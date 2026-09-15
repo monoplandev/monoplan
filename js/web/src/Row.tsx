@@ -710,7 +710,11 @@ export function Row(props: {
               class="context-menu-item"
               onSelect={() => props.onReveal?.(props.item().id, "list")}
             >
-              <span>{m().focus.showInList}</span>
+              <span>
+                {m().focus.showInList(
+                  props.listLabel?.(props.item().listId) ?? props.item().listId,
+                )}
+              </span>
             </ContextMenu.Item>
           </Show>
           <Show when={props.onReveal && canPinToFocus() && focused()}>

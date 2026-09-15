@@ -2297,6 +2297,7 @@ export function Workspace(props: {
           // its own draft/focus flow.
           if (boardListId() !== null) setBoardRevealIds([id]);
         }}
+        onReveal={revealItemIn}
         panelMount={() => (sidePanelShown() ? panelMount() : null)}
         onSwapShell={
           // Too narrow for the panel: no shell to swap to, so the

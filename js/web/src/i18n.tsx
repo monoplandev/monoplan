@@ -318,7 +318,7 @@ export type Messages = {
     /** Static Focus-membership badge shown on pinned list rows. */
     badge: string;
     /** Context-menu jump from the Focus lens to the item's home list. */
-    showInList: string;
+    showInList: (list: string) => string;
     /** Context-menu jump from a list / board to the item in the Focus lens. */
     showInFocus: string;
     /** Empty-state hint shown when the Focus lens has no visible refs. */
@@ -566,7 +566,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       add: "Enfoque",
       remove: "Quitar de Enfoque",
       badge: "Enfoque",
-      showInList: "Ver en la lista",
+      showInList: (list: string) => `Ver en ${list}`,
       showInFocus: "Ver en Enfoque",
       empty:
         "Enfoque está vacío. Añade un elemento nuevo aquí, o haz clic derecho en uno existente y elige «Añadir a Enfoque», para organizar en qué estás trabajando.",
@@ -811,7 +811,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       add: "Focus",
       remove: "Remove from Focus",
       badge: "Focus",
-      showInList: "Show in list",
+      showInList: (list: string) => `Show in ${list}`,
       showInFocus: "Show in Focus",
       empty: "Nothing in Focus yet.",
     },

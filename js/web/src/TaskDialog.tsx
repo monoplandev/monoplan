@@ -125,6 +125,10 @@ export function TaskDialog(props: {
    *  shells, keeping the open item (unlike the app menu's toggle, which
    *  closes it). Renders the header's sidebar button when given. */
   onSwapShell?: () => void;
+  /** Jump to the view that shows this item (the Workspace reveal path:
+   *  switch view, select + scroll the row). The dialog closes so the
+   *  revealed row isn't hidden behind the modal. */
+  onReveal?: (id: string, where: "list" | "focus") => void;
 }) {
   const { m, locale } = useAppI18n();
 
@@ -955,6 +959,23 @@ export function TaskDialog(props: {
                     >
                       {m().common.copyLink}
                     </DropdownMenu.Item>
+                    {/* Home-list jump, mirroring the Focus row's
+                        "Show in <list>". Binned items have no list row
+                        to land on (the Bin holds them). */}
+                    <Show when={props.onReveal && !isBinned(it())}>
+                      <DropdownMenu.Item
+                        class="dropdown-menu-item"
+                        onSelect={() => {
+                          props.onReveal?.(it().id, "list");
+                          props.setItemId(null);
+                        }}
+                      >
+                        {m().focus.showInList(
+                          listOptions().find((o) => o.id === it().listId)?.name ??
+                            it().listId,
+                        )}
+                      </DropdownMenu.Item>
+                    </Show>
                     <Show when={!isBinned(it())}>
                       <DropdownMenu.Item
                         class="dropdown-menu-item"
