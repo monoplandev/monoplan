@@ -35,6 +35,9 @@ pub struct DeviceRow {
     pub account_id: Uuid,
     pub name: String,
     pub last_seen_at: i64,
+    /// IP the device last connected from, as seen by the server (or
+    /// the proxy in front of it). `None` until first authed request.
+    pub last_seen_ip: Option<String>,
     pub created_at: i64,
     pub last_acked_seq: i64,
 }
@@ -245,7 +248,7 @@ pub async fn list_devices(db: &Db, account_id: Uuid) -> anyhow::Result<Vec<Devic
     let acc_bytes = account_id.as_bytes().to_vec();
     db.call(move |c| {
         let mut stmt = c.prepare(
-            "SELECT id, account_id, name, last_seen_at, created_at, last_acked_seq
+            "SELECT id, account_id, name, last_seen_at, created_at, last_acked_seq, last_seen_ip
              FROM devices WHERE account_id = ? ORDER BY created_at",
         )?;
         let rows = stmt
@@ -325,13 +328,20 @@ pub async fn find_device_by_token_hash(
     .await
 }
 
-pub async fn touch_device_last_seen(db: &Db, device_id: Uuid) -> anyhow::Result<()> {
+/// Bump `last_seen_at` and record the client IP the request arrived
+/// from. `ip == None` (no connect info, unparseable forwarded header)
+/// leaves the stored IP untouched rather than clearing it.
+pub async fn touch_device_last_seen(
+    db: &Db,
+    device_id: Uuid,
+    ip: Option<String>,
+) -> anyhow::Result<()> {
     let id_bytes = device_id.as_bytes().to_vec();
     let now = now_millis();
     db.call(move |c| {
         c.execute(
-            "UPDATE devices SET last_seen_at = ? WHERE id = ?",
-            params![now, id_bytes],
+            "UPDATE devices SET last_seen_at = ?, last_seen_ip = COALESCE(?, last_seen_ip) WHERE id = ?",
+            params![now, ip, id_bytes],
         )
     })
     .await?;
@@ -425,6 +435,7 @@ fn row_to_device(r: &rusqlite::Row<'_>) -> rusqlite::Result<DeviceRow> {
         last_seen_at: r.get(3)?,
         created_at: r.get(4)?,
         last_acked_seq: r.get(5)?,
+        last_seen_ip: r.get(6)?,
     })
 }
 

@@ -42,6 +42,7 @@ CREATE TABLE devices (
   auth_token_hash     BLOB NOT NULL,                           -- SHA-256(device_token bytes)
   last_acked_seq      INTEGER NOT NULL DEFAULT 0,              -- per-account contiguous-prefix frontier
   last_seen_at        INTEGER NOT NULL,
+  last_seen_ip        TEXT,                                    -- client IP at last_seen_at; overwritten, never a history
   created_at          INTEGER NOT NULL
 );
 CREATE INDEX devices_account_id_idx ON devices (account_id);

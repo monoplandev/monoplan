@@ -45,6 +45,7 @@ export interface Device {
   id: string;
   name: string;
   last_seen_at: number;
+  last_seen_ip: string | null;
   created_at: number;
   last_acked_seq: number;
 }

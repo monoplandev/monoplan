@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Extension, Query, State};
-use axum::http::HeaderMap;
+use axum::http::{Extensions, HeaderMap};
 use axum::response::Response;
 use monoplan_protocol::{
     ClientFrame, EncryptedBlob, Hello, HelloAck, HelloRejected, PROTOCOL_VERSION, PushBlob,
@@ -21,6 +21,7 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::auth::DeviceAuth;
+use crate::auth::client_ip::{client_ip, peer_ip};
 use crate::auth::cookie;
 use crate::auth::queries::{find_device_by_token_hash, touch_device_last_seen};
 use crate::auth::tokens::{decode_token, sha256};
@@ -56,6 +57,7 @@ pub async fn ws_handler(
     Query(q): Query<WsAuthQuery>,
     headers: HeaderMap,
     Extension(request_id): Extension<RequestId>,
+    extensions: Extensions,
 ) -> Result<Response, ApiError> {
     // Preference order: bearer header (CLI) → cookie (web) → query param
     // (test fallback). All three reach the same hash lookup.
@@ -74,7 +76,8 @@ pub async fn ws_handler(
     let lookup = find_device_by_token_hash(&state.db, hash)
         .await?
         .ok_or(ApiError::Unauthorized)?;
-    let _ = touch_device_last_seen(&state.db, lookup.device_id).await;
+    let ip = client_ip(&headers, peer_ip(&extensions));
+    let _ = touch_device_last_seen(&state.db, lookup.device_id, ip).await;
     let auth = DeviceAuth {
         account_id: lookup.account_id,
         device_id: lookup.device_id,

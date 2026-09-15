@@ -27,6 +27,7 @@ pub async fn list(
                 id: d.id.to_string(),
                 name: d.name,
                 last_seen_at: d.last_seen_at,
+                last_seen_ip: d.last_seen_ip,
                 created_at: d.created_at,
                 last_acked_seq: d.last_acked_seq.max(0) as u64,
             })

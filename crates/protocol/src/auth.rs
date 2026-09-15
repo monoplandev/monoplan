@@ -213,6 +213,9 @@ pub struct Device {
     pub id: String,
     pub name: String,
     pub last_seen_at: i64,
+    /// IP the device last connected from, as the server saw it. `None`
+    /// until the device's first authed request.
+    pub last_seen_ip: Option<String>,
     pub created_at: i64,
     /// Highest op seq this device has acked (0 = never acked).
     pub last_acked_seq: u64,

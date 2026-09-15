@@ -10,7 +10,7 @@ POST   /api/account/recover            (recovery-code path; gated by recovery_au
 POST   /api/account/logout             (authed; revokes calling device + clears cookie)
 POST   /api/account/password/change    (change password, authed by device token + current_auth_secret)
 POST   /api/account/password/reset     (set new password, authed by recovery_session_token)
-GET    /api/devices                    (list current account's devices)
+GET    /api/devices                    (list current account's devices: name, last_seen_at, last_seen_ip, last_acked_seq)
 POST   /api/devices                    (register a new device)
 PATCH  /api/devices/:device_id         (rename a device)
 DELETE /api/devices/:device_id
@@ -24,6 +24,7 @@ All HTTP request and response bodies are MessagePack-encoded (`Content-Type: app
 
 - Opaque random 32-byte token, hex-encoded. Stored server-side as `auth_token_hash` (SHA-256 is sufficient — the token is already high-entropy).
 - Issued per-device on registration. Forever-lived. Revocable via `DELETE /api/devices/:id` (or `POST /api/account/logout` for the calling device).
+- Every authed request (HTTP and WS upgrade) bumps the device's `last_seen_at` and overwrites `last_seen_ip` with the client address: leftmost `X-Forwarded-For` (Caddy sets it), else `X-Real-IP`, else the TCP peer. One IP per device, no history; it is deleted with the row on revoke. Surfaced only to the account owner via `GET /api/devices` so they can spot a device they do not recognise.
 - Same token, two transports: CLI sends `Authorization: Bearer <token>`; web receives an HttpOnly cookie and never touches the token from JS.
 
 Forever tokens in both threat models. A compromised CLI host hands the attacker the DEK from keychain anyway; a browser owned by XSS already drives the live session and can re-derive everything from local crypto state. Splitting into short access + long refresh shrinks the XSS exposure window but doesn't change what an active payload can reach. Single tier for now; revisit when there's a re-auth boundary that crypto state actually depends on.

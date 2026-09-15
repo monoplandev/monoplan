@@ -1,3 +1,4 @@
+pub mod client_ip;
 pub mod cookie;
 pub mod middleware;
 pub mod queries;

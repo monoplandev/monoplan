@@ -43,7 +43,12 @@ impl TestServer {
         let addr = listener.local_addr().unwrap();
         let base = format!("http://{}", addr);
         let handle = tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .unwrap();
         });
         Self { base, handle }
     }
@@ -266,6 +271,11 @@ async fn device_can_be_renamed() {
         rmp_serde::from_slice(&response.bytes().await.unwrap()).unwrap();
     assert_eq!(devices.devices.len(), 1);
     assert_eq!(devices.devices[0].name, "renamed device");
+    // Test server binds loopback with connect info, no proxy header.
+    assert_eq!(
+        devices.devices[0].last_seen_ip.as_deref(),
+        Some("127.0.0.1")
+    );
 }
 
 #[tokio::test]

@@ -9,6 +9,7 @@ use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use uuid::Uuid;
 
+use crate::auth::client_ip::{client_ip, peer_ip};
 use crate::auth::cookie;
 use crate::auth::queries::{find_device_by_token_hash, touch_device_last_seen};
 use crate::auth::tokens::{decode_token, sha256};
@@ -43,7 +44,8 @@ impl FromRequestParts<AppState> for DeviceAuth {
             .ok_or(ApiError::Unauthorized)?;
         // Best-effort touch — failure is non-fatal for this request and
         // would only surface as a slightly stale `last_seen_at`.
-        let _ = touch_device_last_seen(&state.db, lookup.device_id).await;
+        let ip = client_ip(&parts.headers, peer_ip(&parts.extensions));
+        let _ = touch_device_last_seen(&state.db, lookup.device_id, ip).await;
         Ok(Self {
             account_id: lookup.account_id,
             device_id: lookup.device_id,

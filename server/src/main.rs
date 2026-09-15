@@ -79,7 +79,11 @@ async fn main() -> anyhow::Result<()> {
         build.git_sha = build_info::GIT_SHA,
         "monoplan-server listening"
     );
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 

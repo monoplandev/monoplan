@@ -428,6 +428,10 @@ export function Settings(props: {
                               </div>
                               <div class="device-meta">
                                 {m().settings.lastSeen} {formatRelative(d.last_seen_at, locale())}
+                                <Show when={d.last_seen_ip}>
+                                  {" · "}
+                                  {d.last_seen_ip}
+                                </Show>
                                 {" · "}
                                 {m().settings.deviceSeq(d.last_acked_seq, serverLastSeq())}
                               </div>
