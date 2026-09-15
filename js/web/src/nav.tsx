@@ -24,6 +24,7 @@ import dotsVerticalSvg from "./icons/dots-vertical.svg?raw";
 import drawingPinSvg from "./icons/drawing-pin.svg?raw";
 import externalLinkSvg from "./icons/external-link.svg?raw";
 import fileSvg from "./icons/file.svg?raw";
+import magnifyingGlassSvg from "./icons/magnifying-glass.svg?raw";
 import plusSvg from "./icons/plus.svg?raw";
 import { formatRelative } from "./format.tsx";
 import { useAppI18n } from "./i18n.tsx";
@@ -733,6 +734,33 @@ export function Nav(props: {
         onConfirm={() => props.app.emptyBin()}
       />
     </nav>
+  );
+}
+
+/** Magnifying-glass button pinned to the right end of the sidebar
+ *  footer; opens the Find palette (the same surface as the `/` and ⌘F
+ *  shortcuts). Mouse discoverability for the palette — keyboard users
+ *  never need it. */
+export function NavFindButton(props: { onClick: () => void }) {
+  const { m } = useAppI18n();
+  return (
+    <Tooltip openDelay={200} closeDelay={0} placement="top">
+      <Tooltip.Trigger
+        as="button"
+        type="button"
+        class="icon-button nav-find-button"
+        tabIndex={-1}
+        aria-label={m().shortcuts.find}
+        onClick={() => props.onClick()}
+        innerHTML={magnifyingGlassSvg}
+      />
+      <Tooltip.Portal>
+        <Tooltip.Content class="tooltip-content">
+          {m().shortcuts.find}
+          <Tooltip.Arrow />
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip>
   );
 }
 

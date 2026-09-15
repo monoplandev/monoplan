@@ -48,7 +48,7 @@ import { restoreCapturedPositions } from "./linger.ts";
 import { createPopoverTooltipGuard } from "./popoverTooltip.ts";
 import type { ListOption } from "./ListPicker.tsx";
 import { MovePalette } from "./MovePalette.tsx";
-import { EditableNavLabel, Nav, NavMenu, StatusSlot } from "./nav.tsx";
+import { EditableNavLabel, Nav, NavFindButton, NavMenu, StatusSlot } from "./nav.tsx";
 import { MobileBars } from "./MobileShell.tsx";
 import { digitNavTarget } from "./navShortcuts.ts";
 import {
@@ -2202,6 +2202,7 @@ export function Workspace(props: {
               session={session.session()}
               onSession={session.swapSession}
             />
+            <NavFindButton onClick={() => setFindOpen(true)} />
           </>
         }
       />

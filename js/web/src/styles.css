@@ -162,6 +162,12 @@ body {
   padding: 0 12px;
 }
 
+/* Find (magnifying glass) sits at the footer's right edge, opposite the
+   app menu + sync widget. */
+.nav-find-button {
+  margin-left: auto;
+}
+
 [data-theme="dark"] .nav {
   color: var(--text-muted);
 }
