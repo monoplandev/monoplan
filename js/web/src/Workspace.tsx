@@ -2825,6 +2825,13 @@ export function Workspace(props: {
       </Show>
       <Show when={isMobile()}>
         <MobileBars
+          view={view()}
+          setView={(v) => {
+            // The pills stay live over an open item's page (as with
+            // Find); close it so the destination view is visible.
+            setOpenItemId(null);
+            navigateTo(v);
+          }}
           onFind={() => setFindOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
           onAdd={

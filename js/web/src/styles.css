@@ -483,8 +483,7 @@ body {
 
   /* Single pane: the desktop sidebar isn't rendered on phones
      (Workspace.tsx swaps it for MobileBar + ListSheet), so the grid
-     collapses to main alone, leaving room beneath for the fixed bottom
-     bar. */
+     collapses to main alone; the pills float over it. */
   .app {
     grid-template-columns: 100vw;
     grid-template-rows: 1fr;
@@ -494,9 +493,17 @@ body {
     grid-area: 1 / 1;
   }
 
-  /* Room beneath the floating pills. */
-  .main {
-    padding-bottom: calc(var(--mobile-bar-h) + 28px + env(safe-area-inset-bottom));
+  /* The pills float over the content rather than owning a band beneath
+     it: `.main` reserves nothing, and each view's *scroller* carries
+     scroll-end clearance (`--mobile-bar-clearance`) so its last row can
+     still be scrolled clear of the pills. Padding on `.main` itself
+     would sit below the inner scrollers as a permanent blank footer. */
+  .main .dnd-host .dnd-parent {
+    padding-bottom: var(--mobile-bar-clearance);
+  }
+
+  .upcoming {
+    padding-bottom: var(--mobile-bar-clearance);
   }
 }
 
@@ -2883,7 +2890,14 @@ input.task-check:hover {
     inset: 0;
     z-index: 40;
     background: var(--bg-elevated);
-    padding-bottom: calc(var(--mobile-bar-h) + 28px + env(safe-area-inset-bottom));
+    padding-bottom: 0;
+  }
+
+  /* The notes editor is the page's last child and grows to fill it, so
+     the clearance lives inside the editor: its surface runs under the
+     pills, and only the text keeps clear of them. */
+  .task-page .task-dialog-notes {
+    padding-bottom: var(--mobile-bar-clearance);
   }
 
   /* Thumb-sized badges: extra padding over the desktop 2px 8px. */
@@ -3581,6 +3595,9 @@ input.task-check:hover {
 
 :root {
   --mobile-bar-h: 46px;
+  /* Scroll-end clearance a mobile scroller needs so its last row can
+     clear the pills: bar height + its bottom offset + breathing room. */
+  --mobile-bar-clearance: calc(var(--mobile-bar-h) + 28px + env(safe-area-inset-bottom));
 }
 
 /* Shared liquid-glass chrome: the bottom pills and the header's sync
@@ -3626,6 +3643,40 @@ input.task-check:hover {
   right: calc(16px + env(safe-area-inset-right));
 }
 
+/* Add pill: a solid accent fill instead of glass, so the primary
+   capture affordance stands apart from the neutral switcher pill. The
+   pill holds only the Add button, so the fill is on the pill (keeping
+   its 5px inset, so the tint reaches the rounded edge). */
+.mobile-bar-right.glass,
+[data-theme="dark"] .mobile-bar-right.glass {
+  background: #4da3ef;
+  border-color: #4da3ef;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow:
+    0 4px 14px rgba(77, 163, 239, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.mobile-bar-right .mobile-bar-btn {
+  color: #fff;
+}
+
+.mobile-bar-right .mobile-bar-btn:active {
+  background: rgba(0, 0, 0, 0.14);
+}
+
+/* Disabled Add (a draft is already open): fade the whole pill, not just
+   the glyph, since the fill is the affordance. */
+.mobile-bar-right:has(.mobile-bar-btn:disabled) {
+  opacity: 0.5;
+}
+
+.mobile-bar-right .mobile-bar-btn:disabled {
+  opacity: 1;
+}
+
 .mobile-bar-btn {
   display: inline-flex;
   align-items: center;
@@ -3653,6 +3704,12 @@ input.task-check:hover {
 
 .mobile-bar-btn:disabled {
   opacity: 0.4;
+}
+
+/* Fixed-view jumps (Focus / Inbox / Upcoming): the one matching the
+   current view reads as selected. */
+.mobile-bar-btn[data-active] {
+  background: rgba(127, 127, 127, 0.14);
 }
 
 /* The sync indicator rides in the left pill as one more pill button:
@@ -3740,9 +3797,10 @@ input.task-check:hover {
   inset: 0;
   z-index: 101;
   display: flex;
-  /* Light scrim: enough to mute the page and hide the pills, but not so
-     dark that the glass card above reads as a flat slab. */
-  background: rgba(0, 0, 0, 0.18);
+  /* Light scrim: enough to mute the page and hide the pills, but light
+     enough that the glass card above stays bright — the card's blur
+     samples the scrim too, so every point here darkens the card. */
+  background: rgba(0, 0, 0, 0.1);
   /* Tighter at the sides than top/bottom: the card wants near-full
      width for row titles while still clearing the screen edge. */
   padding:
@@ -3753,7 +3811,7 @@ input.task-check:hover {
 }
 
 [data-theme="dark"] .find-sheet {
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.3);
 }
 
 .find-sheet__panel {
@@ -3765,26 +3823,23 @@ input.task-check:hover {
   overflow: hidden;
   border-radius: 16px;
   color: var(--text);
-  /* Same liquid-glass recipe as the pills. Fill kept thin and the blur
-     moderate so the page's rows and title still ghost through; the
-     scrim behind carries the legibility instead. */
+  /* Same liquid-glass recipe as the pills, with a heavier fill: the
+     card sits over the scrim, so a thin fill blends with the dimmed page
+     into a flat gray. ~85% white keeps a hint of the page ghosting
+     through while reading as a bright surface. */
   border: 1px solid rgba(255, 255, 255, 0.45);
-  background: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
-  box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.18),
-    0 2px 6px rgba(0, 0, 0, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  /* No drop shadow: the scrim already separates the card from the page.
+     Only the inset top highlight from the glass recipe remains. */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 [data-theme="dark"] .find-sheet__panel {
   border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(30, 30, 32, 0.55);
-  box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.4),
-    0 2px 6px rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  background: rgba(30, 30, 32, 0.85);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .find-sheet__header {
@@ -3866,12 +3921,12 @@ input.task-check:hover {
   background: var(--palette-select-bg);
 }
 
-/* Current view: a selected-row fill, not a check. Light mode goes solid
-   white rather than the nav's `--bg-active` grey: on the translucent
-   glass card a white row lifts off the tinted surface, where a grey
-   tint only a few percent off white would vanish into it. */
+/* Current view: a selected-row fill, not a check. The card is now
+   bright enough that the nav's `--bg-active` grey reads as a selection
+   rather than vanishing into a tinted surface (a white row would no
+   longer lift off it). */
 .find-sheet__row[aria-current="true"] {
-  background: #fff;
+  background: var(--bg-active);
 }
 
 [data-theme="dark"] .find-sheet__row[aria-current="true"] {
