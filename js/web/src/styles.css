@@ -2599,6 +2599,66 @@ input.task-check:hover {
   font-size: 14px;
 }
 
+/* Date section between the badge row and the notes: a hairline-ruled band
+   holding the planned-date (`when`) trigger. Same badge scale as the row
+   above so the two read as one metadata block. */
+.task-dialog-dates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 0;
+  border-top: 0.5px solid var(--row-divider);
+  border-bottom: 0.5px solid var(--row-divider);
+}
+
+/* The planned-date input: borderless, reads as a line of text in the band
+   ("Date" placeholder when unset). Read-only for now, so the caret is
+   hidden and the pointer says "opens something". */
+.task-dialog-when-anchor {
+  display: inline-flex;
+  min-width: 0;
+}
+
+.task-dialog-when-input {
+  width: 100%;
+  min-width: 8em;
+  margin: 0;
+  padding: 2px 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  caret-color: transparent;
+  cursor: pointer;
+  outline: none;
+}
+
+.task-dialog-when-input::placeholder {
+  color: var(--text-empty);
+}
+
+.task-dialog-when-input[data-muted] {
+  color: var(--text-muted);
+}
+
+.task-dialog-when-input:hover {
+  background: var(--bg-hover);
+}
+
+.task-dialog-when-input:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+/* The picker popover under the date input: shares the modal's card look
+   (`.deadline-dialog`) and sits above the task dialog (z-index 100 / 101). */
+.when-popover {
+  z-index: 120;
+}
+
 /* The always-visible badge that opens the deadline quick popover (a faint
    "Deadline" placeholder when unset). Button reset so the DeadlineBadge inside
    keeps its own look. */
@@ -2911,6 +2971,14 @@ input.task-check:hover {
   }
 
   .task-page .task-dialog-badges {
+    gap: 6px;
+  }
+
+  .task-page .task-dialog-when-input {
+    padding: 6px 8px;
+  }
+
+  .task-page .task-dialog-dates {
     gap: 6px;
   }
 

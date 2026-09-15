@@ -243,8 +243,8 @@ export type Messages = {
   when: {
     /** Section label / accessible name for the planned-date control. */
     label: string;
-    /** Task-dialog badge label when no planned date is set. */
-    unset: string;
+    /** Task-dialog date input placeholder when no planned date is set. */
+    placeholder: string;
     /** Tooltip / tone name for a planned date that is now in the past. */
     slipped: string;
     /** Badge + quick-action label for today's date. */
@@ -513,7 +513,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     when: {
       label: "Cuándo",
-      unset: "Cuándo",
+      placeholder: "Fecha",
       slipped: "Atrasado",
       today: "Hoy",
       tomorrow: "Mañana",
@@ -758,7 +758,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     when: {
       label: "When",
-      unset: "When",
+      placeholder: "Date",
       slipped: "Slipped",
       today: "Today",
       tomorrow: "Tomorrow",

@@ -1,16 +1,16 @@
-// The task dialog's planned-date control, the `when` twin of
-// `DeadlineField`: an always-visible badge (calendar icon + "When" when
-// unset) that opens a small popover with quick actions — Set date…
-// (calendar modal with the optional time field), Today, Tomorrow, and
-// Remove date when one is set. Today / Tomorrow keep any time part.
+// The task dialog's planned-date control: a text input in the dates band
+// that reads the set `when` (same short label as `WhenBadge`, "Date" as
+// its placeholder when unset) and opens a popover holding the shared
+// calendar picker (`CalendarPicker`, with the optional time field and
+// Remove). The input is read-only for now: typed dates are a later step,
+// so the popover is the only writer. Anchored on the input rather than a
+// Popover.Trigger button so it can become editable without changing shape.
 
-import { DropdownMenu } from "@kobalte/core/dropdown-menu";
-import { Show } from "solid-js";
-import { DeadlineCalendarDialog } from "./DeadlineCalendarDialog.tsx";
-import { addDaysToStamp, nowMs, todayStamp, whenFromParts, whenTime } from "./format.tsx";
-import calendarSvg from "./icons/calendar.svg?raw";
+import { Popover } from "@kobalte/core/popover";
+import { createMemo } from "solid-js";
+import { CalendarPicker } from "./DeadlineCalendarDialog.tsx";
+import { formatWhenBadge, nowMs, todayStamp } from "./format.tsx";
 import { useAppI18n } from "./i18n.tsx";
-import { WhenBadge } from "./WhenBadge.tsx";
 
 export function WhenField(props: {
   when: () => string | null;
@@ -19,74 +19,80 @@ export function WhenField(props: {
   open: () => boolean;
   setOpen: (v: boolean) => void;
 }) {
-  const { m } = useAppI18n();
-  const keepTime = (day: string) => whenFromParts(day, whenTime(props.when() ?? ""));
+  const { m, locale } = useAppI18n();
+  let inputRef: HTMLInputElement | undefined;
+
+  const label = createMemo(() => {
+    const w = props.when();
+    if (!w) return "";
+    return (
+      formatWhenBadge(
+        w,
+        todayStamp(nowMs()),
+        { today: m().when.today, tomorrow: m().when.tomorrow },
+        locale(),
+      )?.label ?? w
+    );
+  });
 
   return (
-    <>
-      <DropdownMenu gutter={4}>
-        <DropdownMenu.Trigger
-          class="task-dialog-deadline-trigger"
+    <Popover
+      open={props.open()}
+      onOpenChange={props.setOpen}
+      placement="bottom-start"
+      gutter={6}
+    >
+      <Popover.Anchor as="span" class="task-dialog-when-anchor">
+        <input
+          ref={inputRef}
+          type="text"
+          class="task-dialog-when-input"
+          readOnly
+          inputMode="none"
+          value={label()}
+          placeholder={m().when.placeholder}
           aria-label={m().when.label}
-        >
-          <Show
-            when={props.when()}
-            fallback={
-              <span class="badge when-badge" data-tone="muted">
-                <span class="deadline-badge-icon" innerHTML={calendarSvg} />
-                {m().when.unset}
-              </span>
+          aria-haspopup="dialog"
+          aria-expanded={props.open()}
+          data-muted={props.muted() ? "" : undefined}
+          onClick={() => props.setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
+              e.preventDefault();
+              props.setOpen(true);
             }
-          >
-            {(w) => <WhenBadge when={w()} muted={props.muted()} />}
-          </Show>
-        </DropdownMenu.Trigger>
-        <DropdownMenu.Portal>
-          <DropdownMenu.Content class="dropdown-menu-content task-dialog-menu-content">
-            <Show when={props.when()}>
-              <DropdownMenu.Item
-                class="dropdown-menu-item"
-                onSelect={() => props.onChange(null)}
-              >
-                <span>{m().when.remove}</span>
-              </DropdownMenu.Item>
-            </Show>
-            <DropdownMenu.Item
-              class="dropdown-menu-item"
-              onSelect={() => {
-                // The calendar is a modal dialog, so it won't self-dismiss
-                // on the menu's focus-restore; rAF just defers the open past
-                // the menu teardown.
-                requestAnimationFrame(() => props.setOpen(true));
-              }}
-            >
-              <span>{m().when.setDate}</span>
-            </DropdownMenu.Item>
-            <DropdownMenu.Item
-              class="dropdown-menu-item"
-              onSelect={() => props.onChange(keepTime(todayStamp(nowMs())))}
-            >
-              <span>{m().when.today}</span>
-            </DropdownMenu.Item>
-            <DropdownMenu.Item
-              class="dropdown-menu-item"
-              onSelect={() =>
-                props.onChange(keepTime(addDaysToStamp(todayStamp(nowMs()), 1)))
-              }
-            >
-              <span>{m().when.tomorrow}</span>
-            </DropdownMenu.Item>
-          </DropdownMenu.Content>
-        </DropdownMenu.Portal>
-      </DropdownMenu>
-      <DeadlineCalendarDialog
-        kind="when"
-        open={props.open}
-        setOpen={props.setOpen}
-        value={props.when}
-        onPick={props.onChange}
-        onRemove={() => props.onChange(null)}
-      />
-    </>
+          }}
+        />
+      </Popover.Anchor>
+      <Popover.Portal>
+        <Popover.Content
+          class="deadline-dialog when-popover"
+          // A click on the input while open would otherwise dismiss on
+          // pointerdown and reopen on click; keep it open instead.
+          onInteractOutside={(e) => {
+            if (
+              inputRef &&
+              e.target instanceof Node &&
+              inputRef.contains(e.target)
+            ) {
+              e.preventDefault();
+            }
+          }}
+          onCloseAutoFocus={(e) => {
+            e.preventDefault();
+            inputRef?.focus();
+          }}
+        >
+          <CalendarPicker
+            kind="when"
+            open={props.open}
+            setOpen={props.setOpen}
+            value={props.when}
+            onPick={props.onChange}
+            onRemove={() => props.onChange(null)}
+          />
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover>
   );
 }

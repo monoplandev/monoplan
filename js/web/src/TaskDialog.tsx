@@ -874,13 +874,6 @@ export function TaskDialog(props: {
               }}
               onChange={setNewItemState}
             />
-            <WhenField
-              when={newWhen}
-              muted={() => newItemTarget()?.done ?? false}
-              onChange={setNewWhen}
-              open={whenCalOpen}
-              setOpen={setWhenCalOpen}
-            />
             <DeadlineField
               deadline={newDeadline}
               muted={() => newItemTarget()?.done ?? false}
@@ -894,6 +887,17 @@ export function TaskDialog(props: {
                 onToggle={() => setNewFocus((v) => !v)}
               />
             </Show>
+          </div>
+          {/* Date section: the planned date on its own ruled band
+              between the badges and the notes. */}
+          <div class="task-dialog-dates">
+            <WhenField
+              when={newWhen}
+              muted={() => newItemTarget()?.done ?? false}
+              onChange={setNewWhen}
+              open={whenCalOpen}
+              setOpen={setWhenCalOpen}
+            />
           </div>
           <div
             ref={(el) => {
@@ -1059,13 +1063,6 @@ export function TaskDialog(props: {
                 onChange={(state) => props.app.setLifecycle(it().id, state)}
               />
             </Show>
-            <WhenField
-              when={() => it().when ?? null}
-              muted={() => isDone(it()) || isBinned(it())}
-              onChange={(value) => props.app.setItemWhen(it().id, value)}
-              open={whenCalOpen}
-              setOpen={setWhenCalOpen}
-            />
             <DeadlineField
               deadline={() => it().deadline ?? null}
               muted={() => isDone(it()) || isBinned(it())}
@@ -1078,6 +1075,18 @@ export function TaskDialog(props: {
             <Show when={!isDone(it()) && !isBinned(it())}>
               <PinToggle pinned={focused} onToggle={toggleFocus} />
             </Show>
+          </div>
+
+          {/* Date section: the planned date on its own ruled band
+              between the badges and the notes. */}
+          <div class="task-dialog-dates">
+            <WhenField
+              when={() => it().when ?? null}
+              muted={() => isDone(it()) || isBinned(it())}
+              onChange={(value) => props.app.setItemWhen(it().id, value)}
+              open={whenCalOpen}
+              setOpen={setWhenCalOpen}
+            />
           </div>
 
           <div
