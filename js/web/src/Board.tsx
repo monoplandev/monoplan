@@ -243,6 +243,10 @@ export function Board(props: {
   const laneSelections = new Map<WorkflowState, DndSelection>();
   const [activeSelection, setActiveSelection] =
     createSignal<DndSelection | null>(null);
+  // The lane that most recently held the active selection, kept after that
+  // selection is cleared (a move-out, a bin) so focus restore still has a
+  // listbox to land on when no lane is active.
+  let lastActiveLane: WorkflowState | null = null;
   // Bring a lane's column fully into the board strip's horizontal view.
   // `inline: "nearest"` is test-then-minimal-scroll: an already-visible
   // column no-ops, a partly-clipped one slides just past its near edge
@@ -265,6 +269,7 @@ export function Board(props: {
             if (other !== sel && other.hasSelection()) other.clear();
           }
           setActiveSelection(sel);
+          lastActiveLane = laneKey;
           // Activation is the one funnel every lane-landing path shares —
           // card click, ←/→ lane hop, cross-lane drop, "+" capture, find
           // pick — so the column scrolls into view for all of them.
@@ -551,15 +556,27 @@ export function Board(props: {
   };
   // Restore keyboard focus to the lane that currently owns the active
   // selection (its Dnd listbox is what up/down nav is bound to). Used after
-  // the detail dialog closes so board nav resumes where it left off.
+  // the detail dialog closes so board nav resumes where it left off. With
+  // no active selection — the move palette re-filed the selected cards
+  // out of this board, or ⌫ binned them — fall back to the lane that last
+  // held one, then to the first mounted lane, so focus never strands on
+  // body: a focused lane with nothing selected answers ↓ / ↑ by selecting
+  // its first / last card, and ← / → still hop lanes.
   const focusActiveLane = (): void => {
     const active = activeSelection();
-    if (!active) return;
-    for (const [laneKey, sel] of laneSelections) {
-      if (sel !== active) continue;
-      laneHandles.get(laneKey)?.focus();
-      return;
+    if (active) {
+      for (const [laneKey, sel] of laneSelections) {
+        if (sel !== active) continue;
+        laneHandles.get(laneKey)?.focus();
+        return;
+      }
     }
+    const fallback =
+      (lastActiveLane !== null ? laneHandles.get(lastActiveLane) : undefined) ??
+      orderedLaneKeys()
+        .map((k) => laneHandles.get(k))
+        .find((h) => h !== undefined);
+    fallback?.focus();
   };
   props.ref?.({ focusActive: focusActiveLane });
 
