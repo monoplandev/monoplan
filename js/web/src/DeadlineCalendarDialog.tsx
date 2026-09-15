@@ -61,6 +61,10 @@ export interface CalendarPickerProps {
   /** Clear the value. When provided and a value is set, a "Remove" button
    *  shows at the bottom. */
   onRemove?: () => void;
+  /** `when` mode only: render the time field under the grid (default on).
+   *  Off where the host edits the time elsewhere (the task dialog's dates
+   *  band); a date pick still keeps the stored time. */
+  withTime?: boolean;
 }
 
 /** The picker body: month grid, the `when` time field, the Remove footer.
@@ -177,7 +181,7 @@ export function CalendarPicker(props: CalendarPickerProps) {
           </>
         )}
       </Calendar>
-      <Show when={isWhen()}>
+      <Show when={isWhen() && props.withTime !== false}>
         <div class="deadline-dialog-time">
           <TimeField
             class="time-field"

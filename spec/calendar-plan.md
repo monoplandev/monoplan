@@ -114,7 +114,9 @@ Fixed     = DateTime "[" IanaZone "]"           ; RFC 9557, e.g. 2026-07-13T14:0
 
 ## Agenda (Upcoming, generalised)
 
-Upcoming keeps its token, nav entry, and shape. `groupByDeadline` becomes
+Upcoming keeps its `upcoming` token and shape; its nav entry reads
+"Calendar" (renamed 2026-09-16; `calendar` stays reserved as a URL token
+for the month grid). `groupByDeadline` becomes
 `groupByDay` over both fields:
 
 - **Rows** are Open items with a `when` or a `deadline` (or both).

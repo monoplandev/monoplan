@@ -245,6 +245,8 @@ export type Messages = {
     label: string;
     /** Task-dialog date input placeholder when no planned date is set. */
     placeholder: string;
+    /** Label of the task-dialog switch between an all-day and a timed `when`. */
+    allDay: string;
     /** Tooltip / tone name for a planned date that is now in the past. */
     slipped: string;
     /** Badge + quick-action label for today's date. */
@@ -398,7 +400,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     nav: {
       inbox: "Bandeja de entrada",
       focus: "Enfoque",
-      upcoming: "Próximo",
+      upcoming: "Calendario",
       done: "Hecho",
       bin: "Papelera",
       archiveList: "Archivar",
@@ -514,6 +516,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     when: {
       label: "Cuándo",
       placeholder: "Fecha",
+      allDay: "Todo el día",
       slipped: "Atrasado",
       today: "Hoy",
       tomorrow: "Mañana",
@@ -643,7 +646,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     nav: {
       inbox: "Inbox",
       focus: "Focus",
-      upcoming: "Upcoming",
+      upcoming: "Calendar",
       done: "Done",
       bin: "Bin",
       archiveList: "Archive",
@@ -759,6 +762,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     when: {
       label: "When",
       placeholder: "Date",
+      allDay: "All day",
       slipped: "Slipped",
       today: "Today",
       tomorrow: "Tomorrow",

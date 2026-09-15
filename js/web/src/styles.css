@@ -246,7 +246,6 @@ body {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  color: var(--text-muted);
   border-left: 0.5px solid var(--border-surface);
   background: var(--surface);
 }
@@ -2600,31 +2599,90 @@ input.task-check:hover {
 }
 
 /* Date section between the badge row and the notes: a hairline-ruled band
-   holding the planned-date (`when`) trigger. Same badge scale as the row
-   above so the two read as one metadata block. */
+   stacking an optional time row (timed `when` only) over the date input +
+   "All day" switch row. */
 .task-dialog-dates {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px;
+  flex-direction: column;
+  gap: 6px;
   padding: 8px 0;
   border-top: 0.5px solid var(--row-divider);
   border-bottom: 0.5px solid var(--row-divider);
+}
+
+.task-dialog-dates-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Segmented time field (same anatomy as the calendar modal's) on its own
+   row above the date. Its clock glyph sits in the same slot as the date
+   input's calendar glyph so the two rows align. */
+.task-dialog-time-row {
+  display: flex;
+  align-items: center;
+  padding-left: 6px;
+}
+
+/* In the band the segments read as plain text at the date input's size:
+   no box, no tabular digits. The modal's boxed field is untouched. */
+.task-dialog-time-row .time-field-input {
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  font-variant-numeric: normal;
+}
+
+.task-dialog-time-row .time-field-input:focus-within {
+  outline: none;
+}
+
+.task-dialog-time-icon {
+  display: inline-flex;
+  align-items: center;
+  width: 20px;
+  color: var(--text-muted);
+}
+
+.task-dialog-time-icon svg {
+  width: 14px;
+  height: 14px;
 }
 
 /* The planned-date input: borderless, reads as a line of text in the band
    ("Date" placeholder when unset). Read-only for now, so the caret is
    hidden and the pointer says "opens something". */
 .task-dialog-when-anchor {
+  position: relative;
   display: inline-flex;
+  align-items: center;
+  flex: 2 1 0;
   min-width: 0;
+}
+
+/* Glyph overlaid on the input's left edge; clicks fall through to the
+   input beneath. Muted with the input's text via the sibling selector. */
+.task-dialog-when-icon {
+  position: absolute;
+  left: 6px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.task-dialog-when-icon svg {
+  width: 14px;
+  height: 14px;
 }
 
 .task-dialog-when-input {
   width: 100%;
-  min-width: 8em;
+  min-width: 0;
   margin: 0;
-  padding: 2px 4px;
+  padding: 2px 4px 2px 26px;
   border: none;
   border-radius: 4px;
   background: transparent;
@@ -2653,10 +2711,58 @@ input.task-check:hover {
   outline-offset: 2px;
 }
 
+/* "All day" switch at the right edge of the dates band. Reuses the
+   display-popover switch anatomy, minus its stacking margin. Disabled
+   while no date is set: nothing to strip a time from. */
+.task-dialog-allday-switch {
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: flex-end;
+  margin-top: 0;
+  padding: 2px 4px;
+  font-size: 13px;
+}
+
+.task-dialog-allday-switch[data-disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* The picker popover under the date input: shares the modal's card look
    (`.deadline-dialog`) and sits above the task dialog (z-index 100 / 101). */
 .when-popover {
   z-index: 120;
+}
+
+/* Today / Tomorrow quick actions heading the when popover, ruled off from
+   the month grid below. Same quiet button as the picker's footer. */
+.when-popover-quick {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-row);
+}
+
+.when-popover-quick-action {
+  flex: 1;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg-badge);
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.when-popover-quick-action:hover {
+  background: var(--bg-hover);
+}
+
+.when-popover-quick-action:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 1px;
 }
 
 /* The always-visible badge that opens the deadline quick popover (a faint
@@ -2975,7 +3081,15 @@ input.task-check:hover {
   }
 
   .task-page .task-dialog-when-input {
-    padding: 6px 8px;
+    padding: 6px 8px 6px 30px;
+  }
+
+  .task-page .task-dialog-when-icon {
+    left: 10px;
+  }
+
+  .task-page .task-dialog-time-row {
+    padding-left: 10px;
   }
 
   .task-page .task-dialog-dates {
