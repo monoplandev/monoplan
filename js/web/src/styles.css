@@ -1932,8 +1932,8 @@ input.task-check:hover {
 }
 
 /* Left half: logo artwork, letterboxed on its own cream ground so the
-   wordmark never crops. Drops out on narrow viewports so the form gets
-   the full width. */
+   wordmark never crops. On narrow viewports it becomes a short band
+   above the form (see the media query). */
 .auth-dialog-art {
   min-height: 320px;
   padding: 4em;
@@ -1955,10 +1955,19 @@ input.task-check:hover {
     grid-template-columns: 1fr;
     width: 360px;
     max-width: 100%;
+    max-height: 100%;
+    overflow-y: auto;
   }
 
+  /* Single column: the art becomes a short header band above the form
+     (DOM order already puts it first); the divider moves from its right
+     edge to its bottom. */
   .auth-dialog-art {
-    display: none;
+    min-height: 0;
+    height: 160px;
+    padding: 20px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
   }
 }
 

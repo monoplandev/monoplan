@@ -45,7 +45,8 @@ export interface Session {
 }
 
 /** Illustration shown as the left half of the auth dialog on wide
- *  screens; hidden on narrow viewports (see `.auth-dialog-art`). */
+ *  screens; a header band above the form on narrow viewports (see
+ *  `.auth-dialog-art`). */
 const AUTH_ART_URL = "/monoplan-badge.png";
 
 function defaultDeviceName(): string {
