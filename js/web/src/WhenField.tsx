@@ -5,15 +5,13 @@
 // calendar picker (`CalendarPicker`, without its time field; Remove). The input is read-only for now: typed dates are a later step,
 // so the popover is the only writer. Anchored on the input rather than a
 // Popover.Trigger button so it can become editable without changing shape.
-// An "All day" switch sits at the band's right edge: on strips the time
-// part, off attaches a default 09:00. Timed values also show a segmented
-// time field on a row above the input and switch, writing through on each
-// complete edit; the popover carries no time field of its own.
+// The typed time picker (`TimePicker`) sits on a row above the input and
+// is always shown: a dim "All day" placeholder when the `when` has no
+// time part, and a ✕ that strips one. A time picked while no date is set
+// lands on today. The popover carries no time field of its own.
 
 import { Popover } from "@kobalte/core/popover";
-import { Switch } from "@kobalte/core/switch";
-import { TimeField } from "@kobalte/core/time-field";
-import { createEffect, createMemo, createSignal, on, Show } from "solid-js";
+import { createMemo } from "solid-js";
 import { CalendarPicker } from "./DeadlineCalendarDialog.tsx";
 import {
   addDaysToStamp,
@@ -25,15 +23,11 @@ import {
   whenDay,
   whenFromParts,
   whenTime,
-  type TimeParts,
 } from "./format.tsx";
 import calendarSvg from "./icons/calendar.svg?raw";
 import clockSvg from "./icons/clock.svg?raw";
 import { useAppI18n } from "./i18n.tsx";
-
-/** Time attached when "All day" is switched off; the popover's time field
- *  adjusts it from there. */
-const DEFAULT_TIME = { hour: 9, minute: 0 };
+import { TimePicker } from "./TimePicker.tsx";
 
 export function WhenField(props: {
   when: () => string | null;
@@ -50,35 +44,17 @@ export function WhenField(props: {
     props.setOpen(false);
   };
 
-  const allDay = () => {
-    const w = props.when();
-    return !w || whenTime(w) === null;
+  // The picker hands back a complete hour + minute, or null for all-day,
+  // so every change writes straight through. Without a date yet, a time
+  // is attached to today.
+  const time = () => {
+    const t = whenTime(props.when() ?? "");
+    return t && isCompleteTime(t) ? t : null;
   };
-
-  // Time field state, reseeded whenever the register's time changes (a
-  // switch flip, a sync from another device). Partial states stay local:
-  // only a complete hour + minute writes through, so the stored time is
-  // never torn mid-edit and blanking the segments doesn't flip to all-day
-  // under the user (that is the switch's job).
-  const [time, setTime] = createSignal<TimeParts>({});
-  createEffect(
-    on(
-      () => whenTime(props.when() ?? ""),
-      (t) => setTime(t ?? {}),
-    ),
-  );
-  const onTimeChange = (v: { hour?: number; minute?: number } | null) => {
-    const next: TimeParts = { hour: v?.hour, minute: v?.minute };
-    setTime(next);
+  const onTimeChange = (t: { hour: number; minute: number } | null) => {
     const w = props.when();
-    if (w && isCompleteTime(next)) {
-      props.onChange(whenFromParts(whenDay(w), next));
-    }
-  };
-  const setAllDay = (on: boolean) => {
-    const w = props.when();
-    if (!w) return;
-    props.onChange(on ? whenDay(w) : whenFromParts(whenDay(w), DEFAULT_TIME));
+    const day = w ? whenDay(w) : todayStamp(nowMs());
+    props.onChange(whenFromParts(day, t));
   };
 
   // The input reads the day only ("Wed 23 Sept", the year once it isn't
@@ -105,32 +81,21 @@ export function WhenField(props: {
 
   return (
     <>
-      <Show when={!allDay()}>
-        <div class="task-dialog-time-row">
-          <TimeField
-            class="time-field"
-            value={time()}
-            hourCycle={hourCycle(locale())}
-            granularity="minute"
-            onChange={onTimeChange}
-          >
-            {/* Clock glyph in the date glyph's slot; the text stays as
-                the accessible name only. */}
-            <TimeField.Label class="time-field-label task-dialog-time-icon">
-              <span aria-hidden="true" innerHTML={clockSvg} />
-              <span class="sr-only">{m().when.time}</span>
-            </TimeField.Label>
-            <TimeField.Input class="time-field-input">
-              {(segment) => (
-                <TimeField.Segment
-                  class="time-field-segment"
-                  segment={segment()}
-                />
-              )}
-            </TimeField.Input>
-          </TimeField>
-        </div>
-      </Show>
+      <div class="task-dialog-time-row">
+        {/* Clock glyph inset in the input like the date glyph below; the
+            input carries the accessible name. */}
+        <TimePicker
+          class="task-dialog-time-input"
+          icon={clockSvg}
+          value={time}
+          onChange={onTimeChange}
+          cycle={() => hourCycle(locale())}
+          locale={locale}
+          label={m().when.time}
+          allDayLabel={m().when.allDay}
+          clearLabel={m().when.clearTime}
+        />
+      </div>
       <div class="task-dialog-dates-row">
         <Popover
           open={props.open()}
@@ -220,20 +185,6 @@ export function WhenField(props: {
             </Popover.Content>
           </Popover.Portal>
         </Popover>
-        <Switch
-          class="done-switch task-dialog-allday-switch"
-          checked={allDay()}
-          disabled={!props.when()}
-          onChange={setAllDay}
-        >
-          <Switch.Label class="done-switch-label">
-            {m().when.allDay}
-          </Switch.Label>
-          <Switch.Input class="done-switch-input" />
-          <Switch.Control class="done-switch-control">
-            <Switch.Thumb class="done-switch-thumb" />
-          </Switch.Control>
-        </Switch>
       </div>
     </>
   );

@@ -2616,39 +2616,71 @@ input.task-check:hover {
   gap: 8px;
 }
 
-/* Segmented time field (same anatomy as the calendar modal's) on its own
-   row above the date. Its clock glyph sits in the same slot as the date
-   input's calendar glyph so the two rows align. */
+/* The typed time picker on its own row above the date, with the same
+   anatomy as the date input below: the clock glyph inset at the input's
+   left edge, the input padding past it, so the two glyphs and the two
+   texts line up. The input reads as plain text at the date input's size. */
 .task-dialog-time-row {
   display: flex;
   align-items: center;
-  padding-left: 6px;
 }
 
-/* In the band the segments read as plain text at the date input's size:
-   no box, no tabular digits. The modal's boxed field is untouched. */
-.task-dialog-time-row .time-field-input {
-  padding: 2px 0;
+/* Input and its ✕ side by side; the ✕ only renders while a time is set,
+   at a smaller scale than the header buttons so it sits in the text line. */
+.time-picker-field {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Glyph overlaid on the input's left edge; clicks fall through to the
+   input beneath. */
+.time-picker-icon {
+  position: absolute;
+  left: 6px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.time-picker-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.task-dialog-time-input {
+  width: 120px;
+  margin: 0;
+  padding: 2px 4px 2px 26px;
   border: none;
+  border-radius: 4px;
   background: transparent;
+  font: inherit;
   font-size: 14px;
-  font-variant-numeric: normal;
-}
-
-.task-dialog-time-row .time-field-input:focus-within {
+  color: var(--text);
   outline: none;
 }
 
-.task-dialog-time-icon {
-  display: inline-flex;
-  align-items: center;
-  width: 20px;
-  color: var(--text-muted);
+/* "All day" as the placeholder: the dim absence of a time. */
+.task-dialog-time-input::placeholder {
+  color: var(--text-empty);
 }
 
-.task-dialog-time-icon svg {
-  width: 14px;
-  height: 14px;
+.task-dialog-time-input:hover {
+  background: var(--bg-hover);
+}
+
+.task-dialog-time-input:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+.time-picker-clear {
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
 }
 
 /* The planned-date input: borderless, reads as a line of text in the band
@@ -2709,23 +2741,6 @@ input.task-check:hover {
 .task-dialog-when-input:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: 2px;
-}
-
-/* "All day" switch at the right edge of the dates band. Reuses the
-   display-popover switch anatomy, minus its stacking margin. Disabled
-   while no date is set: nothing to strip a time from. */
-.task-dialog-allday-switch {
-  flex: 1 1 0;
-  min-width: 0;
-  justify-content: flex-end;
-  margin-top: 0;
-  padding: 2px 4px;
-  font-size: 13px;
-}
-
-.task-dialog-allday-switch[data-disabled] {
-  opacity: 0.5;
-  cursor: default;
 }
 
 /* The picker popover under the date input: shares the modal's card look
@@ -3088,8 +3103,12 @@ input.task-check:hover {
     left: 10px;
   }
 
-  .task-page .task-dialog-time-row {
-    padding-left: 10px;
+  .task-page .task-dialog-time-input {
+    padding: 6px 8px 6px 30px;
+  }
+
+  .task-page .time-picker-icon {
+    left: 10px;
   }
 
   .task-page .task-dialog-dates {
@@ -3533,6 +3552,22 @@ input.task-check:hover {
 .list-picker .palette__item {
   padding: 6px 10px;
   font-size: 14px;
+}
+
+/* The time picker's panel: the list-picker panel narrowed to a column of
+   times, tabular so the rows line up down the list. */
+.time-picker {
+  width: 132px;
+}
+
+.time-picker .palette__results {
+  max-height: 240px;
+  padding: 4px;
+}
+
+.time-picker .palette__item {
+  padding: 4px 10px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- Kanban board (spec/kanban.md) ---------- */
