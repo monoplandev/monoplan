@@ -3812,17 +3812,11 @@ input.task-check:hover {
 }
 
 /* Planned-date pill (`WhenBadge`): same geometry and icon slot as the
-   deadline pill. Today is the warning pairing; slipped is deliberately
-   quiet — a `when` never goes red. */
+   deadline pill. Today is the warning pairing; a past `when` is plain,
+   it never goes red. */
 .when-badge[data-tone="today"] {
   color: var(--due-today-text);
   background: var(--due-today-bg);
-}
-
-.when-badge[data-tone="slipped"] {
-  color: var(--text-muted);
-  text-decoration: underline dotted;
-  text-underline-offset: 2px;
 }
 
 .when-badge[data-tone="muted"] {

@@ -291,7 +291,7 @@ export function formatWhenTime(when: string, locale: string): string {
   );
 }
 
-export type WhenUrgency = "slipped" | "today" | "future";
+export type WhenUrgency = "today" | "future";
 
 export interface WhenBadgeInfo {
   label: string;
@@ -299,10 +299,10 @@ export interface WhenBadgeInfo {
 }
 
 // Compact label + urgency for a planned date relative to `today`. Before
-// today → the compact date itself in the slipped tone (a `when` is never
-// "overdue": it slipped, and the useful fact is which day). Today /
-// tomorrow / weekday / compact date otherwise, as deadlines do. A timed
-// value appends its wall-clock time.
+// today → the compact date itself, unjudged (a `when` is never "overdue",
+// and whether it slipped is not decided: the useful fact is which day).
+// Today / tomorrow / weekday / compact date otherwise, as deadlines do. A
+// timed value appends its wall-clock time.
 export function formatWhenBadge(
   when: string,
   today: string,
@@ -317,7 +317,7 @@ export function formatWhenBadge(
   let urgency: WhenUrgency;
   if (days < 0) {
     label = compactDate(target, ref, locale);
-    urgency = "slipped";
+    urgency = "future";
   } else if (days === 0) {
     label = labels.today;
     urgency = "today";

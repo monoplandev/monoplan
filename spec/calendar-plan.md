@@ -44,10 +44,9 @@ The section exists only while something is past.
 A past `when` is deliberately not judged. Whether it slipped or simply
 happened depends on whether the item is a task or an event, and that
 distinction is not made yet. The conservative rule for now: `when` is fixed.
-It does not roll over into Today, is not rewritten by the clock, and keeps a
-muted tone in Overdue until the user ticks, bins, or reschedules the item.
-The code's `slipped` tone name is a placeholder for that muted rendering,
-not a verdict.
+It does not roll over into Today, is not rewritten by the clock, and carries
+no tone or label of its own in Overdue until the user ticks, bins, or
+reschedules the item. There is deliberately no "slipped" state.
 
 Done and binned items keep both fields untouched, as they keep `deadline`
 today. Views filter on lifecycle; the fields are never cleared by a
@@ -129,7 +128,7 @@ for the month grid). `groupByDeadline` becomes
 - **Placement** of every other row: an item appears exactly once, on its
   *placement day*, the earlier of its `when` day and its `deadline` day.
 - **Tone** of a row is the most urgent of: overdue (deadline day < today),
-  today-warning (deadline day = today), slipped (when day < today), neutral.
+  today-warning (deadline day = today), neutral. A past `when` is neutral.
 - **Within a day**, order by the raw string of the field that placed the row,
   then `created_at`.
 - **Badges**: the placing date is carried by the day header and not repeated,
@@ -181,7 +180,7 @@ for the month grid). `groupByDeadline` becomes
   are set, `when` renders first. Muted on done/binned items as deadline is.
 - Row context menus gain the same quick actions for When.
 - i18n: a `when` message group mirroring `deadline` (label, unset, today,
-  tomorrow, slipped, time-of-day formatting defers to the existing
+  tomorrow; time-of-day formatting defers to the existing
   preference).
 
 ## URLs

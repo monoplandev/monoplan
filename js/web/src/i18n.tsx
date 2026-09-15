@@ -247,8 +247,6 @@ export type Messages = {
     placeholder: string;
     /** Label of the task-dialog switch between an all-day and a timed `when`. */
     allDay: string;
-    /** Tooltip / tone name for a planned date that is now in the past. */
-    slipped: string;
     /** Badge + quick-action label for today's date. */
     today: string;
     /** Badge + quick-action label for tomorrow's date. */
@@ -517,7 +515,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       label: "Cuándo",
       placeholder: "Fecha",
       allDay: "Todo el día",
-      slipped: "Atrasado",
       today: "Hoy",
       tomorrow: "Mañana",
       remove: "Quitar fecha",
@@ -763,7 +760,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       label: "When",
       placeholder: "Date",
       allDay: "All day",
-      slipped: "Slipped",
       today: "Today",
       tomorrow: "Tomorrow",
       remove: "Remove date",

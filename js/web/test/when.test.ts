@@ -124,10 +124,10 @@ describe("formatWhenBadge", () => {
   const labels = { today: "Today", tomorrow: "Tomorrow" };
   const today = "2026-07-07"; // a Tuesday
 
-  test("past is the date in the slipped tone, never a word", () => {
+  test("past is the plain date, never a word or a tone", () => {
     expect(formatWhenBadge("2026-07-06", today, labels, "en-US")).toEqual({
       label: "Jul 6",
-      urgency: "slipped",
+      urgency: "future",
     });
     expect(formatWhenBadge("2020-01-01", today, labels, "en-US")?.label).toBe(
       "Jan 1, 2020",

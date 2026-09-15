@@ -37,7 +37,7 @@ describe("groupByDay", () => {
   test("places on the earlier field; past dates go to Overdue", () => {
     const groups = groupByDay(
       [
-        item("slipped", { when: "2026-09-01" }),
+        item("past-when", { when: "2026-09-01" }),
         item("overdue", { deadline: "2026-09-05" }),
         item("both-late", { when: "2026-09-20", deadline: "2026-09-08" }),
         item("both", { when: "2026-09-12", deadline: "2026-09-30" }),
@@ -50,7 +50,7 @@ describe("groupByDay", () => {
       "en",
     );
     expect(groups.map((g) => [g.key, g.urgency, ids(g)])).toEqual([
-      ["overdue", "overdue", ["overdue", "both-late", "slipped"]],
+      ["overdue", "overdue", ["overdue", "both-late", "past-when"]],
       [TODAY, "today", ["due-today"]],
       ["2026-09-11", "future", ["dl-first"]],
       ["2026-09-12", "future", ["both"]],
@@ -59,7 +59,7 @@ describe("groupByDay", () => {
     expect(groups[0]!.rows.map((r) => [r.placedBy, r.tone])).toEqual([
       ["deadline", "overdue"],
       ["deadline", "overdue"],
-      ["when", "slipped"],
+      ["when", "neutral"],
     ]);
     expect(groups[1]!.rows.map((r) => r.tone)).toEqual(["warning"]);
     expect(groups[2]!.rows[0]!.placedBy).toBe("deadline");
@@ -83,15 +83,15 @@ describe("groupByDay", () => {
     expect(ids(groups[1]!)).toEqual(["allday-a", "allday-b", "t09", "t14"]);
   });
 
-  test("Overdue leads only when something is past: deadlines oldest first, then slipped whens, then createdAt", () => {
+  test("Overdue leads only when something is past: deadlines oldest first, then past whens, then createdAt", () => {
     const groups = groupByDay(
       [
         item("over-b", { deadline: "2026-09-08" }),
         item("over-a", { deadline: "2026-09-08" }),
         item("over-old", { when: "2026-09-30", deadline: "2026-08-20" }),
-        item("slip-b", { when: "2026-09-07" }),
-        item("slip-a", { when: "2026-09-07" }),
-        item("slip-old", { when: "2026-09-01T09:00", deadline: "2026-09-20" }),
+        item("past-b", { when: "2026-09-07" }),
+        item("past-a", { when: "2026-09-07" }),
+        item("past-old", { when: "2026-09-01T09:00", deadline: "2026-09-20" }),
         item("own", { when: TODAY }),
       ],
       TODAY,
@@ -101,7 +101,7 @@ describe("groupByDay", () => {
     expect(groups.map((g) => [g.key, ids(g)])).toEqual([
       [
         "overdue",
-        ["over-old", "over-b", "over-a", "slip-old", "slip-b", "slip-a"],
+        ["over-old", "over-b", "over-a", "past-old", "past-b", "past-a"],
       ],
       [TODAY, ["own"]],
     ]);
@@ -109,9 +109,9 @@ describe("groupByDay", () => {
       "overdue",
       "overdue",
       "overdue",
-      "slipped",
-      "slipped",
-      "slipped",
+      "neutral",
+      "neutral",
+      "neutral",
     ]);
   });
 
@@ -119,9 +119,9 @@ describe("groupByDay", () => {
     const groups = groupByDay(
       [
         item("own-timed", { when: "2026-09-09T10:00" }),
-        item("slip-new", { when: "2026-09-07T08:00" }),
+        item("past-new", { when: "2026-09-07T08:00" }),
         item("over-new", { deadline: "2026-09-08" }),
-        item("slip-old", { when: "2026-09-01" }),
+        item("past-old", { when: "2026-09-01" }),
         item("over-old", { deadline: "2026-08-20" }),
         item("own-allday", { when: TODAY }),
       ],
@@ -132,8 +132,8 @@ describe("groupByDay", () => {
     expect(ids(groups[0]!)).toEqual([
       "over-old",
       "over-new",
-      "slip-old",
-      "slip-new",
+      "past-old",
+      "past-new",
     ]);
     expect(ids(groups[1]!)).toEqual(["own-allday", "own-timed"]);
   });

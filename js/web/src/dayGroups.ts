@@ -10,7 +10,7 @@ import { formatDeadlineBadge, whenDay } from "./format.tsx";
 import { isOpen, type ItemView } from "./sync/store.ts";
 
 /** Most urgent first when comparing. */
-export type DayTone = "overdue" | "warning" | "slipped" | "neutral";
+export type DayTone = "overdue" | "warning" | "neutral";
 
 export interface DayRow {
   item: ItemView;
@@ -37,11 +37,11 @@ export interface DayGroupLabels {
 }
 
 const FOLD_OVERDUE = 0;
-const FOLD_SLIPPED = 1;
+const FOLD_PAST_WHEN = 1;
 
 /** Bucket `items` by placement day. `today` is the local `YYYY-MM-DD`
  *  stamp everything is judged against. An Overdue group leads when any
- *  date is past: overdue deadlines first (oldest first), then slipped
+ *  date is past: overdue deadlines first (oldest first), then past
  *  whens (oldest first), then `createdAt`. Today is always present after
  *  it, empty if nothing is due, so the surface anchors on the current day.
  *
@@ -60,11 +60,11 @@ export function groupByDay(
     const wDay = it.when ? whenDay(it.when) : null;
     const dDay = it.deadline ?? null;
     const overdue = dDay !== null && dDay < today;
-    const slipped = wDay !== null && wDay < today;
+    const pastWhen = wDay !== null && wDay < today;
     // Any past date leaves the day ladder for the Overdue group. An overdue
     // deadline is owed now whatever `when` says and places the row (red);
-    // a slipped `when` follows, placed by that `when` (muted).
-    if (overdue || slipped) {
+    // a past `when` follows, placed by that `when`, unjudged (neutral).
+    if (overdue || pastWhen) {
       overdueRows.push(
         overdue
           ? {
@@ -73,9 +73,9 @@ export function groupByDay(
               row: { item: it, placedBy: "deadline", tone: "overdue" },
             }
           : {
-              fold: FOLD_SLIPPED,
+              fold: FOLD_PAST_WHEN,
               raw: it.when!,
-              row: { item: it, placedBy: "when", tone: "slipped" },
+              row: { item: it, placedBy: "when", tone: "neutral" },
             },
       );
       continue;

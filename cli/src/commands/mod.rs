@@ -78,7 +78,7 @@ enum Cmd {
     When(items::DateArg),
     /// Set (YYYY-MM-DD) or clear (-) an item's deadline.
     Deadline(items::DateArg),
-    /// Open items by day: Today (with overdue and slipped folded in), then the coming days.
+    /// Open items by day: Today (with overdue and past-dated folded in), then the coming days.
     Agenda(agenda::AgendaArgs),
     /// Curated Focus lens: list (default), add, rm, mv.
     Focus(focus::FocusArgs),

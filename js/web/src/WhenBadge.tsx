@@ -5,11 +5,12 @@ import { useAppI18n } from "./i18n.tsx";
 
 // Compact planned-date badge, the `when` twin of `DeadlineBadge`. Reads
 // the raw register (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`) and renders a
-// short label with a `data-tone` of slipped / today / future, or muted
-// for done/binned items. A slipped `when` shows its date, never a word:
-// nothing is owed, it just didn't happen yet. Timed values append the
-// wall-clock time in the preferred 12 / 24-hour cycle. Recomputes off the
-// shared `nowMs()` tick so the tone rolls over at local midnight.
+// short label with a `data-tone` of today / future, or muted for
+// done/binned items. A past `when` shows its date, never a word and never
+// a tone: nothing is owed, and the useful fact is which day. Timed values
+// append the wall-clock time in the preferred 12 / 24-hour cycle.
+// Recomputes off the shared `nowMs()` tick so the tone rolls over at
+// local midnight.
 export function WhenBadge(props: { when: string; muted?: boolean }) {
   const { m, locale } = useAppI18n();
   const info = createMemo(() =>
@@ -21,12 +22,7 @@ export function WhenBadge(props: { when: string; muted?: boolean }) {
     ),
   );
   const tone = () => (props.muted ? "muted" : (info()?.urgency ?? "future"));
-  const title = () => {
-    const base = `${m().when.label}: ${props.when}`;
-    return info()?.urgency === "slipped" && !props.muted
-      ? `${base} (${m().when.slipped})`
-      : base;
-  };
+  const title = () => `${m().when.label}: ${props.when}`;
   return (
     <Show when={info()}>
       {(i) => (

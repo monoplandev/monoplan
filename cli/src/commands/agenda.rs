@@ -1,5 +1,5 @@
 //! `monoplan agenda`: Open items by day, Today first with overdue
-//! deadlines and slipped planned dates folded in, then the coming days
+//! deadlines and past planned dates folded in, then the coming days
 //! (`spec/calendar-plan.md` "Agenda").
 //!
 //! Placement, tone, and ordering are pure functions of the item views
@@ -27,13 +27,12 @@ pub struct AgendaArgs {
     pub json: bool,
 }
 
-/// Row tone, least to most urgent. Overdue and warning come from the
-/// deadline; slipped from the planned date. Never red for `when`.
+/// Row tone, least to most urgent. Both come from the deadline; a past
+/// `when` is not judged and stays neutral. Never red for `when`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Tone {
     Neutral,
-    Slipped,
     Warning,
     Overdue,
 }
@@ -42,7 +41,6 @@ impl Tone {
     fn label(self) -> Option<&'static str> {
         match self {
             Tone::Neutral => None,
-            Tone::Slipped => Some("slipped"),
             Tone::Warning => Some("due today"),
             Tone::Overdue => Some("overdue"),
         }
@@ -78,9 +76,9 @@ pub struct AgendaDay {
 /// - Placement day: the earlier of the `when` day and the `deadline`
 ///   day, each clamped up to today. A past date of either kind lands in
 ///   Today.
-/// - Tone: overdue (deadline < today), warning (deadline = today),
-///   slipped (when < today), else neutral. Most urgent wins.
-/// - Within a day: overdue deadlines (oldest first), then slipped
+/// - Tone: overdue (deadline < today), warning (deadline = today), else
+///   neutral. A past `when` is not judged.
+/// - Within a day: overdue deadlines (oldest first), then past
 ///   whens (oldest first), then the day's own rows by the raw string
 ///   of the placing field (all-day ahead of timed), then `created_at`.
 pub fn build_agenda<'a>(items: &'a [ItemView], today: &'a str, horizon: &str) -> Vec<AgendaDay> {
@@ -109,21 +107,19 @@ pub fn build_agenda<'a>(items: &'a [ItemView], today: &'a str, horizon: &str) ->
             continue;
         }
         let deadline_overdue = deadline_day.is_some_and(|d| d < today);
-        let when_slipped = when_day.is_some_and(|w| w < today);
+        let when_past = when_day.is_some_and(|w| w < today);
         let tone = if deadline_overdue {
             Tone::Overdue
         } else if deadline_day == Some(today) {
             Tone::Warning
-        } else if when_slipped {
-            Tone::Slipped
         } else {
             Tone::Neutral
         };
         // Today's fold: overdue deadlines lead (by their own date), then
-        // slipped whens (by their own date), then today's own rows.
+        // past whens (by their own date), then today's own rows.
         let (group, raw) = if deadline_overdue {
             (0, deadline_day.unwrap().to_string())
-        } else if when_slipped {
+        } else if when_past {
             (1, item.when.clone().unwrap())
         } else {
             (2, raw.to_string())
@@ -304,8 +300,8 @@ mod tests {
     #[test]
     fn placement_is_earlier_field_clamped_to_today() {
         let items = [
-            // past when → Today, slipped
-            item("slipped", Some("2026-09-01"), None, 1),
+            // past when → Today, unjudged (neutral)
+            item("past-when", Some("2026-09-01"), None, 1),
             // past deadline → Today, overdue
             item("overdue", None, Some("2026-09-05"), 2),
             // future when, past deadline → Today (owed now), overdue tone
@@ -327,7 +323,10 @@ mod tests {
         assert_eq!(
             by_day,
             vec![
-                (TODAY, vec!["overdue", "both-late", "slipped", "due-today"]),
+                (
+                    TODAY,
+                    vec!["overdue", "both-late", "past-when", "due-today"]
+                ),
                 ("2026-09-11", vec!["dl-first"]),
                 ("2026-09-12", vec!["both"]),
             ]
@@ -336,7 +335,7 @@ mod tests {
         let tones: Vec<Tone> = today.rows.iter().map(|r| r.tone).collect();
         assert_eq!(
             tones,
-            vec![Tone::Overdue, Tone::Overdue, Tone::Slipped, Tone::Warning]
+            vec![Tone::Overdue, Tone::Overdue, Tone::Neutral, Tone::Warning]
         );
         assert_eq!(days[1].rows[0].placed_by, PlacedBy::Deadline);
         assert_eq!(days[1].rows[0].tone, Tone::Neutral);
@@ -359,12 +358,12 @@ mod tests {
     }
 
     #[test]
-    fn today_fold_orders_overdue_oldest_first_then_slipped_then_own() {
+    fn today_fold_orders_overdue_oldest_first_then_past_when_then_own() {
         let items = [
             item("own-timed", Some("2026-09-09T10:00"), None, 1),
-            item("slip-new", Some("2026-09-07T08:00"), None, 2),
+            item("past-new", Some("2026-09-07T08:00"), None, 2),
             item("over-new", None, Some("2026-09-08"), 3),
-            item("slip-old", Some("2026-09-01"), None, 4),
+            item("past-old", Some("2026-09-01"), None, 4),
             item("over-old", None, Some("2026-08-20"), 5),
             item("own-allday", Some(TODAY), None, 6),
         ];
@@ -374,8 +373,8 @@ mod tests {
             vec![
                 "over-old",
                 "over-new",
-                "slip-old",
-                "slip-new",
+                "past-old",
+                "past-new",
                 "own-allday",
                 "own-timed"
             ]
