@@ -1,11 +1,10 @@
 // Day grouping behind the Upcoming view (`spec/calendar-plan.md`
 // "Agenda"): every Open item carrying a `when` or a `deadline`, placed
-// once on the earlier of the two days, each clamped up to today. Today
-// always leads and absorbs everything past: an overdue deadline is still
-// owed now, a slipped `when` is still the user's call, and a separate
-// pile for either is the section people learn to skip. Done / binned
-// items never appear. Pure so it can be unit-tested without a DOM
-// (`test/dayGroups.test.ts`).
+// once on the earlier of the two days. Anything with a past date of either
+// kind leads in an Overdue group so the pile that needs a decision is
+// visible at a glance and Today reads as today's plan; the group only
+// exists while something is past. Done / binned items never appear. Pure
+// so it can be unit-tested without a DOM (`test/dayGroups.test.ts`).
 
 import { formatDeadlineBadge, whenDay } from "./format.tsx";
 import { isOpen, type ItemView } from "./sync/store.ts";
@@ -20,12 +19,14 @@ export interface DayRow {
   tone: DayTone;
 }
 
+/** Group key of the Overdue group, which has no day of its own. */
+export const OVERDUE_KEY = "overdue";
+
 export interface DayGroup {
-  /** Group key: the `YYYY-MM-DD` stamp of the day. Past dates share the
-   *  Today key, so a row's own date may sort before it. */
+  /** Group key: the `YYYY-MM-DD` stamp of the day, or `OVERDUE_KEY`. */
   key: string;
   label: string;
-  urgency: "today" | "future";
+  urgency: "overdue" | "today" | "future";
   rows: DayRow[];
 }
 
@@ -37,72 +38,83 @@ export interface DayGroupLabels {
 
 const FOLD_OVERDUE = 0;
 const FOLD_SLIPPED = 1;
-const FOLD_OWN = 2;
 
 /** Bucket `items` by placement day. `today` is the local `YYYY-MM-DD`
- *  stamp everything is judged against. Today is always the first group,
- *  empty if nothing is due, so the surface anchors on the current day.
+ *  stamp everything is judged against. An Overdue group leads when any
+ *  date is past: overdue deadlines first (oldest first), then slipped
+ *  whens (oldest first), then `createdAt`. Today is always present after
+ *  it, empty if nothing is due, so the surface anchors on the current day.
  *
- *  Within a day: overdue deadlines lead (oldest first), then slipped whens
- *  (oldest first), then the day's own rows by the raw string of the
- *  placing field (all-day ahead of timed), then `createdAt`. */
+ *  Within a day, rows order by the raw string of the placing field
+ *  (all-day ahead of timed), then `createdAt`. */
 export function groupByDay(
   items: Iterable<ItemView>,
   today: string,
   labels: DayGroupLabels,
   locale: string,
 ): DayGroup[] {
-  const placed: { day: string; fold: number; raw: string; row: DayRow }[] = [];
+  const placed: { day: string; raw: string; row: DayRow }[] = [];
+  const overdueRows: { fold: number; raw: string; row: DayRow }[] = [];
   for (const it of items) {
     if (!isOpen(it) || (!it.when && !it.deadline)) continue;
     const wDay = it.when ? whenDay(it.when) : null;
     const dDay = it.deadline ?? null;
-    const clamp = (d: string) => (d < today ? today : d);
-    const wPlaced = wDay ? clamp(wDay) : null;
-    const dPlaced = dDay ? clamp(dDay) : null;
-    // `when` wins a tie: it is the "happens on" date and renders first.
-    let day: string;
-    let placedBy: DayRow["placedBy"];
-    let raw: string;
-    if (wPlaced && (!dPlaced || wPlaced <= dPlaced)) {
-      day = wPlaced;
-      placedBy = "when";
-      raw = it.when!;
-    } else {
-      day = dPlaced!;
-      placedBy = "deadline";
-      raw = dDay!;
-    }
     const overdue = dDay !== null && dDay < today;
     const slipped = wDay !== null && wDay < today;
-    const tone: DayTone = overdue
-      ? "overdue"
-      : dDay === today
-        ? "warning"
-        : slipped
-          ? "slipped"
-          : "neutral";
-    let fold = FOLD_OWN;
-    if (overdue) {
-      fold = FOLD_OVERDUE;
-      raw = dDay!;
-    } else if (slipped) {
-      fold = FOLD_SLIPPED;
-      raw = it.when!;
+    // Any past date leaves the day ladder for the Overdue group. An overdue
+    // deadline is owed now whatever `when` says and places the row (red);
+    // a slipped `when` follows, placed by that `when` (muted).
+    if (overdue || slipped) {
+      overdueRows.push(
+        overdue
+          ? {
+              fold: FOLD_OVERDUE,
+              raw: dDay!,
+              row: { item: it, placedBy: "deadline", tone: "overdue" },
+            }
+          : {
+              fold: FOLD_SLIPPED,
+              raw: it.when!,
+              row: { item: it, placedBy: "when", tone: "slipped" },
+            },
+      );
+      continue;
     }
-    placed.push({ day, fold, raw, row: { item: it, placedBy, tone } });
+    // Both dates are today or later: place on the earlier. `when` wins a
+    // tie: it is the "happens on" date and renders first.
+    const tone: DayTone = dDay === today ? "warning" : "neutral";
+    if (wDay && (!dDay || wDay <= dDay)) {
+      placed.push({
+        day: wDay,
+        raw: it.when!,
+        row: { item: it, placedBy: "when", tone },
+      });
+    } else {
+      placed.push({
+        day: dDay!,
+        raw: dDay!,
+        row: { item: it, placedBy: "deadline", tone },
+      });
+    }
   }
-  placed.sort(
-    (a, b) =>
-      a.day.localeCompare(b.day) ||
-      a.fold - b.fold ||
-      a.raw.localeCompare(b.raw) ||
-      a.row.item.createdAt - b.row.item.createdAt,
-  );
+  const byRawThenCreated = (
+    a: { raw: string; row: DayRow },
+    b: { raw: string; row: DayRow },
+  ) =>
+    a.raw.localeCompare(b.raw) || a.row.item.createdAt - b.row.item.createdAt;
+  overdueRows.sort((a, b) => a.fold - b.fold || byRawThenCreated(a, b));
+  placed.sort((a, b) => a.day.localeCompare(b.day) || byRawThenCreated(a, b));
 
-  const out: DayGroup[] = [
-    { key: today, label: labels.today, urgency: "today", rows: [] },
-  ];
+  const out: DayGroup[] = [];
+  if (overdueRows.length > 0) {
+    out.push({
+      key: OVERDUE_KEY,
+      label: labels.overdue,
+      urgency: "overdue",
+      rows: overdueRows.map((p) => p.row),
+    });
+  }
+  out.push({ key: today, label: labels.today, urgency: "today", rows: [] });
   for (const p of placed) {
     const last = out[out.length - 1]!;
     if (last.key === p.day) {

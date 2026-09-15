@@ -22,7 +22,8 @@ lands; this file is the design record.
 | Date and time: one register or two? | **One register, `when`, shape-discriminated.** `YYYY-MM-DD` is all-day, `YYYY-MM-DDTHH:MM` is timed. Same rule as iCalendar `VALUE=DATE` vs `DATE-TIME`. One register can't tear under concurrent edit (date moved on one device, time set on another), sorts by plain string compare, and clears with one delete. An explicit flag is redundant with the shape and a third thing to keep consistent. |
 | Time zone? | **Floating only, now.** A `when` is a wall-clock intent, the devices travel together, and floating keeps sorting a string compare. The grammar reserves an RFC 9557 bracketed IANA suffix (`...T14:00[Europe/London]`) for fixed-instant values. Writers may later default to appending the device zone; untouched values stay floating, so nothing migrates. Note this is the task-manager default, not the calendar default: Apple and Google pin timed events to a zone. |
 | Recurrence? | **Not in the first cut.** No `repeat` field, no hint of one in the doc. Repeat-on-done (clone with the date advanced when ticked Done) is the likely first form; RRULE-style schedules are a calendar app's job. |
-| Does the clock ever write? | **Never.** A slipped `when` rolls into Today as a derived view rule. Nothing promotes an item to Live, adds it to Focus, or moves it because a day arrived: every device would race to do it. |
+| Does the clock ever write? | **Never.** A past `when` stays where it was set; the agenda surfaces it in the Overdue section as a derived view rule. Nothing promotes an item to Live, adds it to Focus, or moves it because a day arrived: every device would race to do it. |
+| What does a past `when` mean? | **No opinion yet.** Events and tasks are not yet distinguished: a past `when` on an event is simply over, on a task it may have slipped. Until that distinction exists, `when` is fixed and does not roll over: it is never rewritten, never reinterpreted as "today", and never red. The agenda only lists it under Overdue so the user can decide. |
 | Calendar surface | **One lens: Upcoming becomes the agenda** (day sections, both dates). Day granularity only: no hour grid, no durations, no overlap. A month grid and drag-to-reschedule are deferred; the agenda's shape does not change when they land. |
 | Time input | **Kobalte `TimeField`**, segmented hour / minute, 12 or 24-hour cycle from the existing time-format preference. Blank means all-day. See "Task surface and rows". |
 | Export / CalDAV | **Deferred.** Mapping is recorded below. A subscribable feed needs a server that can read items, which the E2EE server cannot; a non-E2EE CalDAV carve-out is a separate conversation. |
@@ -32,13 +33,21 @@ lands; this file is the design record.
 
 | | before the day | on the day | after the day, still Open |
 |---|---|---|---|
-| `deadline` | upcoming | Today, warning tone | Today, overdue tone (red) |
-| `when` | upcoming | Today, neutral tone | Today, slipped tone (muted), never red |
+| `deadline` | upcoming | Today, warning tone | Overdue section, overdue tone (red) |
+| `when` | upcoming | Today, neutral tone | Overdue section, muted tone, never red |
 
-A slipped `when` stays in Today until the item is ticked, binned, or
-rescheduled. That is the user's decision to make, not the clock's, and a
-"slipped" bucket that ages out is the pile people learn to skip (same
-reasoning as folding overdue into Today, `deadlineGroups.ts`).
+A past date of either kind moves the row to an Overdue section above Today
+(decided 2026-09-16, replacing the earlier fold into Today): the pile that
+needs a decision is visible at a glance and Today reads as today's plan.
+The section exists only while something is past.
+
+A past `when` is deliberately not judged. Whether it slipped or simply
+happened depends on whether the item is a task or an event, and that
+distinction is not made yet. The conservative rule for now: `when` is fixed.
+It does not roll over into Today, is not rewritten by the clock, and keeps a
+muted tone in Overdue until the user ticks, bins, or reschedules the item.
+The code's `slipped` tone name is a placeholder for that muted rendering,
+not a verdict.
 
 Done and binned items keep both fields untouched, as they keep `deadline`
 today. Views filter on lifecycle; the fields are never cleared by a
@@ -109,22 +118,24 @@ Upcoming keeps its token, nav entry, and shape. `groupByDeadline` becomes
 `groupByDay` over both fields:
 
 - **Rows** are Open items with a `when` or a `deadline` (or both).
-- **Placement**: an item appears exactly once, on its *placement day*, the
-  earlier of its `when` day and its `deadline` day, each clamped to today.
-  So a past date of either kind lands in Today, and a future `when` with a
-  slipped `deadline` lands in Today (it is owed now).
+- **Overdue** (web): any row with a `deadline` day or a `when` day before
+  today goes to an Overdue section above Today. Overdue deadlines lead,
+  placed by the deadline whatever `when` says (it is owed now), oldest
+  first; then past whens, placed by the `when`, oldest first; then
+  `created_at`. Rendered only when non-empty. The CLI `agenda` still folds
+  these into Today.
+- **Placement** of every other row: an item appears exactly once, on its
+  *placement day*, the earlier of its `when` day and its `deadline` day.
 - **Tone** of a row is the most urgent of: overdue (deadline day < today),
   today-warning (deadline day = today), slipped (when day < today), neutral.
 - **Within a day**, order by the raw string of the field that placed the row,
-  then `created_at`. Today's fold keeps overdue deadlines first, oldest first,
-  then slipped whens, oldest first, then today's own rows.
+  then `created_at`.
 - **Badges**: the placing date is carried by the day header and not repeated,
-  except in Today where a past date shows its actual date (existing
-  `pastAsDate` rule). The other field, when present, shows as its own badge so
-  a row reads "Sat 13 · due 31 Oct". Timed rows show the time as a leading
-  label.
-- Today is always the first group, empty if nothing is due, so the surface
-  anchors on the current day.
+  except in Overdue, where it shows its actual date (existing `pastAsDate`
+  rule). The other field, when present, shows as its own badge so a row
+  reads "Sat 13 · due 31 Oct". Timed rows show the time as a leading label.
+- Today is always present (after Overdue, when that exists), empty if
+  nothing is due, so the surface anchors on the current day.
 - Stays the flat virtualised list it is today, not a `Dnd` listbox.
   Drag-to-reschedule is deferred (see below).
 

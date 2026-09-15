@@ -430,6 +430,12 @@ body {
   color: var(--text);
 }
 
+/* The Overdue section (only rendered while something is owed) heads in
+   the deadline badge's danger colour so it reads as a warning, not a day. */
+.upcoming-day[data-urgency="overdue"] .upcoming-day-label {
+  color: var(--overdue-text);
+}
+
 .upcoming-empty-day {
   padding: 6px 8px;
   color: var(--text-faint);

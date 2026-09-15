@@ -1,6 +1,7 @@
 // Day bucketing behind the Upcoming view (`spec/calendar-plan.md`
-// "Agenda"): placement on the earlier of `when` / `deadline` clamped to
-// today, tone precedence, and within-day ordering.
+// "Agenda"): past dates of either kind in a leading Overdue group,
+// placement on the earlier of `when` / `deadline`, tone precedence, and
+// within-day ordering.
 
 import { describe, expect, test } from "bun:test";
 
@@ -33,7 +34,7 @@ function item(
 const ids = (g: { rows: { item: ItemView }[] }) => g.rows.map((r) => r.item.id);
 
 describe("groupByDay", () => {
-  test("places on the earlier field, clamped to today", () => {
+  test("places on the earlier field; past dates go to Overdue", () => {
     const groups = groupByDay(
       [
         item("slipped", { when: "2026-09-01" }),
@@ -49,20 +50,22 @@ describe("groupByDay", () => {
       "en",
     );
     expect(groups.map((g) => [g.key, g.urgency, ids(g)])).toEqual([
-      [TODAY, "today", ["overdue", "both-late", "slipped", "due-today"]],
+      ["overdue", "overdue", ["overdue", "both-late", "slipped"]],
+      [TODAY, "today", ["due-today"]],
       ["2026-09-11", "future", ["dl-first"]],
       ["2026-09-12", "future", ["both"]],
     ]);
-    expect(groups[0]!.rows.map((r) => r.tone)).toEqual([
-      "overdue",
-      "overdue",
-      "slipped",
-      "warning",
+    expect(groups[0]!.label).toBe("Overdue");
+    expect(groups[0]!.rows.map((r) => [r.placedBy, r.tone])).toEqual([
+      ["deadline", "overdue"],
+      ["deadline", "overdue"],
+      ["when", "slipped"],
     ]);
-    expect(groups[1]!.rows[0]!.placedBy).toBe("deadline");
-    expect(groups[1]!.rows[0]!.tone).toBe("neutral");
-    expect(groups[2]!.rows[0]!.placedBy).toBe("when");
-    expect(groups[1]!.label).toBe("Fri");
+    expect(groups[1]!.rows.map((r) => r.tone)).toEqual(["warning"]);
+    expect(groups[2]!.rows[0]!.placedBy).toBe("deadline");
+    expect(groups[2]!.rows[0]!.tone).toBe("neutral");
+    expect(groups[3]!.rows[0]!.placedBy).toBe("when");
+    expect(groups[2]!.label).toBe("Fri");
   });
 
   test("within a day, all-day leads timed, then createdAt", () => {
@@ -80,7 +83,39 @@ describe("groupByDay", () => {
     expect(ids(groups[1]!)).toEqual(["allday-a", "allday-b", "t09", "t14"]);
   });
 
-  test("Today's fold: overdue oldest first, then slipped, then own", () => {
+  test("Overdue leads only when something is past: deadlines oldest first, then slipped whens, then createdAt", () => {
+    const groups = groupByDay(
+      [
+        item("over-b", { deadline: "2026-09-08" }),
+        item("over-a", { deadline: "2026-09-08" }),
+        item("over-old", { when: "2026-09-30", deadline: "2026-08-20" }),
+        item("slip-b", { when: "2026-09-07" }),
+        item("slip-a", { when: "2026-09-07" }),
+        item("slip-old", { when: "2026-09-01T09:00", deadline: "2026-09-20" }),
+        item("own", { when: TODAY }),
+      ],
+      TODAY,
+      LABELS,
+      "en",
+    );
+    expect(groups.map((g) => [g.key, ids(g)])).toEqual([
+      [
+        "overdue",
+        ["over-old", "over-b", "over-a", "slip-old", "slip-b", "slip-a"],
+      ],
+      [TODAY, ["own"]],
+    ]);
+    expect(groups[0]!.rows.map((r) => r.tone)).toEqual([
+      "overdue",
+      "overdue",
+      "overdue",
+      "slipped",
+      "slipped",
+      "slipped",
+    ]);
+  });
+
+  test("Today holds only its own rows, all-day ahead of timed", () => {
     const groups = groupByDay(
       [
         item("own-timed", { when: "2026-09-09T10:00" }),
@@ -99,9 +134,8 @@ describe("groupByDay", () => {
       "over-new",
       "slip-old",
       "slip-new",
-      "own-allday",
-      "own-timed",
     ]);
+    expect(ids(groups[1]!)).toEqual(["own-allday", "own-timed"]);
   });
 
   test("skips done and binned items; Today leads even when empty", () => {

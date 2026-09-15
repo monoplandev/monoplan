@@ -1,9 +1,9 @@
 // The Upcoming view: the agenda. Every Open item with a planned date or a
 // deadline, bucketed by day (`dayGroups.ts`), Today always anchored so the
 // surface reads as "the days ahead" even when nothing is due. Past dates
-// of either kind live in Today rather than a section of their own, and
-// are the only placing dates that badge (the day header carries everyone
-// else's). The other field, when present, badges beside it so a row reads
+// of either kind sit in an Overdue section above Today, and are the only
+// placing dates that badge (the day header carries everyone else's). The
+// other field, when present, badges beside it so a row reads
 // "Sat 13 · due 31 Oct". Timed rows lead with their time. Rows tick off in
 // place and open the task surface (dialog or side panel) on click.
 //
@@ -14,7 +14,7 @@
 import { createMemo, For, Show } from "solid-js";
 import { groupByDay, type DayGroup, type DayRow } from "./dayGroups.ts";
 import { DeadlineBadge } from "./DeadlineBadge.tsx";
-import { formatWhenTime, nowMs, todayStamp, whenDay } from "./format.tsx";
+import { formatWhenTime, nowMs, todayStamp } from "./format.tsx";
 import { useAppI18n } from "./i18n.tsx";
 import { isDone, type DocApp } from "./sync/store.ts";
 import { WhenBadge } from "./WhenBadge.tsx";
@@ -42,8 +42,10 @@ export function Upcoming(props: {
 
   // Every day heads with the same long-form date ("Sat 24 Sept"); Today
   // is the only one annotated, so the eye lands on it without the other
-  // days changing shape as they approach.
+  // days changing shape as they approach. Overdue has no day: its rows
+  // each carry their own date.
   const dayHeading = (g: DayGroup): string => {
+    if (g.urgency === "overdue") return g.label;
     const [y, mo, d] = g.key.split("-").map(Number);
     if (!y || !mo || !d) return g.label;
     const date = new Intl.DateTimeFormat(locale(), {
@@ -54,12 +56,12 @@ export function Upcoming(props: {
     return g.urgency === "today" ? `${date} (${m().deadline.today})` : date;
   };
 
-  // The placing field badges only when its own day is behind the header
-  // (Today's fold); the other field always badges.
-  const showPlacingWhen = (r: DayRow, key: string) =>
-    r.placedBy === "when" && whenDay(r.item.when!) < key;
-  const showPlacingDeadline = (r: DayRow, key: string) =>
-    r.placedBy === "deadline" && r.item.deadline! < key;
+  // The placing field badges only in Overdue, where the header carries no
+  // day; the other field always badges.
+  const showPlacingWhen = (r: DayRow, g: DayGroup) =>
+    r.placedBy === "when" && g.urgency === "overdue";
+  const showPlacingDeadline = (r: DayRow, g: DayGroup) =>
+    r.placedBy === "deadline" && g.urgency === "overdue";
   const timeLabel = (r: DayRow) =>
     r.placedBy === "when" ? formatWhenTime(r.item.when!, locale()) : "";
 
@@ -74,9 +76,7 @@ export function Upcoming(props: {
             <Show
               when={g.rows.length > 0}
               fallback={
-                <div class="upcoming-empty-day">
-                  {m().upcoming.emptyToday}
-                </div>
+                <div class="upcoming-empty-day">{m().upcoming.emptyToday}</div>
               }
             >
               <For each={g.rows}>
@@ -106,13 +106,13 @@ export function Upcoming(props: {
                     </Show>
                     <span class="upcoming-row-text">{r.item.text}</span>
                     <span class="upcoming-row-meta">
-                      <Show when={showPlacingWhen(r, g.key)}>
+                      <Show when={showPlacingWhen(r, g)}>
                         <WhenBadge when={r.item.when!} />
                       </Show>
                       <Show when={r.placedBy === "deadline" && r.item.when}>
                         {(w) => <WhenBadge when={w()} />}
                       </Show>
-                      <Show when={showPlacingDeadline(r, g.key)}>
+                      <Show when={showPlacingDeadline(r, g)}>
                         <DeadlineBadge deadline={r.item.deadline!} pastAsDate />
                       </Show>
                       <Show when={r.placedBy === "when" && r.item.deadline}>
