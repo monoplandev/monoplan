@@ -1192,11 +1192,11 @@ input.task-check:hover {
 }
 
 /* Origin-list badge on the Done view (spec/board.md — the global Done view
-   is cross-list). A subtle pill so it reads as metadata, not row text. */
+   is cross-list). Same grey as every other badge (`.badge`), so the pill
+   row reads as one set. */
 .row-list {
   max-width: 16ch;
   min-width: 0;
-  color: var(--text-badge-faint);
 }
 
 .row-list-name {
@@ -1207,9 +1207,8 @@ input.task-check:hover {
 }
 
 /* Lifecycle-state badge on flat list rows (per-list "Show state" display
-   option). Same quiet pill as the origin-list badge: metadata, not text. */
+   option). Same pill as the origin-list badge. */
 .row-state {
-  color: var(--text-badge-faint);
 }
 
 /* Remove (×) affordance shown inside the Focus lens, at the row's trailing
@@ -1227,7 +1226,6 @@ input.task-check:hover {
   margin-top: -1px;
   min-height: calc(1.3em + 4px);
   background: none;
-  color: var(--text-badge-faint);
 }
 
 .row-focus-badge svg {
@@ -1243,7 +1241,6 @@ input.task-check:hover {
   margin-top: -1px;
   min-height: calc(1.3em + 4px);
   background: none;
-  color: var(--text-badge-faint);
 }
 
 .row-notes-badge svg {
@@ -2617,18 +2614,20 @@ input.task-check:hover {
 
 /* Pin-to-Focus toggle beside the deadline badge: same pill geometry as
    `.deadline-badge` / `.row-focus-badge`. Faint outline pin when unpinned,
-   muted filled pin when pressed (`aria-pressed`); disabled (Done / Binned
-   items — no Focus refs, spec/focus.md) just loses the pointer. */
+   filled pin when pressed (`aria-pressed`). Colours follow the badge
+   pair: unpressed matches the unset deadline / when placeholders, pressed
+   matches every other badge. Disabled (Done / Binned items — no Focus
+   refs, spec/focus.md) just loses the pointer. */
 .task-dialog-pin-toggle {
   justify-content: center;
   min-height: calc(1.3em + 4px);
-  color: var(--text-faint);
+  color: var(--text-badge-faint);
   cursor: pointer;
   outline: none;
 }
 
 .task-dialog-pin-toggle[aria-pressed="true"] {
-  color: var(--text-muted);
+  color: var(--text-badge);
 }
 
 .task-dialog-pin-toggle:focus-visible {
