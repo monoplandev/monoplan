@@ -7,7 +7,7 @@
 // Focus or a click opens the panel on every quarter hour with the stored
 // time under the cursor and the input's text selected, so typing replaces
 // it; the typed text narrows the list to what it names (`timeSuggest.ts`
-// has the grammar). With no time stored the input shows a dim "All day"
+// has the grammar). With no time stored the input shows the host's dim
 // placeholder, and a ✕ after the input clears a stored time back to it. Arrow keys move the cursor and put the row's label
 // in the input (selected again, still without narrowing the list: the
 // typed query and the shown text are separate). Enter commits the row
@@ -49,7 +49,7 @@ export function TimePicker(props: {
   /** Accessible name. */
   label: string;
   /** Placeholder shown for the null value. */
-  allDayLabel: string;
+  placeholder: () => string;
   /** Accessible name of the ✕ that clears the time. */
   clearLabel: string;
   /** Raw SVG for a decorative glyph inset at the input's left edge; the
@@ -269,7 +269,7 @@ export function TimePicker(props: {
           inputMode="numeric"
           enterkeyhint="done"
           value={display()}
-          placeholder={props.allDayLabel}
+          placeholder={props.placeholder()}
           aria-label={props.label}
           aria-expanded={panelVisible()}
           aria-controls={panelVisible() ? listboxId : undefined}

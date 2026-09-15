@@ -6,8 +6,9 @@
 // so the popover is the only writer. Anchored on the input rather than a
 // Popover.Trigger button so it can become editable without changing shape.
 // The typed time picker (`TimePicker`) sits on a row above the input and
-// is always shown: a dim "All day" placeholder when the `when` has no
-// time part, and a ✕ that strips one. A time picked while no date is set
+// is always shown: a dim placeholder when the `when` has no time part
+// ("All day" against a set date, "Time" while there is no date for it to
+// be all of), and a ✕ that strips one. A time picked while no date is set
 // lands on today. The popover carries no time field of its own.
 
 import { Popover } from "@kobalte/core/popover";
@@ -92,7 +93,7 @@ export function WhenField(props: {
           cycle={() => hourCycle(locale())}
           locale={locale}
           label={m().when.time}
-          allDayLabel={m().when.allDay}
+          placeholder={() => (props.when() ? m().when.allDay : m().when.time)}
           clearLabel={m().when.clearTime}
         />
       </div>

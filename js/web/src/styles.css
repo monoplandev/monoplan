@@ -2573,9 +2573,10 @@ input.task-check:hover {
   cursor: pointer;
 }
 
-/* Badge row under the notes editor: the deadline trigger and the
-   pin-to-Focus toggle side by side. Owns the top gap the deadline trigger used
-   to carry alone. */
+/* Badge row under the title: list picker, lifecycle, deadline trigger,
+   pin-to-Focus toggle. In the 780px modal they run inline at their
+   natural widths; the narrow shells below rearrange them. Owns the top
+   gap the deadline trigger used to carry alone. */
 .task-dialog-badges {
   display: flex;
   flex-wrap: wrap;
@@ -2589,6 +2590,42 @@ input.task-check:hover {
 .task-dialog-badges .badge {
   font-size: 14px;
   padding: 2px 8px;
+}
+
+/* Narrow shells (the side pane, the mobile page): a two-column grid, so
+   each labelled badge takes half the row and they fall into two rows of
+   two (or three, when the pin toggle is hidden on Done / Binned items).
+   The pickers drop their fit-content width and the list picker's 10em
+   cap, the deadline trigger and the pill inside it stretch, and the sort
+   carets move to the far edge, Select-style. The pin toggle is a glyph,
+   not a label, so it keeps its natural pill at the start of its cell. */
+.task-panel .task-dialog-badges,
+.task-page .task-dialog-badges {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.task-panel .task-dialog-badges .badge,
+.task-page .task-dialog-badges .badge {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+
+.task-panel .task-dialog-badges .task-dialog-deadline-trigger,
+.task-page .task-dialog-badges .task-dialog-deadline-trigger {
+  width: 100%;
+}
+
+.task-panel .task-dialog-badges .task-dialog-list-caret,
+.task-page .task-dialog-badges .task-dialog-list-caret {
+  margin-left: auto;
+}
+
+.task-panel .task-dialog-badges .task-dialog-pin-toggle,
+.task-page .task-dialog-badges .task-dialog-pin-toggle {
+  width: auto;
+  justify-self: start;
 }
 
 .task-dialog-badges .badge svg,
@@ -2625,13 +2662,12 @@ input.task-check:hover {
   align-items: center;
 }
 
-/* Input and its ✕ side by side; the ✕ only renders while a time is set,
-   at a smaller scale than the header buttons so it sits in the text line. */
+/* The input with its glyph inset at the left edge and its ✕ inset at the
+   right, both overlaid; the input pads past each. */
 .time-picker-field {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
 }
 
 /* Glyph overlaid on the input's left edge; clicks fall through to the
@@ -2651,9 +2687,9 @@ input.task-check:hover {
 }
 
 .task-dialog-time-input {
-  width: 120px;
+  width: 130px;
   margin: 0;
-  padding: 2px 4px 2px 26px;
+  padding: 2px 24px 2px 26px;
   border: none;
   border-radius: 4px;
   background: transparent;
@@ -2677,10 +2713,29 @@ input.task-check:hover {
   outline-offset: 2px;
 }
 
+/* The ✕ only renders while a time is set, and only shows while the field
+   is hovered or holds focus (the input, or the ✕ itself via Tab), so at
+   rest the row reads as text. Touch has no hover, so there it stays
+   visible whenever it renders. */
 .time-picker-clear {
-  width: 22px;
-  height: 22px;
-  font-size: 12px;
+  position: absolute;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  border-radius: 4px;
+  opacity: 0;
+}
+
+.time-picker-field:hover .time-picker-clear,
+.time-picker-field:focus-within .time-picker-clear {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .time-picker-clear {
+    opacity: 1;
+  }
 }
 
 /* The planned-date input: borderless, reads as a line of text in the band
@@ -2690,7 +2745,7 @@ input.task-check:hover {
   position: relative;
   display: inline-flex;
   align-items: center;
-  flex: 2 1 0;
+  flex: 0 1 auto;
   min-width: 0;
 }
 
@@ -2710,8 +2765,10 @@ input.task-check:hover {
   height: 14px;
 }
 
+/* Sized for its longest reading ("Wed 23 Sept 2027") rather than the
+   row, so it stays a field-sized pill like the time input above it. */
 .task-dialog-when-input {
-  width: 100%;
+  width: 150px;
   min-width: 0;
   margin: 0;
   padding: 2px 4px 2px 26px;
@@ -3104,7 +3161,7 @@ input.task-check:hover {
   }
 
   .task-page .task-dialog-time-input {
-    padding: 6px 8px 6px 30px;
+    padding: 6px 28px 6px 30px;
   }
 
   .task-page .time-picker-icon {
