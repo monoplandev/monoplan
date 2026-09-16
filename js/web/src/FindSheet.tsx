@@ -7,6 +7,10 @@
 // autofocused: switching lists is the common case on a phone, and popping
 // the keyboard on open would cover half the list before a tap lands.
 //
+// The default menu (empty query) ends with a Settings row: the bottom
+// pill no longer carries Settings, so this is the phone's only way in.
+// It is not a FindResult and never appears in query results.
+//
 // Rendered as a full-screen surface above the floating pills (the
 // palette's z band) with an explicit Close, since there is no scrim edge
 // to tap outside of.
@@ -17,6 +21,7 @@ import type { DocApp } from "./sync/store.ts";
 import type { ViewKey } from "./prefs.ts";
 import { useAppI18n } from "./i18n.tsx";
 import { trackOverlay } from "./overlay.ts";
+import mixerHzSvg from "./icons/mixer-hz.svg?raw";
 import {
   createFindState,
   findResultLifecycle,
@@ -42,6 +47,8 @@ export function FindSheet(props: {
   view: ViewKey;
   onOpenChange: (open: boolean) => void;
   onSelect?: (result: FindResult) => void;
+  /** Opens the Settings dialog; the sheet closes first. */
+  onOpenSettings: () => void;
   /** Count badges, same sources and rules as the desktop nav (see
    *  `Nav`): Focus shows only when non-zero, Bin always, Inbox always
    *  ("-" for zero), other lists only under `showListCounts`. */
@@ -174,6 +181,22 @@ export function FindSheet(props: {
                 matches. */}
             <Show when={find.items().length === 0}>
               <div class="palette__empty">{m().find.noMatches}</div>
+            </Show>
+            {/* Default menu only: Settings sits below the lists, behind
+                its own break, as the last thing in the switcher. */}
+            <Show when={!find.input().trim()}>
+              <div class="find-sheet__divider" role="separator" />
+              <button
+                type="button"
+                class="palette__item find-sheet__row"
+                onClick={() => {
+                  props.onOpenChange(false);
+                  props.onOpenSettings();
+                }}
+              >
+                <span class="palette__item-icon" innerHTML={mixerHzSvg} aria-hidden="true" />
+                <span class="palette__item-name">{m().nav.settings}</span>
+              </button>
             </Show>
           </div>
         </div>

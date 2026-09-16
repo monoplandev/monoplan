@@ -2234,6 +2234,7 @@ export function Workspace(props: {
           view={view()}
           onOpenChange={onFindOpenChange}
           onSelect={onFindPick}
+          onOpenSettings={() => setSettingsOpen(true)}
           focusCount={state.focusOrder.length}
           binCount={state.binCount}
           openCountsByList={openCountsByList()}
@@ -2844,7 +2845,6 @@ export function Workspace(props: {
             navigateTo(v);
           }}
           onFind={() => setFindOpen(true)}
-          onOpenSettings={() => setSettingsOpen(true)}
           onAdd={
             (view().kind === "list" || view().kind === "focus") &&
             boardListId() === null

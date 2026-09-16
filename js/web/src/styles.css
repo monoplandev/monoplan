@@ -3959,7 +3959,10 @@ input.task-check:hover {
 /* ---- Mobile shell: floating glass pills ---------------------------- */
 
 :root {
-  --mobile-bar-h: 46px;
+  /* Bottom pills run larger than the header pill (`--mobile-header-h`):
+     they are the primary thumb targets. */
+  --mobile-bar-h: 56px;
+  --mobile-header-h: 46px;
   /* Scroll-end clearance a mobile scroller needs so its last row can
      clear the pills: bar height + its bottom offset + breathing room. */
   --mobile-bar-clearance: calc(var(--mobile-bar-h) + 28px + env(safe-area-inset-bottom));
@@ -3995,7 +3998,7 @@ input.task-check:hover {
   align-items: center;
   gap: 2px;
   height: var(--mobile-bar-h);
-  padding: 0 5px;
+  padding: 0 6px;
   border-radius: 99px;
   -webkit-tap-highlight-color: transparent;
 }
@@ -4046,8 +4049,8 @@ input.task-check:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   border: 0;
   border-radius: 99px;
@@ -4058,8 +4061,8 @@ input.task-check:hover {
 }
 
 .mobile-bar-btn svg {
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
 }
 
 .mobile-bar-btn:active {
@@ -4123,7 +4126,7 @@ input.task-check:hover {
 
   .main-header .header-group {
     gap: 2px;
-    height: var(--mobile-bar-h);
+    height: var(--mobile-header-h);
     padding: 0 5px;
     border-radius: 99px;
     -webkit-tap-highlight-color: transparent;

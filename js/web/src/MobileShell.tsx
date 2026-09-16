@@ -2,21 +2,20 @@
 //
 // On phones the desktop sidebar (and its footer chrome) is not rendered (see
 // Workspace.tsx). The left pill leads with icon-only jumps to the three
-// fixed views (Focus, Inbox, Upcoming — the same order as the sidebar's
+// fixed views (Focus, Inbox, Upcoming, the same order as the sidebar's
 // top group, minus Done / Bin), then Find (FindSheet.tsx, which doubles
-// as the list switcher: it lists every view on an empty query and marks
-// the current one), Settings, and the account/sync indicator (`status`,
-// mirroring the desktop sidebar footer); the right pill is Add. No
-// custom drawer: the DOM can't fake a native sheet convincingly, so we
-// don't try.
+// as the list switcher: it lists every view on an empty query, marks
+// the current one, and carries the Settings entry), and the account/sync
+// indicator (`status`, mirroring the desktop sidebar footer); the right
+// pill is Add. No custom drawer: the DOM can't fake a native sheet
+// convincingly, so we don't try.
 
 import { Show, type JSX } from "solid-js";
 import { useAppI18n } from "./i18n.tsx";
 import archiveSvg from "./icons/archive.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
-import caretUpDownSvg from "./icons/caret-up-down.svg?raw";
 import drawingPinSvg from "./icons/drawing-pin.svg?raw";
-import mixerHzSvg from "./icons/mixer-hz.svg?raw";
+import magnifyingGlassSvg from "./icons/magnifying-glass.svg?raw";
 import plusSvg from "./icons/plus.svg?raw";
 import type { ViewKey } from "./prefs.ts";
 
@@ -26,7 +25,6 @@ export function MobileBars(props: {
   view: ViewKey;
   setView: (v: ViewKey) => void;
   onFind: () => void;
-  onOpenSettings: () => void;
   /** null hides the add pill (views that can't capture). */
   onAdd: (() => void) | null;
   addDisabled: boolean;
@@ -72,14 +70,7 @@ export function MobileBars(props: {
           class="mobile-bar-btn"
           aria-label={m().find.placeholder}
           onClick={props.onFind}
-          innerHTML={caretUpDownSvg}
-        />
-        <button
-          type="button"
-          class="mobile-bar-btn"
-          aria-label={m().nav.settings}
-          onClick={props.onOpenSettings}
-          innerHTML={mixerHzSvg}
+          innerHTML={magnifyingGlassSvg}
         />
         {props.status}
       </nav>
