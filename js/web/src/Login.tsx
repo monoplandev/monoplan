@@ -49,6 +49,9 @@ export interface Session {
  *  `.auth-dialog-art`). */
 const AUTH_ART_URL = "/monoplan-badge.png";
 
+/** Mailing-list signup linked from the pre-release notice. */
+const MAILING_LIST_URL = "https://monoplan.app/#mailing-list";
+
 function defaultDeviceName(): string {
   return `web-${typeof navigator !== "undefined" ? navigator.platform : "unknown"}`;
 }
@@ -86,6 +89,12 @@ function AuthForm(props: {
 
   return (
     <form class="auth-form" onSubmit={submit}>
+      <p class="auth-prerelease-notice" role="note">
+        {m().auth.prereleaseNotice}{" "}
+        <a href={MAILING_LIST_URL} target="_blank" rel="noopener noreferrer">
+          {m().auth.prereleaseLink}
+        </a>
+      </p>
       <Dialog.Title class="auth-dialog-title">
         {mode() === "login" ? m().auth.signIn : m().auth.signUp}
       </Dialog.Title>

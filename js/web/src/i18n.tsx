@@ -62,6 +62,10 @@ export type Messages = {
     noAccount: string;
     haveAccount: string;
     serverMissingDeviceCredential: string;
+    /** Pre-release banner shown above both sign-in and sign-up. The link
+     *  text is rendered as an anchor to the mailing-list signup. */
+    prereleaseNotice: string;
+    prereleaseLink: string;
   };
   nav: {
     inbox: string;
@@ -399,6 +403,10 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       noAccount: "¿No tienes cuenta? Crea una",
       haveAccount: "¿Ya tienes cuenta? Inicia sesión",
       serverMissingDeviceCredential: "el servidor no devolvió una credencial de dispositivo",
+      prereleaseNotice:
+        "Esta es una versión preliminar. Los datos se borrarán con regularidad.",
+      prereleaseLink:
+        "Suscríbete a nuestra lista de correo para saber cuándo se lance Monoplan.",
     },
     nav: {
       inbox: "Bandeja de entrada",
@@ -646,6 +654,10 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       noAccount: "Don't have an account? Sign up",
       haveAccount: "Have an account? Sign in",
       serverMissingDeviceCredential: "server did not return a device credential",
+      prereleaseNotice:
+        "This is a pre-release build. Data will be regularly deleted.",
+      prereleaseLink:
+        "Sign up to our mailing list to get notified when Monoplan releases.",
     },
     nav: {
       inbox: "Inbox",

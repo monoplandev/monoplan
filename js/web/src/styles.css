@@ -2047,6 +2047,21 @@ input.task-check:hover {
   filter: brightness(0.96);
 }
 
+.auth-prerelease-notice {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.auth-prerelease-notice a {
+  color: var(--text);
+  text-decoration: underline;
+}
+
 .auth-dialog-title {
   margin: 0 0 4px;
   font-size: 16px;
