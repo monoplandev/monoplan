@@ -8595,6 +8595,23 @@ mod tests {
     }
 
     #[test]
+    fn negative_or_oversized_raw_duration_reads_as_unset() {
+        // `set_item_duration` takes a `u32`, so a negative value can only
+        // arrive from another writer. The reader treats it as absent.
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "meeting").unwrap();
+        let map = doc.find_item(&id).unwrap();
+        for raw in [-5i64, 0, i64::from(MAX_DURATION_MINUTES) + 1, i64::MAX] {
+            map.insert(KEY_DURATION, raw).unwrap();
+            doc.inner.commit();
+            assert_eq!(doc.get_item(&id).unwrap().duration, None, "{raw}");
+        }
+        map.insert(KEY_DURATION, 15i64).unwrap();
+        doc.inner.commit();
+        assert_eq!(doc.get_item(&id).unwrap().duration, Some(15));
+    }
+
+    #[test]
     fn clearing_when_clears_duration_but_all_day_keeps_it() {
         let doc = Doc::new().unwrap();
         let id = doc.add_item(LIST_INBOX, "meeting").unwrap();

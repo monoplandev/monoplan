@@ -56,6 +56,13 @@ export function TimePicker(props: {
    *  input pads past it. */
   icon?: string;
   class?: string;
+  /** Optional dim note after each option's label; for the end-of-span
+   *  picker this is the length that option would give. */
+  optionHint?: (t: TimeSuggestion) => string | null;
+  /** Anchor for an end-of-span picker: the blank list runs from this
+   *  time + 15 minutes round the clock, and typed readings order by
+   *  distance after it (`timeSuggest.ts`). */
+  after?: () => Required<TimeParts> | null;
 }) {
   const baseId = createUniqueId();
   const listboxId = `${baseId}-listbox`;
@@ -110,9 +117,13 @@ export function TimePicker(props: {
   });
 
   const blank = () => (query() ?? "").trim() === "";
-  const items = createMemo(() => timeSuggestions(query() ?? "", props.cycle()));
-  /** Row of the stored time (9:00 without one) in the blank list. */
-  const storedIndex = () => nearestQuarterIndex(props.value());
+  const after = () => props.after?.() ?? null;
+  const items = createMemo(() =>
+    timeSuggestions(query() ?? "", props.cycle(), after()),
+  );
+  /** Row of the stored time (9:00 without one; an hour on in an
+   *  anchored list) in the blank list. */
+  const storedIndex = () => nearestQuarterIndex(props.value(), after());
   const panelVisible = () => open() && items().length > 0;
 
   const scrollSelectedIntoView = (
@@ -356,7 +367,14 @@ export function TimePicker(props: {
                     onMouseMove={(e) => onRowMouseMove(e, i())}
                     onClick={() => commit(t)}
                   >
-                    <span class="palette__item-name">{format(t)}</span>
+                    <span class="palette__item-name">
+                      {format(t)}
+                      <Show when={props.optionHint?.(t)}>
+                        {(hint) => (
+                          <span class="time-picker-hint">{hint()}</span>
+                        )}
+                      </Show>
+                    </span>
                   </div>
                 )}
               </For>

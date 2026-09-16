@@ -19,6 +19,11 @@
 //
 // Two readings are ordered by distance from noon so the daytime one is
 // under the cursor: 1 to 6 and 12 suggest PM first, 7 to 11 AM first.
+//
+// With an `after` time (the end-of-span picker, anchored on the start),
+// the blank list instead runs from `after` + 15 minutes round the clock
+// to `after` itself a day later, and two readings order by how long
+// after the start they fall, so "3" after 14:00 is 15:00 before 03:00.
 
 import type { TimeParts } from "./format.tsx";
 
@@ -29,11 +34,29 @@ const STEP = 15;
 
 const QUERY = /^\s*(\d{1,4})(?:[:.](\d{0,2}))?\s*(?:([ap])\.?\s*m?\.?)?\s*$/i;
 
+const DAY = 24 * 60;
+
+const toMinutes = (t: TimeSuggestion) => t.hour * 60 + t.minute;
+const fromMinutes = (m: number): TimeSuggestion => {
+  const wrapped = ((m % DAY) + DAY) % DAY;
+  return { hour: Math.floor(wrapped / 60), minute: wrapped % 60 };
+};
+
+/** Minutes from `after` forward to `t` on the clock; a `t` equal to
+ *  `after` is a full day later, never zero. */
+function minutesAfter(after: TimeSuggestion, t: TimeSuggestion): number {
+  const diff = toMinutes(t) - toMinutes(after);
+  return diff > 0 ? diff : diff + DAY;
+}
+
 export function timeSuggestions(
   query: string,
   cycle: 12 | 24,
+  after: TimeSuggestion | null = null,
 ): TimeSuggestion[] {
-  if (query.trim() === "") return allQuarterHours();
+  if (query.trim() === "") {
+    return after ? quarterHoursAfter(after) : allQuarterHours();
+  }
   const m = QUERY.exec(query);
   if (!m) return [];
   let digits = m[1];
@@ -60,7 +83,9 @@ export function timeSuggestions(
   }
   if (minute > 59) return [];
 
-  return hourReadings(hour, half, cycle).map((h) => ({ hour: h, minute }));
+  const out = hourReadings(hour, half, cycle).map((h) => ({ hour: h, minute }));
+  if (after) out.sort((a, b) => minutesAfter(after, a) - minutesAfter(after, b));
+  return out;
 }
 
 /** The 24-hour hours a typed hour can mean, most likely first. */
@@ -95,9 +120,30 @@ function allQuarterHours(): TimeSuggestion[] {
   return out;
 }
 
+/** The end-of-span list: every quarter hour from `after` + one step
+ *  round the clock to `after` itself, a day later, as the last row. */
+function quarterHoursAfter(after: TimeSuggestion): TimeSuggestion[] {
+  const out: TimeSuggestion[] = [];
+  const base = toMinutes(after);
+  for (let offset = STEP; offset <= DAY; offset += STEP) {
+    out.push(fromMinutes(base + offset));
+  }
+  return out;
+}
+
 /** Index of the untyped list's row nearest to (at or before) `time`, so
- *  the stored value is under the cursor when the picker opens blank. */
-export function nearestQuarterIndex(time: TimeParts | null): number {
-  if (!time || time.hour == null || time.minute == null) return 9 * 4;
-  return Math.floor((time.hour * 60 + time.minute) / STEP);
+ *  the stored value is under the cursor when the picker opens blank.
+ *  Without a time: 9:00, or one hour on in an `after` list. */
+export function nearestQuarterIndex(
+  time: TimeParts | null,
+  after: TimeSuggestion | null = null,
+): number {
+  const complete = time && time.hour != null && time.minute != null ? (time as TimeSuggestion) : null;
+  if (!after) {
+    return complete ? Math.floor(toMinutes(complete) / STEP) : 9 * 4;
+  }
+  if (!complete) return 60 / STEP - 1;
+  // Row k holds `after` + (k + 1) steps; floor so a time between rows
+  // sits on the row before it, and clamp a sub-step gap to the first row.
+  return Math.max(0, Math.floor(minutesAfter(after, complete) / STEP) - 1);
 }

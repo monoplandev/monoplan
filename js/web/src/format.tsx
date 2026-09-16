@@ -265,6 +265,16 @@ export function endTimeOf(start: Required<TimeParts>, minutes: number): Required
   return { hour: Math.floor(total / 60), minute: total % 60 };
 }
 
+/** Compact length: `45m`, `2h`, `1h 30m`. Hours keep counting past a
+ *  day, so a day-long span reads `24h`. */
+export function formatDurationShort(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
 /** Length in minutes from a start to an end typed as a clock time. An end
  *  at or before the start on the clock means the next day, so 23:00 to
  *  01:00 is two hours and 09:00 to 09:00 is a full day. */

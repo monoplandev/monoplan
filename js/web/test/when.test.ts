@@ -22,6 +22,7 @@ import {
   whenFromParts,
   endTimeOf,
   durationBetween,
+  formatDurationShort,
   whenTime,
 } from "../src/format.tsx";
 
@@ -102,6 +103,13 @@ describe("duration ⇄ end-time bridge", () => {
     expect(endTimeOf({ hour: 14, minute: 0 }, 90)).toEqual({ hour: 15, minute: 30 });
     expect(endTimeOf({ hour: 23, minute: 15 }, 60)).toEqual({ hour: 0, minute: 15 });
     expect(endTimeOf({ hour: 9, minute: 0 }, 24 * 60)).toEqual({ hour: 9, minute: 0 });
+  });
+
+  test("formatDurationShort", () => {
+    expect(formatDurationShort(45)).toBe("45m");
+    expect(formatDurationShort(120)).toBe("2h");
+    expect(formatDurationShort(90)).toBe("1h 30m");
+    expect(formatDurationShort(24 * 60)).toBe("24h");
   });
 
   test("durationBetween treats an end at or before the start as next day", () => {

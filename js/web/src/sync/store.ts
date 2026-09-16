@@ -957,6 +957,10 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       mutate(() => engine.setItemWhen(id, when ?? undefined));
     },
     setItemDuration(id, minutes) {
+      // The core rejects zero, negative, and over-a-week values; refuse
+      // anything that is not a positive whole number here so a bad value
+      // never reaches the engine (where it would throw).
+      if (minutes != null && (!Number.isInteger(minutes) || minutes <= 0)) return;
       mutate(() => engine.setItemDuration(id, minutes ?? undefined));
     },
     setDone(id, done) {

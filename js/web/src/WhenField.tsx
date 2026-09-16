@@ -25,6 +25,7 @@ import {
   addDaysToStamp,
   durationBetween,
   endTimeOf,
+  formatDurationShort,
   hourCycle,
   isCompleteTime,
   nowMs,
@@ -141,6 +142,11 @@ export function WhenField(props: {
             label={m().when.end}
             placeholder={() => m().when.end}
             clearLabel={m().when.clearEnd}
+            after={time}
+            optionHint={(t) => {
+              const start = time();
+              return start ? formatDurationShort(durationBetween(start, t)) : null;
+            }}
           />
         </Show>
       </div>

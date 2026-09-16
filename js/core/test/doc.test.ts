@@ -198,3 +198,21 @@ describe("Op stream round trip via two replicas", () => {
     expect(bytesEqual(blob.ciphertext, ciphertext)).toBe(true);
   });
 });
+
+describe("Doc duration", () => {
+  test("negative, zero, fractional and oversized durations are rejected", () => {
+    const doc = Doc.create();
+    const id = doc.addItem(LIST_MAIN, "meeting");
+    doc.setItemWhen(id, "2026-09-12T14:00");
+    for (const bad of [-5, 0, -1, 7 * 24 * 60 + 1]) {
+      expect(() => doc.setItemDuration(id, bad)).toThrow();
+    }
+    doc.setItemDuration(id, 90);
+    const items = JSON.parse(doc.itemsInListJson(LIST_MAIN, false));
+    expect(items[0].duration).toBe(90);
+    // Clearing the date takes the length with it.
+    doc.setItemWhen(id, undefined);
+    const after = JSON.parse(doc.itemsInListJson(LIST_MAIN, false));
+    expect(after[0].duration).toBeUndefined();
+  });
+});

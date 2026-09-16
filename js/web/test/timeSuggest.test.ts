@@ -102,3 +102,41 @@ describe("nearestQuarterIndex", () => {
     expect(nearestQuarterIndex({})).toBe(36);
   });
 });
+
+describe("anchored (end-of-span) suggestions", () => {
+  const after = { hour: 14, minute: 0 };
+
+  test("blank runs from a step after the anchor round to the anchor itself", () => {
+    const list = timeSuggestions("", 12, after);
+    expect(list).toHaveLength(96);
+    expect(list[0]).toEqual({ hour: 14, minute: 15 });
+    expect(list[39]).toEqual({ hour: 0, minute: 0 });
+    expect(list[95]).toEqual({ hour: 14, minute: 0 });
+  });
+
+  test("typed readings order by distance after the anchor", () => {
+    expect(timeSuggestions("3", 12, after)).toEqual([
+      { hour: 15, minute: 0 },
+      { hour: 3, minute: 0 },
+    ]);
+    // Both readings of "1" are past the anchor on the clock: 1 AM is
+    // eleven hours on, 1 PM twenty-three, so the small hour leads.
+    expect(timeSuggestions("1", 12, after)).toEqual([
+      { hour: 1, minute: 0 },
+      { hour: 13, minute: 0 },
+    ]);
+  });
+
+  test("nearestQuarterIndex maps into the anchored list", () => {
+    expect(nearestQuarterIndex({ hour: 14, minute: 15 }, after)).toBe(0);
+    expect(nearestQuarterIndex({ hour: 15, minute: 30 }, after)).toBe(5);
+    expect(nearestQuarterIndex({ hour: 0, minute: 0 }, after)).toBe(39);
+    expect(nearestQuarterIndex({ hour: 14, minute: 0 }, after)).toBe(95);
+    // Between rows floors; inside the first step clamps to the first row.
+    expect(nearestQuarterIndex({ hour: 15, minute: 40 }, after)).toBe(5);
+    expect(nearestQuarterIndex({ hour: 14, minute: 5 }, after)).toBe(0);
+    // No stored end: an hour on.
+    expect(nearestQuarterIndex(null, after)).toBe(3);
+    expect(timeSuggestions("", 12, after)[3]).toEqual({ hour: 15, minute: 0 });
+  });
+});

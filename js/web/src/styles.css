@@ -2714,6 +2714,12 @@ input.task-check:hover {
   outline: none;
 }
 
+/* Dim length after each end-time option ("3:30 PM  1h 30m"). */
+.time-picker-hint {
+  margin-left: 8px;
+  color: var(--text-faint);
+}
+
 /* The end-time picker after the arrow: same pill, no glyph slot, and
    narrower since it only ever reads a clock time. */
 .task-dialog-end-input {
@@ -3645,6 +3651,12 @@ input.task-check:hover {
      This panel is portaled outside that machinery, so it has to opt back
      in — without this every click on a row lands nowhere. */
   pointer-events: auto;
+}
+
+/* The time pickers' panel is a short list of clock times (plus a dim
+   length in the end picker), so it sits narrower than the list picker. */
+.list-picker.time-picker {
+  width: 12em;
 }
 
 .list-picker .palette__search input {
