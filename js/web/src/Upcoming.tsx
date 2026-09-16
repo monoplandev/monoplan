@@ -5,7 +5,9 @@
 // placing dates that badge (the day header carries everyone else's). The
 // other field, when present, badges beside it so a row reads
 // "Sat 13 · due 31 Oct". Timed rows lead with their time. Rows tick off in
-// place and open the task surface (dialog or side panel) on click.
+// place and stay where they are on their `when` day once done, muted, so
+// the day still records what happened. Click opens the task surface
+// (dialog or side panel).
 //
 // Deliberately not a `Dnd` listbox: day sections are the point, and the
 // flat virtualised list can't host group headers. Drag-to-reschedule is
@@ -86,6 +88,7 @@ export function Upcoming(props: {
                     role="button"
                     tabIndex={-1}
                     data-tone={r.tone}
+                    data-done={isDone(r.item) ? "" : undefined}
                     onClick={(e) => {
                       const t = e.target as HTMLElement | null;
                       if (t?.closest("input")) return;
@@ -116,7 +119,12 @@ export function Upcoming(props: {
                         <DeadlineBadge deadline={r.item.deadline!} pastAsDate />
                       </Show>
                       <Show when={r.placedBy === "when" && r.item.deadline}>
-                        {(d) => <DeadlineBadge deadline={d()} />}
+                        {(d) => (
+                          <DeadlineBadge
+                            deadline={d()}
+                            muted={isDone(r.item)}
+                          />
+                        )}
                       </Show>
                       <span
                         class="badge row-list"

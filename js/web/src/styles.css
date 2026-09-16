@@ -478,6 +478,13 @@ body {
   color: var(--text-muted);
 }
 
+/* A ticked row stays on its day as the record of what happened: muted,
+   the tick doing the talking. */
+.upcoming-row[data-done] .upcoming-row-text,
+.upcoming-row[data-done] .upcoming-row-time {
+  color: var(--text-muted);
+}
+
 @media (max-width: 768px) and (pointer: coarse) {
   /* Bump the inherited base size on phones; chrome elements with
      explicit px sizes (section labels, chips) keep theirs. ≥16px also

@@ -49,8 +49,17 @@ no tone or label of its own in Overdue until the user ticks, bins, or
 reschedules the item. There is deliberately no "slipped" state.
 
 Done and binned items keep both fields untouched, as they keep `deadline`
-today. Views filter on lifecycle; the fields are never cleared by a
-transition. Restore brings the dates back with the item.
+today. The fields are never cleared by a transition. Restore brings the
+dates back with the item.
+
+**`when` survives Done; `deadline` does not** (decided 2026-09-16). A
+ticked item still happened, or will happen, on its day, so it stays on the
+calendar in the same slot: muted, tick shown, nothing reordered. A deadline is
+"owed by", and Done settles the debt, so a done item's deadline places
+nothing. Overdue is Open-only. A checkless "event" item kind was considered
+and rejected: it would be a second item kind touching the board, Focus,
+Overdue, repeat-on-done and the CLI, and would still need a close action
+because the clock never writes. Ticking is that action.
 
 `when` and `deadline` are independent. Neither derives from the other and
 neither is required by the other.
@@ -151,9 +160,17 @@ Upcoming keeps its `upcoming` token and shape; its nav entry reads
 for the month grid). `groupByDeadline` becomes
 `groupByDay` over both fields:
 
-- **Rows** are Open items with a `when` or a `deadline` (or both).
-- **Overdue** (web): any row with a `deadline` day or a `when` day before
-  today goes to an Overdue section above Today. Overdue deadlines lead,
+- **Rows** are Open items with a `when` or a `deadline` (or both), plus
+  Done items with a `when` (see "`when` survives Done" above). Binned items
+  never appear.
+- **Done rows** place by `when` only, on that day, neutral tone, in the
+  same within-day order as everything else, so ticking never moves a row.
+  Their deadline places nothing and badges muted. A done item whose `when` is past drops out:
+  Overdue is Open-only and the agenda renders no past days. A month grid or
+  backward agenda, when built, shows them on their day with a "show
+  completed" toggle if the noise warrants one.
+- **Overdue** (web): any Open row with a `deadline` day or a `when` day
+  before today goes to an Overdue section above Today. Overdue deadlines lead,
   placed by the deadline whatever `when` says (it is owed now), oldest
   first; then past whens, placed by the `when`, oldest first; then
   `created_at`. Rendered only when non-empty. The CLI `agenda` still folds

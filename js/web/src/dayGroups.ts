@@ -3,11 +3,14 @@
 // once on the earlier of the two days. Anything with a past date of either
 // kind leads in an Overdue group so the pile that needs a decision is
 // visible at a glance and Today reads as today's plan; the group only
-// exists while something is past. Done / binned items never appear. Pure
-// so it can be unit-tested without a DOM (`test/dayGroups.test.ts`).
+// exists while something is past. Done items keep their calendar day via
+// `when` only ("happens on" outlives the tick, "owed by" does not): they
+// keep their slot on that day, never in Overdue and never placed by
+// deadline. Binned items never appear. Pure so it can be unit-tested
+// without a DOM (`test/dayGroups.test.ts`).
 
 import { formatDeadlineBadge, whenDay } from "./format.tsx";
-import { isOpen, type ItemView } from "./sync/store.ts";
+import { isBinned, isDone, type ItemView } from "./sync/store.ts";
 
 /** Most urgent first when comparing. */
 export type DayTone = "overdue" | "warning" | "neutral";
@@ -46,7 +49,8 @@ const FOLD_PAST_WHEN = 1;
  *  it, empty if nothing is due, so the surface anchors on the current day.
  *
  *  Within a day, rows order by the raw string of the placing field
- *  (all-day ahead of timed), then `createdAt`. */
+ *  (all-day ahead of timed), then `createdAt`; ticking a row does not
+ *  move it. */
 export function groupByDay(
   items: Iterable<ItemView>,
   today: string,
@@ -56,9 +60,21 @@ export function groupByDay(
   const placed: { day: string; raw: string; row: DayRow }[] = [];
   const overdueRows: { fold: number; raw: string; row: DayRow }[] = [];
   for (const it of items) {
-    if (!isOpen(it) || (!it.when && !it.deadline)) continue;
+    if (isBinned(it) || (!it.when && !it.deadline)) continue;
     const wDay = it.when ? whenDay(it.when) : null;
     const dDay = it.deadline ?? null;
+    if (isDone(it)) {
+      // A ticked item stays put on its `when` day, unjudged. Its deadline
+      // is settled and places nothing; Overdue is Open-only, and past days
+      // are not rendered here, so a past `when` simply drops out.
+      if (wDay === null || wDay < today) continue;
+      placed.push({
+        day: wDay,
+        raw: it.when!,
+        row: { item: it, placedBy: "when", tone: "neutral" },
+      });
+      continue;
+    }
     const overdue = dDay !== null && dDay < today;
     const pastWhen = wDay !== null && wDay < today;
     // Any past date leaves the day ladder for the Overdue group. An overdue

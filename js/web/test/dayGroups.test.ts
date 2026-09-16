@@ -1,7 +1,7 @@
 // Day bucketing behind the Upcoming view (`spec/calendar-plan.md`
 // "Agenda"): past dates of either kind in a leading Overdue group,
-// placement on the earlier of `when` / `deadline`, tone precedence, and
-// within-day ordering.
+// placement on the earlier of `when` / `deadline`, tone precedence,
+// within-day ordering, and done rows kept on their `when` day.
 
 import { describe, expect, test } from "bun:test";
 
@@ -138,11 +138,42 @@ describe("groupByDay", () => {
     expect(ids(groups[1]!)).toEqual(["own-allday", "own-timed"]);
   });
 
-  test("skips done and binned items; Today leads even when empty", () => {
+  test("done rows keep their when day and slot; binned never show", () => {
     const groups = groupByDay(
       [
-        item("done", { when: TODAY }, { state: "done" }),
+        item("done-today", { when: TODAY }, { state: "done" }),
+        item("open-today", { when: TODAY }),
+        item("done-early", { when: `${TODAY}T08:00` }, { state: "done" }),
         item("binned", { deadline: TODAY }, { binnedAt: 1 }),
+        item("future", { when: "2026-09-10" }),
+        // Done: deadline is settled and places nothing, even when earlier.
+        item(
+          "done-both",
+          { when: "2026-09-10", deadline: "2026-09-05" },
+          { state: "done" },
+        ),
+        // Done with no `when`: nothing to show.
+        item("done-deadline", { deadline: "2026-09-12" }, { state: "done" }),
+        // Done in the past: not Overdue, and past days are not rendered.
+        item("done-past", { when: "2026-09-01" }, { state: "done" }),
+      ],
+      TODAY,
+      LABELS,
+      "en",
+    );
+    expect(groups.map((g) => [g.key, ids(g)])).toEqual([
+      [TODAY, ["done-today", "open-today", "done-early"]],
+      ["2026-09-10", ["future", "done-both"]],
+    ]);
+    expect(groups[1]!.label).toBe("Tomorrow");
+    expect(groups[1]!.rows[1]!.placedBy).toBe("when");
+    expect(groups[1]!.rows[1]!.tone).toBe("neutral");
+  });
+
+  test("Today leads even when empty", () => {
+    const groups = groupByDay(
+      [
+        item("binned", { when: TODAY }, { binnedAt: 1 }),
         item("future", { when: "2026-09-10" }),
       ],
       TODAY,
@@ -153,7 +184,6 @@ describe("groupByDay", () => {
       [TODAY, []],
       ["2026-09-10", ["future"]],
     ]);
-    expect(groups[1]!.label).toBe("Tomorrow");
   });
 
   test("empty input still yields an empty Today", () => {
