@@ -2538,6 +2538,63 @@ input.task-check:hover {
   color: var(--text-faint);
 }
 
+/* On an existing item the stamp is a button opening the activity popover:
+   plain text at rest, lifting to the muted tone on hover / open so it
+   reads as clickable without becoming a pill. */
+.task-dialog-created-trigger {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.task-dialog-created-trigger:hover,
+.task-dialog-created-trigger[data-expanded] {
+  color: var(--text-muted);
+}
+
+.task-dialog-created-trigger:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 1px;
+}
+
+/* Activity popover under the stamp: the shared card look, above the task
+   dialog (z-index 100 / 101, as `.when-popover`). Holds a heading over a
+   log of plain sentences (created; completed + how long it took). */
+.activity-popover {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  min-width: 200px;
+  max-width: min(320px, 90vw);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  outline: none;
+  z-index: 120;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.activity-popover-heading {
+  margin: 0 0 6px;
+  color: var(--text-faint);
+}
+
+.activity-popover-log {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-muted);
+}
+
 /* Content column: the title, notes, badges, metadata and actions all
    share one left edge. The checkbox lives in the header, on its own line
    above the title. */

@@ -125,6 +125,12 @@ export type Messages = {
     /** New-item dialog stamp when the done checkbox is ticked, i.e. the
      *  capture will be filed as already completed. */
     loggingDoneStamp: string;
+    /** Activity popover on the task-dialog header stamp: heading over a
+     *  log of plain sentences. The creation line reuses `createdStamp`;
+     *  the completion line (shown once done) carries the elapsed span
+     *  since creation, e.g. "Completed yesterday 8:06 PM after 3 hours". */
+    activity: string;
+    activityCompleted: (when: string, span: string) => string;
     duplicate: string;
     moveToBin: string;
     moveToList: string;
@@ -456,6 +462,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       completedStamp: (when) => `Completado ${when}`,
       newItemStamp: "Elemento nuevo",
       loggingDoneStamp: "Registrando como hecho",
+      activity: "Actividad",
+      activityCompleted: (when, span) => `Completado ${when} tras ${span}`,
       duplicate: "Duplicar",
       moveToBin: "Mover a la papelera",
       moveToList: "Mover a la lista",
@@ -707,6 +715,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       completedStamp: (when) => `Completed ${when}`,
       newItemStamp: "New item",
       loggingDoneStamp: "Logging as done",
+      activity: "Activity",
+      activityCompleted: (when, span) => `Completed ${when} after ${span}`,
       duplicate: "Duplicate",
       moveToBin: "Move to bin",
       moveToList: "Move to list",

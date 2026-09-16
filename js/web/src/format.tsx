@@ -411,3 +411,46 @@ export function formatDialogStamp(
   }
   return `${compactDate(tsDate, nowDate, locale)} ${time}`;
 }
+
+// Elapsed span between two instants, for the task dialog's activity
+// section ("took 2 days 3 hours"). Localised via `Intl.NumberFormat`'s
+// unit style so the unit words come out right per locale. Two units at
+// most, the larger first, and the smaller only when it is non-zero:
+// seconds under a minute; minutes under an hour; hours + minutes under a
+// day; days + hours under a week; weeks + days under a month; months +
+// days under a year; years + months beyond. Months are calendar-average
+// (30.44 days), which is as exact as a plain span can be.
+export function formatElapsed(ms: number, locale: string): string {
+  const unit = (n: number, u: string) =>
+    new Intl.NumberFormat(locale, { style: "unit", unit: u, unitDisplay: "long" }).format(n);
+  const pair = (a: number, ua: string, b: number, ub: string) =>
+    b > 0 ? `${unit(a, ua)} ${unit(b, ub)}` : unit(a, ua);
+  const SEC = 1_000;
+  const MIN = 60 * SEC;
+  const HOUR = 60 * MIN;
+  const DAY = 24 * HOUR;
+  const WEEK = 7 * DAY;
+  const MONTH = 30.44 * DAY;
+  const YEAR = 365.25 * DAY;
+  const span = Math.max(0, ms);
+  if (span < MIN) return unit(Math.floor(span / SEC), "second");
+  if (span < HOUR) return unit(Math.floor(span / MIN), "minute");
+  if (span < DAY) {
+    const h = Math.floor(span / HOUR);
+    return pair(h, "hour", Math.floor((span - h * HOUR) / MIN), "minute");
+  }
+  if (span < WEEK) {
+    const d = Math.floor(span / DAY);
+    return pair(d, "day", Math.floor((span - d * DAY) / HOUR), "hour");
+  }
+  if (span < MONTH) {
+    const w = Math.floor(span / WEEK);
+    return pair(w, "week", Math.floor((span - w * WEEK) / DAY), "day");
+  }
+  if (span < YEAR) {
+    const mo = Math.floor(span / MONTH);
+    return pair(mo, "month", Math.floor((span - mo * MONTH) / DAY), "day");
+  }
+  const y = Math.floor(span / YEAR);
+  return pair(y, "year", Math.floor((span - y * YEAR) / MONTH), "month");
+}

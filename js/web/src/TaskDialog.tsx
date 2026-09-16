@@ -11,6 +11,7 @@
 
 import { Dialog } from "@kobalte/core/dialog";
 import { DropdownMenu } from "@kobalte/core/dropdown-menu";
+import { Popover } from "@kobalte/core/popover";
 import {
   createEffect,
   createMemo,
@@ -32,7 +33,7 @@ import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import drawingPinSvg from "./icons/drawing-pin.svg?raw";
 import drawingPinFilledSvg from "./icons/drawing-pin-filled.svg?raw";
 import sidebarRightSvg from "./icons/sidebar-right.svg?raw";
-import { formatDialogStamp, nowMs } from "./format.tsx";
+import { formatDateTime, formatDialogStamp, formatElapsed, nowMs } from "./format.tsx";
 import { useAppI18n, laneLabel } from "./i18n.tsx";
 import {
   collapsedCaretOffset,
@@ -259,6 +260,8 @@ export function TaskDialog(props: {
   // Deadline calendar popover open state, shared by both DeadlineField modes.
   const [deadlineCalOpen, setDeadlineCalOpen] = createSignal(false);
   const [whenCalOpen, setWhenCalOpen] = createSignal(false);
+  // Activity popover anchored on the header's created / completed stamp.
+  const [activityOpen, setActivityOpen] = createSignal(false);
   // The title and notes editors are contenteditable (not textareas) so that
   // http(s) URLs render as clickable anchors, matching the row quick-entry
   // editor. Their content is set imperatively from the buffers on load — it
@@ -807,6 +810,11 @@ export function TaskDialog(props: {
     </>
   );
 
+  // Completion instant for the activity log: the reflection stamp
+  // (last entry into Done), or the register's transition time for an
+  // item done before the stamp existed.
+  const doneAt = (it: ItemView) => it.doneAt ?? it.lifecycleAt;
+
   // The surface body, shared by both shells below.
   const body = () => (
     <>
@@ -944,17 +952,52 @@ export function TaskDialog(props: {
                   props.app.setDone(it().id, e.currentTarget.checked)
                 }
               />
-              {/* Created stamp, swapping to the completion stamp
-                  once the item is ticked off. */}
-              <span class="task-dialog-created">
-                {isDone(it())
-                  ? m().workspace.completedStamp(
-                      formatDialogStamp(it().lifecycleAt, nowMs(), locale(), { inline: true }),
-                    )
-                  : m().workspace.createdStamp(
-                      formatDialogStamp(it().createdAt, nowMs(), locale(), { inline: true }),
-                    )}
-              </span>
+              {/* Created stamp, swapping to the completion stamp once
+                  the item is ticked off. A click opens the activity log:
+                  the item's timeline as plain sentences. Two entries for
+                  now: when it was created, and once done, when it was
+                  completed and how long that took. The completion stamp
+                  is the reflection `doneAt` (last entry into Done),
+                  falling back to the register's transition time. */}
+              <Popover
+                open={activityOpen()}
+                onOpenChange={setActivityOpen}
+                placement="bottom-start"
+                gutter={6}
+              >
+                <Popover.Trigger
+                  class="task-dialog-created task-dialog-created-trigger"
+                  aria-label={m().workspace.activity}
+                >
+                  {isDone(it())
+                    ? m().workspace.completedStamp(
+                        formatDialogStamp(it().lifecycleAt, nowMs(), locale(), { inline: true }),
+                      )
+                    : m().workspace.createdStamp(
+                        formatDialogStamp(it().createdAt, nowMs(), locale(), { inline: true }),
+                      )}
+                </Popover.Trigger>
+                <Popover.Portal>
+                  <Popover.Content class="activity-popover">
+                    <div class="activity-popover-heading">{m().workspace.activity}</div>
+                    <ul class="activity-popover-log">
+                      <li title={formatDateTime(it().createdAt, locale())}>
+                        {m().workspace.createdStamp(
+                          formatDialogStamp(it().createdAt, nowMs(), locale(), { inline: true }),
+                        )}
+                      </li>
+                      <Show when={isDone(it())}>
+                        <li title={formatDateTime(doneAt(it()), locale())}>
+                          {m().workspace.activityCompleted(
+                            formatDialogStamp(doneAt(it()), nowMs(), locale(), { inline: true }),
+                            formatElapsed(doneAt(it()) - it().createdAt, locale()),
+                          )}
+                        </li>
+                      </Show>
+                    </ul>
+                  </Popover.Content>
+                </Popover.Portal>
+              </Popover>
             </div>
             <div class="task-dialog-header-actions">
               <DropdownMenu>
@@ -1155,8 +1198,11 @@ export function TaskDialog(props: {
     // doesn't have yet) says.
     if (!isNew() && props.entered?.() === false) return;
     // A click into the pane entered it with focus already where the
-    // user put it; don't yank the caret to the title.
-    if (shellRef?.contains(document.activeElement)) return;
+    // user put it; don't yank the caret to the title. Portal-aware: a
+    // popover or menu the pane opened is portaled to <body>, and its
+    // content taking focus is what entered the pane (the focusin reaches
+    // the shell through Solid's delegation, which follows portals).
+    if (shellRef && portalContains(shellRef, document.activeElement)) return;
     focusOnOpen();
   });
   createEffect(() => {
@@ -1247,6 +1293,16 @@ const LIFECYCLE_CHOICES: readonly WorkflowState[] = [...OPEN_STATES, "done"];
  *  workflow state and opens a menu of all five to move it in one commit.
  *  Backed by `setLifecycle` for open items and by the new-item target
  *  buffer in capture mode. */
+// `Node.contains` that follows Solid portals back to their host: the same
+// walk Solid's delegated events take (`_$host` on a portal's container),
+// so content a surface portaled to <body> counts as inside that surface.
+function portalContains(root: Node, node: Node | null): boolean {
+  for (let n = node; n; n = (n as { _$host?: Node })._$host ?? n.parentNode) {
+    if (n === root) return true;
+  }
+  return false;
+}
+
 function LifecycleBadge(props: {
   value: () => WorkflowState;
   onChange: (state: WorkflowState) => void;

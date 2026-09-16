@@ -89,3 +89,6 @@ dayplane.app
 - in sidebar mode, the open item overrules the current list in history, always (it used to close on enter and push history of the list)
 - show keyboard shortcuts when hovered over an item somehow?
 - cancelled status (child of done?!)
+- Icons for lifecycle statuses
+- dnd week view
+- Conduct bug hunt: fine-grained non-realtime issues (text not updating on same device in different representations and cross-device)
