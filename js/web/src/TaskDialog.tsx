@@ -28,7 +28,7 @@ import { WhenField } from "./WhenField.tsx";
 import { ListPicker, type ListOption } from "./ListPicker.tsx";
 import caretSortSvg from "./icons/caret-sort.svg?raw";
 import checkSvg from "./icons/check.svg?raw";
-import dotsVerticalSvg from "./icons/dots-vertical.svg?raw";
+import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import drawingPinSvg from "./icons/drawing-pin.svg?raw";
 import drawingPinFilledSvg from "./icons/drawing-pin-filled.svg?raw";
 import sidebarRightSvg from "./icons/sidebar-right.svg?raw";
@@ -961,7 +961,7 @@ export function TaskDialog(props: {
                 <DropdownMenu.Trigger
                   class="icon-button"
                   aria-label={m().common.menu}
-                  innerHTML={dotsVerticalSvg}
+                  innerHTML={dotsHorizontalSvg}
                 />
                 <DropdownMenu.Portal>
                   <DropdownMenu.Content class="dropdown-menu-content task-dialog-menu-content">
