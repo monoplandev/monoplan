@@ -2048,6 +2048,9 @@ input.task-check:hover {
 }
 
 .auth-prerelease-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   margin: 0;
   padding: 8px 12px;
   border-radius: 4px;
@@ -2055,6 +2058,11 @@ input.task-check:hover {
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.4;
+}
+
+.auth-prerelease-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
 }
 
 .auth-prerelease-notice a {
