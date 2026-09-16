@@ -86,3 +86,8 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - Consider blocked items..?
 - bug: mark multiple items as done then mark one of those as not done and list position changes!
 - fullscreen-ing an item to hyperfocus
+- Upcoming - how many items to display at once? monthly? next month? more? or infinite scroll? virtualised?
+- Record activity log?
+- For calendar view - option to hide items that are already complete?
+- Faster datetime input - look up the best
+- Consider project view
