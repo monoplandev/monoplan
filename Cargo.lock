@@ -1800,7 +1800,7 @@ dependencies = [
 
 [[package]]
 name = "monoplan"
-version = "0.0.1-alpha.13"
+version = "0.0.1-alpha.14"
 dependencies = [
  "anyhow",
  "axum",
@@ -1836,7 +1836,7 @@ dependencies = [
 
 [[package]]
 name = "monoplan-core"
-version = "0.0.1-alpha.13"
+version = "0.0.1-alpha.14"
 dependencies = [
  "argon2",
  "bip39",
@@ -1860,7 +1860,7 @@ dependencies = [
 
 [[package]]
 name = "monoplan-core-web"
-version = "0.0.1-alpha.13"
+version = "0.0.1-alpha.14"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.2.17",
@@ -1875,7 +1875,7 @@ dependencies = [
 
 [[package]]
 name = "monoplan-ffi"
-version = "0.0.1-alpha.13"
+version = "0.0.1-alpha.14"
 dependencies = [
  "monoplan-core",
  "monoplan-storage-sqlite",
@@ -1887,7 +1887,7 @@ dependencies = [
 
 [[package]]
 name = "monoplan-protocol"
-version = "0.0.1-alpha.13"
+version = "0.0.1-alpha.14"
 dependencies = [
  "serde",
  "serde_bytes",
@@ -1896,7 +1896,7 @@ dependencies = [
 
 [[package]]
 name = "monoplan-server"
-version = "0.0.1-alpha.13"
+version = "0.0.1-alpha.14"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1933,7 +1933,7 @@ dependencies = [
 
 [[package]]
 name = "monoplan-storage-sqlite"
-version = "0.0.1-alpha.13"
+version = "0.0.1-alpha.14"
 dependencies = [
  "monoplan-core",
  "monoplan-protocol",
