@@ -252,6 +252,8 @@ export function TaskDialog(props: {
   const [newDeadline, setNewDeadline] = createSignal<string | null>(null);
   // New-item mode's planned-date buffer, same deal.
   const [newWhen, setNewWhen] = createSignal<string | null>(null);
+  // New-item mode's duration buffer, applied after `newWhen`.
+  const [newDuration, setNewDuration] = createSignal<number | null>(null);
   // New-item mode's pin-to-Focus buffer, same deal as `newDeadline`.
   const [newFocus, setNewFocus] = createSignal(false);
   // Deadline calendar popover open state, shared by both DeadlineField modes.
@@ -596,6 +598,8 @@ export function TaskDialog(props: {
         if (d) props.app.setItemDeadline(id, d);
         const w = newWhen();
         if (w) props.app.setItemWhen(id, w);
+        const dur = newDuration();
+        if (w && dur) props.app.setItemDuration(id, dur);
         // A Done capture can't hold a Focus ref (auto-remove-on-Done,
         // spec/focus.md), so the pin buffer only applies to open captures.
         if (newFocus() && !nw.done) props.app.addToFocus(id);
@@ -893,8 +897,14 @@ export function TaskDialog(props: {
           <div class="task-dialog-dates">
             <WhenField
               when={newWhen}
+              duration={newDuration}
               muted={() => newItemTarget()?.done ?? false}
-              onChange={setNewWhen}
+              onChange={(value) => {
+                setNewWhen(value);
+                // Mirror the core: no date, no length.
+                if (!value) setNewDuration(null);
+              }}
+              onDurationChange={setNewDuration}
               open={whenCalOpen}
               setOpen={setWhenCalOpen}
             />
@@ -1082,8 +1092,12 @@ export function TaskDialog(props: {
           <div class="task-dialog-dates">
             <WhenField
               when={() => it().when ?? null}
+              duration={() => it().duration ?? null}
               muted={() => isDone(it()) || isBinned(it())}
               onChange={(value) => props.app.setItemWhen(it().id, value)}
+              onDurationChange={(minutes) =>
+                props.app.setItemDuration(it().id, minutes)
+              }
               open={whenCalOpen}
               setOpen={setWhenCalOpen}
             />

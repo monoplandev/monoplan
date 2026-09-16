@@ -109,6 +109,15 @@ const KEY_DEADLINE: &str = "deadline";
 /// register, so date and time can never tear under concurrent edit.
 /// Validated in `set_item_when`; see `spec/calendar-plan.md`.
 const KEY_WHEN: &str = "when";
+/// Optional duration in whole minutes (`1..=MAX_DURATION_MINUTES`), a
+/// length rather than an end so that moving `when` on one device and
+/// setting the length on another can never produce an item that ends
+/// before it starts. Meaningful only beside a timed `when`; views ignore
+/// it otherwise. Absent ≡ unset; the mutation deletes the key when
+/// cleared. Validated in `set_item_duration`; see `spec/calendar-plan.md`.
+const KEY_DURATION: &str = "duration";
+/// Upper bound on `duration`: one week of minutes.
+pub const MAX_DURATION_MINUTES: u32 = 7 * 24 * 60;
 const KEY_NAME: &str = "name";
 /// Optional per-list display icon. Stored as the literal emoji grapheme
 /// the user picked (e.g. `"📥"`); absent/empty means "no icon, render the
@@ -337,6 +346,9 @@ pub struct ItemView {
     /// `YYYY-MM-DDTHH:MM` (timed), floating. `None` ≡ unset. Raw string,
     /// never parsed into a timestamp; sorts by plain string compare.
     pub when: Option<String>,
+    /// Optional duration in whole minutes, `1..=MAX_DURATION_MINUTES`.
+    /// `None` ≡ unset. Only meaningful beside a timed `when`.
+    pub duration: Option<u32>,
     pub created_at: i64,
     /// Reflection stamp: first entry into In Progress (write-once).
     pub started_at: Option<i64>,
@@ -620,6 +632,10 @@ pub struct ExportItem {
     /// unset so older dumps stay byte-identical.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub when: Option<String>,
+    /// Duration in whole minutes. Skipped when unset so older dumps stay
+    /// byte-identical.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub duration: Option<u32>,
     pub created_at: i64,
     /// Reflection stamp (first entry into In Progress). Skipped when
     /// unset; v2 exports never carry it.
@@ -1646,6 +1662,7 @@ impl Doc {
                 binned_at: None,
                 deadline: None,
                 when: None,
+                duration: None,
                 open_index,
             });
         }
@@ -1856,23 +1873,67 @@ impl Doc {
     /// value and writes the `when` register; `None` deletes the key. One
     /// Loro commit. Malformed values — seconds, offsets, a bracketed
     /// zone suffix — are rejected with `Invalid` and never touch the doc.
-    /// Mirrors `set_item_deadline`.
+    /// Mirrors `set_item_deadline`. Clearing the `when` also clears any
+    /// `duration` in the same commit: a length without a start is
+    /// meaningless, and leaving it would resurface on the next date set.
+    /// Going timed → all-day keeps it, so re-adding a time restores the
+    /// end.
     pub fn set_item_when(&self, item_id: &str, when: Option<&str>) -> Result<(), DocError> {
         let normalized = match when {
             Some(raw) => Some(parse_when(raw)?),
             None => None,
         };
         let map = self.find_item(item_id)?;
+        let mut duration_cleared = false;
         match &normalized {
             Some(value) => map.insert(KEY_WHEN, value.as_str())?,
             None => {
                 let _ = map.delete(KEY_WHEN);
+                if read_duration(&map).is_some() {
+                    let _ = map.delete(KEY_DURATION);
+                    duration_cleared = true;
+                }
             }
         }
         self.inner.commit();
         self.push_event(AppEvent::ItemWhenChanged {
             id: item_id.to_string(),
             when: normalized,
+        });
+        if duration_cleared {
+            self.push_event(AppEvent::ItemDurationChanged {
+                id: item_id.to_string(),
+                duration: None,
+            });
+        }
+        Ok(())
+    }
+
+    /// Set or clear an item's duration in whole minutes. `Some(n)` must
+    /// be in `1..=MAX_DURATION_MINUTES` or the call rejects with
+    /// `Invalid`; `None` deletes the key. One Loro commit. Independent of
+    /// `when` at the register level (no cross-field check, so concurrent
+    /// edits can never leave the doc invalid); a duration beside an
+    /// all-day or absent `when` is simply ignored by views.
+    pub fn set_item_duration(&self, item_id: &str, duration: Option<u32>) -> Result<(), DocError> {
+        if let Some(n) = duration
+            && (n == 0 || n > MAX_DURATION_MINUTES)
+        {
+            return Err(DocError::Invalid(format!(
+                "duration must be 1..={MAX_DURATION_MINUTES} minutes: {n}"
+            )));
+        }
+        let map = self.find_item(item_id)?;
+        match duration {
+            Some(n) => map.insert(KEY_DURATION, i64::from(n))?,
+            None => {
+                let _ = map.delete(KEY_DURATION);
+            }
+        }
+        self.inner.commit();
+        self.push_event(AppEvent::ItemDurationChanged {
+            id: item_id.to_string(),
+            duration,
         });
         Ok(())
     }
@@ -3084,6 +3145,7 @@ impl Doc {
                 },
                 deadline: item.deadline,
                 when: item.when,
+                duration: item.duration,
                 created_at: item.created_at,
                 started_at: item.started_at,
                 done_at: item.done_at,
@@ -3245,6 +3307,13 @@ impl Doc {
             }
             if let Some(value) = src_item.when.as_deref().and_then(|w| parse_when(w).ok()) {
                 map.insert(KEY_WHEN, value.as_str())?;
+            }
+            // Same leniency for an out-of-range duration.
+            if let Some(n) = src_item
+                .duration
+                .filter(|n| (1..=MAX_DURATION_MINUTES).contains(n))
+            {
+                map.insert(KEY_DURATION, i64::from(n))?;
             }
             let notes = src_item.notes.trim();
             if !notes.is_empty() {
@@ -3812,6 +3881,8 @@ impl Doc {
                         KEY_TEXT,
                         KEY_NOTES,
                         KEY_DEADLINE,
+                        KEY_WHEN,
+                        KEY_DURATION,
                         KEY_LIFECYCLE,
                         KEY_STARTED_AT,
                         KEY_DONE_AT,
@@ -3946,6 +4017,12 @@ impl Doc {
                         when: view.when.clone(),
                     });
                 }
+                if has(KEY_DURATION) {
+                    self.push_event(AppEvent::ItemDurationChanged {
+                        id: id.clone(),
+                        duration: view.duration,
+                    });
+                }
                 // An open→open workflow flip (the register alone, e.g.
                 // Backlog → In Progress) changes the item's lane but not
                 // its order, so the per-list walk emits nothing for it —
@@ -4005,6 +4082,7 @@ impl Doc {
                     binned_at: view.binned_at,
                     deadline: view.deadline,
                     when: view.when,
+                    duration: view.duration,
                     open_index: None,
                 });
                 continue;
@@ -4068,6 +4146,7 @@ impl Doc {
                             binned_at: view.binned_at,
                             deadline: view.deadline,
                             when: view.when,
+                            duration: view.duration,
                             open_index: Some(i),
                         },
                     );
@@ -4333,6 +4412,7 @@ impl Doc {
                 binned_at: item.binned_at,
                 deadline: item.deadline,
                 when: item.when,
+                duration: item.duration,
                 open_index,
             });
         }
@@ -4430,6 +4510,7 @@ impl Doc {
             hasher.update(i.lifecycle_at.to_be_bytes());
             hash_opt_str(&mut hasher, i.deadline.as_deref());
             hash_opt_str(&mut hasher, i.when.as_deref());
+            hash_opt_i64(&mut hasher, i.duration.map(i64::from));
             hasher.update(i.created_at.to_be_bytes());
             hash_opt_i64(&mut hasher, i.started_at);
             hash_opt_i64(&mut hasher, i.done_at);
@@ -5001,6 +5082,15 @@ fn trim_delta(mut ops: Vec<NotesDeltaOp>) -> Vec<NotesDeltaOp> {
     ops
 }
 
+/// `duration` register as minutes; an out-of-range value (a newer client
+/// with a wider bound, or a stray write) reads as unset.
+fn read_duration(map: &LoroMap) -> Option<u32> {
+    let n = read_i64(map, KEY_DURATION)?;
+    u32::try_from(n)
+        .ok()
+        .filter(|n| (1..=MAX_DURATION_MINUTES).contains(n))
+}
+
 fn read_i64(map: &LoroMap, key: &str) -> Option<i64> {
     let v = map.get(key)?;
     let value = v.as_value()?.clone();
@@ -5139,6 +5229,7 @@ fn item_view(map: &LoroMap) -> Option<ItemView> {
         lifecycle_at,
         deadline: read_string(map, KEY_DEADLINE).filter(|s| !s.is_empty()),
         when: read_string(map, KEY_WHEN).filter(|s| !s.is_empty()),
+        duration: read_duration(map),
         created_at: read_i64(map, KEY_CREATED_AT)?,
         started_at: read_i64(map, KEY_STARTED_AT),
         done_at: read_i64(map, KEY_DONE_AT),
@@ -5378,6 +5469,7 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                     binned_at: post_it.binned_at,
                     deadline: post_it.deadline.clone(),
                     when: post_it.when.clone(),
+                    duration: post_it.duration,
                     open_index,
                 });
             }
@@ -5404,6 +5496,12 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                     out.push(AppEvent::ItemWhenChanged {
                         id: post_it.id.clone(),
                         when: post_it.when.clone(),
+                    });
+                }
+                if pre_it.duration != post_it.duration {
+                    out.push(AppEvent::ItemDurationChanged {
+                        id: post_it.id.clone(),
+                        duration: post_it.duration,
                     });
                 }
                 if pre_it.state != post_it.state
@@ -8178,6 +8276,7 @@ mod tests {
             },
             deadline: None,
             when: None,
+            duration: None,
             created_at: 1,
             started_at: None,
             done_at: None,
@@ -8447,6 +8546,165 @@ mod tests {
     }
 
     #[test]
+    fn set_and_clear_item_duration() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "meeting").unwrap();
+        assert_eq!(doc.get_item(&id).unwrap().duration, None);
+        let _ = doc.drain_events();
+
+        doc.set_item_when(&id, Some("2026-07-13T14:00")).unwrap();
+        let _ = doc.drain_events();
+        doc.set_item_duration(&id, Some(90)).unwrap();
+        assert_eq!(doc.get_item(&id).unwrap().duration, Some(90));
+        assert_eq!(
+            doc.drain_events(),
+            vec![AppEvent::ItemDurationChanged {
+                id: id.clone(),
+                duration: Some(90),
+            }]
+        );
+
+        // Bounds are inclusive; zero and over-a-week are rejected and
+        // leave the doc untouched.
+        doc.set_item_duration(&id, Some(1)).unwrap();
+        doc.set_item_duration(&id, Some(MAX_DURATION_MINUTES))
+            .unwrap();
+        let _ = doc.drain_events();
+        for bad in [0, MAX_DURATION_MINUTES + 1] {
+            let err = doc.set_item_duration(&id, Some(bad)).unwrap_err();
+            assert!(matches!(err, DocError::Invalid(_)), "{bad}: {err:?}");
+        }
+        assert_eq!(
+            doc.get_item(&id).unwrap().duration,
+            Some(MAX_DURATION_MINUTES)
+        );
+        assert!(doc.drain_events().is_empty());
+
+        // Explicit clear deletes the key; `when` is untouched.
+        doc.set_item_duration(&id, None).unwrap();
+        let view = doc.get_item(&id).unwrap();
+        assert_eq!(view.duration, None);
+        assert_eq!(view.when.as_deref(), Some("2026-07-13T14:00"));
+        assert_eq!(
+            doc.drain_events(),
+            vec![AppEvent::ItemDurationChanged {
+                id: id.clone(),
+                duration: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn clearing_when_clears_duration_but_all_day_keeps_it() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "meeting").unwrap();
+        doc.set_item_when(&id, Some("2026-07-13T14:00")).unwrap();
+        doc.set_item_duration(&id, Some(30)).unwrap();
+        let _ = doc.drain_events();
+
+        // Timed → all-day keeps the length (re-adding a time restores it).
+        doc.set_item_when(&id, Some("2026-07-13")).unwrap();
+        assert_eq!(doc.get_item(&id).unwrap().duration, Some(30));
+        assert_eq!(
+            doc.drain_events(),
+            vec![AppEvent::ItemWhenChanged {
+                id: id.clone(),
+                when: Some("2026-07-13".into()),
+            }]
+        );
+
+        // Clearing `when` drops the duration in the same commit and says so.
+        doc.set_item_when(&id, None).unwrap();
+        let view = doc.get_item(&id).unwrap();
+        assert_eq!(view.when, None);
+        assert_eq!(view.duration, None);
+        assert_eq!(
+            doc.drain_events(),
+            vec![
+                AppEvent::ItemWhenChanged {
+                    id: id.clone(),
+                    when: None,
+                },
+                AppEvent::ItemDurationChanged {
+                    id: id.clone(),
+                    duration: None,
+                },
+            ]
+        );
+
+        // Clearing an already-clear `when` emits no duration event.
+        doc.set_item_when(&id, None).unwrap();
+        assert_eq!(
+            doc.drain_events(),
+            vec![AppEvent::ItemWhenChanged {
+                id: id.clone(),
+                when: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn export_import_preserves_duration_and_drops_out_of_range() {
+        let src = Doc::new().unwrap();
+        let a = src.add_item(LIST_INBOX, "timed").unwrap();
+        let _b = src.add_item(LIST_INBOX, "unset").unwrap();
+        src.set_item_when(&a, Some("2026-09-12T14:00")).unwrap();
+        src.set_item_duration(&a, Some(45)).unwrap();
+
+        let export = src.export_json();
+        let json = serde_json::to_string(&export).unwrap();
+        assert_eq!(json.matches("\"duration\"").count(), 1);
+
+        let dst = Doc::new().unwrap();
+        dst.import_json(&export).unwrap();
+        let imported: Vec<ItemView> = dst.iter_items().collect();
+        let find = |t: &str| imported.iter().find(|i| i.text == t).unwrap();
+        assert_eq!(find("timed").duration, Some(45));
+        assert_eq!(find("unset").duration, None);
+
+        let mut edited = export.clone();
+        edited.items[0].duration = Some(0);
+        let dst2 = Doc::new().unwrap();
+        dst2.import_json(&edited).unwrap();
+        assert!(dst2.iter_items().all(|i| i.duration.is_none()));
+    }
+
+    #[test]
+    fn duration_converges_between_peers() {
+        let dek = Dek::generate();
+        let mut a = Doc::new().unwrap();
+        let id = a.add_item(LIST_INBOX, "sync me").unwrap();
+        let seed = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        let mut b = Doc::empty();
+        b.apply_remote(&dek, &seed).unwrap();
+        let _ = a.drain_events();
+        let _ = b.drain_events();
+
+        a.set_item_when(&id, Some("2026-11-05T09:30")).unwrap();
+        a.set_item_duration(&id, Some(120)).unwrap();
+        let frame = a.pending_export(&dek).unwrap().unwrap();
+        b.apply_remote(&dek, &frame).unwrap();
+        assert_eq!(b.get_item(&id).unwrap().duration, Some(120));
+        assert_eq!(a.fingerprint(), b.fingerprint());
+        assert!(b.drain_events().iter().any(|e| matches!(
+            e,
+            AppEvent::ItemDurationChanged { id: eid, duration: Some(120) } if eid == &id
+        )));
+
+        // A remote clear of `when` carries the duration clear with it.
+        a.set_item_when(&id, None).unwrap();
+        let frame = a.pending_export(&dek).unwrap().unwrap();
+        b.apply_remote(&dek, &frame).unwrap();
+        assert_eq!(b.get_item(&id).unwrap().duration, None);
+        assert_eq!(a.fingerprint(), b.fingerprint());
+        assert!(b.drain_events().iter().any(|e| matches!(
+            e,
+            AppEvent::ItemDurationChanged { id: eid, duration: None } if eid == &id
+        )));
+    }
+
+    #[test]
     fn set_item_when_rejects_malformed_values() {
         let doc = Doc::new().unwrap();
         let id = doc.add_item(LIST_INBOX, "task").unwrap();
@@ -8645,6 +8903,7 @@ mod tests {
                 },
                 deadline: None,
                 when: None,
+                duration: None,
                 created_at: 1_700_000_000_000,
                 started_at: None,
                 done_at: None,

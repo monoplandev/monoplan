@@ -240,6 +240,8 @@ struct RowJson<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     when: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    duration: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     deadline: Option<&'a str>,
     placed_by: PlacedBy,
     tone: Tone,
@@ -252,6 +254,7 @@ fn row_json(row: &AgendaRow) -> RowJson<'_> {
         list_id: &row.item.list_id,
         state: row.item.state.name(),
         when: row.item.when.as_deref(),
+        duration: row.item.duration,
         deadline: row.item.deadline.as_deref(),
         placed_by: row.placed_by,
         tone: row.tone,
@@ -273,6 +276,7 @@ mod tests {
             lifecycle_at: created_at,
             deadline: deadline.map(str::to_string),
             when: when.map(str::to_string),
+            duration: None,
             created_at,
             started_at: None,
             done_at: None,

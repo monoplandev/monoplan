@@ -20,6 +20,8 @@ import {
   setTimeFormatPref,
   whenDay,
   whenFromParts,
+  endTimeOf,
+  durationBetween,
   whenTime,
 } from "../src/format.tsx";
 
@@ -92,6 +94,20 @@ describe("when ⇄ time-field bridge", () => {
     expect(whenFromParts("2026-07-13", { hour: 9, minute: 5 })).toBe("2026-07-13T09:05");
     expect(whenFromParts("2026-07-13", { hour: 9 })).toBe("2026-07-13");
     expect(whenFromParts("2026-07-13", null)).toBe("2026-07-13");
+  });
+});
+
+describe("duration ⇄ end-time bridge", () => {
+  test("endTimeOf adds and wraps past midnight", () => {
+    expect(endTimeOf({ hour: 14, minute: 0 }, 90)).toEqual({ hour: 15, minute: 30 });
+    expect(endTimeOf({ hour: 23, minute: 15 }, 60)).toEqual({ hour: 0, minute: 15 });
+    expect(endTimeOf({ hour: 9, minute: 0 }, 24 * 60)).toEqual({ hour: 9, minute: 0 });
+  });
+
+  test("durationBetween treats an end at or before the start as next day", () => {
+    expect(durationBetween({ hour: 14, minute: 0 }, { hour: 15, minute: 30 })).toBe(90);
+    expect(durationBetween({ hour: 23, minute: 0 }, { hour: 1, minute: 0 })).toBe(120);
+    expect(durationBetween({ hour: 9, minute: 0 }, { hour: 9, minute: 0 })).toBe(24 * 60);
   });
 });
 

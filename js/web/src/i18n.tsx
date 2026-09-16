@@ -261,6 +261,11 @@ export type Messages = {
     time: string;
     /** Button beside the time field that blanks it (back to all-day). */
     clearTime: string;
+    /** Accessible name + placeholder of the end-time field after the
+     *  start time; typing an end stores a duration. */
+    end: string;
+    /** Button beside the end field that removes the duration. */
+    clearEnd: string;
   };
   upcoming: {
     /** Upcoming view's Today group when nothing is due today. */
@@ -522,6 +527,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       dialogTitle: "Establecer fecha",
       time: "Hora",
       clearTime: "Quitar hora",
+      end: "Fin",
+      clearEnd: "Quitar fin",
     },
     upcoming: {
       emptyToday: "Nada para hoy",
@@ -767,6 +774,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       dialogTitle: "Set date",
       time: "Time",
       clearTime: "Clear time",
+      end: "End",
+      clearEnd: "Clear end",
     },
     upcoming: {
       emptyToday: "Nothing due today",

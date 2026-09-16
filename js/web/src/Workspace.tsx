@@ -1224,11 +1224,17 @@ export function Workspace(props: {
   // stays a single undo step either way.
   const copyItemDetails = (
     id: string,
-    src: { notes: string; deadline: string | undefined; when: string | undefined },
+    src: {
+      notes: string;
+      deadline: string | undefined;
+      when: string | undefined;
+      duration: number | undefined;
+    },
   ): void => {
     if (src.notes) app.editItemNotes(id, src.notes);
     if (src.deadline) app.setItemDeadline(id, src.deadline);
     if (src.when) app.setItemWhen(id, src.when);
+    if (src.when && src.duration) app.setItemDuration(id, src.duration);
   };
 
   const duplicateBlock = (sourceIds: readonly string[]): void => {
@@ -1248,6 +1254,7 @@ export function Workspace(props: {
         notes: string;
         deadline: string | undefined;
         when: string | undefined;
+        duration: number | undefined;
         state: WorkflowState;
         listId: string;
       }[] = [];
@@ -1263,6 +1270,7 @@ export function Workspace(props: {
           notes: it.notes,
           deadline: it.deadline,
           when: it.when,
+          duration: it.duration,
           state: it.state,
           listId,
         });
@@ -1310,6 +1318,7 @@ export function Workspace(props: {
       notes: string;
       deadline: string | undefined;
       when: string | undefined;
+      duration: number | undefined;
       state: WorkflowState;
     }[] = [];
     visible.forEach((id, idx) => {
@@ -1322,6 +1331,7 @@ export function Workspace(props: {
         notes: it.notes,
         deadline: it.deadline,
         when: it.when,
+        duration: it.duration,
         state: it.state,
       });
     });

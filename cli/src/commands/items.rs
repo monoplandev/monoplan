@@ -1,5 +1,5 @@
 //! Item commands: add / ls / backlog / todo / start / review / done /
-//! bin (verb) / restore / mv / edit / when / deadline.
+//! bin (verb) / restore / mv / edit / when / duration / deadline.
 //!
 //! Every action goes through `Session` (open → mutate → flush). The
 //! session reads from and writes to the local Loro doc; it only talks
@@ -113,6 +113,9 @@ struct ItemJson<'a> {
     /// Planned date (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`), when set.
     #[serde(skip_serializing_if = "Option::is_none")]
     when: Option<&'a str>,
+    /// Duration in whole minutes, when set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duration: Option<u32>,
 }
 
 fn item_json(item: &ItemView) -> ItemJson<'_> {
@@ -128,16 +131,22 @@ fn item_json(item: &ItemView) -> ItemJson<'_> {
         binned_at: item.binned_at,
         deadline: item.deadline.as_deref(),
         when: item.when.as_deref(),
+        duration: item.duration,
     }
 }
 
-/// Trailing date tags for a text row: ` @<when>` then ` !<deadline>`,
-/// each only when set. Shared by `ls` and `agenda`.
+/// Trailing date tags for a text row: ` @<when>` (with `+<duration>`
+/// glued on when a timed `when` carries one, e.g. `@2026-09-12T14:00+1h30m`)
+/// then ` !<deadline>`, each only when set. Shared by `ls` and `agenda`.
 pub fn date_tags(item: &ItemView) -> String {
     let mut s = String::new();
     if let Some(w) = &item.when {
         s.push_str(" @");
         s.push_str(w);
+        if let Some(n) = item.duration.filter(|_| w.len() > 10) {
+            s.push('+');
+            s.push_str(&format_duration(n));
+        }
     }
     if let Some(d) = &item.deadline {
         s.push_str(" !");
@@ -270,13 +279,54 @@ pub async fn mv(args: MvArgs, sync: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-// ---------- when / deadline ----------
+// ---------- when / duration / deadline ----------
 
 #[derive(Parser, Debug)]
 pub struct DateArg {
     pub item_id: String,
     /// The value to set, or `-` to clear.
     pub value: String,
+}
+
+/// Render minutes as `2h`, `45m`, or `1h30m`.
+pub fn format_duration(minutes: u32) -> String {
+    match (minutes / 60, minutes % 60) {
+        (0, m) => format!("{m}m"),
+        (h, 0) => format!("{h}h"),
+        (h, m) => format!("{h}h{m}m"),
+    }
+}
+
+/// Parse a duration: plain minutes (`90`), or hours and minutes with
+/// `h` / `m` suffixes in that order (`1h30m`, `2h`, `45m`). Whitespace
+/// around and between parts is tolerated; the range is the core's.
+pub fn parse_duration(raw: &str) -> anyhow::Result<u32> {
+    let s: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+    let bad = || anyhow::anyhow!("duration must be minutes or like 1h30m: {raw:?}");
+    if s.is_empty() {
+        return Err(bad());
+    }
+    if s.bytes().all(|b| b.is_ascii_digit()) {
+        return s.parse::<u32>().map_err(|_| bad());
+    }
+    let mut hours: u32 = 0;
+    let mut minutes: u32 = 0;
+    let mut rest = s.as_str();
+    if let Some((h, tail)) = rest.split_once('h') {
+        hours = h.parse().map_err(|_| bad())?;
+        rest = tail;
+    }
+    if let Some(m) = rest.strip_suffix('m') {
+        minutes = m.parse().map_err(|_| bad())?;
+        rest = "";
+    }
+    if !rest.is_empty() || (hours == 0 && minutes == 0 && !s.contains('h')) {
+        return Err(bad());
+    }
+    hours
+        .checked_mul(60)
+        .and_then(|h| h.checked_add(minutes))
+        .ok_or_else(bad)
 }
 
 /// Set or clear the planned date: `YYYY-MM-DD` (all-day) or
@@ -286,6 +336,20 @@ pub async fn when(args: DateArg, sync: bool) -> anyhow::Result<()> {
     session
         .doc()
         .set_item_when(&args.item_id, clear_or(&args.value))?;
+    session.flush().await?;
+    println!("{}", args.item_id);
+    Ok(())
+}
+
+/// Set or clear the duration: minutes or `1h30m`; `-` clears. Range
+/// validation lives in the core.
+pub async fn duration(args: DateArg, sync: bool) -> anyhow::Result<()> {
+    let value = match clear_or(&args.value) {
+        Some(v) => Some(parse_duration(v)?),
+        None => None,
+    };
+    let session = Session::open(sync).await?;
+    session.doc().set_item_duration(&args.item_id, value)?;
     session.flush().await?;
     println!("{}", args.item_id);
     Ok(())
@@ -320,4 +384,29 @@ pub async fn edit(args: EditArgs, sync: bool) -> anyhow::Result<()> {
     session.flush().await?;
     println!("{}", args.item_id);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duration_parses_minutes_and_hm_forms() {
+        assert_eq!(parse_duration("90").unwrap(), 90);
+        assert_eq!(parse_duration("1h30m").unwrap(), 90);
+        assert_eq!(parse_duration("2h").unwrap(), 120);
+        assert_eq!(parse_duration("45m").unwrap(), 45);
+        assert_eq!(parse_duration(" 1h 5m ").unwrap(), 65);
+        assert_eq!(parse_duration("0h").unwrap(), 0);
+        for bad in ["", "h", "m", "1x", "30m1h", "1h30", "-5", "1.5h"] {
+            assert!(parse_duration(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn duration_formats_compactly() {
+        assert_eq!(format_duration(45), "45m");
+        assert_eq!(format_duration(120), "2h");
+        assert_eq!(format_duration(90), "1h30m");
+    }
 }

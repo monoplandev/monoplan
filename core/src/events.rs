@@ -56,6 +56,8 @@ pub enum AppEvent {
         /// Planned date (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`) or `None`.
         /// Floating wall-clock; consumers format without zone conversion.
         when: Option<String>,
+        /// Duration in whole minutes, or `None`.
+        duration: Option<u32>,
         open_index: Option<usize>,
     },
     /// Item removed from the doc (deleteBinned / emptyBin). Toggling
@@ -105,6 +107,13 @@ pub enum AppEvent {
     ItemWhenChanged {
         id: String,
         when: Option<String>,
+    },
+    /// Item's duration changed. The payload is the value in whole
+    /// minutes after the write — `None` when cleared (including the
+    /// clear that rides along with clearing `when`).
+    ItemDurationChanged {
+        id: String,
+        duration: Option<u32>,
     },
     /// Lifecycle changed (`spec/data-model.md`). Emitted whenever the
     /// workflow register, a reflection stamp, or the `binned_at` mask

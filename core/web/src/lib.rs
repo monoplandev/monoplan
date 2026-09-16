@@ -239,6 +239,15 @@ impl Doc {
             .map_err(js_err)
     }
 
+    /// Set (`Some`, whole minutes in `1..=10080`) or clear (`None`) an
+    /// item's duration. Only meaningful beside a timed `when`.
+    #[wasm_bindgen(js_name = setItemDuration)]
+    pub fn set_item_duration(&self, item_id: &str, duration: Option<u32>) -> Result<(), JsError> {
+        self.inner
+            .set_item_duration(item_id, duration)
+            .map_err(js_err)
+    }
+
     #[wasm_bindgen(js_name = moveItem)]
     pub fn move_item(
         &self,
@@ -1561,6 +1570,16 @@ impl SyncEngine {
             .map_err(js_err)
     }
 
+    /// Set (`Some`, whole minutes in `1..=10080`) or clear (`None`) an
+    /// item's duration. Only meaningful beside a timed `when`.
+    #[wasm_bindgen(js_name = setItemDuration)]
+    pub fn set_item_duration(&self, item_id: &str, duration: Option<u32>) -> Result<(), JsError> {
+        self.inner
+            .doc()
+            .set_item_duration(item_id, duration)
+            .map_err(js_err)
+    }
+
     #[wasm_bindgen(js_name = moveItem)]
     pub fn move_item(
         &self,
@@ -1972,7 +1991,7 @@ impl From<CoreEvent> for EngineEvent {
 ///
 /// Variant → fields:
 /// - `fullResync` — no fields; rematerialize current state once
-/// - `itemAdded` — id, listId, text, notes, createdAt, state, lifecycleAt, startedAt?, doneAt?, binnedAt?, deadline?, when?, openIndex?
+/// - `itemAdded` — id, listId, text, notes, createdAt, state, lifecycleAt, startedAt?, doneAt?, binnedAt?, deadline?, when?, duration?, openIndex?
 /// - `itemRemoved` — id
 /// - `itemMoved` — id, openIndex?
 /// - `itemTextChanged` — id, text
@@ -1980,6 +1999,7 @@ impl From<CoreEvent> for EngineEvent {
 /// - `itemNotesDelta` — id, delta (JSON array of `{retain}` / `{insert}` / `{delete}`, UTF-16 units; only for items with a `subscribeNotes` subscription)
 /// - `itemDeadlineChanged` — id, deadline? (undefined = no deadline)
 /// - `itemWhenChanged` — id, when? (undefined = unset; `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`)
+/// - `itemDurationChanged` — id, duration? (undefined = unset; whole minutes)
 /// - `itemLifecycleChanged` — id, state, lifecycleAt, startedAt?, doneAt?, binnedAt?, openIndex?
 /// - `itemListChanged` — id, listId, openIndex?
 /// - `listAdded` — id, name, createdAt, archivedAt?, index
@@ -2023,6 +2043,9 @@ pub struct AppEventJs {
     deadline: Option<String>,
     /// Planned date (`itemAdded` / `itemWhenChanged`); `None` means unset.
     when: Option<String>,
+    /// Duration in whole minutes (`itemAdded` / `itemDurationChanged`);
+    /// `None` means unset.
+    duration: Option<u32>,
     created_at: Option<i64>,
     /// Reflection stamp: last entry into Done, if any.
     done_at: Option<i64>,
@@ -2136,6 +2159,10 @@ impl AppEventJs {
     pub fn when(&self) -> Option<String> {
         self.when.clone()
     }
+    #[wasm_bindgen(getter, js_name = duration)]
+    pub fn duration(&self) -> Option<u32> {
+        self.duration
+    }
 }
 
 impl From<CoreAppEvent> for AppEventJs {
@@ -2155,6 +2182,7 @@ impl From<CoreAppEvent> for AppEventJs {
             started_at: None,
             deadline: None,
             when: None,
+            duration: None,
             created_at: None,
             done_at: None,
             binned_at: None,
@@ -2186,6 +2214,7 @@ impl From<CoreAppEvent> for AppEventJs {
                 binned_at,
                 deadline,
                 when,
+                duration,
                 open_index,
             } => AppEventJs {
                 kind: "itemAdded",
@@ -2201,6 +2230,7 @@ impl From<CoreAppEvent> for AppEventJs {
                 binned_at,
                 deadline,
                 when,
+                duration,
                 open_index,
                 ..blank
             },
@@ -2243,6 +2273,12 @@ impl From<CoreAppEvent> for AppEventJs {
                 kind: "itemWhenChanged",
                 id,
                 when,
+                ..blank
+            },
+            CoreAppEvent::ItemDurationChanged { id, duration } => AppEventJs {
+                kind: "itemDurationChanged",
+                id,
+                duration,
                 ..blank
             },
             CoreAppEvent::ItemLifecycleChanged {
@@ -2423,6 +2459,9 @@ fn item_to_json(it: &monoplan_core::ItemView) -> String {
     if let Some(w) = &it.when {
         s.push_str(",\"when\":");
         s.push_str(&json_string(w));
+    }
+    if let Some(n) = it.duration {
+        s.push_str(&format!(",\"duration\":{n}"));
     }
     s.push('}');
     s

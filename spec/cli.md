@@ -19,7 +19,7 @@ Single binary `monoplan`. Subcommands:
 
 ### Items
 - `monoplan add <text> [--list <list>]` — `<text>` of `-` reads from stdin; one item per non-blank line. New items are created in **Backlog** (the workflow register is omitted).
-- `monoplan ls [--list <list>]` — rows carry a trailing ` @<when>` and ` !<deadline>` when set; `--json` adds `when` / `deadline` fields (omitted when unset)
+- `monoplan ls [--list <list>]` — rows carry a trailing ` @<when>` (with `+<len>` glued on when a timed `when` has a duration, e.g. `@2026-09-12T14:00+1h30m`) and ` !<deadline>` when set; `--json` adds `when` / `duration` (minutes) / `deadline` fields (omitted when unset)
 - `monoplan backlog <item_id>` — workflow → Backlog
 - `monoplan todo <item_id>` — workflow → Todo
 - `monoplan start <item_id>` — workflow → In Progress (stamps `started_at` on first entry)
@@ -29,9 +29,10 @@ Single binary `monoplan`. Subcommands:
 - `monoplan restore <item_id>` — clear the bin mask only; reveals the preserved workflow state (Backlog / Todo / In Progress / Review / Done)
 - `monoplan mv <item_id> <list>`
 - `monoplan edit <item_id> <text>`
-- `monoplan when <item_id> <YYYY-MM-DD[THH:MM] | ->` — set (all-day or timed, floating) or clear (`-`) the planned date; validation is the core's (`spec/calendar-plan.md`)
+- `monoplan when <item_id> <YYYY-MM-DD[THH:MM] | ->` — set (all-day or timed, floating) or clear (`-`) the planned date; validation is the core's (`spec/calendar-plan.md`). Clearing also clears the duration.
+- `monoplan duration <item_id> <minutes | [Nh][Nm] | ->` — set (`90`, `1h30m`, `2h`, `45m`) or clear (`-`) the duration in whole minutes; range (`1..=10080`) is the core's. Only shown beside a timed `when`.
 - `monoplan deadline <item_id> <YYYY-MM-DD | ->` — set or clear the deadline
-- `monoplan agenda [--days N] [--today YYYY-MM-DD] [--json]` — Open dated items by day: Today first (always shown, with overdue deadlines and past planned dates folded in, oldest first), then each non-empty day up to `N` days out (default 14). Rows carry the same `@` / `!` tags as `ls` plus a trailing `(overdue)` / `(due today)` tone; a past `when` carries no tone. `--today` overrides the local date, for scripts and tests. `--json` emits `[{ day, today, rows: [{ id, text, list_id, state, when?, deadline?, placed_by, tone }] }]`.
+- `monoplan agenda [--days N] [--today YYYY-MM-DD] [--json]` — Open dated items by day: Today first (always shown, with overdue deadlines and past planned dates folded in, oldest first), then each non-empty day up to `N` days out (default 14). Rows carry the same `@` / `!` tags as `ls` plus a trailing `(overdue)` / `(due today)` tone; a past `when` carries no tone. `--today` overrides the local date, for scripts and tests. `--json` emits `[{ day, today, rows: [{ id, text, list_id, state, when?, duration?, deadline?, placed_by, tone }] }]`.
 
 Lifecycle is the atomic `lifecycle` workflow register (`[state, at]`, states Backlog | Todo | In Progress | Review | Done) masked by the orthogonal `binned_at` bin flag — see `spec/data-model.md` "Lifecycle". Each workflow command writes the register `[state, now]` (and clears any bin mask) in a single commit; re-applying the current resolved state is a no-op. `ls` boxes carry a one-character state mark (` ` backlog, `-` todo, `>` in progress, `?` review, `x` done, `~` binned).
 

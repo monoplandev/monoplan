@@ -8,14 +8,23 @@
 // The typed time picker (`TimePicker`) sits on a row above the input and
 // is always shown: a dim placeholder when the `when` has no time part
 // ("All day" against a set date, "Time" while there is no date for it to
-// be all of), and a ✕ that strips one. A time picked while no date is set
-// lands on today. The popover carries no time field of its own.
+// be all of), and a ✕ that strips one. The date input carries the same
+// inset ✕ while a `when` is set; it removes the whole value, time
+// included, as the popover's Remove does. A time picked while no date is
+// set lands on today. The popover carries no time field of its own.
+// After the arrow, a second picker reads the end time: the start plus the
+// stored `duration` (a length, not an end, so moving the start keeps it).
+// Typing an end writes the difference in minutes; an end at or before the
+// start on the clock means the next day. It renders only once a start
+// time exists, since without one there is nothing to be after.
 
 import { Popover } from "@kobalte/core/popover";
-import { createMemo } from "solid-js";
+import { createMemo, Show } from "solid-js";
 import { CalendarPicker } from "./DeadlineCalendarDialog.tsx";
 import {
   addDaysToStamp,
+  durationBetween,
+  endTimeOf,
   hourCycle,
   isCompleteTime,
   nowMs,
@@ -25,6 +34,7 @@ import {
   whenFromParts,
   whenTime,
 } from "./format.tsx";
+import arrowRightSvg from "./icons/arrow-right.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
 import clockSvg from "./icons/clock.svg?raw";
 import { useAppI18n } from "./i18n.tsx";
@@ -32,8 +42,11 @@ import { TimePicker } from "./TimePicker.tsx";
 
 export function WhenField(props: {
   when: () => string | null;
+  /** Stored duration in minutes, or null. */
+  duration: () => number | null;
   muted: () => boolean;
   onChange: (value: string | null) => void;
+  onDurationChange: (minutes: number | null) => void;
   open: () => boolean;
   setOpen: (v: boolean) => void;
 }) {
@@ -56,6 +69,22 @@ export function WhenField(props: {
     const w = props.when();
     const day = w ? whenDay(w) : todayStamp(nowMs());
     props.onChange(whenFromParts(day, t));
+  };
+
+  // The end field is derived: start + duration. Committing an end stores
+  // the length back; clearing it removes the duration.
+  const end = () => {
+    const start = time();
+    const d = props.duration();
+    return start && d ? endTimeOf(start, d) : null;
+  };
+  const onEndChange = (t: { hour: number; minute: number } | null) => {
+    const start = time();
+    if (!t || !start) {
+      props.onDurationChange(null);
+      return;
+    }
+    props.onDurationChange(durationBetween(start, t));
   };
 
   // The input reads the day only ("Wed 23 Sept", the year once it isn't
@@ -96,6 +125,24 @@ export function WhenField(props: {
           placeholder={() => (props.when() ? m().when.allDay : m().when.time)}
           clearLabel={m().when.clearTime}
         />
+        {/* Arrow to the end field; both only once a start time is set. */}
+        <Show when={time()}>
+          <span
+            class="task-dialog-time-arrow"
+            aria-hidden="true"
+            innerHTML={arrowRightSvg}
+          />
+          <TimePicker
+            class="task-dialog-time-input task-dialog-end-input"
+            value={end}
+            onChange={onEndChange}
+            cycle={() => hourCycle(locale())}
+            locale={locale}
+            label={m().when.end}
+            placeholder={() => m().when.end}
+            clearLabel={m().when.clearEnd}
+          />
+        </Show>
       </div>
       <div class="task-dialog-dates-row">
         <Popover
@@ -136,6 +183,22 @@ export function WhenField(props: {
                 }
               }}
             />
+            {/* Same inset ✕ as the time field. mousedown is cancelled so
+                the click never moves focus off the input. */}
+            <Show when={props.when()}>
+              <button
+                type="button"
+                class="icon-button task-dialog-when-clear"
+                aria-label={m().when.remove}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  props.onChange(null);
+                  props.setOpen(false);
+                }}
+              >
+                ✕
+              </button>
+            </Show>
           </Popover.Anchor>
           <Popover.Portal>
             <Popover.Content

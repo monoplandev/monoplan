@@ -58,6 +58,9 @@ export interface ItemView {
    *  `YYYY-MM-DDTHH:MM` (timed), floating (`spec/calendar-plan.md`).
    *  Same never-`new Date()` rule as `deadline`. Absent means unset. */
   when?: string;
+  /** Optional duration in whole minutes. Only meaningful beside a timed
+   *  `when`; views ignore it otherwise. Absent means unset. */
+  duration?: number;
   createdAt: number;
   /** Reflection stamp: first entry into In Progress, if any. */
   startedAt?: number;
@@ -260,6 +263,9 @@ export interface DocApp {
    *  item's planned date. Floating; malformed values are rejected by the
    *  core. */
   setItemWhen(id: string, when: string | null): void;
+  /** Set (whole minutes, 1..=10080) or clear (`null`) an item's duration.
+   *  Clearing `when` clears it in the core as well. */
+  setItemDuration(id: string, minutes: number | null): void;
   /** Done toggle: `true` is the Done transition; `false` is un-done — a
    *  plain write to Backlog, applied only to currently-Done items. */
   setDone(id: string, done: boolean): void;
@@ -526,6 +532,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
           lifecycleAt: Number(ev.lifecycleAt ?? ev.createdAt ?? 0),
           deadline: ev.deadline ?? undefined,
           when: ev.when ?? undefined,
+          duration: ev.duration != null ? Number(ev.duration) : undefined,
           createdAt: Number(ev.createdAt ?? 0),
           startedAt: ev.startedAt != null ? Number(ev.startedAt) : undefined,
           doneAt: ev.doneAt != null ? Number(ev.doneAt) : undefined,
@@ -643,6 +650,17 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       case "itemWhenChanged": {
         if (state.itemsById[ev.id]) {
           setState("itemsById", ev.id, "when", ev.when ?? undefined);
+        }
+        break;
+      }
+      case "itemDurationChanged": {
+        if (state.itemsById[ev.id]) {
+          setState(
+            "itemsById",
+            ev.id,
+            "duration",
+            ev.duration != null ? Number(ev.duration) : undefined,
+          );
         }
         break;
       }
@@ -937,6 +955,9 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     },
     setItemWhen(id, when) {
       mutate(() => engine.setItemWhen(id, when ?? undefined));
+    },
+    setItemDuration(id, minutes) {
+      mutate(() => engine.setItemDuration(id, minutes ?? undefined));
     },
     setDone(id, done) {
       mutate(() => engine.setItemDone(id, done));

@@ -73,9 +73,9 @@ Fixed     = DateTime "[" IanaZone "]"           ; RFC 9557, e.g. 2026-07-13T14:0
   `00..=59`. Seconds are never stored. Anything else, including a bracketed
   suffix, is rejected with `Invalid`. Input is trimmed before validation, as
   `parse_deadline` does; the stored value is the normalised form.
-- **All-day** ≡ 10-character value. There is no default time and no end time.
-  On the day, an all-day `when` is owed all day and sorts ahead of every timed
-  row.
+- **All-day** ≡ 10-character value. There is no default time. On the day,
+  an all-day `when` is owed all day and sorts ahead of every timed row.
+- **End time** is not stored; see "Field: `duration`" below.
 - **Sort key** is the raw string. `2026-07-13` < `2026-07-13T09:00` <
   `2026-07-13T14:00`, so untimed rows lead their day with no special casing.
 - **Day key** is the first ten characters, shared with `deadline`. Every
@@ -91,6 +91,39 @@ Fixed     = DateTime "[" IanaZone "]"           ; RFC 9557, e.g. 2026-07-13T14:0
   IANA name rather than an offset, because an offset pinned today is wrong for
   a future date after the next DST change. Old clients treat an unparseable
   value as absent, matching the `DefaultView` rule in `board.md`.
+
+## Field: `duration` (added 2026-09-16)
+
+Item register, integer minutes, optional. `1..=10080` (one week).
+
+- **Why a length and not an end.** The tearing argument that put date and
+  time in one register applies again. If device A moves the start while
+  device B sets an absolute end, the item can end before it starts and
+  something has to repair it. A duration is invariant under moving the
+  start, so concurrent edits merge into a sensible item with no repair rule.
+  It is also what every calendar preserves when a start is dragged, and
+  overnight spans need no disambiguation: 23:00 for 120 minutes ends at
+  01:00 next day. iCalendar allows `DURATION` in place of `DTEND`, so the
+  export mapping is unchanged.
+- **Only meaningful beside a timed `when`.** The core never cross-checks
+  the two registers (a check would reintroduce invalid states under
+  concurrent edit); views ignore a duration beside an all-day or absent
+  `when`. Clearing `when` deletes `duration` in the same commit; timed →
+  all-day keeps it so re-adding a time restores the end.
+- **Agenda placement is unchanged.** Day granularity on the start; an
+  overnight span appears on its start day only.
+- **Multi-day all-day spans** (a Tuesday-to-Thursday conference) are not
+  expressed. Minutes are the wrong unit for that; revisit if it comes up.
+- **UI shows an end time, stores a length.** The task dialog's time row is
+  start, arrow, end. The end field reads start + duration and renders only
+  once a start time exists. Committing an end writes the difference in
+  minutes; an end at or before the start on the clock means the next day.
+  Moving the start leaves the end shifting along with it.
+- **Mutation** `set_item_duration(item_id, Option<u32>)`, event
+  `ItemDurationChanged { id, duration }`, `ItemAdded.duration`, export
+  `duration` (skipped when unset), wasm `setItemDuration`, CLI
+  `monoplan duration <id> <minutes | 1h30m | ->` and a `+<len>` suffix on
+  the `@when` tag.
 
 ## Mutation and events
 
@@ -251,7 +284,8 @@ here.
   waits.
 - **Export**, per the mapping above.
 - **CalDAV carve-out.** Separate conversation.
-- **Week view, durations, end times, hour grid.** Not planned.
+- **Week view, hour grid.** Not planned. (A `duration` register landed
+  2026-09-16 without either; see "Field: `duration`".)
 
 ## Testing
 

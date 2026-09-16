@@ -76,6 +76,8 @@ enum Cmd {
     Edit(items::EditArgs),
     /// Set (YYYY-MM-DD or YYYY-MM-DDTHH:MM) or clear (-) an item's planned date.
     When(items::DateArg),
+    /// Set (minutes or 1h30m) or clear (-) an item's duration; shown beside a timed planned date.
+    Duration(items::DateArg),
     /// Set (YYYY-MM-DD) or clear (-) an item's deadline.
     Deadline(items::DateArg),
     /// Open items by day: Today (with overdue and past-dated folded in), then the coming days.
@@ -115,6 +117,7 @@ impl Cli {
             Cmd::Mv(a) => items::mv(a, sync).await,
             Cmd::Edit(a) => items::edit(a, sync).await,
             Cmd::When(a) => items::when(a, sync).await,
+            Cmd::Duration(a) => items::duration(a, sync).await,
             Cmd::Deadline(a) => items::deadline(a, sync).await,
             Cmd::Agenda(a) => agenda::run(a, sync).await,
             Cmd::Focus(a) => focus::run(a, sync).await,

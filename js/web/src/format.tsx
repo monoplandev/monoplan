@@ -254,6 +254,25 @@ export function isEmptyTime(t: TimeParts): boolean {
   return t.hour == null && t.minute == null;
 }
 
+/** Minutes in a day, the wrap for end-time arithmetic. */
+const DAY_MINUTES = 24 * 60;
+
+/** Wall-clock end of a timed `when` that runs for `minutes`: the start
+ *  plus the length, wrapped past midnight. A span longer than a day still
+ *  reads as a clock time; the day it lands on is not shown. */
+export function endTimeOf(start: Required<TimeParts>, minutes: number): Required<TimeParts> {
+  const total = (((start.hour * 60 + start.minute + minutes) % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
+  return { hour: Math.floor(total / 60), minute: total % 60 };
+}
+
+/** Length in minutes from a start to an end typed as a clock time. An end
+ *  at or before the start on the clock means the next day, so 23:00 to
+ *  01:00 is two hours and 09:00 to 09:00 is a full day. */
+export function durationBetween(start: Required<TimeParts>, end: Required<TimeParts>): number {
+  const diff = end.hour * 60 + end.minute - (start.hour * 60 + start.minute);
+  return diff > 0 ? diff : diff + DAY_MINUTES;
+}
+
 /** Build a `when` from a day stamp and an optional complete time. A
  *  partial or null time yields the all-day form. */
 export function whenFromParts(day: string, time: TimeParts | null | undefined): string {
