@@ -85,3 +85,4 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - consider the problem of spaced repetition - target without explicit 'when' - i.e. how long since the last time?
 - Consider blocked items..?
 - bug: mark multiple items as done then mark one of those as not done and list position changes!
+- fullscreen-ing an item to hyperfocus
