@@ -1,8 +1,5 @@
 # Roadmap
-- another one - we probably want to remove 'done' items positions in the main lists! - is this not done?
-- bug: mark multiple items as done then mark one of those as not done and list position changes!
 - onAuthFailed → logout() → dekVault.clear() - a little bit blunt and not quite in local-first spirit, wipe-dek-to-anonymous the wrong response
-- Themes
 
 ## Sync & persistence
 - Report catch-up volume in `HelloAck` so clients can show progress and we can observe snapshot-vs-tail sync weight.
@@ -56,13 +53,6 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 ## CI
 - sqlite migrations
 
-## Other names?
-picoplan.app
-monofolio.app
-contraplane.app
-aeroplan.app
-dayplane.app
-
 ## Maybe/later
 - Encoding habits?
 - vi keys (as an option)
@@ -76,7 +66,6 @@ dayplane.app
 - Gaming controls?
 - Location based tasks
 - take checkbox off kanban board - show on hover or show below card?: I tried this and there are heavy tradeoffs with every strategy i tried (hover top left & right corners), above or text move aside
-- Remove "Notes" placeholder and have a button (+ or badge?) instead
 - Known bug - checking and unchecking contiguous tasks allowing them to linger causes confusion
 - Themes + change theme palette
 - Location based tasks?
@@ -92,3 +81,7 @@ dayplane.app
 - Icons for lifecycle statuses
 - dnd week view
 - Conduct bug hunt: fine-grained non-realtime issues (text not updating on same device in different representations and cross-device)
+- In the done section, show what's a weekend vs what's a week, preferably use days of the week
+- consider the problem of spaced repetition - target without explicit 'when' - i.e. how long since the last time?
+- Consider blocked items..?
+- bug: mark multiple items as done then mark one of those as not done and list position changes!
