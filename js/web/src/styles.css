@@ -2496,9 +2496,40 @@ input.task-check:hover {
   height: 12px;
 }
 
+/* Status group in the header: the done checkbox and the lifecycle
+   trigger sit inside one padded, hover-highlighted box so they read as
+   a single control. The checkbox can't nest inside the trigger button
+   (interactive content in a button is invalid, and the trigger would
+   swallow its clicks), so the wrapper carries the padding and hover
+   background instead and the trigger is bare text. The highlight only
+   applies while the trigger is present: the binned dialog shows the
+   checkbox alone, and a lone hovered box would look like a button. */
+.task-dialog-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  /* Cancel the left padding so the checkbox stays flush with the title
+     below; the hover box hangs into the gutter instead. */
+  margin-left: -6px;
+  border-radius: 6px;
+  min-width: 0;
+}
+
+.task-dialog-status:has(.task-dialog-lifecycle):hover,
+.task-dialog-status:has(.task-dialog-lifecycle[data-expanded]) {
+  background: var(--bg-hover);
+}
+
+.task-dialog-status:hover .task-dialog-lifecycle,
+.task-dialog-lifecycle[data-expanded] {
+  color: var(--text);
+}
+
 /* Lifecycle status trigger in the header, right of the checkbox: not a
-   pill. Plain muted text, no caret, no background at rest, a hover/open
-   background so it reads as clickable; opens the workflow-state menu. */
+   pill. Plain muted text, no caret, no background of its own (the
+   .task-dialog-status wrapper paints the hover); opens the
+   workflow-state menu. */
 .task-dialog-lifecycle {
   appearance: none;
   -webkit-appearance: none;
@@ -2506,9 +2537,9 @@ input.task-check:hover {
   align-items: center;
   width: fit-content;
   margin: 0;
-  padding: 2px 6px;
+  padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 4px;
   background: none;
   font: inherit;
   font-size: 14px;
@@ -2516,12 +2547,6 @@ input.task-check:hover {
   color: var(--text-muted);
   white-space: nowrap;
   cursor: pointer;
-}
-
-.task-dialog-lifecycle:hover,
-.task-dialog-lifecycle[data-expanded] {
-  background: var(--bg-hover);
-  color: var(--text);
 }
 
 .task-dialog-lifecycle:focus-visible {
@@ -2651,19 +2676,21 @@ input.task-check:hover {
 .task-dialog-badges .badge {
   font-size: 14px;
   padding: 4px;
+  height: 28px;
+  box-sizing: border-box;
 }
 
-/* Narrow shells (the side pane, the mobile page): a two-column grid, so
-   each labelled badge takes half the row: the list picker and deadline
-   trigger on the first row, the pin toggle (when shown) on the second.
-   The pickers drop their fit-content width and the list picker's 10em
-   cap, the deadline trigger and the pill inside it stretch, and the sort
-   carets move to the far edge, Select-style. The pin toggle is a glyph,
-   not a label, so it keeps its natural pill at the start of its cell. */
+/* Narrow shells (the side pane, the mobile page): a single-row grid. The
+   two labelled badges (list picker, deadline trigger) split the width
+   evenly and the pin toggle (when shown) takes a natural-width column at
+   the end. The pickers drop their fit-content width and the list picker's
+   10em cap, the deadline trigger and the pill inside it stretch, and the
+   sort carets move to the far edge, Select-style. The pin toggle is a
+   glyph, not a label, so it keeps its natural pill. */
 .task-panel .task-dialog-badges,
 .task-page .task-dialog-badges {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr auto;
 }
 
 .task-panel .task-dialog-badges .badge,
@@ -2686,7 +2713,6 @@ input.task-check:hover {
 .task-panel .task-dialog-badges .task-dialog-pin-toggle,
 .task-page .task-dialog-badges .task-dialog-pin-toggle {
   width: auto;
-  justify-self: start;
 }
 
 .task-dialog-badges .badge svg,
@@ -3256,9 +3282,10 @@ input.task-check:hover {
     padding-bottom: var(--mobile-bar-clearance);
   }
 
-  /* Thumb-sized badges: extra padding over the desktop 4px. */
+  /* Wider badges: extra side padding over the desktop 4px (height is
+     pinned at 28px by the base dialog badge rule). */
   .task-page .task-dialog-badges .badge {
-    padding: 6px 10px;
+    padding: 4px 10px;
   }
 
   .task-page .task-dialog-badges {

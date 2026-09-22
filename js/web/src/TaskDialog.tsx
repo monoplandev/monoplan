@@ -817,31 +817,35 @@ export function TaskDialog(props: {
     <Show when={isNew()}>
       <header class="task-dialog-header">
         <div class="task-dialog-header-meta">
-          {/* Checked = this capture is logged as already-done. Pre-set
-              by the Done lane "+" and the Done view's "Log" button;
-              flip it off to file the item as a normal open task. */}
-          <input
-            type="checkbox"
-            class="task-check"
-            checked={newItemTarget()?.done ?? false}
-            aria-label={
-              newItemTarget()?.done
-                ? m().workspace.markNotDone
-                : m().workspace.markDone
-            }
-            onChange={(e) => setNewItemDone(e.currentTarget.checked)}
-          />
-          {/* Lifecycle badge beside the checkbox, mirroring the edit
-              dialog's header: names the state the capture will be
-              filed in, and opens the menu to change it. Picks land in
-              the new-item buffer and are written after commit. */}
-          <LifecycleBadge
-            value={() => {
-              const nw = newItemTarget();
-              return nw?.done ? "done" : (nw?.state ?? "backlog");
-            }}
-            onChange={setNewItemState}
-          />
+          {/* Checkbox + lifecycle badge share one hover group so they
+              read as a single status control (see .task-dialog-status). */}
+          <div class="task-dialog-status">
+            {/* Checked = this capture is logged as already-done. Pre-set
+                by the Done lane "+" and the Done view's "Log" button;
+                flip it off to file the item as a normal open task. */}
+            <input
+              type="checkbox"
+              class="task-check"
+              checked={newItemTarget()?.done ?? false}
+              aria-label={
+                newItemTarget()?.done
+                  ? m().workspace.markNotDone
+                  : m().workspace.markDone
+              }
+              onChange={(e) => setNewItemDone(e.currentTarget.checked)}
+            />
+            {/* Lifecycle badge beside the checkbox, mirroring the edit
+                dialog's header: names the state the capture will be
+                filed in, and opens the menu to change it. Picks land in
+                the new-item buffer and are written after commit. */}
+            <LifecycleBadge
+              value={() => {
+                const nw = newItemTarget();
+                return nw?.done ? "done" : (nw?.state ?? "backlog");
+              }}
+              onChange={setNewItemState}
+            />
+          </div>
         </div>
         <div class="task-dialog-header-actions">{shellButtons()}</div>
       </header>
@@ -937,25 +941,31 @@ export function TaskDialog(props: {
         <>
           <header class="task-dialog-header">
             <div class="task-dialog-header-meta">
-              <input
-                type="checkbox"
-                class="task-check"
-                checked={isDone(it())}
-                onChange={(e) =>
-                  props.app.setDone(it().id, e.currentTarget.checked)
-                }
-              />
-              {/* Lifecycle status badge beside the checkbox; hidden
-                  while binned (the bin mask overrides the workflow
-                  state; Restore is the way out). The created /
-                  completed timeline lives in the activity section
-                  under the notes. */}
-              <Show when={!isBinned(it())}>
-                <LifecycleBadge
-                  value={() => it().state}
-                  onChange={(state) => props.app.setLifecycle(it().id, state)}
+              {/* Checkbox + lifecycle badge share one hover group so
+                  they read as a single status control. */}
+              <div class="task-dialog-status">
+                <input
+                  type="checkbox"
+                  class="task-check"
+                  checked={isDone(it())}
+                  onChange={(e) =>
+                    props.app.setDone(it().id, e.currentTarget.checked)
+                  }
                 />
-              </Show>
+                {/* Lifecycle status badge beside the checkbox; hidden
+                    while binned (the bin mask overrides the workflow
+                    state; Restore is the way out). The created /
+                    completed timeline lives in the activity section
+                    under the notes. */}
+                <Show when={!isBinned(it())}>
+                  <LifecycleBadge
+                    value={() => it().state}
+                    onChange={(state) =>
+                      props.app.setLifecycle(it().id, state)
+                    }
+                  />
+                </Show>
+              </div>
             </div>
             <div class="task-dialog-header-actions">
               <DropdownMenu>
