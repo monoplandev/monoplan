@@ -8,9 +8,9 @@
 // The typed time picker (`TimePicker`) sits on a row above the input and
 // is always shown: a dim placeholder when the `when` has no time part
 // ("All day" against a set date, "Time" while there is no date for it to
-// be all of), and a ✕ that strips one. The date input carries the same
-// inset ✕ while a `when` is set; it removes the whole value, time
-// included, as the popover's Remove does. A time picked while no date is
+// be all of). A single ✕ after the end field strips the time part (back
+// to all-day); the date input has an inset ✕ while a `when` is set, which
+// removes the whole value, time included, as the popover's Remove does. A time picked while no date is
 // set lands on today. The popover carries no time field of its own.
 // After the arrow, a second picker reads the end time: the start plus the
 // stored `duration` (a length, not an end, so moving the start keeps it).
@@ -124,7 +124,6 @@ export function WhenField(props: {
           locale={locale}
           label={m().when.time}
           placeholder={() => (props.when() ? m().when.allDay : m().when.time)}
-          clearLabel={m().when.clearTime}
         />
         {/* End field, shown once a start time is set. The arrow glyph is
             inset in its left edge, like the clock in the start field. */}
@@ -138,13 +137,26 @@ export function WhenField(props: {
             locale={locale}
             label={m().when.end}
             placeholder={() => m().when.end}
-            clearLabel={m().when.clearEnd}
             after={time}
             optionHint={(t) => {
               const start = time();
               return start ? formatDurationShort(durationBetween(start, t)) : null;
             }}
           />
+          {/* One ✕ after both time fields: strips the time part, making
+              the item all-day (the core keeps the duration, so re-adding
+              a time restores the end). mousedown is cancelled so the
+              click never blurs a focused picker under it. */}
+          <button
+            type="button"
+            class="icon-button task-dialog-time-clear"
+            aria-label={m().when.clearTime}
+            title={m().when.clearTime}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onTimeChange(null)}
+          >
+            ✕
+          </button>
         </Show>
       </div>
       <div class="task-dialog-dates-row">
@@ -186,8 +198,8 @@ export function WhenField(props: {
                 }
               }}
             />
-            {/* Same inset ✕ as the time field. mousedown is cancelled so
-                the click never moves focus off the input. */}
+            {/* Inset ✕ at the input's right edge. mousedown is cancelled
+                so the click never moves focus off the input. */}
             <Show when={props.when()}>
               <button
                 type="button"

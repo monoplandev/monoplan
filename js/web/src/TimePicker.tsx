@@ -8,7 +8,8 @@
 // time under the cursor and the input's text selected, so typing replaces
 // it; the typed text narrows the list to what it names (`timeSuggest.ts`
 // has the grammar). With no time stored the input shows the host's dim
-// placeholder, and a ✕ after the input clears a stored time back to it. Arrow keys move the cursor and put the row's label
+// placeholder; there is no clear control here (the date input's ✕ drops
+// the whole value). Arrow keys move the cursor and put the row's label
 // in the input (selected again, still without narrowing the list: the
 // typed query and the shown text are separate). Enter commits the row
 // under the cursor, clicking a row commits it, and both leave focus in
@@ -50,8 +51,6 @@ export function TimePicker(props: {
   label: string;
   /** Placeholder shown for the null value. */
   placeholder: () => string;
-  /** Accessible name of the ✕ that clears the time. */
-  clearLabel: string;
   /** Raw SVG for a decorative glyph inset at the input's left edge; the
    *  input pads past it. */
   icon?: string;
@@ -320,19 +319,6 @@ export function TimePicker(props: {
           }}
           onKeyDown={onKeyDown}
         />
-        {/* mousedown is cancelled so the click never blurs the input (which
-            would revert the panel under it) and focus stays put. */}
-        <Show when={props.value()}>
-          <button
-            type="button"
-            class="icon-button time-picker-clear"
-            aria-label={props.clearLabel}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => commit(null)}
-          >
-            ✕
-          </button>
-        </Show>
       </span>
       <Show when={panelVisible()}>
         <Portal>

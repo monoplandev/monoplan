@@ -238,6 +238,11 @@ export function whenDay(when: string): string {
 }
 
 /** The time part of a timed `when`, or null for an all-day one. */
+/** Length the core writes beside a timed `when` that lands on an item
+ *  with no duration (`DEFAULT_DURATION_MINUTES` in core `doc.rs`); the
+ *  new-item buffer mirrors it so the end field shows before commit. */
+export const DEFAULT_DURATION_MINUTES = 60;
+
 export function whenTime(when: string): TimeParts | null {
   const m = /^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})$/.exec(when);
   if (!m) return null;

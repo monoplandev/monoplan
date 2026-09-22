@@ -119,15 +119,28 @@ Item register, integer minutes, optional. `1..=10080` (one week).
   concurrent edit); views ignore a duration beside an all-day or absent
   `when`. Clearing `when` deletes `duration` in the same commit; timed →
   all-day keeps it so re-adding a time restores the end.
+- **A start implies an end (added 2026-09-22).** `set_item_when` with a
+  timed value on an item that has no duration writes the default of 60
+  minutes (`DEFAULT_DURATION_MINUTES`) in the same commit and reports it
+  with `ItemDurationChanged`. An existing length is never touched, so
+  moving the start keeps the end moving with it. This is a default at
+  write time, not a check: the registers stay independent under
+  concurrent edit. Import writes the register directly and does not
+  default. The task dialog's new-item buffer mirrors the rule so the end
+  field appears as soon as a start time is typed.
 - **Agenda placement is unchanged.** Day granularity on the start; an
   overnight span appears on its start day only.
 - **Multi-day all-day spans** (a Tuesday-to-Thursday conference) are not
   expressed. Minutes are the wrong unit for that; revisit if it comes up.
 - **UI shows an end time, stores a length.** The task dialog's time row is
-  start, arrow, end. The end field reads start + duration and renders only
-  once a start time exists. Committing an end writes the difference in
-  minutes; an end at or before the start on the clock means the next day.
-  Moving the start leaves the end shifting along with it.
+  start and end, the arrow glyph inset in the end field. The end field
+  reads start + duration and renders only once a start time exists, and
+  then always has a value via the default above. Neither time field has a
+  clear control of its own; one ✕ after the end field strips the time
+  (back to all-day), and the date input's ✕ removes the whole value.
+  Committing an end writes the difference in minutes; an end at or before
+  the start on the clock means the next day. Moving the start leaves the
+  end shifting along with it.
 - **Mutation** `set_item_duration(item_id, Option<u32>)`, event
   `ItemDurationChanged { id, duration }`, `ItemAdded.duration`, export
   `duration` (skipped when unset), wasm `setItemDuration`, CLI
@@ -139,7 +152,8 @@ Item register, integer minutes, optional. `1..=10080` (one week).
 - `set_item_when(item_id, when: Option<&str>)`: `Some(value)` validates per
   the grammar and writes the `when` register with the normalised value;
   `None` deletes the key. One commit. Rejects malformed values with
-  `Invalid`. Mirrors `set_item_deadline` exactly.
+  `Invalid`. Mirrors `set_item_deadline`, plus the `duration` coupling
+  above (default on a timed set, clear on a clear).
 - `AppEvent::ItemWhenChanged { id, when: Option<String> }`, the raw value
   after the write. `ItemAdded` gains a `when` field. The wasm event dispatch
   gains `itemWhenChanged` and `itemAdded.when`.

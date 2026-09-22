@@ -2746,9 +2746,20 @@ input.task-check:hover {
    texts line up. The input reads as plain text at the date input's size. */
 .task-dialog-time-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr auto;
   align-items: center;
   gap: 8px;
+  max-width: 18em;
+}
+
+/* The ✕ after both time fields (rendered only while a time is set):
+   small and muted like the date input's, but always visible since it
+   sits outside either field and has no hover region of its own. */
+.task-dialog-time-clear {
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  border-radius: 4px;
 }
 
 /* Each picker fills its half of the row; the start field alone sits in
@@ -2758,8 +2769,8 @@ input.task-check:hover {
   min-width: 0;
 }
 
-/* The input with its glyph inset at the left edge and its ✕ inset at the
-   right, both overlaid; the input pads past each. */
+/* The input with its glyph inset at the left edge, overlaid; the input
+   pads past it. */
 .time-picker-field {
   position: relative;
   display: inline-flex;
@@ -2787,7 +2798,7 @@ input.task-check:hover {
   width: 100%;
   min-width: 0;
   margin: 0;
-  padding: 2px 24px 2px 26px;
+  padding: 2px 8px 2px 26px;
   border: none;
   border-radius: 4px;
   background: transparent;
@@ -2815,31 +2826,6 @@ input.task-check:hover {
 .task-dialog-time-input:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: 2px;
-}
-
-/* The ✕ only renders while a time is set, and only shows while the field
-   is hovered or holds focus (the input, or the ✕ itself via Tab), so at
-   rest the row reads as text. Touch has no hover, so there it stays
-   visible whenever it renders. */
-.time-picker-clear {
-  position: absolute;
-  right: 3px;
-  width: 18px;
-  height: 18px;
-  font-size: 11px;
-  border-radius: 4px;
-  opacity: 0;
-}
-
-.time-picker-field:hover .time-picker-clear,
-.time-picker-field:focus-within .time-picker-clear {
-  opacity: 1;
-}
-
-@media (hover: none) {
-  .time-picker-clear {
-    opacity: 1;
-  }
 }
 
 /* The planned-date input: borderless, reads as a line of text in the band
@@ -2905,8 +2891,8 @@ input.task-check:hover {
   outline-offset: 2px;
 }
 
-/* Same reveal rule as `.time-picker-clear`: rendered only while a date
-   is set, visible on hover or focus within the field, always on touch. */
+/* The date input's ✕: rendered only while a date is set, visible on hover
+   or focus within the field, always on touch (no hover there). */
 .task-dialog-when-clear {
   position: absolute;
   right: 3px;
@@ -3290,7 +3276,7 @@ input.task-check:hover {
   }
 
   .task-page .task-dialog-time-input {
-    padding: 6px 28px 6px 30px;
+    padding: 6px 10px 6px 30px;
   }
 
   .task-page .time-picker-icon {

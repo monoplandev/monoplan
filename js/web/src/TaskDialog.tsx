@@ -31,7 +31,14 @@ import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import drawingPinSvg from "./icons/drawing-pin.svg?raw";
 import drawingPinFilledSvg from "./icons/drawing-pin-filled.svg?raw";
 import sidebarRightSvg from "./icons/sidebar-right.svg?raw";
-import { formatDateTime, formatDialogStamp, formatElapsed, nowMs } from "./format.tsx";
+import {
+  DEFAULT_DURATION_MINUTES,
+  formatDateTime,
+  formatDialogStamp,
+  formatElapsed,
+  nowMs,
+  whenTime,
+} from "./format.tsx";
 import { useAppI18n, laneLabel } from "./i18n.tsx";
 import {
   collapsedCaretOffset,
@@ -906,8 +913,12 @@ export function TaskDialog(props: {
               muted={() => newItemTarget()?.done ?? false}
               onChange={(value) => {
                 setNewWhen(value);
-                // Mirror the core: no date, no length.
+                // Mirror the core's `set_item_when`: no date, no length;
+                // a timed date on a buffer with no length takes the
+                // default hour, so the end field shows before commit.
                 if (!value) setNewDuration(null);
+                else if (whenTime(value) && newDuration() == null)
+                  setNewDuration(DEFAULT_DURATION_MINUTES);
               }}
               onDurationChange={setNewDuration}
               open={whenCalOpen}

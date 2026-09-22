@@ -118,6 +118,10 @@ const KEY_WHEN: &str = "when";
 const KEY_DURATION: &str = "duration";
 /// Upper bound on `duration`: one week of minutes.
 pub const MAX_DURATION_MINUTES: u32 = 7 * 24 * 60;
+/// Length written beside a timed `when` that lands on an item with no
+/// duration yet: a start implies an end, and an hour is the calendar
+/// default. See `set_item_when`.
+pub const DEFAULT_DURATION_MINUTES: u32 = 60;
 const KEY_NAME: &str = "name";
 /// Optional per-list display icon. Stored as the literal emoji grapheme
 /// the user picked (e.g. `"📥"`); absent/empty means "no icon, render the
@@ -1873,25 +1877,36 @@ impl Doc {
     /// value and writes the `when` register; `None` deletes the key. One
     /// Loro commit. Malformed values — seconds, offsets, a bracketed
     /// zone suffix — are rejected with `Invalid` and never touch the doc.
-    /// Mirrors `set_item_deadline`. Clearing the `when` also clears any
-    /// `duration` in the same commit: a length without a start is
-    /// meaningless, and leaving it would resurface on the next date set.
-    /// Going timed → all-day keeps it, so re-adding a time restores the
-    /// end.
+    /// Mirrors `set_item_deadline`. The `duration` register moves with
+    /// it in the same commit at both ends: a timed value landing on an
+    /// item with no duration writes `DEFAULT_DURATION_MINUTES` (a start
+    /// implies an end; an existing length is left alone), and clearing
+    /// the `when` clears any duration (a length without a start is
+    /// meaningless, and leaving it would resurface on the next date
+    /// set). Going timed → all-day keeps it, so re-adding a time
+    /// restores the end. Either duration write is reported by its own
+    /// `ItemDurationChanged` after the `ItemWhenChanged`.
     pub fn set_item_when(&self, item_id: &str, when: Option<&str>) -> Result<(), DocError> {
         let normalized = match when {
             Some(raw) => Some(parse_when(raw)?),
             None => None,
         };
         let map = self.find_item(item_id)?;
-        let mut duration_cleared = false;
+        // `Some(Some(n))`: duration written; `Some(None)`: cleared.
+        let mut duration_change: Option<Option<u32>> = None;
         match &normalized {
-            Some(value) => map.insert(KEY_WHEN, value.as_str())?,
+            Some(value) => {
+                map.insert(KEY_WHEN, value.as_str())?;
+                if when_is_timed(value) && read_duration(&map).is_none() {
+                    map.insert(KEY_DURATION, i64::from(DEFAULT_DURATION_MINUTES))?;
+                    duration_change = Some(Some(DEFAULT_DURATION_MINUTES));
+                }
+            }
             None => {
                 let _ = map.delete(KEY_WHEN);
                 if read_duration(&map).is_some() {
                     let _ = map.delete(KEY_DURATION);
-                    duration_cleared = true;
+                    duration_change = Some(None);
                 }
             }
         }
@@ -1900,10 +1915,10 @@ impl Doc {
             id: item_id.to_string(),
             when: normalized,
         });
-        if duration_cleared {
+        if let Some(duration) = duration_change {
             self.push_event(AppEvent::ItemDurationChanged {
                 id: item_id.to_string(),
-                duration: None,
+                duration,
             });
         }
         Ok(())
@@ -5182,6 +5197,12 @@ fn parse_deadline(raw: &str) -> Result<String, DocError> {
 /// through `parse_deadline`'s calendar check. Seconds, offsets, and the
 /// reserved RFC 9557 `[Zone]` suffix are rejected until fixed-instant
 /// support lands (`spec/calendar-plan.md`). Floating; no timezone.
+/// Whether a normalised `when` carries a time part (`YYYY-MM-DDTHH:MM`,
+/// 16 chars) rather than being all-day (10 chars).
+fn when_is_timed(normalized: &str) -> bool {
+    normalized.len() == 16
+}
+
 fn parse_when(raw: &str) -> Result<String, DocError> {
     let s = raw.trim();
     let invalid = || {
@@ -8530,18 +8551,27 @@ mod tests {
         let _ = doc.drain_events();
 
         // Clearing deletes the key; deadline is independent and untouched.
+        // The timed sets above defaulted a duration, so the clear drops
+        // that too and says so.
         doc.set_item_deadline(&id, Some("2026-10-31")).unwrap();
         let _ = doc.drain_events();
         doc.set_item_when(&id, None).unwrap();
         let view = doc.get_item(&id).unwrap();
         assert_eq!(view.when, None);
+        assert_eq!(view.duration, None);
         assert_eq!(view.deadline.as_deref(), Some("2026-10-31"));
         assert_eq!(
             doc.drain_events(),
-            vec![AppEvent::ItemWhenChanged {
-                id: id.clone(),
-                when: None,
-            }]
+            vec![
+                AppEvent::ItemWhenChanged {
+                    id: id.clone(),
+                    when: None,
+                },
+                AppEvent::ItemDurationChanged {
+                    id: id.clone(),
+                    duration: None,
+                },
+            ]
         );
     }
 
@@ -8609,6 +8639,58 @@ mod tests {
         map.insert(KEY_DURATION, 15i64).unwrap();
         doc.inner.commit();
         assert_eq!(doc.get_item(&id).unwrap().duration, Some(15));
+    }
+
+    #[test]
+    fn timed_when_defaults_duration_when_none_is_set() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "meeting").unwrap();
+        let _ = doc.drain_events();
+
+        // All-day: no time, so no default length.
+        doc.set_item_when(&id, Some("2026-07-13")).unwrap();
+        assert_eq!(doc.get_item(&id).unwrap().duration, None);
+        assert_eq!(
+            doc.drain_events(),
+            vec![AppEvent::ItemWhenChanged {
+                id: id.clone(),
+                when: Some("2026-07-13".into()),
+            }]
+        );
+
+        // Adding a time to an item with no length writes the default in
+        // the same commit and reports it.
+        doc.set_item_when(&id, Some("2026-07-13T14:00")).unwrap();
+        assert_eq!(
+            doc.get_item(&id).unwrap().duration,
+            Some(DEFAULT_DURATION_MINUTES)
+        );
+        assert_eq!(
+            doc.drain_events(),
+            vec![
+                AppEvent::ItemWhenChanged {
+                    id: id.clone(),
+                    when: Some("2026-07-13T14:00".into()),
+                },
+                AppEvent::ItemDurationChanged {
+                    id: id.clone(),
+                    duration: Some(DEFAULT_DURATION_MINUTES),
+                },
+            ]
+        );
+
+        // An existing length is left alone when the start moves.
+        doc.set_item_duration(&id, Some(90)).unwrap();
+        let _ = doc.drain_events();
+        doc.set_item_when(&id, Some("2026-07-14T09:00")).unwrap();
+        assert_eq!(doc.get_item(&id).unwrap().duration, Some(90));
+        assert_eq!(
+            doc.drain_events(),
+            vec![AppEvent::ItemWhenChanged {
+                id: id.clone(),
+                when: Some("2026-07-14T09:00".into()),
+            }]
+        );
     }
 
     #[test]

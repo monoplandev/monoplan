@@ -29,7 +29,7 @@ Single binary `monoplan`. Subcommands:
 - `monoplan restore <item_id>` — clear the bin mask only; reveals the preserved workflow state (Backlog / Todo / In Progress / Review / Done)
 - `monoplan mv <item_id> <list>`
 - `monoplan edit <item_id> <text>`
-- `monoplan when <item_id> <YYYY-MM-DD[THH:MM] | ->` — set (all-day or timed, floating) or clear (`-`) the planned date; validation is the core's (`spec/calendar-plan.md`). Clearing also clears the duration.
+- `monoplan when <item_id> <YYYY-MM-DD[THH:MM] | ->` — set (all-day or timed, floating) or clear (`-`) the planned date; validation is the core's (`spec/calendar-plan.md`). A timed value on an item with no duration defaults it to 60 minutes; clearing also clears the duration.
 - `monoplan duration <item_id> <minutes | [Nh][Nm] | ->` — set (`90`, `1h30m`, `2h`, `45m`) or clear (`-`) the duration in whole minutes; range (`1..=10080`) is the core's. Only shown beside a timed `when`.
 - `monoplan deadline <item_id> <YYYY-MM-DD | ->` — set or clear the deadline
 - `monoplan agenda [--days N] [--today YYYY-MM-DD] [--json]` — Open dated items by day: Today first (always shown, with overdue deadlines and past planned dates folded in, oldest first), then each non-empty day up to `N` days out (default 14). Rows carry the same `@` / `!` tags as `ls` plus a trailing `(overdue)` / `(due today)` tone; a past `when` carries no tone. `--today` overrides the local date, for scripts and tests. `--json` emits `[{ day, today, rows: [{ id, text, list_id, state, when?, duration?, deadline?, placed_by, tone }] }]`.
