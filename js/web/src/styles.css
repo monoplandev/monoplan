@@ -374,15 +374,12 @@ body {
   background: var(--bg-badge);
 }
 
-/* Fixed-height hosts (the side pane, the mobile page): let the notes
-   editor grow to fill the leftover height so the whole pane reads as
-   the note, not a short field with a blank tail. `flex-grow` only, no
-   shrink, so once the text outgrows the pane the surface scrolls as
-   before. The modal stays content-sized. */
+/* Fixed-height hosts (the side pane, the mobile page): the body grows to
+   fill the leftover height. `flex-grow` only, no shrink, so once the
+   content outgrows the pane the surface scrolls as before. The modal
+   stays content-sized. */
 .task-panel .task-dialog-body,
-.task-page .task-dialog-body,
-.task-panel .task-dialog-notes,
-.task-page .task-dialog-notes {
+.task-page .task-dialog-body {
   flex: 1 0 auto;
 }
 
@@ -2499,13 +2496,25 @@ input.task-check:hover {
   height: 12px;
 }
 
-/* Lifecycle status badge beside the list picker: same pill geometry and
-   hover/open lift as `.task-dialog-list`; opens the workflow-state menu. */
+/* Lifecycle status trigger in the header, right of the checkbox: not a
+   pill. Plain muted text, no caret, no background at rest, a hover/open
+   background so it reads as clickable; opens the workflow-state menu. */
 .task-dialog-lifecycle {
   appearance: none;
   -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
   width: fit-content;
-  font-family: inherit;
+  margin: 0;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.3em;
+  color: var(--text-muted);
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -2513,6 +2522,11 @@ input.task-check:hover {
 .task-dialog-lifecycle[data-expanded] {
   background: var(--bg-hover);
   color: var(--text);
+}
+
+.task-dialog-lifecycle:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 1px;
 }
 
 .task-dialog-lifecycle-value {
@@ -2531,61 +2545,21 @@ input.task-check:hover {
   height: 14px;
 }
 
-/* Created / completed stamp: sits in the header, right of the checkbox. */
-.task-dialog-created {
-  flex-shrink: 0;
+/* Activity section under the notes: a faint heading over a log of plain
+   sentences (created; completed + how long it took). Read-only, so it
+   sits in the content column's own tone rather than a card. */
+.task-dialog-activity {
+  padding-top: 8px;
+  border-top: 0.5px solid var(--row-divider);
   font-size: 13px;
-  color: var(--text-faint);
 }
 
-/* On an existing item the stamp is a button opening the activity popover:
-   plain text at rest, lifting to the muted tone on hover / open so it
-   reads as clickable without becoming a pill. */
-.task-dialog-created-trigger {
-  appearance: none;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  border-radius: 4px;
-}
-
-.task-dialog-created-trigger:hover,
-.task-dialog-created-trigger[data-expanded] {
-  color: var(--text-muted);
-}
-
-.task-dialog-created-trigger:focus-visible {
-  outline: 2px solid var(--link);
-  outline-offset: 1px;
-}
-
-/* Activity popover under the stamp: the shared card look, above the task
-   dialog (z-index 100 / 101, as `.when-popover`). Holds a heading over a
-   log of plain sentences (created; completed + how long it took). */
-.activity-popover {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  min-width: 200px;
-  max-width: min(320px, 90vw);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-  outline: none;
-  z-index: 120;
-  font-size: 13px;
-  color: var(--text);
-}
-
-.activity-popover-heading {
+.task-dialog-activity-heading {
   margin: 0 0 6px;
   color: var(--text-faint);
 }
 
-.activity-popover-log {
+.task-dialog-activity-log {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -2660,8 +2634,8 @@ input.task-check:hover {
   cursor: pointer;
 }
 
-/* Badge row under the title: list picker, lifecycle, deadline trigger,
-   pin-to-Focus toggle. In the 780px modal they run inline at their
+/* Badge row under the title: list picker, deadline trigger, pin-to-Focus
+   toggle. In the 780px modal they run inline at their
    natural widths; the narrow shells below rearrange them. Owns the top
    gap the deadline trigger used to carry alone. */
 .task-dialog-badges {
@@ -2676,12 +2650,12 @@ input.task-check:hover {
    scale with them. */
 .task-dialog-badges .badge {
   font-size: 14px;
-  padding: 2px 8px;
+  padding: 4px;
 }
 
 /* Narrow shells (the side pane, the mobile page): a two-column grid, so
-   each labelled badge takes half the row and they fall into two rows of
-   two (or three, when the pin toggle is hidden on Done / Binned items).
+   each labelled badge takes half the row: the list picker and deadline
+   trigger on the first row, the pin toggle (when shown) on the second.
    The pickers drop their fit-content width and the list picker's 10em
    cap, the deadline trigger and the pill inside it stretch, and the sort
    carets move to the far edge, Select-style. The pin toggle is a glyph,
@@ -3275,14 +3249,14 @@ input.task-check:hover {
     padding-bottom: 0;
   }
 
-  /* The notes editor is the page's last child and grows to fill it, so
-     the clearance lives inside the editor: its surface runs under the
-     pills, and only the text keeps clear of them. */
-  .task-page .task-dialog-notes {
+  /* The activity section is the page's last child, so the scroll-end
+     clearance lives on it: it runs under the pills, and only the log
+     keeps clear of them. */
+  .task-page .task-dialog-activity {
     padding-bottom: var(--mobile-bar-clearance);
   }
 
-  /* Thumb-sized badges: extra padding over the desktop 2px 8px. */
+  /* Thumb-sized badges: extra padding over the desktop 4px. */
   .task-page .task-dialog-badges .badge {
     padding: 6px 10px;
   }

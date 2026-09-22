@@ -116,19 +116,11 @@ export type Messages = {
     hasNotes: string;
     markDone: string;
     markNotDone: string;
-    /** Task-dialog header stamp beside the checkbox: creation time. */
-    createdStamp: (when: string) => string;
-    /** Task-dialog header stamp once the item is done: completion time. */
-    completedStamp: (when: string) => string;
-    /** New-item dialog stamp beside the (unchecked) done checkbox. */
-    newItemStamp: string;
-    /** New-item dialog stamp when the done checkbox is ticked, i.e. the
-     *  capture will be filed as already completed. */
-    loggingDoneStamp: string;
-    /** Activity popover on the task-dialog header stamp: heading over a
-     *  log of plain sentences. The creation line reuses `createdStamp`;
+    /** Activity section under the task-dialog notes: heading over a
+     *  log of plain sentences. `createdStamp` is the creation line;
      *  the completion line (shown once done) carries the elapsed span
      *  since creation, e.g. "Completed yesterday 8:06 PM after 3 hours". */
+    createdStamp: (when: string) => string;
     activity: string;
     activityCompleted: (when: string, span: string) => string;
     duplicate: string;
@@ -459,9 +451,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       markDone: "Marcar como hecho",
       markNotDone: "Marcar como no hecho",
       createdStamp: (when) => `Creado ${when}`,
-      completedStamp: (when) => `Completado ${when}`,
-      newItemStamp: "Elemento nuevo",
-      loggingDoneStamp: "Registrando como hecho",
       activity: "Actividad",
       activityCompleted: (when, span) => `Completado ${when} tras ${span}`,
       duplicate: "Duplicar",
@@ -712,9 +701,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       markDone: "Mark as done",
       markNotDone: "Mark as not done",
       createdStamp: (when) => `Created ${when}`,
-      completedStamp: (when) => `Completed ${when}`,
-      newItemStamp: "New item",
-      loggingDoneStamp: "Logging as done",
       activity: "Activity",
       activityCompleted: (when, span) => `Completed ${when} after ${span}`,
       duplicate: "Duplicate",

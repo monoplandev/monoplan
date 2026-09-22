@@ -11,7 +11,6 @@
 
 import { Dialog } from "@kobalte/core/dialog";
 import { DropdownMenu } from "@kobalte/core/dropdown-menu";
-import { Popover } from "@kobalte/core/popover";
 import {
   createEffect,
   createMemo,
@@ -27,7 +26,6 @@ import { Portal } from "solid-js/web";
 import { DeadlineField } from "./DeadlineField.tsx";
 import { WhenField } from "./WhenField.tsx";
 import { ListPicker, type ListOption } from "./ListPicker.tsx";
-import caretSortSvg from "./icons/caret-sort.svg?raw";
 import checkSvg from "./icons/check.svg?raw";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import drawingPinSvg from "./icons/drawing-pin.svg?raw";
@@ -260,8 +258,6 @@ export function TaskDialog(props: {
   // Deadline calendar popover open state, shared by both DeadlineField modes.
   const [deadlineCalOpen, setDeadlineCalOpen] = createSignal(false);
   const [whenCalOpen, setWhenCalOpen] = createSignal(false);
-  // Activity popover anchored on the header's created / completed stamp.
-  const [activityOpen, setActivityOpen] = createSignal(false);
   // The title and notes editors are contenteditable (not textareas) so that
   // http(s) URLs render as clickable anchors, matching the row quick-entry
   // editor. Their content is set imperatively from the buffers on load — it
@@ -835,13 +831,17 @@ export function TaskDialog(props: {
             }
             onChange={(e) => setNewItemDone(e.currentTarget.checked)}
           />
-          {/* Stamp mirroring the edit dialog's created/completed
-              text: names the checkbox's current meaning. */}
-          <span class="task-dialog-created">
-            {newItemTarget()?.done
-              ? m().workspace.loggingDoneStamp
-              : m().workspace.newItemStamp}
-          </span>
+          {/* Lifecycle badge beside the checkbox, mirroring the edit
+              dialog's header: names the state the capture will be
+              filed in, and opens the menu to change it. Picks land in
+              the new-item buffer and are written after commit. */}
+          <LifecycleBadge
+            value={() => {
+              const nw = newItemTarget();
+              return nw?.done ? "done" : (nw?.state ?? "backlog");
+            }}
+            onChange={setNewItemState}
+          />
         </div>
         <div class="task-dialog-header-actions">{shellButtons()}</div>
       </header>
@@ -878,13 +878,6 @@ export function TaskDialog(props: {
               options={listOptions}
               value={() => newItemListOption()?.id ?? null}
               onChange={setNewItemList}
-            />
-            <LifecycleBadge
-              value={() => {
-                const nw = newItemTarget();
-                return nw?.done ? "done" : (nw?.state ?? "backlog");
-              }}
-              onChange={setNewItemState}
             />
             <DeadlineField
               deadline={newDeadline}
@@ -952,52 +945,17 @@ export function TaskDialog(props: {
                   props.app.setDone(it().id, e.currentTarget.checked)
                 }
               />
-              {/* Created stamp, swapping to the completion stamp once
-                  the item is ticked off. A click opens the activity log:
-                  the item's timeline as plain sentences. Two entries for
-                  now: when it was created, and once done, when it was
-                  completed and how long that took. The completion stamp
-                  is the reflection `doneAt` (last entry into Done),
-                  falling back to the register's transition time. */}
-              <Popover
-                open={activityOpen()}
-                onOpenChange={setActivityOpen}
-                placement="bottom-start"
-                gutter={6}
-              >
-                <Popover.Trigger
-                  class="task-dialog-created task-dialog-created-trigger"
-                  aria-label={m().workspace.activity}
-                >
-                  {isDone(it())
-                    ? m().workspace.completedStamp(
-                        formatDialogStamp(it().lifecycleAt, nowMs(), locale(), { inline: true }),
-                      )
-                    : m().workspace.createdStamp(
-                        formatDialogStamp(it().createdAt, nowMs(), locale(), { inline: true }),
-                      )}
-                </Popover.Trigger>
-                <Popover.Portal>
-                  <Popover.Content class="activity-popover">
-                    <div class="activity-popover-heading">{m().workspace.activity}</div>
-                    <ul class="activity-popover-log">
-                      <li title={formatDateTime(it().createdAt, locale())}>
-                        {m().workspace.createdStamp(
-                          formatDialogStamp(it().createdAt, nowMs(), locale(), { inline: true }),
-                        )}
-                      </li>
-                      <Show when={isDone(it())}>
-                        <li title={formatDateTime(doneAt(it()), locale())}>
-                          {m().workspace.activityCompleted(
-                            formatDialogStamp(doneAt(it()), nowMs(), locale(), { inline: true }),
-                            formatElapsed(doneAt(it()) - it().createdAt, locale()),
-                          )}
-                        </li>
-                      </Show>
-                    </ul>
-                  </Popover.Content>
-                </Popover.Portal>
-              </Popover>
+              {/* Lifecycle status badge beside the checkbox; hidden
+                  while binned (the bin mask overrides the workflow
+                  state; Restore is the way out). The created /
+                  completed timeline lives in the activity section
+                  under the notes. */}
+              <Show when={!isBinned(it())}>
+                <LifecycleBadge
+                  value={() => it().state}
+                  onChange={(state) => props.app.setLifecycle(it().id, state)}
+                />
+              </Show>
             </div>
             <div class="task-dialog-header-actions">
               <DropdownMenu>
@@ -1108,14 +1066,6 @@ export function TaskDialog(props: {
               value={() => it().listId}
               onChange={(id) => moveItemToList(id, it().listId)}
             />
-            {/* Lifecycle status badge: hidden while binned (the bin mask
-                overrides the workflow state; Restore is the way out). */}
-            <Show when={!isBinned(it())}>
-              <LifecycleBadge
-                value={() => it().state}
-                onChange={(state) => props.app.setLifecycle(it().id, state)}
-              />
-            </Show>
             <DeadlineField
               deadline={() => it().deadline ?? null}
               muted={() => isDone(it()) || isBinned(it())}
@@ -1165,6 +1115,30 @@ export function TaskDialog(props: {
             onPaste={pasteAsPlainText}
             onClick={(e) => openLinkOnClick(e, notesRef)}
           />
+          {/* Activity log under the notes: the item's timeline as plain
+              sentences. Two entries for now: when it was created, and
+              once done, when it was completed and how long that took.
+              The completion stamp is the reflection `doneAt` (last
+              entry into Done), falling back to the register's
+              transition time. */}
+          <section class="task-dialog-activity" aria-label={m().workspace.activity}>
+            <div class="task-dialog-activity-heading">{m().workspace.activity}</div>
+            <ul class="task-dialog-activity-log">
+              <li title={formatDateTime(it().createdAt, locale())}>
+                {m().workspace.createdStamp(
+                  formatDialogStamp(it().createdAt, nowMs(), locale(), { inline: true }),
+                )}
+              </li>
+              <Show when={isDone(it())}>
+                <li title={formatDateTime(doneAt(it()), locale())}>
+                  {m().workspace.activityCompleted(
+                    formatDialogStamp(doneAt(it()), nowMs(), locale(), { inline: true }),
+                    formatElapsed(doneAt(it()) - it().createdAt, locale()),
+                  )}
+                </li>
+              </Show>
+            </ul>
+          </section>
 
             </div>
           </div>
@@ -1311,18 +1285,13 @@ function LifecycleBadge(props: {
   return (
     <DropdownMenu>
       <DropdownMenu.Trigger
-        class="badge task-dialog-lifecycle"
+        class="task-dialog-lifecycle"
         aria-label={m().workspace.changeStatus}
         title={m().workspace.changeStatus}
       >
         <span class="task-dialog-lifecycle-value">
           {laneLabel(m(), props.value())}
         </span>
-        <span
-          class="task-dialog-list-caret"
-          aria-hidden="true"
-          innerHTML={caretSortSvg}
-        />
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content class="dropdown-menu-content task-dialog-lifecycle-menu">
