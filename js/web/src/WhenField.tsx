@@ -126,15 +126,12 @@ export function WhenField(props: {
           placeholder={() => (props.when() ? m().when.allDay : m().when.time)}
           clearLabel={m().when.clearTime}
         />
-        {/* Arrow to the end field; both only once a start time is set. */}
+        {/* End field, shown once a start time is set. The arrow glyph is
+            inset in its left edge, like the clock in the start field. */}
         <Show when={time()}>
-          <span
-            class="task-dialog-time-arrow"
-            aria-hidden="true"
-            innerHTML={arrowRightSvg}
-          />
           <TimePicker
             class="task-dialog-time-input task-dialog-end-input"
+            icon={arrowRightSvg}
             value={end}
             onChange={onEndChange}
             cycle={() => hourCycle(locale())}

@@ -2745,21 +2745,17 @@ input.task-check:hover {
    left edge, the input padding past it, so the two glyphs and the two
    texts line up. The input reads as plain text at the date input's size. */
 .task-dialog-time-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   align-items: center;
   gap: 8px;
 }
 
-/* Arrow glyph after the time input, muted like the field glyphs. */
-.task-dialog-time-arrow {
-  display: inline-flex;
-  align-items: center;
-  color: var(--text-muted);
-}
-
-.task-dialog-time-arrow svg {
-  width: 14px;
-  height: 14px;
+/* Each picker fills its half of the row; the start field alone sits in
+   the left half until an end field appears beside it. */
+.task-dialog-time-row .time-picker-field {
+  display: flex;
+  min-width: 0;
 }
 
 /* The input with its glyph inset at the left edge and its ✕ inset at the
@@ -2786,10 +2782,10 @@ input.task-check:hover {
   height: 14px;
 }
 
-/* Shares the date input's width below so the two fields stack as one
-   column. */
+/* Fills its grid cell, so start and end split the row evenly. */
 .task-dialog-time-input {
-  width: 150px;
+  width: 100%;
+  min-width: 0;
   margin: 0;
   padding: 2px 24px 2px 26px;
   border: none;
@@ -2805,13 +2801,6 @@ input.task-check:hover {
 .time-picker-hint {
   margin-left: 8px;
   color: var(--text-faint);
-}
-
-/* The end-time picker after the arrow: same pill, no glyph slot, and
-   narrower since it only ever reads a clock time. */
-.task-dialog-end-input {
-  width: 96px;
-  padding-left: 8px;
 }
 
 /* "All day" as the placeholder: the dim absence of a time. */
@@ -3302,10 +3291,6 @@ input.task-check:hover {
 
   .task-page .task-dialog-time-input {
     padding: 6px 28px 6px 30px;
-  }
-
-  .task-page .task-dialog-end-input {
-    padding-left: 10px;
   }
 
   .task-page .time-picker-icon {
