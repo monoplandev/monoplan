@@ -782,6 +782,30 @@ export function TaskDialog(props: {
     }
   };
 
+  // Side pane only: drop a text selection left behind in the title /
+  // notes editors when focus leaves the pane (Enter / Escape hand focus
+  // to the list, a row click pulls it to the listbox). Moving focus
+  // doesn't touch the DOM Selection, and the pane's editors stay mounted
+  // across the followed row changing, so the range would otherwise live
+  // on: painted as an inactive highlight, and, worse, still the target
+  // of clipboard events. Browsers dispatch paste / copy / cut to the
+  // editing host holding the selection start whenever that start sits in
+  // an editable region, whatever activeElement is, so a Ctrl+V meant for
+  // the list would land in the notes. Portal-aware: a popover the pane
+  // opened taking focus is not leaving the pane.
+  const onShellFocusOut = (e: FocusEvent) => {
+    if (!shellRef) return;
+    if (portalContains(shellRef, e.relatedTarget as Node | null)) return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    if (
+      !shellRef.contains(sel.anchorNode) &&
+      !shellRef.contains(sel.focusNode)
+    )
+      return;
+    sel.removeAllRanges();
+  };
+
   // Header buttons shared by the new-item and edit forms: the shell swap
   // (desktop only) and the close ✕. The panel shell drops the ✕ — the
   // pane is dismissed by leaving the selection (Escape steps out to the
@@ -1235,6 +1259,7 @@ export function TaskDialog(props: {
                 onFocusIn={() => {
                   if (props.entered?.() === false) props.onFocused?.();
                 }}
+                onFocusOut={onShellFocusOut}
               >
                 {body()}
               </section>
