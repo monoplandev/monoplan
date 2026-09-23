@@ -107,7 +107,7 @@ describe("edits", () => {
     const { eng, search } = newSearch();
     const titleHit = eng.addItem(LIST_MAIN, "phoenix kickoff");
     const notesHit = eng.addItem(LIST_MAIN, "another item");
-    eng.editItemNotes(notesHit, "see also: phoenix");
+    eng.applyNotesDelta(notesHit, JSON.stringify([{ insert: "see also: phoenix" }]));
     pump(eng, search);
 
     const r = search.query("phoenix");

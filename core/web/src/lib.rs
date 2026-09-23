@@ -186,11 +186,6 @@ impl Doc {
         self.inner.edit_item_text(item_id, text).map_err(js_err)
     }
 
-    #[wasm_bindgen(js_name = editItemNotes)]
-    pub fn edit_item_notes(&self, item_id: &str, notes: &str) -> Result<(), JsError> {
-        self.inner.edit_item_notes(item_id, notes).map_err(js_err)
-    }
-
     /// Start streaming an item's notes as `itemNotesDelta` events; returns
     /// the current plain text for the editor to load. See
     /// `Doc::subscribe_notes`.
@@ -1506,14 +1501,6 @@ impl SyncEngine {
         self.inner
             .doc()
             .edit_item_text(item_id, text)
-            .map_err(js_err)
-    }
-
-    #[wasm_bindgen(js_name = editItemNotes)]
-    pub fn edit_item_notes(&self, item_id: &str, notes: &str) -> Result<(), JsError> {
-        self.inner
-            .doc()
-            .edit_item_notes(item_id, notes)
             .map_err(js_err)
     }
 

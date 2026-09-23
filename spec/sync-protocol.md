@@ -93,7 +93,7 @@ Every Loro commit carries an origin string. The engine uses three values:
 
 - **`""`** (Loro default) — local mutations from the user. No explicit tag needed; `LoroDoc::commit()` already passes empty.
 - **`"remote"`** — ops applied via `apply_remote()` after decrypting an inbound `OpsBatch`/`OpsBroadcast`. Set with `LoroDoc::import_with(bytes, "remote")`.
-- **`"notes:<item id>"`** — `Doc::apply_notes_delta`, the open notes editor's per-keystroke writes (`spec/notes-plan.md` Phase 2). Excluded from workspace undo so typing never lands on the undo stack; the editor's own history owns notes undo while it is open. Whole-string `edit_item_notes` writes keep the default origin and stay undoable.
+- **`"notes:<item id>"`** — `Doc::apply_notes_delta`, the open notes editor's per-keystroke writes (`spec/notes-plan.md` Phase 2). Excluded from workspace undo so typing never lands on the undo stack; the editor's own history owns notes undo while it is focused, and the web store records one session-level step at blur (`spec/notes-plan.md` "Undo consequence"). Clients write all notes this way, whole-value writes included, so no notes commit carries the default origin.
 
 This exists so a future `UndoManager` can `exclude_origin_prefixes(["remote"])` and undo only the local user's edits, not concurrent remote ones. Origins are not synced; they're a local-only event filter (cf. Loro `set_next_commit_origin` docs). New non-local sources (snapshot bootstrap replay, schema migrations, etc.) get their own prefix as they appear — keep them disjoint from `"remote"` so undo policy can target them independently.
 

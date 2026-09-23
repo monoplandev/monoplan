@@ -1701,6 +1701,12 @@ impl Doc {
     /// the other. Clearing deletes the text's content and keeps the map
     /// key: deleting the key would hide the child, and a later
     /// `ensure_mergeable_text` would resurface the old content.
+    ///
+    /// Default origin, so this is a workspace undo step. Clients no
+    /// longer call it (the web store and the CLI seed write notes through
+    /// `apply_notes_delta`, so notes never enter the core's UndoManager
+    /// and its undo of a whole-string set never interleaves with excluded
+    /// delta commits on the same text); it remains for core tests.
     pub fn edit_item_notes(&self, item_id: &str, notes: &str) -> Result<(), DocError> {
         let map = self.find_item(item_id)?;
         let text = map.ensure_mergeable_text(KEY_NOTES)?;

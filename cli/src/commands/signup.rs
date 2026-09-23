@@ -1,6 +1,6 @@
 use clap::Parser;
 use dialoguer::{Confirm, Input};
-use monoplan_core::{Dek, Doc, generate_recovery_code, random_bytes};
+use monoplan_core::{Dek, Doc, NotesDeltaOp, generate_recovery_code, random_bytes};
 use monoplan_protocol::{KdfParams, RecoveryMaterial, SignupRequest, SignupResponse};
 
 use crate::config::{Config, Profile, Secrets};
@@ -137,9 +137,12 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
     ];
     let item_ids = doc.add_items_at(&welcome, &welcome_items, 0)?;
     if let Some(first) = item_ids.first() {
-        doc.edit_item_notes(
+        doc.apply_notes_delta(
             first,
-            "Monoplan helps you capture and organise your ideas, tasks, and projects.",
+            &[NotesDeltaOp::Insert {
+                insert: "Monoplan helps you capture and organise your ideas, tasks, and projects."
+                    .to_string(),
+            }],
         )?;
     }
     crate::storage::seed_snapshot(&storage, &dek, doc_id, &doc)?;

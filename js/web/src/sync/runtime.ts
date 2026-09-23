@@ -41,7 +41,7 @@ function seedWelcome(app: DocApp): string {
   const welcomeId = app.addList("Welcome");
   app.setListIcon(welcomeId, "👋");
   const ids = app.addItemsAt(welcomeId, [...WELCOME_ITEMS], 0);
-  if (ids[0]) app.editItemNotes(ids[0], WELCOME_NOTE);
+  if (ids[0]) app.setItemNotes(ids[0], WELCOME_NOTE);
   return welcomeId;
 }
 

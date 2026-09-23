@@ -540,12 +540,12 @@ export function TaskDialog(props: {
       // composition left unsent, then make the burst durable.
       commitLocalEdit();
       if (n !== synced) {
-        props.app.editItemNotes(id, n);
+        props.app.setItemNotes(id, n);
         synced = n;
       }
       props.app.flushNotes();
     } else if (n !== it.notes) {
-      props.app.editItemNotes(id, n);
+      props.app.setItemNotes(id, n);
     }
   };
 
@@ -646,7 +646,7 @@ export function TaskDialog(props: {
             ? props.app.addItemInStateAt(nw.listId, t, nw.state, at)
             : props.app.addItemAt(nw.listId, t, at);
         const n = notes();
-        if (n.trim()) props.app.editItemNotes(id, n);
+        if (n.trim()) props.app.setItemNotes(id, n);
         const d = newDeadline();
         if (d) props.app.setItemDeadline(id, d);
         const w = newWhen();

@@ -235,10 +235,13 @@ export interface DocApp {
    *  UI see one update, not N. */
   addItemsAt(listId: string, texts: string[], indexInList: number): string[];
   editItemText(id: string, text: string): void;
-  /** Set the free-form notes string. Empty clears it; whitespace is
-   *  preserved verbatim. One undoable step; used for whole-value writes
-   *  (a new item's notes). An open editor uses the delta path below. */
-  editItemNotes(id: string, notes: string): void;
+  /** Set the free-form notes string: a whole-value convenience over
+   *  `applyNotesDelta` (the diff against the current text, one excluded
+   *  commit), so notes never enter the core's UndoManager. Empty clears
+   *  it; whitespace is preserved verbatim. Undo: an open editing session
+   *  for the item absorbs it; inside `withActionBatch` it joins the
+   *  batch's step; otherwise it is one workspace step of its own. */
+  setItemNotes(id: string, notes: string): void;
   /** Notes delta bridge (spec/notes-plan.md Phase 2). `subscribeNotes`
    *  returns the current text and starts streaming remote / other-tab /
    *  undo changes to `onNotesDelta` listeners as UTF-16 deltas; call it
@@ -463,14 +466,18 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
   let flushDeferred = false;
   let actionBatchStartVersion = 0;
   let pendingActionSteps = 0;
-  // A workspace undo entry is either a count of core `UndoManager` steps
-  // (the usual case) or one notes editing session, which the core
-  // excludes by origin (`notes:` prefix) and the store reverts itself
-  // by re-applying the inverse delta through the same excluded path.
-  type NotesStep = { kind: "notes"; id: string; before: string; after: string };
-  type UndoEntry = number | NotesStep;
+  // A workspace undo entry pairs a count of core `UndoManager` steps
+  // with the notes writes made alongside them. Notes commits carry the
+  // `notes:` origin the core excludes, so the store reverts them itself
+  // by re-applying the inverse delta through that same excluded path.
+  // Undo reverts the notes first, then the core steps (an item's notes
+  // go before the item does); redo mirrors that.
+  type NotesStep = { id: string; before: string; after: string };
+  type UndoEntry = { steps: number; notes: NotesStep[] };
   const undoStack: UndoEntry[] = [];
   const redoStack: UndoEntry[] = [];
+  // Notes writes made inside the open action batch, folded into its entry.
+  let pendingBatchNotes: NotesStep[] = [];
 
   // ---- listOpen helpers: every write is list-local. `insertOpen`
   // removes any existing occurrence first so re-dispatch of an id
@@ -864,9 +871,9 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     flush();
   };
 
-  const recordAction = (steps: number): void => {
-    if (steps <= 0) return;
-    undoStack.push(steps);
+  const recordAction = (steps: number, notes: NotesStep[] = []): void => {
+    if (steps <= 0 && notes.length === 0) return;
+    undoStack.push({ steps, notes });
     redoStack.length = 0;
   };
 
@@ -884,8 +891,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     }
     const after = item.notes ?? "";
     if (after !== session.base) {
-      undoStack.push({ kind: "notes", id: session.id, before: session.base, after });
-      redoStack.length = 0;
+      recordAction(0, [{ id: session.id, before: session.base, after }]);
     }
     notesSession = { id: session.id, base: after };
   };
@@ -910,7 +916,6 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       notesSession = { id, base: state.itemsById[id]?.notes ?? "" };
     }
     for (const cb of notesListeners) cb(id, ops);
-    flush();
     return true;
   };
 
@@ -934,6 +939,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     if (outermost) {
       actionBatchStartVersion = version();
       pendingActionSteps = 0;
+      pendingBatchNotes = [];
     }
     try {
       return fn();
@@ -944,10 +950,11 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
           flushDeferred = false;
           flush();
         }
-        if (version() !== actionBatchStartVersion && pendingActionSteps > 0) {
-          recordAction(pendingActionSteps);
+        if (version() !== actionBatchStartVersion) {
+          recordAction(pendingActionSteps, pendingBatchNotes);
         }
         pendingActionSteps = 0;
+        pendingBatchNotes = [];
       }
     }
   };
@@ -980,12 +987,22 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     editItemText(id, text) {
       mutate(() => engine.editItemText(id, text));
     },
-    editItemNotes(id, notes) {
-      mutate(() => engine.editItemNotes(id, notes));
-      // A whole-string write is its own core step; the open session must
-      // not record it again.
+    setItemNotes(id, notes) {
+      const before = state.itemsById[id]?.notes ?? "";
+      const ops = diffToDelta(before, notes);
+      if (!ops) return;
+      engine.applyNotesDelta(id, JSON.stringify(ops));
+      // A caller-driven write: no delta notification (the caller owns
+      // any editor showing this item), durable now rather than on the
+      // typing idle timer.
+      flush();
+      const step = { id, before, after: notes };
       if (notesSession?.id === id) {
-        notesSession = { id, base: state.itemsById[id]?.notes ?? notes };
+        // The session records its net change at blur / switch.
+      } else if (actionBatchDepth > 0) {
+        pendingBatchNotes.push(step);
+      } else {
+        recordAction(0, [step]);
       }
     },
     subscribeNotes(id) {
@@ -1150,23 +1167,23 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       for (;;) {
         const entry = undoStack.pop();
         if (entry == null) return false;
-        if (typeof entry !== "number") {
-          // A rejected step is dropped and the next one tried.
-          if (!applyNotesStep(entry.id, entry.after, entry.before)) continue;
-          redoStack.push(entry);
-          return true;
-        }
+        // Notes first (newest first), then the core steps. A notes step
+        // the core rejects is dropped from the entry.
+        const notes = entry.notes.filter((n) => applyNotesStep(n.id, n.after, n.before));
         let applied = 0;
-        for (let i = 0; i < entry; i++) {
+        for (let i = 0; i < entry.steps; i++) {
           if (!engine.undo()) break;
           applied++;
         }
-        if (applied === 0) {
-          undoStack.push(entry);
-          return false;
+        if (applied === 0 && notes.length === 0) {
+          if (entry.steps > 0) {
+            undoStack.push(entry);
+            return false;
+          }
+          continue;
         }
         flush();
-        redoStack.push(applied);
+        redoStack.push({ steps: applied, notes });
         return true;
       }
     },
@@ -1174,22 +1191,21 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       for (;;) {
         const entry = redoStack.pop();
         if (entry == null) return false;
-        if (typeof entry !== "number") {
-          if (!applyNotesStep(entry.id, entry.before, entry.after)) continue;
-          undoStack.push(entry);
-          return true;
-        }
         let applied = 0;
-        for (let i = 0; i < entry; i++) {
+        for (let i = 0; i < entry.steps; i++) {
           if (!engine.redo()) break;
           applied++;
         }
-        if (applied === 0) {
-          redoStack.push(entry);
-          return false;
+        const notes = entry.notes.filter((n) => applyNotesStep(n.id, n.before, n.after));
+        if (applied === 0 && notes.length === 0) {
+          if (entry.steps > 0) {
+            redoStack.push(entry);
+            return false;
+          }
+          continue;
         }
         flush();
-        undoStack.push(applied);
+        undoStack.push({ steps: applied, notes });
         return true;
       }
     },

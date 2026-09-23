@@ -75,12 +75,8 @@ test("a notes editing session is one workspace undo step after blur", () => {
   const app = createSyncedApp(engine);
   const a = app.addItem("inbox", "a");
   const b = app.addItem("inbox", "b");
-  // An earlier session wrote "og". (Not `editItemNotes`: a core-recorded
-  // whole-string step followed by excluded deltas on the same text trips
-  // a Loro UndoManager quirk on redo, which is out of scope here.)
-  expect(app.subscribeNotes(a)).toBe("");
-  app.applyNotesDelta(a, [{ insert: "og" }]);
-  app.unsubscribeNotes(a);
+  // An earlier whole-value write put "og" there: one workspace step.
+  app.setItemNotes(a, "og");
   expect(app.state.itemsById[a]?.notes).toBe("og");
 
   // Type "e1" over "og" in a few edits, then blur.
@@ -102,7 +98,7 @@ test("a notes editing session is one workspace undo step after blur", () => {
   expect(app.state.itemsById[a]?.notes).toBe("og");
   // Subscribed editors hear about it as a delta on that item.
   expect(inbound).toEqual([[a, [{ delete: 2 }, { insert: "og" }]]]);
-  // The next undo is the earlier session, not this one again.
+  // The next undo is the earlier whole-value write, not this one again.
   expect(app.undo()).toBe(true);
   expect(app.state.itemsById[a]?.notes).toBe("");
 
@@ -149,4 +145,44 @@ test("an unchanged notes session records no undo step", () => {
   expect(app.undo()).toBe(true);
   expect(app.canUndo()).toBe(false);
   expect(stackHas()).toBe(false);
+});
+
+// A whole-value notes write inside an action batch (duplicate, or a
+// capture that sets notes with its add) joins the batch's step: one undo
+// removes the item, one redo brings it back with its notes.
+test("notes written inside an action batch ride the batch's undo step", () => {
+  const engine = new SyncEngine(
+    Doc.create(),
+    DOC_ID,
+    Dek.generate(),
+    0n,
+    "test",
+    "0",
+    new MemEngineStorage() as unknown as EngineStorage,
+  );
+  const app = createSyncedApp(engine);
+  const a = app.withActionBatch(() => {
+    const id = app.addItem("inbox", "a");
+    app.setItemNotes(id, "og");
+    return id;
+  });
+  expect(app.state.itemsById[a]?.notes).toBe("og");
+  expect(app.undo()).toBe(true);
+  expect(app.state.itemsById[a]).toBeUndefined();
+  expect(app.redo()).toBe(true);
+  expect(app.state.itemsById[a]?.notes).toBe("og");
+  expect(app.canUndo()).toBe(true);
+  expect(app.canRedo()).toBe(false);
+
+  // Outside a batch, a whole-value write on an existing item is its own
+  // step, and the capture form's separate add stays a separate step.
+  const b = app.addItem("inbox", "b");
+  app.setItemNotes(b, "hello");
+  expect(app.undo()).toBe(true);
+  expect(app.state.itemsById[b]?.notes).toBe("");
+  expect(app.undo()).toBe(true);
+  expect(app.state.itemsById[b]).toBeUndefined();
+  expect(app.redo()).toBe(true);
+  expect(app.redo()).toBe(true);
+  expect(app.state.itemsById[b]?.notes).toBe("hello");
 });

@@ -55,7 +55,7 @@ describe("Doc JSON import (additive)", () => {
     const alpha = src.addItem(LIST_MAIN, "alpha");
     const beta = src.addItem(LIST_MAIN, "beta");
     const gamma = src.addItem(otherId, "gamma");
-    src.editItemNotes(alpha, "alpha notes");
+    src.applyNotesDelta(alpha, JSON.stringify([{ insert: "alpha notes" }]));
     src.setItemDone(beta, true);
     src.setItemBinned(gamma, true);
 

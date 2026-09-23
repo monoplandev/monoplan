@@ -1231,7 +1231,7 @@ export function Workspace(props: {
       duration: number | undefined;
     },
   ): void => {
-    if (src.notes) app.editItemNotes(id, src.notes);
+    if (src.notes) app.setItemNotes(id, src.notes);
     if (src.deadline) app.setItemDeadline(id, src.deadline);
     if (src.when) app.setItemWhen(id, src.when);
     if (src.when && src.duration) app.setItemDuration(id, src.duration);
