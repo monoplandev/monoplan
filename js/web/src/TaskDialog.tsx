@@ -275,6 +275,12 @@ export function TaskDialog(props: {
   // Which id the buffers currently hold. A plain var (not a signal): it's
   // written from the load effect, never read reactively.
   let loadedId: string | null = null;
+  // The store's title text the `text` buffer was last aligned with: what
+  // the load effect read, or what `flush` last wrote. The buffer is
+  // "clean" while it still matches this; a clean buffer follows the
+  // store (undo/redo, a peer rename), a dirty one keeps the user's
+  // in-flight typing.
+  let syncedText = "";
 
   // Notes delta bridge. `synced` is the notes text the core holds for the
   // subscribed item (what the editor last sent or received); `notes()`
@@ -514,7 +520,10 @@ export function TaskDialog(props: {
     const it = props.app.state.itemsById[id];
     if (!it) return;
     const t = text().trim();
-    if (t && t !== it.text) props.app.editItemText(id, t);
+    if (t && t !== it.text) {
+      syncedText = t;
+      props.app.editItemText(id, t);
+    }
     const n = notes();
     if (subscribedId === id) {
       // Streaming: the core already holds every sent edit. Send what is
@@ -562,6 +571,7 @@ export function TaskDialog(props: {
     // is the same string one drain behind); a capture has none yet.
     const n = id ? subscribeNotes(id, it?.notes ?? "") : "";
     setText(t);
+    syncedText = t;
     setNotes(n);
     setNewDeadline(null);
     setNewWhen(null);
@@ -575,6 +585,34 @@ export function TaskDialog(props: {
       loadEditor(titleRef, t);
       loadEditor(notesRef, n);
     });
+  });
+
+  // Follow the store's title while the buffer is clean. The title has no
+  // delta stream like notes: once an edit is flushed, the buffer and the
+  // editor DOM would otherwise hold the last-typed text forever, so an
+  // undo/redo or a peer rename of the open item stayed invisible (and a
+  // later flush wrote the stale buffer back over it). A dirty buffer is
+  // left alone: the user's typing wins, as it always did.
+  createEffect(() => {
+    const id = props.itemId();
+    if (!id || id !== loadedId) return;
+    const storeText = props.app.state.itemsById[id]?.text;
+    if (storeText == null || storeText === syncedText) return;
+    const clean = untrack(text).trim() === syncedText.trim();
+    syncedText = storeText;
+    if (!clean) return;
+    setText(storeText);
+    // The row overlay mirrors the buffer; keep it in step too.
+    props.onLiveText?.(storeText);
+    if (!titleRef) return;
+    const caret =
+      document.activeElement === titleRef
+        ? collapsedCaretOffset(titleRef)
+        : null;
+    loadEditor(titleRef, storeText);
+    if (caret !== null) {
+      placeCaretAtOffset(titleRef, Math.min(caret, storeText.length));
+    }
   });
 
   // Unmounting mid-edit (the shell swapping, the workspace tearing down)
