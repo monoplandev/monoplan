@@ -1201,9 +1201,15 @@ input.task-check:hover {
 }
 
 /* Origin-list badge on the Done view (spec/board.md — the global Done view
-   is cross-list). Same grey as every other badge (`.badge`), so the pill
-   row reads as one set. */
+   is cross-list). Plain text, no pill background, so it reads as a
+   quiet origin label rather than a tag. */
 .row-list {
+  background: none;
+  /* Pulled a fifth of the way toward the page bg: lighter in light mode,
+     darker in dark, so it sits behind the state badges in weight. */
+  color: color-mix(in srgb, var(--text-badge) 80%, var(--bg));
+  padding-left: 0;
+  padding-right: 0;
   max-width: 16ch;
   min-width: 0;
 }
@@ -2617,6 +2623,12 @@ input.task-check:hover {
 
 .task-dialog-section:last-child {
   border-bottom: none;
+}
+
+/* The title sits flush against the badges below it, no rule between. */
+.task-dialog-title-section {
+  border-bottom: none;
+  padding-bottom: 0;
 }
 
 .task-dialog-title {

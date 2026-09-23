@@ -935,7 +935,7 @@ export function TaskDialog(props: {
       </header>
       <div class="task-dialog-body">
         <div class="task-dialog-content">
-          <section class="task-dialog-section">
+          <section class="task-dialog-section task-dialog-title-section">
             <div
               ref={(el) => {
                 titleRef = el;
@@ -1140,7 +1140,7 @@ export function TaskDialog(props: {
 
           <div class="task-dialog-body">
             <div class="task-dialog-content">
-          <section class="task-dialog-section">
+          <section class="task-dialog-section task-dialog-title-section">
             <div
               ref={(el) => {
                 titleRef = el;
