@@ -186,3 +186,35 @@ test("notes written inside an action batch ride the batch's undo step", () => {
   expect(app.redo()).toBe(true);
   expect(app.state.itemsById[b]?.notes).toBe("hello");
 });
+
+// The capture form's shape: add, notes, deadline, focus, done inside one
+// batch. One undo removes the item; one redo restores every field.
+test("a full capture is one undo step and redo restores its fields", () => {
+  const engine = new SyncEngine(
+    Doc.create(),
+    DOC_ID,
+    Dek.generate(),
+    0n,
+    "test",
+    "0",
+    new MemEngineStorage() as unknown as EngineStorage,
+  );
+  const app = createSyncedApp(engine);
+  const id = app.withActionBatch(() => {
+    const id = app.addItemAt("inbox", "capture", 0);
+    app.setItemNotes(id, "some notes");
+    app.setItemDeadline(id, "2026-10-01");
+    app.addToFocus(id);
+    return id;
+  });
+  expect(app.state.itemsById[id]?.deadline).toBe("2026-10-01");
+  expect(app.undo()).toBe(true);
+  expect(app.state.itemsById[id]).toBeUndefined();
+  expect(app.canUndo()).toBe(false);
+  expect(app.redo()).toBe(true);
+  const it = app.state.itemsById[id];
+  expect(it?.text).toBe("capture");
+  expect(it?.notes).toBe("some notes");
+  expect(it?.deadline).toBe("2026-10-01");
+  expect(app.state.focusOrder).toContain(id);
+});

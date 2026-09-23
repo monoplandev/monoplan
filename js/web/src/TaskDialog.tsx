@@ -641,24 +641,30 @@ export function TaskDialog(props: {
       const t = text().trim();
       if (t) {
         const at = nw.index ?? 0;
-        const id =
-          nw.state !== "backlog"
-            ? props.app.addItemInStateAt(nw.listId, t, nw.state, at)
-            : props.app.addItemAt(nw.listId, t, at);
-        const n = notes();
-        if (n.trim()) props.app.setItemNotes(id, n);
-        const d = newDeadline();
-        if (d) props.app.setItemDeadline(id, d);
-        const w = newWhen();
-        if (w) props.app.setItemWhen(id, w);
-        const dur = newDuration();
-        if (w && dur) props.app.setItemDuration(id, dur);
-        // A Done capture can't hold a Focus ref (auto-remove-on-Done,
-        // spec/focus.md), so the pin buffer only applies to open captures.
-        if (newFocus() && !nw.done) props.app.addToFocus(id);
-        // Logged-as-done capture: create open, then mark done in a second op
-        // (mirrors a drag-into-Done). Stamps doneAt = now.
-        if (nw.done) props.app.setDone(id, true);
+        // One capture, one undo step: the add and every field the form
+        // set on it. Undo removes the item outright; redo restores it
+        // with its notes and fields.
+        const id = props.app.withActionBatch(() => {
+          const id =
+            nw.state !== "backlog"
+              ? props.app.addItemInStateAt(nw.listId, t, nw.state, at)
+              : props.app.addItemAt(nw.listId, t, at);
+          const n = notes();
+          if (n.trim()) props.app.setItemNotes(id, n);
+          const d = newDeadline();
+          if (d) props.app.setItemDeadline(id, d);
+          const w = newWhen();
+          if (w) props.app.setItemWhen(id, w);
+          const dur = newDuration();
+          if (w && dur) props.app.setItemDuration(id, dur);
+          // A Done capture can't hold a Focus ref (auto-remove-on-Done,
+          // spec/focus.md), so the pin buffer only applies to open captures.
+          if (newFocus() && !nw.done) props.app.addToFocus(id);
+          // Logged-as-done capture: create open, then mark done in a second
+          // op (mirrors a drag-into-Done). Stamps doneAt = now.
+          if (nw.done) props.app.setDone(id, true);
+          return id;
+        });
         props.onCreated?.(id);
       }
     }
