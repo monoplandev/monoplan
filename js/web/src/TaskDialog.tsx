@@ -262,7 +262,7 @@ export function TaskDialog(props: {
   const [newDuration, setNewDuration] = createSignal<number | null>(null);
   // New-item mode's pin-to-Focus buffer, same deal as `newDeadline`.
   const [newFocus, setNewFocus] = createSignal(false);
-  // Deadline calendar popover open state, shared by both DeadlineField modes.
+  // Deadline / date popover open state, shared by both dialog modes.
   const [deadlineCalOpen, setDeadlineCalOpen] = createSignal(false);
   const [whenCalOpen, setWhenCalOpen] = createSignal(false);
   // The title and notes editors are contenteditable (not textareas) so that
@@ -935,44 +935,38 @@ export function TaskDialog(props: {
       </header>
       <div class="task-dialog-body">
         <div class="task-dialog-content">
-          <div
-            ref={(el) => {
-              titleRef = el;
-              // Set the literal attribute value (not Solid's folded
-              // valueless `contenteditable`) so the workspace's
-              // `[contenteditable="true"]` shortcut guard matches.
-              el.setAttribute("contenteditable", "true");
-              setLinkifiedText(el, text());
-            }}
-            class="task-dialog-title"
-            role="textbox"
-            data-done={newItemTarget()?.done ? "" : undefined}
-            data-placeholder={
-              newItemTarget()?.done
-                ? m().workspace.logCompleted
-                : m().board.addItem
-            }
-            onInput={() => setText(editorText(titleRef))}
-            onKeyDown={onTitleKeyDown}
-            onPaste={pasteAsPlainText}
-            onClick={(e) => openLinkOnClick(e, titleRef)}
-          />
-          {/* List selector leads the badge row, then the deadline
-              badge; picks land in the local buffers and are written
-              after the item commits. The pin toggle buffers the
-              same way (`newFocus`). */}
-          <div class="task-dialog-badges">
+          <section class="task-dialog-section">
+            <div
+              ref={(el) => {
+                titleRef = el;
+                // Set the literal attribute value (not Solid's folded
+                // valueless `contenteditable`) so the workspace's
+                // `[contenteditable="true"]` shortcut guard matches.
+                el.setAttribute("contenteditable", "true");
+                setLinkifiedText(el, text());
+              }}
+              class="task-dialog-title"
+              role="textbox"
+              data-done={newItemTarget()?.done ? "" : undefined}
+              data-placeholder={
+                newItemTarget()?.done
+                  ? m().workspace.logCompleted
+                  : m().board.addItem
+              }
+              onInput={() => setText(editorText(titleRef))}
+              onKeyDown={onTitleKeyDown}
+              onPaste={pasteAsPlainText}
+              onClick={(e) => openLinkOnClick(e, titleRef)}
+            />
+          </section>
+          {/* List selector leads the badge row; picks land in the
+              local buffers and are written after the item commits.
+              The pin toggle buffers the same way (`newFocus`). */}
+          <section class="task-dialog-section task-dialog-badges">
             <ListPicker
               options={listOptions}
               value={() => newItemListOption()?.id ?? null}
               onChange={setNewItemList}
-            />
-            <DeadlineField
-              deadline={newDeadline}
-              muted={() => newItemTarget()?.done ?? false}
-              onChange={setNewDeadline}
-              open={deadlineCalOpen}
-              setOpen={setDeadlineCalOpen}
             />
             <Show when={!(newItemTarget()?.done ?? false)}>
               <PinToggle
@@ -980,10 +974,10 @@ export function TaskDialog(props: {
                 onToggle={() => setNewFocus((v) => !v)}
               />
             </Show>
-          </div>
-          {/* Date section: the planned date on its own ruled band
-              between the badges and the notes. */}
-          <div class="task-dialog-dates">
+          </section>
+          {/* Date section: the planned date between the badges and the
+              deadline. */}
+          <section class="task-dialog-section task-dialog-dates">
             <WhenField
               when={newWhen}
               duration={newDuration}
@@ -1001,26 +995,39 @@ export function TaskDialog(props: {
               open={whenCalOpen}
               setOpen={setWhenCalOpen}
             />
-          </div>
-          <div
-            ref={(el) => {
-              notesRef = el;
-              el.setAttribute("contenteditable", "true");
-              setLinkifiedText(el, notes());
-            }}
-            class="task-dialog-notes"
-            role="textbox"
-            aria-multiline="true"
-            data-placeholder={m().workspace.notes}
-            on:input={onNotesInput}
-            onBlur={endNotesEdit}
-            on:compositionstart={onNotesCompositionStart}
-            on:compositionend={onNotesCompositionEnd}
-            onKeyDown={onNotesKeyDown}
-            on:beforeinput={onNotesBeforeInput}
-            onPaste={pasteAsPlainText}
-            onClick={(e) => openLinkOnClick(e, notesRef)}
-          />
+          </section>
+          {/* Deadline section under the dates, buffered like the date
+              until the item commits. */}
+          <section class="task-dialog-section task-dialog-deadline">
+            <DeadlineField
+              deadline={newDeadline}
+              muted={() => newItemTarget()?.done ?? false}
+              onChange={setNewDeadline}
+              open={deadlineCalOpen}
+              setOpen={setDeadlineCalOpen}
+            />
+          </section>
+          <section class="task-dialog-section">
+            <div
+              ref={(el) => {
+                notesRef = el;
+                el.setAttribute("contenteditable", "true");
+                setLinkifiedText(el, notes());
+              }}
+              class="task-dialog-notes"
+              role="textbox"
+              aria-multiline="true"
+              data-placeholder={m().workspace.notes}
+              on:input={onNotesInput}
+              onBlur={endNotesEdit}
+              on:compositionstart={onNotesCompositionStart}
+              on:compositionend={onNotesCompositionEnd}
+              onKeyDown={onNotesKeyDown}
+              on:beforeinput={onNotesBeforeInput}
+              onPaste={pasteAsPlainText}
+              onClick={(e) => openLinkOnClick(e, notesRef)}
+            />
+          </section>
         </div>
       </div>
     </Show>
@@ -1133,13 +1140,14 @@ export function TaskDialog(props: {
 
           <div class="task-dialog-body">
             <div class="task-dialog-content">
-              <div
-                ref={(el) => {
-                  titleRef = el;
-                  el.setAttribute("contenteditable", "true");
-                  setLinkifiedText(el, text());
-                }}
-                class="task-dialog-title"
+          <section class="task-dialog-section">
+            <div
+              ref={(el) => {
+                titleRef = el;
+                el.setAttribute("contenteditable", "true");
+                setLinkifiedText(el, text());
+              }}
+              class="task-dialog-title"
               role="textbox"
               data-done={isDone(it()) ? "" : undefined}
               onInput={() => {
@@ -1151,36 +1159,25 @@ export function TaskDialog(props: {
               onPaste={pasteAsPlainText}
               onClick={(e) => openLinkOnClick(e, titleRef)}
             />
+          </section>
 
-          {/* Badge row: the move-to-list picker first, then the
-              always-visible deadline badge — clicking it opens a
-              quick popover (Set date… / Tomorrow / Remove date).
-              The pin toggle beside it adds / removes the Focus ref;
-              hidden on Done / Binned items, which can't hold one
-              (spec/focus.md). */}
-          <div class="task-dialog-badges">
+          {/* Badge row: the move-to-list picker, then the pin toggle
+              that adds / removes the Focus ref; hidden on Done /
+              Binned items, which can't hold one (spec/focus.md). */}
+          <section class="task-dialog-section task-dialog-badges">
             <ListPicker
               options={listOptions}
               value={() => it().listId}
               onChange={(id) => moveItemToList(id, it().listId)}
             />
-            <DeadlineField
-              deadline={() => it().deadline ?? null}
-              muted={() => isDone(it()) || isBinned(it())}
-              onChange={(stamp) =>
-                props.app.setItemDeadline(it().id, stamp)
-              }
-              open={deadlineCalOpen}
-              setOpen={setDeadlineCalOpen}
-            />
             <Show when={!isDone(it()) && !isBinned(it())}>
               <PinToggle pinned={focused} onToggle={toggleFocus} />
             </Show>
-          </div>
+          </section>
 
-          {/* Date section: the planned date on its own ruled band
-              between the badges and the notes. */}
-          <div class="task-dialog-dates">
+          {/* Date section: the planned date between the badges and the
+              deadline. */}
+          <section class="task-dialog-section task-dialog-dates">
             <WhenField
               when={() => it().when ?? null}
               duration={() => it().duration ?? null}
@@ -1192,34 +1189,54 @@ export function TaskDialog(props: {
               open={whenCalOpen}
               setOpen={setWhenCalOpen}
             />
-          </div>
+          </section>
 
-          <div
-            ref={(el) => {
-              notesRef = el;
-              el.setAttribute("contenteditable", "true");
-              setLinkifiedText(el, notes());
-            }}
-            class="task-dialog-notes"
-            role="textbox"
-            aria-multiline="true"
-            data-placeholder={m().workspace.notes}
-            on:input={onNotesInput}
-            onBlur={endNotesEdit}
-            on:compositionstart={onNotesCompositionStart}
-            on:compositionend={onNotesCompositionEnd}
-            onKeyDown={onNotesKeyDown}
-            on:beforeinput={onNotesBeforeInput}
-            onPaste={pasteAsPlainText}
-            onClick={(e) => openLinkOnClick(e, notesRef)}
-          />
+          {/* Deadline section under the dates, before the notes.
+              Clicking the field opens a popover (Today / Tomorrow /
+              calendar / Remove). */}
+          <section class="task-dialog-section task-dialog-deadline">
+            <DeadlineField
+              deadline={() => it().deadline ?? null}
+              muted={() => isDone(it()) || isBinned(it())}
+              onChange={(stamp) =>
+                props.app.setItemDeadline(it().id, stamp)
+              }
+              open={deadlineCalOpen}
+              setOpen={setDeadlineCalOpen}
+            />
+          </section>
+
+          <section class="task-dialog-section">
+            <div
+              ref={(el) => {
+                notesRef = el;
+                el.setAttribute("contenteditable", "true");
+                setLinkifiedText(el, notes());
+              }}
+              class="task-dialog-notes"
+              role="textbox"
+              aria-multiline="true"
+              data-placeholder={m().workspace.notes}
+              on:input={onNotesInput}
+              onBlur={endNotesEdit}
+              on:compositionstart={onNotesCompositionStart}
+              on:compositionend={onNotesCompositionEnd}
+              onKeyDown={onNotesKeyDown}
+              on:beforeinput={onNotesBeforeInput}
+              onPaste={pasteAsPlainText}
+              onClick={(e) => openLinkOnClick(e, notesRef)}
+            />
+          </section>
           {/* Activity log under the notes: the item's timeline as plain
               sentences. Two entries for now: when it was created, and
               once done, when it was completed and how long that took.
               The completion stamp is the reflection `doneAt` (last
               entry into Done), falling back to the register's
               transition time. */}
-          <section class="task-dialog-activity" aria-label={m().workspace.activity}>
+          <section
+            class="task-dialog-section task-dialog-activity"
+            aria-label={m().workspace.activity}
+          >
             <div class="task-dialog-activity-heading">{m().workspace.activity}</div>
             <ul class="task-dialog-activity-log">
               <li title={formatDateTime(it().createdAt, locale())}>
@@ -1423,7 +1440,7 @@ function LifecycleBadge(props: {
   );
 }
 
-/** Pin-to-Focus toggle shown beside the deadline badge: outline pin when
+/** Pin-to-Focus toggle shown beside the list picker: outline pin when
  *  unpinned, filled when pinned. Backed by live Focus state for open items
  *  and by the `newFocus` buffer in new-item capture mode. */
 function PinToggle(props: {

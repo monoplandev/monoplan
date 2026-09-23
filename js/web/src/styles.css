@@ -2574,8 +2574,6 @@ input.task-check:hover {
    sentences (created; completed + how long it took). Read-only, so it
    sits in the content column's own tone rather than a card. */
 .task-dialog-activity {
-  padding-top: 8px;
-  border-top: 0.5px solid var(--row-divider);
   font-size: 13px;
 }
 
@@ -2607,7 +2605,18 @@ input.task-check:hover {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+}
+
+/* The content column's stacked sections (title, badges, dates, deadline,
+   notes, activity): each padded and ruled off below by a hairline, the
+   last one open-ended. */
+.task-dialog-section {
+  padding: 8px 0;
+  border-bottom: 0.5px solid var(--row-divider);
+}
+
+.task-dialog-section:last-child {
+  border-bottom: none;
 }
 
 .task-dialog-title {
@@ -2634,7 +2643,7 @@ input.task-check:hover {
   width: 100%;
   min-height: 3em;
   margin: 0;
-  padding: 8px 0;
+  padding: 0;
   background: none;
   outline: none;
   font: inherit;
@@ -2659,16 +2668,14 @@ input.task-check:hover {
   cursor: pointer;
 }
 
-/* Badge row under the title: list picker, deadline trigger, pin-to-Focus
-   toggle. In the 780px modal they run inline at their
-   natural widths; the narrow shells below rearrange them. Owns the top
-   gap the deadline trigger used to carry alone. */
+/* Badge row under the title: list picker, pin-to-Focus toggle. In the
+   780px modal they run inline at their natural widths; the narrow shells
+   below rearrange them. */
 .task-dialog-badges {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 2px;
-  margin-top: 4px;
 }
 
 /* Dialog badges run a step larger than the 12px row badges; their glyphs
@@ -2681,16 +2688,15 @@ input.task-check:hover {
 }
 
 /* Narrow shells (the side pane, the mobile page): a single-row grid. The
-   two labelled badges (list picker, deadline trigger) split the width
-   evenly and the pin toggle (when shown) takes a natural-width column at
-   the end. The pickers drop their fit-content width and the list picker's
-   10em cap, the deadline trigger and the pill inside it stretch, and the
-   sort carets move to the far edge, Select-style. The pin toggle is a
-   glyph, not a label, so it keeps its natural pill. */
+   list picker takes the width and the pin toggle (when shown) a
+   natural-width column at the end. The picker drops its fit-content
+   width and 10em cap, and the sort caret moves to the far edge,
+   Select-style. The pin toggle is a glyph, not a label, so it keeps its
+   natural pill. */
 .task-panel .task-dialog-badges,
 .task-page .task-dialog-badges {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: 1fr auto;
 }
 
 .task-panel .task-dialog-badges .badge,
@@ -2698,11 +2704,6 @@ input.task-check:hover {
   width: 100%;
   max-width: none;
   box-sizing: border-box;
-}
-
-.task-panel .task-dialog-badges .task-dialog-deadline-trigger,
-.task-page .task-dialog-badges .task-dialog-deadline-trigger {
-  width: 100%;
 }
 
 .task-panel .task-dialog-badges .task-dialog-list-caret,
@@ -2722,16 +2723,13 @@ input.task-check:hover {
   font-size: 14px;
 }
 
-/* Date section between the badge row and the notes: a hairline-ruled band
-   stacking an optional time row (timed `when` only) over the date input +
-   "All day" switch row. */
+/* Date section between the badge row and the deadline: the time row
+   stacked over the date input row. The deadline section under it is one
+   row (the deadline input) and needs nothing beyond the section rule. */
 .task-dialog-dates {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px 0;
-  border-top: 0.5px solid var(--row-divider);
-  border-bottom: 0.5px solid var(--row-divider);
 }
 
 .task-dialog-dates-row {
@@ -2882,6 +2880,17 @@ input.task-check:hover {
   color: var(--text-muted);
 }
 
+/* The deadline input reads its urgency as text colour (the row badge's
+   overdue / today roles, without the fill); muted wins via the rule above
+   since it sets no tone but "muted". */
+.task-dialog-deadline-input[data-tone="overdue"] {
+  color: var(--overdue-text);
+}
+
+.task-dialog-deadline-input[data-tone="today"] {
+  color: var(--due-today-text);
+}
+
 .task-dialog-when-input:hover {
   background: var(--bg-hover);
 }
@@ -2951,26 +2960,7 @@ input.task-check:hover {
   outline-offset: 1px;
 }
 
-/* The always-visible badge that opens the deadline quick popover (a faint
-   "Deadline" placeholder when unset). Button reset so the DeadlineBadge inside
-   keeps its own look. */
-.task-dialog-deadline-trigger {
-  display: inline-flex;
-  align-items: center;
-  padding: 0;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  border-radius: 6px;
-  outline: none;
-}
-
-.task-dialog-deadline-trigger:focus-visible {
-  outline: 2px solid var(--link);
-  outline-offset: 2px;
-}
-
-/* Pin-to-Focus toggle beside the deadline badge: same pill geometry as
+/* Pin-to-Focus toggle beside the list picker: same pill geometry as
    `.deadline-badge` / `.row-focus-badge`. Faint outline pin when unpinned,
    filled pin when pressed (`aria-pressed`). Colours follow the badge
    pair: unpressed matches the unset deadline / when placeholders, pressed

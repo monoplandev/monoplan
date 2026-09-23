@@ -221,7 +221,7 @@ export type Messages = {
   deadline: {
     /** Section label / accessible name for the deadline control. */
     label: string;
-    /** Task-dialog badge label when no deadline is set. */
+    /** Task-dialog deadline input placeholder when no deadline is set. */
     unset: string;
     /** Badge label when the deadline is before today. */
     overdue: string;
