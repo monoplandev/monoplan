@@ -449,6 +449,15 @@ export function TaskDialog(props: {
     commitLocalEdit();
     props.app.flushNotes();
   };
+  // Leaving the editor also closes the editing session: what was typed
+  // since focus arrived becomes one workspace undo step, so Cmd+Z still
+  // reverts it after the caret has moved on (the browser's own text undo
+  // only covers the editor while it is focused, and not at all once
+  // another item's text has been loaded into it).
+  const endNotesEdit = () => {
+    commitLocalEdit();
+    props.app.endNotesSession();
+  };
   const onVisibility = () => {
     if (document.visibilityState === "hidden") flushNotesNow();
   };
@@ -998,7 +1007,7 @@ export function TaskDialog(props: {
             aria-multiline="true"
             data-placeholder={m().workspace.notes}
             on:input={onNotesInput}
-            onBlur={flushNotesNow}
+            onBlur={endNotesEdit}
             on:compositionstart={onNotesCompositionStart}
             on:compositionend={onNotesCompositionEnd}
             onKeyDown={onNotesKeyDown}
@@ -1190,7 +1199,7 @@ export function TaskDialog(props: {
             aria-multiline="true"
             data-placeholder={m().workspace.notes}
             on:input={onNotesInput}
-            onBlur={flushNotesNow}
+            onBlur={endNotesEdit}
             on:compositionstart={onNotesCompositionStart}
             on:compositionend={onNotesCompositionEnd}
             onKeyDown={onNotesKeyDown}

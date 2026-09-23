@@ -57,3 +57,96 @@ test("typed notes deltas are captured to the WAL on the idle timer", async () =>
   expect(storage.ops.length).toBe(rowsAfterAdd + 2);
   app.unsubscribeNotes(id);
 });
+
+// Keystrokes never reach the core's UndoManager (origin-excluded), so
+// once the editor blurs the store records the session's net change as
+// one workspace undo step of its own. It must survive moving to another
+// item, revert exactly once, and redo.
+test("a notes editing session is one workspace undo step after blur", () => {
+  const engine = new SyncEngine(
+    Doc.create(),
+    DOC_ID,
+    Dek.generate(),
+    0n,
+    "test",
+    "0",
+    new MemEngineStorage() as unknown as EngineStorage,
+  );
+  const app = createSyncedApp(engine);
+  const a = app.addItem("inbox", "a");
+  const b = app.addItem("inbox", "b");
+  // An earlier session wrote "og". (Not `editItemNotes`: a core-recorded
+  // whole-string step followed by excluded deltas on the same text trips
+  // a Loro UndoManager quirk on redo, which is out of scope here.)
+  expect(app.subscribeNotes(a)).toBe("");
+  app.applyNotesDelta(a, [{ insert: "og" }]);
+  app.unsubscribeNotes(a);
+  expect(app.state.itemsById[a]?.notes).toBe("og");
+
+  // Type "e1" over "og" in a few edits, then blur.
+  expect(app.subscribeNotes(a)).toBe("og");
+  app.applyNotesDelta(a, [{ delete: 2 }]);
+  app.applyNotesDelta(a, [{ insert: "e" }]);
+  app.applyNotesDelta(a, [{ retain: 1 }, { insert: "1" }]);
+  expect(app.state.itemsById[a]?.notes).toBe("e1");
+  app.endNotesSession();
+
+  // Move to another item: the session is gone, the step is not.
+  app.unsubscribeNotes(a);
+  expect(app.subscribeNotes(b)).toBe("");
+
+  const inbound: Array<[string, unknown]> = [];
+  app.onNotesDelta((id, ops) => inbound.push([id, ops]));
+
+  expect(app.undo()).toBe(true);
+  expect(app.state.itemsById[a]?.notes).toBe("og");
+  // Subscribed editors hear about it as a delta on that item.
+  expect(inbound).toEqual([[a, [{ delete: 2 }, { insert: "og" }]]]);
+  // The next undo is the earlier session, not this one again.
+  expect(app.undo()).toBe(true);
+  expect(app.state.itemsById[a]?.notes).toBe("");
+
+  expect(app.redo()).toBe(true);
+  expect(app.state.itemsById[a]?.notes).toBe("og");
+  expect(app.redo()).toBe(true);
+  expect(app.state.itemsById[a]?.notes).toBe("e1");
+  expect(app.canRedo()).toBe(false);
+  app.unsubscribeNotes(b);
+});
+
+// A session that ends where it began (undone natively while focused)
+// records nothing; a blur without any edit records nothing either.
+test("an unchanged notes session records no undo step", () => {
+  const engine = new SyncEngine(
+    Doc.create(),
+    DOC_ID,
+    Dek.generate(),
+    0n,
+    "test",
+    "0",
+    new MemEngineStorage() as unknown as EngineStorage,
+  );
+  const app = createSyncedApp(engine);
+  const a = app.addItem("inbox", "a");
+  // Consume the add so the stack is empty.
+  expect(app.undo()).toBe(true);
+  expect(app.redo()).toBe(true);
+  expect(app.canUndo()).toBe(true);
+  const stackHas = () => {
+    // Probe: undoing pops exactly one entry; put it back with redo.
+    const did = app.undo();
+    if (did) app.redo();
+    return did;
+  };
+
+  app.subscribeNotes(a);
+  app.endNotesSession();
+  app.applyNotesDelta(a, [{ insert: "x" }]);
+  app.applyNotesDelta(a, [{ delete: 1 }]);
+  app.endNotesSession();
+  app.unsubscribeNotes(a);
+  // Only the add is undoable: one undo empties the stack.
+  expect(app.undo()).toBe(true);
+  expect(app.canUndo()).toBe(false);
+  expect(stackHas()).toBe(false);
+});

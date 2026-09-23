@@ -16,7 +16,7 @@
 
 import type { AppEventJs, SyncEngine } from "@monoplan/core/wasm";
 import { ItemLifecycle } from "@monoplan/core/wasm";
-import type { NotesDeltaOp } from "../notesDelta.ts";
+import { diffToDelta, type NotesDeltaOp } from "../notesDelta.ts";
 import { batch, createSignal, type Accessor } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
 import { createSearchEngine, type SearchEngine } from "../search.ts";
@@ -251,6 +251,13 @@ export interface DocApp {
   unsubscribeNotes(id: string): void;
   applyNotesDelta(id: string, ops: readonly NotesDeltaOp[]): void;
   flushNotes(): void;
+  /** End the current notes editing session (the editor blurred): flush,
+   *  then record the net change since `subscribeNotes` / the previous
+   *  session end as one workspace undo step. Keystrokes stay out of the
+   *  workspace undo while the editor is focused (the browser's own text
+   *  undo owns them there); this is what makes the edit reversible once
+   *  focus has left. `unsubscribeNotes` ends the session too. */
+  endNotesSession(): void;
   /** Listen for inbound notes deltas. `ops` is `null` after a
    *  `fullResync`: the subscriber must reload the text. Returns the
    *  unsubscribe function. */
@@ -456,8 +463,14 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
   let flushDeferred = false;
   let actionBatchStartVersion = 0;
   let pendingActionSteps = 0;
-  const undoStack: number[] = [];
-  const redoStack: number[] = [];
+  // A workspace undo entry is either a count of core `UndoManager` steps
+  // (the usual case) or one notes editing session, which the core
+  // excludes by origin (`notes:` prefix) and the store reverts itself
+  // by re-applying the inverse delta through the same excluded path.
+  type NotesStep = { kind: "notes"; id: string; before: string; after: string };
+  type UndoEntry = number | NotesStep;
+  const undoStack: UndoEntry[] = [];
+  const redoStack: UndoEntry[] = [];
 
   // ---- listOpen helpers: every write is list-local. `insertOpen`
   // removes any existing occurrence first so re-dispatch of an id
@@ -511,6 +524,9 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
   const NOTES_FLUSH_IDLE_MS = 300;
   let notesFlushTimer: ReturnType<typeof setTimeout> | undefined;
   let notesFlushPending = false;
+  // The open notes editing session: which item, and its text when the
+  // session began. Its net change becomes one undo step at session end.
+  let notesSession: { id: string; base: string } | null = null;
 
   const dispatch = (ev: AppEventJs): void => {
     switch (ev.kind) {
@@ -854,6 +870,50 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     redoStack.length = 0;
   };
 
+  // Close the open notes session as one undo step (nothing if the text
+  // is back where it started, e.g. fully undone natively while focused)
+  // and start the next one from the current text.
+  const endNotesSession = (): void => {
+    flushNotesNow();
+    const session = notesSession;
+    if (!session) return;
+    const item = state.itemsById[session.id];
+    if (!item) {
+      notesSession = null;
+      return;
+    }
+    const after = item.notes ?? "";
+    if (after !== session.base) {
+      undoStack.push({ kind: "notes", id: session.id, before: session.base, after });
+      redoStack.length = 0;
+    }
+    notesSession = { id: session.id, base: after };
+  };
+
+  // Write `to` over `from` on a notes step's item as a positional delta
+  // via the undo-excluded notes path, so reverting never registers a
+  // core step of its own. Peer edits since the step landed shift or
+  // survive around the region; a delta the core rejects (the item is
+  // gone, or the text no longer fits) skips the step. Subscribed editors
+  // learn of the change like any inbound delta.
+  const applyNotesStep = (id: string, from: string, to: string): boolean => {
+    const ops = diffToDelta(from, to);
+    if (!ops) return true;
+    try {
+      engine.applyNotesDelta(id, JSON.stringify(ops));
+    } catch (e) {
+      console.warn("notes undo step skipped:", e);
+      return false;
+    }
+    drainEvents();
+    if (notesSession?.id === id) {
+      notesSession = { id, base: state.itemsById[id]?.notes ?? "" };
+    }
+    for (const cb of notesListeners) cb(id, ops);
+    flush();
+    return true;
+  };
+
   const mutate = <T>(fn: () => T, assumedSteps = 1): T => {
     if (actionBatchDepth > 0) {
       pendingActionSteps += assumedSteps;
@@ -922,12 +982,21 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     },
     editItemNotes(id, notes) {
       mutate(() => engine.editItemNotes(id, notes));
+      // A whole-string write is its own core step; the open session must
+      // not record it again.
+      if (notesSession?.id === id) {
+        notesSession = { id, base: state.itemsById[id]?.notes ?? notes };
+      }
     },
     subscribeNotes(id) {
-      return engine.subscribeNotes(id);
+      endNotesSession();
+      const text = engine.subscribeNotes(id);
+      notesSession = { id, base: text };
+      return text;
     },
     unsubscribeNotes(id) {
-      flushNotesNow();
+      endNotesSession();
+      if (notesSession?.id === id) notesSession = null;
       engine.unsubscribeNotes(id);
     },
     applyNotesDelta(id, ops) {
@@ -943,6 +1012,9 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     },
     flushNotes() {
       flushNotesNow();
+    },
+    endNotesSession() {
+      endNotesSession();
     },
     onNotesDelta(cb) {
       notesListeners.add(cb);
@@ -1072,36 +1144,54 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       mutate(() => engine.moveInFocus(id, index));
     },
     undo() {
-      const steps = undoStack.pop();
-      if (steps == null) return false;
-      let applied = 0;
-      for (let i = 0; i < steps; i++) {
-        if (!engine.undo()) break;
-        applied++;
+      // An open session is settled first so Cmd+Z right after typing
+      // (blur pending) reverts the typing, not an older step.
+      endNotesSession();
+      for (;;) {
+        const entry = undoStack.pop();
+        if (entry == null) return false;
+        if (typeof entry !== "number") {
+          // A rejected step is dropped and the next one tried.
+          if (!applyNotesStep(entry.id, entry.after, entry.before)) continue;
+          redoStack.push(entry);
+          return true;
+        }
+        let applied = 0;
+        for (let i = 0; i < entry; i++) {
+          if (!engine.undo()) break;
+          applied++;
+        }
+        if (applied === 0) {
+          undoStack.push(entry);
+          return false;
+        }
+        flush();
+        redoStack.push(applied);
+        return true;
       }
-      if (applied === 0) {
-        undoStack.push(steps);
-        return false;
-      }
-      flush();
-      redoStack.push(applied);
-      return true;
     },
     redo() {
-      const steps = redoStack.pop();
-      if (steps == null) return false;
-      let applied = 0;
-      for (let i = 0; i < steps; i++) {
-        if (!engine.redo()) break;
-        applied++;
+      for (;;) {
+        const entry = redoStack.pop();
+        if (entry == null) return false;
+        if (typeof entry !== "number") {
+          if (!applyNotesStep(entry.id, entry.before, entry.after)) continue;
+          undoStack.push(entry);
+          return true;
+        }
+        let applied = 0;
+        for (let i = 0; i < entry; i++) {
+          if (!engine.redo()) break;
+          applied++;
+        }
+        if (applied === 0) {
+          redoStack.push(entry);
+          return false;
+        }
+        flush();
+        undoStack.push(applied);
+        return true;
       }
-      if (applied === 0) {
-        redoStack.push(steps);
-        return false;
-      }
-      flush();
-      undoStack.push(applied);
-      return true;
     },
     canUndo() {
       return undoStack.length > 0;

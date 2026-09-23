@@ -355,9 +355,18 @@ prerequisite for long offline editing sessions.
 
 Undo consequence: with notes commits excluded from the workspace
 `UndoManager` by origin prefix (see Undo under Rich text; the prefix hook
-already exists in core for `remote`), closing the dialog leaves no undo
-for notes at all. The editor's own history owns notes undo while open.
-Accepted.
+already exists in core for `remote`), the core never records a notes
+step. The editor's own history owns notes undo while it is focused. Once
+focus leaves, the web store steps in (built 2026-09-23): `subscribeNotes`
+opens an editing session, and `endNotesSession` (editor blur, target
+switch, unsubscribe) records the session's net change as one entry on
+the store's undo stack beside the core step counts. Undo / redo of that
+entry re-applies the inverse delta through `applyNotesDelta` (still the
+excluded origin, so no core step is registered) and notifies subscribed
+editors like any inbound delta. A session whose text ends where it began
+(fully undone natively while focused) records nothing, so the two
+histories never hold the same edit. Peer edits since the step shift or
+survive around the region; a delta the core rejects drops the step.
 
 Phase 2 deliverable: this bridge plus the current plain contenteditable
 dialog switched from full-string writes to deltas, so a live remote edit

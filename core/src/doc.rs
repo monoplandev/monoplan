@@ -82,7 +82,9 @@ const KEY_NOTES: &str = "notes";
 /// Commit origin prefix for notes delta writes (`spec/notes-plan.md`
 /// Phase 2). The workspace `UndoManager` excludes it, so typing in an
 /// open notes editor never lands on the workspace undo stack; the
-/// editor's own history owns notes undo while it is open.
+/// editor's own history owns notes undo while it is focused, and the
+/// client records one session-level step of its own at blur (the web
+/// store's `endNotesSession`).
 pub const NOTES_ORIGIN_PREFIX: &str = "notes:";
 /// Atomic location register: `"<list_id>:<placement_id>"`. Written as
 /// one scalar so list membership and placement can never be torn apart
