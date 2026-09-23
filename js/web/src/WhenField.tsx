@@ -127,7 +127,25 @@ export function WhenField(props: {
             locale={locale}
             label={m().when.time}
             placeholder={() => m().when.allDay}
-          />
+          >
+            {/* Inset ✕ at the start field's right edge, shown on hover like
+                the date input's: strips the time part, making the item
+                all-day (the core keeps the duration, so re-adding a time
+                restores the end). mousedown is cancelled so the click never
+                blurs a focused picker under it. */}
+            <Show when={time()}>
+              <button
+                type="button"
+                class="icon-button task-dialog-time-clear"
+                aria-label={m().when.clearTime}
+                title={m().when.clearTime}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onTimeChange(null)}
+              >
+                ✕
+              </button>
+            </Show>
+          </TimePicker>
           {/* End field, shown once a start time is set. The arrow glyph is
               inset in its left edge, like the clock in the start field. */}
           <Show when={time()}>
@@ -146,20 +164,6 @@ export function WhenField(props: {
                 return start ? formatDurationShort(durationBetween(start, t)) : null;
               }}
             />
-            {/* One ✕ after both time fields: strips the time part, making
-                the item all-day (the core keeps the duration, so re-adding
-                a time restores the end). mousedown is cancelled so the
-                click never blurs a focused picker under it. */}
-            <button
-              type="button"
-              class="icon-button task-dialog-time-clear"
-              aria-label={m().when.clearTime}
-              title={m().when.clearTime}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => onTimeChange(null)}
-            >
-              ✕
-            </button>
           </Show>
         </div>
       </Show>

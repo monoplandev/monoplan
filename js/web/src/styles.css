@@ -324,7 +324,7 @@ body {
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--text);
+  color: var(--text-muted);
   font: inherit;
   font-size: 13px;
   text-align: left;
@@ -2756,20 +2756,33 @@ input.task-check:hover {
    texts line up. The input reads as plain text at the date input's size. */
 .task-dialog-time-row {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: 1fr 1fr;
   align-items: center;
   gap: 8px;
   max-width: 18em;
 }
 
-/* The ✕ after both time fields (rendered only while a time is set):
-   small and muted like the date input's, but always visible since it
-   sits outside either field and has no hover region of its own. */
+/* The ✕ inset at the start field's right edge (rendered only while a
+   time is set): the date input's ✕ again, revealed on hover / focus. */
 .task-dialog-time-clear {
+  position: absolute;
+  right: 3px;
   width: 18px;
   height: 18px;
   font-size: 11px;
   border-radius: 4px;
+  opacity: 0;
+}
+
+.time-picker-field:hover .task-dialog-time-clear,
+.time-picker-field:focus-within .task-dialog-time-clear {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .task-dialog-time-clear {
+    opacity: 1;
+  }
 }
 
 /* Each picker fills its half of the row; the start field alone sits in
@@ -2794,7 +2807,7 @@ input.task-check:hover {
   left: 6px;
   display: inline-flex;
   align-items: center;
-  color: var(--text-muted);
+  color: var(--text-empty);
   pointer-events: none;
 }
 
@@ -2808,7 +2821,7 @@ input.task-check:hover {
   width: 100%;
   min-width: 0;
   margin: 0;
-  padding: 2px 8px 2px 26px;
+  padding: 2px 24px 2px 26px;
   border: none;
   border-radius: 4px;
   background: transparent;
@@ -2816,6 +2829,11 @@ input.task-check:hover {
   font-size: 14px;
   color: var(--text);
   outline: none;
+}
+
+/* The end field carries no ✕, so it keeps the plain right inset. */
+.task-dialog-end-input {
+  padding-right: 8px;
 }
 
 /* Dim length after each end-time option ("3:30 PM  1h 30m"). */
@@ -2857,7 +2875,7 @@ input.task-check:hover {
   left: 6px;
   display: inline-flex;
   align-items: center;
-  color: var(--text-muted);
+  color: var(--text-empty);
   pointer-events: none;
 }
 
@@ -3278,7 +3296,11 @@ input.task-check:hover {
   }
 
   .task-page .task-dialog-time-input {
-    padding: 6px 10px 6px 30px;
+    padding: 6px 28px 6px 30px;
+  }
+
+  .task-page .task-dialog-end-input {
+    padding-right: 10px;
   }
 
   .task-page .time-picker-icon {

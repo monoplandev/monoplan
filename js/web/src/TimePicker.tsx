@@ -27,6 +27,7 @@ import {
   onCleanup,
   Show,
   untrack,
+  type JSX,
 } from "solid-js";
 import { Portal } from "solid-js/web";
 import { timeFormatter, type TimeParts } from "./format.tsx";
@@ -58,6 +59,9 @@ export function TimePicker(props: {
   /** Optional dim note after each option's label; for the end-of-span
    *  picker this is the length that option would give. */
   optionHint?: (t: TimeSuggestion) => string | null;
+  /** Rendered inside the field after the input, for a control overlaid
+   *  on its right edge (the host's ✕). */
+  children?: JSX.Element;
   /** Anchor for an end-of-span picker: the blank list runs from this
    *  time + 15 minutes round the clock, and typed readings order by
    *  distance after it (`timeSuggest.ts`). */
@@ -319,6 +323,7 @@ export function TimePicker(props: {
           }}
           onKeyDown={onKeyDown}
         />
+        {props.children}
       </span>
       <Show when={panelVisible()}>
         <Portal>
