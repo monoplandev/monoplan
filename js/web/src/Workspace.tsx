@@ -43,6 +43,7 @@ import { FindPalette } from "./FindPalette.tsx";
 import { FindSheet } from "./FindSheet.tsx";
 import type { FindResult } from "./findResults.tsx";
 import { laneLabel, useAppI18n } from "./i18n.tsx";
+import { readClip, toClipItem, writeClip, type ClipItem } from "./itemClip.ts";
 import { ListIconPicker } from "./ListIconPicker.tsx";
 import { restoreCapturedPositions } from "./linger.ts";
 import { createPopoverTooltipGuard } from "./popoverTooltip.ts";
@@ -916,29 +917,57 @@ export function Workspace(props: {
     });
   };
 
-  // Paste anywhere in a list view drops the clipboard contents in as items,
-  // one per non-empty line. Skip when the paste targets an editable element
-  // (add form, row edit, list rename) so normal paste still works there.
-  // If any rows are selected, insert immediately after the last-selected one;
-  // otherwise append.
+  // Paste anywhere in a list view drops the clipboard contents in as items.
+  // A block copied from Monoplan carries a structured payload (itemClip.ts)
+  // and pastes as full clones: notes, dates, duration and, off the board,
+  // workflow state. Anything else pastes one item per non-empty line. Skip
+  // when the paste targets an editable element (add form, row edit, list
+  // rename) so normal paste still works there. If any rows are selected,
+  // insert immediately after the last-selected one; otherwise append.
   const onPaste = (e: ClipboardEvent) => {
     if (isOverlayOpen()) return;
     const v = view();
     if (v.kind !== "list" && v.kind !== "focus") return;
     const target = e.target as Element | null;
     if (target?.closest('input, textarea, [contenteditable="true"]')) return;
-    const data = e.clipboardData?.getData("text") ?? "";
-    const lines = data
-      .split(/\r?\n/)
-      .map((l) => l.trim().replace(/^-\s+(?:\[[^\]]*\]\s*)?/, ""))
-      .filter((l) => l.length > 0);
-    if (lines.length === 0) return;
+    const clip = readClip(e.clipboardData ?? null);
+    const structured = clip !== null && clip.length > 0;
+    let entries: ClipItem[];
+    if (structured) {
+      entries = clip;
+    } else {
+      const data = e.clipboardData?.getData("text") ?? "";
+      entries = data
+        .split(/\r?\n/)
+        .map((l) => l.trim().replace(/^-\s+(?:\[[^\]]*\]\s*)?/, ""))
+        .filter((l) => l.length > 0)
+        .map((text) => ({ text, state: "backlog" as const }));
+    }
+    if (entries.length === 0) return;
     e.preventDefault();
+    const texts = entries.map((c) => c.text);
+
+    // Fill each fresh item in from its clip entry. Items are created as
+    // Backlog; a copied open state is re-applied in the same undo step,
+    // which keeps the just-assigned Open position (spec/board.md). Done is
+    // never carried: a pasted item is a fresh open task, as with Cmd+D.
+    // `lane` overrides the copied state wholesale (the board's anchor).
+    const fillFromClip = (ids: string[], lane?: WorkflowState): void => {
+      ids.forEach((id, i) => {
+        const c = entries[i];
+        if (!c) return;
+        copyItemDetails(id, c);
+        const st =
+          lane ?? (structured && c.state !== "done" ? c.state : "backlog");
+        if (st !== "backlog") app.setLifecycle(id, st);
+      });
+    };
 
     // Board: land the block below the bottom-most selected card, in that
     // card's lane — same shape as duplicateBlock. Slots come straight from
     // the shared Open order (Backlog and Live are one array), so a Done-lane
-    // or empty selection finds no slot and the block appends to Backlog.
+    // or empty selection finds no slot and the block appends, each card in
+    // its copied lane (or Backlog for plain text).
     const boardId = boardListId();
     if (boardId !== null) {
       const linear = state.listOpen[boardId] ?? [];
@@ -951,14 +980,10 @@ export function Workspace(props: {
       const boardIds = app.withActionBatch(() => {
         const created = app.addItemsAt(
           boardId,
-          lines,
+          texts,
           anchorIdx >= 0 ? anchorIdx + 1 : linear.length,
         );
-        // Created as Backlog; flip to the anchor's lane in the same undo
-        // step, which keeps the just-assigned Open position (spec/board.md).
-        if (anchor && anchor.state !== "backlog") {
-          app.setLifecycleMany(created, anchor.state);
-        }
+        fillFromClip(created, anchor?.state);
         return created;
       });
       if (boardIds.length === 0) return;
@@ -975,10 +1000,14 @@ export function Workspace(props: {
       .filter((idx) => idx >= 0);
     const insertAt =
       selectedHere.length === 0 ? visible.length : Math.max(...selectedHere) + 1;
-    const ids =
-      v.kind === "focus"
-        ? captureToFocus(lines, insertAt)
-        : app.addItemsAt(v.id, lines, insertAt);
+    const ids = app.withActionBatch(() => {
+      const created =
+        v.kind === "focus"
+          ? captureToFocus(texts, insertAt)
+          : app.addItemsAt(v.id, texts, insertAt);
+      fillFromClip(created);
+      return created;
+    });
     if (ids.length === 0) return;
     // Wait for the dnd's source to absorb the new ids — see the
     // matching note in onDuplicate.
@@ -1225,10 +1254,10 @@ export function Workspace(props: {
   const copyItemDetails = (
     id: string,
     src: {
-      notes: string;
-      deadline: string | undefined;
-      when: string | undefined;
-      duration: number | undefined;
+      notes?: string;
+      deadline?: string;
+      when?: string;
+      duration?: number;
     },
   ): void => {
     if (src.notes) app.setItemNotes(id, src.notes);
@@ -1367,12 +1396,15 @@ export function Workspace(props: {
     });
   };
 
-  // Copy items to the clipboard as a markdown-ish checklist (one line
-  // each, in visible order, with `[*]` marking done items) so the block
-  // round-trips back as items if the user pastes into Monoplan. A single
-  // source additionally appends its notes on the following line when
-  // present, since notes only matter when one item is in focus.
-  const copyBlock = (sourceIds: readonly string[]): void => {
+  // Copy items to the clipboard, in visible order. Plain text is just the
+  // titles, one per line; the html and custom types carry the full items
+  // so a paste back into Monoplan clones them (itemClip.ts). With the
+  // `copy` event's DataTransfer every type is set synchronously; without
+  // one (context menu, palette) the async API takes the standard two.
+  const copyBlock = (
+    sourceIds: readonly string[],
+    dt?: DataTransfer | null,
+  ): void => {
     const visible = items().map((it) => it.id);
     const sourceSet = new Set(sourceIds);
     const inOrder: ItemView[] = [];
@@ -1388,14 +1420,7 @@ export function Workspace(props: {
       }
     }
     if (inOrder.length === 0) return;
-    const lines = inOrder.map(
-      (it) => `- [${isDone(it) ? "*" : " "}] ${it.text}`,
-    );
-    let text = lines.join("\n");
-    if (inOrder.length === 1 && inOrder[0].notes) {
-      text = `${text}\n${inOrder[0].notes}`;
-    }
-    void navigator.clipboard.writeText(text);
+    writeClip(inOrder.map(toClipItem), dt);
   };
 
   // Cmd/Ctrl+D: duplicate the current selection.
@@ -1410,21 +1435,94 @@ export function Workspace(props: {
   };
   onGlobalKey(onDuplicateKey);
 
-  // Cmd/Ctrl+C: copy the current selection through copyBlock. Skipped
-  // when focus is in an editable surface so the browser's native copy
-  // still grabs the user's text fragment, and skipped when there's a
-  // non-collapsed window selection (the user is copying highlighted
-  // text, not rows).
+  // Copying rows rides the browser's own copy command (Cmd/Ctrl+C, Edit >
+  // Copy) so the `copy` event's DataTransfer can carry every clipboard
+  // type. The selection to copy: null when the copy isn't ours — focus is
+  // in an editable surface or an inert shell (native copy grabs the
+  // user's text fragment), a window selection is highlighted (the user is
+  // copying text, not rows), an overlay is open, or nothing is selected.
+  // The guard reads the focused element, not the event target: a `copy`
+  // event targets wherever the text caret sits, which can be the task
+  // pane while a row holds focus, and the keydown net below must agree
+  // with the event on whose copy this is.
+  const rowCopyIds = (): string[] | null => {
+    if (isOverlayOpen()) return null;
+    const el = document.activeElement;
+    if (
+      el?.closest(
+        'input, textarea, [contenteditable="true"], [data-shortcuts-inert]',
+      )
+    )
+      return null;
+    const winSel = window.getSelection();
+    if (winSel && !winSel.isCollapsed && winSel.toString().length > 0)
+      return null;
+    const ids = actionSelection()?.getSelectedKeys().map(String) ?? [];
+    return ids.length === 0 ? null : ids;
+  };
+  // Browsers enable the copy command only over a text selection unless
+  // the page cancels `beforecopy`, which is how a row selection with no
+  // highlighted text still gets a `copy` event.
+  const onBeforeCopy = (e: Event) => {
+    if (pendingCopyIds !== null || rowCopyIds() !== null) e.preventDefault();
+  };
+  // Set while `copyRows` runs the copy command itself: the ids to copy,
+  // bypassing the guards (the intent is explicit) and telling the event
+  // apart from a browser-initiated copy.
+  let pendingCopyIds: string[] | null = null;
+  let copyEventSeen = false;
+  const onCopyEvent = (e: ClipboardEvent) => {
+    const ids = pendingCopyIds ?? rowCopyIds();
+    if (ids === null) return;
+    copyEventSeen = true;
+    e.preventDefault();
+    console.log("[clip] copy via copy event", {
+      ids,
+      commanded: pendingCopyIds !== null,
+    });
+    copyBlock(ids, e.clipboardData);
+  };
+  document.addEventListener("beforecopy", onBeforeCopy);
+  document.addEventListener("copy", onCopyEvent);
+  onCleanup(() => {
+    document.removeEventListener("beforecopy", onBeforeCopy);
+    document.removeEventListener("copy", onCopyEvent);
+  });
+  // Copy a block of rows by running the copy command now, so the `copy`
+  // event lands synchronously with every type. Cmd+C can't lean on the
+  // browser's own command for this: Firefox delivers that one a task
+  // later (a hop through its parent process), which raced an earlier
+  // timer-based net and let a late async write flatten the event's richer
+  // one to plain text. Needs user activation (a keystroke, a menu click),
+  // which every caller has; where the command won't run or the event
+  // never reaches us, the async API takes the standard two types.
+  const copyRows = (ids: readonly string[]): void => {
+    pendingCopyIds = [...ids];
+    copyEventSeen = false;
+    let ran = false;
+    try {
+      ran = document.execCommand("copy");
+    } catch {
+      ran = false;
+    }
+    pendingCopyIds = null;
+    if (ran && copyEventSeen) return;
+    console.log("[clip] copy command unavailable, async fallback", {
+      ran,
+      copyEventSeen,
+    });
+    copyBlock(ids);
+  };
+  // Cmd/Ctrl+C: take over the keystroke (so the browser's own, possibly
+  // delayed, copy doesn't follow) and copy through `copyRows`.
   const onCopyKey = (e: KeyboardEvent) => {
     if (e.key !== "c" && e.key !== "C") return;
     if (!(e.metaKey || e.ctrlKey)) return;
     if (e.shiftKey || e.altKey) return;
-    const winSel = window.getSelection();
-    if (winSel && !winSel.isCollapsed && winSel.toString().length > 0) return;
-    const ids = actionSelection()?.getSelectedKeys().map(String) ?? [];
-    if (ids.length === 0) return;
+    const ids = rowCopyIds();
+    if (ids === null) return;
     e.preventDefault();
-    copyBlock(ids);
+    copyRows(ids);
   };
   onGlobalKey(onCopyKey);
 
@@ -2011,7 +2109,7 @@ export function Workspace(props: {
           label: msgs.common.restore,
           run: () => app.setBinnedMany(ids, false),
         },
-        { label: msgs.common.copy, shortcut: "⌘C", run: () => copyBlock(ids) },
+        { label: msgs.common.copy, shortcut: "⌘C", run: () => copyRows(ids) },
         {
           label: msgs.common.delete,
           shortcut: "⌫",
@@ -2060,7 +2158,7 @@ export function Workspace(props: {
     }
     out.push(
       { label: msgs.common.move, shortcut: "M", run: () => openMovePalette(ids) },
-      { label: msgs.common.copy, shortcut: "⌘C", run: () => copyBlock(ids) },
+      { label: msgs.common.copy, shortcut: "⌘C", run: () => copyRows(ids) },
     );
     if (openIds.length > 0) {
       out.push({
@@ -2742,7 +2840,7 @@ export function Workspace(props: {
                           return v.kind === "list" && showState(v.id);
                         }}
                         duplicateBlock={duplicateBlock}
-                        copyBlock={copyBlock}
+                        copyBlock={copyRows}
                         onDraftSettle={settleDraft}
                         onOpen={(id) => setOpenItemId(id)}
                         onSetDeadline={openDeadlineCalendar}
@@ -2769,7 +2867,7 @@ export function Workspace(props: {
               onMoveToList={openMovePalette}
               openOnTap={itemsIsMobile}
               duplicateBlock={duplicateBlock}
-              copyBlock={copyBlock}
+              copyBlock={copyRows}
               onAddItem={(listId, state, done) =>
                 setNewItemTarget({ listId, state, done })
               }
