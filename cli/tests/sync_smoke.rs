@@ -17,7 +17,7 @@ use monoplan_cli::config::{Config, Profile, Secrets};
 use monoplan_cli::keystore::dek_to_hex;
 use monoplan_cli::storage::Account;
 use monoplan_cli::sync::Session;
-use monoplan_core::{Dek, Doc, LIST_INBOX};
+use monoplan_core::{Dek, Doc, LIST_INBOX, NotesDeltaOp};
 use monoplan_server::sync::queries;
 use uuid::Uuid;
 
@@ -250,7 +250,13 @@ async fn export_json_writes_semantic_account_dump() {
     let doc = Doc::new().unwrap();
     let errands = doc.add_list("Errands").unwrap();
     let item_id = doc.add_item(&errands, "buy milk").unwrap();
-    doc.edit_item_notes(&item_id, "whole milk").unwrap();
+    doc.apply_notes_delta(
+        &item_id,
+        &[NotesDeltaOp::Insert {
+            insert: "whole milk".to_string(),
+        }],
+    )
+    .unwrap();
 
     let out = tmp.path().join("export.json");
     write_export(&doc.export_json(), Some(&out)).unwrap();

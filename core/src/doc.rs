@@ -49,8 +49,8 @@ use std::sync::{Arc, Mutex};
 use loro::event::{Diff as LoroDiff, DiffEvent, ListDiffItem};
 use loro::{
     CommitOptions, Container, ContainerID, EventTriggerKind, ExportMode, Index, LoroDoc, LoroMap,
-    LoroMovableList, LoroText, LoroValue, Subscription, TextDelta, UndoManager, UpdateOptions,
-    ValueOrContainer, VersionVector,
+    LoroMovableList, LoroValue, Subscription, TextDelta, UndoManager, ValueOrContainer,
+    VersionVector,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -80,8 +80,9 @@ const KEY_ID: &str = "id";
 const KEY_TEXT: &str = "text";
 const KEY_NOTES: &str = "notes";
 /// Commit origin prefix for notes delta writes (`spec/notes-plan.md`
-/// Phase 2). The workspace `UndoManager` excludes it, so typing in an
-/// open notes editor never lands on the workspace undo stack; the
+/// Phase 2). Every notes write carries it (`apply_notes_delta` is the
+/// only notes write). The workspace `UndoManager` excludes it, so typing
+/// in an open notes editor never lands on the workspace undo stack; the
 /// editor's own history owns notes undo while it is focused, and the
 /// client records one session-level step of its own at blur (the web
 /// store's `endNotesSession`).
@@ -1690,39 +1691,6 @@ impl Doc {
         Ok(())
     }
 
-    /// Set an item's free-form notes. Empty is allowed (clears the
-    /// note); leading/trailing whitespace is preserved verbatim because
-    /// notes are intentionally a freeform plain-text field.
-    ///
-    /// Notes live in a mergeable `LoroText` child of the item map
-    /// (`spec/notes-plan.md`), created on the first write. The new string
-    /// is applied as a character diff against the current text, so
-    /// concurrent edits from two devices merge instead of one overwriting
-    /// the other. Clearing deletes the text's content and keeps the map
-    /// key: deleting the key would hide the child, and a later
-    /// `ensure_mergeable_text` would resurface the old content.
-    ///
-    /// Default origin, so this is a workspace undo step. Clients no
-    /// longer call it (the web store and the CLI seed write notes through
-    /// `apply_notes_delta`, so notes never enter the core's UndoManager
-    /// and its undo of a whole-string set never interleaves with excluded
-    /// delta commits on the same text); it remains for core tests.
-    pub fn edit_item_notes(&self, item_id: &str, notes: &str) -> Result<(), DocError> {
-        let map = self.find_item(item_id)?;
-        let text = map.ensure_mergeable_text(KEY_NOTES)?;
-        if text.to_string() == notes {
-            return Ok(());
-        }
-        update_text(&text, notes)?;
-        self.inner.commit();
-        self.refresh_notes_shadow(item_id, notes);
-        self.push_event(AppEvent::ItemNotesChanged {
-            id: item_id.to_string(),
-            notes: notes.to_string(),
-        });
-        Ok(())
-    }
-
     /// Start streaming an item's notes as deltas. Returns the current
     /// plain text, which the caller's editor loads; from here on every
     /// remote (or other-tab, or undo) change to this item's notes is
@@ -1750,6 +1718,11 @@ impl Doc {
 
     /// Apply an editor delta (UTF-16 units) to an item's notes. One
     /// commit, origin `notes:<item id>`, excluded from workspace undo.
+    /// This is the only notes write: clients express whole-value sets
+    /// as the diff against the current text (the web store's
+    /// `setItemNotes`, the CLI's welcome seed), so no notes commit ever
+    /// carries the default origin. A delta that changes nothing writes
+    /// nothing and emits nothing.
     /// The whole delta is validated against the current text before
     /// anything is written: an out-of-range retain / delete, or a
     /// position that would split a surrogate pair, rejects with
@@ -1775,6 +1748,11 @@ impl Doc {
         self.inner
             .commit_with(CommitOptions::new().origin(&format!("{NOTES_ORIGIN_PREFIX}{item_id}")));
         let notes = text.to_string();
+        if notes == current {
+            // Nothing changed (empty delta, or inserts / deletes of zero
+            // length): no op was written, so no phantom event either.
+            return Ok(());
+        }
         self.refresh_notes_shadow(item_id, &notes);
         self.push_event(AppEvent::ItemNotesChanged {
             id: item_id.to_string(),
@@ -4866,14 +4844,6 @@ fn read_text(map: &LoroMap, key: &str) -> Option<String> {
     }
 }
 
-/// Make `text` equal `target` with a minimal character diff. The default
-/// options have no timeout, so the timeout error arm cannot fire; it is
-/// mapped to `Invalid` for completeness.
-fn update_text(text: &LoroText, target: &str) -> Result<(), DocError> {
-    text.update(target, UpdateOptions::default())
-        .map_err(|e| DocError::Invalid(e.to_string()))
-}
-
 /// Check a UTF-16 delta against the text it will be applied to: every
 /// retain / delete stays within the text and every position it lands on
 /// is a scalar boundary (never inside a surrogate pair). Inserts are
@@ -6216,7 +6186,7 @@ mod tests {
         let b = doc.add_item(&list, "b").unwrap();
         let c = doc.add_item(&list, "c").unwrap();
         let d = doc.add_item(&list, "d").unwrap();
-        doc.edit_item_notes(&a, "some notes").unwrap();
+        set_notes(&doc, &a, "some notes");
         doc.set_item_deadline(&a, Some("2026-09-01")).unwrap();
         doc.set_item_lifecycle(&b, ItemLifecycle::InProgress)
             .unwrap();
@@ -6788,7 +6758,7 @@ mod tests {
         let doc = Doc::new().unwrap();
         let other = doc.add_list("Other").unwrap();
         let id = doc.add_item(LIST_INBOX, "wandering").unwrap();
-        doc.edit_item_notes(&id, "some notes").unwrap();
+        set_notes(&doc, &id, "some notes");
         let before = doc.get_item(&id).unwrap();
 
         doc.move_item(&id, &other, 0).unwrap();
@@ -6939,7 +6909,7 @@ mod tests {
     fn json_export_includes_notes_and_lifecycle_timestamps() {
         let doc = Doc::new().unwrap();
         let id = doc.add_item(LIST_INBOX, "buy milk").unwrap();
-        doc.edit_item_notes(&id, "whole milk").unwrap();
+        set_notes(&doc, &id, "whole milk");
         doc.set_item_done(&id, true).unwrap();
         doc.set_item_binned(&id, true).unwrap();
 
@@ -8358,7 +8328,7 @@ mod tests {
         let a = src.add_item(LIST_INBOX, "alpha").unwrap();
         let b = src.add_item(LIST_INBOX, "beta").unwrap();
         let c = src.add_item(LIST_INBOX, "gamma").unwrap();
-        src.edit_item_notes(&a, "alpha notes").unwrap();
+        set_notes(&src, &a, "alpha notes");
         src.set_item_done(&b, true).unwrap();
         src.set_item_binned(&c, true).unwrap();
 
@@ -10174,8 +10144,8 @@ mod tests {
 
         // Neither peer has a notes container yet; both create one
         // offline. Mergeable ids make it the same container.
-        a.edit_item_notes(&id, "from a").unwrap();
-        b.edit_item_notes(&id, "from b").unwrap();
+        set_notes(&a, &id, "from a");
+        set_notes(&b, &id, "from b");
         exchange(&mut a, &mut b, &dek);
 
         let na = a.get_item(&id).unwrap().notes;
@@ -10192,11 +10162,11 @@ mod tests {
         let dek = Dek::generate();
         let mut a = Doc::new().unwrap();
         let id = a.add_item(LIST_INBOX, "item").unwrap();
-        a.edit_item_notes(&id, "alpha\nbeta").unwrap();
+        set_notes(&a, &id, "alpha\nbeta");
         let mut b = sync_fresh_peer(&mut a, &dek);
 
-        a.edit_item_notes(&id, "ALPHA\nbeta").unwrap();
-        b.edit_item_notes(&id, "alpha\nBETA").unwrap();
+        set_notes(&a, &id, "ALPHA\nbeta");
+        set_notes(&b, &id, "alpha\nBETA");
         exchange(&mut a, &mut b, &dek);
 
         assert_eq!(a.get_item(&id).unwrap().notes, "ALPHA\nBETA");
@@ -10208,11 +10178,11 @@ mod tests {
         let dek = Dek::generate();
         let mut a = Doc::new().unwrap();
         let id = a.add_item(LIST_INBOX, "item").unwrap();
-        a.edit_item_notes(&id, "hello").unwrap();
+        set_notes(&a, &id, "hello");
         let mut b = sync_fresh_peer(&mut a, &dek);
 
-        a.edit_item_notes(&id, "hello world").unwrap();
-        b.edit_item_notes(&id, "hello there").unwrap();
+        set_notes(&a, &id, "hello world");
+        set_notes(&b, &id, "hello there");
         exchange(&mut a, &mut b, &dek);
 
         let na = a.get_item(&id).unwrap().notes;
@@ -10233,7 +10203,7 @@ mod tests {
         let mut b = sync_fresh_peer(&mut a, &dek);
 
         // First write: marker op on the item map plus the text insert.
-        a.edit_item_notes(&id, "first").unwrap();
+        set_notes(&a, &id, "first");
         let blob = a.pending_export(&dek).unwrap().unwrap();
         a.mark_persisted();
         b.apply_remote(&dek, &blob).unwrap();
@@ -10250,7 +10220,7 @@ mod tests {
         // Second write: only the text container changes. This is the
         // `LoroDiff::Text` classifier arm; without it the frame is
         // opaque and forces a FullResync.
-        a.edit_item_notes(&id, "first, then more").unwrap();
+        set_notes(&a, &id, "first, then more");
         let blob = a.pending_export(&dek).unwrap().unwrap();
         a.mark_persisted();
         b.apply_remote(&dek, &blob).unwrap();
@@ -10272,17 +10242,17 @@ mod tests {
         let dek = Dek::generate();
         let mut a = Doc::new().unwrap();
         let id = a.add_item(LIST_INBOX, "item").unwrap();
-        a.edit_item_notes(&id, "hello").unwrap();
+        set_notes(&a, &id, "hello");
         let mut b = sync_fresh_peer(&mut a, &dek);
 
-        a.edit_item_notes(&id, "").unwrap();
+        set_notes(&a, &id, "");
         assert_eq!(
             notes_container_count(&a, &id),
             1,
             "clear deletes content, never the key"
         );
         assert_eq!(a.get_item(&id).unwrap().notes, "");
-        b.edit_item_notes(&id, "hello world").unwrap();
+        set_notes(&b, &id, "hello world");
         exchange(&mut a, &mut b, &dek);
 
         assert_eq!(a.get_item(&id).unwrap().notes, " world");
@@ -10297,11 +10267,11 @@ mod tests {
         let dek = Dek::generate();
         let mut a = Doc::new().unwrap();
         let id = a.add_item(LIST_INBOX, "item").unwrap();
-        a.edit_item_notes(&id, "hello").unwrap();
+        set_notes(&a, &id, "hello");
         let mut b = sync_fresh_peer(&mut a, &dek);
 
-        a.edit_item_notes(&id, "").unwrap();
-        a.edit_item_notes(&id, "h").unwrap();
+        set_notes(&a, &id, "");
+        set_notes(&a, &id, "h");
         exchange(&mut a, &mut b, &dek);
 
         assert_eq!(a.get_item(&id).unwrap().notes, "h");
@@ -10313,35 +10283,16 @@ mod tests {
     fn notes_unchanged_write_is_a_no_op() {
         let doc = Doc::new().unwrap();
         let id = doc.add_item(LIST_INBOX, "item").unwrap();
-        doc.edit_item_notes(&id, "same").unwrap();
+        set_notes(&doc, &id, "same");
         let _ = doc.drain_events();
         let vv = doc.inner.oplog_vv();
 
-        doc.edit_item_notes(&id, "same").unwrap();
+        // An empty delta, and one made only of zero-length steps.
+        doc.apply_notes_delta(&id, &[]).unwrap();
+        doc.apply_notes_delta(&id, &[d_retain(4), d_insert(""), d_delete(0)])
+            .unwrap();
         assert!(doc.drain_events().is_empty());
         assert_eq!(doc.inner.oplog_vv(), vv, "no ops written");
-    }
-
-    #[test]
-    fn notes_undo_restores_previous_text() {
-        let doc = Doc::new().unwrap();
-        let id = doc.add_item(LIST_INBOX, "item").unwrap();
-        doc.edit_item_notes(&id, "one").unwrap();
-        doc.edit_item_notes(&id, "one two").unwrap();
-        let _ = doc.drain_events();
-
-        assert!(doc.undo().unwrap());
-        assert_eq!(doc.get_item(&id).unwrap().notes, "one");
-        let evs = doc.drain_events();
-        assert_eq!(
-            evs,
-            vec![AppEvent::ItemNotesChanged {
-                id: id.clone(),
-                notes: "one".into(),
-            }]
-        );
-        assert!(doc.redo().unwrap());
-        assert_eq!(doc.get_item(&id).unwrap().notes, "one two");
     }
 
     #[test]
@@ -10350,7 +10301,7 @@ mod tests {
         // string in both), so a v3 export imports as-is.
         let src = Doc::new().unwrap();
         let a = src.add_item(LIST_INBOX, "alpha").unwrap();
-        src.edit_item_notes(&a, "  keep my\nnotes  ").unwrap();
+        set_notes(&src, &a, "  keep my\nnotes  ");
         let json = src.export_json_string();
 
         let dst = Doc::new().unwrap();
@@ -10368,6 +10319,47 @@ mod tests {
     }
 
     // ---- notes delta bridge (spec/notes-plan.md Phase 2) ----
+
+    /// Whole-value notes write for tests: the UTF-16 prefix / suffix diff
+    /// against the current text as one `apply_notes_delta`, the same
+    /// shape the web store's `setItemNotes` sends.
+    fn set_notes(doc: &Doc, id: &str, notes: &str) {
+        let cur: Vec<u16> = doc.get_item(id).unwrap().notes.encode_utf16().collect();
+        let new: Vec<u16> = notes.encode_utf16().collect();
+        let mut prefix = 0;
+        while prefix < cur.len() && prefix < new.len() && cur[prefix] == new[prefix] {
+            prefix += 1;
+        }
+        if prefix > 0
+            && prefix < cur.len().min(new.len())
+            && (0xd800..=0xdbff).contains(&cur[prefix - 1])
+        {
+            prefix -= 1;
+        }
+        let mut suffix = 0;
+        while suffix < cur.len() - prefix
+            && suffix < new.len() - prefix
+            && cur[cur.len() - 1 - suffix] == new[new.len() - 1 - suffix]
+        {
+            suffix += 1;
+        }
+        if suffix > 0 && (0xdc00..=0xdfff).contains(&cur[cur.len() - suffix]) {
+            suffix -= 1;
+        }
+        let mut delta = Vec::new();
+        if prefix > 0 {
+            delta.push(NotesDeltaOp::Retain { retain: prefix });
+        }
+        let deleted = cur.len() - prefix - suffix;
+        if deleted > 0 {
+            delta.push(NotesDeltaOp::Delete { delete: deleted });
+        }
+        let inserted = String::from_utf16(&new[prefix..new.len() - suffix]).unwrap();
+        if !inserted.is_empty() {
+            delta.push(NotesDeltaOp::Insert { insert: inserted });
+        }
+        doc.apply_notes_delta(id, &delta).unwrap();
+    }
 
     fn d_retain(n: usize) -> NotesDeltaOp {
         NotesDeltaOp::Retain { retain: n }
@@ -10470,14 +10462,14 @@ mod tests {
         let mut a = Doc::new().unwrap();
         let id = a.add_item(LIST_INBOX, "item").unwrap();
         let other = a.add_item(LIST_INBOX, "other").unwrap();
-        a.edit_item_notes(&id, "a😀b").unwrap();
-        a.edit_item_notes(&other, "x").unwrap();
+        set_notes(&a, &id, "a😀b");
+        set_notes(&a, &other, "x");
         let mut b = sync_fresh_peer(&mut a, &dek);
 
         assert_eq!(b.subscribe_notes(&id).unwrap(), "a😀b");
         a.apply_notes_delta(&id, &[d_retain(4), d_insert("!")])
             .unwrap();
-        a.edit_item_notes(&other, "xy").unwrap();
+        set_notes(&a, &other, "xy");
         exchange(&mut a, &mut b, &dek);
 
         let evs = b.drain_events();
@@ -10510,7 +10502,7 @@ mod tests {
         let dek = Dek::generate();
         let mut a = Doc::new().unwrap();
         let id = a.add_item(LIST_INBOX, "item").unwrap();
-        a.edit_item_notes(&id, "hello").unwrap();
+        set_notes(&a, &id, "hello");
         let mut b = sync_fresh_peer(&mut a, &dek);
 
         // a's editor is open; a types at the end while b prepends
@@ -10540,24 +10532,6 @@ mod tests {
         assert_eq!(
             notes_deltas(&evs),
             vec![(id.clone(), vec![d_retain(8), d_insert("!")])],
-            "{evs:?}"
-        );
-    }
-
-    #[test]
-    fn undo_of_whole_string_notes_write_streams_a_delta() {
-        let doc = Doc::new().unwrap();
-        let id = doc.add_item(LIST_INBOX, "item").unwrap();
-        doc.edit_item_notes(&id, "one").unwrap();
-        doc.edit_item_notes(&id, "one two").unwrap();
-        doc.subscribe_notes(&id).unwrap();
-        let _ = doc.drain_events();
-        assert!(doc.undo().unwrap());
-        let evs = doc.drain_events();
-        assert_eq!(doc.get_item(&id).unwrap().notes, "one");
-        assert_eq!(
-            notes_deltas(&evs),
-            vec![(id.clone(), vec![d_retain(3), d_delete(4)])],
             "{evs:?}"
         );
     }

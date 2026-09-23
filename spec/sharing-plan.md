@@ -299,7 +299,7 @@ Today an item's `text` and `notes` are plain string values in the item `LoroMap`
 
 - Character-level merges come for free from Loro; no new crate, no new protocol surface, op blobs stay opaque to the server.
 - Pre-release, so rip-and-replace per the premise above: no in-doc migration, no dual-read. The `001_init.sql` rule applies in spirit to the doc layout too. Do it before any doc has more than one member, or a notes migration has to run inside every shared doc.
-- `data-model.md` item table gets the `notes` type change. `edit_item_notes` in core keeps its signature (takes a full string) and diffs it into the container with `LoroText::update`, so CLI and existing callers are untouched. `edit_item_text` is unchanged: a title is a short phrase rewritten whole, and a character merge of two concurrent rewrites interleaves them, so LWW is the better outcome there.
+- `data-model.md` item table gets the `notes` type change. `edit_item_notes` in core kept its signature (takes a full string) and diffed it into the container with `LoroText::update`, so CLI and existing callers were untouched (since removed: `apply_notes_delta` is the only notes write, see `notes-plan.md`). `edit_item_text` is unchanged: a title is a short phrase rewritten whole, and a character merge of two concurrent rewrites interleaves them, so LWW is the better outcome there.
 - Diff translation (`id` kept inside the map so a container handle resolves to its item, see data-model.md) already anticipates child containers under an item; text containers slot into the same path.
 
 ### What this does not commit to

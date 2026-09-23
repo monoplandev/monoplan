@@ -199,6 +199,8 @@ The live-under-caret case is Phase 2.
 - `edit_item_notes(id, notes: &str)`: `ensure_mergeable_text(KEY_NOTES)`
   then `text.update(notes, UpdateOptions::default())` (Myers diff; the
   default has no timeout, so the `UpdateTimeoutError` arm cannot fire).
+  Removed 2026-09-23 once every caller had moved to `apply_notes_delta`;
+  see the Phase 2 note below.
   Empty string: `update("")`, which deletes the content and keeps the key,
   never a key delete (see the resurface note under Mergeable containers).
   Signature unchanged, so CLI, wasm bindings, import, and duplicate-list
@@ -377,14 +379,15 @@ under the caret no longer replaces the whole field. Estimate: 1.5 days.
 `undo_of_whole_string_notes_write_streams_a_delta`,
 `utf16_conversion_and_compose_helpers` in `core/src/doc.rs`;
 `js/web/test/notesDelta.test.ts` for the editor diff / caret transform.
-`edit_item_notes` (whole string, default origin, one undo step) remains
-in core for its tests only (2026-09-23): every client write, including
-the CLI's welcome seed, the web capture form, and duplicate, goes through
-`apply_notes_delta`, so notes never enter the core's UndoManager on
-their own (`import_json` still fills the text container inside its own
-single import commit). The web store's `setItemNotes` is the
-whole-value convenience over the delta path; its undo bookkeeping is
-described under "Undo consequence" above. Not verified in a
+`edit_item_notes` (whole string, default origin, one undo step) is gone
+(2026-09-23): `apply_notes_delta` is the only notes write. Every caller,
+including the CLI's welcome seed, the web capture form, and duplicate,
+sends the diff against the current text, so notes never enter the
+core's UndoManager on their own (`import_json` still fills the text
+container inside its own single import commit). The web store's
+`setItemNotes` is the whole-value convenience over the delta path; its
+undo bookkeeping is described under "Undo consequence" above. A delta
+that changes nothing writes no op and emits no event. Not verified in a
 browser (no automation here): the IME re-placement path and caret
 restoration are covered by reading and the unit tests only.
 

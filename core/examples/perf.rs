@@ -9,7 +9,7 @@
 //!   mergeable `LoroText` shape on a raw Loro doc, and the same with a
 //!   simulated typing history. Reports snapshot size, import, boot-shaped
 //!   walk, notes read, and seal / open of the blob.
-//! - `commit`: per-call cost of `add_item` vs `edit_item_notes` vs the
+//! - `commit`: per-call cost of `add_item` vs `apply_notes_delta` vs the
 //!   bulk `add_items_at`, to separate commit cost from index cost.
 //! - `import`: `import_json` of a synthetic v3 export of the same size.
 
@@ -17,6 +17,7 @@ use loro::{Container, ExportMode, LoroDoc, LoroMap, LoroValue, UpdateOptions, Va
 use monoplan_core::doc::Doc;
 use monoplan_core::{
     Dek, ExportItem, ExportLifecycle, ExportList, ExportSettings, JsonExport, LIST_INBOX,
+    NotesDeltaOp,
 };
 use std::time::Instant;
 
@@ -103,7 +104,13 @@ fn scale(cfg: &Cfg) {
         let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
         let ids = doc.add_items_at(LIST_INBOX, &refs, usize::MAX).unwrap();
         for (i, id) in ids.iter().enumerate() {
-            doc.edit_item_notes(id, &notes_for(cfg, i)).unwrap();
+            doc.apply_notes_delta(
+                id,
+                &[NotesDeltaOp::Insert {
+                    insert: notes_for(cfg, i),
+                }],
+            )
+            .unwrap();
         }
         println!(
             "\n[A  v3 string register, monoplan Doc] build {:?}",
@@ -266,10 +273,15 @@ fn commit(cfg: &Cfg) {
     println!("\n[commit] add_item x{n}: {:?}", t.elapsed());
     let t = Instant::now();
     for (i, id) in ids.iter().enumerate() {
-        doc.edit_item_notes(id, &format!("note {i} some longer text here"))
-            .unwrap();
+        doc.apply_notes_delta(
+            id,
+            &[NotesDeltaOp::Insert {
+                insert: format!("note {i} some longer text here"),
+            }],
+        )
+        .unwrap();
     }
-    println!("  edit_item_notes x{n}: {:?}", t.elapsed());
+    println!("  apply_notes_delta x{n}: {:?}", t.elapsed());
     let doc2 = Doc::new().unwrap();
     let texts: Vec<String> = (0..n).map(|i| format!("item {i}")).collect();
     let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
