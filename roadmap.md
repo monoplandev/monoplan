@@ -92,3 +92,4 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - Faster datetime input - look up the best
 - Consider project view
 - Consider 2-liner by default if task area is small
+- see how long an item has been sitting in focus?
