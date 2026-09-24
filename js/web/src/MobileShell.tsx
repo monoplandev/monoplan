@@ -38,42 +38,48 @@ export function MobileBars(props: {
   const viewActive = (on: boolean) => (on && !props.findOpen ? "" : undefined);
   return (
     <>
+      {/* Left pill: icon over a small text label per button (the label
+          is the accessible name, so no aria-label). */}
       <nav class="mobile-bar mobile-bar-left glass" aria-label={m().common.menu}>
         <button
           type="button"
-          class="mobile-bar-btn"
+          class="mobile-bar-btn mobile-bar-btn--labelled"
           data-active={viewActive(props.view.kind === "focus")}
-          aria-label={m().nav.focus}
           onClick={() => props.setView({ kind: "focus" })}
-          innerHTML={drawingPinSvg}
-        />
+        >
+          <span class="mobile-bar-icon" innerHTML={drawingPinSvg} aria-hidden="true" />
+          <span class="mobile-bar-label">{m().nav.focus}</span>
+        </button>
         <button
           type="button"
-          class="mobile-bar-btn"
+          class="mobile-bar-btn mobile-bar-btn--labelled"
           data-active={viewActive(
             props.view.kind === "list" && props.view.id === "inbox",
           )}
-          aria-label={m().nav.inbox}
           onClick={() => props.setView({ kind: "list", id: "inbox" })}
-          innerHTML={archiveSvg}
-        />
+        >
+          <span class="mobile-bar-icon" innerHTML={archiveSvg} aria-hidden="true" />
+          <span class="mobile-bar-label">{m().nav.inbox}</span>
+        </button>
         <button
           type="button"
-          class="mobile-bar-btn"
+          class="mobile-bar-btn mobile-bar-btn--labelled"
           data-active={viewActive(props.view.kind === "upcoming")}
-          aria-label={m().nav.upcoming}
           onClick={() => props.setView({ kind: "upcoming" })}
-          innerHTML={calendarSvg}
-        />
+        >
+          <span class="mobile-bar-icon" innerHTML={calendarSvg} aria-hidden="true" />
+          <span class="mobile-bar-label">{m().nav.upcoming}</span>
+        </button>
         <button
           type="button"
-          class="mobile-bar-btn"
+          class="mobile-bar-btn mobile-bar-btn--labelled"
           data-active={props.findOpen ? "" : undefined}
-          aria-label={m().find.placeholder}
           aria-expanded={props.findOpen}
           onClick={props.onFind}
-          innerHTML={hamburgerMenuSvg}
-        />
+        >
+          <span class="mobile-bar-icon" innerHTML={hamburgerMenuSvg} aria-hidden="true" />
+          <span class="mobile-bar-label">{m().common.menu}</span>
+        </button>
       </nav>
       <Show when={props.onAdd}>
         {(onAdd) => (

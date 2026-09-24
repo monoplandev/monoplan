@@ -4126,6 +4126,34 @@ input.task-check:hover {
   height: 22px;
 }
 
+/* Left-pill buttons: the glyph over a small label, in a rounded box
+   wide enough for the longest label rather than the icon-only circle. */
+.mobile-bar-btn--labelled {
+  flex-direction: column;
+  gap: 2px;
+  width: auto;
+  min-width: 44px;
+  padding: 0 8px;
+  border-radius: 14px;
+}
+
+.mobile-bar-btn--labelled svg {
+  width: 20px;
+  height: 20px;
+}
+
+.mobile-bar-icon {
+  display: inline-flex;
+  line-height: 0;
+}
+
+.mobile-bar-label {
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
 .mobile-bar-btn:active {
   transform: scale(0.92);
   background: rgba(127, 127, 127, 0.18);
