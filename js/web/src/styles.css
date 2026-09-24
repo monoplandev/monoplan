@@ -2454,6 +2454,9 @@ input.task-check:hover {
   appearance: none;
   -webkit-appearance: none;
   width: fit-content;
+  /* Wider than the 3px badge gap so the list glyph sits clear of the
+     name at the dialog's larger badge size. */
+  gap: 8px;
   /* Widened from 8em when the list glyph joined the trigger, so the name
      keeps roughly the same room before it ellipsizes. */
   max-width: 10em;
@@ -2694,8 +2697,8 @@ input.task-check:hover {
    scale with them. */
 .task-dialog-badges .badge {
   font-size: 14px;
-  padding: 4px;
-  height: 28px;
+  padding: 4px 8px;
+  height: 32px;
   box-sizing: border-box;
 }
 
@@ -2816,9 +2819,12 @@ input.task-check:hover {
   height: 14px;
 }
 
-/* Fills its grid cell, so start and end split the row evenly. */
+/* Fills its grid cell, so start and end split the row evenly; 32px tall
+   like the date input and the dialog badges. */
 .task-dialog-time-input {
   width: 100%;
+  height: 32px;
+  box-sizing: border-box;
   min-width: 0;
   margin: 0;
   padding: 2px 24px 2px 26px;
@@ -2864,7 +2870,7 @@ input.task-check:hover {
   position: relative;
   display: inline-flex;
   align-items: center;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -2884,10 +2890,12 @@ input.task-check:hover {
   height: 14px;
 }
 
-/* Sized for its longest reading ("Wed 23 Sept 2027") rather than the
-   row, so it stays a field-sized pill like the time input above it. */
+/* Fills the row (the anchor grows to take it); a fixed 32px height
+   matches the dialog badges. */
 .task-dialog-when-input {
-  width: 150px;
+  width: 100%;
+  height: 32px;
+  box-sizing: border-box;
   min-width: 0;
   margin: 0;
   padding: 2px 24px 2px 26px;
@@ -3277,8 +3285,8 @@ input.task-check:hover {
     padding-bottom: var(--mobile-bar-clearance);
   }
 
-  /* Wider badges: extra side padding over the desktop 4px (height is
-     pinned at 28px by the base dialog badge rule). */
+  /* Wider badges: extra side padding over the desktop 8px (height is
+     pinned at 32px by the base dialog badge rule). */
   .task-page .task-dialog-badges .badge {
     padding: 4px 10px;
   }
