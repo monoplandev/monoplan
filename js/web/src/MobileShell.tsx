@@ -4,18 +4,19 @@
 // Workspace.tsx). The left pill leads with icon-only jumps to the three
 // fixed views (Focus, Inbox, Upcoming, the same order as the sidebar's
 // top group, minus Done / Bin), then Find (FindSheet.tsx, which doubles
-// as the list switcher: it lists every view on an empty query, marks
-// the current one, and carries the Settings entry), and the account/sync
-// indicator (`status`, mirroring the desktop sidebar footer); the right
-// pill is Add. No custom drawer: the DOM can't fake a native sheet
-// convincingly, so we don't try.
+// as the list switcher: on an empty query it lists Done, Bin and the
+// user lists (the views this pill already reaches are left out), marks
+// the current one, and carries the account/sync indicator and Settings;
+// the page sits under these pills and the Find button toggles it, marked
+// active while it's up); the right pill is Add. No custom drawer: the
+// DOM can't fake a native sheet convincingly, so we don't try.
 
-import { Show, type JSX } from "solid-js";
+import { Show } from "solid-js";
 import { useAppI18n } from "./i18n.tsx";
 import archiveSvg from "./icons/archive.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
 import drawingPinSvg from "./icons/drawing-pin.svg?raw";
-import magnifyingGlassSvg from "./icons/magnifying-glass.svg?raw";
+import hamburgerMenuSvg from "./icons/hamburger-menu.svg?raw";
 import plusSvg from "./icons/plus.svg?raw";
 import type { ViewKey } from "./prefs.ts";
 
@@ -24,23 +25,24 @@ export function MobileBars(props: {
       matching `view` is marked active. */
   view: ViewKey;
   setView: (v: ViewKey) => void;
+  /** Toggles the Find page; `findOpen` marks the button while it's up. */
   onFind: () => void;
+  findOpen: boolean;
   /** null hides the add pill (views that can't capture). */
   onAdd: (() => void) | null;
   addDisabled: boolean;
-  /** The account/sync indicator (StatusSlot), rendered last in the left
-      pill. Passed in rather than owned here so it stays mounted exactly
-      once per session (its first-run auth prompt fires on mount). */
-  status: JSX.Element;
 }) {
   const { m } = useAppI18n();
+  // One active pill at a time: while the Find page is up it covers the
+  // view, so the view's own button gives up its mark to the Find button.
+  const viewActive = (on: boolean) => (on && !props.findOpen ? "" : undefined);
   return (
     <>
       <nav class="mobile-bar mobile-bar-left glass" aria-label={m().common.menu}>
         <button
           type="button"
           class="mobile-bar-btn"
-          data-active={props.view.kind === "focus" ? "" : undefined}
+          data-active={viewActive(props.view.kind === "focus")}
           aria-label={m().nav.focus}
           onClick={() => props.setView({ kind: "focus" })}
           innerHTML={drawingPinSvg}
@@ -48,11 +50,9 @@ export function MobileBars(props: {
         <button
           type="button"
           class="mobile-bar-btn"
-          data-active={
-            props.view.kind === "list" && props.view.id === "inbox"
-              ? ""
-              : undefined
-          }
+          data-active={viewActive(
+            props.view.kind === "list" && props.view.id === "inbox",
+          )}
           aria-label={m().nav.inbox}
           onClick={() => props.setView({ kind: "list", id: "inbox" })}
           innerHTML={archiveSvg}
@@ -60,7 +60,7 @@ export function MobileBars(props: {
         <button
           type="button"
           class="mobile-bar-btn"
-          data-active={props.view.kind === "upcoming" ? "" : undefined}
+          data-active={viewActive(props.view.kind === "upcoming")}
           aria-label={m().nav.upcoming}
           onClick={() => props.setView({ kind: "upcoming" })}
           innerHTML={calendarSvg}
@@ -68,11 +68,12 @@ export function MobileBars(props: {
         <button
           type="button"
           class="mobile-bar-btn"
+          data-active={props.findOpen ? "" : undefined}
           aria-label={m().find.placeholder}
+          aria-expanded={props.findOpen}
           onClick={props.onFind}
-          innerHTML={magnifyingGlassSvg}
+          innerHTML={hamburgerMenuSvg}
         />
-        {props.status}
       </nav>
       <Show when={props.onAdd}>
         {(onAdd) => (

@@ -4141,14 +4141,6 @@ input.task-check:hover {
   background: rgba(127, 127, 127, 0.14);
 }
 
-/* The sync indicator rides in the left pill as one more pill button:
-   drop the sidebar-footer negative margin and let `.mobile-bar-btn`
-   size it. */
-.mobile-bar .connection-indicator {
-  margin: 0;
-  color: var(--text);
-}
-
 /* Mobile board lanes: the per-lane Add is a primary capture affordance
    on a phone, so give it a proper tap target and a legible glyph (the
    card-stack icon's "+" is only a third of its viewBox, so it needs to
@@ -4215,80 +4207,69 @@ input.task-check:hover {
   }
 }
 
-/* Mobile Find sheet (FindSheet.tsx): the phone's list switcher. A
-   floating card over a scrim in the palette's z band (above the pills,
-   which the scrim hides), inset from every screen edge so it reads as a
-   surface hovering over the page: a search field beside an explicit
-   Close, then the palette's row anatomy at thumb scale. The row for the
-   current view takes the nav's selected fill. */
+/* Mobile Find sheet (FindSheet.tsx): the phone's list switcher. A full
+   page on the app background, fixed under the floating pills (their z
+   band is 50), which stay live as the way out: the Find pill toggles the
+   page, the fixed-view pills jump off it. A search field up top, then the
+   palette's row anatomy at thumb scale, with scroll-end clearance for the
+   pills. The row for the current view takes the nav's selected fill. */
 .find-sheet {
   position: fixed;
   inset: 0;
-  z-index: 101;
-  display: flex;
-  /* Light scrim: enough to mute the page and hide the pills, but light
-     enough that the glass card above stays bright — the card's blur
-     samples the scrim too, so every point here darkens the card. */
-  background: rgba(0, 0, 0, 0.1);
-  /* Tighter at the sides than top/bottom: the card wants near-full
-     width for row titles while still clearing the screen edge. */
-  padding:
-    calc(1em + env(safe-area-inset-top))
-    calc(0.5em + env(safe-area-inset-right))
-    calc(1em + env(safe-area-inset-bottom))
-    calc(0.5em + env(safe-area-inset-left));
-}
-
-[data-theme="dark"] .find-sheet {
-  background: rgba(0, 0, 0, 0.3);
-}
-
-.find-sheet__panel {
+  z-index: 40;
   display: flex;
   flex-direction: column;
-  flex: 1;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  border-radius: 16px;
+  padding-top: env(safe-area-inset-top);
+  padding-right: env(safe-area-inset-right);
+  padding-left: env(safe-area-inset-left);
   color: var(--text);
-  /* Same liquid-glass recipe as the pills, with a heavier fill: the
-     card sits over the scrim, so a thin fill blends with the dimmed page
-     into a flat gray. ~85% white keeps a hint of the page ghosting
-     through while reading as a bright surface. */
-  border: 1px solid rgba(255, 255, 255, 0.45);
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
-  /* No drop shadow: the scrim already separates the card from the page.
-     Only the inset top highlight from the glass recipe remains. */
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  background: var(--bg);
 }
 
-[data-theme="dark"] .find-sheet__panel {
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(30, 30, 32, 0.85);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
+/* Top line: the sync / account indicator at the left edge, Settings at
+   the right, no rule beneath. */
 .find-sheet__header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
+  justify-content: space-between;
+  padding: 8px 12px 0;
+}
+
+/* The indicator at the Settings icon's size: undo `.connection-indicator`'s
+   desktop-footer negative margin and give it a thumb-sized box. */
+.find-sheet__status {
+  width: 40px;
+  height: 40px;
+  margin: 0;
+  padding: 0;
+  border-radius: 8px;
+  color: var(--text);
+}
+
+.find-sheet__status svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* The search field on its own line, inset to the cards' side margins,
+   staying put while the cards scroll under it. */
+.find-sheet__search {
+  padding: 4px 16px 0;
 }
 
 /* 16px floor so iOS doesn't zoom the page on focus. */
 .find-sheet__input {
-  flex: 1;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
   min-width: 0;
   height: 40px;
   padding: 0 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  /* Tinted rather than opaque so the field sits on the glass card
-     instead of punching a solid block through it. */
   background: rgba(127, 127, 127, 0.12);
   color: var(--text);
   font-size: 16px;
@@ -4301,16 +4282,18 @@ input.task-check:hover {
   border-color: var(--text-faint);
 }
 
-.find-sheet__close {
+/* Settings: an icon at the field's height, on its own line. */
+.find-sheet__settings {
   flex-shrink: 0;
+  width: 40px;
   height: 40px;
-  padding: 0 4px;
-  border: 0;
-  background: transparent;
+  border-radius: 8px;
   color: var(--text);
-  font-size: 16px;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
+}
+
+.find-sheet__settings svg {
+  width: 20px;
+  height: 20px;
 }
 
 .find-sheet__results {
@@ -4318,27 +4301,40 @@ input.task-check:hover {
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 6px 8px 24px;
+  padding: 16px 16px var(--mobile-bar-clearance);
 }
 
-/* Group break between the fixed views and the lists in the default
-   menu: a hairline with breathing room, inset to the row's radius. */
-.find-sheet__divider {
-  height: 0.5px;
-  margin: 6px 8px;
-  background: var(--border);
+/* iOS inset-grouped cards: each group (the fixed views; Inbox + the
+   lists; a query's results) is a rounded surface lifted off the page
+   background, rows stacked edge to edge inside it with a hairline
+   between them inset to the text's left edge. */
+.find-sheet__group {
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.find-sheet__group + .find-sheet__group {
+  margin-top: 20px;
+}
+
+/* The page and the elevated surface sit a shade apart in dark mode, so
+   the card takes a translucent lift instead. */
+[data-theme="dark"] .find-sheet__group {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 /* Buttons rather than option divs — plain tap targets, no listbox
    semantics. Reset the button chrome so `.palette__item` styling reads
    through; taller than the desktop row to match the nav drawer's mobile
-   bump. */
+   bump. Square corners: the card carries the radius. */
 .find-sheet__row {
+  position: relative;
   width: 100%;
   min-height: 44px;
-  padding: 8px 12px;
+  padding: 10px 16px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 0;
   background: transparent;
   font: inherit;
   font-size: 16px;
@@ -4346,14 +4342,25 @@ input.task-check:hover {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Row separator: a hairline from the text's left edge (the row inset
+   plus the 18px glyph and its 8px gap) to the card's right edge, on every
+   row but the last. */
+.find-sheet__row:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 42px;
+  right: 0;
+  bottom: 0;
+  height: 0.5px;
+  background: var(--border);
+}
+
 .find-sheet__row:active {
   background: var(--palette-select-bg);
 }
 
-/* Current view: a selected-row fill, not a check. The card is now
-   bright enough that the nav's `--bg-active` grey reads as a selection
-   rather than vanishing into a tinted surface (a white row would no
-   longer lift off it). */
+/* Current view: a selected-row fill, not a check, the nav's `--bg-active`
+   grey on the plain page background. */
 .find-sheet__row[aria-current="true"] {
   background: var(--bg-active);
 }

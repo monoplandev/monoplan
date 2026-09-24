@@ -7,15 +7,15 @@
 // autofocused: switching lists is the common case on a phone, and popping
 // the keyboard on open would cover half the list before a tap lands.
 //
-// The default menu (empty query) ends with a Settings row: the bottom
-// pill no longer carries Settings, so this is the phone's only way in.
-// It is not a FindResult and never appears in query results.
+// The top line carries the account/sync indicator (left) and a Settings
+// icon (right): the bottom pill carries neither, so this is the phone's
+// only way into both. Neither is a FindResult.
 //
-// Rendered as a full-screen surface above the floating pills (the
-// palette's z band) with an explicit Close, since there is no scrim edge
-// to tap outside of.
+// Rendered as a full page under the floating pills (which stay live):
+// no scrim, no card, no Close. The Find pill toggles it, a row pick or a
+// pill jump dismisses it, and a hardware Escape still closes it.
 
-import { createEffect, For, onCleanup, Show } from "solid-js";
+import { createEffect, For, onCleanup, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import type { DocApp } from "./sync/store.ts";
 import type { ViewKey } from "./prefs.ts";
@@ -29,6 +29,16 @@ import {
   isFixedView,
   type FindResult,
 } from "./findResults.tsx";
+
+/** Rows the default menu leaves out: the fixed views the bottom pill
+ *  already reaches (Focus, Inbox, Upcoming). They still match a typed
+ *  query, so search stays complete. */
+function onPill(item: FindResult): boolean {
+  return (
+    item.kind === "view" &&
+    (item.id === "focus" || item.id === "inbox" || item.id === "upcoming")
+  );
+}
 
 /** Whether a result row denotes the view currently on screen. Items are
  *  never "current" — they live inside a view rather than being one. */
@@ -49,6 +59,9 @@ export function FindSheet(props: {
   onSelect?: (result: FindResult) => void;
   /** Opens the Settings dialog; the sheet closes first. */
   onOpenSettings: () => void;
+  /** The account/sync indicator (StatusSlot), top left of the page. Its
+   *  popover / sign-in dialog open over the page, which stays put. */
+  status: JSX.Element;
   /** Count badges, same sources and rules as the desktop nav (see
    *  `Nav`): Focus shows only when non-zero, Bin always, Inbox always
    *  ("-" for zero), other lists only under `showListCounts`. */
@@ -110,19 +123,46 @@ export function FindSheet(props: {
     props.onOpenChange(false);
   }
 
+  const row = (item: FindResult) => (
+    <button
+      type="button"
+      class="palette__item find-sheet__row"
+      classList={{
+        "palette__item--binned": findResultLifecycle(item) === "binned",
+      }}
+      aria-current={isCurrent(item, props.view) ? "true" : undefined}
+      onClick={() => selectItem(item)}
+    >
+      <FindResultBody app={props.app} item={item} />
+      <Show when={countLabel(item)}>
+        {(count) => <span class="find-sheet__count">{count()}</span>}
+      </Show>
+    </button>
+  );
+
   return (
     <Show when={props.open}>
       <Portal>
-        {/* Scrim + floating card: the outer layer dims the page (and hides
-            the pills beneath); a tap on it, outside the card, dismisses. */}
-        <div
-          class="find-sheet"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) props.onOpenChange(false);
-          }}
-        >
-        <div class="find-sheet__panel" role="dialog" aria-label={m().find.placeholder}>
+        {/* Full-page surface below the pills' z band, so the left pill
+            (Find toggles, the fixed views jump) stays the way out. */}
+        <div class="find-sheet" role="dialog" aria-label={m().find.placeholder}>
+          {/* Top line: the sync / account indicator at the left, Settings
+              at the right; the search field on its own line beneath,
+              above the cards. */}
           <div class="find-sheet__header">
+            {props.status}
+            <button
+              type="button"
+              class="icon-button find-sheet__settings"
+              aria-label={m().nav.settings}
+              onClick={() => {
+                props.onOpenChange(false);
+                props.onOpenSettings();
+              }}
+              innerHTML={mixerHzSvg}
+            />
+          </div>
+          <div class="find-sheet__search">
             <input
               class="find-sheet__input"
               type="search"
@@ -133,73 +173,42 @@ export function FindSheet(props: {
               autocapitalize="off"
               autocorrect="off"
             />
-            <button
-              type="button"
-              class="find-sheet__close"
-              onClick={() => props.onOpenChange(false)}
-            >
-              {m().common.close}
-            </button>
           </div>
           <div ref={listRef} class="find-sheet__results">
-            <For each={find.items()}>
-              {(item, index) => (
+            {/* Default menu (empty query): two inset-grouped cards, iOS
+                style, one for the fixed views the pill doesn't reach
+                (Done, Bin) and one for the user lists. Query results are
+                one ranked run in a single card. */}
+            <Show
+              when={find.input().trim()}
+              fallback={
                 <>
-                {/* Default menu only: the sidebar's break between the
-                    fixed views and the lists group (Inbox + user lists),
-                    drawn above the first non-fixed row. Query results
-                    are one ranked run and get no break. */}
-                <Show
-                  when={
-                    !find.input().trim() &&
-                    index() > 0 &&
-                    !isFixedView(item) &&
-                    isFixedView(find.items()[index() - 1]!)
-                  }
-                >
-                  <div class="find-sheet__divider" role="separator" />
-                </Show>
-                <button
-                  type="button"
-                  class="palette__item find-sheet__row"
-                  classList={{
-                    "palette__item--binned": findResultLifecycle(item) === "binned",
-                  }}
-                  aria-current={isCurrent(item, props.view) ? "true" : undefined}
-                  onClick={() => selectItem(item)}
-                >
-                  <FindResultBody app={props.app} item={item} />
-                  <Show when={countLabel(item)}>
-                    {(count) => <span class="find-sheet__count">{count()}</span>}
-                  </Show>
-                </button>
+                  <div class="find-sheet__group">
+                    <For each={find.items().filter((i) => isFixedView(i) && !onPill(i))}>
+                      {row}
+                    </For>
+                  </div>
+                  <div class="find-sheet__group">
+                    <For each={find.items().filter((i) => !isFixedView(i) && !onPill(i))}>
+                      {row}
+                    </For>
+                  </div>
                 </>
-              )}
-            </For>
-            {/* An empty query always yields the default menu (built-ins are
-                unconditional), so an empty result set means a query with no
-                matches. */}
-            <Show when={find.items().length === 0}>
-              <div class="palette__empty">{m().find.noMatches}</div>
-            </Show>
-            {/* Default menu only: Settings sits below the lists, behind
-                its own break, as the last thing in the switcher. */}
-            <Show when={!find.input().trim()}>
-              <div class="find-sheet__divider" role="separator" />
-              <button
-                type="button"
-                class="palette__item find-sheet__row"
-                onClick={() => {
-                  props.onOpenChange(false);
-                  props.onOpenSettings();
-                }}
+              }
+            >
+              {/* An empty query always yields the default menu (built-ins
+                  are unconditional), so an empty result set here means a
+                  query with no matches. */}
+              <Show
+                when={find.items().length > 0}
+                fallback={<div class="palette__empty">{m().find.noMatches}</div>}
               >
-                <span class="palette__item-icon" innerHTML={mixerHzSvg} aria-hidden="true" />
-                <span class="palette__item-name">{m().nav.settings}</span>
-              </button>
+                <div class="find-sheet__group">
+                  <For each={find.items()}>{row}</For>
+                </div>
+              </Show>
             </Show>
           </div>
-        </div>
         </div>
       </Portal>
     </Show>

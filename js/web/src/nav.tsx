@@ -237,6 +237,35 @@ function ConnectionStatusPopover(props: {
  *  connection-status popover once authed. Lives in the sidebar footer
  *  beside the app menu (see `Workspace`), rendered exactly once, so its
  *  auto-open-on-mount auth dialog fires only once. */
+/** The first-run sign-in prompt on its own: for shells where the
+ *  indicator isn't mounted at boot (mobile keeps it in the Find page),
+ *  so the prompt still fires on load. Same dismissed-flag rules as
+ *  `StatusSlot`'s built-in prompt. */
+export function FirstRunAuthPrompt(props: {
+  session: Session;
+  onSession: (s: Session) => void;
+}) {
+  const [authOpen, setAuthOpen] = createSignal(
+    props.session.anonymous && !loadAuthPromptDismissed(),
+  );
+  const onOpenChange = (open: boolean) => {
+    if (!open) markAuthPromptDismissed();
+    setAuthOpen(open);
+  };
+  return (
+    <Show when={props.session.anonymous}>
+      <AuthDialog
+        open={authOpen()}
+        onOpenChange={onOpenChange}
+        onSession={(s) => {
+          setAuthOpen(false);
+          props.onSession(s);
+        }}
+      />
+    </Show>
+  );
+}
+
 export function StatusSlot(props: {
   /** Extra class on the indicator button (mobile's glass chrome). */
   class?: string;
@@ -245,6 +274,9 @@ export function StatusSlot(props: {
   lastSyncAt: number | null;
   session: Session;
   onSession: (s: Session) => void;
+  /** `false` when a `FirstRunAuthPrompt` elsewhere owns the first-run
+   *  prompt, so this slot only opens sign-in on tap. Default true. */
+  autoPrompt?: boolean;
 }) {
   const { m } = useAppI18n();
   // Auto-prompt anonymous users on first mount unless they've dismissed the
@@ -252,7 +284,9 @@ export function StatusSlot(props: {
   // reloads don't re-nag. The whole workspace remounts on session swap
   // (App's keyed <Show>); logout clears the flag so it re-prompts.
   const [authOpen, setAuthOpen] = createSignal(
-    props.session.anonymous && !loadAuthPromptDismissed(),
+    props.autoPrompt !== false &&
+      props.session.anonymous &&
+      !loadAuthPromptDismissed(),
   );
   const onOpenChange = (open: boolean) => {
     if (!open) markAuthPromptDismissed();

@@ -49,7 +49,7 @@ import { restoreCapturedPositions } from "./linger.ts";
 import { createPopoverTooltipGuard } from "./popoverTooltip.ts";
 import type { ListOption } from "./ListPicker.tsx";
 import { MovePalette } from "./MovePalette.tsx";
-import { EditableNavLabel, Nav, NavFindButton, NavMenu, StatusSlot } from "./nav.tsx";
+import { EditableNavLabel, Nav, NavFindButton, NavMenu, FirstRunAuthPrompt, StatusSlot } from "./nav.tsx";
 import { MobileBars } from "./MobileShell.tsx";
 import { digitNavTarget } from "./navShortcuts.ts";
 import {
@@ -2333,6 +2333,21 @@ export function Workspace(props: {
           onOpenChange={onFindOpenChange}
           onSelect={onFindPick}
           onOpenSettings={() => setSettingsOpen(true)}
+          status={
+            /* Mobile: the sync indicator sits in the Find page's top
+               line (there's no sidebar footer, and the pill doesn't carry
+               it). It mounts with the page, so the first-run auth prompt
+               is owned by the FirstRunAuthPrompt beside MobileBars. */
+            <StatusSlot
+              class="find-sheet__status"
+              app={app}
+              online={session.online()}
+              lastSyncAt={session.lastSyncAt()}
+              session={session.session()}
+              onSession={session.swapSession}
+              autoPrompt={false}
+            />
+          }
           focusCount={state.focusOrder.length}
           binCount={state.binCount}
           openCountsByList={openCountsByList()}
@@ -2937,37 +2952,35 @@ export function Workspace(props: {
         <MobileBars
           view={view()}
           setView={(v) => {
-            // The pills stay live over an open item's page (as with
-            // Find); close it so the destination view is visible.
+            // The pills stay live over an open item's page and over the
+            // Find page; close both so the destination view is visible.
             setOpenItemId(null);
+            if (findOpen()) onFindOpenChange(false);
             navigateTo(v);
           }}
-          onFind={() => setFindOpen(true)}
+          onFind={() => onFindOpenChange(!findOpen())}
           onAdd={
             (view().kind === "list" || view().kind === "focus") &&
             boardListId() === null
               ? () => {
-                  // The pills stay live over an open item's page; Add
-                  // captures into the list behind it, so close it first.
+                  // The pills stay live over an open item's page and the
+                  // Find page; Add captures into the list behind them,
+                  // so close both first.
                   setOpenItemId(null);
+                  if (findOpen()) onFindOpenChange(false);
                   startDraft();
                 }
               : null
           }
+          findOpen={findOpen()}
           addDisabled={draft() !== null}
-          status={
-            /* Mobile: the sync indicator rides in the left pill (there's
-               no sidebar footer). Always mounted while mobile so its
-               first-run auth prompt still fires on load, as on desktop. */
-            <StatusSlot
-              class="mobile-bar-btn"
-              app={app}
-              online={session.online()}
-              lastSyncAt={session.lastSyncAt()}
-              session={session.session()}
-              onSession={session.swapSession}
-            />
-          }
+        />
+        {/* Always mounted while mobile, so the first-run auth prompt
+            still fires on load as on desktop, where the sidebar's
+            StatusSlot owns it. */}
+        <FirstRunAuthPrompt
+          session={session.session()}
+          onSession={session.swapSession}
         />
       </Show>
     </div>
