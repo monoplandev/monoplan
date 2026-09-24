@@ -74,6 +74,7 @@ import {
   OPEN_STATES,
   type DocApp,
   type ItemView,
+  type UndoOutcome,
   type ListView,
   type RecentDoneEntry,
   type WorkflowState,
@@ -1789,6 +1790,48 @@ export function Workspace(props: {
       dndHandle?.scrollToKey(id);
     }, 0);
   };
+
+  // After an undo / redo lands, put the user on what it changed. An item
+  // the current view already shows (including a board's Done lane and a
+  // lingering row) is selected in place, several at once when the step
+  // touched several; otherwise the first surviving item is revealed in
+  // its home view (Bin / Done / list). Ids that no longer resolve (an
+  // undone add) are ignored, so an item-less step does nothing beyond
+  // landing on a list the step touched, if that list still exists.
+  const revealUndoOutcome = (outcome: UndoOutcome): void => {
+    const surviving = outcome.itemIds.filter((id) => state.itemsById[id]);
+    if (surviving.length === 0) {
+      const listId = outcome.listIds.find((id) => state.listsById[id]);
+      if (listId === undefined) return;
+      const target: ViewKey = { kind: "list", id: listId };
+      if (viewKey(target) !== viewKey(view())) setView(target);
+      return;
+    }
+    const visible = withBoardDone(new Set(items().map((it) => it.id)));
+    const inView = surviving.filter((id) => visible.has(id));
+    if (inView.length === 0) {
+      revealItem(surviving[0], viewForItem(state.itemsById[surviving[0]]));
+      return;
+    }
+    if (boardListId() !== null) {
+      // The board reveals one lane at a time: keep the ids sharing the
+      // first one's lane (a done card's lane is Done, not its state).
+      const laneOf = (id: string): string => {
+        const it = state.itemsById[id];
+        return isDone(it) && !isBinned(it) ? "done" : it.state;
+      };
+      const lane = laneOf(inView[0]);
+      setBoardRevealIds(inView.filter((id) => laneOf(id) === lane));
+      return;
+    }
+    // Same deferral as `revealItem`: past the store-driven re-render so
+    // the dnd's source has the rows when the scroll lands.
+    setTimeout(() => {
+      selection.setSelectedKeys(inView);
+      dndHandle?.scrollToKey(inView[0]);
+    }, 0);
+  };
+  onCleanup(app.onUndoRedo(revealUndoOutcome));
 
   // Selecting a palette result: jump to the view that contains it. Built-in
   // views (Focus / Upcoming / Done / Bin / Inbox) and lists go straight to

@@ -358,11 +358,22 @@ export interface DocApp {
   redo(): boolean;
   canUndo(): boolean;
   canRedo(): boolean;
+  /** Subscribe to applied undo / redo steps. The outcome names the items
+   *  and lists whose events the step produced, in event order, so the
+   *  view can land the user on what just changed. An id may no longer
+   *  resolve (an undone add removes the item outright). */
+  onUndoRedo(cb: (outcome: UndoOutcome) => void): () => void;
   withActionBatch<T>(fn: () => T): T;
   /** Additive JSON import: lists in `json` are created as fresh user
    *  lists, items get fresh IDs and route into them (or local `main`).
    *  Single Loro commit → one undo step. */
   importJson(json: string): ImportSummary;
+}
+
+/** What an undo / redo step touched: see `DocApp.onUndoRedo`. */
+export interface UndoOutcome {
+  itemIds: string[];
+  listIds: string[];
 }
 
 export interface ImportSummary {
@@ -478,6 +489,38 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
   const redoStack: UndoEntry[] = [];
   // Notes writes made inside the open action batch, folded into its entry.
   let pendingBatchNotes: NotesStep[] = [];
+  // While an undo / redo step is being applied, every drained event's
+  // subject id is collected here (items and lists separately, deduped,
+  // event order) and handed to `onUndoRedo` listeners once it lands.
+  let undoTouched: UndoOutcome | null = null;
+  const undoListeners = new Set<(outcome: UndoOutcome) => void>();
+  const collectTouched = (events: readonly AppEventJs[]): void => {
+    const touched = undoTouched;
+    if (!touched) return;
+    for (const ev of events) {
+      if (!ev.id) continue;
+      const bucket = ev.kind.startsWith("item")
+        ? touched.itemIds
+        : ev.kind.startsWith("list")
+          ? touched.listIds
+          : null;
+      if (bucket && !bucket.includes(ev.id)) bucket.push(ev.id);
+    }
+  };
+  // Run `step` with touched-id collection on; notify listeners when it
+  // reports a step was applied.
+  const withUndoOutcome = (step: () => boolean): boolean => {
+    undoTouched = { itemIds: [], listIds: [] };
+    let did = false;
+    try {
+      did = step();
+    } finally {
+      const outcome = undoTouched;
+      undoTouched = null;
+      if (did && outcome) for (const cb of undoListeners) cb(outcome);
+    }
+    return did;
+  };
 
   // ---- listOpen helpers: every write is list-local. `insertOpen`
   // removes any existing occurrence first so re-dispatch of an id
@@ -805,6 +848,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       if (!ev) break;
       events.push(ev);
     }
+    collectTouched(events);
     const coarse = shouldUseCoarseProjection(events);
     const fullResync = events.some((ev) => ev.kind === "fullResync");
     // Batch so a multi-event drain (e.g. addItemsAt for a multi-line
@@ -956,6 +1000,56 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
         pendingActionSteps = 0;
         pendingBatchNotes = [];
       }
+    }
+  };
+
+  // One undo / redo step off its stack. Both run under
+  // `withUndoOutcome`, which reports the touched ids on success.
+  const undoStep = (): boolean => {
+    for (;;) {
+      const entry = undoStack.pop();
+      if (entry == null) return false;
+      // Notes first (newest first), then the core steps. A notes step
+      // the core rejects is dropped from the entry.
+      const notes = entry.notes.filter((n) => applyNotesStep(n.id, n.after, n.before));
+      let applied = 0;
+      for (let i = 0; i < entry.steps; i++) {
+        if (!engine.undo()) break;
+        applied++;
+      }
+      if (applied === 0 && notes.length === 0) {
+        if (entry.steps > 0) {
+          undoStack.push(entry);
+          return false;
+        }
+        continue;
+      }
+      flush();
+      redoStack.push({ steps: applied, notes });
+      return true;
+    }
+  };
+
+  const redoStep = (): boolean => {
+    for (;;) {
+      const entry = redoStack.pop();
+      if (entry == null) return false;
+      let applied = 0;
+      for (let i = 0; i < entry.steps; i++) {
+        if (!engine.redo()) break;
+        applied++;
+      }
+      const notes = entry.notes.filter((n) => applyNotesStep(n.id, n.before, n.after));
+      if (applied === 0 && notes.length === 0) {
+        if (entry.steps > 0) {
+          redoStack.push(entry);
+          return false;
+        }
+        continue;
+      }
+      flush();
+      undoStack.push({ steps: applied, notes });
+      return true;
     }
   };
 
@@ -1164,56 +1258,22 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       // An open session is settled first so Cmd+Z right after typing
       // (blur pending) reverts the typing, not an older step.
       endNotesSession();
-      for (;;) {
-        const entry = undoStack.pop();
-        if (entry == null) return false;
-        // Notes first (newest first), then the core steps. A notes step
-        // the core rejects is dropped from the entry.
-        const notes = entry.notes.filter((n) => applyNotesStep(n.id, n.after, n.before));
-        let applied = 0;
-        for (let i = 0; i < entry.steps; i++) {
-          if (!engine.undo()) break;
-          applied++;
-        }
-        if (applied === 0 && notes.length === 0) {
-          if (entry.steps > 0) {
-            undoStack.push(entry);
-            return false;
-          }
-          continue;
-        }
-        flush();
-        redoStack.push({ steps: applied, notes });
-        return true;
-      }
+      return withUndoOutcome(undoStep);
     },
     redo() {
-      for (;;) {
-        const entry = redoStack.pop();
-        if (entry == null) return false;
-        let applied = 0;
-        for (let i = 0; i < entry.steps; i++) {
-          if (!engine.redo()) break;
-          applied++;
-        }
-        const notes = entry.notes.filter((n) => applyNotesStep(n.id, n.before, n.after));
-        if (applied === 0 && notes.length === 0) {
-          if (entry.steps > 0) {
-            redoStack.push(entry);
-            return false;
-          }
-          continue;
-        }
-        flush();
-        undoStack.push({ steps: applied, notes });
-        return true;
-      }
+      return withUndoOutcome(redoStep);
     },
     canUndo() {
       return undoStack.length > 0;
     },
     canRedo() {
       return redoStack.length > 0;
+    },
+    onUndoRedo(cb) {
+      undoListeners.add(cb);
+      return () => {
+        undoListeners.delete(cb);
+      };
     },
     withActionBatch,
   };
