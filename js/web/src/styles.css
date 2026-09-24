@@ -3066,9 +3066,10 @@ input.task-check:hover {
   border-top: 1px solid var(--border-row);
 }
 
-/* Optional time under the calendar (`when` mode): the typed time picker
-   the task dialog uses, ruled off from the grid. The picker fills the
-   row so "All day" reads as a line under the month. */
+/* Optional time under the calendar (`when` mode): the task dialog's
+   start / end time row, ruled off from the grid. The row spans the
+   dialog so "All day" reads as a line under the month and the end
+   field takes the other half once a start is set. */
 .deadline-dialog-time {
   display: flex;
   align-items: center;
@@ -3077,10 +3078,9 @@ input.task-check:hover {
   border-top: 1px solid var(--border-row);
 }
 
-.deadline-dialog-time .time-picker-field {
-  display: flex;
+.deadline-dialog-time .task-dialog-time-row {
   flex: 1;
-  min-width: 0;
+  max-width: none;
 }
 
 .deadline-dialog-remove {

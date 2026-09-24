@@ -8,13 +8,14 @@
 // modal doesn't. The task dialog's date input hosts the same body in a
 // Popover of its own (`WhenField.tsx`), where no menu is involved.
 //
-// In `when` mode the typed time picker (`TimePicker`, the task dialog's
-// control) sits under the grid, reading a dim "All day" while no time is
-// set; an inset ✕ strips the time part. The picker only ever commits a
-// complete hour + minute or null, so every edit against an already-set
-// date writes through and stays open; with no date yet the time is held
-// locally and a date pick applies it as it closes
-// (`spec/calendar-plan.md` "Task surface and rows").
+// In `when` mode the task dialog's time row (`WhenTimeRow`: start picker
+// reading a dim "All day" while no time is set, an inset ✕ that strips
+// the time part, and an end picker once a start exists) sits under the
+// grid. The pickers only ever commit a complete hour + minute or null, so
+// every edit against an already-set date writes through and stays open;
+// with no date yet the time and length are held locally and a date pick
+// applies them as it closes (`spec/calendar-plan.md` "Task surface and
+// rows").
 
 import Calendar from "@corvu/calendar";
 import { Dialog } from "@kobalte/core/dialog";
@@ -27,7 +28,6 @@ import {
   Show,
 } from "solid-js";
 import {
-  hourCycle,
   isCompleteTime,
   localDateStamp,
   parseLocalDateParts,
@@ -36,10 +36,9 @@ import {
   whenTime,
   type TimeParts,
 } from "./format.tsx";
-import clockSvg from "./icons/clock.svg?raw";
 import { useAppI18n } from "./i18n.tsx";
 import { closeToItems } from "./overlay.ts";
-import { TimePicker } from "./TimePicker.tsx";
+import { WhenTimeRow } from "./WhenTimeRow.tsx";
 
 export interface CalendarPickerProps {
   /** Whether the host surface is showing; the time field reseeds from the
@@ -61,10 +60,15 @@ export interface CalendarPickerProps {
   /** Clear the value. When provided and a value is set, a "Remove" button
    *  shows at the bottom. */
   onRemove?: () => void;
-  /** `when` mode only: render the time field under the grid (default on).
+  /** `when` mode only: render the time row under the grid (default on).
    *  Off where the host edits the time elsewhere (the task dialog's dates
    *  band); a date pick still keeps the stored time. */
   withTime?: boolean;
+  /** `when` mode, with the time row: the stored duration in minutes (or
+   *  null) behind the end picker, and its writer. Fired only against a
+   *  set date; with none the length waits with the time for the pick. */
+  duration?: () => number | null;
+  onDurationChange?: (minutes: number | null) => void;
 }
 
 /** The picker body: month grid, the `when` time field, the Remove footer.
@@ -85,11 +89,17 @@ export function CalendarPicker(props: CalendarPickerProps) {
   // host opens so a reopen shows the stored time (or "All day"). The
   // picker hands back a complete time or null, never a partial state.
   const [time, setTime] = createSignal<Required<TimeParts> | null>(null);
+  // A length typed before any date exists, applied with the time on the
+  // pick; against a set date the host's register is read instead.
+  const [pendingDuration, setPendingDuration] = createSignal<number | null>(
+    null,
+  );
   createEffect(
     on(props.open, (open) => {
       if (!open) return;
       const t = whenTime(props.value() ?? "");
       setTime(t && isCompleteTime(t) ? t : null);
+      setPendingDuration(null);
     }),
   );
   // Write through only when there is a date to attach the time to;
@@ -98,6 +108,12 @@ export function CalendarPicker(props: CalendarPickerProps) {
     setTime(t);
     const cur = props.value();
     if (cur) props.onPick(whenFromParts(whenDay(cur), t));
+  };
+  const duration = () =>
+    props.value() ? (props.duration?.() ?? null) : pendingDuration();
+  const onDurationChange = (minutes: number | null) => {
+    if (props.value()) props.onDurationChange?.(minutes);
+    else setPendingDuration(minutes);
   };
 
   const monthLabelFmt = createMemo(
@@ -122,7 +138,13 @@ export function CalendarPicker(props: CalendarPickerProps) {
         onValueChange={(d) => {
           if (d) {
             const day = localDateStamp(d);
+            const hadDate = props.value() !== null;
             props.onPick(isWhen() ? whenFromParts(day, time()) : day);
+            // A length typed against no date lands once there is one.
+            const pending = pendingDuration();
+            if (isWhen() && !hadDate && time() && pending !== null) {
+              props.onDurationChange?.(pending);
+            }
           }
           props.setOpen(false);
         }}
@@ -191,32 +213,12 @@ export function CalendarPicker(props: CalendarPickerProps) {
       </Calendar>
       <Show when={isWhen() && props.withTime !== false}>
         <div class="deadline-dialog-time">
-          <TimePicker
-            class="time-picker-input"
-            icon={clockSvg}
-            value={time}
-            onChange={onTimeChange}
-            cycle={() => hourCycle(locale())}
-            locale={locale}
-            label={m().when.time}
-            placeholder={() => m().when.allDay}
-          >
-            {/* Inset ✕ at the input's right edge while a time is set:
-                back to all-day, the date kept. mousedown is cancelled so
-                the click never blurs a focused picker under it. */}
-            <Show when={time()}>
-              <button
-                type="button"
-                class="icon-button time-picker-clear"
-                aria-label={m().when.clearTime}
-                title={m().when.clearTime}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => onTimeChange(null)}
-              >
-                ✕
-              </button>
-            </Show>
-          </TimePicker>
+          <WhenTimeRow
+            time={time}
+            onTimeChange={onTimeChange}
+            duration={duration}
+            onDurationChange={onDurationChange}
+          />
         </div>
       </Show>
       <Show when={props.onRemove && props.value()}>

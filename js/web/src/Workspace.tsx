@@ -2470,6 +2470,19 @@ export function Workspace(props: {
           // date just picked rather than the stale opening value.
           setWhenTarget({ ids: t.ids, initial: value });
         }}
+        // The end picker reads the first target's length live (a
+        // multi-select shares one row) and writes to every target.
+        duration={() => {
+          const t = whenTarget();
+          const first = t?.ids[0];
+          return first !== undefined
+            ? (app.getItem(first)?.duration ?? null)
+            : null;
+        }}
+        onDurationChange={(minutes) => {
+          const t = whenTarget();
+          if (t) for (const id of t.ids) app.setItemDuration(id, minutes);
+        }}
         onRemove={() => {
           const t = whenTarget();
           if (t) for (const id of t.ids) app.setItemWhen(id, null);

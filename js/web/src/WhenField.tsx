@@ -5,29 +5,18 @@
 // calendar picker (`CalendarPicker`, without its time field; Remove). The input is read-only for now: typed dates are a later step,
 // so the popover is the only writer. Anchored on the input rather than a
 // Popover.Trigger button so it can become editable without changing shape.
-// The typed time picker (`TimePicker`) sits on a row above the input and
-// shows only once a date is set: without one the section is just the
-// date input, and there is no day for a time to belong to. Against a set
-// date it reads a dim "All day" placeholder while the `when` has no time
-// part. A single ✕ after the end field strips the time part (back to
-// all-day); the date input has an inset ✕ while a `when` is set, which
-// removes the whole value, time included, as the popover's Remove does.
-// The popover carries no time picker of its own.
-// After the arrow, a second picker reads the end time: the start plus the
-// stored `duration` (a length, not an end, so moving the start keeps it).
-// Typing an end writes the difference in minutes; an end at or before the
-// start on the clock means the next day. It renders only once a start
-// time exists, since without one there is nothing to be after.
+// The time row (`WhenTimeRow`: start picker, ✕, end picker) sits above
+// the input and shows only once a date is set: without one the section
+// is just the date input, and there is no day for a time to belong to.
+// The date input has an inset ✕ while a `when` is set, which removes the
+// whole value, time included, as the popover's Remove does. The popover
+// carries no time picker of its own.
 
 import { Popover } from "@kobalte/core/popover";
 import { createMemo, Show } from "solid-js";
 import { CalendarPicker } from "./DeadlineCalendarDialog.tsx";
 import {
   addDaysToStamp,
-  durationBetween,
-  endTimeOf,
-  formatDurationShort,
-  hourCycle,
   isCompleteTime,
   nowMs,
   parseLocalDateParts,
@@ -36,11 +25,9 @@ import {
   whenFromParts,
   whenTime,
 } from "./format.tsx";
-import arrowRightSvg from "./icons/arrow-right.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
-import clockSvg from "./icons/clock.svg?raw";
 import { useAppI18n } from "./i18n.tsx";
-import { TimePicker } from "./TimePicker.tsx";
+import { WhenTimeRow } from "./WhenTimeRow.tsx";
 
 export function WhenField(props: {
   when: () => string | null;
@@ -73,22 +60,6 @@ export function WhenField(props: {
     props.onChange(whenFromParts(day, t));
   };
 
-  // The end field is derived: start + duration. Committing an end stores
-  // the length back; clearing it removes the duration.
-  const end = () => {
-    const start = time();
-    const d = props.duration();
-    return start && d ? endTimeOf(start, d) : null;
-  };
-  const onEndChange = (t: { hour: number; minute: number } | null) => {
-    const start = time();
-    if (!t || !start) {
-      props.onDurationChange(null);
-      return;
-    }
-    props.onDurationChange(durationBetween(start, t));
-  };
-
   // The input reads the day only ("Wed 23 Sept", the year once it isn't
   // this one) rather than the badge's relative labels: a field should say
   // what is stored, and the time has its own row above. Judged against
@@ -115,57 +86,12 @@ export function WhenField(props: {
     <>
       {/* Time row, only once there is a date for the time to sit on. */}
       <Show when={props.when()}>
-        <div class="task-dialog-time-row">
-          {/* Clock glyph inset in the input like the date glyph below; the
-              input carries the accessible name. */}
-          <TimePicker
-            class="time-picker-input"
-            icon={clockSvg}
-            value={time}
-            onChange={onTimeChange}
-            cycle={() => hourCycle(locale())}
-            locale={locale}
-            label={m().when.time}
-            placeholder={() => m().when.allDay}
-          >
-            {/* Inset ✕ at the start field's right edge, shown on hover like
-                the date input's: strips the time part, making the item
-                all-day (the core keeps the duration, so re-adding a time
-                restores the end). mousedown is cancelled so the click never
-                blurs a focused picker under it. */}
-            <Show when={time()}>
-              <button
-                type="button"
-                class="icon-button time-picker-clear"
-                aria-label={m().when.clearTime}
-                title={m().when.clearTime}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => onTimeChange(null)}
-              >
-                ✕
-              </button>
-            </Show>
-          </TimePicker>
-          {/* End field, shown once a start time is set. The arrow glyph is
-              inset in its left edge, like the clock in the start field. */}
-          <Show when={time()}>
-            <TimePicker
-              class="time-picker-input task-dialog-end-input"
-              icon={arrowRightSvg}
-              value={end}
-              onChange={onEndChange}
-              cycle={() => hourCycle(locale())}
-              locale={locale}
-              label={m().when.end}
-              placeholder={() => m().when.end}
-              after={time}
-              optionHint={(t) => {
-                const start = time();
-                return start ? formatDurationShort(durationBetween(start, t)) : null;
-              }}
-            />
-          </Show>
-        </div>
+        <WhenTimeRow
+          time={time}
+          onTimeChange={onTimeChange}
+          duration={props.duration}
+          onDurationChange={props.onDurationChange}
+        />
       </Show>
       <div class="task-dialog-dates-row">
         <Popover
