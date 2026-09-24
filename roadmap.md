@@ -91,3 +91,4 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - For calendar view - option to hide items that are already complete?
 - Faster datetime input - look up the best
 - Consider project view
+- Consider 2-liner by default if task area is small
