@@ -8,17 +8,16 @@
 // modal doesn't. The task dialog's date input hosts the same body in a
 // Popover of its own (`WhenField.tsx`), where no menu is involved.
 //
-// In `when` mode a Kobalte `TimeField` sits under the grid. Blank means
-// all-day; a "Clear time" button beside it blanks both segments at once.
-// The field fires on every segment edit, including partial states, so it
-// is held locally and written through only when complete (both segments)
-// or empty (neither): a date pick applies the last such state and closes;
-// a time edit against an already-set date writes through and stays open
+// In `when` mode the typed time picker (`TimePicker`, the task dialog's
+// control) sits under the grid, reading a dim "All day" while no time is
+// set; an inset ✕ strips the time part. The picker only ever commits a
+// complete hour + minute or null, so every edit against an already-set
+// date writes through and stays open; with no date yet the time is held
+// locally and a date pick applies it as it closes
 // (`spec/calendar-plan.md` "Task surface and rows").
 
 import Calendar from "@corvu/calendar";
 import { Dialog } from "@kobalte/core/dialog";
-import { TimeField } from "@kobalte/core/time-field";
 import {
   createEffect,
   createMemo,
@@ -30,7 +29,6 @@ import {
 import {
   hourCycle,
   isCompleteTime,
-  isEmptyTime,
   localDateStamp,
   parseLocalDateParts,
   whenDay,
@@ -38,8 +36,10 @@ import {
   whenTime,
   type TimeParts,
 } from "./format.tsx";
+import clockSvg from "./icons/clock.svg?raw";
 import { useAppI18n } from "./i18n.tsx";
 import { closeToItems } from "./overlay.ts";
+import { TimePicker } from "./TimePicker.tsx";
 
 export interface CalendarPickerProps {
   /** Whether the host surface is showing; the time field reseeds from the
@@ -81,16 +81,24 @@ export function CalendarPicker(props: CalendarPickerProps) {
     return s ? parseLocalDateParts(whenDay(s)) : null;
   });
 
-  // Time field state, reseeded from the register each time the host
-  // opens so a reopen shows the stored time (or blank for all-day).
-  const [time, setTime] = createSignal<TimeParts>({});
+  // The time under the grid, reseeded from the register each time the
+  // host opens so a reopen shows the stored time (or "All day"). The
+  // picker hands back a complete time or null, never a partial state.
+  const [time, setTime] = createSignal<Required<TimeParts> | null>(null);
   createEffect(
     on(props.open, (open) => {
-      if (open) setTime(whenTime(props.value() ?? "") ?? {});
+      if (!open) return;
+      const t = whenTime(props.value() ?? "");
+      setTime(t && isCompleteTime(t) ? t : null);
     }),
   );
-  const settledTime = (): TimeParts | null =>
-    isCompleteTime(time()) ? time() : null;
+  // Write through only when there is a date to attach the time to;
+  // otherwise it waits for the date pick below.
+  const onTimeChange = (t: Required<TimeParts> | null) => {
+    setTime(t);
+    const cur = props.value();
+    if (cur) props.onPick(whenFromParts(whenDay(cur), t));
+  };
 
   const monthLabelFmt = createMemo(
     () => new Intl.DateTimeFormat(locale(), { month: "long", year: "numeric" }),
@@ -114,7 +122,7 @@ export function CalendarPicker(props: CalendarPickerProps) {
         onValueChange={(d) => {
           if (d) {
             const day = localDateStamp(d);
-            props.onPick(isWhen() ? whenFromParts(day, settledTime()) : day);
+            props.onPick(isWhen() ? whenFromParts(day, time()) : day);
           }
           props.setOpen(false);
         }}
@@ -183,50 +191,32 @@ export function CalendarPicker(props: CalendarPickerProps) {
       </Calendar>
       <Show when={isWhen() && props.withTime !== false}>
         <div class="deadline-dialog-time">
-          <TimeField
-            class="time-field"
-            value={time()}
-            hourCycle={hourCycle(locale())}
-            granularity="minute"
-            onChange={(v) => {
-              const next: TimeParts = { hour: v?.hour, minute: v?.minute };
-              setTime(next);
-              // Write through only from a settled state, and only
-              // when there is a date to attach it to.
-              const cur = props.value();
-              if (!cur) return;
-              if (isCompleteTime(next)) {
-                props.onPick(whenFromParts(whenDay(cur), next));
-              } else if (isEmptyTime(next)) {
-                props.onPick(whenDay(cur));
-              }
-            }}
+          <TimePicker
+            class="time-picker-input"
+            icon={clockSvg}
+            value={time}
+            onChange={onTimeChange}
+            cycle={() => hourCycle(locale())}
+            locale={locale}
+            label={m().when.time}
+            placeholder={() => m().when.allDay}
           >
-            <TimeField.Label class="time-field-label">
-              {m().when.time}
-            </TimeField.Label>
-            <TimeField.Input class="time-field-input">
-              {(segment) => (
-                <TimeField.Segment
-                  class="time-field-segment"
-                  segment={segment()}
-                />
-              )}
-            </TimeField.Input>
-          </TimeField>
-          <Show when={!isEmptyTime(time())}>
-            <button
-              type="button"
-              class="deadline-dialog-remove"
-              onClick={() => {
-                setTime({});
-                const cur = props.value();
-                if (cur) props.onPick(whenDay(cur));
-              }}
-            >
-              {m().when.clearTime}
-            </button>
-          </Show>
+            {/* Inset ✕ at the input's right edge while a time is set:
+                back to all-day, the date kept. mousedown is cancelled so
+                the click never blurs a focused picker under it. */}
+            <Show when={time()}>
+              <button
+                type="button"
+                class="icon-button time-picker-clear"
+                aria-label={m().when.clearTime}
+                title={m().when.clearTime}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onTimeChange(null)}
+              >
+                ✕
+              </button>
+            </Show>
+          </TimePicker>
         </div>
       </Show>
       <Show when={props.onRemove && props.value()}>

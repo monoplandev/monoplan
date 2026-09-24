@@ -12,7 +12,7 @@
 // part. A single ✕ after the end field strips the time part (back to
 // all-day); the date input has an inset ✕ while a `when` is set, which
 // removes the whole value, time included, as the popover's Remove does.
-// The popover carries no time field of its own.
+// The popover carries no time picker of its own.
 // After the arrow, a second picker reads the end time: the start plus the
 // stored `duration` (a length, not an end, so moving the start keeps it).
 // Typing an end writes the difference in minutes; an end at or before the
@@ -119,7 +119,7 @@ export function WhenField(props: {
           {/* Clock glyph inset in the input like the date glyph below; the
               input carries the accessible name. */}
           <TimePicker
-            class="task-dialog-time-input"
+            class="time-picker-input"
             icon={clockSvg}
             value={time}
             onChange={onTimeChange}
@@ -136,7 +136,7 @@ export function WhenField(props: {
             <Show when={time()}>
               <button
                 type="button"
-                class="icon-button task-dialog-time-clear"
+                class="icon-button time-picker-clear"
                 aria-label={m().when.clearTime}
                 title={m().when.clearTime}
                 onMouseDown={(e) => e.preventDefault()}
@@ -150,7 +150,7 @@ export function WhenField(props: {
               inset in its left edge, like the clock in the start field. */}
           <Show when={time()}>
             <TimePicker
-              class="task-dialog-time-input task-dialog-end-input"
+              class="time-picker-input task-dialog-end-input"
               icon={arrowRightSvg}
               value={end}
               onChange={onEndChange}

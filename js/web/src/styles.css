@@ -2767,7 +2767,7 @@ input.task-check:hover {
 
 /* The ✕ inset at the start field's right edge (rendered only while a
    time is set): the date input's ✕ again, revealed on hover / focus. */
-.task-dialog-time-clear {
+.time-picker-clear {
   position: absolute;
   right: 3px;
   width: 18px;
@@ -2777,13 +2777,13 @@ input.task-check:hover {
   opacity: 0;
 }
 
-.time-picker-field:hover .task-dialog-time-clear,
-.time-picker-field:focus-within .task-dialog-time-clear {
+.time-picker-field:hover .time-picker-clear,
+.time-picker-field:focus-within .time-picker-clear {
   opacity: 1;
 }
 
 @media (hover: none) {
-  .task-dialog-time-clear {
+  .time-picker-clear {
     opacity: 1;
   }
 }
@@ -2821,7 +2821,7 @@ input.task-check:hover {
 
 /* Fills its grid cell, so start and end split the row evenly; 32px tall
    like the date input and the dialog badges. */
-.task-dialog-time-input {
+.time-picker-input {
   width: 100%;
   height: 32px;
   box-sizing: border-box;
@@ -2849,15 +2849,15 @@ input.task-check:hover {
 }
 
 /* "All day" as the placeholder: the dim absence of a time. */
-.task-dialog-time-input::placeholder {
+.time-picker-input::placeholder {
   color: var(--text-empty);
 }
 
-.task-dialog-time-input:hover {
+.time-picker-input:hover {
   background: var(--bg-hover);
 }
 
-.task-dialog-time-input:focus-visible {
+.time-picker-input:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: 2px;
 }
@@ -3066,70 +3066,24 @@ input.task-check:hover {
   border-top: 1px solid var(--border-row);
 }
 
-/* Optional time under the calendar (`when` mode): Kobalte's segmented
-   TimeField — one focusable span per hour / minute / day-period segment,
-   arrow-spin and typed digits, no native picker. Blank segments render
-   their placeholder (`data-placeholder`), which is how all-day reads. */
+/* Optional time under the calendar (`when` mode): the typed time picker
+   the task dialog uses, ruled off from the grid. The picker fills the
+   row so "All day" reads as a line under the month. */
 .deadline-dialog-time {
   display: flex;
   align-items: center;
-  gap: 8px;
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--border-row);
-  font-size: 12px;
 }
 
-.time-field {
+.deadline-dialog-time .time-picker-field {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex: 1;
+  min-width: 0;
 }
 
-.time-field-label {
-  color: var(--text-muted);
-}
-
-.time-field-input {
-  display: inline-flex;
-  align-items: center;
-  gap: 1px;
-  padding: 2px 6px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  font-variant-numeric: tabular-nums;
-}
-
-.time-field-input:focus-within {
-  outline: 2px solid var(--link);
-  outline-offset: 1px;
-}
-
-.time-field-segment {
-  padding: 1px 2px;
-  border-radius: 3px;
-  outline: none;
-  caret-color: transparent;
-}
-
-.time-field-segment[data-type="literal"] {
-  padding: 0;
-  color: var(--text-muted);
-}
-
-.time-field-segment[data-placeholder] {
-  color: var(--text-badge-faint);
-}
-
-.time-field-segment:focus {
-  background: var(--link);
-  color: #fff;
-}
-
-/* "Clear time" sits at the row's far end so the field keeps its slot
-   whether or not the button is showing. */
-.deadline-dialog-time .deadline-dialog-remove {
+.deadline-dialog-remove {
   margin-left: auto;
 }
 
@@ -3303,7 +3257,7 @@ input.task-check:hover {
     left: 10px;
   }
 
-  .task-page .task-dialog-time-input {
+  .task-page .time-picker-input {
     padding: 6px 28px 6px 30px;
   }
 
@@ -3745,9 +3699,12 @@ input.task-check:hover {
 }
 
 /* The time pickers' panel is a short list of clock times (plus a dim
-   length in the end picker), so it sits narrower than the list picker. */
+   length in the end picker), so it sits narrower than the list picker.
+   It also serves the when modal, whose overlay / positioner sit at
+   120 / 121, so it clears those too. */
 .list-picker.time-picker {
   width: 12em;
+  z-index: 130;
 }
 
 .list-picker .palette__search input {

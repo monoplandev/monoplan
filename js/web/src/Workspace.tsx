@@ -2742,7 +2742,17 @@ export function Workspace(props: {
                 </Switch>
               </DisplayOptionsPopover>
             </Show>
-            <Show when={view().kind === "list" || view().kind === "focus"}>
+            {/* Add on the list, focus and upcoming views. Upcoming has no
+                list of its own to draft into, so it captures a new inbox
+                item through the dialog instead (the user sets a date there
+                if it belongs on the calendar). */}
+            <Show
+              when={
+                view().kind === "list" ||
+                view().kind === "focus" ||
+                view().kind === "upcoming"
+              }
+            >
               <Tooltip openDelay={200} closeDelay={0} placement="bottom">
               <Tooltip.Trigger
                 as="button"
@@ -2760,7 +2770,9 @@ export function Workspace(props: {
                   // listener registers later in onMount).
                   e.stopImmediatePropagation();
                   const boardId = boardListId();
-                  if (boardId !== null) {
+                  if (view().kind === "upcoming") {
+                    setNewItemTarget({ listId: "inbox", state: "backlog" });
+                  } else if (boardId !== null) {
                     // Board view has no inline draft flow; capture a new item
                     // into the first visible open lane, mirroring that
                     // lane's own "+".
@@ -2960,17 +2972,26 @@ export function Workspace(props: {
           }}
           onFind={() => onFindOpenChange(!findOpen())}
           onAdd={
-            (view().kind === "list" || view().kind === "focus") &&
-            boardListId() === null
+            view().kind === "upcoming"
               ? () => {
-                  // The pills stay live over an open item's page and the
-                  // Find page; Add captures into the list behind them,
-                  // so close both first.
+                  // No list to draft into on the calendar: capture a new
+                  // inbox item through the dialog, as the header's Add
+                  // does on desktop.
                   setOpenItemId(null);
                   if (findOpen()) onFindOpenChange(false);
-                  startDraft();
+                  setNewItemTarget({ listId: "inbox", state: "backlog" });
                 }
-              : null
+              : (view().kind === "list" || view().kind === "focus") &&
+                  boardListId() === null
+                ? () => {
+                    // The pills stay live over an open item's page and the
+                    // Find page; Add captures into the list behind them,
+                    // so close both first.
+                    setOpenItemId(null);
+                    if (findOpen()) onFindOpenChange(false);
+                    startDraft();
+                  }
+                : null
           }
           findOpen={findOpen()}
           addDisabled={draft() !== null}

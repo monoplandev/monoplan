@@ -25,7 +25,7 @@ lands; this file is the design record.
 | Does the clock ever write? | **Never.** A past `when` stays where it was set; the agenda surfaces it in the Overdue section as a derived view rule. Nothing promotes an item to Live, adds it to Focus, or moves it because a day arrived: every device would race to do it. |
 | What does a past `when` mean? | **No opinion yet.** Events and tasks are not yet distinguished: a past `when` on an event is simply over, on a task it may have slipped. Until that distinction exists, `when` is fixed and does not roll over: it is never rewritten, never reinterpreted as "today", and never red. The agenda only lists it under Overdue so the user can decide. |
 | Calendar surface | **One lens: Upcoming becomes the agenda** (day sections, both dates). Day granularity only: no hour grid, no durations, no overlap. A month grid and drag-to-reschedule are deferred; the agenda's shape does not change when they land. |
-| Time input | **Kobalte `TimeField`**, segmented hour / minute, 12 or 24-hour cycle from the existing time-format preference. Blank means all-day. See "Task surface and rows". |
+| Time input | **Typed time picker** (`TimePicker.tsx`): a text input with a suggestion list, 12 or 24-hour cycle from the existing time-format preference. Empty means all-day. See "Task surface and rows". |
 | Export / CalDAV | **Deferred.** Mapping is recorded below. A subscribable feed needs a server that can read items, which the E2EE server cannot; a non-E2EE CalDAV carve-out is a separate conversation. |
 | Schema | **Additive within v4.** No break, no import step. |
 
@@ -211,32 +211,30 @@ for the month grid). `groupByDeadline` becomes
   Tomorrow, Remove. Set date… opens the shared calendar modal, which gains an
   optional time field under the grid (blank ≡ all-day). Changing the date
   keeps the time; Remove clears both.
-- **Time field** is Kobalte's `TimeField` (`@kobalte/core/time-field`,
-  already in the installed 0.13.x), `granularity="minute"`, no seconds. It
-  is unstyled and segmented (hour, minute, and a day-period segment in the
-  12-hour cycle), keyboard-driven with arrow spin and typed digits, and
-  reads the locale from the Kobalte `I18nProvider` that `AppI18nProvider`
-  already mounts.
+- **Time picker** is the app's own typed control (`TimePicker.tsx`): a
+  plain text input showing the stored time in the app's hour cycle and, while
+  focused, a listbox of suggestions (every quarter hour, narrowed by what is
+  typed; `timeSuggest.ts` has the grammar). Enter or a click commits the row
+  under the cursor; Escape, Tab and blur revert to the stored value. It is
+  the one time control on every surface: the task dialog's dates band (start
+  and end) and the shared calendar modal. Kobalte's segmented `TimeField`
+  was the first cut and has been removed.
 - **Hour cycle** follows the time-format preference, not the locale alone.
   `format.tsx` gains `hourCycle(locale): 12 | 24`: `"12h"` → 12, `"24h"` →
   24, `"auto"` → whatever `Intl.DateTimeFormat(locale, { hour: "numeric" })`
   resolves to (`h11` / `h12` → 12, `h23` / `h24` → 24). The result is passed
-  as the field's `hourCycle` prop every time, never left to the component's
-  own locale default, so the field and every formatted time in the app agree
-  by construction. Changing the preference in Settings re-renders the field
-  in the new cycle; the stored value is unaffected (it is always 24-hour
-  `HH:MM`).
-- **Value bridge.** The field's `value` is `{ hour?, minute? }`, plain
-  numbers, no date library. The 16-character register maps to
-  `{ hour: HH, minute: MM }`; the 10-character register maps to `{}`.
-  `onChange` fires on every segment edit, including partial states (an hour
-  typed with the minute still blank, or one segment cleared with Backspace),
-  so the dialog holds the field state locally and writes through only when
-  it is **complete** (both hour and minute set → timed) or **empty** (both
-  unset → all-day). A partial state writes nothing and keeps the previous
-  register value; the calendar's date pick applies the last complete or
-  empty time. Clearing both segments on a timed value is how the user drops
-  back to all-day without removing the date.
+  as the picker's `cycle` every time, never left to a component default, so
+  the picker and every formatted time in the app agree by construction.
+  Changing the preference in Settings re-renders the picker in the new
+  cycle; the stored value is unaffected (it is always 24-hour `HH:MM`).
+- **Value bridge.** The picker's value is `{ hour, minute }`, plain numbers,
+  no date library, or null for all-day. The 16-character register maps to
+  the pair; the 10-character register maps to null. A commit is always a
+  complete pair or null, so there is no partial state to hold: against a set
+  date every commit writes through (timed, or back to all-day with the date
+  kept); with no date yet the modal holds the time and the date pick applies
+  it. The inset ✕ on the picker is how the user drops back to all-day
+  without removing the date.
 - The calendar modal is shared with Deadline. The time field mounts only
   when the modal is opened for `when`; the deadline path is unchanged and
   keeps writing 10-character stamps.
@@ -341,7 +339,7 @@ here.
    `--today` so scripts and tests pin the date). `data-model.md` and
    `cli.md` amended. Unit and system tests.
 1. **Web field and agenda.** Built. Store field and mutation, `WhenBadge`,
-   `WhenField` with the Kobalte time field and `hourCycle`, `groupByDay`
+   `WhenField` with the typed time picker and `hourCycle`, `groupByDay`
    (`dayGroups.ts`, replacing `deadlineGroups.ts`), agenda tone rules and
    leading time label, When submenu on row context menus and the palette,
    duplicate / paste carry `when`, i18n. `urls.md` amended for the reserved

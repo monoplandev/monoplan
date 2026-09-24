@@ -225,8 +225,8 @@ export function formatDeadlineBadge(
 // (timed) register (`spec/calendar-plan.md`). Same local-parts rule as
 // deadlines: never `new Date(when)`.
 
-/** Hour / minute pair as Kobalte's `TimeField` holds it: either or both
- *  may be undefined while the user is mid-edit. */
+/** Hour / minute pair of a `when`; both set for a timed value. The
+ *  optional shape is what `whenTime` parses, narrowed by `isCompleteTime`. */
 export interface TimeParts {
   hour?: number;
   minute?: number;
@@ -249,14 +249,9 @@ export function whenTime(when: string): TimeParts | null {
   return { hour: Number(m[1]), minute: Number(m[2]) };
 }
 
-/** Both segments filled: the field state maps to a timed register. */
+/** Both parts set: the pair maps to a timed register. */
 export function isCompleteTime(t: TimeParts): t is Required<TimeParts> {
   return t.hour != null && t.minute != null;
-}
-
-/** Neither segment filled: the field state maps to an all-day register. */
-export function isEmptyTime(t: TimeParts): boolean {
-  return t.hour == null && t.minute == null;
 }
 
 /** Minutes in a day, the wrap for end-time arithmetic. */
@@ -297,10 +292,10 @@ export function whenFromParts(day: string, time: TimeParts | null | undefined): 
   return day;
 }
 
-/** The hour cycle the time field should render in: the explicit 12h /
- *  24h preference, or for "auto" whatever `Intl` resolves for the
- *  locale. Always passed to `TimeField` so the field and every formatted
- *  time in the app agree by construction. */
+/** The hour cycle the time pickers render in: the explicit 12h / 24h
+ *  preference, or for "auto" whatever `Intl` resolves for the locale.
+ *  Always passed to `TimePicker` so the picker and every formatted time
+ *  in the app agree by construction. */
 export function hourCycle(locale: string): 12 | 24 {
   switch (timeFormatPref()) {
     case "12h":

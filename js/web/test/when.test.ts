@@ -16,7 +16,6 @@ import {
   formatWhenTime,
   hourCycle,
   isCompleteTime,
-  isEmptyTime,
   setTimeFormatPref,
   whenDay,
   whenFromParts,
@@ -83,12 +82,9 @@ describe("when ⇄ time-field bridge", () => {
     expect(whenTime("2026-07-13T14:05")).toEqual({ hour: 14, minute: 5 });
   });
 
-  test("complete / empty / partial states", () => {
+  test("complete / partial states", () => {
     expect(isCompleteTime({ hour: 9, minute: 0 })).toBe(true);
     expect(isCompleteTime({ hour: 9 })).toBe(false);
-    expect(isEmptyTime({})).toBe(true);
-    expect(isEmptyTime({ hour: undefined, minute: undefined })).toBe(true);
-    expect(isEmptyTime({ minute: 30 })).toBe(false);
   });
 
   test("whenFromParts pads and falls back to all-day", () => {
