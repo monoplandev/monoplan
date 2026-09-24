@@ -3,15 +3,18 @@
 // purely by an item id, so the same component can later back a native
 // detached window. Notes live here only — the inline row editor is
 // text-only "quick entry". The title is buffered locally and flushed to
-// the engine on close and before stepping to a neighbour (last write on
-// close wins). Notes stream as deltas both ways (spec/notes-plan.md Phase
-// 2): every input event sends the editor's change to the core, and a live
-// peer edit arrives as a delta that is applied under the caret instead of
-// replacing the field.
+// the engine when its editor blurs, on close and before stepping to a
+// neighbour (last write wins). A capture becomes a real item the moment
+// its title blurs with text in it (`promote`), so the notes stream from
+// the start and nothing is lost to a closed tab. Notes stream as deltas
+// both ways (spec/notes-plan.md Phase 2): every input event sends the
+// editor's change to the core, and a live peer edit arrives as a delta
+// that is applied under the caret instead of replacing the field.
 
 import { Dialog } from "@kobalte/core/dialog";
 import { DropdownMenu } from "@kobalte/core/dropdown-menu";
 import {
+  batch,
   createEffect,
   createMemo,
   createSignal,
@@ -73,7 +76,9 @@ export function TaskDialog(props: {
   setItemId: (id: string | null) => void;
   /** New-item mode: a target open lane to capture into (`backlog` is the
    *  list view's default). Mutually exclusive with `itemId`; nothing is
-   *  written until a non-empty title is committed on close. `index`,
+   *  written until the title editor blurs (or the capture closes) with a
+   *  non-empty title, at which point the item is created and the surface
+   *  switches to editing it (`setNewItem(null)` + `setItemId(id)`). `index`,
    *  when set, inserts at that position in the list's Open projection
    *  (Space capture below a board card); omitted appends. */
   newItem?: () => {
@@ -117,10 +122,13 @@ export function TaskDialog(props: {
   onFocused?: () => void;
   /** Pushes the in-progress title into a UI-only channel so the list row
    *  mirrors the edit live — without a sync op per keystroke. The real
-   *  write still happens once, via the close/flush path. */
+   *  write still happens once, when the title editor blurs (or the
+   *  surface closes / switches target). */
   onLiveText?: (text: string) => void;
-  /** Fires with the id of a freshly committed new item, so the caller can
-   *  select/scroll to it (used by the board's "+" capture). */
+  /** Fires with the id of a capture's item once the surface is done with
+   *  it (close, or the side pane handing focus back), so the caller can
+   *  select/scroll to it (used by the board's "+" capture). Deferred past
+   *  the item's creation because the reveal takes focus. */
   onCreated?: (id: string) => void;
   /** Desktop side panel host. When it resolves to an element the surface
    *  renders inline there (non-modal: the list stays live, clicking another
@@ -220,13 +228,6 @@ export function TaskDialog(props: {
     props.app.moveItem(id, targetId, idx);
   };
 
-  // The list option a new item is currently targeting (drives the header
-  // picker's selected value).
-  const newItemListOption = createMemo<ListOption | null>(() => {
-    const nw = newItemTarget();
-    if (!nw) return null;
-    return listOptions().find((o) => o.id === nw.listId) ?? null;
-  });
   // Re-target a new-item capture at a different list. The insert index is
   // dropped — a position in the old list's Open projection is meaningless in
   // the new one, so the item appends.
@@ -281,6 +282,13 @@ export function TaskDialog(props: {
   // store (undo/redo, a peer rename), a dirty one keeps the user's
   // in-flight typing.
   let syncedText = "";
+  // The id a capture was promoted to, held until the surface is done
+  // with it so `onCreated` fires at the old time (see the prop's doc).
+  let createdId: string | null = null;
+  // True while `promote` flips the target from the capture to its item:
+  // the non-modal focus effect re-runs on the target change and must not
+  // yank the caret (which just left the title) back to it.
+  let promoting = false;
 
   // Notes delta bridge. `synced` is the notes text the core holds for the
   // subscribed item (what the editor last sent or received); `notes()`
@@ -458,14 +466,23 @@ export function TaskDialog(props: {
     commitLocalEdit();
     props.app.endNotesSession();
   };
+  // Backgrounding or leaving the page makes everything durable: a
+  // capture becomes an item, a rename is written, the notes burst is
+  // flushed. Before this, the title (and a whole capture) lived only in
+  // the buffers until close, so a closed tab lost them.
+  const flushAll = () => {
+    if (isNew()) promote();
+    else flushTitle(loadedId);
+    flushNotesNow();
+  };
   const onVisibility = () => {
-    if (document.visibilityState === "hidden") flushNotesNow();
+    if (document.visibilityState === "hidden") flushAll();
   };
   document.addEventListener("visibilitychange", onVisibility);
-  window.addEventListener("pagehide", flushNotesNow);
+  window.addEventListener("pagehide", flushAll);
   onCleanup(() => {
     document.removeEventListener("visibilitychange", onVisibility);
-    window.removeEventListener("pagehide", flushNotesNow);
+    window.removeEventListener("pagehide", flushAll);
   });
 
   // Read the plain text out of a contenteditable editor, stripping the stray
@@ -524,7 +541,7 @@ export function TaskDialog(props: {
   // their input handlers) rather than the DOM: by the time a target switch
   // reaches the load effect below, the editors may already show the next
   // target — or, across the new-item / edit forms, be different elements.
-  const flush = (id: string | null) => {
+  const flushTitle = (id: string | null) => {
     if (!id) return;
     const it = props.app.state.itemsById[id];
     if (!it) return;
@@ -533,6 +550,12 @@ export function TaskDialog(props: {
       syncedText = t;
       props.app.editItemText(id, t);
     }
+  };
+  const flush = (id: string | null) => {
+    if (!id) return;
+    const it = props.app.state.itemsById[id];
+    if (!it) return;
+    flushTitle(id);
     const n = notes();
     if (subscribedId === id) {
       // Streaming: the core already holds every sent edit. Send what is
@@ -553,8 +576,10 @@ export function TaskDialog(props: {
   // or write an open item's edits back. Idempotent — a second pass finds
   // nothing changed (or, for a capture already committed, no target).
   const settle = () => {
-    if (loadedId === "new") commitNew();
-    else flush(loadedId);
+    if (loadedId === "new") {
+      createFromBuffers();
+      announceCreated();
+    } else flush(loadedId);
   };
 
   // Load the buffers and the editor DOM when the open target changes (an
@@ -584,6 +609,7 @@ export function TaskDialog(props: {
     setNotes(n);
     setNewDeadline(null);
     setNewWhen(null);
+    setNewDuration(null);
     setNewFocus(false);
     // The editors mount when the surface opens; defer so their refs exist,
     // then push — but only if this target is still the one showing.
@@ -631,59 +657,116 @@ export function TaskDialog(props: {
     unsubscribeNotes();
   });
 
-  // Commit new-item mode: create the item in its target lane's workflow
-  // state iff the title is non-empty, then close. A capture without an
-  // explicit slot lands at the TOP of the lane (index 0) — matching the
-  // list view's inline-draft default — rather than appending.
-  const commitNew = () => {
+  // Create a capture's item in its target lane's workflow state from the
+  // buffers (title, notes, dates, pin, done) iff the title is non-empty.
+  // Returns the new id, or null when there was nothing to create. One
+  // capture, one undo step: the add and every field the form set on it.
+  // Undo removes the item outright; redo restores it with its notes and
+  // fields. A capture without an explicit slot lands at the TOP of the
+  // lane (index 0) — matching the list view's inline-draft default —
+  // rather than appending.
+  const createFromBuffers = (): string | null => {
     const nw = newItemTarget();
-    if (nw) {
-      const t = text().trim();
-      if (t) {
-        const at = nw.index ?? 0;
-        // One capture, one undo step: the add and every field the form
-        // set on it. Undo removes the item outright; redo restores it
-        // with its notes and fields.
-        const id = props.app.withActionBatch(() => {
-          const id =
-            nw.state !== "backlog"
-              ? props.app.addItemInStateAt(nw.listId, t, nw.state, at)
-              : props.app.addItemAt(nw.listId, t, at);
-          const n = notes();
-          if (n.trim()) props.app.setItemNotes(id, n);
-          const d = newDeadline();
-          if (d) props.app.setItemDeadline(id, d);
-          const w = newWhen();
-          if (w) props.app.setItemWhen(id, w);
-          const dur = newDuration();
-          if (w && dur) props.app.setItemDuration(id, dur);
-          // A Done capture can't hold a Focus ref (auto-remove-on-Done,
-          // spec/focus.md), so the pin buffer only applies to open captures.
-          if (newFocus() && !nw.done) props.app.addToFocus(id);
-          // Logged-as-done capture: create open, then mark done in a second
-          // op (mirrors a drag-into-Done). Stamps doneAt = now.
-          if (nw.done) props.app.setDone(id, true);
-          return id;
-        });
-        props.onCreated?.(id);
-      }
-    }
-    props.setNewItem?.(null);
+    if (!nw) return null;
+    const t = text().trim();
+    if (!t) return null;
+    const at = nw.index ?? 0;
+    const id = props.app.withActionBatch(() => {
+      const id =
+        nw.state !== "backlog"
+          ? props.app.addItemInStateAt(nw.listId, t, nw.state, at)
+          : props.app.addItemAt(nw.listId, t, at);
+      const n = notes();
+      if (n) props.app.setItemNotes(id, n);
+      const d = newDeadline();
+      if (d) props.app.setItemDeadline(id, d);
+      const w = newWhen();
+      if (w) props.app.setItemWhen(id, w);
+      const dur = newDuration();
+      if (w && dur) props.app.setItemDuration(id, dur);
+      // A Done capture can't hold a Focus ref (auto-remove-on-Done,
+      // spec/focus.md), so the pin buffer only applies to open captures.
+      if (newFocus() && !nw.done) props.app.addToFocus(id);
+      // Logged-as-done capture: create open, then mark done in a second
+      // op (mirrors a drag-into-Done). Stamps doneAt = now.
+      if (nw.done) props.app.setDone(id, true);
+      return id;
+    });
+    createdId = id;
+    return id;
   };
 
-  const close = () => {
-    if (isNew()) {
-      commitNew();
-      return;
+  // Promote a capture into its item and keep editing: the item is
+  // created and the surface switches to it in place. Runs the moment the
+  // title editor blurs with text in it — a capture that has been named
+  // and moved on from exists, so the notes stream from here, the field
+  // pickers act on the real item, and a closed tab loses nothing. The
+  // buffers carry across rather than reloading: pre-setting `loadedId`
+  // makes the load effect treat the new target as already loaded, so the
+  // editors (and the caret, mid-ArrowDown into the notes) are left alone.
+  const promote = (): string | null => {
+    const id = createFromBuffers();
+    if (!id) return null;
+    loadedId = id;
+    syncedText = text().trim();
+    subscribeNotes(id, notes());
+    setNewDeadline(null);
+    setNewWhen(null);
+    setNewDuration(null);
+    setNewFocus(false);
+    promoting = true;
+    try {
+      batch(() => {
+        props.setNewItem?.(null);
+        props.setItemId(id);
+      });
+    } finally {
+      promoting = false;
     }
+    return id;
+  };
+
+  // Hand a capture's id to the owner once the surface is done with it.
+  const announceCreated = () => {
+    const id = createdId;
+    createdId = null;
+    if (id) props.onCreated?.(id);
+  };
+
+  // Leaving the title editor saves it: a capture is promoted to its
+  // item, an open item's rename is written. Moving on to the notes, a
+  // picker, another window — all count, and the buffer is clean after.
+  const onTitleBlur = () => {
+    if (isNew()) promote();
+    else flushTitle(loadedId);
+  };
+
+  // Save and close. A still-unpromoted capture (its title never blurred)
+  // is created on the way out; an untitled one is dropped.
+  const close = () => {
+    if (isNew()) createFromBuffers();
+    else flush(loadedId);
+    props.setNewItem?.(null);
+    if (props.itemId() !== null) props.setItemId(null);
+    announceCreated();
+  };
+
+  // Side pane "done editing" (Enter in the title, Escape, ⌘Enter): the
+  // pane is ambient, so commit and hand focus back to the list/board
+  // rather than blank it. A capture promoted earlier by a title blur
+  // takes this path too; its reveal fires here, after focus has moved.
+  const releaseFromPane = () => {
     flush(loadedId);
-    props.setItemId(null);
+    props.onReleaseFocus?.();
+    announceCreated();
   };
 
   // Side pane capture: the pane is non-modal, so there's no overlay to
   // catch a click-away. Pointing anywhere else in the app (a row, the
   // nav, the board) commits the capture like Enter / Escape do, rather
-  // than leaving a half-typed item stranded in the pane. Portaled layers
+  // than leaving a half-typed item stranded in the pane. Only while the
+  // capture is unpromoted: once its title has blurred it is an ordinary
+  // entered item, which the selection moving away closes. Portaled layers
   // (the lifecycle / deadline menus, the list picker) live outside the
   // app root, so opening or clicking inside them doesn't count as leaving.
   let shellRef: HTMLElement | undefined;
@@ -694,7 +777,7 @@ export function TaskDialog(props: {
       const target = e.target as Node | null;
       if (!target || !root?.contains(target)) return;
       if (shellRef?.contains(target)) return;
-      commitNew();
+      close();
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     onCleanup(() =>
@@ -710,8 +793,9 @@ export function TaskDialog(props: {
     // browser, but the title never wraps to multiple lines in use. The
     // modal / mobile shells close on commit. The side pane stays open on
     // the item and just returns focus to the list/board — the pane is
-    // ambient, so "done editing" shouldn't blank it. A capture in the
-    // pane still commits via close() (there's no item to stay on yet).
+    // ambient, so "done editing" shouldn't blank it. An unpromoted
+    // capture in the pane still commits via close() (there's no item to
+    // stay on yet).
     if (
       e.key === "Enter" &&
       !e.shiftKey &&
@@ -722,8 +806,7 @@ export function TaskDialog(props: {
     ) {
       e.preventDefault();
       if (panelMode() && !isNew()) {
-        flush(loadedId);
-        props.onReleaseFocus?.();
+        releaseFromPane();
         return;
       }
       close();
@@ -816,8 +899,7 @@ export function TaskDialog(props: {
       // just show it again), so commit-and-close means commit and hand
       // focus back, as Enter in the title does.
       if (panelMode() && !isNew()) {
-        flush(loadedId);
-        props.onReleaseFocus?.();
+        releaseFromPane();
         return;
       }
       close();
@@ -827,8 +909,7 @@ export function TaskDialog(props: {
       e.preventDefault();
       e.stopPropagation();
       if (panelMode() && !isNew()) {
-        flush(loadedId);
-        props.onReleaseFocus?.();
+        releaseFromPane();
         return;
       }
       close();
@@ -895,174 +976,116 @@ export function TaskDialog(props: {
   // item done before the stamp existed.
   const doneAt = (it: ItemView) => it.doneAt ?? it.lifecycleAt;
 
-  // The surface body, shared by both shells below.
+  // One body serves capture and edit. The accessors below read the
+  // capture buffers while the item doesn't exist yet and the store once
+  // it does, so promoting a capture mid-edit swaps the data source under
+  // the same elements: the caret, an open picker menu and the modal's
+  // focus trap all carry on untouched.
+  const vDone = () => {
+    const it = item();
+    if (it) return isDone(it);
+    return newItemTarget()?.done ?? false;
+  };
+  const vBinned = () => {
+    const it = item();
+    return it ? isBinned(it) : false;
+  };
+  const vState = (): WorkflowState => {
+    const it = item();
+    if (it) return it.state;
+    const nw = newItemTarget();
+    return nw?.done ? "done" : (nw?.state ?? "backlog");
+  };
+  const vListId = () => item()?.listId ?? newItemTarget()?.listId ?? null;
+  const vPinned = () => (item() ? focused() : newFocus());
+  const vWhen = () => (item() ? (item()?.when ?? null) : newWhen());
+  const vDuration = () =>
+    item() ? (item()?.duration ?? null) : newDuration();
+  const vDeadline = () =>
+    item() ? (item()?.deadline ?? null) : newDeadline();
+  // Done / Binned: date fields render muted and the pin toggle hides
+  // (neither can hold a Focus ref, spec/focus.md).
+  const muted = () => vDone() || vBinned();
+  const setDoneFlag = (done: boolean) => {
+    const it = item();
+    if (it) props.app.setDone(it.id, done);
+    else setNewItemDone(done);
+  };
+  const setState = (state: WorkflowState) => {
+    const it = item();
+    if (it) props.app.setLifecycle(it.id, state);
+    else setNewItemState(state);
+  };
+  const onListChange = (id: string) => {
+    const it = item();
+    if (it) moveItemToList(id, it.listId);
+    else setNewItemList(id);
+  };
+  const onPinToggle = () => {
+    if (item()) toggleFocus();
+    else setNewFocus((v) => !v);
+  };
+  const onWhenChange = (value: string | null) => {
+    const it = item();
+    if (it) {
+      props.app.setItemWhen(it.id, value);
+      return;
+    }
+    setNewWhen(value);
+    // Mirror the core's `set_item_when`: no date, no length; a timed
+    // date on a buffer with no length takes the default hour, so the
+    // end field shows before the item exists.
+    if (!value) setNewDuration(null);
+    else if (whenTime(value) && newDuration() == null)
+      setNewDuration(DEFAULT_DURATION_MINUTES);
+  };
+  const onDurationChange = (minutes: number | null) => {
+    const it = item();
+    if (it) props.app.setItemDuration(it.id, minutes);
+    else setNewDuration(minutes);
+  };
+  const onDeadlineChange = (stamp: string | null) => {
+    const it = item();
+    if (it) props.app.setItemDeadline(it.id, stamp);
+    else setNewDeadline(stamp);
+  };
+
+  // The surface body, shared by the three shells below.
   const body = () => (
     <>
-    <Show when={isNew()}>
       <header class="task-dialog-header">
         <div class="task-dialog-header-meta">
           {/* Checkbox + lifecycle badge share one hover group so they
-              read as a single status control (see .task-dialog-status). */}
+              read as a single status control (see .task-dialog-status).
+              For a capture, checked = logged as already-done: pre-set by
+              the Done lane "+" and the Done view's "Log" button, and
+              flippable back off to file the item as a normal open task. */}
           <div class="task-dialog-status">
-            {/* Checked = this capture is logged as already-done. Pre-set
-                by the Done lane "+" and the Done view's "Log" button;
-                flip it off to file the item as a normal open task. */}
             <input
               type="checkbox"
               class="task-check"
-              checked={newItemTarget()?.done ?? false}
+              checked={vDone()}
               aria-label={
-                newItemTarget()?.done
-                  ? m().workspace.markNotDone
-                  : m().workspace.markDone
+                vDone() ? m().workspace.markNotDone : m().workspace.markDone
               }
-              onChange={(e) => setNewItemDone(e.currentTarget.checked)}
+              onChange={(e) => setDoneFlag(e.currentTarget.checked)}
             />
-            {/* Lifecycle badge beside the checkbox, mirroring the edit
-                dialog's header: names the state the capture will be
-                filed in, and opens the menu to change it. Picks land in
-                the new-item buffer and are written after commit. */}
-            <LifecycleBadge
-              value={() => {
-                const nw = newItemTarget();
-                return nw?.done ? "done" : (nw?.state ?? "backlog");
-              }}
-              onChange={setNewItemState}
-            />
+            {/* Lifecycle badge beside the checkbox: the state the item is
+                in (or a capture will be filed in), and a menu to change
+                it. Hidden while binned (the bin mask overrides the
+                workflow state; Restore is the way out). The created /
+                completed timeline lives in the activity section under
+                the notes. */}
+            <Show when={!vBinned()}>
+              <LifecycleBadge value={vState} onChange={setState} />
+            </Show>
           </div>
         </div>
-        <div class="task-dialog-header-actions">{shellButtons()}</div>
-      </header>
-      <div class="task-dialog-body">
-        <div class="task-dialog-content">
-          <section class="task-dialog-section task-dialog-title-section">
-            <div
-              ref={(el) => {
-                titleRef = el;
-                // Set the literal attribute value (not Solid's folded
-                // valueless `contenteditable`) so the workspace's
-                // `[contenteditable="true"]` shortcut guard matches.
-                el.setAttribute("contenteditable", "true");
-                setLinkifiedText(el, text());
-              }}
-              class="task-dialog-title"
-              role="textbox"
-              data-done={newItemTarget()?.done ? "" : undefined}
-              data-placeholder={
-                newItemTarget()?.done
-                  ? m().workspace.logCompleted
-                  : m().board.addItem
-              }
-              onInput={() => setText(editorText(titleRef))}
-              onKeyDown={onTitleKeyDown}
-              onPaste={pasteAsPlainText}
-              onClick={(e) => openLinkOnClick(e, titleRef)}
-            />
-          </section>
-          {/* List selector leads the badge row; picks land in the
-              local buffers and are written after the item commits.
-              The pin toggle buffers the same way (`newFocus`). */}
-          <section class="task-dialog-section task-dialog-badges">
-            <ListPicker
-              options={listOptions}
-              value={() => newItemListOption()?.id ?? null}
-              onChange={setNewItemList}
-            />
-            <Show when={!(newItemTarget()?.done ?? false)}>
-              <PinToggle
-                pinned={newFocus}
-                onToggle={() => setNewFocus((v) => !v)}
-              />
-            </Show>
-          </section>
-          {/* Date section: the planned date between the badges and the
-              deadline. */}
-          <section class="task-dialog-section task-dialog-dates">
-            <WhenField
-              when={newWhen}
-              duration={newDuration}
-              muted={() => newItemTarget()?.done ?? false}
-              onChange={(value) => {
-                setNewWhen(value);
-                // Mirror the core's `set_item_when`: no date, no length;
-                // a timed date on a buffer with no length takes the
-                // default hour, so the end field shows before commit.
-                if (!value) setNewDuration(null);
-                else if (whenTime(value) && newDuration() == null)
-                  setNewDuration(DEFAULT_DURATION_MINUTES);
-              }}
-              onDurationChange={setNewDuration}
-              open={whenCalOpen}
-              setOpen={setWhenCalOpen}
-            />
-          </section>
-          {/* Deadline section under the dates, buffered like the date
-              until the item commits. */}
-          <section class="task-dialog-section task-dialog-deadline">
-            <DeadlineField
-              deadline={newDeadline}
-              muted={() => newItemTarget()?.done ?? false}
-              onChange={setNewDeadline}
-              open={deadlineCalOpen}
-              setOpen={setDeadlineCalOpen}
-            />
-          </section>
-          <section class="task-dialog-section">
-            <div
-              ref={(el) => {
-                notesRef = el;
-                el.setAttribute("contenteditable", "true");
-                setLinkifiedText(el, notes());
-              }}
-              class="task-dialog-notes"
-              role="textbox"
-              aria-multiline="true"
-              data-placeholder={m().workspace.notes}
-              on:input={onNotesInput}
-              onBlur={endNotesEdit}
-              on:compositionstart={onNotesCompositionStart}
-              on:compositionend={onNotesCompositionEnd}
-              onKeyDown={onNotesKeyDown}
-              on:beforeinput={onNotesBeforeInput}
-              onPaste={pasteAsPlainText}
-              onClick={(e) => openLinkOnClick(e, notesRef)}
-            />
-          </section>
-        </div>
-      </div>
-    </Show>
-    <Show when={item()}>
-      {(it) => (
-        <>
-          <header class="task-dialog-header">
-            <div class="task-dialog-header-meta">
-              {/* Checkbox + lifecycle badge share one hover group so
-                  they read as a single status control. */}
-              <div class="task-dialog-status">
-                <input
-                  type="checkbox"
-                  class="task-check"
-                  checked={isDone(it())}
-                  onChange={(e) =>
-                    props.app.setDone(it().id, e.currentTarget.checked)
-                  }
-                />
-                {/* Lifecycle status badge beside the checkbox; hidden
-                    while binned (the bin mask overrides the workflow
-                    state; Restore is the way out). The created /
-                    completed timeline lives in the activity section
-                    under the notes. */}
-                <Show when={!isBinned(it())}>
-                  <LifecycleBadge
-                    value={() => it().state}
-                    onChange={(state) =>
-                      props.app.setLifecycle(it().id, state)
-                    }
-                  />
-                </Show>
-              </div>
-            </div>
-            <div class="task-dialog-header-actions">
+        <div class="task-dialog-header-actions">
+          {/* Item menu (link, reveal, bin / restore / delete): only once
+              the item exists. */}
+          <Show when={item()}>
+            {(it) => (
               <DropdownMenu>
                 <DropdownMenu.Trigger
                   class="icon-button"
@@ -1134,27 +1157,41 @@ export function TaskDialog(props: {
                   </DropdownMenu.Content>
                 </DropdownMenu.Portal>
               </DropdownMenu>
-              {shellButtons()}
-            </div>
-          </header>
-
-          <div class="task-dialog-body">
-            <div class="task-dialog-content">
+            )}
+          </Show>
+          {shellButtons()}
+        </div>
+      </header>
+      <div class="task-dialog-body">
+        <div class="task-dialog-content">
           <section class="task-dialog-section task-dialog-title-section">
             <div
               ref={(el) => {
                 titleRef = el;
+                // Set the literal attribute value (not Solid's folded
+                // valueless `contenteditable`) so the workspace's
+                // `[contenteditable="true"]` shortcut guard matches.
                 el.setAttribute("contenteditable", "true");
                 setLinkifiedText(el, text());
               }}
               class="task-dialog-title"
               role="textbox"
-              data-done={isDone(it()) ? "" : undefined}
+              data-done={vDone() ? "" : undefined}
+              data-placeholder={
+                !isNew()
+                  ? undefined
+                  : newItemTarget()?.done
+                    ? m().workspace.logCompleted
+                    : m().board.addItem
+              }
               onInput={() => {
                 const v = editorText(titleRef);
                 setText(v);
-                props.onLiveText?.(v);
+                // The row overlay mirrors an open item's edit live; a
+                // capture has no row yet.
+                if (!isNew()) props.onLiveText?.(v);
               }}
+              onBlur={onTitleBlur}
               onKeyDown={onTitleKeyDown}
               onPaste={pasteAsPlainText}
               onClick={(e) => openLinkOnClick(e, titleRef)}
@@ -1167,11 +1204,11 @@ export function TaskDialog(props: {
           <section class="task-dialog-section task-dialog-badges">
             <ListPicker
               options={listOptions}
-              value={() => it().listId}
-              onChange={(id) => moveItemToList(id, it().listId)}
+              value={vListId}
+              onChange={onListChange}
             />
-            <Show when={!isDone(it()) && !isBinned(it())}>
-              <PinToggle pinned={focused} onToggle={toggleFocus} />
+            <Show when={!muted()}>
+              <PinToggle pinned={vPinned} onToggle={onPinToggle} />
             </Show>
           </section>
 
@@ -1179,13 +1216,11 @@ export function TaskDialog(props: {
               deadline. */}
           <section class="task-dialog-section task-dialog-dates">
             <WhenField
-              when={() => it().when ?? null}
-              duration={() => it().duration ?? null}
-              muted={() => isDone(it()) || isBinned(it())}
-              onChange={(value) => props.app.setItemWhen(it().id, value)}
-              onDurationChange={(minutes) =>
-                props.app.setItemDuration(it().id, minutes)
-              }
+              when={vWhen}
+              duration={vDuration}
+              muted={muted}
+              onChange={onWhenChange}
+              onDurationChange={onDurationChange}
               open={whenCalOpen}
               setOpen={setWhenCalOpen}
             />
@@ -1196,11 +1231,9 @@ export function TaskDialog(props: {
               calendar / Remove). */}
           <section class="task-dialog-section task-dialog-deadline">
             <DeadlineField
-              deadline={() => it().deadline ?? null}
-              muted={() => isDone(it()) || isBinned(it())}
-              onChange={(stamp) =>
-                props.app.setItemDeadline(it().id, stamp)
-              }
+              deadline={vDeadline}
+              muted={muted}
+              onChange={onDeadlineChange}
               open={deadlineCalOpen}
               setOpen={setDeadlineCalOpen}
             />
@@ -1227,39 +1260,40 @@ export function TaskDialog(props: {
               onClick={(e) => openLinkOnClick(e, notesRef)}
             />
           </section>
+
           {/* Activity log under the notes: the item's timeline as plain
               sentences. Two entries for now: when it was created, and
               once done, when it was completed and how long that took.
               The completion stamp is the reflection `doneAt` (last
               entry into Done), falling back to the register's
-              transition time. */}
-          <section
-            class="task-dialog-section task-dialog-activity"
-            aria-label={m().workspace.activity}
-          >
-            <div class="task-dialog-activity-heading">{m().workspace.activity}</div>
-            <ul class="task-dialog-activity-log">
-              <li title={formatDateTime(it().createdAt, locale())}>
-                {m().workspace.createdStamp(
-                  formatDialogStamp(it().createdAt, nowMs(), locale(), { inline: true }),
-                )}
-              </li>
-              <Show when={isDone(it())}>
-                <li title={formatDateTime(doneAt(it()), locale())}>
-                  {m().workspace.activityCompleted(
-                    formatDialogStamp(doneAt(it()), nowMs(), locale(), { inline: true }),
-                    formatElapsed(doneAt(it()) - it().createdAt, locale()),
-                  )}
-                </li>
-              </Show>
-            </ul>
-          </section>
-
-            </div>
-          </div>
-        </>
-      )}
-    </Show>
+              transition time. Only once the item exists. */}
+          <Show when={item()}>
+            {(it) => (
+              <section
+                class="task-dialog-section task-dialog-activity"
+                aria-label={m().workspace.activity}
+              >
+                <div class="task-dialog-activity-heading">{m().workspace.activity}</div>
+                <ul class="task-dialog-activity-log">
+                  <li title={formatDateTime(it().createdAt, locale())}>
+                    {m().workspace.createdStamp(
+                      formatDialogStamp(it().createdAt, nowMs(), locale(), { inline: true }),
+                    )}
+                  </li>
+                  <Show when={isDone(it())}>
+                    <li title={formatDateTime(doneAt(it()), locale())}>
+                      {m().workspace.activityCompleted(
+                        formatDialogStamp(doneAt(it()), nowMs(), locale(), { inline: true }),
+                        formatElapsed(doneAt(it()) - it().createdAt, locale()),
+                      )}
+                    </li>
+                  </Show>
+                </ul>
+              </section>
+            )}
+          </Show>
+        </div>
+      </div>
     </>
   );
 
@@ -1282,6 +1316,9 @@ export function TaskDialog(props: {
     // when the same item is re-entered (`entered` notifies).
     props.itemId();
     newItemTarget();
+    // A promotion is a target change in name only: the caret has just
+    // left the title on purpose.
+    if (promoting) return;
     // A capture has no row to follow: it is always entered, whatever the
     // owner's entered flag (keyed on an open item id, which a new item
     // doesn't have yet) says.
@@ -1304,6 +1341,7 @@ export function TaskDialog(props: {
       fallback={
         <Show when={open()}>
           <section
+            ref={shellRef}
             class="task-dialog task-page"
             role="region"
             aria-label={m().common.close}

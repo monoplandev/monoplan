@@ -334,11 +334,17 @@ mid-composition; a remote delta that lands during one is applied to
 `synced` and the composed text is re-placed on top at `compositionend`
 (its position shifted through the inbound delta, its deletion kept only
 if the remote edit did not touch that range). Closing, target switch,
-blur, `visibilitychange` (hidden) and `pagehide` flush. The dialog renders
-**two** notes editors (the new-item capture form and the existing-item
-edit form); both bind the same handlers. The first Phase 2 cut wired only
-the capture form, so typing in an existing item sent nothing until Enter
-or close. Fixed 2026-09-08.
+blur, `visibilitychange` (hidden) and `pagehide` flush. Until 2026-09-24
+the dialog rendered **two** notes editors (the new-item capture form and
+the existing-item edit form) binding the same handlers; the first Phase 2
+cut wired only the capture form, so typing in an existing item sent
+nothing until Enter or close (fixed 2026-09-08). The forms have since
+merged into one body: a capture is promoted to a real item the moment its
+title editor blurs with text in it, the same editors carry on, and the
+notes stream from that point. The title (a register, not a delta stream)
+is written on title blur, close, target switch, `visibilitychange`
+(hidden) and `pagehide`; before this it was written on close only, so a
+closed tab lost a rename and a whole unsaved capture.
 
 Commit policy, as built: `applyNotesDelta` commits on every editor
 change, but that is not one op blob per keystroke. Loro merges
