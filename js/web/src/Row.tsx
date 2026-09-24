@@ -337,14 +337,20 @@ export function Row(props: {
   // row is part of it, else this row alone), matching the done/bin actions.
   const onDeadlineToday = () => {
     const stamp = todayStamp(nowMs());
-    for (const id of targetIds()) props.app.setItemDeadline(id, stamp);
+    props.app.withActionBatch(() => {
+      for (const id of targetIds()) props.app.setItemDeadline(id, stamp);
+    });
   };
   const onDeadlineTomorrow = () => {
     const stamp = addDaysToStamp(todayStamp(nowMs()), 1);
-    for (const id of targetIds()) props.app.setItemDeadline(id, stamp);
+    props.app.withActionBatch(() => {
+      for (const id of targetIds()) props.app.setItemDeadline(id, stamp);
+    });
   };
   const onDeadlineRemove = () => {
-    for (const id of targetIds()) props.app.setItemDeadline(id, null);
+    props.app.withActionBatch(() => {
+      for (const id of targetIds()) props.app.setItemDeadline(id, null);
+    });
   };
   const onSetDate = () => {
     props.onSetDeadline?.(targetIds(), props.item().deadline ?? null);
@@ -354,14 +360,20 @@ export function Row(props: {
   const keepTime = (day: string) => whenFromParts(day, whenTime(props.item().when ?? ""));
   const onWhenToday = () => {
     const stamp = keepTime(todayStamp(nowMs()));
-    for (const id of targetIds()) props.app.setItemWhen(id, stamp);
+    props.app.withActionBatch(() => {
+      for (const id of targetIds()) props.app.setItemWhen(id, stamp);
+    });
   };
   const onWhenTomorrow = () => {
     const stamp = keepTime(addDaysToStamp(todayStamp(nowMs()), 1));
-    for (const id of targetIds()) props.app.setItemWhen(id, stamp);
+    props.app.withActionBatch(() => {
+      for (const id of targetIds()) props.app.setItemWhen(id, stamp);
+    });
   };
   const onWhenRemove = () => {
-    for (const id of targetIds()) props.app.setItemWhen(id, null);
+    props.app.withActionBatch(() => {
+      for (const id of targetIds()) props.app.setItemWhen(id, null);
+    });
   };
   const onSetWhenDate = () => {
     props.onSetWhen?.(targetIds(), props.item().when ?? null);

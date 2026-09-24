@@ -2447,11 +2447,17 @@ export function Workspace(props: {
         value={() => deadlineTarget()?.initial ?? null}
         onPick={(stamp) => {
           const t = deadlineTarget();
-          if (t) for (const id of t.ids) app.setItemDeadline(id, stamp);
+          if (!t) return;
+          app.withActionBatch(() => {
+            for (const id of t.ids) app.setItemDeadline(id, stamp);
+          });
         }}
         onRemove={() => {
           const t = deadlineTarget();
-          if (t) for (const id of t.ids) app.setItemDeadline(id, null);
+          if (!t) return;
+          app.withActionBatch(() => {
+            for (const id of t.ids) app.setItemDeadline(id, null);
+          });
         }}
       />
       <DeadlineCalendarDialog
@@ -2465,7 +2471,9 @@ export function Workspace(props: {
         onPick={(value) => {
           const t = whenTarget();
           if (!t) return;
-          for (const id of t.ids) app.setItemWhen(id, value);
+          app.withActionBatch(() => {
+            for (const id of t.ids) app.setItemWhen(id, value);
+          });
           // Keep the seed current so a follow-up time edit builds on the
           // date just picked rather than the stale opening value.
           setWhenTarget({ ids: t.ids, initial: value });
@@ -2481,11 +2489,17 @@ export function Workspace(props: {
         }}
         onDurationChange={(minutes) => {
           const t = whenTarget();
-          if (t) for (const id of t.ids) app.setItemDuration(id, minutes);
+          if (!t) return;
+          app.withActionBatch(() => {
+            for (const id of t.ids) app.setItemDuration(id, minutes);
+          });
         }}
         onRemove={() => {
           const t = whenTarget();
-          if (t) for (const id of t.ids) app.setItemWhen(id, null);
+          if (!t) return;
+          app.withActionBatch(() => {
+            for (const id of t.ids) app.setItemWhen(id, null);
+          });
         }}
       />
       <ShortcutsDialog
