@@ -93,7 +93,7 @@ pub const NOTES_ORIGIN_PREFIX: &str = "notes:";
 const KEY_LOCATION: &str = "location";
 /// Atomic workflow register (`spec/data-model.md` "Lifecycle"): a plain
 /// `LoroValue` list `[state, at]` — the current `WorkflowState` code
-/// (`0..=4`) and the unix millis it was entered. Whole-value LWW, so
+/// (`0..=5`) and the unix millis it was entered. Whole-value LWW, so
 /// state and timestamp can never be torn apart by concurrent edits.
 /// Absent ≡ `[Backlog, created_at]`; new items omit it.
 const KEY_LIFECYCLE: &str = "lifecycle";
@@ -224,9 +224,9 @@ impl From<loro::LoroEncodeError> for DocError {
 }
 
 /// Workflow state held by the atomic `lifecycle` register
-/// (`spec/data-model.md` "Lifecycle"): a five-step ladder, the first four
-/// of which are *Open*. Bin is **not** a workflow state — it is the
-/// orthogonal `binned_at` mask.
+/// (`spec/data-model.md` "Lifecycle"): a four-step open ladder plus two
+/// terminal (*closed*) states, Done and Cancelled. Bin is **not** a
+/// workflow state — it is the orthogonal `binned_at` mask.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum WorkflowState {
     Backlog = 0,
@@ -234,6 +234,7 @@ pub enum WorkflowState {
     InProgress = 2,
     Review = 3,
     Done = 4,
+    Cancelled = 5,
 }
 
 impl WorkflowState {
@@ -251,6 +252,7 @@ impl WorkflowState {
             2 => Some(WorkflowState::InProgress),
             3 => Some(WorkflowState::Review),
             4 => Some(WorkflowState::Done),
+            5 => Some(WorkflowState::Cancelled),
             _ => None,
         }
     }
@@ -264,6 +266,7 @@ impl WorkflowState {
             WorkflowState::InProgress => "in_progress",
             WorkflowState::Review => "review",
             WorkflowState::Done => "done",
+            WorkflowState::Cancelled => "cancelled",
         }
     }
 
@@ -275,6 +278,7 @@ impl WorkflowState {
             "in_progress" => Some(WorkflowState::InProgress),
             "review" => Some(WorkflowState::Review),
             "done" => Some(WorkflowState::Done),
+            "cancelled" => Some(WorkflowState::Cancelled),
             _ => None,
         }
     }
@@ -283,6 +287,12 @@ impl WorkflowState {
     /// share each list's single manual order.
     pub fn is_open(self) -> bool {
         self <= WorkflowState::Review
+    }
+
+    /// Closed = Done | Cancelled: the two terminal states. Closed items
+    /// leave the list order projection and render in the Done view.
+    pub fn is_closed(self) -> bool {
+        !self.is_open()
     }
 }
 
@@ -296,6 +306,7 @@ pub enum ItemLifecycle {
     InProgress,
     Review,
     Done,
+    Cancelled,
     Binned,
 }
 
@@ -307,6 +318,7 @@ impl From<WorkflowState> for ItemLifecycle {
             WorkflowState::InProgress => ItemLifecycle::InProgress,
             WorkflowState::Review => ItemLifecycle::Review,
             WorkflowState::Done => ItemLifecycle::Done,
+            WorkflowState::Cancelled => ItemLifecycle::Cancelled,
         }
     }
 }
@@ -321,6 +333,7 @@ impl ItemLifecycle {
             ItemLifecycle::InProgress => Some(WorkflowState::InProgress),
             ItemLifecycle::Review => Some(WorkflowState::Review),
             ItemLifecycle::Done => Some(WorkflowState::Done),
+            ItemLifecycle::Cancelled => Some(WorkflowState::Cancelled),
             ItemLifecycle::Binned => None,
         }
     }
@@ -370,6 +383,15 @@ impl ItemView {
     pub fn is_done(&self) -> bool {
         self.state == WorkflowState::Done
     }
+    /// Workflow register says Cancelled (regardless of the bin mask).
+    pub fn is_cancelled(&self) -> bool {
+        self.state == WorkflowState::Cancelled
+    }
+    /// Workflow register is terminal (Done or Cancelled), regardless of
+    /// the bin mask. The Done view shows closed, not-binned items.
+    pub fn is_closed(&self) -> bool {
+        self.state.is_closed()
+    }
     pub fn is_binned(&self) -> bool {
         self.binned_at.is_some()
     }
@@ -389,7 +411,8 @@ impl ItemView {
     }
 }
 
-/// The five board lanes in left-to-right (ladder) order.
+/// The five board lanes in left-to-right (ladder) order. Cancelled is not a
+/// lane: cancelled items render in the Done lane (`spec/board.md`).
 const ALL_LANES: [WorkflowState; 5] = [
     WorkflowState::Backlog,
     WorkflowState::Todo,
@@ -615,9 +638,9 @@ pub struct ExportList {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportLifecycle {
-    /// `"backlog" | "todo" | "in_progress" | "review" | "done"`. An
-    /// unrecognized name in a hand-edited export degrades to Backlog on
-    /// import.
+    /// `"backlog" | "todo" | "in_progress" | "review" | "done" |
+    /// "cancelled"`. An unrecognized name in a hand-edited export
+    /// degrades to Backlog on import.
     pub state: String,
     pub at: i64,
 }
@@ -1528,8 +1551,8 @@ impl Doc {
 
     /// Board open-lane quick-capture: append a new item directly in the
     /// open workflow state `state`, one commit (`spec/board.md`
-    /// "Capture"). Rejects `Done` — the Done lane logs completions via
-    /// create-then-transition, not direct capture.
+    /// "Capture"). Rejects the closed states — the Done lane logs
+    /// completions via create-then-transition, not direct capture.
     pub fn add_item_in_state(
         &self,
         list_id: &str,
@@ -2221,8 +2244,9 @@ impl Doc {
     /// Convenience toggle over the workflow ladder: `done == true` is the
     /// Done transition; `done == false` is **un-done** — a plain write to
     /// Backlog (`spec/data-model.md` "Set lifecycle"), applied only to
-    /// items whose resolved lifecycle is currently Done (so it never
-    /// yanks a Todo/In Progress/Review item back to Backlog).
+    /// items whose resolved lifecycle is currently closed (Done or
+    /// Cancelled), so it never yanks a Todo/In Progress/Review item back
+    /// to Backlog.
     pub fn set_item_done(&self, item_id: &str, done: bool) -> Result<(), DocError> {
         self.set_items_done(&[item_id], done)
     }
@@ -2285,7 +2309,7 @@ impl Doc {
 
     /// Shared driver behind every lifecycle mutation: resolve all ids up
     /// front (an unknown id aborts before any write), apply the
-    /// transition with one shared `now`, prune Focus on Done, commit
+    /// transition with one shared `now`, prune Focus on close, commit
     /// once, and emit per-item events (or the bulk rebuild + diff).
     fn set_items_lifecycle_impl(
         &self,
@@ -2312,14 +2336,21 @@ impl Doc {
         if changed.is_empty() {
             return Ok(());
         }
-        // Focus self-compacts on completion: a Done transition removes the
-        // item's focus ref(s) in the *same* commit (`spec/focus.md`). This
-        // is the one lifecycle transition that touches a second container —
-        // a Done focus ref renders nothing, so Focus stays finite without
-        // relying on the unwired `reconcile()`. Binned is left to the sweep.
-        let focus_removed = if write == LifecycleWrite::Set(ItemLifecycle::Done) {
-            let done_ids: HashSet<String> = changed.iter().map(|(id, _)| id.to_string()).collect();
-            self.prune_focus_refs(&done_ids)
+        // Focus self-compacts on close: a Done or Cancelled transition
+        // removes the item's focus ref(s) in the *same* commit
+        // (`spec/focus.md`). This is the one lifecycle transition that
+        // touches a second container — a closed focus ref renders nothing,
+        // so Focus stays finite without relying on the unwired
+        // `reconcile()`. Binned is left to the sweep.
+        let closes = matches!(
+            write,
+            LifecycleWrite::Set(ItemLifecycle::Done)
+                | LifecycleWrite::Set(ItemLifecycle::Cancelled)
+        );
+        let focus_removed = if closes {
+            let closed_ids: HashSet<String> =
+                changed.iter().map(|(id, _)| id.to_string()).collect();
+            self.prune_focus_refs(&closed_ids)
         } else {
             0
         };
@@ -2352,7 +2383,7 @@ impl Doc {
 
     /// Add a reference to `item_id` in the Focus lens at visible position
     /// `index` (`usize::MAX` appends), one commit. No-ops if the item is
-    /// already focused (does *not* move-to-top) or is not Open (a Done /
+    /// already focused (does *not* move-to-top) or is not Open (a closed /
     /// binned item cannot be focused). Errors if the item is unknown.
     /// Folds a dead-ref sweep into the same commit.
     pub fn add_to_focus(&self, item_id: &str, index: usize) -> Result<(), DocError> {
@@ -3013,7 +3044,7 @@ impl Doc {
                 }
             }
         }
-        // Focus backstop: prune dead refs (missing / done / binned /
+        // Focus backstop: prune dead refs (missing / closed / binned /
         // foreign / duplicate) from the focus container. Idempotent; the
         // primary compaction paths are auto-remove-on-Done and the sweep
         // folded into each focus mutation (`spec/focus.md`).
@@ -3404,15 +3435,16 @@ impl Doc {
         guard.open_by_list.get(list_id).cloned().unwrap_or_default()
     }
 
-    /// Cross-list "Done" view: ids of done-but-not-binned items, sorted
-    /// by the workflow register's `at` descending. Ties broken by id
-    /// ascending so the order is deterministic across devices despite
-    /// client-clock skew. Binned items are excluded — Bin owns them in
-    /// the UI even if their preserved state is Done.
+    /// Cross-list "Done" view: ids of closed (Done or Cancelled) but
+    /// not-binned items, sorted by the workflow register's `at`
+    /// descending. Ties broken by id ascending so the order is
+    /// deterministic across devices despite client-clock skew. Binned
+    /// items are excluded — Bin owns them in the UI even if their
+    /// preserved state is closed.
     pub fn done_item_ids(&self) -> Vec<String> {
         let mut items: Vec<ItemView> = self
             .iter_items()
-            .filter(|i| i.is_done() && !i.is_binned())
+            .filter(|i| i.is_closed() && !i.is_binned())
             .collect();
         items.sort_by(|a, b| {
             b.lifecycle_at
@@ -5303,7 +5335,8 @@ enum LifecycleWrite {
     /// preserved workflow state. No-op when not binned.
     Restore,
     /// Un-done: write Backlog, but only for items currently resolved
-    /// Done (skips the rest, so a bulk un-done never disturbs open items).
+    /// closed — Done or Cancelled (skips the rest, so a bulk un-done
+    /// never disturbs open items).
     UnDone,
 }
 
@@ -5312,10 +5345,11 @@ enum LifecycleWrite {
 /// anything was written; does not commit. Re-applying the current
 /// resolved lifecycle is a no-op.
 ///
-/// - Open / Done targets write the register `[state, now]`, clear the
-///   bin mask, and ride the reflection stamps in the same batch:
-///   entering In Progress sets `started_at` iff absent; entering Done
-///   sets `done_at`.
+/// - Open / Done / Cancelled targets write the register `[state, now]`,
+///   clear the bin mask, and ride the reflection stamps in the same
+///   batch: entering In Progress sets `started_at` iff absent; entering
+///   Done sets `done_at`. Cancelled stamps nothing — it is not a
+///   completion, and throughput analytics must not count it as one.
 /// - Binned sets the mask only — the register is preserved for restore.
 fn apply_lifecycle(map: &LoroMap, lifecycle: ItemLifecycle, now: i64) -> Result<bool, DocError> {
     let binned = read_i64(map, KEY_BINNED_AT).is_some();
@@ -5361,7 +5395,7 @@ fn apply_lifecycle_write(map: &LoroMap, write: LifecycleWrite, now: i64) -> Resu
         }
         LifecycleWrite::UnDone => {
             let binned = read_i64(map, KEY_BINNED_AT).is_some();
-            if binned || workflow_of(map).0 != WorkflowState::Done {
+            if binned || !workflow_of(map).0.is_closed() {
                 return Ok(false);
             }
             apply_lifecycle(map, ItemLifecycle::Backlog, now)
@@ -9622,6 +9656,82 @@ mod tests {
     }
 
     #[test]
+    fn cancelled_is_closed_not_done() {
+        // Cancelled is a terminal sibling of Done: it leaves the open
+        // projection and joins the Done view, but is not a completion —
+        // `done_at` is never stamped and `is_done()` stays false.
+        let doc = Doc::new().unwrap();
+        let id = doc
+            .add_item_in_state(LIST_INBOX, "x", WorkflowState::InProgress)
+            .unwrap();
+        doc.set_item_lifecycle(&id, ItemLifecycle::Cancelled)
+            .unwrap();
+        let v = doc.get_item(&id).unwrap();
+        assert_eq!(v.lifecycle(), ItemLifecycle::Cancelled);
+        assert!(v.is_cancelled());
+        assert!(v.is_closed());
+        assert!(!v.is_done());
+        assert!(!v.is_open());
+        assert_eq!(v.done_at, None, "cancelling is not a completion");
+        assert!(v.started_at.is_some(), "reflection stamps are untouched");
+        assert!(doc.open_item_ids(LIST_INBOX).is_empty());
+        assert_eq!(doc.done_item_ids(), vec![id.clone()]);
+        // Un-done applies to Cancelled too and lands in Backlog.
+        doc.set_item_done(&id, false).unwrap();
+        assert_eq!(
+            doc.get_item(&id).unwrap().lifecycle(),
+            ItemLifecycle::Backlog
+        );
+        // Direct capture into Cancelled is rejected like Done.
+        assert!(
+            doc.add_item_in_state(LIST_INBOX, "y", WorkflowState::Cancelled)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn cancelling_prunes_focus_like_done() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "x").unwrap();
+        doc.add_to_focus(&id, usize::MAX).unwrap();
+        assert_eq!(doc.focus_refs(), vec![id.clone()]);
+        let _ = doc.drain_events();
+        doc.set_item_lifecycle(&id, ItemLifecycle::Cancelled)
+            .unwrap();
+        assert!(doc.focus_refs().is_empty());
+        assert_eq!(
+            doc.focus_list().len(),
+            0,
+            "ref physically removed on Cancel"
+        );
+        assert!(doc.drain_events().contains(&AppEvent::FocusChanged));
+        // Restoring it to an open state does not re-focus.
+        doc.set_item_done(&id, false).unwrap();
+        assert!(doc.focus_refs().is_empty());
+        assert_eq!(doc.focus_list().len(), 0);
+    }
+
+    #[test]
+    fn cancelled_survives_bin_and_restore() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "x").unwrap();
+        doc.set_item_lifecycle(&id, ItemLifecycle::Cancelled)
+            .unwrap();
+        doc.set_item_lifecycle(&id, ItemLifecycle::Binned).unwrap();
+        assert_eq!(
+            doc.get_item(&id).unwrap().lifecycle(),
+            ItemLifecycle::Binned
+        );
+        assert!(doc.done_item_ids().is_empty(), "bin owns binned items");
+        doc.set_item_binned(&id, false).unwrap();
+        assert_eq!(
+            doc.get_item(&id).unwrap().lifecycle(),
+            ItemLifecycle::Cancelled
+        );
+        assert_eq!(doc.done_item_ids(), vec![id]);
+    }
+
+    #[test]
     fn unparseable_register_degrades_to_backlog() {
         let doc = Doc::new().unwrap();
         let id = doc.add_item(LIST_INBOX, "x").unwrap();
@@ -9706,6 +9816,9 @@ mod tests {
             .unwrap();
         let done = src.add_item(LIST_INBOX, "done").unwrap();
         src.set_item_lifecycle(&done, ItemLifecycle::Done).unwrap();
+        let cancelled = src.add_item(LIST_INBOX, "cancelled").unwrap();
+        src.set_item_lifecycle(&cancelled, ItemLifecycle::Cancelled)
+            .unwrap();
 
         let export = src.export_json();
         let by_text = |t: &str| export.items.iter().find(|i| i.text == t).unwrap();
@@ -9714,8 +9827,10 @@ mod tests {
         assert_eq!(by_text("review").lifecycle.state, "review");
         assert_eq!(by_text("started").lifecycle.state, "in_progress");
         assert_eq!(by_text("done").lifecycle.state, "done");
+        assert_eq!(by_text("cancelled").lifecycle.state, "cancelled");
         assert!(by_text("started").started_at.is_some());
         assert!(by_text("done").done_at.is_some());
+        assert!(by_text("cancelled").done_at.is_none());
 
         let dst = Doc::new().unwrap();
         dst.import_json(&export).unwrap();
@@ -9724,6 +9839,7 @@ mod tests {
         assert_eq!(view_of("review").lifecycle(), ItemLifecycle::Review);
         assert_eq!(view_of("started").lifecycle(), ItemLifecycle::InProgress);
         assert_eq!(view_of("done").lifecycle(), ItemLifecycle::Done);
+        assert_eq!(view_of("cancelled").lifecycle(), ItemLifecycle::Cancelled);
         assert_eq!(
             view_of("started").started_at,
             src.get_item(&started).unwrap().started_at,

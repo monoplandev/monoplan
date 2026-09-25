@@ -76,7 +76,7 @@ type SearchDoc = {
   title: string;
   body: string;
   listId?: string;
-  lifecycle?: "backlog" | "todo" | "in_progress" | "review" | "done" | "binned";
+  lifecycle?: "backlog" | "todo" | "in_progress" | "review" | "done" | "cancelled" | "binned";
   updatedAt?: number;
   tokens: string[];
 };
@@ -146,7 +146,8 @@ Suggested precedence:
 3. Notes hits
 4. List-name context hits on items
 5. Lifecycle order when text match is otherwise equal: `in_progress`, then
-   `review`, then `todo`, then `backlog`, then `done`, then `binned` (active
+   `review`, then `todo`, then `backlog`, then `done` / `cancelled` (tied),
+   then `binned` (active
    work first, then queued, then closed)
 6. More recently updated items before older items
 7. Stable tie-breaker by id
@@ -241,7 +242,7 @@ type SearchResult = {
   title: string;
   body?: string;
   listId?: string;
-  lifecycle?: "backlog" | "todo" | "in_progress" | "review" | "done" | "binned";
+  lifecycle?: "backlog" | "todo" | "in_progress" | "review" | "done" | "cancelled" | "binned";
   score: number;
 };
 
@@ -295,7 +296,7 @@ Minimum test coverage:
 6. delete removes result from queries
 7. multi-token AND queries
 8. last-token prefix queries
-9. ranking preference: in_progress over review over todo over backlog over done over binned when textual match is otherwise equal
+9. ranking preference: in_progress over review over todo over backlog over done / cancelled over binned when textual match is otherwise equal
 
 Where feasible, use the same event stream the app uses rather than bespoke test-only mutation paths.
 

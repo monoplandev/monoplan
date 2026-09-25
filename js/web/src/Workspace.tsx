@@ -69,7 +69,9 @@ import { Upcoming } from "./Upcoming.tsx";
 import { useSession } from "./SessionContext.tsx";
 import {
   isBinned,
-  isDone,
+  isCancelled,
+  isClosed,
+  isClosedState,
   isOpen,
   OPEN_STATES,
   type DocApp,
@@ -450,7 +452,7 @@ export function Workspace(props: {
   // Per-lane item counts for the board whose view-mode popover is open,
   // shown beside each lane toggle so hiding a lane is an informed choice.
   // Mirrors Board.tsx laneMembers / doneMembers: open items partitioned
-  // by workflow state, plus this list's done-not-binned items. Empty
+  // by workflow state, plus this list's closed-not-binned items. Empty
   // (all zero) while no board is mounted.
   const boardLaneCounts = createMemo((): Record<WorkflowState, number> => {
     const counts: Record<WorkflowState, number> = {
@@ -459,6 +461,7 @@ export function Workspace(props: {
       in_progress: 0,
       review: 0,
       done: 0,
+      cancelled: 0, // never rendered: cancelled cards count under Done
     };
     const listId = boardListId();
     if (listId === null) return counts;
@@ -467,7 +470,7 @@ export function Workspace(props: {
       if (it) counts[it.state]++;
     }
     for (const it of Object.values(state.itemsById)) {
-      if (it.listId === listId && isDone(it) && !isBinned(it)) counts.done++;
+      if (it.listId === listId && isClosed(it) && !isBinned(it)) counts.done++;
     }
     return counts;
   });
@@ -625,7 +628,7 @@ export function Workspace(props: {
         .filter((r) => {
           if (!lingerMatches(r, v)) return false;
           const it = state.itemsById[r.id];
-          return it !== undefined && isDone(it) && !isBinned(it);
+          return it !== undefined && isClosed(it) && !isBinned(it);
         })
         .sort((a, b) => b.doneAt - a.doneAt);
       if (done.length === 0) return { ids: new Set(), expiry: -Infinity };
@@ -672,7 +675,7 @@ export function Workspace(props: {
       .recentDone()
       .filter((r) => lingerMatches(r, v) && lingerIds.has(r.id))) {
       const it = state.itemsById[r.id];
-      if (!it || !isDone(it) || isBinned(it)) continue;
+      if (!it || !isClosed(it) || isBinned(it)) continue;
       captured.push({
         index: v.kind === "focus" ? (r.focusIndex ?? 0) : r.index,
         value: it,
@@ -706,11 +709,12 @@ export function Workspace(props: {
       return out;
     }
     if (v.kind === "done") {
-      // Done view excludes binned items: a done-then-binned item lives
-      // in the Bin (see context menu — Bin owns the next transition).
-      // Sorted by the workflow register's transition time desc.
+      // Done view holds the closed items (done and cancelled) and
+      // excludes binned ones: a closed-then-binned item lives in the Bin
+      // (see context menu — Bin owns the next transition). Sorted by the
+      // workflow register's transition time desc.
       return Object.values(state.itemsById)
-        .filter((it) => isDone(it) && !isBinned(it))
+        .filter((it) => isClosed(it) && !isBinned(it))
         .sort((a, b) => b.lifecycleAt - a.lifecycleAt);
     }
     // Upcoming renders its own day-grouped surface (`Upcoming.tsx`), not
@@ -950,8 +954,8 @@ export function Workspace(props: {
 
     // Fill each fresh item in from its clip entry. Items are created as
     // Backlog; a copied open state is re-applied in the same undo step,
-    // which keeps the just-assigned Open position (spec/board.md). Done is
-    // never carried: a pasted item is a fresh open task, as with Cmd+D.
+    // which keeps the just-assigned Open position (spec/board.md). A closed
+    // state is never carried: a pasted item is a fresh open task, as with Cmd+D.
     // `lane` overrides the copied state wholesale (the board's anchor).
     const fillFromClip = (ids: string[], lane?: WorkflowState): void => {
       ids.forEach((id, i) => {
@@ -959,7 +963,7 @@ export function Workspace(props: {
         if (!c) return;
         copyItemDetails(id, c);
         const st =
-          lane ?? (structured && c.state !== "done" ? c.state : "backlog");
+          lane ?? (structured && !isClosedState(c.state) ? c.state : "backlog");
         if (st !== "backlog") app.setLifecycle(id, st);
       });
     };
@@ -1024,13 +1028,13 @@ export function Workspace(props: {
   // to the ids that are actually on screen. On a board, the Done lane's
   // members come from a scan of `itemsById` (Board's `doneMembers`), not
   // the list's Open projection — so `items()` covers only the open lanes.
-  // Add this board's done-but-not-binned items so a card selected in the
+  // Add this board's closed-but-not-binned items so a card selected in the
   // Done lane is actionable too.
   const withBoardDone = (visibleSet: Set<string>): Set<string> => {
     const boardId = boardListId();
     if (boardId !== null) {
       for (const it of Object.values(state.itemsById)) {
-        if (it.listId === boardId && isDone(it) && !isBinned(it)) {
+        if (it.listId === boardId && isClosed(it) && !isBinned(it)) {
           visibleSet.add(it.id);
         }
       }
@@ -1113,22 +1117,44 @@ export function Workspace(props: {
   };
   onGlobalKey(onDeleteKey);
 
-  // Every id resolves to a done item. False for an empty set.
-  const allDoneIds = (ids: string[]): boolean =>
+  // Every id resolves to a closed (done or cancelled) item. False for an
+  // empty set.
+  const allClosedIds = (ids: string[]): boolean =>
     ids.length > 0 &&
     ids.every((id) => {
       const it = app.getItem(id);
-      return it !== undefined && isDone(it);
+      return it !== undefined && isClosed(it);
+    });
+  const allCancelledIds = (ids: string[]): boolean =>
+    ids.length > 0 &&
+    ids.every((id) => {
+      const it = app.getItem(id);
+      return it !== undefined && isCancelled(it);
     });
 
-  // Toggle done on `ids`. Direction follows the group: any not-done →
-  // mark all done, only flip back to not-done when every item is already
-  // done. Shared by `x` and the side panel's multi-select actions.
+  // Toggle done on `ids`. Direction follows the group: any open → mark
+  // all done, only flip back to open when every item is already closed
+  // (a cancelled item reopens the same way). Shared by `x` and the side
+  // panel's multi-select actions.
   const toggleDoneIds = (ids: string[]) => {
     if (ids.length === 0) return;
-    const allDone = allDoneIds(ids);
-    if (allDone && view().kind === "focus") app.undoneIntoFocus(ids);
-    else app.setDoneMany(ids, !allDone);
+    const allClosed = allClosedIds(ids);
+    if (allClosed && view().kind === "focus") app.undoneIntoFocus(ids);
+    else app.setDoneMany(ids, !allClosed);
+  };
+
+  // Toggle cancelled on `ids`: any not-cancelled → cancel all; only
+  // reopen (to Backlog, the core's un-done rule) when every item is
+  // already cancelled. Shared by shift+x, the context menu and the side
+  // panel.
+  const toggleCancelledIds = (ids: string[]) => {
+    if (ids.length === 0) return;
+    if (allCancelledIds(ids)) {
+      if (view().kind === "focus") app.undoneIntoFocus(ids);
+      else app.setDoneMany(ids, false);
+    } else {
+      app.setLifecycleMany(ids, "cancelled");
+    }
   };
 
   // x: toggle done on the current selection. Mirrors the row checkbox and
@@ -1145,6 +1171,18 @@ export function Workspace(props: {
     toggleDoneIds(ids);
   };
   onGlobalKey(onToggleDoneKey);
+
+  // shift+x: toggle cancelled on the current selection. Mirrors the
+  // context menu's Cancel / Reopen. Same editable-surface guard as `x`.
+  const onToggleCancelKey = (e: KeyboardEvent) => {
+    if (e.key !== "x" && e.key !== "X") return;
+    if (e.metaKey || e.ctrlKey || e.altKey || !e.shiftKey) return;
+    const ids = selectedVisibleIds(true);
+    if (ids.length === 0) return;
+    e.preventDefault();
+    toggleCancelledIds(ids);
+  };
+  onGlobalKey(onToggleCancelKey);
 
   // Every id is in the Focus lens. False for an empty set.
   const allFocusedIds = (ids: string[]): boolean => {
@@ -1818,7 +1856,7 @@ export function Workspace(props: {
       // first one's lane (a done card's lane is Done, not its state).
       const laneOf = (id: string): string => {
         const it = state.itemsById[id];
-        return isDone(it) && !isBinned(it) ? "done" : it.state;
+        return isClosed(it) && !isBinned(it) ? "done" : it.state;
       };
       const lane = laneOf(inView[0]);
       setBoardRevealIds(inView.filter((id) => laneOf(id) === lane));
@@ -1851,7 +1889,7 @@ export function Workspace(props: {
       r.id,
       r.lifecycle === "binned"
         ? { kind: "bin" }
-        : r.lifecycle === "done"
+        : r.lifecycle === "done" || r.lifecycle === "cancelled"
           ? { kind: "done" }
           : { kind: "list", id: r.listId || "inbox" },
     );
@@ -1906,12 +1944,13 @@ export function Workspace(props: {
   // bar keeps the view token until the user actually enters the item
   // (Enter, row open, a link, a click into the pane).
 
-  // The view that shows `it`: Bin if binned, Done if done, else its home
-  // list. A stale list id falls back to Inbox; archived lists still render.
+  // The view that shows `it`: Bin if binned, Done if closed (done or
+  // cancelled), else its home list. A stale list id falls back to Inbox;
+  // archived lists still render.
   const viewForItem = (it: ItemView): ViewKey =>
     isBinned(it)
       ? { kind: "bin" }
-      : isDone(it)
+      : isClosed(it)
         ? { kind: "done" }
         : { kind: "list", id: state.listsById[it.listId] ? it.listId : "inbox" };
 
@@ -2166,9 +2205,14 @@ export function Workspace(props: {
     });
     const out: SelectionAction[] = [
       {
-        label: allDoneIds(ids) ? msgs.workspace.markNotDone : msgs.workspace.markDone,
+        label: allClosedIds(ids) ? msgs.workspace.markNotDone : msgs.workspace.markDone,
         shortcut: "X",
         run: () => toggleDoneIds(ids),
+      },
+      {
+        label: allCancelledIds(ids) ? msgs.workspace.reopen : msgs.workspace.markCancelled,
+        shortcut: "⇧X",
+        run: () => toggleCancelledIds(ids),
       },
     ];
     // Focus membership: pin / unpin from a list or board (open rows only,

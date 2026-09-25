@@ -23,7 +23,7 @@ on right now", drawn from across every list, in one hand-curated order.
   You can change an item's lifecycle from within it, but there are **no lanes**
   (no per-state split, no board lens). Keeping it flat is the point.
 - **Feels finite.** Focus is kept small by construction — single-tier, flat, and
-  auto-compacting on Done — not by a cap or a nag. Focus that grows without bound
+  auto-compacting on Done or Cancelled — not by a cap or a nag. Focus that grows without bound
   is Focus that has stopped meaning anything. (An earlier soft-threshold colour
   nudge on the nav count was tried and dropped; the count renders plainly, like
   every other list.)
@@ -99,23 +99,25 @@ list's resolved order is, so `doc_fingerprint` **hashes the focus order**.
 
 ## Lifecycle interplay — the key semantic decision
 
-**Focus is finite by construction: completing an item removes it from Focus.**
+**Focus is finite by construction: closing an item (Done or Cancelled) removes
+it from Focus.**
 
-Unlike an order container — where a Done item's entry still does work (it renders
-in the board's Done lane) — a Done item is filtered out of the Focus view
-entirely. A lingering Done ref in the focus container therefore renders *nothing*;
+Unlike an order container — where a closed item's entry still does work (it
+renders in the board's Done lane) — a closed item is filtered out of the Focus
+view entirely. A lingering closed ref in the focus container therefore renders
+*nothing*;
 it is pure garbage. And `reconcile()` (the plan's nominal GC) is not wired to run
 in production. So Focus cannot rely on lazy sweeping the way order containers do;
 it compacts eagerly instead.
 
-- **Done ⇒ the item's focus ref is removed in the same commit.** The Done
-  transition (`set_item_lifecycle` → Done) additionally deletes the item's focus
-  ref(s). Focus self-compacts; a completed item leaves Focus and does not come
-  back on its own. Un-doing the item does **not** re-add it to Focus — you re-add
+- **Done or Cancelled ⇒ the item's focus ref is removed in the same commit.**
+  Either closing transition (`set_item_lifecycle` → Done / Cancelled)
+  additionally deletes the item's focus ref(s). Focus self-compacts; a closed
+  item leaves Focus and does not come back on its own. Un-doing the item does **not** re-add it to Focus — you re-add
   deliberately (which is itself the discipline Focus is asking for). This is the
   single documented exception to "lifecycle transitions never touch a second
   container" (`spec/data-model.md`), justified because the focus ref is pure
-  garbage once the item is Done, not live state like an order entry.
+  garbage once the item is closed, not live state like an order entry.
 - **Binned ⇒ filtered out of the view** (Open filter), ref left in place. Binning
   is often bulk (delete-list bins many items) and frequently reversible, so it is
   *not* coupled to a focus write. The stale ref is swept the next time the user
@@ -177,10 +179,10 @@ Reads:
 
 Maintenance & integrity:
 
-- `set_item_lifecycle` → Done removes the item's focus ref(s) in the same commit
-  (see Lifecycle interplay).
-- `reconcile()` prunes focus refs that are missing / done / binned / foreign, and
-  dedups. Idempotent; no-op when clean.
+- `set_item_lifecycle` → Done or Cancelled removes the item's focus ref(s) in
+  the same commit (see Lifecycle interplay).
+- `reconcile()` prunes focus refs that are missing / closed / binned / foreign,
+  and dedups. Idempotent; no-op when clean.
 - `doc_fingerprint` hashes the focus order.
 
 Constant: `FOCUS_CONTAINER = "focus"`, alongside the existing container-name

@@ -62,6 +62,8 @@ import { itemUrl } from "./url.ts";
 import { trackOverlay } from "./overlay.ts";
 import {
   isBinned,
+  isCancelled,
+  isClosed,
   isDone,
   OPEN_STATES,
   type DocApp,
@@ -981,10 +983,16 @@ export function TaskDialog(props: {
   // it does, so promoting a capture mid-edit swaps the data source under
   // the same elements: the caret, an open picker menu and the modal's
   // focus trap all carry on untouched.
+  // "Checked" in the header = closed (done or cancelled); the cross
+  // variant shows for cancelled. A capture can only be pre-set to Done.
   const vDone = () => {
     const it = item();
-    if (it) return isDone(it);
+    if (it) return isClosed(it);
     return newItemTarget()?.done ?? false;
+  };
+  const vCancelled = () => {
+    const it = item();
+    return it ? isCancelled(it) : false;
   };
   const vBinned = () => {
     const it = item();
@@ -1003,7 +1011,7 @@ export function TaskDialog(props: {
     item() ? (item()?.duration ?? null) : newDuration();
   const vDeadline = () =>
     item() ? (item()?.deadline ?? null) : newDeadline();
-  // Done / Binned: date fields render muted and the pin toggle hides
+  // Closed / Binned: date fields render muted and the pin toggle hides
   // (neither can hold a Focus ref, spec/focus.md).
   const muted = () => vDone() || vBinned();
   const setDoneFlag = (done: boolean) => {
@@ -1065,8 +1073,13 @@ export function TaskDialog(props: {
               type="checkbox"
               class="task-check"
               checked={vDone()}
+              data-cancelled={vCancelled() ? "" : undefined}
               aria-label={
-                vDone() ? m().workspace.markNotDone : m().workspace.markDone
+                vCancelled()
+                  ? m().workspace.reopen
+                  : vDone()
+                    ? m().workspace.markNotDone
+                    : m().workspace.markDone
               }
               onChange={(e) => setDoneFlag(e.currentTarget.checked)}
             />
@@ -1288,6 +1301,13 @@ export function TaskDialog(props: {
                       )}
                     </li>
                   </Show>
+                  <Show when={isCancelled(it())}>
+                    <li title={formatDateTime(it().lifecycleAt, locale())}>
+                      {m().workspace.activityCancelled(
+                        formatDialogStamp(it().lifecycleAt, nowMs(), locale(), { inline: true }),
+                      )}
+                    </li>
+                  </Show>
                 </ul>
               </section>
             )}
@@ -1413,9 +1433,9 @@ export function TaskDialog(props: {
   );
 }
 
-/** The five pickable workflow states, in ladder order (the bin is not a
+/** The six pickable workflow states, in ladder order (the bin is not a
  *  state — it's reached from the header menu, not from here). */
-const LIFECYCLE_CHOICES: readonly WorkflowState[] = [...OPEN_STATES, "done"];
+const LIFECYCLE_CHOICES: readonly WorkflowState[] = [...OPEN_STATES, "done", "cancelled"];
 
 /** Lifecycle status badge beside the list picker: shows the item's current
  *  workflow state and opens a menu of all five to move it in one commit.

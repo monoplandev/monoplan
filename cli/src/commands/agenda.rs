@@ -86,13 +86,14 @@ pub struct AgendaDay {
 ///   Ticking a row does not move it.
 /// - Done items place by `when` only, on that day (today or later),
 ///   neutral. A done item with no `when`, or a past `when`, is dropped:
-///   nothing is owed and past days are not shown. Binned items never
-///   appear.
+///   nothing is owed and past days are not shown. Cancelled and binned
+///   items never appear: a cancelled slot is something that did not
+///   happen, so it clutters rather than records.
 pub fn build_agenda<'a>(items: &'a [ItemView], today: &'a str, horizon: &str) -> Vec<AgendaDay> {
     // (day, fold group, placing raw, created_at, row)
     let mut placed: Vec<(String, u8, String, i64, AgendaRow)> = Vec::new();
     for item in items {
-        if item.is_binned() {
+        if item.is_binned() || item.is_cancelled() {
             continue;
         }
         let when_day = item.when.as_deref().map(|w| &w[..w.len().min(10)]);
@@ -430,6 +431,9 @@ mod tests {
         done_past.state = WorkflowState::Done;
         let mut binned = item("binned", Some(TODAY), None, 6);
         binned.binned_at = Some(5);
+        // Cancelled: dropped even with a future `when` — it did not happen.
+        let mut cancelled = item("cancelled", Some("2026-09-10"), Some("2026-09-10"), 9);
+        cancelled.state = WorkflowState::Cancelled;
         let items = [
             done_today,
             item("open-today", Some("2026-09-09T15:00"), None, 7),
@@ -439,6 +443,7 @@ mod tests {
             done_deadline,
             done_past,
             binned,
+            cancelled,
         ];
         let days = build_agenda(&items, TODAY, HORIZON);
         let by_day: Vec<(&str, Vec<&str>)> =

@@ -37,8 +37,9 @@ fn js_err<E: std::fmt::Display>(e: E) -> JsError {
 // ---------- lifecycle ----------
 
 /// Resolved item lifecycle (`spec/data-model.md` "Lifecycle"), mirrored
-/// from `monoplan_core::ItemLifecycle` for the wasm boundary: the five
-/// workflow states plus the orthogonal `Binned` mask. Passed to
+/// from `monoplan_core::ItemLifecycle` for the wasm boundary: the six
+/// workflow states (four open, plus the terminal Done and Cancelled)
+/// and the orthogonal `Binned` mask. Passed to
 /// `setItemLifecycle` / `setItemsLifecycle`; the board's lane-drop
 /// primitive.
 #[wasm_bindgen]
@@ -49,6 +50,7 @@ pub enum ItemLifecycle {
     InProgress,
     Review,
     Done,
+    Cancelled,
     Binned,
 }
 
@@ -60,14 +62,15 @@ impl From<ItemLifecycle> for CoreItemLifecycle {
             ItemLifecycle::InProgress => CoreItemLifecycle::InProgress,
             ItemLifecycle::Review => CoreItemLifecycle::Review,
             ItemLifecycle::Done => CoreItemLifecycle::Done,
+            ItemLifecycle::Cancelled => CoreItemLifecycle::Cancelled,
             ItemLifecycle::Binned => CoreItemLifecycle::Binned,
         }
     }
 }
 
 /// Resolve a JS-side lifecycle argument to the open workflow state a
-/// direct capture requires (`spec/board.md` "Capture"): Done and Binned
-/// are not capture lanes.
+/// direct capture requires (`spec/board.md` "Capture"): Done, Cancelled
+/// and Binned are not capture lanes.
 fn open_state_arg(l: ItemLifecycle) -> Result<monoplan_core::WorkflowState, JsError> {
     CoreItemLifecycle::from(l)
         .workflow_state()
@@ -507,7 +510,8 @@ impl Doc {
         self.inner.open_item_ids(list_id)
     }
 
-    /// Ids of all `Done` items, sorted by `done_at` descending.
+    /// Ids of all closed (`Done` or `Cancelled`), not-binned items,
+    /// sorted by the register's `at` descending — the Done view.
     #[wasm_bindgen(js_name = doneItemIds)]
     pub fn done_item_ids(&self) -> Vec<String> {
         self.inner.done_item_ids()
@@ -2016,9 +2020,9 @@ pub struct AppEventJs {
     /// default was cleared or the event doesn't carry one.
     default_view: Option<String>,
     /// Workflow register state name (`itemAdded` / `itemLifecycleChanged`):
-    /// `"backlog" | "todo" | "in_progress" | "review" | "done"`, masked
-    /// by `binned_at` when that is set. `None` on events that don't
-    /// carry lifecycle.
+    /// `"backlog" | "todo" | "in_progress" | "review" | "done" |
+    /// "cancelled"`, masked by `binned_at` when that is set. `None` on
+    /// events that don't carry lifecycle.
     state: Option<&'static str>,
     /// The workflow register's transition timestamp (`itemAdded` /
     /// `itemLifecycleChanged`).

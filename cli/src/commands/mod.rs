@@ -66,6 +66,8 @@ enum Cmd {
     Review(items::IdArg),
     /// Mark an item done.
     Done(items::IdArg),
+    /// Cancel an item (closed like Done, but not a completion).
+    Cancel(items::IdArg),
     /// Send an item to the bin (or operate on the bin namespace).
     Bin(bin::BinArgs),
     /// Restore an item from the bin (reveals its preserved lifecycle).
@@ -112,6 +114,7 @@ impl Cli {
             Cmd::Start(a) => items::start(a, sync).await,
             Cmd::Review(a) => items::review(a, sync).await,
             Cmd::Done(a) => items::done(a, sync).await,
+            Cmd::Cancel(a) => items::cancel(a, sync).await,
             Cmd::Bin(a) => bin::run(a, sync).await,
             Cmd::Restore(a) => items::restore(a, sync).await,
             Cmd::Mv(a) => items::mv(a, sync).await,

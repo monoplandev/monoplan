@@ -10,7 +10,7 @@
 // without a DOM (`test/dayGroups.test.ts`).
 
 import { formatDeadlineBadge, whenDay } from "./format.tsx";
-import { isBinned, isDone, type ItemView } from "./sync/store.ts";
+import { isBinned, isCancelled, isDone, type ItemView } from "./sync/store.ts";
 
 /** Most urgent first when comparing. */
 export type DayTone = "overdue" | "warning" | "neutral";
@@ -60,7 +60,9 @@ export function groupByDay(
   const placed: { day: string; raw: string; row: DayRow }[] = [];
   const overdueRows: { fold: number; raw: string; row: DayRow }[] = [];
   for (const it of items) {
-    if (isBinned(it) || (!it.when && !it.deadline)) continue;
+    // A cancelled item did not happen: unlike a done one it keeps no
+    // calendar slot, so it drops out with the binned ones.
+    if (isBinned(it) || isCancelled(it) || (!it.when && !it.deadline)) continue;
     const wDay = it.when ? whenDay(it.when) : null;
     const dDay = it.deadline ?? null;
     if (isDone(it)) {

@@ -87,7 +87,7 @@ impl From<monoplan_core::CryptoError> for MonoplanError {
 // ---------- flat view records ----------
 
 /// Flat mirror of `monoplan_core::ItemView` for the FFI boundary. `state`
-/// is the workflow register's name (`"backlog"` … `"done"`,
+/// is the workflow register's name (`"backlog"` … `"cancelled"`,
 /// `spec/data-model.md` "Lifecycle") and `lifecycle_at` its transition
 /// time; `binned_at` is the orthogonal bin mask, `done_at` the
 /// reflection stamp. The Swift side derives booleans if it wants them.

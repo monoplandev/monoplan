@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, on, Show } from "solid-js";
 import { ContextMenu } from "@kobalte/core/context-menu";
 import checkSvg from "./icons/check.svg?raw";
+import crossSvg from "./icons/cross.svg?raw";
 import drawingPinFilledSvg from "./icons/drawing-pin-filled.svg?raw";
 import noteSvg from "./icons/note.svg?raw";
 import { DndSelection } from "./dnd/solid";
@@ -24,7 +25,8 @@ import { itemUrl } from "./url.ts";
 import type { ViewKey } from "./prefs.ts";
 import {
   isBinned,
-  isDone,
+  isCancelled,
+  isClosed,
   isOpen,
   type DocApp,
   type ItemView,
@@ -38,11 +40,12 @@ export const DRAFT_ID_PREFIX = "__draft__";
 export const isDraftId = (id: string): boolean => id.startsWith(DRAFT_ID_PREFIX);
 
 // Surface the most recent state-changing timestamp. Binned wins over
-// done because it's the later transition: a done-then-binned item shows
-// when it was binned in the Bin view; a plain done item shows the
-// register's Done transition time in the Done view. Open rows show none.
+// closed because it's the later transition: a done-then-binned item shows
+// when it was binned in the Bin view; a plain done or cancelled item shows
+// the register's closing transition time in the Done view. Open rows show
+// none.
 function lifecycleTimestamp(it: ItemView): number | undefined {
-  return it.binnedAt ?? (isDone(it) ? it.lifecycleAt : undefined);
+  return it.binnedAt ?? (isClosed(it) ? it.lifecycleAt : undefined);
 }
 
 export function Row(props: {
@@ -278,11 +281,18 @@ export function Row(props: {
     if (ids.length === 0) return;
     props.app.setDoneMany(ids, true);
   };
+  // Un-done reopens both Done and Cancelled items (the core's closed →
+  // Backlog rule), so Mark not done and Reopen share this.
   const onMarkNotDone = () => {
     const ids = targetIds();
     if (ids.length === 0) return;
     if (props.viewKind === "focus") props.app.undoneIntoFocus(ids);
     else props.app.setDoneMany(ids, false);
+  };
+  const onCancel = () => {
+    const ids = targetIds();
+    if (ids.length === 0) return;
+    props.app.setLifecycleMany(ids, "cancelled");
   };
   // Focus toggle from the context menu acts on the whole target set (the
   // selection when this row is part of it, else this row alone) in a single
@@ -394,7 +404,8 @@ export function Row(props: {
     <ContextMenu onOpenChange={onOpenChange}>
       <ContextMenu.Trigger
         class={props.deadlineInFooter ? "row row-card" : "row"}
-        data-done={isDone(props.item()) ? "" : undefined}
+        data-done={isClosed(props.item()) ? "" : undefined}
+        data-cancelled={isCancelled(props.item()) ? "" : undefined}
         data-binned={isBinned(props.item()) ? "" : undefined}
         data-expanded={props.expanded() ? "" : undefined}
         on:dblclick={(e) => {
@@ -425,7 +436,8 @@ export function Row(props: {
           type="checkbox"
           class="task-check"
           tabIndex={-1}
-          checked={isDone(props.item())}
+          checked={isClosed(props.item())}
+          data-cancelled={isCancelled(props.item()) ? "" : undefined}
           onMouseDown={(e) => {
             // Clicking still focuses the checkbox despite tabIndex=-1, and
             // the lingering focus makes a later Space press re-toggle it.
@@ -435,8 +447,9 @@ export function Row(props: {
           }}
           onChange={(e) => {
             const id = props.item().id;
-            // Un-checking a lingering row in Focus re-pins it (Done dropped
-            // its ref); elsewhere it's a plain lifecycle flip.
+            // Un-checking a lingering row in Focus re-pins it (closing
+            // dropped its ref); elsewhere it's a plain lifecycle flip. A
+            // cancelled row un-checks the same way (closed → Backlog).
             if (!e.currentTarget.checked && props.viewKind === "focus") {
               props.app.undoneIntoFocus([id]);
             } else {
@@ -600,7 +613,10 @@ export function Row(props: {
                   title={formatDateTime(ts(), locale())}
                 >
                   <Show when={props.viewKind === "done"}>
-                    <span class="row-timestamp-icon" innerHTML={checkSvg} />
+                    <span
+                      class="row-timestamp-icon"
+                      innerHTML={isCancelled(props.item()) ? crossSvg : checkSvg}
+                    />
                   </Show>
                   {props.viewKind === "done"
                     ? formatDoneStamp(ts(), nowMs(), locale())
@@ -684,16 +700,26 @@ export function Row(props: {
               <kbd class="menu-shortcut">↵</kbd>
             </ContextMenu.Item>
           </Show>
-          <Show when={!isDone(props.item())}>
+          <Show when={!isClosed(props.item())}>
             <ContextMenu.Item class="context-menu-item" onSelect={onMarkDone}>
               <span>{m().workspace.markDone}</span>
               <kbd class="menu-shortcut">X</kbd>
             </ContextMenu.Item>
           </Show>
-          <Show when={isDone(props.item())}>
+          <Show when={isClosed(props.item())}>
             <ContextMenu.Item class="context-menu-item" onSelect={onMarkNotDone}>
-              <span>{m().workspace.markNotDone}</span>
+              <span>
+                {isCancelled(props.item())
+                  ? m().workspace.reopen
+                  : m().workspace.markNotDone}
+              </span>
               <kbd class="menu-shortcut">X</kbd>
+            </ContextMenu.Item>
+          </Show>
+          <Show when={!isClosed(props.item())}>
+            <ContextMenu.Item class="context-menu-item" onSelect={onCancel}>
+              <span>{m().workspace.markCancelled}</span>
+              <kbd class="menu-shortcut">⇧X</kbd>
             </ContextMenu.Item>
           </Show>
           <Show when={canPinToFocus()}>

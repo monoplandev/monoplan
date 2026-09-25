@@ -1075,6 +1075,19 @@ input.task-check:hover {
   background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'><path d='M3.5 8.5l3 3 6-6' stroke='%23e5e5e5' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
 
+/* Cancelled: the box is "checked" (closed) but draws a cross, not a tick.
+   Same box, same weight, so a cancelled row reads as settled rather than
+   achieved. Source order beats the tick rules above. */
+.task-check[data-cancelled]:checked,
+.task-check[data-cancelled][data-checked] {
+  background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'><path d='M5 5l6 6M11 5l-6 6' stroke='black' stroke-width='2' fill='none' stroke-linecap='round'/></svg>");
+}
+
+[data-theme="dark"] .task-check[data-cancelled]:checked,
+[data-theme="dark"] .task-check[data-cancelled][data-checked] {
+  background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'><path d='M5 5l6 6M11 5l-6 6' stroke='%23e5e5e5' stroke-width='2' fill='none' stroke-linecap='round'/></svg>");
+}
+
 .task-check:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: 1px;

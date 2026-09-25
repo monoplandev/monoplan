@@ -31,10 +31,13 @@ reorder anything by itself.
 
 - **Backlog / Todo / In Progress / Review** — the list's Open items with the
   matching lifecycle state, in list order.
-- **Done** — the list's done-but-not-binned items (`state == Done &&
-  binned_at == null`), sorted by the workflow register's `at` **descending**
-  (id asc tiebreak). Scoped to the current list. This is the per-list slice of
-  the global Done view.
+- **Done** — the list's closed-but-not-binned items (`state is Done |
+  Cancelled && binned_at == null`), sorted by the workflow register's `at`
+  **descending** (id asc tiebreak). Scoped to the current list. This is the
+  per-list slice of the global Done view. Cancelled is deliberately **not a
+  sixth lane**: a cancelled card sits in the Done lane with a cross instead
+  of a tick, so the closed history stays in one place and the lane set (and
+  its `LaneSet` bitmask / view grammar) is unchanged.
 
 The open lanes **preserve relative order** from the list's Open projection:
 an item's position is the same whether you read `order/<list-id>` linearly or
@@ -73,8 +76,9 @@ has no meaning on the board (the lane is the state) or on the Done view.
   index — see `spec/data-model.md`) and partitions it by
   `ItemView::lifecycle()` into the four open lanes. No new core projection is
   needed; the open lanes are four views of one ordered array.
-- Done is a timestamp sort over the list's done-but-not-binned items, exactly
-  the global Done view filtered to this `list_id`.
+- Done is a timestamp sort over the list's closed-but-not-binned items
+  (done and cancelled), exactly the global Done view filtered to this
+  `list_id`.
 - `ItemView` carries the lifecycle state and its `at` timestamp; the state is
   the displayed lane.
 
@@ -86,17 +90,19 @@ the target lane *is* the target state, uniformly:
 - **Drop into an open lane** (Backlog / Todo / In Progress / Review) — set
   that lifecycle state. If the drop names a target position in the shared
   Open order, fold a `move_item` reorder into the same commit.
-- **Drop into Done** — set lifecycle Done. Done is timestamp-ordered, so a
-  drop position within Done is ignored.
-- **Drop from Done into an open lane** — set that state; the item reappears in
-  the Open order at its preserved entry position (drops naming a position fold
-  the reorder in, as above).
+- **Drop into Done** — set lifecycle Done (never Cancelled: cancelling is
+  an explicit action — context menu, `⇧X`, the status picker — not a drop
+  target). Done is timestamp-ordered, so a drop position within Done is
+  ignored.
+- **Drop from Done into an open lane** — set that state, for a done or a
+  cancelled card alike; the item reappears in the Open order at its preserved
+  entry position (drops naming a position fold the reorder in, as above).
 
 Lanes are the state axis; lists are the location axis. A **cross-list move**
 (the `m` palette, the task dialog's list picker, or a drag onto a list in the
-nav) is a relocation only: it never changes lifecycle. A Done item moved to
-another list stays Done and appears in the target's Done lane; reopening it is
-a separate lane drop or un-done. The one exception is a *binned* item, which
+nav) is a relocation only: it never changes lifecycle. A closed item moved to
+another list stays closed and appears in the target's Done lane; reopening it
+is a separate lane drop or un-done. The one exception is a *binned* item, which
 is restored into the target list on move — the Bin is outside the workspace,
 so a move while binned has no meaning (restore reveals the preserved state, so
 a done-then-binned item arrives Done).
@@ -178,8 +184,8 @@ local override (if any)  →  saved default (if any)  →  built-in flat list
   item state.
 - A drag between open lanes is a same-list lifecycle change: the item is
   **not** spliced out of the list's Open array (`listOpen`), it stays in place
-  and its lane is recomputed from the lifecycle state. Only Done/Binned
-  transitions remove it from `listOpen`.
+  and its lane is recomputed from the lifecycle state. Only Done / Cancelled
+  / Binned transitions remove it from `listOpen`.
 
 ## Future
 

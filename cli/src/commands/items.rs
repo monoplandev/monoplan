@@ -71,7 +71,7 @@ pub struct LsArgs {
     /// List to show. Defaults to `inbox`.
     #[arg(long, default_value = LIST_INBOX)]
     pub list: String,
-    /// Include items marked `Done`.
+    /// Include closed items (`Done` and `Cancelled`).
     #[arg(long)]
     pub done: bool,
     /// Machine-parseable output.
@@ -83,7 +83,7 @@ pub async fn ls(args: LsArgs, sync: bool) -> anyhow::Result<()> {
     let session = Session::open(sync).await?;
     let mut items = session.doc().items_in_list(&args.list, false);
     if !args.done {
-        items.retain(|i| !i.is_done());
+        items.retain(|i| !i.is_closed());
     }
     if args.json {
         print_json(&items.iter().map(item_json).collect::<Vec<_>>())?;
@@ -163,6 +163,7 @@ pub fn state_mark(state: WorkflowState) -> &'static str {
         WorkflowState::InProgress => ">",
         WorkflowState::Review => "?",
         WorkflowState::Done => "x",
+        WorkflowState::Cancelled => "/",
     }
 }
 
@@ -195,7 +196,7 @@ pub fn print_json<T: Serialize>(value: &T) -> anyhow::Result<()> {
     Ok(())
 }
 
-// ---------- backlog / todo / start / review / done / bin / restore ----------
+// ---------- backlog / todo / start / review / done / cancel / bin / restore ----------
 
 #[derive(Parser, Debug)]
 pub struct IdArg {
@@ -236,6 +237,11 @@ pub async fn review(args: IdArg, sync: bool) -> anyhow::Result<()> {
 /// Workflow → Done (stamps `done_at`).
 pub async fn done(args: IdArg, sync: bool) -> anyhow::Result<()> {
     transition(args, sync, ItemLifecycle::Done).await
+}
+
+/// Workflow → Cancelled (closed, but stamps nothing: not a completion).
+pub async fn cancel(args: IdArg, sync: bool) -> anyhow::Result<()> {
+    transition(args, sync, ItemLifecycle::Cancelled).await
 }
 
 pub async fn bin(args: IdArg, sync: bool) -> anyhow::Result<()> {

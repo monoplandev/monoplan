@@ -39,7 +39,7 @@ One child `LoroMap` under `items`, keyed by `ItemId`.
 | `text` | string | the user's content. Stays a string register on purpose: a title is rewritten whole, so concurrent rewrites resolve by LWW to one clean title rather than a character interleaving (`notes-plan.md` "Why `text` stays a register") |
 | `notes` | `LoroText` | optional free-form plain text as a **mergeable child text container** (`LoroMap::ensure_mergeable_text`, `notes-plan.md`). Absent until the first write; created lazily by whichever device writes first, and concurrent first writes on two devices merge into one container. Edits are applied as character diffs (`LoroText::update`), so concurrent edits from two devices merge character-wise. Clearing deletes the content and **keeps the key**: the key is never deleted, because a later `ensure` would resurface the hidden child's old content. Reads take the container's plain string; a stray string value at the key (a v3 leftover) is not read. |
 | `location` | string | **atomic placement register** — encoded `"<list_id>:<placement_id>"`, see below |
-| `lifecycle` | value | **atomic workflow register** — a plain `LoroValue` list `[state, at]`: the current workflow state (integer `0..=4`, see "Lifecycle") and the unix millis it was entered. Absent ≡ `[Backlog, created_at]`; new items omit it. |
+| `lifecycle` | value | **atomic workflow register** — a plain `LoroValue` list `[state, at]`: the current workflow state (integer `0..=5`, see "Lifecycle") and the unix millis it was entered. Absent ≡ `[Backlog, created_at]`; new items omit it. |
 | `binned_at` | i64? | **bin mask** — unix millis when the item was binned. Present ≡ binned (masking the workflow state); absent ≡ not binned. Restore deletes the key, revealing the preserved workflow state. Orthogonal to `lifecycle`. |
 | `deadline` | string? | optional **date-only** deadline, a floating local calendar date in `YYYY-MM-DD` format (no time, no timezone, not unix millis). Absent ≡ no deadline; clearing deletes the key. Values that are not a well-formed `YYYY-MM-DD` calendar date are rejected by the mutation. Means "owed by": past it the item is overdue. |
 | `when` | string? | optional **planned date**, shape-discriminated: `YYYY-MM-DD` (all-day, 10 chars) or `YYYY-MM-DDTHH:MM` (timed, 16 chars, `HH` 00–23, `MM` 00–59). Floating wall-clock, no seconds, no zone; an RFC 9557 `[Zone]` suffix is reserved and rejected for now. Absent ≡ unset; clearing deletes the key. One register so date and time cannot tear under concurrent edit; sorts by plain string compare (all-day leads its day). Means "happens on" or "act on". Fixed: never rewritten or rolled over by the clock, and never red past its day; whether a past `when` "slipped" is undecided until events and tasks are distinguished (`calendar-plan.md`). Independent of `deadline`. See `calendar-plan.md`. |
@@ -56,19 +56,28 @@ other kinds appear.
 Lifecycle is a **workflow register plus a bin mask** — two persisted fields:
 
 ```
-enum WorkflowState {          // the `lifecycle` register, 0..=4
+enum WorkflowState {          // the `lifecycle` register, 0..=5
     Backlog    = 0,
     Todo       = 1,
     InProgress = 2,
     Review     = 3,
-    Done       = 4,
+    Done       = 4,           // closed: completed
+    Cancelled  = 5,           // closed: deliberately dropped, not completed
 }
 
 enum ItemLifecycle {          // API-level resolved lifecycle
-    Backlog, Todo, InProgress, Review, Done,
+    Backlog, Todo, InProgress, Review, Done, Cancelled,
     Binned,                   // = binned_at present, masking the state
 }
 ```
+
+The first four states are **Open**; Done and Cancelled are the two
+**closed** (terminal) states. Cancelled exists because "I decided not to do
+this" is a real outcome worth keeping next to what was finished — unlike
+the bin, which is for mis-captures and duplicates that may be hard-deleted.
+It is not a completion: it never writes `done_at`, and it renders as a cross
+where Done renders a tick. Cancelled is **not** a board lane; cancelled items
+share the Done lane and the Done view (`spec/board.md`).
 
 The `lifecycle` field is a single **atomic register** holding a plain
 `LoroValue` list `[state, at]` — the current workflow state and the
@@ -100,8 +109,10 @@ Projections:
   In Progress | Review). The four open states share the list's single manual
   order — the state partitions Open into board lanes without reordering
   anything (`spec/board.md`).
-- **Done view** = `binned_at == null && state == Done`, sorted by the
-  register's `at` desc (id asc tiebreak).
+- **Done view** = `binned_at == null && state is Done | Cancelled` (closed,
+  not binned), sorted by the register's `at` desc (id asc tiebreak).
+  Cancelled rows render muted with a cross; clients may offer a display-only
+  "hide cancelled" filter.
 - **Bin view** = `binned_at != null`, sorted by `binned_at` desc.
 
 `ItemView::lifecycle()` returns the resolved `ItemLifecycle`; `ItemView` also
@@ -194,9 +205,9 @@ match wins), and can be cleaned opportunistically (see Reconciliation).
 - **Reads never mutate.** Projection (including the fallback tail) is pure;
   it never writes order entries. Materializing fallback placements into real
   entries happens only through the explicit reconciliation mutation.
-- The Done view sorts by the workflow register's `at` desc (id asc tiebreak),
-  the Bin view by `binned_at` desc; both are timestamp sorts, not
-  order-container projections.
+- The Done view (closed items: Done and Cancelled) sorts by the workflow
+  register's `at` desc (id asc tiebreak), the Bin view by `binned_at` desc;
+  both are timestamp sorts, not order-container projections.
 
 ### Resolved order
 
@@ -256,32 +267,36 @@ Every mutation below forms **one Loro commit** (one undo step, one op group).
 
   | Target | `lifecycle` register | `binned_at` |
   |---|---|---|
-  | Backlog / Todo / In Progress / Review / Done | write `[state, now]` | clear |
+  | Backlog / Todo / In Progress / Review / Done / Cancelled | write `[state, now]` | clear |
   | Binned | *untouched* (preserved for restore) | set now |
 
   Reflection stamps ride in the same commit: entering In Progress sets
-  `started_at` iff absent; entering Done sets `done_at`.
+  `started_at` iff absent; entering Done sets `done_at`. Entering Cancelled
+  stamps nothing — it is not a completion, and throughput analytics must
+  not count it as one; the register's own `at` is the cancelled time.
 
   The convenience transitions:
 
   - **Un-done** — set lifecycle Backlog (a plain register write; the workflow
-    ladder has no masking, so there is no prior state to reveal).
+    ladder has no masking, so there is no prior state to reveal). Applies to
+    both closed states: reopening a Cancelled item is the same write.
   - **Restore from Bin** — clear `binned_at` only, revealing the preserved
-    workflow state (which may itself be Done, if the item was done before it
-    was binned).
+    workflow state (which may itself be Done or Cancelled, if the item was
+    closed before it was binned).
 
   An item's order entry never moves on a lifecycle change; restore/un-done
   reveal it in its former position (or the fallback tail if its entry was
   lost). Board drops that additionally reorder within the shared Open order
   fold the `move_item` reorder into the *same* commit.
 
-  **Focus exception (the one second-container write).** The **Done** transition
-  additionally removes the item's focus ref(s) from the `focus` container in the
-  same commit, so completing an item removes it from Focus and it does not return
-  on un-done. This is the sole lifecycle transition that touches a container other
-  than the item map; it is justified because a Done focus ref renders nothing (the
-  Focus view is Open-only) and Focus must stay finite without relying on the
-  unwired `reconcile()`. Transitions between the four open states — including
+  **Focus exception (the one second-container write).** The **Done** and
+  **Cancelled** transitions additionally remove the item's focus ref(s) from
+  the `focus` container in the same commit, so closing an item removes it from
+  Focus and it does not return on un-done. This is the sole lifecycle
+  transition that touches a container other than the item map; it is
+  justified because a closed focus ref renders nothing (the Focus view is
+  Open-only) and Focus must stay finite without relying on the unwired
+  `reconcile()`. Transitions between the four open states — including
   into Review — never touch Focus. **Binned does not** touch the focus
   container — binned refs are filtered from the view and swept on the next
   focus interaction. See `spec/focus.md` "Lifecycle interplay".
@@ -306,10 +321,10 @@ Every mutation below forms **one Loro commit** (one undo step, one op group).
 `reconcile()` is an explicit, idempotent maintenance mutation (never run
 implicitly by reads): for every list it removes stale/duplicate entries and
 appends real entries for fallback-tail items (using each item's existing
-placement id). It also prunes **focus** refs that are missing / done / binned /
+placement id). It also prunes **focus** refs that are missing / closed / binned /
 foreign and dedups them (`spec/focus.md`). One commit; a no-op when the doc is
 clean. Clients may run it opportunistically (e.g. after bootstrap); nothing
-depends on it running — Focus stays bounded via auto-remove-on-Done and the
+depends on it running — Focus stays bounded via auto-remove-on-close and the
 sweep folded into each focus mutation.
 
 ## ListMeta
@@ -402,7 +417,7 @@ All mutations go through Loro APIs internally; the core exposes typed helpers:
   `target_list_id` equals the current list (order `mov`, placement kept);
   cross-list move otherwise (fresh placement, atomic location write,
   entry delete+insert). One commit either way.
-- `set_item_lifecycle(item_id, lifecycle)` / `set_items_lifecycle(item_ids, lifecycle)` — move one or many items to an `ItemLifecycle` (`Backlog | Todo | InProgress | Review | Done | Binned`) in a single commit, writing the `[state, at]` register / `binned_at` mask (plus reflection stamps) per the transition table above. This is the primitive the board uses; the `done`/`bin`/`restore`/`un-done` helpers below are convenience wrappers over it.
+- `set_item_lifecycle(item_id, lifecycle)` / `set_items_lifecycle(item_ids, lifecycle)` — move one or many items to an `ItemLifecycle` (`Backlog | Todo | InProgress | Review | Done | Cancelled | Binned`) in a single commit, writing the `[state, at]` register / `binned_at` mask (plus reflection stamps) per the transition table above. This is the primitive the board uses; the `done`/`bin`/`restore`/`un-done` helpers below are convenience wrappers over it.
 - `edit_item_text(item_id, text)`
 - `set_item_deadline(item_id, deadline)` — `Some(date)` validates a `YYYY-MM-DD`
   calendar date and writes the `deadline` register; `None` deletes the key. One
@@ -478,7 +493,7 @@ untouched (op blobs are opaque), and the cutover is the one-time
 **export → wipe → import** at a clean checkpoint.
 
 The JSON export carries `lifecycle: { state, at }` for every item, with
-`state` as a name — `"backlog" | "todo" | "in_progress" | "review" | "done"` —
+`state` as a name — `"backlog" | "todo" | "in_progress" | "review" | "done" | "cancelled"` —
 plus `binned_at` and the reflection stamps when present. `lifecycle` is
 required on import; there is no mapping from the v2 `live` / `done_at` shape
 (the v2 → v3 cutover was a one-time export → wipe → import and its importer

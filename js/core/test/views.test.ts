@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { Doc } from "../wasm/monoplan_core_web.js";
+import { Doc, ItemLifecycle } from "../wasm/monoplan_core_web.js";
 
 const LIST_MAIN = "inbox";
 
@@ -48,6 +48,24 @@ describe("Doc view helpers", () => {
     doc.setItemDone(third, true);
 
     expect(doc.doneItemIds()).toEqual([third, second, first]);
+  });
+
+  test("cancelled items join the Done view, sorted with done ones", async () => {
+    const doc = Doc.create();
+    const a = doc.addItem(LIST_MAIN, "a");
+    const b = doc.addItem(LIST_MAIN, "b");
+    doc.setItemLifecycle(a, ItemLifecycle.Cancelled);
+    await sleep(2);
+    doc.setItemDone(b, true);
+    expect(doc.openItemIds(LIST_MAIN)).toEqual([]);
+    expect(doc.doneItemIds()).toEqual([b, a]);
+    const view = JSON.parse(doc.getItemJson(a)!);
+    expect(view.state).toBe("cancelled");
+    expect(view.doneAt).toBeUndefined();
+    // Un-done reopens a cancelled item into Backlog.
+    doc.setItemDone(a, false);
+    expect(doc.openItemIds(LIST_MAIN)).toEqual([a]);
+    expect(JSON.parse(doc.getItemJson(a)!).state).toBe("backlog");
   });
 
   test("done-and-binned item appears in bin only", async () => {

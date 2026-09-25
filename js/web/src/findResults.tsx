@@ -179,7 +179,10 @@ export function FindResultBody(props: { app: DocApp; item: FindResult }) {
           <span
             class="task-check palette__item-check"
             data-kind={props.item.kind}
-            data-checked={lifecycle() === "done" ? "" : undefined}
+            data-checked={
+              lifecycle() === "done" || lifecycle() === "cancelled" ? "" : undefined
+            }
+            data-cancelled={lifecycle() === "cancelled" ? "" : undefined}
             aria-hidden="true"
           />
         }

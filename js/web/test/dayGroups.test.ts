@@ -156,6 +156,12 @@ describe("groupByDay", () => {
         item("done-deadline", { deadline: "2026-09-12" }, { state: "done" }),
         // Done in the past: not Overdue, and past days are not rendered.
         item("done-past", { when: "2026-09-01" }, { state: "done" }),
+        // Cancelled: never placed, whatever its dates — it did not happen.
+        item(
+          "cancelled",
+          { when: "2026-09-10", deadline: TODAY },
+          { state: "cancelled" },
+        ),
       ],
       TODAY,
       LABELS,

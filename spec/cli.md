@@ -25,8 +25,9 @@ Single binary `monoplan`. Subcommands:
 - `monoplan start <item_id>` — workflow → In Progress (stamps `started_at` on first entry)
 - `monoplan review <item_id>` — workflow → Review
 - `monoplan done <item_id>` — workflow → Done (stamps `done_at`)
+- `monoplan cancel <item_id>` — workflow → Cancelled (closed like Done, but stamps nothing: not a completion)
 - `monoplan bin <item_id>` — set the bin mask (`binned_at`); the workflow register is preserved
-- `monoplan restore <item_id>` — clear the bin mask only; reveals the preserved workflow state (Backlog / Todo / In Progress / Review / Done)
+- `monoplan restore <item_id>` — clear the bin mask only; reveals the preserved workflow state (Backlog / Todo / In Progress / Review / Done / Cancelled)
 - `monoplan mv <item_id> <list>`
 - `monoplan edit <item_id> <text>`
 - `monoplan when <item_id> <YYYY-MM-DD[THH:MM] | ->` — set (all-day or timed, floating) or clear (`-`) the planned date; validation is the core's (`spec/calendar-plan.md`). A timed value on an item with no duration defaults it to 60 minutes; clearing also clears the duration.
@@ -34,7 +35,7 @@ Single binary `monoplan`. Subcommands:
 - `monoplan deadline <item_id> <YYYY-MM-DD | ->` — set or clear the deadline
 - `monoplan agenda [--days N] [--today YYYY-MM-DD] [--json]` — Open dated items by day: Today first (always shown, with overdue deadlines and past planned dates folded in, oldest first), then each non-empty day up to `N` days out (default 14). Rows carry the same `@` / `!` tags as `ls` plus a trailing `(overdue)` / `(due today)` tone; a past `when` carries no tone. `--today` overrides the local date, for scripts and tests. `--json` emits `[{ day, today, rows: [{ id, text, list_id, state, when?, duration?, deadline?, placed_by, tone }] }]`.
 
-Lifecycle is the atomic `lifecycle` workflow register (`[state, at]`, states Backlog | Todo | In Progress | Review | Done) masked by the orthogonal `binned_at` bin flag — see `spec/data-model.md` "Lifecycle". Each workflow command writes the register `[state, now]` (and clears any bin mask) in a single commit; re-applying the current resolved state is a no-op. `ls` boxes carry a one-character state mark (` ` backlog, `-` todo, `>` in progress, `?` review, `x` done, `~` binned).
+Lifecycle is the atomic `lifecycle` workflow register (`[state, at]`, states Backlog | Todo | In Progress | Review | Done | Cancelled) masked by the orthogonal `binned_at` bin flag — see `spec/data-model.md` "Lifecycle". Each workflow command writes the register `[state, now]` (and clears any bin mask) in a single commit; re-applying the current resolved state is a no-op. `ls` boxes carry a one-character state mark (` ` backlog, `-` todo, `>` in progress, `?` review, `x` done, `/` cancelled, `~` binned). `ls` hides closed items (Done and Cancelled) unless `--done`; `agenda` never shows cancelled items.
 
 ### Focus
 The curated single-tier Focus lens (`spec/focus.md`). References items across lists; the item stays in its home list.

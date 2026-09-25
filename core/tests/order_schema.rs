@@ -226,7 +226,7 @@ fn assert_projection_invariants(doc: &Doc, ctx: &str) {
     for it in &items {
         assert_eq!(
             done.contains(&it.id),
-            it.is_done() && !it.is_binned(),
+            it.is_closed() && !it.is_binned(),
             "{ctx}: done view mismatch for {}",
             it.id
         );
@@ -316,11 +316,12 @@ fn random_op(doc: &Doc, rng: &mut Lcg, op_no: usize) {
         65..=69 => {
             if !items.is_empty() {
                 let it = &items[rng.below(items.len())];
-                let target = match rng.below(5) {
+                let target = match rng.below(6) {
                     0 => ItemLifecycle::Backlog,
                     1 => ItemLifecycle::Todo,
                     2 => ItemLifecycle::InProgress,
                     3 => ItemLifecycle::Review,
+                    4 => ItemLifecycle::Cancelled,
                     _ => ItemLifecycle::Done,
                 };
                 let _ = doc.set_item_lifecycle(&it.id, target);

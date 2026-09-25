@@ -55,7 +55,7 @@ routing key, never identity (`spec/sharing-plan.md`).
 Opening `#item_<id>`:
 
 1. Look the id up in the store. If found, navigate to the view that
-   shows it (Bin if binned, Done if done, else its home list; an
+   shows it (Bin if binned, Done if closed — done or cancelled — else its home list; an
    archived home list still resolves) and open the item.
 2. If not found, hold the id as *pending* and retry on every store
    change until the user navigates elsewhere. This covers a link

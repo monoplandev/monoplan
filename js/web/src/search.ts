@@ -103,8 +103,8 @@ function lifecycleFromEvent(ev: AppEventJs): SearchLifecycle {
 }
 
 // Rank order for tie-breaking (spec/search.md "Ranking"): in_progress,
-// then review, then todo, then backlog, then done, then binned — active
-// work first, then queued, then closed.
+// then review, then todo, then backlog, then done / cancelled, then
+// binned — active work first, then queued, then closed.
 function lifecycleRankOf(s: SearchLifecycle | undefined): number {
   switch (s) {
     case "in_progress":
@@ -116,6 +116,7 @@ function lifecycleRankOf(s: SearchLifecycle | undefined): number {
     case "backlog":
       return 2;
     case "done":
+    case "cancelled":
       return 1;
     default:
       return 0;

@@ -127,11 +127,13 @@ describe("readClip", () => {
       items: [
         { text: "A", state: "bogus", notes: "", duration: 15 },
         { text: "B", state: "done", when: "2026-10-02", duration: 1.5 },
+        { text: "C", state: "cancelled" },
       ],
     });
     expect(readClip(transfer({ [ITEM_CLIP_TYPE]: raw }))).toEqual([
       { text: "A", state: "backlog" },
       { text: "B", state: "done", when: "2026-10-02" },
+      { text: "C", state: "cancelled" },
     ]);
   });
 });

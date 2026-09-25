@@ -116,6 +116,10 @@ export type Messages = {
     hasNotes: string;
     markDone: string;
     markNotDone: string;
+    /** Cancel: the closed-but-not-completed sibling of Done
+     *  (`spec/data-model.md` "Lifecycle"). `reopen` is its un-done. */
+    markCancelled: string;
+    reopen: string;
     /** Activity section under the task-dialog notes: heading over a
      *  log of plain sentences. `createdStamp` is the creation line;
      *  the completion line (shown once done) carries the elapsed span
@@ -123,6 +127,8 @@ export type Messages = {
     createdStamp: (when: string) => string;
     activity: string;
     activityCompleted: (when: string, span: string) => string;
+    /** Activity line for a cancelled item: when it was cancelled. */
+    activityCancelled: (when: string) => string;
     duplicate: string;
     moveToBin: string;
     moveToList: string;
@@ -192,12 +198,15 @@ export type Messages = {
   board: {
     viewAsBoard: string;
     viewAsList: string;
-    /** Header labels for the five fixed board lanes (spec/board.md). */
+    /** Header labels for the five fixed board lanes (spec/board.md),
+     *  plus the Cancelled state label (not a lane: cancelled cards sit in
+     *  the Done lane, but the status picker and badges still name it). */
     backlogLane: string;
     todoLane: string;
     inProgressLane: string;
     reviewLane: string;
     doneLane: string;
+    cancelledLane: string;
     /** View-mode popover section label for the open-lane visibility
      *  toggles (client-local lane hiding, spec/board.md). */
     lanes: string;
@@ -291,6 +300,7 @@ export type Messages = {
     newItem: string;
     openItem: string;
     toggleDone: string;
+    toggleCancelled: string;
     toggleFocus: string;
     /** The bare `m` move-to-list palette. */
     moveToList: string;
@@ -448,9 +458,12 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       hasNotes: "Tiene notas",
       markDone: "Marcar como hecho",
       markNotDone: "Marcar como no hecho",
+      markCancelled: "Cancelar",
+      reopen: "Reabrir",
       createdStamp: (when) => `Creado ${when}`,
       activity: "Actividad",
       activityCompleted: (when, span) => `Completado ${when} tras ${span}`,
+      activityCancelled: (when) => `Cancelado ${when}`,
       duplicate: "Duplicar",
       moveToBin: "Mover a la papelera",
       moveToList: "Mover a la lista",
@@ -495,6 +508,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       inProgressLane: "En curso",
       reviewLane: "Revisión",
       doneLane: "Hecho",
+      cancelledLane: "Cancelado",
       lanes: "Carriles",
       addItem: "Añadir elemento",
       viewMode: "Modo de vista",
@@ -550,6 +564,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       newItem: "Nuevo elemento",
       openItem: "Abrir elemento",
       toggleDone: "Marcar como hecho",
+      toggleCancelled: "Cancelar / reabrir",
       toggleFocus: "Añadir o quitar de Enfoque",
       moveToList: "Mover a la lista",
       duplicate: "Duplicar",
@@ -697,9 +712,12 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       hasNotes: "Has notes",
       markDone: "Mark as done",
       markNotDone: "Mark as not done",
+      markCancelled: "Cancel",
+      reopen: "Reopen",
       createdStamp: (when) => `Created ${when}`,
       activity: "Activity",
       activityCompleted: (when, span) => `Completed ${when} after ${span}`,
+      activityCancelled: (when) => `Cancelled ${when}`,
       duplicate: "Duplicate",
       moveToBin: "Move to bin",
       moveToList: "Move to list",
@@ -744,6 +762,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       inProgressLane: "In progress",
       reviewLane: "Review",
       doneLane: "Done",
+      cancelledLane: "Cancelled",
       lanes: "Lanes",
       addItem: "Add item",
       viewMode: "View mode",
@@ -799,6 +818,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       newItem: "New item",
       openItem: "Open item",
       toggleDone: "Toggle done",
+      toggleCancelled: "Cancel / reopen",
       toggleFocus: "Toggle focus",
       moveToList: "Move to list",
       duplicate: "Duplicate",
@@ -943,5 +963,7 @@ export function laneLabel(m: Messages, lane: WorkflowState): string {
       return m.board.reviewLane;
     case "done":
       return m.board.doneLane;
+    case "cancelled":
+      return m.board.cancelledLane;
   }
 }

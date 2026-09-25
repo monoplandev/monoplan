@@ -35,7 +35,7 @@ import { Row } from "./Row.tsx";
 import { planReorderMoves } from "./reorder.ts";
 import {
   isBinned,
-  isDone,
+  isClosed,
   OPEN_STATES,
   type DocApp,
   type ItemView,
@@ -128,6 +128,7 @@ export function Board(props: {
       in_progress: [],
       review: [],
       done: [],
+      cancelled: [], // closed states never appear in listOpen
     };
     for (const id of state.listOpen[props.listId] ?? []) {
       const it = state.itemsById[id];
@@ -137,8 +138,9 @@ export function Board(props: {
     return lanes;
   });
 
-  // Members of the Done lane: this list's done-but-not-binned items,
-  // newest-done first (the workflow register's `at`) — the same slice
+  // Members of the Done lane: this list's closed-but-not-binned items
+  // (done and cancelled), newest-closed first (the workflow register's
+  // `at`) — the same slice
   // (and sort) the list view's Done filter and the global Done view use.
   // Not order-container backed: the board's Open projection only covers
   // open items, so this is a scan of `itemsById` scoped to the list.
@@ -146,7 +148,7 @@ export function Board(props: {
   const doneMembers = createMemo((): ItemView[] => {
     const out: ItemView[] = [];
     for (const it of Object.values(state.itemsById)) {
-      if (it.listId === props.listId && isDone(it) && !isBinned(it)) {
+      if (it.listId === props.listId && isClosed(it) && !isBinned(it)) {
         out.push(it);
       }
     }
@@ -165,12 +167,12 @@ export function Board(props: {
   const visibleOpen = (): readonly WorkflowState[] =>
     props.visibleOpenLanes?.() ?? OPEN_STATES;
 
-  // Which lane a card currently lives in. A done card's home is the Done
-  // lane; a binned card never renders here.
+  // Which lane a card currently lives in. A closed card's home is the
+  // Done lane; a binned card never renders here.
   const sourceLaneOf = (id: string): WorkflowState => {
     const it = state.itemsById[id];
     if (!it) return "backlog";
-    if (isDone(it) && !isBinned(it)) return DONE_LANE;
+    if (isClosed(it) && !isBinned(it)) return DONE_LANE;
     return it.state;
   };
 

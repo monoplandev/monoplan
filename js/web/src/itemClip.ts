@@ -55,6 +55,7 @@ const STATES: ReadonlySet<string> = new Set<WorkflowState>([
   "in_progress",
   "review",
   "done",
+  "cancelled",
 ]);
 
 export const toClipItem = (it: ItemView): ClipItem => {

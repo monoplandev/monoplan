@@ -56,7 +56,11 @@ dates back with the item.
 ticked item still happened, or will happen, on its day, so it stays on the
 calendar in the same slot: muted, tick shown, nothing reordered. A deadline is
 "owed by", and Done settles the debt, so a done item's deadline places
-nothing. Overdue is Open-only. A checkless "event" item kind was considered
+nothing. Overdue is Open-only. **Cancelled keeps neither** (decided
+2026-09-25): a cancelled item did not happen and will not, so a struck slot on
+the day only clutters; the cross in the Done view is its record. The fields
+themselves stay on the item (reopening brings the slot back). A checkless
+"event" item kind was considered
 and rejected: it would be a second item kind touching the board, Focus,
 Overdue, repeat-on-done and the CLI, and would still need a close action
 because the clock never writes. Ticking is that action.
@@ -175,8 +179,8 @@ for the month grid). `groupByDeadline` becomes
 `groupByDay` over both fields:
 
 - **Rows** are Open items with a `when` or a `deadline` (or both), plus
-  Done items with a `when` (see "`when` survives Done" above). Binned items
-  never appear.
+  Done items with a `when` (see "`when` survives Done" above). Cancelled and
+  binned items never appear.
 - **Done rows** place by `when` only, on that day, neutral tone, in the
   same within-day order as everything else, so ticking never moves a row.
   Their deadline places nothing and badges muted. A done item whose `when` is past drops out:

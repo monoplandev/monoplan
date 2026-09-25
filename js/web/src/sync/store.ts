@@ -22,14 +22,20 @@ import { createStore, produce, reconcile } from "solid-js/store";
 import { createSearchEngine, type SearchEngine } from "../search.ts";
 
 /** Workflow register state (`spec/data-model.md` "Lifecycle"): the
- *  five-step ladder held by the atomic `[state, at]` register. Bin is
- *  not a state — it is the orthogonal `binnedAt` mask. */
+ *  four-step open ladder plus the two terminal (closed) states, Done and
+ *  Cancelled, held by the atomic `[state, at]` register. Bin is not a
+ *  state — it is the orthogonal `binnedAt` mask. */
 export type WorkflowState =
   | "backlog"
   | "todo"
   | "in_progress"
   | "review"
-  | "done";
+  | "done"
+  | "cancelled";
+
+/** The two closed states. Both leave the list's Open projection and
+ *  render in the Done view / lane; only `done` is a completion. */
+export const CLOSED_STATES: readonly WorkflowState[] = ["done", "cancelled"];
 
 /** The four open states, in board lane order. */
 export const OPEN_STATES: readonly WorkflowState[] = [
@@ -88,6 +94,8 @@ function lifecycleEnum(l: Lifecycle): ItemLifecycle {
       return ItemLifecycle.Review;
     case "done":
       return ItemLifecycle.Done;
+    case "cancelled":
+      return ItemLifecycle.Cancelled;
     case "binned":
       return ItemLifecycle.Binned;
   }
@@ -102,6 +110,7 @@ export function parseWorkflowState(s: string | undefined): WorkflowState {
     case "in_progress":
     case "review":
     case "done":
+    case "cancelled":
       return s;
     default:
       return "backlog";
@@ -110,11 +119,18 @@ export function parseWorkflowState(s: string | undefined): WorkflowState {
 
 /** Workflow register says Done (regardless of the bin mask). */
 export const isDone = (it: ItemView): boolean => it.state === "done";
+/** Workflow register says Cancelled (regardless of the bin mask). */
+export const isCancelled = (it: ItemView): boolean => it.state === "cancelled";
+/** Closed state (`done` or `cancelled`) on the register, regardless of
+ *  the bin mask. The Done view shows closed, not-binned items. */
+export const isClosedState = (s: WorkflowState): boolean =>
+  s === "done" || s === "cancelled";
+export const isClosed = (it: ItemView): boolean => isClosedState(it.state);
 export const isBinned = (it: ItemView): boolean => it.binnedAt != null;
 /** Open (one of the four open workflow states, not binned) — the
  *  per-list view. */
 export const isOpen = (it: ItemView): boolean =>
-  !isBinned(it) && it.state !== "done";
+  !isBinned(it) && !isClosedState(it.state);
 /** Resolved lifecycle: `binned` while the mask is present, else the
  *  workflow register's state. */
 export const lifecycleOf = (it: ItemView): Lifecycle =>
@@ -162,7 +178,7 @@ export interface WorkspaceState {
 }
 
 /** Snapshot of where an item sat in its list's live order at the
- *  moment it was marked done. Feeds the list-view "linger" affordance
+ *  moment it was closed (done or cancelled). Feeds the list-view "linger" affordance
  *  (`Workspace`), which briefly re-inserts recently-done rows at their
  *  old position — the live projection itself drops them instantly. */
 export interface RecentDoneEntry {
@@ -173,7 +189,7 @@ export interface RecentDoneEntry {
   /** Visible Focus slot the item occupied, when it was in the Focus lens
    *  (Done auto-removes the ref, so this is the only record). */
   focusIndex?: number;
-  /** The Done transition's register timestamp (`lifecycleAt`). */
+  /** The closing transition's register timestamp (`lifecycleAt`). */
   doneAt: number;
 }
 
@@ -277,7 +293,8 @@ export interface DocApp {
    *  Clearing `when` clears it in the core as well. */
   setItemDuration(id: string, minutes: number | null): void;
   /** Done toggle: `true` is the Done transition; `false` is un-done — a
-   *  plain write to Backlog, applied only to currently-Done items. */
+   *  plain write to Backlog, applied only to currently-closed (Done or
+   *  Cancelled) items. */
   setDone(id: string, done: boolean): void;
   setDoneMany(ids: string[], done: boolean): void;
   /** Un-done from inside the Focus lens: clear each id's done flag and
@@ -667,9 +684,10 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
         const startedAt = ev.startedAt != null ? Number(ev.startedAt) : undefined;
         const doneAt = ev.doneAt != null ? Number(ev.doneAt) : undefined;
         const binnedAt = ev.binnedAt != null ? Number(ev.binnedAt) : undefined;
-        const nowOpen = binnedAt == null && nextState !== "done";
-        if (wasOpen && nextState === "done" && binnedAt == null) {
-          // Leaving the Open projection by being marked done: snapshot
+        const nowOpen = binnedAt == null && !isClosedState(nextState);
+        if (wasOpen && !nowOpen && binnedAt == null) {
+          // Leaving the Open projection by being closed (done or
+          // cancelled): snapshot
           // the vacated position (before the removal below) for the
           // linger re-insert.
           const idx = state.listOpen[prev.listId]?.indexOf(ev.id) ?? -1;
