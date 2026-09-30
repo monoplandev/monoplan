@@ -2775,7 +2775,6 @@ input.task-check:hover {
   grid-template-columns: 1fr 1fr;
   align-items: center;
   gap: 8px;
-  max-width: 18em;
 }
 
 /* The ✕ inset at the start field's right edge (rendered only while a
@@ -4398,4 +4397,3 @@ input.task-check:hover {
   font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
-
