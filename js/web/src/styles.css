@@ -2979,6 +2979,11 @@ input.task-check:hover {
    (`.deadline-dialog`) and sits above the task dialog (z-index 100 / 101). */
 .when-popover {
   z-index: 120;
+  /* Backstop for a viewport shorter than the picker (a phone on its
+     side): scroll inside the card so the Remove row stays reachable. */
+  max-height: calc(100dvh - 16px);
+  box-sizing: border-box;
+  overflow-y: auto;
 }
 
 /* Today / Tomorrow quick actions heading the when popover, ruled off from

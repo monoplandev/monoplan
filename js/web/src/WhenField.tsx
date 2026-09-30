@@ -100,6 +100,11 @@ export function WhenField(props: {
           onOpenChange={props.setOpen}
           placement="bottom-start"
           gutter={6}
+          // With no room below or above (a phone, a long title), slide
+          // over the input rather than run off the screen: the popover is
+          // portaled to <body>, which never scrolls, so an overflowing
+          // Remove row could not be reached.
+          overlap
         >
           <Popover.Anchor as="span" class="task-dialog-when-anchor">
             {/* Calendar glyph sits inside the input's left edge; the input

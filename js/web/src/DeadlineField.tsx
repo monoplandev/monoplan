@@ -82,6 +82,9 @@ export function DeadlineField(props: {
         onOpenChange={props.setOpen}
         placement="bottom-start"
         gutter={6}
+        // As the planned-date popover: slide over the input rather than
+        // run off the screen when neither side has room.
+        overlap
       >
         <Popover.Anchor as="span" class="task-dialog-when-anchor">
           {/* Timer glyph inset in the input's left edge; decorative, the
