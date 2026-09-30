@@ -4340,6 +4340,12 @@ input.task-check:hover {
   margin-top: 20px;
 }
 
+/* Home page link, a row in its own card under the lists: an anchor
+   rather than a button, so drop the link underline. */
+.find-sheet__website {
+  text-decoration: none;
+}
+
 /* The page and the elevated surface sit a shade apart in dark mode, so
    the card takes a translucent lift instead. */
 [data-theme="dark"] .find-sheet__group {

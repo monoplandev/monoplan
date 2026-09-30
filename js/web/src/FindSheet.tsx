@@ -9,7 +9,8 @@
 //
 // The top line carries the account/sync indicator (left) and a Settings
 // icon (right): the bottom pill carries neither, so this is the phone's
-// only way into both. Neither is a FindResult.
+// only way into both. Neither is a FindResult, nor is the home page link
+// in the default menu's last card.
 //
 // Rendered as a full page under the floating pills (which stay live):
 // no scrim, no card, no Close. The Find pill toggles it, a row pick or a
@@ -22,6 +23,7 @@ import type { DocApp } from "./sync/store.ts";
 import type { ViewKey } from "./prefs.ts";
 import { useAppI18n } from "./i18n.tsx";
 import { trackOverlay } from "./overlay.ts";
+import externalLinkSvg from "./icons/external-link.svg?raw";
 import mixerHzSvg from "./icons/mixer-hz.svg?raw";
 import {
   createFindState,
@@ -205,6 +207,24 @@ export function FindSheet(props: {
                     <For each={find.items().filter((i) => !isFixedView(i) && !onPill(i))}>
                       {row}
                     </For>
+                  </div>
+                  {/* A third card closing the default menu: the link out
+                      to the home page, in the rows' anatomy with the
+                      external-link arrow in the glyph slot. */}
+                  <div class="find-sheet__group">
+                    <a
+                      class="palette__item find-sheet__row find-sheet__website"
+                      href="https://monoplan.app/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <span
+                        class="palette__item-icon"
+                        innerHTML={externalLinkSvg}
+                        aria-hidden="true"
+                      />
+                      <span class="palette__item-name">{m().nav.website}</span>
+                    </a>
                   </div>
                 </>
               }
