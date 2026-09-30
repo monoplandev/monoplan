@@ -2,7 +2,7 @@
 
 [Monoplan](https://monoplan.app/) is an e2ee, local-first, tasks/reminders app i.e. todo list, with conflict resolution backed by Loro. It is optimised for ergonomics and frictionless capture and will work offline.
 
-![Monoplan screenshot](https://monoplan.app/screenshot.png)
+https://github.com/user-attachments/assets/8b64c3d5-279a-4467-85c1-b5930639a0e9
 
 ⚠️ ATTN: Monoplan is undergoing extensive and frequent changes, you can use it locally, but you may have to manually export and import data between updates.
 
