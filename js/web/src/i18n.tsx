@@ -270,7 +270,8 @@ export type Messages = {
     setDate: string;
     /** Label of the time field in the task surface's dates band. */
     time: string;
-    /** Button beside the time field that blanks it (back to all-day). */
+    /** ✕ beside the time field and the Remove row in its panel: blanks
+     *  the time (back to all-day). */
     clearTime: string;
     /** Accessible name + placeholder of the end-time field after the
      *  start time; typing an end stores a duration. */
@@ -797,7 +798,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       remove: "Remove date",
       setDate: "Set date…",
       time: "Time",
-      clearTime: "Clear time",
+      clearTime: "Remove time",
       end: "End",
     },
     upcoming: {

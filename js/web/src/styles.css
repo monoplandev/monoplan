@@ -143,7 +143,7 @@ body {
 
 .nav {
   background: transparent;
-  padding: 8px 0 0;
+  padding: 12px 0 4px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -814,8 +814,7 @@ body {
 }
 
 .main-header {
-  height: 3em;
-  padding: 12px;
+  padding: 12px 12px 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3266,12 +3265,14 @@ input.task-check:hover {
     left: 10px;
   }
 
-  .task-page .time-picker-input {
-    padding: 6px 28px 6px 30px;
+  /* Nor on the start time: the picker's panel carries a Remove row. With
+     no ✕ to clear, start and end share the plain right inset. */
+  .task-page .time-picker-clear {
+    display: none;
   }
 
-  .task-page .task-dialog-end-input {
-    padding-right: 10px;
+  .task-page .time-picker-input {
+    padding: 6px 10px 6px 30px;
   }
 
   .task-page .time-picker-icon {
@@ -3744,6 +3745,33 @@ input.task-check:hover {
 .time-picker .palette__item {
   padding: 4px 10px;
   font-variant-numeric: tabular-nums;
+}
+
+/* Remove row pinned under the list while a time is set: ruled off like
+   the calendar picker's footer, and outside the scroller, so it holds its
+   place when the panel is squeezed and the list gives up the height. */
+.time-picker-footer {
+  flex-shrink: 0;
+  padding: 4px;
+  border-top: 1px solid var(--border-row);
+}
+
+.time-picker-remove {
+  width: 100%;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text-muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.time-picker-remove:hover {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 /* ---------- Kanban board (spec/kanban.md) ---------- */

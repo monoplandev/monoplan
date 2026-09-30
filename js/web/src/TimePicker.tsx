@@ -8,8 +8,9 @@
 // time under the cursor and the input's text selected, so typing replaces
 // it; the typed text narrows the list to what it names (`timeSuggest.ts`
 // has the grammar). With no time stored the input shows the host's dim
-// placeholder; there is no clear control here (the date input's ✕ drops
-// the whole value). Arrow keys move the cursor and put the row's label
+// placeholder. A host that passes `removeLabel` gets a Remove row pinned
+// under the list while a time is stored, which commits null. Arrow keys
+// move the cursor and put the row's label
 // in the input (selected again, still without narrowing the list: the
 // typed query and the shown text are separate). Enter commits the row
 // under the cursor, clicking a row commits it, and both leave focus in
@@ -66,6 +67,10 @@ export function TimePicker(props: {
    *  time + 15 minutes round the clock, and typed readings order by
    *  distance after it (`timeSuggest.ts`). */
   after?: () => Required<TimeParts> | null;
+  /** Label of a Remove row pinned under the list while a value is
+   *  stored; picking it commits null. Without it the panel has no clear
+   *  control. */
+  removeLabel?: () => string;
 }) {
   const baseId = createUniqueId();
   const listboxId = `${baseId}-listbox`;
@@ -138,16 +143,32 @@ export function TimePicker(props: {
 
   // Under the input, or above it when the viewport runs out. Portaled to
   // <body> because the task dialog is a scroll container that would clip
-  // it, which is also why scroll / resize reposition below.
+  // it, which is also why scroll / resize reposition below. Measured
+  // against the visual viewport, which is what an on-screen keyboard
+  // shrinks: with room on neither side the panel takes the roomier one
+  // and its list shrinks to fit, so the Remove row under the list never
+  // ends up behind the keyboard.
   const place = () => {
     const panel = panelRef;
     const anchor = inputRef?.getBoundingClientRect();
     if (!panel || !anchor) return;
+    const vv = window.visualViewport;
+    const viewTop = vv?.offsetTop ?? 0;
+    const viewBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
     const below = anchor.bottom + GUTTER;
-    const fitsBelow = below + panel.offsetHeight <= window.innerHeight - MARGIN;
-    const top = fitsBelow
-      ? below
-      : Math.max(MARGIN, anchor.top - GUTTER - panel.offsetHeight);
+    const roomBelow = viewBottom - MARGIN - below;
+    const roomAbove = anchor.top - GUTTER - viewTop - MARGIN;
+    // Natural height first: a cap from the last placement would hide it.
+    // Lifting the cap lets the list grow, which can clamp its scroll
+    // offset; put that back once the cap is on again.
+    const scrolled = listRef?.scrollTop ?? 0;
+    panel.style.maxHeight = "";
+    const natural = panel.offsetHeight;
+    const goBelow = natural <= roomBelow || roomBelow >= roomAbove;
+    const height = Math.min(natural, goBelow ? roomBelow : roomAbove);
+    if (height < natural) panel.style.maxHeight = `${Math.max(0, height)}px`;
+    if (listRef) listRef.scrollTop = scrolled;
+    const top = goBelow ? below : anchor.top - GUTTER - height;
     const left = Math.min(
       anchor.left,
       window.innerWidth - panel.offsetWidth - MARGIN,
@@ -212,14 +233,30 @@ export function TimePicker(props: {
       e.stopImmediatePropagation();
       revert();
     };
-    const reposition = () => place();
+    // The list's own scrolling never moves the input, so it is skipped.
+    const reposition = (e: Event) => {
+      if (e.target instanceof Node && panelRef?.contains(e.target)) return;
+      place();
+    };
+    // The keyboard arriving (after the focus that opened the panel) moves
+    // only the visual viewport; the window never hears of it. It can
+    // squeeze the list, so the cursor row is brought back into view.
+    const vv = window.visualViewport;
+    const onViewportResize = () => {
+      place();
+      scrollSelectedIntoView(selectedIndex(), blank() ? "center" : "nearest");
+    };
     document.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("resize", reposition);
     document.addEventListener("scroll", reposition, true);
+    vv?.addEventListener("resize", onViewportResize);
+    vv?.addEventListener("scroll", reposition);
     onCleanup(() => {
       document.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("resize", reposition);
       document.removeEventListener("scroll", reposition, true);
+      vv?.removeEventListener("resize", onViewportResize);
+      vv?.removeEventListener("scroll", reposition);
     });
   });
 
@@ -370,6 +407,21 @@ export function TimePicker(props: {
                 )}
               </For>
             </div>
+            {/* Outside the scroller, so it stays in reach wherever the
+                list has scrolled to. Never focused: the input keeps focus
+                (the panel's cancelled mousedown), as for a row click. */}
+            <Show when={props.removeLabel && props.value()}>
+              <div class="time-picker-footer">
+                <button
+                  type="button"
+                  class="time-picker-remove"
+                  tabIndex={-1}
+                  onClick={() => commit(null)}
+                >
+                  {props.removeLabel?.()}
+                </button>
+              </div>
+            </Show>
           </div>
         </Portal>
       </Show>

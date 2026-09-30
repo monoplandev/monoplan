@@ -1,6 +1,8 @@
 // The planned time row in the task dialog's dates band (`WhenField`): the
 // typed start picker (`TimePicker`) reading a dim "All day" while no time
-// is set, an inset ✕ that strips the time part, and, once a start exists,
+// is set, an inset ✕ that strips the time part (the picker's panel offers
+// the same as a Remove row, the only route on the mobile page, which
+// hides the ✕), and, once a start exists,
 // an end picker after an arrow. The end is derived: start + the stored
 // `duration` (a length, not an end, so moving the start keeps it). Typing
 // an end writes the difference in minutes; an end at or before the start
@@ -58,6 +60,7 @@ export function WhenTimeRow(props: {
         locale={locale}
         label={m().when.time}
         placeholder={() => m().when.allDay}
+        removeLabel={() => m().when.clearTime}
       >
         {/* Inset ✕ at the start field's right edge, shown on hover like
             the date input's: strips the time part, making the item
