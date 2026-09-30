@@ -426,12 +426,6 @@ body {
   color: var(--text);
 }
 
-/* The Overdue section (only rendered while something is owed) heads in
-   the deadline badge's danger colour so it reads as a warning, not a day. */
-.upcoming-day[data-urgency="overdue"] .upcoming-day-label {
-  color: var(--overdue-text);
-}
-
 .upcoming-empty-day {
   padding: 6px 8px;
   color: var(--text-faint);
@@ -768,6 +762,16 @@ body {
   color: var(--text-faint);
   font-size: 0.9em;
   font-variant-numeric: tabular-nums;
+}
+/* Upcoming's count takes the agenda's urgency tones: an overdue deadline
+   reads danger, one due today warning; anything else stays faint. */
+.nav-item-count[data-tone="overdue"],
+.find-sheet__count[data-tone="overdue"] {
+  color: var(--overdue-text);
+}
+.nav-item-count[data-tone="warning"],
+.find-sheet__count[data-tone="warning"] {
+  color: var(--due-today-text);
 }
 .nav-item-input {
   border: 0;
@@ -3074,23 +3078,6 @@ input.task-check:hover {
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--border-row);
-}
-
-/* Optional time under the calendar (`when` mode): the task dialog's
-   start / end time row, ruled off from the grid. The row spans the
-   dialog so "All day" reads as a line under the month and the end
-   field takes the other half once a start is set. */
-.deadline-dialog-time {
-  display: flex;
-  align-items: center;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border-row);
-}
-
-.deadline-dialog-time .task-dialog-time-row {
-  flex: 1;
-  max-width: none;
 }
 
 .deadline-dialog-remove {

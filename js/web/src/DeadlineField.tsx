@@ -166,7 +166,6 @@ export function DeadlineField(props: {
             </div>
             <CalendarPicker
               kind="deadline"
-              open={props.open}
               setOpen={props.setOpen}
               value={props.deadline}
               onPick={props.onChange}

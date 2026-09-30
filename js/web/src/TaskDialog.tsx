@@ -109,6 +109,11 @@ export function TaskDialog(props: {
    *  re-lands the caret. Treated as true when omitted, and ignored for a
    *  new-item capture, which always lands the caret. */
   entered?: () => boolean;
+  /** The planned-date popover's open state, owned by the caller so it can
+   *  open the surface with the popover already showing (a row context
+   *  menu's "Set date…"). Cleared by the surface as it closes. */
+  whenOpen: () => boolean;
+  setWhenOpen: (v: boolean) => void;
   /** Called as the dialog closes so the owner can restore focus (to the
    *  list). Fires from Kobalte's close-auto-focus hook, which we take over
    *  to steer focus back to the listbox instead of the trigger. */
@@ -265,9 +270,9 @@ export function TaskDialog(props: {
   const [newDuration, setNewDuration] = createSignal<number | null>(null);
   // New-item mode's pin-to-Focus buffer, same deal as `newDeadline`.
   const [newFocus, setNewFocus] = createSignal(false);
-  // Deadline / date popover open state, shared by both dialog modes.
+  // Deadline popover open state, shared by both dialog modes. The date
+  // popover's is the caller's (`whenOpen`).
   const [deadlineCalOpen, setDeadlineCalOpen] = createSignal(false);
-  const [whenCalOpen, setWhenCalOpen] = createSignal(false);
   // The title and notes editors are contenteditable (not textareas) so that
   // http(s) URLs render as clickable anchors, matching the row quick-entry
   // editor. Their content is set imperatively from the buffers on load — it
@@ -599,8 +604,13 @@ export function TaskDialog(props: {
     unsubscribeNotes();
     loadedId = key;
     // Closed: the editors unmount; forgetting the target means reopening
-    // the same item re-pushes its content into fresh editors.
-    if (key === null) return;
+    // the same item re-pushes its content into fresh editors. The date
+    // popover's open state is the caller's and outlives the surface, so
+    // drop it here rather than let the next open inherit it.
+    if (key === null) {
+      props.setWhenOpen(false);
+      return;
+    }
     const it = id ? props.app.state.itemsById[id] : undefined;
     const t = it?.text ?? "";
     // The core's text is the truth for an open item (the store's copy
@@ -1234,8 +1244,8 @@ export function TaskDialog(props: {
               muted={muted}
               onChange={onWhenChange}
               onDurationChange={onDurationChange}
-              open={whenCalOpen}
-              setOpen={setWhenCalOpen}
+              open={props.whenOpen}
+              setOpen={props.setWhenOpen}
             />
           </section>
 
@@ -1353,6 +1363,9 @@ export function TaskDialog(props: {
     // content taking focus is what entered the pane (the focusin reaches
     // the shell through Solid's delegation, which follows portals).
     if (shellRef && portalContains(shellRef, document.activeElement)) return;
+    // Opened straight onto the date popover: focus is the popover's.
+    // Untracked, so closing it doesn't pull the caret to the title.
+    if (untrack(props.whenOpen)) return;
     focusOnOpen();
   });
   createEffect(() => {
@@ -1422,9 +1435,12 @@ export function TaskDialog(props: {
               }}
               onOpenAutoFocus={(e) => {
                 // Kobalte would focus the first tabbable (the close button);
-                // take over and land the caret.
+                // take over and land the caret, unless the surface opened
+                // straight onto the date popover, which takes focus itself
+                // (a caret landing in the title after it would read as an
+                // outside interaction and dismiss it).
                 e.preventDefault();
-                focusOnOpen();
+                if (!props.whenOpen()) focusOnOpen();
               }}
             >
               {body()}

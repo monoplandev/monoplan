@@ -45,6 +45,8 @@ import type { FindResult } from "./findResults.tsx";
 import { laneLabel, useAppI18n } from "./i18n.tsx";
 import { readClip, toClipItem, writeClip, type ClipItem } from "./itemClip.ts";
 import { ListIconPicker } from "./ListIconPicker.tsx";
+import { attentionBadge } from "./dayGroups.ts";
+import { nowMs, todayStamp } from "./format.tsx";
 import { restoreCapturedPositions } from "./linger.ts";
 import { createPopoverTooltipGuard } from "./popoverTooltip.ts";
 import type { ListOption } from "./ListPicker.tsx";
@@ -314,6 +316,16 @@ export function Workspace(props: {
       openedViewKey = id === null ? null : viewKey(untrack(view));
       setOpenItemIdRaw(id);
     });
+  // Whether the task surface's planned-date popover is open. Owned here
+  // rather than by the surface so a row context menu's "Set date…" can
+  // enter the item with the popover already showing. The surface clears
+  // it as it closes.
+  const [itemWhenOpen, setItemWhenOpen] = createSignal(false);
+  const openItemWhen = (id: string) =>
+    batch(() => {
+      setOpenItemId(id);
+      setItemWhenOpen(true);
+    });
   // Rows the move palette will re-file (visible order), or null when the
   // palette is closed. Captured at open (from the `m` shortcut's selection
   // or a row context menu's target set) so the pick acts on what the user
@@ -329,14 +341,6 @@ export function Workspace(props: {
   } | null>(null);
   const openDeadlineCalendar = (ids: readonly string[], initial: string | null) => {
     if (ids.length > 0) setDeadlineTarget({ ids, initial });
-  };
-  // Same again for the planned date (`when`), which carries the time field.
-  const [whenTarget, setWhenTarget] = createSignal<{
-    ids: readonly string[];
-    initial: string | null;
-  } | null>(null);
-  const openWhenCalendar = (ids: readonly string[], initial: string | null) => {
-    if (ids.length > 0) setWhenTarget({ ids, initial });
   };
   // New-item capture target for the detail dialog (board "+" buttons), or
   // null when not capturing. Mutually exclusive with `openItemId`.
@@ -750,6 +754,14 @@ export function Workspace(props: {
     }
     return counts;
   });
+
+  // The Upcoming entry's badge: what is owed or on today, with the most
+  // urgent tone (`attentionBadge`). Unlike the list counts this scans the
+  // items, as the Upcoming view itself does; the shared `nowMs` tick rolls
+  // it over at midnight.
+  const upcomingBadge = createMemo(() =>
+    attentionBadge(Object.values(state.itemsById), todayStamp(nowMs())),
+  );
 
   const dndRevision = createMemo(() => {
     const v = view();
@@ -2235,10 +2247,6 @@ export function Workspace(props: {
     // entry hide for done rows too).
     if (openIds.length > 0) {
       out.push({
-        label: `${msgs.when.label}: ${msgs.when.setDate}`,
-        run: () => openWhenCalendar(openIds, null),
-      });
-      out.push({
         label: `${msgs.deadline.label}: ${msgs.deadline.setDate}`,
         run: () => openDeadlineCalendar(openIds, null),
       });
@@ -2371,6 +2379,7 @@ export function Workspace(props: {
         lists={activeLists()}
         binCount={state.binCount}
         focusCount={state.focusOrder.length}
+        upcomingBadge={upcomingBadge()}
         openCountsByList={openCountsByList()}
         showListCounts={state.settings.showListCounts}
         view={view()}
@@ -2436,6 +2445,7 @@ export function Workspace(props: {
             />
           }
           focusCount={state.focusOrder.length}
+          upcomingBadge={upcomingBadge()}
           binCount={state.binCount}
           openCountsByList={openCountsByList()}
           showListCounts={state.settings.showListCounts}
@@ -2487,6 +2497,8 @@ export function Workspace(props: {
         app={app}
         lists={activeLists}
         entered={() => openItemId() !== null}
+        whenOpen={itemWhenOpen}
+        setWhenOpen={setItemWhenOpen}
         onClosed={restoreItemsFocus}
         onReleaseFocus={() => {
           // Handing focus back closes the entered item; the pane carries
@@ -2544,48 +2556,6 @@ export function Workspace(props: {
           if (!t) return;
           app.withActionBatch(() => {
             for (const id of t.ids) app.setItemDeadline(id, null);
-          });
-        }}
-      />
-      <DeadlineCalendarDialog
-        kind="when"
-        closeToItems
-        open={() => whenTarget() !== null}
-        setOpen={(o) => {
-          if (!o) setWhenTarget(null);
-        }}
-        value={() => whenTarget()?.initial ?? null}
-        onPick={(value) => {
-          const t = whenTarget();
-          if (!t) return;
-          app.withActionBatch(() => {
-            for (const id of t.ids) app.setItemWhen(id, value);
-          });
-          // Keep the seed current so a follow-up time edit builds on the
-          // date just picked rather than the stale opening value.
-          setWhenTarget({ ids: t.ids, initial: value });
-        }}
-        // The end picker reads the first target's length live (a
-        // multi-select shares one row) and writes to every target.
-        duration={() => {
-          const t = whenTarget();
-          const first = t?.ids[0];
-          return first !== undefined
-            ? (app.getItem(first)?.duration ?? null)
-            : null;
-        }}
-        onDurationChange={(minutes) => {
-          const t = whenTarget();
-          if (!t) return;
-          app.withActionBatch(() => {
-            for (const id of t.ids) app.setItemDuration(id, minutes);
-          });
-        }}
-        onRemove={() => {
-          const t = whenTarget();
-          if (!t) return;
-          app.withActionBatch(() => {
-            for (const id of t.ids) app.setItemWhen(id, null);
           });
         }}
       />
@@ -2985,7 +2955,7 @@ export function Workspace(props: {
                         onDraftSettle={settleDraft}
                         onOpen={(id) => setOpenItemId(id)}
                         onSetDeadline={openDeadlineCalendar}
-                        onSetWhen={openWhenCalendar}
+                        onSetWhen={openItemWhen}
                         onReveal={revealItemIn}
                         onMoveToList={openMovePalette}
                         openOnTap={itemsIsMobile}
@@ -3003,7 +2973,7 @@ export function Workspace(props: {
               listId={listId}
               onOpen={(id) => setOpenItemId(id)}
               onSetDeadline={openDeadlineCalendar}
-              onSetWhen={openWhenCalendar}
+              onSetWhen={openItemWhen}
               onReveal={revealItemIn}
               onMoveToList={openMovePalette}
               openOnTap={itemsIsMobile}

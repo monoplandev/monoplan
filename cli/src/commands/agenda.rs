@@ -1,8 +1,8 @@
 //! `monoplan agenda`: dated items by day, Today first with overdue
-//! deadlines and past planned dates folded in, then the coming days
-//! (`spec/calendar-plan.md` "Agenda"). Done items keep their `when` day
-//! and slot (the tick does not erase "happens on"); their deadline is
-//! settled and places nothing.
+//! deadlines folded in, then the coming days (`spec/calendar-plan.md`
+//! "Agenda"). A past `when` has gone by like an event and places nothing.
+//! Done items keep their `when` day and slot (the tick does not erase
+//! "happens on"); their deadline is settled and places nothing.
 //!
 //! Placement, tone, and ordering are pure functions of the item views
 //! and a `today` stamp, so they are unit-tested here without a doc.
@@ -29,8 +29,8 @@ pub struct AgendaArgs {
     pub json: bool,
 }
 
-/// Row tone, least to most urgent. Both come from the deadline; a past
-/// `when` is not judged and stays neutral. Never red for `when`.
+/// Row tone, least to most urgent. Both come from the deadline; `when`
+/// is never judged and never red.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Tone {
@@ -76,14 +76,14 @@ pub struct AgendaDay {
 /// first group, even when empty; later empty days are skipped.
 ///
 /// - Placement day: the earlier of the `when` day and the `deadline`
-///   day, each clamped up to today. A past date of either kind lands in
-///   Today.
+///   day, the deadline clamped up to today, so an overdue deadline lands
+///   in Today. A past `when` is over and places nothing: an item with
+///   only that is dropped, and one with a deadline too places by it.
 /// - Tone: overdue (deadline < today), warning (deadline = today), else
-///   neutral. A past `when` is not judged.
-/// - Within a day: overdue deadlines (oldest first), then past
-///   whens (oldest first), then the day's own rows by the raw string
-///   of the placing field (all-day ahead of timed), then `created_at`.
-///   Ticking a row does not move it.
+///   neutral.
+/// - Within a day: overdue deadlines (oldest first), then the day's own
+///   rows by the raw string of the placing field (all-day ahead of
+///   timed), then `created_at`. Ticking a row does not move it.
 /// - Done items place by `when` only, on that day (today or later),
 ///   neutral. A done item with no `when`, or a past `when`, is dropped:
 ///   nothing is owed and past days are not shown. Cancelled and binned
@@ -96,13 +96,18 @@ pub fn build_agenda<'a>(items: &'a [ItemView], today: &'a str, horizon: &str) ->
         if item.is_binned() || item.is_cancelled() {
             continue;
         }
-        let when_day = item.when.as_deref().map(|w| &w[..w.len().min(10)]);
+        // Past days are not shown, so a past `when` places nothing.
+        let when_day = item
+            .when
+            .as_deref()
+            .map(|w| &w[..w.len().min(10)])
+            .filter(|w| *w >= today);
         let deadline_day = item.deadline.as_deref();
         if when_day.is_none() && deadline_day.is_none() {
             continue;
         }
         if item.is_done() {
-            let Some(day) = when_day.filter(|w| *w >= today) else {
+            let Some(day) = when_day else {
                 continue;
             };
             if day > horizon {
@@ -110,7 +115,7 @@ pub fn build_agenda<'a>(items: &'a [ItemView], today: &'a str, horizon: &str) ->
             }
             placed.push((
                 day.to_string(),
-                2,
+                1,
                 item.when.clone().unwrap(),
                 item.created_at,
                 AgendaRow {
@@ -121,11 +126,9 @@ pub fn build_agenda<'a>(items: &'a [ItemView], today: &'a str, horizon: &str) ->
             ));
             continue;
         }
-        let clamp = |d: &'a str| -> &'a str { if d < today { today } else { d } };
-        let when_placed = when_day.map(clamp);
-        let deadline_placed = deadline_day.map(clamp);
+        let deadline_placed = deadline_day.map(|d| if d < today { today } else { d });
         // `when` wins a tie: it is the "happens on" date and renders first.
-        let (day, placed_by, raw) = match (when_placed, deadline_placed) {
+        let (day, placed_by, raw) = match (when_day, deadline_placed) {
             (Some(w), Some(d)) if d < w => (d, PlacedBy::Deadline, deadline_day.unwrap()),
             (Some(w), _) => (w, PlacedBy::When, item.when.as_deref().unwrap()),
             (None, Some(d)) => (d, PlacedBy::Deadline, deadline_day.unwrap()),
@@ -135,7 +138,6 @@ pub fn build_agenda<'a>(items: &'a [ItemView], today: &'a str, horizon: &str) ->
             continue;
         }
         let deadline_overdue = deadline_day.is_some_and(|d| d < today);
-        let when_past = when_day.is_some_and(|w| w < today);
         let tone = if deadline_overdue {
             Tone::Overdue
         } else if deadline_day == Some(today) {
@@ -144,14 +146,11 @@ pub fn build_agenda<'a>(items: &'a [ItemView], today: &'a str, horizon: &str) ->
             Tone::Neutral
         };
         // Today's fold: overdue deadlines lead (by their own date), then
-        // past whens (by their own date), then today's own rows, done
-        // or not.
+        // today's own rows, done or not.
         let (group, raw) = if deadline_overdue {
             (0, deadline_day.unwrap().to_string())
-        } else if when_past {
-            (1, item.when.clone().unwrap())
         } else {
-            (2, raw.to_string())
+            (1, raw.to_string())
         };
         placed.push((
             day.to_string(),
@@ -333,7 +332,7 @@ mod tests {
     #[test]
     fn placement_is_earlier_field_clamped_to_today() {
         let items = [
-            // past when → Today, unjudged (neutral)
+            // past when → over, dropped
             item("past-when", Some("2026-09-01"), None, 1),
             // past deadline → Today, overdue
             item("overdue", None, Some("2026-09-05"), 2),
@@ -356,20 +355,14 @@ mod tests {
         assert_eq!(
             by_day,
             vec![
-                (
-                    TODAY,
-                    vec!["overdue", "both-late", "past-when", "due-today"]
-                ),
+                (TODAY, vec!["overdue", "both-late", "due-today"]),
                 ("2026-09-11", vec!["dl-first"]),
                 ("2026-09-12", vec!["both"]),
             ]
         );
         let today = &days[0];
         let tones: Vec<Tone> = today.rows.iter().map(|r| r.tone).collect();
-        assert_eq!(
-            tones,
-            vec![Tone::Overdue, Tone::Overdue, Tone::Neutral, Tone::Warning]
-        );
+        assert_eq!(tones, vec![Tone::Overdue, Tone::Overdue, Tone::Warning]);
         assert_eq!(days[1].rows[0].placed_by, PlacedBy::Deadline);
         assert_eq!(days[1].rows[0].tone, Tone::Neutral);
         assert_eq!(days[2].rows[0].placed_by, PlacedBy::When);
@@ -391,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn today_fold_orders_overdue_oldest_first_then_past_when_then_own() {
+    fn today_fold_orders_overdue_oldest_first_then_own() {
         let items = [
             item("own-timed", Some("2026-09-09T10:00"), None, 1),
             item("past-new", Some("2026-09-07T08:00"), None, 2),
@@ -403,13 +396,41 @@ mod tests {
         let days = build_agenda(&items, TODAY, HORIZON);
         assert_eq!(
             ids(&days[0]),
+            vec!["over-old", "over-new", "own-allday", "own-timed"]
+        );
+    }
+
+    #[test]
+    fn past_when_places_nothing_but_a_deadline_still_does() {
+        let items = [
+            item("past-when", Some("2026-09-07T08:00"), None, 1),
+            // past when, overdue deadline → Today by the deadline, overdue
+            item("past-overdue", Some("2026-09-01"), Some("2026-09-02"), 2),
+            // past when, deadline today → Today by the deadline, warning
+            item("past-due-today", Some("2026-09-01"), Some(TODAY), 3),
+            // past when, later deadline → the deadline's day
+            item("past-due-later", Some("2026-09-01"), Some("2026-09-20"), 4),
+        ];
+        let days = build_agenda(&items, TODAY, HORIZON);
+        let by_day: Vec<(&str, Vec<&str>)> =
+            days.iter().map(|d| (d.day.as_str(), ids(d))).collect();
+        assert_eq!(
+            by_day,
             vec![
-                "over-old",
-                "over-new",
-                "past-old",
-                "past-new",
-                "own-allday",
-                "own-timed"
+                (TODAY, vec!["past-overdue", "past-due-today"]),
+                ("2026-09-20", vec!["past-due-later"]),
+            ]
+        );
+        let rows: Vec<(PlacedBy, Tone)> = days
+            .iter()
+            .flat_map(|d| d.rows.iter().map(|r| (r.placed_by, r.tone)))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                (PlacedBy::Deadline, Tone::Overdue),
+                (PlacedBy::Deadline, Tone::Warning),
+                (PlacedBy::Deadline, Tone::Neutral),
             ]
         );
     }

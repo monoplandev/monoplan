@@ -1,11 +1,11 @@
 // Day bucketing behind the Upcoming view (`spec/calendar-plan.md`
-// "Agenda"): past dates of either kind in a leading Overdue group,
-// placement on the earlier of `when` / `deadline`, tone precedence,
-// within-day ordering, and done rows kept on their `when` day.
+// "Agenda"): overdue deadlines in a leading Overdue group, past whens
+// dropped, placement on the earlier of `when` / `deadline`, tone
+// precedence, within-day ordering, and done rows kept on their `when` day.
 
 import { describe, expect, test } from "bun:test";
 
-import { groupByDay } from "../src/dayGroups.ts";
+import { attentionBadge, groupByDay } from "../src/dayGroups.ts";
 import type { ItemView } from "../src/sync/store.ts";
 
 const LABELS = { overdue: "Overdue", today: "Today", tomorrow: "Tomorrow" };
@@ -34,7 +34,7 @@ function item(
 const ids = (g: { rows: { item: ItemView }[] }) => g.rows.map((r) => r.item.id);
 
 describe("groupByDay", () => {
-  test("places on the earlier field; past dates go to Overdue", () => {
+  test("places on the earlier field; overdue deadlines go to Overdue, past whens drop out", () => {
     const groups = groupByDay(
       [
         item("past-when", { when: "2026-09-01" }),
@@ -50,7 +50,7 @@ describe("groupByDay", () => {
       "en",
     );
     expect(groups.map((g) => [g.key, g.urgency, ids(g)])).toEqual([
-      ["overdue", "overdue", ["overdue", "both-late", "past-when"]],
+      ["overdue", "overdue", ["overdue", "both-late"]],
       [TODAY, "today", ["due-today"]],
       ["2026-09-11", "future", ["dl-first"]],
       ["2026-09-12", "future", ["both"]],
@@ -59,7 +59,6 @@ describe("groupByDay", () => {
     expect(groups[0]!.rows.map((r) => [r.placedBy, r.tone])).toEqual([
       ["deadline", "overdue"],
       ["deadline", "overdue"],
-      ["when", "neutral"],
     ]);
     expect(groups[1]!.rows.map((r) => r.tone)).toEqual(["warning"]);
     expect(groups[2]!.rows[0]!.placedBy).toBe("deadline");
@@ -83,15 +82,14 @@ describe("groupByDay", () => {
     expect(ids(groups[1]!)).toEqual(["allday-a", "allday-b", "t09", "t14"]);
   });
 
-  test("Overdue leads only when something is past: deadlines oldest first, then past whens, then createdAt", () => {
+  test("Overdue holds overdue deadlines only, oldest first, then createdAt", () => {
     const groups = groupByDay(
       [
         item("over-b", { deadline: "2026-09-08" }),
         item("over-a", { deadline: "2026-09-08" }),
         item("over-old", { when: "2026-09-30", deadline: "2026-08-20" }),
-        item("past-b", { when: "2026-09-07" }),
-        item("past-a", { when: "2026-09-07" }),
-        item("past-old", { when: "2026-09-01T09:00", deadline: "2026-09-20" }),
+        item("over-past-when", { when: "2026-09-01", deadline: "2026-09-02" }),
+        item("past-when", { when: "2026-09-07" }),
         item("own", { when: TODAY }),
       ],
       TODAY,
@@ -99,20 +97,35 @@ describe("groupByDay", () => {
       "en",
     );
     expect(groups.map((g) => [g.key, ids(g)])).toEqual([
-      [
-        "overdue",
-        ["over-old", "over-b", "over-a", "past-old", "past-b", "past-a"],
-      ],
+      ["overdue", ["over-old", "over-past-when", "over-b", "over-a"]],
       [TODAY, ["own"]],
     ]);
-    expect(groups[0]!.rows.map((r) => r.tone)).toEqual([
-      "overdue",
-      "overdue",
-      "overdue",
-      "neutral",
-      "neutral",
-      "neutral",
+    expect(groups[0]!.rows.map((r) => [r.placedBy, r.tone])).toEqual([
+      ["deadline", "overdue"],
+      ["deadline", "overdue"],
+      ["deadline", "overdue"],
+      ["deadline", "overdue"],
     ]);
+  });
+
+  test("a past when places nothing: no Overdue group, and a later deadline places the row", () => {
+    const groups = groupByDay(
+      [
+        item("past-when", { when: "2026-09-07" }),
+        item("past-timed", { when: "2026-09-08T09:00" }),
+        item("past-due-today", { when: "2026-09-01", deadline: TODAY }),
+        item("past-due-later", { when: "2026-09-01T09:00", deadline: "2026-09-20" }),
+      ],
+      TODAY,
+      LABELS,
+      "en",
+    );
+    expect(groups.map((g) => [g.key, ids(g)])).toEqual([
+      [TODAY, ["past-due-today"]],
+      ["2026-09-20", ["past-due-later"]],
+    ]);
+    expect(groups[0]!.rows[0]).toMatchObject({ placedBy: "deadline", tone: "warning" });
+    expect(groups[1]!.rows[0]).toMatchObject({ placedBy: "deadline", tone: "neutral" });
   });
 
   test("Today holds only its own rows, all-day ahead of timed", () => {
@@ -129,12 +142,7 @@ describe("groupByDay", () => {
       LABELS,
       "en",
     );
-    expect(ids(groups[0]!)).toEqual([
-      "over-old",
-      "over-new",
-      "past-old",
-      "past-new",
-    ]);
+    expect(ids(groups[0]!)).toEqual(["over-old", "over-new"]);
     expect(ids(groups[1]!)).toEqual(["own-allday", "own-timed"]);
   });
 
@@ -154,7 +162,7 @@ describe("groupByDay", () => {
         ),
         // Done with no `when`: nothing to show.
         item("done-deadline", { deadline: "2026-09-12" }, { state: "done" }),
-        // Done in the past: not Overdue, and past days are not rendered.
+        // Done in the past: past days are not rendered.
         item("done-past", { when: "2026-09-01" }, { state: "done" }),
         // Cancelled: never placed, whatever its dates — it did not happen.
         item(
@@ -195,5 +203,48 @@ describe("groupByDay", () => {
   test("empty input still yields an empty Today", () => {
     const groups = groupByDay([], TODAY, LABELS, "en");
     expect(groups.map((g) => g.key)).toEqual([TODAY]);
+  });
+});
+
+describe("attentionBadge", () => {
+  test("counts overdue deadlines and today's open rows; past whens and future days count for nothing", () => {
+    const badge = attentionBadge(
+      [
+        item("over", { deadline: "2026-09-08" }),
+        item("due-today", { when: "2026-09-20", deadline: TODAY }),
+        item("on-today", { when: `${TODAY}T10:00`, deadline: "2026-09-20" }),
+        item("past-when", { when: "2026-09-07" }),
+        item("past-when-future-due", { when: "2026-09-01", deadline: "2026-09-20" }),
+        item("future", { when: "2026-09-10" }),
+        item("undated", {}),
+      ],
+      TODAY,
+    );
+    expect(badge).toEqual({ count: 3, tone: "overdue" });
+  });
+
+  test("tone is the most urgent counted: warning for a deadline today, else neutral", () => {
+    expect(
+      attentionBadge(
+        [item("on", { when: TODAY }), item("due", { deadline: TODAY })],
+        TODAY,
+      ),
+    ).toEqual({ count: 2, tone: "warning" });
+    expect(attentionBadge([item("on", { when: TODAY })], TODAY)).toEqual({
+      count: 1,
+      tone: "neutral",
+    });
+  });
+
+  test("Open-only: done, cancelled and binned rows do not count", () => {
+    const badge = attentionBadge(
+      [
+        item("done", { when: TODAY }, { state: "done" }),
+        item("cancelled", { deadline: "2026-09-01" }, { state: "cancelled" }),
+        item("binned", { deadline: TODAY }, { binnedAt: 1 }),
+      ],
+      TODAY,
+    );
+    expect(badge).toEqual({ count: 0, tone: "neutral" });
   });
 });

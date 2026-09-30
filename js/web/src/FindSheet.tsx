@@ -17,6 +17,7 @@
 
 import { createEffect, For, onCleanup, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
+import type { AttentionBadge } from "./dayGroups.ts";
 import type { DocApp } from "./sync/store.ts";
 import type { ViewKey } from "./prefs.ts";
 import { useAppI18n } from "./i18n.tsx";
@@ -63,9 +64,10 @@ export function FindSheet(props: {
    *  popover / sign-in dialog open over the page, which stays put. */
   status: JSX.Element;
   /** Count badges, same sources and rules as the desktop nav (see
-   *  `Nav`): Focus shows only when non-zero, Bin always, Inbox always
-   *  ("-" for zero), other lists only under `showListCounts`. */
+   *  `Nav`): Focus and Upcoming show only when non-zero, Bin always, Inbox
+   *  always ("-" for zero), other lists only under `showListCounts`. */
   focusCount: number;
+  upcomingBadge: AttentionBadge;
   binCount: number;
   openCountsByList: Record<string, number>;
   showListCounts: boolean;
@@ -74,8 +76,8 @@ export function FindSheet(props: {
   trackOverlay(() => props.open);
   const find = createFindState(props.app);
 
-  // Trailing count for a row, or null for rows that carry none (Upcoming,
-  // Done, item results, user lists with counts switched off).
+  // Trailing count for a row, or null for rows that carry none (Done, item
+  // results, user lists with counts switched off).
   const countLabel = (item: FindResult): string | null => {
     const openCount = (id: string) => {
       const n = props.openCountsByList[id] ?? 0;
@@ -83,6 +85,8 @@ export function FindSheet(props: {
     };
     if (item.kind === "view") {
       if (item.id === "focus") return props.focusCount > 0 ? String(props.focusCount) : null;
+      if (item.id === "upcoming")
+        return props.upcomingBadge.count > 0 ? String(props.upcomingBadge.count) : null;
       if (item.id === "bin") return String(props.binCount);
       if (item.id === "inbox") return openCount("inbox");
       return null;
@@ -90,6 +94,11 @@ export function FindSheet(props: {
     if (item.kind === "list") return props.showListCounts ? openCount(item.id) : null;
     return null;
   };
+  // Only Upcoming's count is toned (`attentionBadge`); the rest stay faint.
+  const countTone = (item: FindResult): string | undefined =>
+    item.kind === "view" && item.id === "upcoming"
+      ? props.upcomingBadge.tone
+      : undefined;
   let listRef: HTMLDivElement | undefined;
 
   // Fresh query on every open, and bring the current row into view so a
@@ -135,7 +144,11 @@ export function FindSheet(props: {
     >
       <FindResultBody app={props.app} item={item} />
       <Show when={countLabel(item)}>
-        {(count) => <span class="find-sheet__count">{count()}</span>}
+        {(count) => (
+          <span class="find-sheet__count" data-tone={countTone(item)}>
+            {count()}
+          </span>
+        )}
       </Show>
     </button>
   );

@@ -84,9 +84,10 @@ export function Row(props: {
   /** Open the shared calendar modal to set a deadline on the target set.
    *  `initial` seeds the calendar (this row's current deadline, or null). */
   onSetDeadline?: (ids: readonly string[], initial: string | null) => void;
-  /** Open the shared calendar modal (with its time field) to set a
-   *  planned date on the target set. `initial` seeds it. */
-  onSetWhen?: (ids: readonly string[], initial: string | null) => void;
+  /** Open this item's task surface with its planned-date popover
+   *  showing. Single-item only: the menu entry hides for a multi-row
+   *  target, which keeps the Today / Tomorrow / Remove quick actions. */
+  onSetWhen?: (id: string) => void;
   /** Jump to the item's other appearance and select it there: from the
    *  Focus lens to its home list, or from a list / board to the Focus
    *  lens. Only offered for items that appear in both (`spec/focus.md`). */
@@ -386,7 +387,7 @@ export function Row(props: {
     });
   };
   const onSetWhenDate = () => {
-    props.onSetWhen?.(targetIds(), props.item().when ?? null);
+    props.onSetWhen?.(props.item().id);
   };
   const onOpenChange = (open: boolean) => {
     // Register the menu in the shared overlay count so the workspace's
@@ -784,7 +785,7 @@ export function Row(props: {
                       <span>{m().when.remove}</span>
                     </ContextMenu.Item>
                   </Show>
-                  <Show when={props.onSetWhen}>
+                  <Show when={props.onSetWhen && targetIds().length === 1}>
                     <ContextMenu.Item
                       class="context-menu-item"
                       onSelect={onSetWhenDate}

@@ -12,6 +12,7 @@ import { Popover } from "@kobalte/core/popover";
 import { Tooltip } from "@kobalte/core/tooltip";
 import { createPopoverTooltipGuard } from "./popoverTooltip.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
+import type { AttentionBadge } from "./dayGroups.ts";
 import { Dnd, DndSelection, type DndOp } from "./dnd/solid";
 import archiveSvg from "./icons/archive.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
@@ -340,6 +341,10 @@ export function Nav(props: {
   /** Number of visible Focus refs — the Focus nav entry's count badge, and
    *  what drives the soft "getting big" signal past the threshold. */
   focusCount: number;
+  /** The Upcoming entry's badge: Open rows owed or on today, toned by the
+   *  most urgent (red for an overdue deadline, warning for one due today).
+   *  Hidden at zero. */
+  upcomingBadge: AttentionBadge;
   /** Open-item count (Backlog + Live) per list id. Inbox's row always
    *  renders a badge (showing "-" when zero); non-Inbox rows render theirs
    *  only when `showListCounts` is true, again with "-" for zero. */
@@ -537,6 +542,11 @@ export function Nav(props: {
         >
           <span class="nav-item-icon" innerHTML={calendarSvg} />
           {m().nav.upcoming}
+          <Show when={props.upcomingBadge.count > 0}>
+            <span class="nav-item-count" data-tone={props.upcomingBadge.tone}>
+              {props.upcomingBadge.count}
+            </span>
+          </Show>
         </button>
         <button
           type="button"

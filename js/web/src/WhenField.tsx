@@ -2,7 +2,7 @@
 // that reads the set `when` as a day ("Wed 23 Sept"; "Date" as its
 // placeholder when unset) and opens a popover: Today / Tomorrow quick
 // actions on top (they keep any time part and close), then the shared
-// calendar picker (`CalendarPicker`, without its time field; Remove). The input is read-only for now: typed dates are a later step,
+// calendar picker (`CalendarPicker`; Remove). The input is read-only for now: typed dates are a later step,
 // so the popover is the only writer. Anchored on the input rather than a
 // Popover.Trigger button so it can become editable without changing shape.
 // The time row (`WhenTimeRow`: start picker, ✕, end picker) sits above
@@ -10,7 +10,8 @@
 // is just the date input, and there is no day for a time to belong to.
 // The date input has an inset ✕ while a `when` is set, which removes the
 // whole value, time included, as the popover's Remove does. The popover
-// carries no time picker of its own.
+// carries no time picker of its own. Its open state is the caller's, so a
+// row context menu's "Set date…" can open the item straight onto it.
 
 import { Popover } from "@kobalte/core/popover";
 import { createMemo, Show } from "solid-js";
@@ -188,12 +189,10 @@ export function WhenField(props: {
               </div>
               <CalendarPicker
                 kind="when"
-                open={props.open}
                 setOpen={props.setOpen}
                 value={props.when}
                 onPick={props.onChange}
                 onRemove={() => props.onChange(null)}
-                withTime={false}
               />
             </Popover.Content>
           </Popover.Portal>

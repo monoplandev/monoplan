@@ -1,13 +1,13 @@
 // The Upcoming view: the agenda. Every Open item with a planned date or a
 // deadline, bucketed by day (`dayGroups.ts`), Today always anchored so the
-// surface reads as "the days ahead" even when nothing is due. Past dates
-// of either kind sit in an Overdue section above Today, and are the only
-// placing dates that badge (the day header carries everyone else's). The
-// other field, when present, badges beside it so a row reads
-// "Sat 13 · due 31 Oct". Timed rows lead with their time. Rows tick off in
-// place and stay where they are on their `when` day once done, muted, so
-// the day still records what happened. Click opens the task surface
-// (dialog or side panel).
+// surface reads as "the days ahead" even when nothing is due. Overdue
+// deadlines sit in an Overdue section above Today, and are the only
+// placing dates that badge (the day header carries everyone else's). A
+// past `when` is over and places nothing here. The other field, when
+// present, badges beside it so a row reads "Sat 13 · due 31 Oct". Timed
+// rows lead with their time. Rows tick off in place and stay where they
+// are on their `when` day once done, muted, so the day still records what
+// happened. Click opens the task surface (dialog or side panel).
 //
 // Deliberately not a `Dnd` listbox: day sections are the point, and the
 // flat virtualised list can't host group headers. Drag-to-reschedule is
@@ -58,10 +58,8 @@ export function Upcoming(props: {
     return g.urgency === "today" ? `${date} (${m().deadline.today})` : date;
   };
 
-  // The placing field badges only in Overdue, where the header carries no
-  // day; the other field always badges.
-  const showPlacingWhen = (r: DayRow, g: DayGroup) =>
-    r.placedBy === "when" && g.urgency === "overdue";
+  // The placing field badges only in Overdue (deadlines only), where the
+  // header carries no day; the other field always badges.
   const showPlacingDeadline = (r: DayRow, g: DayGroup) =>
     r.placedBy === "deadline" && g.urgency === "overdue";
   const timeLabel = (r: DayRow) =>
@@ -109,9 +107,6 @@ export function Upcoming(props: {
                     </Show>
                     <span class="upcoming-row-text">{r.item.text}</span>
                     <span class="upcoming-row-meta">
-                      <Show when={showPlacingWhen(r, g)}>
-                        <WhenBadge when={r.item.when!} />
-                      </Show>
                       <Show when={r.placedBy === "deadline" && r.item.when}>
                         {(w) => <WhenBadge when={w()} />}
                       </Show>

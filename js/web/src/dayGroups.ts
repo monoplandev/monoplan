@@ -1,16 +1,23 @@
 // Day grouping behind the Upcoming view (`spec/calendar-plan.md`
 // "Agenda"): every Open item carrying a `when` or a `deadline`, placed
-// once on the earlier of the two days. Anything with a past date of either
-// kind leads in an Overdue group so the pile that needs a decision is
-// visible at a glance and Today reads as today's plan; the group only
-// exists while something is past. Done items keep their calendar day via
-// `when` only ("happens on" outlives the tick, "owed by" does not): they
-// keep their slot on that day, never in Overdue and never placed by
-// deadline. Binned items never appear. Pure so it can be unit-tested
-// without a DOM (`test/dayGroups.test.ts`).
+// once on the earlier of the two days. An overdue deadline leads in an
+// Overdue group so what is owed is visible at a glance and Today reads as
+// today's plan; the group only exists while something is overdue. A past
+// `when` has gone by like an event: it places nothing, and an item with
+// only that is not selected for this view. Done items keep their calendar
+// day via `when` only ("happens on" outlives the tick, "owed by" does
+// not): they keep their slot on that day, never in Overdue and never
+// placed by deadline. Binned items never appear. Pure so it can be
+// unit-tested without a DOM (`test/dayGroups.test.ts`).
 
 import { formatDeadlineBadge, whenDay } from "./format.tsx";
-import { isBinned, isCancelled, isDone, type ItemView } from "./sync/store.ts";
+import {
+  isBinned,
+  isCancelled,
+  isDone,
+  isOpen,
+  type ItemView,
+} from "./sync/store.ts";
 
 /** Most urgent first when comparing. */
 export type DayTone = "overdue" | "warning" | "neutral";
@@ -39,14 +46,11 @@ export interface DayGroupLabels {
   tomorrow: string;
 }
 
-const FOLD_OVERDUE = 0;
-const FOLD_PAST_WHEN = 1;
-
 /** Bucket `items` by placement day. `today` is the local `YYYY-MM-DD`
  *  stamp everything is judged against. An Overdue group leads when any
- *  date is past: overdue deadlines first (oldest first), then past
- *  whens (oldest first), then `createdAt`. Today is always present after
- *  it, empty if nothing is due, so the surface anchors on the current day.
+ *  deadline is past, oldest first, then `createdAt`. Today is always
+ *  present after it, empty if nothing is due, so the surface anchors on
+ *  the current day.
  *
  *  Within a day, rows order by the raw string of the placing field
  *  (all-day ahead of timed), then `createdAt`; ticking a row does not
@@ -58,18 +62,19 @@ export function groupByDay(
   locale: string,
 ): DayGroup[] {
   const placed: { day: string; raw: string; row: DayRow }[] = [];
-  const overdueRows: { fold: number; raw: string; row: DayRow }[] = [];
+  const overdueRows: { raw: string; row: DayRow }[] = [];
   for (const it of items) {
     // A cancelled item did not happen: unlike a done one it keeps no
     // calendar slot, so it drops out with the binned ones.
     if (isBinned(it) || isCancelled(it) || (!it.when && !it.deadline)) continue;
-    const wDay = it.when ? whenDay(it.when) : null;
+    // Past days are not rendered here, so a past `when` places nothing,
+    // done or not.
+    const wDay = it.when && whenDay(it.when) >= today ? whenDay(it.when) : null;
     const dDay = it.deadline ?? null;
     if (isDone(it)) {
       // A ticked item stays put on its `when` day, unjudged. Its deadline
-      // is settled and places nothing; Overdue is Open-only, and past days
-      // are not rendered here, so a past `when` simply drops out.
-      if (wDay === null || wDay < today) continue;
+      // is settled and places nothing; Overdue is Open-only.
+      if (wDay === null) continue;
       placed.push({
         day: wDay,
         raw: it.when!,
@@ -77,28 +82,18 @@ export function groupByDay(
       });
       continue;
     }
-    const overdue = dDay !== null && dDay < today;
-    const pastWhen = wDay !== null && wDay < today;
-    // Any past date leaves the day ladder for the Overdue group. An overdue
-    // deadline is owed now whatever `when` says and places the row (red);
-    // a past `when` follows, placed by that `when`, unjudged (neutral).
-    if (overdue || pastWhen) {
-      overdueRows.push(
-        overdue
-          ? {
-              fold: FOLD_OVERDUE,
-              raw: dDay!,
-              row: { item: it, placedBy: "deadline", tone: "overdue" },
-            }
-          : {
-              fold: FOLD_PAST_WHEN,
-              raw: it.when!,
-              row: { item: it, placedBy: "when", tone: "neutral" },
-            },
-      );
+    // An overdue deadline is owed now whatever `when` says: it leaves the
+    // day ladder for the Overdue group (red).
+    if (dDay !== null && dDay < today) {
+      overdueRows.push({
+        raw: dDay,
+        row: { item: it, placedBy: "deadline", tone: "overdue" },
+      });
       continue;
     }
-    // Both dates are today or later: place on the earlier. `when` wins a
+    // Only a past `when`: over, nothing to place.
+    if (wDay === null && dDay === null) continue;
+    // What is left is today or later: place on the earlier. `when` wins a
     // tie: it is the "happens on" date and renders first.
     const tone: DayTone = dDay === today ? "warning" : "neutral";
     if (wDay && (!dDay || wDay <= dDay)) {
@@ -120,7 +115,7 @@ export function groupByDay(
     b: { raw: string; row: DayRow },
   ) =>
     a.raw.localeCompare(b.raw) || a.row.item.createdAt - b.row.item.createdAt;
-  overdueRows.sort((a, b) => a.fold - b.fold || byRawThenCreated(a, b));
+  overdueRows.sort(byRawThenCreated);
   placed.sort((a, b) => a.day.localeCompare(b.day) || byRawThenCreated(a, b));
 
   const out: DayGroup[] = [];
@@ -150,4 +145,39 @@ export function groupByDay(
     });
   }
   return out;
+}
+
+/** The Upcoming nav entry's badge: how many Open rows need the user today,
+ *  and the most urgent tone among them. */
+export interface AttentionBadge {
+  count: number;
+  tone: DayTone;
+}
+
+/** Count what is owed or on today: Open items with an overdue deadline, a
+ *  deadline today, or a `when` today. Tone is the most urgent counted:
+ *  overdue, else warning (a deadline today), else neutral. A past `when`
+ *  has gone by like an event and counts for nothing; future days are the
+ *  view's business, not the badge's. */
+export function attentionBadge(
+  items: Iterable<ItemView>,
+  today: string,
+): AttentionBadge {
+  let count = 0;
+  let overdue = false;
+  let warning = false;
+  for (const it of items) {
+    if (!isOpen(it)) continue;
+    const dDay = it.deadline ?? null;
+    if (dDay !== null && dDay < today) {
+      count++;
+      overdue = true;
+    } else if (dDay === today) {
+      count++;
+      warning = true;
+    } else if (it.when && whenDay(it.when) === today) {
+      count++;
+    }
+  }
+  return { count, tone: overdue ? "overdue" : warning ? "warning" : "neutral" };
 }

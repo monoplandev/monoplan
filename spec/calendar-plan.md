@@ -17,13 +17,13 @@ lands; this file is the design record.
 
 | Question | Decision |
 |---|---|
-| Why a second field? | `deadline` means "owed by": past it the item is overdue and red. A planned or scheduled day means "happens on" or "act on": past it the item is not owed, it slipped. Using `deadline` for the second meaning makes every past event scream overdue. The distinction is what happens after the date, so it needs its own field. |
+| Why a second field? | `deadline` means "owed by": past it the item is overdue and red. A planned or scheduled day means "happens on" or "act on": past it the item is not owed, it is simply over. Using `deadline` for the second meaning makes every past event scream overdue. The distinction is what happens after the date, so it needs its own field. |
 | Replace `deadline`, or flag it? | **Neither. Add `when` beside it.** Both can coexist on one item ("do it Saturday, due Oct 31"), which a single date plus a kind flag can't express. Additive, so six months of real data needs no migration. Same names as Things, which is the model people already know. |
 | Date and time: one register or two? | **One register, `when`, shape-discriminated.** `YYYY-MM-DD` is all-day, `YYYY-MM-DDTHH:MM` is timed. Same rule as iCalendar `VALUE=DATE` vs `DATE-TIME`. One register can't tear under concurrent edit (date moved on one device, time set on another), sorts by plain string compare, and clears with one delete. An explicit flag is redundant with the shape and a third thing to keep consistent. |
 | Time zone? | **Floating only, now.** A `when` is a wall-clock intent, the devices travel together, and floating keeps sorting a string compare. The grammar reserves an RFC 9557 bracketed IANA suffix (`...T14:00[Europe/London]`) for fixed-instant values. Writers may later default to appending the device zone; untouched values stay floating, so nothing migrates. Note this is the task-manager default, not the calendar default: Apple and Google pin timed events to a zone. |
 | Recurrence? | **Not in the first cut.** No `repeat` field, no hint of one in the doc. Repeat-on-done (clone with the date advanced when ticked Done) is the likely first form; RRULE-style schedules are a calendar app's job. |
-| Does the clock ever write? | **Never.** A past `when` stays where it was set; the agenda surfaces it in the Overdue section as a derived view rule. Nothing promotes an item to Live, adds it to Focus, or moves it because a day arrived: every device would race to do it. |
-| What does a past `when` mean? | **No opinion yet.** Events and tasks are not yet distinguished: a past `when` on an event is simply over, on a task it may have slipped. Until that distinction exists, `when` is fixed and does not roll over: it is never rewritten, never reinterpreted as "today", and never red. The agenda only lists it under Overdue so the user can decide. |
+| Does the clock ever write? | **Never.** A past `when` stays where it was set, on its day in the past. Nothing promotes an item to Live, adds it to Focus, or moves it because a day arrived: every device would race to do it. |
+| What does a past `when` mean? | **It went by, like an event** (decided 2026-09-30). `when` is fixed and does not roll over: it is never rewritten, never reinterpreted as "today", never red, and never "slipped". A `when` from a previous day is in the past, and the agenda, which renders no past days, does not select it. A later calendar view, or scrolling this one backwards, is how past days get seen. |
 | Calendar surface | **One lens: Upcoming becomes the agenda** (day sections, both dates). Day granularity only: no hour grid, no durations, no overlap. A month grid and drag-to-reschedule are deferred; the agenda's shape does not change when they land. |
 | Time input | **Typed time picker** (`TimePicker.tsx`): a text input with a suggestion list, 12 or 24-hour cycle from the existing time-format preference. Empty means all-day. See "Task surface and rows". |
 | Export / CalDAV | **Deferred.** Mapping is recorded below. A subscribable feed needs a server that can read items, which the E2EE server cannot; a non-E2EE CalDAV carve-out is a separate conversation. |
@@ -34,19 +34,21 @@ lands; this file is the design record.
 | | before the day | on the day | after the day, still Open |
 |---|---|---|---|
 | `deadline` | upcoming | Today, warning tone | Overdue section, overdue tone (red) |
-| `when` | upcoming | Today, neutral tone | Overdue section, muted tone, never red |
+| `when` | upcoming | Today, neutral tone | in the past: not on the agenda, never red |
 
-A past date of either kind moves the row to an Overdue section above Today
-(decided 2026-09-16, replacing the earlier fold into Today): the pile that
-needs a decision is visible at a glance and Today reads as today's plan.
-The section exists only while something is past.
+An overdue deadline moves the row to an Overdue section above Today
+(decided 2026-09-16, replacing the earlier fold into Today): what is owed
+is visible at a glance and Today reads as today's plan. The section exists
+only while a deadline is overdue.
 
-A past `when` is deliberately not judged. Whether it slipped or simply
-happened depends on whether the item is a task or an event, and that
-distinction is not made yet. The conservative rule for now: `when` is fixed.
-It does not roll over into Today, is not rewritten by the clock, and carries
-no tone or label of its own in Overdue until the user ticks, bins, or
-reschedules the item. There is deliberately no "slipped" state.
+A past `when` is not judged and not surfaced (decided 2026-09-30, replacing
+the earlier rule that listed it under Overdue for the user to decide). It
+went by like an event and lives on its day in the past: it does not roll
+over into Today, is not rewritten by the clock, and places nothing on the
+agenda, which renders no past days. An item with a past `when` and a
+deadline is placed by the deadline alone. There is deliberately no
+"slipped" state. Past days become visible when a calendar view that can
+reach them is built, or when the agenda learns to scroll backwards.
 
 Done and binned items keep both fields untouched, as they keep `deadline`
 today. The fields are never cleared by a transition. Restore brings the
@@ -178,51 +180,58 @@ Upcoming keeps its `upcoming` token and shape; its nav entry reads
 for the month grid). `groupByDeadline` becomes
 `groupByDay` over both fields:
 
-- **Rows** are Open items with a `when` or a `deadline` (or both), plus
-  Done items with a `when` (see "`when` survives Done" above). Cancelled and
-  binned items never appear.
+- **Rows** are Open items with a `deadline` or a `when` of today or later
+  (or both), plus Done items with a `when` of today or later (see "`when`
+  survives Done" above). A `when` before today places nothing, done or not.
+  Cancelled and binned items never appear.
 - **Done rows** place by `when` only, on that day, neutral tone, in the
   same within-day order as everything else, so ticking never moves a row.
   Their deadline places nothing and badges muted. A done item whose `when` is past drops out:
   Overdue is Open-only and the agenda renders no past days. A month grid or
   backward agenda, when built, shows them on their day with a "show
   completed" toggle if the noise warrants one.
-- **Overdue** (web): any Open row with a `deadline` day or a `when` day
-  before today goes to an Overdue section above Today. Overdue deadlines lead,
-  placed by the deadline whatever `when` says (it is owed now), oldest
-  first; then past whens, placed by the `when`, oldest first; then
-  `created_at`. Rendered only when non-empty. The CLI `agenda` still folds
-  these into Today.
+- **Overdue** (web): any Open row with a `deadline` day before today goes
+  to an Overdue section above Today, placed by the deadline whatever `when`
+  says (it is owed now), oldest first, then `created_at`. Rendered only
+  when non-empty. The CLI `agenda` still folds these into Today.
 - **Placement** of every other row: an item appears exactly once, on its
-  *placement day*, the earlier of its `when` day and its `deadline` day.
+  *placement day*, the earlier of its `when` day and its `deadline` day,
+  ignoring a `when` before today.
 - **Tone** of a row is the most urgent of: overdue (deadline day < today),
-  today-warning (deadline day = today), neutral. A past `when` is neutral.
+  today-warning (deadline day = today), neutral.
 - **Within a day**, order by the raw string of the field that placed the row,
   then `created_at`.
 - **Badges**: the placing date is carried by the day header and not repeated,
-  except in Overdue, where it shows its actual date (existing `pastAsDate`
-  rule). The other field, when present, shows as its own badge so a row
+  except in Overdue, where the deadline shows its actual date (existing
+  `pastAsDate` rule). The other field, when present, shows as its own badge so a row
   reads "Sat 13 · due 31 Oct". Timed rows show the time as a leading label.
 - Today is always present (after Overdue, when that exists), empty if
   nothing is due, so the surface anchors on the current day.
+- **Nav badge** (web, built): the Upcoming entry carries a count of Open
+  items owed or on today: an overdue deadline, a deadline today, or a `when`
+  today. Its tone is the most urgent counted (overdue red, deadline-today
+  warning, otherwise the ordinary faint count); hidden at zero and not gated
+  by `showListCounts`. Future days and done rows do not count, and neither
+  does a past `when`: it has gone by like an event (`attentionBadge` in
+  `dayGroups.ts`).
 - Stays the flat virtualised list it is today, not a `Dnd` listbox.
   Drag-to-reschedule is deferred (see below).
 
 ## Task surface and rows
 
 - The task dialog and side panel gain a **When** control beside Deadline,
-  same badge-with-popover pattern as `DeadlineField`: Set date…, Today,
-  Tomorrow, Remove. Set date… opens the shared calendar modal, which gains an
-  optional time field under the grid (blank ≡ all-day). Changing the date
-  keeps the time; Remove clears both.
+  same field-with-popover pattern as `DeadlineField`: Today, Tomorrow, the
+  calendar grid, Remove. The time (blank ≡ all-day) has its own row in the
+  dates band, shown once a date is set. Changing the date keeps the time;
+  Remove clears both.
 - **Time picker** is the app's own typed control (`TimePicker.tsx`): a
   plain text input showing the stored time in the app's hour cycle and, while
   focused, a listbox of suggestions (every quarter hour, narrowed by what is
   typed; `timeSuggest.ts` has the grammar). Enter or a click commits the row
   under the cursor; Escape, Tab and blur revert to the stored value. It is
   the one time control on every surface: the task dialog's dates band (start
-  and end) and the shared calendar modal. Kobalte's segmented `TimeField`
-  was the first cut and has been removed.
+  and end). Kobalte's segmented `TimeField` was the first cut and has been
+  removed.
 - **Hour cycle** follows the time-format preference, not the locale alone.
   `format.tsx` gains `hourCycle(locale): 12 | 24`: `"12h"` → 12, `"24h"` →
   24, `"auto"` → whatever `Intl.DateTimeFormat(locale, { hour: "numeric" })`
@@ -236,15 +245,17 @@ for the month grid). `groupByDeadline` becomes
   the pair; the 10-character register maps to null. A commit is always a
   complete pair or null, so there is no partial state to hold: against a set
   date every commit writes through (timed, or back to all-day with the date
-  kept); with no date yet the modal holds the time and the date pick applies
-  it. The inset ✕ on the picker is how the user drops back to all-day
-  without removing the date.
-- The calendar modal is shared with Deadline. The time field mounts only
-  when the modal is opened for `when`; the deadline path is unchanged and
-  keeps writing 10-character stamps.
+  kept), and the time row only shows against a set date. The inset ✕ on the
+  picker is how the user drops back to all-day without removing the date.
+- The calendar grid (`CalendarPicker`) is shared with Deadline and carries
+  no time field: the time is edited in the task surface's dates band. The
+  standalone calendar modal is Deadline-only; `when` has no surface outside
+  the task dialog / side panel.
 - `WhenBadge` beside `DeadlineBadge` on list rows and board cards. When both
   are set, `when` renders first. Muted on done/binned items as deadline is.
-- Row context menus gain the same quick actions for When.
+- Row context menus gain the same quick actions for When (Today, Tomorrow,
+  Remove, acting on the whole target set). Set date… opens the item with its
+  date popover showing, so it is offered for a single row only.
 - i18n: a `when` message group mirroring `deadline` (label, unset, today,
   tomorrow; time-of-day formatting defers to the existing
   preference).
@@ -304,8 +315,8 @@ here.
 - **Month grid.** A workspace-level lens, sibling of Upcoming, on the
   `calendar` token: one month at a time on `@corvu/calendar` (already under
   the date picker), a few row titles per cell in placement order with a
-  "+k" overflow, tone per the agenda rules (past cells empty, since the fold
-  moved their rows to Today), click or Enter on a day opens the agenda
+  "+k" overflow, tone per the agenda rules (past cells show the `when` rows that went by
+  on them; overdue deadlines stay in Overdue), click or Enter on a day opens the agenda
   anchored on it. Needs the agenda to accept an anchor day. Nothing in the
   data model changes for it.
 - **Reschedule.** Drag a row between agenda day sections or grid cells. A

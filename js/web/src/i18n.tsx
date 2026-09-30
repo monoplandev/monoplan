@@ -266,11 +266,9 @@ export type Messages = {
     tomorrow: string;
     /** Quick action / context-menu action that removes the planned date. */
     remove: string;
-    /** Context-menu action that opens the calendar to pick a date. */
+    /** Context-menu action that opens the item onto its date popover. */
     setDate: string;
-    /** Title of the calendar modal. */
-    dialogTitle: string;
-    /** Label of the optional time field under the calendar. */
+    /** Label of the time field in the task surface's dates band. */
     time: string;
     /** Button beside the time field that blanks it (back to all-day). */
     clearTime: string;
@@ -544,7 +542,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       tomorrow: "Mañana",
       remove: "Quitar fecha",
       setDate: "Elegir fecha…",
-      dialogTitle: "Establecer fecha",
       time: "Hora",
       clearTime: "Quitar hora",
       end: "Fin",
@@ -799,7 +796,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       tomorrow: "Tomorrow",
       remove: "Remove date",
       setDate: "Set date…",
-      dialogTitle: "Set date",
       time: "Time",
       clearTime: "Clear time",
       end: "End",
