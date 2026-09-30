@@ -2592,16 +2592,14 @@ input.task-check:hover {
   height: 14px;
 }
 
-/* Activity section under the notes: a faint heading over a log of plain
-   sentences (created; completed + how long it took). Read-only, so it
-   sits in the content column's own tone rather than a card. */
-.task-dialog-activity {
+/* Activity section under the notes: an unheaded log of plain sentences
+   (created; completed; how long it took). Read-only, so it sits faint in
+   the content column's own tone rather than a card, with a little more
+   air above it than the other sections (the compound selector outranks
+   the shared `.task-dialog-section` padding below). */
+.task-dialog-section.task-dialog-activity {
+  padding-top: 16px;
   font-size: 13px;
-}
-
-.task-dialog-activity-heading {
-  margin: 0 0 6px;
-  color: var(--text-faint);
 }
 
 .task-dialog-activity-log {
@@ -2611,7 +2609,7 @@ input.task-check:hover {
   margin: 0;
   padding: 0;
   list-style: none;
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
 /* Content column: the title, notes, badges, metadata and actions all

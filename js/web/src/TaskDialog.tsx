@@ -1275,18 +1275,18 @@ export function TaskDialog(props: {
           </section>
 
           {/* Activity log under the notes: the item's timeline as plain
-              sentences. Two entries for now: when it was created, and
-              once done, when it was completed and how long that took.
-              The completion stamp is the reflection `doneAt` (last
-              entry into Done), falling back to the register's
-              transition time. Only once the item exists. */}
+              sentences, unheaded (the section's name is its aria-label).
+              When it was created, and once done, when it was completed
+              and, on a line of its own, how long that took. The
+              completion stamp is the reflection `doneAt` (last entry
+              into Done), falling back to the register's transition
+              time. Only once the item exists. */}
           <Show when={item()}>
             {(it) => (
               <section
                 class="task-dialog-section task-dialog-activity"
                 aria-label={m().workspace.activity}
               >
-                <div class="task-dialog-activity-heading">{m().workspace.activity}</div>
                 <ul class="task-dialog-activity-log">
                   <li title={formatDateTime(it().createdAt, locale())}>
                     {m().workspace.createdStamp(
@@ -1297,6 +1297,10 @@ export function TaskDialog(props: {
                     <li title={formatDateTime(doneAt(it()), locale())}>
                       {m().workspace.activityCompleted(
                         formatDialogStamp(doneAt(it()), nowMs(), locale(), { inline: true }),
+                      )}
+                    </li>
+                    <li>
+                      {m().workspace.activityElapsed(
                         formatElapsed(doneAt(it()) - it().createdAt, locale()),
                       )}
                     </li>

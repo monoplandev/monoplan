@@ -120,13 +120,15 @@ export type Messages = {
      *  (`spec/data-model.md` "Lifecycle"). `reopen` is its un-done. */
     markCancelled: string;
     reopen: string;
-    /** Activity section under the task-dialog notes: heading over a
-     *  log of plain sentences. `createdStamp` is the creation line;
-     *  the completion line (shown once done) carries the elapsed span
-     *  since creation, e.g. "Completed yesterday 8:06 PM after 3 hours". */
+    /** Activity section under the task-dialog notes: a log of plain
+     *  sentences (`activity` is its accessible name, not shown).
+     *  `createdStamp` is the creation line; once done, the completion
+     *  line ("Completed yesterday 8:06 PM") is followed by the elapsed
+     *  span since creation on its own line ("3 hours elapsed"). */
     createdStamp: (when: string) => string;
     activity: string;
-    activityCompleted: (when: string, span: string) => string;
+    activityCompleted: (when: string) => string;
+    activityElapsed: (span: string) => string;
     /** Activity line for a cancelled item: when it was cancelled. */
     activityCancelled: (when: string) => string;
     duplicate: string;
@@ -462,7 +464,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       reopen: "Reabrir",
       createdStamp: (when) => `Creado ${when}`,
       activity: "Actividad",
-      activityCompleted: (when, span) => `Completado ${when} tras ${span}`,
+      activityCompleted: (when) => `Completado ${when}`,
+      activityElapsed: (span) => `Tiempo transcurrido: ${span}`,
       activityCancelled: (when) => `Cancelado ${when}`,
       duplicate: "Duplicar",
       moveToBin: "Mover a la papelera",
@@ -716,7 +719,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       reopen: "Reopen",
       createdStamp: (when) => `Created ${when}`,
       activity: "Activity",
-      activityCompleted: (when, span) => `Completed ${when} after ${span}`,
+      activityCompleted: (when) => `Completed ${when}`,
+      activityElapsed: (span) => `${span} elapsed`,
       activityCancelled: (when) => `Cancelled ${when}`,
       duplicate: "Duplicate",
       moveToBin: "Move to bin",
