@@ -565,20 +565,24 @@ export function Board(props: {
   // body: a focused lane with nothing selected answers ↓ / ↑ by selecting
   // its first / last card, and ← / → still hop lanes.
   const focusActiveLane = (): void => {
+    // The handle's focus never scrolls, so reveal the lane explicitly.
+    const focusLane = (laneKey: WorkflowState): void => {
+      laneHandles.get(laneKey)?.focus();
+      ensureLaneVisible(laneKey);
+    };
     const active = activeSelection();
     if (active) {
       for (const [laneKey, sel] of laneSelections) {
         if (sel !== active) continue;
-        laneHandles.get(laneKey)?.focus();
+        focusLane(laneKey);
         return;
       }
     }
     const fallback =
-      (lastActiveLane !== null ? laneHandles.get(lastActiveLane) : undefined) ??
-      orderedLaneKeys()
-        .map((k) => laneHandles.get(k))
-        .find((h) => h !== undefined);
-    fallback?.focus();
+      lastActiveLane !== null && laneHandles.has(lastActiveLane)
+        ? lastActiveLane
+        : orderedLaneKeys().find((k) => laneHandles.has(k));
+    if (fallback !== undefined) focusLane(fallback);
   };
   props.ref?.({ focusActive: focusActiveLane });
 

@@ -23,7 +23,10 @@ const BORDER_RADIUS_PX = 4;
 export interface DndImperative {
   getSelection(): { blocks: any[]; active: any | null };
   scrollToKey(key: Key): void;
-  /** Move keyboard focus to the listbox so arrow/Enter/Space act on it. */
+  /** Move keyboard focus to the listbox so arrow/Enter/Space act on it.
+   *  Never scrolls: Safari's focus-time reveal is an instant jump that
+   *  cancels any smooth scroll the caller started (the board's lane hop),
+   *  so callers own bringing the listbox into view. */
   focus(): void;
   /** Preview a foreign drag (from another Dnd) hovering this list as a
    *  drop target: placeholder + nudge + vertical autoscroll. Pass the
@@ -254,7 +257,7 @@ export function Dnd<T>(props: DndProps<T>): JSX.Element {
     props.ref?.({
       getSelection: () => controller!.getSelection(),
       scrollToKey: (k) => controller!.scrollToKey(k),
-      focus: () => listboxEl.focus(),
+      focus: () => listboxEl.focus({ preventScroll: true }),
       setForeignHover: (x, y) => controller!.setForeignHover(x, y),
       clearForeignHover: () => controller!.clearForeignHover(),
       getForeignHoverIndex: () => controller!.getForeignHoverIndex(),
