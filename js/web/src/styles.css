@@ -3246,8 +3246,15 @@ input.task-check:hover {
     gap: 6px;
   }
 
+  /* No inset ✕ on the page's date and deadline inputs: it is far under a
+     tap target, and the picker's Remove already does the job. The input
+     takes the plain right inset back. */
+  .task-page .task-dialog-when-clear {
+    display: none;
+  }
+
   .task-page .task-dialog-when-input {
-    padding: 6px 28px 6px 30px;
+    padding: 6px 10px 6px 30px;
   }
 
   .task-page .task-dialog-when-icon {
