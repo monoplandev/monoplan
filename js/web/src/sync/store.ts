@@ -45,6 +45,13 @@ export const OPEN_STATES: readonly WorkflowState[] = [
   "review",
 ];
 
+/** All six workflow states in ladder order: what a status picker offers
+ *  (the bin is not a state, so it is never one of the choices). */
+export const WORKFLOW_STATES: readonly WorkflowState[] = [
+  ...OPEN_STATES,
+  ...CLOSED_STATES,
+];
+
 export interface ItemView {
   id: string;
   text: string;

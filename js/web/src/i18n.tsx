@@ -137,6 +137,9 @@ export type Messages = {
     /** Accessible name for the task dialog's lifecycle status badge —
      *  opens the workflow-state menu. */
     changeStatus: string;
+    /** Row context-menu submenu that moves the target set to a workflow
+     *  state (the menu twin of the task dialog's status badge). */
+    status: string;
     /** Placeholder / accessible name for the filter box in the move-to-list
      *  picker's popover. */
     searchLists: string;
@@ -470,6 +473,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       moveToBin: "Mover a la papelera",
       moveToList: "Mover a la lista",
       changeStatus: "Cambiar estado",
+      status: "Estado",
       searchLists: "Buscar listas",
       moveItem: "Mover elemento",
       moveItems: "Mover elementos",
@@ -724,6 +728,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       moveToBin: "Move to bin",
       moveToList: "Move to list",
       changeStatus: "Change status",
+      status: "Status",
       searchLists: "Search lists",
       moveItem: "Move item",
       moveItems: "Move items",

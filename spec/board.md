@@ -182,6 +182,12 @@ local override (if any)  →  saved default (if any)  →  built-in flat list
 - Lane visibility is part of the view spec, so it lives in the same override
   map and is published by the same "Save as default". Hiding never mutates
   item state.
+- Outside the board, state is set from a **status picker** listing all six
+  workflow states (the four open states, Done, Cancelled) with the current one
+  ticked: the task dialog's status badge, and the row context menu's Status
+  submenu. The context menu acts on the whole target set (the selection when
+  the row is part of it) in one `set_items_lifecycle` commit. Neither is
+  offered while the item is binned.
 - A drag between open lanes is a same-list lifecycle change: the item is
   **not** spliced out of the list's Open array (`listOpen`), it stays in place
   and its lane is recomputed from the lifecycle state. Only Done / Cancelled

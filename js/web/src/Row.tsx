@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, on, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, Show } from "solid-js";
 import { ContextMenu } from "@kobalte/core/context-menu";
 import checkSvg from "./icons/check.svg?raw";
 import crossSvg from "./icons/cross.svg?raw";
@@ -27,9 +27,12 @@ import {
   isBinned,
   isCancelled,
   isClosed,
+  isClosedState,
   isOpen,
+  WORKFLOW_STATES,
   type DocApp,
   type ItemView,
+  type WorkflowState,
 } from "./sync/store.ts";
 
 // Draft items live only in the dnd's items list — never in the engine —
@@ -294,6 +297,27 @@ export function Row(props: {
     const ids = targetIds();
     if (ids.length === 0) return;
     props.app.setLifecycleMany(ids, "cancelled");
+  };
+  // Status submenu: move the whole target set to one workflow state in a
+  // single commit. Targets already in that state are skipped by the core,
+  // so a mixed selection converges without re-stamping the ones in place.
+  const onSetStatus = (state: WorkflowState) => {
+    const ids = targetIds();
+    if (ids.length === 0) return;
+    // Reopening from inside Focus re-pins first, as un-checking does
+    // (closing dropped the ref); the state write then joins the same
+    // undo step.
+    const reopened =
+      props.viewKind === "focus" && !isClosedState(state)
+        ? ids.filter((id) => {
+            const it = props.app.getItem(id);
+            return it !== undefined && isClosed(it);
+          })
+        : [];
+    props.app.withActionBatch(() => {
+      if (reopened.length > 0) props.app.undoneIntoFocus(reopened);
+      props.app.setLifecycleMany(ids, state);
+    });
   };
   // Focus toggle from the context menu acts on the whole target set (the
   // selection when this row is part of it, else this row alone) in a single
@@ -722,6 +746,47 @@ export function Row(props: {
               <span>{m().workspace.markCancelled}</span>
               <kbd class="menu-shortcut">⇧X</kbd>
             </ContextMenu.Item>
+          </Show>
+          {/* Every workflow state in one place, the tick marking this
+              row's current one. Hidden while binned: the bin mask
+              overrides the state and Restore is the way out. */}
+          <Show when={!isBinned(props.item())}>
+            <ContextMenu.Sub gutter={4}>
+              <ContextMenu.SubTrigger class="context-menu-item">
+                <span>{m().workspace.status}</span>
+                <span class="menu-sub-arrow" aria-hidden="true">
+                  ›
+                </span>
+              </ContextMenu.SubTrigger>
+              <ContextMenu.Portal>
+                <ContextMenu.SubContent class="context-menu-content">
+                  <ContextMenu.RadioGroup value={props.item().state}>
+                    <For each={WORKFLOW_STATES}>
+                      {(state) => (
+                        <ContextMenu.RadioItem
+                          value={state}
+                          class="context-menu-item"
+                          // Radio items keep the menu open by default;
+                          // picking a state is a one-shot move, so close.
+                          // `onSelect` rather than the group's `onChange`
+                          // so re-picking this row's state still moves
+                          // the rest of a mixed selection.
+                          closeOnSelect
+                          onSelect={() => onSetStatus(state)}
+                        >
+                          <span>{laneLabel(m(), state)}</span>
+                          <ContextMenu.ItemIndicator
+                            class="menu-check"
+                            aria-hidden="true"
+                            innerHTML={checkSvg}
+                          />
+                        </ContextMenu.RadioItem>
+                      )}
+                    </For>
+                  </ContextMenu.RadioGroup>
+                </ContextMenu.SubContent>
+              </ContextMenu.Portal>
+            </ContextMenu.Sub>
           </Show>
           <Show when={canPinToFocus()}>
             <ContextMenu.Item

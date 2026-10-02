@@ -65,7 +65,7 @@ import {
   isCancelled,
   isClosed,
   isDone,
-  OPEN_STATES,
+  WORKFLOW_STATES,
   type DocApp,
   type ItemView,
   type ListView,
@@ -1453,12 +1453,8 @@ export function TaskDialog(props: {
   );
 }
 
-/** The six pickable workflow states, in ladder order (the bin is not a
- *  state — it's reached from the header menu, not from here). */
-const LIFECYCLE_CHOICES: readonly WorkflowState[] = [...OPEN_STATES, "done", "cancelled"];
-
 /** Lifecycle status badge beside the list picker: shows the item's current
- *  workflow state and opens a menu of all five to move it in one commit.
+ *  workflow state and opens a menu of all six to move it in one commit.
  *  Backed by `setLifecycle` for open items and by the new-item target
  *  buffer in capture mode. */
 // `Node.contains` that follows Solid portals back to their host: the same
@@ -1493,7 +1489,7 @@ function LifecycleBadge(props: {
             value={props.value()}
             onChange={(v) => props.onChange(v as WorkflowState)}
           >
-            <For each={LIFECYCLE_CHOICES}>
+            <For each={WORKFLOW_STATES}>
               {(state) => (
                 <DropdownMenu.RadioItem
                   value={state}

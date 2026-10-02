@@ -2229,6 +2229,18 @@ input.task-check:hover {
   line-height: 1;
 }
 
+/* Trailing tick on the checked radio item of a context submenu (Status). */
+.menu-check {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.menu-check svg {
+  width: 14px;
+  height: 14px;
+}
+
 .dropdown-menu-content {
   min-width: 160px;
   padding: 4px;
