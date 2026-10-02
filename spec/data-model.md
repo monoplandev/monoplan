@@ -402,8 +402,8 @@ of events.
   non-archivable, non-deletable. One difference: no list view or board
   projects it, so it has no saved default view (`set_default_view`
   refuses it) and `order/events` is maintained but never read by a view.
-  Its items are **events**: they surface only on the calendar, without a
-  checkbox. "Is an event" is `location.list_id == "events"` and nothing
+  Its items are **events**: they surface only on the calendar, never as
+  open work in a list. "Is an event" is `location.list_id == "events"` and nothing
   else (`ItemView::is_event`); moving an item in or out is the whole
   conversion. The core does not require an event to carry a `when`
   (independent registers; see `events-plan.md` "Why no invariant").

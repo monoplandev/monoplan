@@ -19,7 +19,7 @@ Single binary `monoplan`. Subcommands:
 
 ### Items
 - `monoplan add <text> [--list <list>]` — `<text>` of `-` reads from stdin; one item per non-blank line. New items are created in **Backlog** (the workflow register is omitted).
-- `monoplan ls [--list <list>]` — `--list events` lists events (`spec/events-plan.md`); an Open event prints three spaces in place of its state box, since there is nothing to tick. Rows carry a trailing ` @<when>` (with `+<len>` glued on when a timed `when` has a duration, e.g. `@2026-09-12T14:00+1h30m`) and ` !<deadline>` when set; `--json` adds `when` / `duration` (minutes) / `deadline` fields (omitted when unset)
+- `monoplan ls [--list <list>]` — `--list events` lists events (`spec/events-plan.md`). Rows carry a trailing ` @<when>` (with `+<len>` glued on when a timed `when` has a duration, e.g. `@2026-09-12T14:00+1h30m`) and ` !<deadline>` when set; `--json` adds `when` / `duration` (minutes) / `deadline` fields (omitted when unset)
 - `monoplan backlog <item_id>` — workflow → Backlog
 - `monoplan todo <item_id>` — workflow → Todo
 - `monoplan start <item_id>` — workflow → In Progress (stamps `started_at` on first entry)

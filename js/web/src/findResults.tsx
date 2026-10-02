@@ -171,13 +171,6 @@ export function FindResultBody(props: { app: DocApp; item: FindResult }) {
   const viewIcon = (): string | undefined =>
     props.item.kind === "view" ? VIEW_ICONS[props.item.id] : undefined;
   const listLabel = () => findResultListLabel(props.app, m().nav, props.item);
-  // An Open event shows its marker, not a box it has no use for.
-  const openEvent = () =>
-    props.item.kind === "item" &&
-    props.item.listId === LIST_EVENTS &&
-    lifecycle() !== "done" &&
-    lifecycle() !== "cancelled" &&
-    lifecycle() !== "binned";
   const archived = () => findResultArchived(props.app, props.item);
   return (
     <>
@@ -186,7 +179,6 @@ export function FindResultBody(props: { app: DocApp; item: FindResult }) {
         fallback={
           <span
             class="task-check palette__item-check"
-            classList={{ "event-mark": openEvent() }}
             data-kind={props.item.kind}
             data-checked={
               lifecycle() === "done" || lifecycle() === "cancelled" ? "" : undefined

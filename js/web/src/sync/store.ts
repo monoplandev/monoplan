@@ -145,6 +145,18 @@ export const LIST_EVENTS = "events";
 /** Located in the reserved `events` list. That is the whole definition
  *  of an event: there is no item kind. */
 export const isEvent = (it: ItemView): boolean => it.listId === LIST_EVENTS;
+/** What a status picker offers on an event: its open states collapse
+ *  into one choice (labelled "Event", standing in as `backlog`, which is
+ *  what reopening writes), beside the two closed states. */
+export const EVENT_STATES: readonly WorkflowState[] = [
+  "backlog",
+  "done",
+  "cancelled",
+];
+/** The value a status picker shows for `it`: an Open event reads as the
+ *  single open choice whatever open state it holds underneath. */
+export const statusValue = (it: ItemView): WorkflowState =>
+  isEvent(it) && !isClosedState(it.state) ? "backlog" : it.state;
 /** Resolved lifecycle: `binned` while the mask is present, else the
  *  workflow register's state. */
 export const lifecycleOf = (it: ItemView): Lifecycle =>

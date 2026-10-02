@@ -69,8 +69,8 @@ because the clock never writes. Ticking is that action.
 
 **Events get a reserved list, not a kind** (decided and built 2026-10-02,
 `events-plan.md`). The rejection of a kind stands. An item
-located in the reserved list `events` surfaces only on this calendar and
-renders without a checkbox; nothing about the item itself differs, and the
+located in the reserved list `events` surfaces only on this calendar, with
+a checkbox nothing asks it to tick; nothing about the item itself differs, and the
 close-action objection lapsed on 2026-09-30 when a past `when` stopped
 needing a decision.
 
@@ -226,8 +226,8 @@ for the month grid). `groupByDeadline` becomes
 - **Capture** (web): the Add button on this view opens the task dialog on
   a new event, `when` prefilled to today; the dialog's list picker
   re-files it as a task.
-- **Events** (`events-plan.md`): an Open event's row shows a marker in
-  place of the checkbox and no list label. Open events with neither date
+- **Events** (`events-plan.md`): an event's row is a task's row with no
+  list label. Open events with neither date
   sit in an **Unscheduled** section between Overdue and Today, oldest
   first, rendered only when non-empty, and the nav badge counts them at
   neutral tone. Everything else above applies to events unchanged.

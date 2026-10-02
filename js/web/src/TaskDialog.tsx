@@ -43,7 +43,7 @@ import {
   todayStamp,
   whenTime,
 } from "./format.tsx";
-import { useAppI18n, laneLabel } from "./i18n.tsx";
+import { useAppI18n, statusLabel } from "./i18n.tsx";
 import {
   collapsedCaretOffset,
   openLinkOnClick,
@@ -65,7 +65,9 @@ import {
   isBinned,
   isCancelled,
   isClosed,
+  isClosedState,
   isDone,
+  EVENT_STATES,
   LIST_EVENTS,
   WORKFLOW_STATES,
   type DocApp,
@@ -1038,11 +1040,9 @@ export function TaskDialog(props: {
   };
   const vListId = () => item()?.listId ?? newItemTarget()?.listId ?? null;
   // An event (`spec/events-plan.md`): filed under the reserved `events`
-  // list. While Open it has nothing to tick, so the header shows a marker
-  // for the checkbox and no lifecycle badge (the open ladder means nothing
-  // there); Mark done / Cancel / Reopen live in the item menu.
+  // list. The header is a task's, with the lifecycle badge's open ladder
+  // collapsed to one choice: Event / Done / Cancelled.
   const vEvent = () => vListId() === LIST_EVENTS;
-  const vOpenEvent = () => vEvent() && !vDone() && !vBinned();
   const vPinned = () => (item() ? focused() : newFocus());
   const vWhen = () => (item() ? (item()?.when ?? null) : newWhen());
   const vDuration = () =>
@@ -1107,39 +1107,32 @@ export function TaskDialog(props: {
               the Done lane "+" and the Done view's "Log" button, and
               flippable back off to file the item as a normal open task. */}
           <div class="task-dialog-status">
-            <Show
-              when={!vOpenEvent()}
-              fallback={
-                <span
-                  class="task-check event-mark"
-                  role="img"
-                  aria-label={m().upcoming.eventMark}
-                />
+            <input
+              type="checkbox"
+              class="task-check"
+              checked={vDone()}
+              data-cancelled={vCancelled() ? "" : undefined}
+              aria-label={
+                vCancelled()
+                  ? m().workspace.reopen
+                  : vDone()
+                    ? m().workspace.markNotDone
+                    : m().workspace.markDone
               }
-            >
-              <input
-                type="checkbox"
-                class="task-check"
-                checked={vDone()}
-                data-cancelled={vCancelled() ? "" : undefined}
-                aria-label={
-                  vCancelled()
-                    ? m().workspace.reopen
-                    : vDone()
-                      ? m().workspace.markNotDone
-                      : m().workspace.markDone
-                }
-                onChange={(e) => setDoneFlag(e.currentTarget.checked)}
-              />
-            </Show>
+              onChange={(e) => setDoneFlag(e.currentTarget.checked)}
+            />
             {/* Lifecycle badge beside the checkbox: the state the item is
                 in (or a capture will be filed in), and a menu to change
                 it. Hidden while binned (the bin mask overrides the
                 workflow state; Restore is the way out). The created /
                 completed timeline lives in the activity section under
                 the notes. */}
-            <Show when={!vBinned() && !vEvent()}>
-              <LifecycleBadge value={vState} onChange={setState} />
+            <Show when={!vBinned()}>
+              <LifecycleBadge
+                value={vState}
+                onChange={setState}
+                event={vEvent}
+              />
             </Show>
           </div>
         </div>
@@ -1156,39 +1149,6 @@ export function TaskDialog(props: {
                 />
                 <DropdownMenu.Portal>
                   <DropdownMenu.Content class="dropdown-menu-content task-dialog-menu-content">
-                    {/* An event's closing actions: it has no checkbox or
-                        lifecycle badge while Open, and the calendar's rows
-                        have no context menu, so this is where they live. */}
-                    <Show when={vEvent() && !isBinned(it())}>
-                      <Show
-                        when={!isClosed(it())}
-                        fallback={
-                          <DropdownMenu.Item
-                            class="dropdown-menu-item"
-                            onSelect={() => props.app.setDone(it().id, false)}
-                          >
-                            {isCancelled(it())
-                              ? m().workspace.reopen
-                              : m().workspace.markNotDone}
-                          </DropdownMenu.Item>
-                        }
-                      >
-                        <DropdownMenu.Item
-                          class="dropdown-menu-item"
-                          onSelect={() => props.app.setDone(it().id, true)}
-                        >
-                          {m().workspace.markDone}
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Item
-                          class="dropdown-menu-item"
-                          onSelect={() =>
-                            props.app.setLifecycle(it().id, "cancelled")
-                          }
-                        >
-                          {m().workspace.markCancelled}
-                        </DropdownMenu.Item>
-                      </Show>
-                    </Show>
                     <DropdownMenu.Item
                       class="dropdown-menu-item"
                       onSelect={() => {
@@ -1528,7 +1488,10 @@ export function TaskDialog(props: {
 /** Lifecycle status badge beside the list picker: shows the item's current
  *  workflow state and opens a menu of all six to move it in one commit.
  *  Backed by `setLifecycle` for open items and by the new-item target
- *  buffer in capture mode. */
+ *  buffer in capture mode. On an event the four open states are one
+ *  choice, "Event" (`EVENT_STATES`): picking it on a closed event reopens
+ *  it to Backlog, and on an Open one changes nothing, so an open state the
+ *  item brought in from a list is kept. */
 // `Node.contains` that follows Solid portals back to their host: the same
 // walk Solid's delegated events take (`_$host` on a portal's container),
 // so content a surface portaled to <body> counts as inside that surface.
@@ -1542,8 +1505,13 @@ function portalContains(root: Node, node: Node | null): boolean {
 function LifecycleBadge(props: {
   value: () => WorkflowState;
   onChange: (state: WorkflowState) => void;
+  event: () => boolean;
 }) {
   const { m } = useAppI18n();
+  // The picker's value: an Open event sits on the single open choice
+  // whatever open state it holds underneath.
+  const picked = (): WorkflowState =>
+    props.event() && !isClosedState(props.value()) ? "backlog" : props.value();
   return (
     <DropdownMenu>
       <DropdownMenu.Trigger
@@ -1552,16 +1520,16 @@ function LifecycleBadge(props: {
         title={m().workspace.changeStatus}
       >
         <span class="task-dialog-lifecycle-value">
-          {laneLabel(m(), props.value())}
+          {statusLabel(m(), props.value(), props.event())}
         </span>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content class="dropdown-menu-content task-dialog-lifecycle-menu">
           <DropdownMenu.RadioGroup
-            value={props.value()}
+            value={picked()}
             onChange={(v) => props.onChange(v as WorkflowState)}
           >
-            <For each={WORKFLOW_STATES}>
+            <For each={props.event() ? EVENT_STATES : WORKFLOW_STATES}>
               {(state) => (
                 <DropdownMenu.RadioItem
                   value={state}
@@ -1570,7 +1538,7 @@ function LifecycleBadge(props: {
                   // toggling); picking a state is a one-shot move, so close.
                   closeOnSelect
                 >
-                  <span>{laneLabel(m(), state)}</span>
+                  <span>{statusLabel(m(), state, props.event())}</span>
                   <DropdownMenu.ItemIndicator
                     class="task-dialog-lifecycle-check"
                     aria-hidden="true"

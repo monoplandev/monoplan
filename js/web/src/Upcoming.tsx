@@ -9,10 +9,11 @@
 // are on their `when` day once done, muted, so the day still records what
 // happened. Click opens the task surface (dialog or side panel).
 //
-// Events (`spec/events-plan.md`) live here and nowhere else. An Open event
-// shows a neutral marker where a task has its checkbox: there is nothing
-// to tick, it just goes by. Events with no date sit in an Unscheduled
-// section between Overdue and Today so they are never out of sight.
+// Events (`spec/events-plan.md`) live here and nowhere else. An event row
+// is a task row without the list label: the checkbox is there for anyone
+// who wants the record, but nothing asks for it, the event just goes by.
+// Events with no date sit in an Unscheduled section between Overdue and
+// Today so they are never out of sight.
 //
 // Deliberately not a `Dnd` listbox: day sections are the point, and the
 // flat virtualised list can't host group headers. Drag-to-reschedule is
@@ -99,28 +100,15 @@ export function Upcoming(props: {
                       props.onOpen(r.item.id);
                     }}
                   >
-                    {/* An Open event has nothing to tick; a ticked one
-                        keeps its box so the tick shows and can be undone. */}
-                    <Show
-                      when={!isEvent(r.item) || isDone(r.item)}
-                      fallback={
-                        <span
-                          class="task-check event-mark"
-                          role="img"
-                          aria-label={m().upcoming.eventMark}
-                        />
+                    <input
+                      type="checkbox"
+                      class="task-check"
+                      checked={isDone(r.item)}
+                      aria-label={m().workspace.markDone}
+                      onChange={(e) =>
+                        props.app.setDone(r.item.id, e.currentTarget.checked)
                       }
-                    >
-                      <input
-                        type="checkbox"
-                        class="task-check"
-                        checked={isDone(r.item)}
-                        aria-label={m().workspace.markDone}
-                        onChange={(e) =>
-                          props.app.setDone(r.item.id, e.currentTarget.checked)
-                        }
-                      />
-                    </Show>
+                    />
                     <Show when={timeLabel(r)}>
                       {(t) => <span class="upcoming-row-time">{t()}</span>}
                     </Show>
@@ -140,7 +128,8 @@ export function Upcoming(props: {
                           />
                         )}
                       </Show>
-                      {/* The marker already says "event". */}
+                      {/* No label is the event's mark: every task row
+                          carries its list, an event has none to show. */}
                       <Show when={!isEvent(r.item)}>
                         <span
                           class="badge row-list"

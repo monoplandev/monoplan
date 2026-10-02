@@ -18,7 +18,7 @@ import {
   whenFromParts,
   whenTime,
 } from "./format.tsx";
-import { laneLabel, useAppI18n } from "./i18n.tsx";
+import { laneLabel, statusLabel, useAppI18n } from "./i18n.tsx";
 import { pasteAsPlainText } from "./plainTextPaste.ts";
 import { openLinkOnClick, setLinkifiedText } from "./linkify.ts";
 import { itemUrl } from "./url.ts";
@@ -30,6 +30,8 @@ import {
   isClosedState,
   isEvent,
   isOpen,
+  EVENT_STATES,
+  statusValue,
   WORKFLOW_STATES,
   type DocApp,
   type ItemView,
@@ -168,9 +170,6 @@ export function Row(props: {
     !isDraftId(props.item().id);
   const inFocusView = (): boolean =>
     props.viewKind === "focus" && !isDraftId(props.item().id);
-  // An event that is still Open: the marker replaces the checkbox.
-  const openEvent = (): boolean =>
-    isEvent(props.item()) && isOpen(props.item());
 
   // Any inline (non-footer) badge visible on this list row? Mirrors the
   // individual `<Show>` guards below so the `.row-badges` container only
@@ -323,6 +322,23 @@ export function Row(props: {
       props.app.setLifecycleMany(ids, state);
     });
   };
+  // Status pick on an event row. Its submenu offers Event / Done /
+  // Cancelled (`EVENT_STATES`); "Event" stands for every open state, so
+  // picking it only reopens the targets that are closed. Writing Backlog
+  // over the lot would flatten an open state another selected row holds.
+  const onPickStatus = (state: WorkflowState) => {
+    if (!isEvent(props.item()) || isClosedState(state)) {
+      onSetStatus(state);
+      return;
+    }
+    const closed = targetIds().filter((id) => {
+      const it = props.app.getItem(id);
+      return it !== undefined && isClosed(it) && !isBinned(it);
+    });
+    if (closed.length === 0) return;
+    if (props.viewKind === "focus") props.app.undoneIntoFocus(closed);
+    else props.app.setDoneMany(closed, false);
+  };
   // Focus toggle from the context menu acts on the whole target set (the
   // selection when this row is part of it, else this row alone) in a single
   // commit, mirroring Mark done / Mark not done. Direction follows the
@@ -461,45 +477,31 @@ export function Row(props: {
           props.onOpen?.(props.item().id);
         }}
       >
-        {/* An Open event has nothing to tick (`spec/events-plan.md`): it
-            shows a marker in the checkbox's slot. Closed or binned, it
-            keeps the box, which carries the tick / cross and its undo. */}
-        <Show
-          when={!openEvent()}
-          fallback={
-            <span
-              class="task-check event-mark"
-              role="img"
-              aria-label={m().upcoming.eventMark}
-            />
-          }
-        >
-          <input
-            type="checkbox"
-            class="task-check"
-            tabIndex={-1}
-            checked={isClosed(props.item())}
-            data-cancelled={isCancelled(props.item()) ? "" : undefined}
-            onMouseDown={(e) => {
-              // Clicking still focuses the checkbox despite tabIndex=-1, and
-              // the lingering focus makes a later Space press re-toggle it.
-              // Preventing mousedown's default suppresses the focus move while
-              // the click (and toggle) still fire.
-              e.preventDefault();
-            }}
-            onChange={(e) => {
-              const id = props.item().id;
-              // Un-checking a lingering row in Focus re-pins it (closing
-              // dropped its ref); elsewhere it's a plain lifecycle flip. A
-              // cancelled row un-checks the same way (closed → Backlog).
-              if (!e.currentTarget.checked && props.viewKind === "focus") {
-                props.app.undoneIntoFocus([id]);
-              } else {
-                props.app.setDone(id, e.currentTarget.checked);
-              }
-            }}
-          />
-        </Show>
+        <input
+          type="checkbox"
+          class="task-check"
+          tabIndex={-1}
+          checked={isClosed(props.item())}
+          data-cancelled={isCancelled(props.item()) ? "" : undefined}
+          onMouseDown={(e) => {
+            // Clicking still focuses the checkbox despite tabIndex=-1, and
+            // the lingering focus makes a later Space press re-toggle it.
+            // Preventing mousedown's default suppresses the focus move while
+            // the click (and toggle) still fire.
+            e.preventDefault();
+          }}
+          onChange={(e) => {
+            const id = props.item().id;
+            // Un-checking a lingering row in Focus re-pins it (closing
+            // dropped its ref); elsewhere it's a plain lifecycle flip. A
+            // cancelled row un-checks the same way (closed → Backlog).
+            if (!e.currentTarget.checked && props.viewKind === "focus") {
+              props.app.undoneIntoFocus([id]);
+            } else {
+              props.app.setDone(id, e.currentTarget.checked);
+            }
+          }}
+        />
         <Show when={leadingStamp() && rowStamp()}>
           {(ts) => (
             <span
@@ -767,10 +769,10 @@ export function Row(props: {
           </Show>
           {/* Every workflow state in one place, the tick marking this
               row's current one. Hidden while binned: the bin mask
-              overrides the state and Restore is the way out. Hidden for
-              an event too: the open ladder means nothing there, and Mark
-              done / Cancel / Reopen above cover the rest. */}
-          <Show when={!isBinned(props.item()) && !isEvent(props.item())}>
+              overrides the state and Restore is the way out. An event
+              has no lanes, so its open ladder is one choice: Event /
+              Done / Cancelled (`spec/events-plan.md`). */}
+          <Show when={!isBinned(props.item())}>
             <ContextMenu.Sub gutter={4}>
               <ContextMenu.SubTrigger class="context-menu-item">
                 <span>{m().workspace.status}</span>
@@ -780,8 +782,12 @@ export function Row(props: {
               </ContextMenu.SubTrigger>
               <ContextMenu.Portal>
                 <ContextMenu.SubContent class="context-menu-content">
-                  <ContextMenu.RadioGroup value={props.item().state}>
-                    <For each={WORKFLOW_STATES}>
+                  <ContextMenu.RadioGroup value={statusValue(props.item())}>
+                    <For
+                      each={
+                        isEvent(props.item()) ? EVENT_STATES : WORKFLOW_STATES
+                      }
+                    >
                       {(state) => (
                         <ContextMenu.RadioItem
                           value={state}
@@ -792,9 +798,11 @@ export function Row(props: {
                           // so re-picking this row's state still moves
                           // the rest of a mixed selection.
                           closeOnSelect
-                          onSelect={() => onSetStatus(state)}
+                          onSelect={() => onPickStatus(state)}
                         >
-                          <span>{laneLabel(m(), state)}</span>
+                          <span>
+                            {statusLabel(m(), state, isEvent(props.item()))}
+                          </span>
                           <ContextMenu.ItemIndicator
                             class="menu-check"
                             aria-hidden="true"

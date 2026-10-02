@@ -288,9 +288,9 @@ export type Messages = {
     emptyToday: string;
     /** Header of the group holding events with no date. */
     unscheduled: string;
-    /** Accessible name of the marker an event shows in place of a
-     *  checkbox. */
-    eventMark: string;
+    /** What an Open event's status reads: the one label its four open
+     *  states share in the status controls (`statusLabel`). */
+    event: string;
   };
   sidePanel: {
     /** Accessible name of the desktop side panel. */
@@ -563,7 +563,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     upcoming: {
       emptyToday: "Nada para hoy",
       unscheduled: "Sin fecha",
-      eventMark: "Evento",
+      event: "Evento",
     },
     sidePanel: {
       title: "Barra de contexto",
@@ -821,7 +821,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     upcoming: {
       emptyToday: "Nothing due today",
       unscheduled: "Unscheduled",
-      eventMark: "Event",
+      event: "Event",
     },
     sidePanel: {
       title: "Context sidebar",
@@ -971,6 +971,20 @@ export function useAppI18n(): {
 /** Localized label for a workflow state: the board lane headers, the
  *  task dialog's status picker, and the list view's state badge all
  *  share it so a state reads the same everywhere. */
+/** Status label for an item's state in the status controls. A task takes
+ *  the lane label. An event (`spec/events-plan.md`) has no lanes, so its
+ *  four open states read as one, "Event"; Done and Cancelled read as they
+ *  do on a task. Display only: the stored state is untouched. */
+export function statusLabel(
+  m: Messages,
+  state: WorkflowState,
+  event: boolean,
+): string {
+  return event && state !== "done" && state !== "cancelled"
+    ? m.upcoming.event
+    : laneLabel(m, state);
+}
+
 export function laneLabel(m: Messages, lane: WorkflowState): string {
   switch (lane) {
     case "backlog":

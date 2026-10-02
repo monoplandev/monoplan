@@ -2,10 +2,10 @@
 
 **Status: built 2026-10-02 (Phase 0 core / CLI and Phase 1 web). Decided
 the same day.** Adds a second reserved
-list, `events`, whose items surface only on the calendar and render without
-a checkbox. An event is something that happens on a day. It does not need
-ticking off: it goes by. It can still be ticked or cancelled by anyone who
-wants the record.
+list, `events`, whose items surface only on the calendar. An event is
+something that happens on a day. It does not need ticking off: it goes by.
+It can still be ticked or cancelled by anyone who wants the record, and
+its row keeps the checkbox for that.
 
 Companion to `calendar-plan.md` (the `when` register, the agenda),
 `data-model.md` (reserved lists, `location`), `urls.md`, `cli.md`, which
@@ -19,7 +19,7 @@ record.
 | What is an event? | **An item located in the reserved list `events`.** Nothing else: no item field, no kind flag. The test is `location.list_id == "events"`, behind one predicate (`is_event`). |
 | Is this the checkless item kind rejected on 2026-09-16? | **No.** That was a second item kind. This is a place. Converting a task to an event and back is an ordinary move, and every item mutation works on an event unchanged. The other objection ("still needs a close action because the clock never writes") fell away on 2026-09-30, when a past `when` stopped needing a decision. See "Why a list and not a kind". |
 | Where do events live in the UI? | **The calendar is their home** (the Upcoming lens, nav label "Calendar"). There is no Events nav entry, no list view and no board. The calendar is to `events` what the board is to a user list: its view. |
-| Do events have a checkbox? | **No.** An Open event shows a neutral marker in the checkbox slot. Mark done and Cancel stay available from the task surface's item menu, row context menus, the keyboard and the CLI. A closed event keeps the box, ticked or crossed, so the record shows and can be undone. |
+| Do events have a checkbox? | **Yes, an optional one** (revised 2026-10-02; the first cut replaced it with a dot marker). The row is a task's row. What makes it an event is that nothing asks for the tick: no list holds it as open work, no count includes it, and when its day passes it leaves the agenda untouched. Its status reads Event / Done / Cancelled (see "Status on an event"). |
 | What happens when the day passes? | **Nothing.** The event stays Open, with its `when` in the past, and leaves the agenda like any past `when`. No write, no state change, no nag. |
 | What about an event with no `when`? | **An Unscheduled section on the calendar**, rendered only when non-empty. The core never requires a `when` on an event (see "Why no invariant"). |
 | One list or many calendars? | **One reserved list.** Several calendars (Work, Personal) would be a `kind` register on `ListMeta`; `is_event` is the only call site that would change. Not planned. |
@@ -52,7 +52,7 @@ An event is an ordinary item. Every register keeps its meaning.
 
 | Event state | Where it shows |
 |---|---|
-| Open, `when` today or later | the calendar, on its day, no checkbox |
+| Open, `when` today or later | the calendar, on its day |
 | Open, `when` before today | nowhere on the agenda: it went by. Reachable by search and by its URL; shown on its day once a month grid or backward agenda exists |
 | Open, no `when` | the calendar's Unscheduled section |
 | Done | the Done view; also the calendar on its day while `when` is today or later, muted and ticked (the existing "`when` survives Done" rule) |
@@ -61,9 +61,10 @@ An event is an ordinary item. Every register keeps its meaning.
 
 - **Lifecycle is untouched.** An event is Backlog from creation and usually
   stays there. Done and Cancelled mean what they mean on a task. The open
-  ladder (Todo, In Progress, Review) is not offered on event surfaces; a
-  value written some other way (CLI, a move from a list) is preserved and
-  ignored, and takes effect again if the item moves back to a list.
+  ladder (Backlog, Todo, In Progress, Review) is not offered on event
+  surfaces: the four read as one status, "Event". A value written some
+  other way (CLI, a move from a list) is preserved and ignored, and takes
+  effect again if the item moves back to a list.
 - **`deadline` and `duration` are untouched.** A deadline on an event is
   legitimate ("tickets by the 3rd") and places and tones the row by the
   existing agenda rules.
@@ -131,13 +132,12 @@ nothing is lost.
 
 The agenda in `calendar-plan.md` is unchanged for tasks. Additions:
 
-- **Event rows.** Same row as a task row with the checkbox replaced by a
-  neutral marker of the same width (a small dot, `.event-mark`), so titles
-  stay aligned. The row's owning-list label is omitted: the missing
-  checkbox already says "event". A Done event renders the ticked box, as
-  done rows do today, and unticking it brings the marker back. Placement,
-  tone, within-day order and badges follow the existing rules with no
-  special case.
+- **Event rows.** The same row as a task row, checkbox included, with the
+  owning-list label omitted. That absence is the event's mark on the
+  agenda: every task row carries its list, an event has none worth
+  showing. Ticking works as on any row (done, muted, slot kept).
+  Placement, tone, within-day order and badges follow the existing rules
+  with no special case.
 - **Unscheduled.** A section holding every Open event with no `when` and
   no `deadline`, oldest first by `created_at`. Rendered only when
   non-empty, after Overdue and before Today. (An event with a deadline and
@@ -156,27 +156,33 @@ The agenda in `calendar-plan.md` is unchanged for tasks. Additions:
   a single Open item with no `when` into Events opens it with its date
   popover showing, as Set date… does. A multi-selection just moves;
   undated ones land in Unscheduled.
-- **Closing an event.** Agenda rows have no context menu, so the task
-  surface's item menu carries an event's closing actions: Mark done and
-  Cancel while Open, Mark not done / Reopen once closed. Where an event
-  has a row context menu (Focus, Done, Bin), the Status submenu is
-  omitted: the open ladder means nothing there. `x` and `⇧x` work on a
-  selected event row as on any row. When, Deadline, Focus, Move, Copy
-  link and Bin are unchanged.
-- **Task surface.** The dialog and side panel show the neutral marker in
-  place of the checkbox while the event is Open, and omit the lifecycle
-  status control. A closed event shows the ticked or crossed box, which
-  reopens it. All other fields are unchanged.
+- **Status on an event** (revised 2026-10-02; the first cut hid the
+  status controls and put closing actions in the item menu). The status
+  controls stay where a task has them, relabelled: an event's four open
+  states collapse into one choice, **Event**, beside **Done** and
+  **Cancelled** (`EVENT_STATES`, `statusValue`, `statusLabel`). This is
+  display only; nothing is stored differently. Picking Done or Cancelled
+  is the ordinary lifecycle write. Picking Event on a closed event reopens
+  it (Backlog, the core's un-done rule); on an Open one it changes
+  nothing, so an open state brought in from a list is kept. The task
+  surface's lifecycle badge and the Status submenu of a row context menu
+  (Focus, Done) both use the trimmed set; agenda rows have no context
+  menu, so the badge is how an event is closed from the calendar. `x` and
+  `⇧x` work on a selected event row as on any row. When, Deadline, Focus,
+  Move, Copy link and Bin are unchanged.
+- **Task surface.** The dialog and side panel are a task's, with the
+  status badge reading "Event" while the event is Open. All other fields
+  are unchanged.
 - **Elsewhere.** Search indexes events like any item; the owning-list
-  column reads "Events" and an Open event's result shows the marker.
+  column reads "Events".
   Picking an Open event in Find goes to the calendar and opens the item
   (there is no row to select, and a past event has no day). The Done view
-  and the Bin list closed and binned events with that same label. Focus
-  renders an Open event with the marker, and its "Show in Events" goes to
-  the calendar with the item open. No list count, list column or board
+  and the Bin list closed and binned events with that same label. In Focus
+  an event is an ordinary row, and its "Show in Events" goes to the
+  calendar with the item open. No list count, list column or board
   ever includes one.
-- **i18n.** `nav.events`, `upcoming.unscheduled`, `upcoming.eventMark`
-  (the marker's accessible name), in both languages.
+- **i18n.** `nav.events`, `upcoming.unscheduled`, `upcoming.event` (the
+  open status label), in both languages.
 
 ## URLs
 
@@ -192,9 +198,8 @@ does.
 - `events` is a second literal list id, accepted wherever `<list>` is:
   `add --list events`, `mv <id> events`, `ls --list events`.
 - `ls --list events` prints events in resolved order with the usual `@` /
-  `!` tags. An Open event prints three spaces where the state box would
-  be, so titles stay aligned; closed and binned ones keep their mark.
-- `agenda` prints Open event rows the same way. An Unscheduled group
+  `!` tags and the same state box as any row.
+- `agenda` prints event rows like any other. An Unscheduled group
   prints after Today when non-empty. `--json` rows already carry
   `list_id`; the Unscheduled group is `{ day: null, today: false, rows }`
   in second position, and its rows omit `placed_by`.
@@ -232,6 +237,9 @@ does.
   Unscheduled membership, order and position; an event with a deadline and
   no `when` is placed by the deadline; the badge counts unscheduled
   events; cancelled and past events place nothing.
+- `events.test.ts` (web store): add and move into `events`, the open
+  state kept underneath while the picker shows one choice, close and
+  reopen, the built-in list label in Find.
 - CLI system test: an event added on one device appears on the other's
   `agenda` after sync; `mv` out of `events` makes it an ordinary list
   item with its dates intact.
@@ -240,9 +248,10 @@ does.
 ## Phases
 
 0. **Core, wasm, CLI.** Built. The reserved id, refusals, `is_event`,
-   export / import, `row_box` and the agenda's Unscheduled group.
+   export / import and the agenda's Unscheduled group.
    `data-model.md` and `cli.md` amended. Unit and system tests.
 1. **Web.** Built. Event rows, Unscheduled, badge, capture, move
-   destination, closing actions and task surface, Find, URL alias, i18n.
+   destination, trimmed status controls and task surface, Find, URL
+   alias, i18n.
    `calendar-plan.md` and `urls.md` amended. Verified by typecheck, unit
    tests and source reading only (no browser automation here).

@@ -167,15 +167,11 @@ pub fn state_mark(state: WorkflowState) -> &'static str {
     }
 }
 
-/// The row's state box, `[<mark>]`. An Open event has nothing to tick
-/// (`spec/events-plan.md`), so its box is blank padding of the same
-/// width; a closed or binned event keeps its mark, as the record.
+/// The row's state box, `[<mark>]`. Shared by `ls` and `agenda`.
 pub fn row_box(item: &ItemView) -> String {
     // `~` (binned) masks the workflow mark in the box.
     if item.is_binned() {
         "[~]".to_string()
-    } else if item.is_event() && item.is_open() {
-        "   ".to_string()
     } else {
         format!("[{}]", state_mark(item.state))
     }

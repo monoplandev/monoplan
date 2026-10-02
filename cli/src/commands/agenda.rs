@@ -3,9 +3,9 @@
 //! "Agenda"). A past `when` has gone by like an event and places nothing.
 //! Done items keep their `when` day and slot (the tick does not erase
 //! "happens on"); their deadline is settled and places nothing. Events
-//! (`spec/events-plan.md`) place by the same rules and print without a
-//! state box; an Open event with no date at all has no day, so it prints
-//! in an Unscheduled group after Today.
+//! (`spec/events-plan.md`) place and print by the same rules; an Open
+//! event with no date at all has no day, so it prints in an Unscheduled
+//! group after Today.
 //!
 //! Placement, tone, and ordering are pure functions of the item views
 //! and a `today` stamp, so they are unit-tested here without a doc.
