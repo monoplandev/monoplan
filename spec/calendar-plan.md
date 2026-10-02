@@ -67,6 +67,14 @@ and rejected: it would be a second item kind touching the board, Focus,
 Overdue, repeat-on-done and the CLI, and would still need a close action
 because the clock never writes. Ticking is that action.
 
+**Events get a reserved list, not a kind** (decided 2026-10-02, plan in
+`events-plan.md`, not built). The rejection of a kind stands. An item
+located in the reserved list `events` surfaces only on this calendar and
+renders without a checkbox; nothing about the item itself differs, and the
+close-action objection lapsed on 2026-09-30 when a past `when` stopped
+needing a decision. Until that plan is built, everything in this file
+describes the agenda as it is.
+
 `when` and `deadline` are independent. Neither derives from the other and
 neither is required by the other.
 
@@ -216,6 +224,13 @@ for the month grid). `groupByDeadline` becomes
   `dayGroups.ts`).
 - Stays the flat virtualised list it is today, not a `Dnd` listbox.
   Drag-to-reschedule is deferred (see below).
+- **Capture** (web, built): the Add button on this view opens the task
+  dialog on a new Inbox item; the user sets a date there if it belongs on
+  the calendar.
+- **Planned** (`events-plan.md`): checkless event rows, an Unscheduled
+  section between Overdue and Today for events with no date, unscheduled
+  events counted by the nav badge, and Add capturing into `events` with
+  `when` prefilled to today.
 
 ## Task surface and rows
 
@@ -308,7 +323,8 @@ here.
 - **Recurrence.** Likely form: an optional `repeat` register `{ every, unit }`
   with `unit` in day/week/month/year; ticking Done spawns a successor with
   `when` advanced and the done item kept, so creation-to-done stats stay
-  honest. No RRULE.
+  honest. No RRULE. This form covers tasks only: an event
+  (`events-plan.md`) is never ticked, so recurring events are unsolved.
 - **Fixed instants.** The bracketed suffix above. Flipping the default means
   writers append the device zone; sorting then needs instant normalisation
   for mixed values, which is why it waits.

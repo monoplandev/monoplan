@@ -18,6 +18,9 @@ id     = [0-9a-f]{32}          -- uuid-v7 hex, same as ItemId / ListMeta.id
 Reserved, not yet parsed (`calendar-plan.md`): `calendar` for a month-grid
 lens, and an underscore day anchor on the agenda and grid
 (`upcoming_2026-07-13`, `calendar_2026-07`).
+Planned (`events-plan.md`): the reserved `events` list gets no token of its
+own. `#list_events` will canonicalise to `#upcoming`, and `#item_<id>` for
+an Open event will resolve to the calendar, its home.
 Anything else is ignored: the client keeps whatever it was showing.
 There is no `#home`: a bare URL (no fragment) restores the last view
 from local prefs, as before URLs existed.

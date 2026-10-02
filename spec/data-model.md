@@ -42,14 +42,16 @@ One child `LoroMap` under `items`, keyed by `ItemId`.
 | `lifecycle` | value | **atomic workflow register** — a plain `LoroValue` list `[state, at]`: the current workflow state (integer `0..=5`, see "Lifecycle") and the unix millis it was entered. Absent ≡ `[Backlog, created_at]`; new items omit it. |
 | `binned_at` | i64? | **bin mask** — unix millis when the item was binned. Present ≡ binned (masking the workflow state); absent ≡ not binned. Restore deletes the key, revealing the preserved workflow state. Orthogonal to `lifecycle`. |
 | `deadline` | string? | optional **date-only** deadline, a floating local calendar date in `YYYY-MM-DD` format (no time, no timezone, not unix millis). Absent ≡ no deadline; clearing deletes the key. Values that are not a well-formed `YYYY-MM-DD` calendar date are rejected by the mutation. Means "owed by": past it the item is overdue. |
-| `when` | string? | optional **planned date**, shape-discriminated: `YYYY-MM-DD` (all-day, 10 chars) or `YYYY-MM-DDTHH:MM` (timed, 16 chars, `HH` 00–23, `MM` 00–59). Floating wall-clock, no seconds, no zone; an RFC 9557 `[Zone]` suffix is reserved and rejected for now. Absent ≡ unset; clearing deletes the key. One register so date and time cannot tear under concurrent edit; sorts by plain string compare (all-day leads its day). Means "happens on" or "act on". Fixed: never rewritten or rolled over by the clock, and never red past its day; whether a past `when` "slipped" is undecided until events and tasks are distinguished (`calendar-plan.md`). Independent of `deadline`. See `calendar-plan.md`. |
+| `when` | string? | optional **planned date**, shape-discriminated: `YYYY-MM-DD` (all-day, 10 chars) or `YYYY-MM-DDTHH:MM` (timed, 16 chars, `HH` 00–23, `MM` 00–59). Floating wall-clock, no seconds, no zone; an RFC 9557 `[Zone]` suffix is reserved and rejected for now. Absent ≡ unset; clearing deletes the key. One register so date and time cannot tear under concurrent edit; sorts by plain string compare (all-day leads its day). Means "happens on" or "act on". Fixed: never rewritten or rolled over by the clock, and never red past its day. A past `when` has gone by like an event: there is no "slipped" state (decided 2026-09-30, `calendar-plan.md`). Independent of `deadline`. See `calendar-plan.md`. |
 | `duration` | i64? | optional **length in whole minutes**, `1..=10080` (one week). A length rather than an end so that moving `when` on one device and setting the length on another can never produce an item that ends before it starts; the end is derived (`when` + `duration`). Meaningful only beside a timed `when`: views ignore it beside an all-day or absent one, and the register is never cross-checked against `when` (no invalid state under concurrent edit). Absent ≡ unset; clearing deletes the key. Written by `set_item_when` too: a timed `when` on an item with no duration defaults it to 60 minutes in the same commit, and clearing `when` deletes it; timed → all-day keeps it. Out-of-range values read as unset. See `calendar-plan.md`. |
 | `created_at` | i64 | unix millis (client clock) |
 | `started_at` | i64? | **reflection stamp**: set (write-once) the first time the item enters In Progress; never cleared. Feeds analytics (created → started); no view reads it. |
 | `done_at` | i64? | **reflection stamp**: set each time the item enters Done; never cleared, so it survives later binning and un-doing. Feeds analytics (started → done); view sorts use the register's `at`, not this. |
 
 Item type is implicit (currently always text). Add an `item_type` field when
-other kinds appear.
+other kinds appear. Events are deliberately not a kind: an event is an
+ordinary item located in the reserved list `events` (`events-plan.md`,
+planned).
 
 ### Lifecycle
 
@@ -156,7 +158,8 @@ All three are single **encoded scalar strings**. Rationale (vs a structured
 `placement_id` can never be torn apart by concurrent edits — there are no
 independently-mergeable sub-fields to conflict. It is also smaller on the wire
 and trivially comparable. The separator `:` is reserved: ids are uuid-v7 hex
-(`[0-9a-f]{32}`) or the literal `inbox`, so it can never appear inside a
+(`[0-9a-f]{32}`) or the literal `inbox` (and `events`, reserved by
+`events-plan.md`), so it can never appear inside a
 component. Parsing splits on the **first** `:`. (A bare `FocusRef` has no `:` and
 is a local-doc item id; the emitter writes only this form today — see
 `spec/focus.md`.)
@@ -392,6 +395,15 @@ Monoplan has one reserved primary capture list:
   order container is `order/inbox`. Its label is client-defined (the localized
   built-in) and it is non-renamable, non-movable, and non-deletable — there is
   no display-name override. Doc-level settings for it live in `settings`.
+
+**Planned, not built** (`events-plan.md`, decided 2026-10-02): a second
+reserved list, `events`, rendered as "Events". Same shape as `inbox` (no
+`ListMeta` row, order container `order/events`, non-renamable,
+non-archivable, non-deletable), with one difference: no list view or board
+projects it. Its items surface only on the calendar, without a checkbox.
+"Is an event" is `location.list_id == "events"` and nothing else, so the id
+is reserved now: no user list can take it (list ids are uuid-v7 hex) and no
+client should write it until the plan lands. Additive within v4.
 
 The bin is *not* a list; it's the `binned_at` mask on items.
 

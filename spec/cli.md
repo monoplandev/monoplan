@@ -147,4 +147,4 @@ Done.
 
 Default output: human-readable. `--json` flag on every read command emits machine-parseable JSON for tests and scripting.
 
-Item and list ids: full uuid v7 hex (32 chars), shown verbatim and required in full when an id is passed in. Built-in list `inbox` is the one literal id. (Earlier drafts of this spec proposed prefix matching; dropped because it adds parsing complexity for marginal ergonomic gain over shell completion / copy-paste.)
+Item and list ids: full uuid v7 hex (32 chars), shown verbatim and required in full when an id is passed in. Built-in list `inbox` is the one literal id; `events` is reserved as a second (`spec/events-plan.md`, not built). (Earlier drafts of this spec proposed prefix matching; dropped because it adds parsing complexity for marginal ergonomic gain over shell completion / copy-paste.)
