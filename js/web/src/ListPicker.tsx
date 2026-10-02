@@ -25,15 +25,24 @@ import {
 } from "solid-js";
 import { Portal } from "solid-js/web";
 import archiveSvg from "./icons/archive.svg?raw";
+import calendarSvg from "./icons/calendar.svg?raw";
 import caretSortSvg from "./icons/caret-sort.svg?raw";
 import fileSvg from "./icons/file.svg?raw";
 import { useAppI18n } from "./i18n.tsx";
 import { matchesName } from "./search.ts";
+import { LIST_EVENTS } from "./sync/store.ts";
 
-/** One entry in the move-to-list picker: the reserved `inbox` list plus
- *  every user list. `icon` is a list's chosen emoji grapheme when it has
- *  one; the picker falls back to the same glyphs the nav uses. */
+/** One entry in the move-to-list picker: the reserved `inbox` and
+ *  `events` lists plus every user list. `icon` is a list's chosen emoji
+ *  grapheme when it has one; the picker falls back to the same glyphs the
+ *  nav uses. */
 export type ListOption = { id: string; name: string; icon?: string };
+
+/** Fallback glyph for a list with no chosen emoji: the nav's own marks
+ *  for the reserved lists (Inbox's archive box, the calendar for Events),
+ *  the default file glyph otherwise. */
+export const listGlyph = (id: string): string =>
+  id === "inbox" ? archiveSvg : id === LIST_EVENTS ? calendarSvg : fileSvg;
 
 /** Gap between the trigger and the panel, and the minimum breathing room
  *  kept against every viewport edge. */
@@ -237,7 +246,7 @@ export function ListPicker(props: {
                 <span
                   class="task-dialog-list-icon"
                   aria-hidden="true"
-                  innerHTML={opt().id === "inbox" ? archiveSvg : fileSvg}
+                  innerHTML={listGlyph(opt().id)}
                 />
               }
             >
@@ -324,7 +333,7 @@ export function ListPicker(props: {
                         <span
                           class="palette__item-icon"
                           aria-hidden="true"
-                          innerHTML={opt.id === "inbox" ? archiveSvg : fileSvg}
+                          innerHTML={listGlyph(opt.id)}
                         />
                       }
                     >

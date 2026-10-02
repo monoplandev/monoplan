@@ -19,7 +19,7 @@ Single binary `monoplan`. Subcommands:
 
 ### Items
 - `monoplan add <text> [--list <list>]` — `<text>` of `-` reads from stdin; one item per non-blank line. New items are created in **Backlog** (the workflow register is omitted).
-- `monoplan ls [--list <list>]` — rows carry a trailing ` @<when>` (with `+<len>` glued on when a timed `when` has a duration, e.g. `@2026-09-12T14:00+1h30m`) and ` !<deadline>` when set; `--json` adds `when` / `duration` (minutes) / `deadline` fields (omitted when unset)
+- `monoplan ls [--list <list>]` — `--list events` lists events (`spec/events-plan.md`); an Open event prints three spaces in place of its state box, since there is nothing to tick. Rows carry a trailing ` @<when>` (with `+<len>` glued on when a timed `when` has a duration, e.g. `@2026-09-12T14:00+1h30m`) and ` !<deadline>` when set; `--json` adds `when` / `duration` (minutes) / `deadline` fields (omitted when unset)
 - `monoplan backlog <item_id>` — workflow → Backlog
 - `monoplan todo <item_id>` — workflow → Todo
 - `monoplan start <item_id>` — workflow → In Progress (stamps `started_at` on first entry)
@@ -28,12 +28,12 @@ Single binary `monoplan`. Subcommands:
 - `monoplan cancel <item_id>` — workflow → Cancelled (closed like Done, but stamps nothing: not a completion)
 - `monoplan bin <item_id>` — set the bin mask (`binned_at`); the workflow register is preserved
 - `monoplan restore <item_id>` — clear the bin mask only; reveals the preserved workflow state (Backlog / Todo / In Progress / Review / Done / Cancelled)
-- `monoplan mv <item_id> <list>`
+- `monoplan mv <item_id> <list>` (`mv <item_id> events` makes the item an event; moving it back out makes it a task again, dates intact)
 - `monoplan edit <item_id> <text>`
 - `monoplan when <item_id> <YYYY-MM-DD[THH:MM] | ->` — set (all-day or timed, floating) or clear (`-`) the planned date; validation is the core's (`spec/calendar-plan.md`). A timed value on an item with no duration defaults it to 60 minutes; clearing also clears the duration.
 - `monoplan duration <item_id> <minutes | [Nh][Nm] | ->` — set (`90`, `1h30m`, `2h`, `45m`) or clear (`-`) the duration in whole minutes; range (`1..=10080`) is the core's. Only shown beside a timed `when`.
 - `monoplan deadline <item_id> <YYYY-MM-DD | ->` — set or clear the deadline
-- `monoplan agenda [--days N] [--today YYYY-MM-DD] [--json]` — Open dated items by day: Today first (always shown, with overdue deadlines folded in, oldest first), then each non-empty day up to `N` days out (default 14). Rows carry the same `@` / `!` tags as `ls` plus a trailing `(overdue)` / `(due today)` tone; a `when` before today places nothing, so an item with only a past `when` is not listed. `--today` overrides the local date, for scripts and tests. `--json` emits `[{ day, today, rows: [{ id, text, list_id, state, when?, duration?, deadline?, placed_by, tone }] }]`.
+- `monoplan agenda [--days N] [--today YYYY-MM-DD] [--json]` — Open dated items by day: Today first (always shown, with overdue deadlines folded in, oldest first), then each non-empty day up to `N` days out (default 14). Rows carry the same `@` / `!` tags as `ls` plus a trailing `(overdue)` / `(due today)` tone; a `when` before today places nothing, so an item with only a past `when` is not listed. Events place by the same rules; Open events with neither date print in an `Unscheduled` group after Today (in `--json`, a group with `day: null` whose rows omit `placed_by`). `--today` overrides the local date, for scripts and tests. `--json` emits `[{ day, today, rows: [{ id, text, list_id, state, when?, duration?, deadline?, placed_by, tone }] }]`.
 
 Lifecycle is the atomic `lifecycle` workflow register (`[state, at]`, states Backlog | Todo | In Progress | Review | Done | Cancelled) masked by the orthogonal `binned_at` bin flag — see `spec/data-model.md` "Lifecycle". Each workflow command writes the register `[state, now]` (and clears any bin mask) in a single commit; re-applying the current resolved state is a no-op. `ls` boxes carry a one-character state mark (` ` backlog, `-` todo, `>` in progress, `?` review, `x` done, `/` cancelled, `~` binned). `ls` hides closed items (Done and Cancelled) unless `--done`; `agenda` never shows cancelled items.
 
@@ -51,7 +51,7 @@ Marking a focused item `done` removes it from Focus automatically; binning/delet
 - `monoplan lists ls` — active lists only by default; `--archived` shows only archived lists, `--all` shows both. `--json` output includes `archived_at` (null for active lists).
 - `monoplan lists add <name>`
 - `monoplan lists rename <list> <name>`
-- `monoplan lists archive <list>` — remove a list from the active workspace without touching its items, ordering, or metadata (`spec/data-model.md` "Archived lists"). Refuses for `inbox`.
+- `monoplan lists archive <list>` — remove a list from the active workspace without touching its items, ordering, or metadata (`spec/data-model.md` "Archived lists"). Refuses for `inbox` and `events`.
 - `monoplan lists unarchive <list>` — restore an archived list to the active workspace.
 
 There is deliberately **no user-facing list delete**: archive is the only way to
@@ -147,4 +147,4 @@ Done.
 
 Default output: human-readable. `--json` flag on every read command emits machine-parseable JSON for tests and scripting.
 
-Item and list ids: full uuid v7 hex (32 chars), shown verbatim and required in full when an id is passed in. Built-in list `inbox` is the one literal id; `events` is reserved as a second (`spec/events-plan.md`, not built). (Earlier drafts of this spec proposed prefix matching; dropped because it adds parsing complexity for marginal ergonomic gain over shell completion / copy-paste.)
+Item and list ids: full uuid v7 hex (32 chars), shown verbatim and required in full when an id is passed in. The built-in lists `inbox` and `events` (`spec/events-plan.md`) are the two literal ids, accepted wherever `<list>` is. (Earlier drafts of this spec proposed prefix matching; dropped because it adds parsing complexity for marginal ergonomic gain over shell completion / copy-paste.)

@@ -69,6 +69,9 @@ export type Messages = {
   };
   nav: {
     inbox: string;
+    /** The reserved `events` list (`spec/events-plan.md`). Never a nav
+     *  entry: it labels events as a move destination and an origin list. */
+    events: string;
     focus: string;
     /** The Upcoming view: every open item with a deadline, by day. */
     upcoming: string;
@@ -283,6 +286,11 @@ export type Messages = {
   upcoming: {
     /** Upcoming view's Today group when nothing is due today. */
     emptyToday: string;
+    /** Header of the group holding events with no date. */
+    unscheduled: string;
+    /** Accessible name of the marker an event shows in place of a
+     *  checkbox. */
+    eventMark: string;
   };
   sidePanel: {
     /** Accessible name of the desktop side panel. */
@@ -420,6 +428,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     nav: {
       inbox: "Bandeja de entrada",
+      events: "Eventos",
       focus: "Enfoque",
       upcoming: "Calendario",
       done: "Hecho",
@@ -553,6 +562,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     upcoming: {
       emptyToday: "Nada para hoy",
+      unscheduled: "Sin fecha",
+      eventMark: "Evento",
     },
     sidePanel: {
       title: "Barra de contexto",
@@ -675,6 +686,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     nav: {
       inbox: "Inbox",
+      events: "Events",
       focus: "Focus",
       upcoming: "Calendar",
       done: "Done",
@@ -808,6 +820,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     upcoming: {
       emptyToday: "Nothing due today",
+      unscheduled: "Unscheduled",
+      eventMark: "Event",
     },
     sidePanel: {
       title: "Context sidebar",

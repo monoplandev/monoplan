@@ -9,6 +9,11 @@
 // are on their `when` day once done, muted, so the day still records what
 // happened. Click opens the task surface (dialog or side panel).
 //
+// Events (`spec/events-plan.md`) live here and nowhere else. An Open event
+// shows a neutral marker where a task has its checkbox: there is nothing
+// to tick, it just goes by. Events with no date sit in an Unscheduled
+// section between Overdue and Today so they are never out of sight.
+//
 // Deliberately not a `Dnd` listbox: day sections are the point, and the
 // flat virtualised list can't host group headers. Drag-to-reschedule is
 // deferred (`spec/calendar-plan.md`).
@@ -18,7 +23,7 @@ import { groupByDay, type DayGroup, type DayRow } from "./dayGroups.ts";
 import { DeadlineBadge } from "./DeadlineBadge.tsx";
 import { formatWhenTime, nowMs, todayStamp } from "./format.tsx";
 import { useAppI18n } from "./i18n.tsx";
-import { isDone, type DocApp } from "./sync/store.ts";
+import { isDone, isEvent, type DocApp } from "./sync/store.ts";
 import { WhenBadge } from "./WhenBadge.tsx";
 
 export function Upcoming(props: {
@@ -35,6 +40,7 @@ export function Upcoming(props: {
       todayStamp(nowMs()),
       {
         overdue: m().deadline.overdue,
+        unscheduled: m().upcoming.unscheduled,
         today: m().deadline.today,
         tomorrow: m().deadline.tomorrow,
       },
@@ -45,9 +51,9 @@ export function Upcoming(props: {
   // Every day heads with the same long-form date ("Sat 24 Sept"); Today
   // is the only one annotated, so the eye lands on it without the other
   // days changing shape as they approach. Overdue has no day: its rows
-  // each carry their own date.
+  // each carry their own date. Unscheduled has no day at all.
   const dayHeading = (g: DayGroup): string => {
-    if (g.urgency === "overdue") return g.label;
+    if (g.urgency === "overdue" || g.urgency === "unscheduled") return g.label;
     const [y, mo, d] = g.key.split("-").map(Number);
     if (!y || !mo || !d) return g.label;
     const date = new Intl.DateTimeFormat(locale(), {
@@ -93,15 +99,28 @@ export function Upcoming(props: {
                       props.onOpen(r.item.id);
                     }}
                   >
-                    <input
-                      type="checkbox"
-                      class="task-check"
-                      checked={isDone(r.item)}
-                      aria-label={m().workspace.markDone}
-                      onChange={(e) =>
-                        props.app.setDone(r.item.id, e.currentTarget.checked)
+                    {/* An Open event has nothing to tick; a ticked one
+                        keeps its box so the tick shows and can be undone. */}
+                    <Show
+                      when={!isEvent(r.item) || isDone(r.item)}
+                      fallback={
+                        <span
+                          class="task-check event-mark"
+                          role="img"
+                          aria-label={m().upcoming.eventMark}
+                        />
                       }
-                    />
+                    >
+                      <input
+                        type="checkbox"
+                        class="task-check"
+                        checked={isDone(r.item)}
+                        aria-label={m().workspace.markDone}
+                        onChange={(e) =>
+                          props.app.setDone(r.item.id, e.currentTarget.checked)
+                        }
+                      />
+                    </Show>
                     <Show when={timeLabel(r)}>
                       {(t) => <span class="upcoming-row-time">{t()}</span>}
                     </Show>
@@ -121,14 +140,17 @@ export function Upcoming(props: {
                           />
                         )}
                       </Show>
-                      <span
-                        class="badge row-list"
-                        title={props.listLabel(r.item.listId)}
-                      >
-                        <span class="row-list-name">
-                          {props.listLabel(r.item.listId)}
+                      {/* The marker already says "event". */}
+                      <Show when={!isEvent(r.item)}>
+                        <span
+                          class="badge row-list"
+                          title={props.listLabel(r.item.listId)}
+                        >
+                          <span class="row-list-name">
+                            {props.listLabel(r.item.listId)}
+                          </span>
                         </span>
-                      </span>
+                      </Show>
                     </span>
                   </div>
                 )}

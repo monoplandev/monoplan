@@ -14,10 +14,8 @@ import {
   Show,
 } from "solid-js";
 import { Portal } from "solid-js/web";
-import archiveSvg from "./icons/archive.svg?raw";
-import fileSvg from "./icons/file.svg?raw";
 import { useAppI18n } from "./i18n.tsx";
-import type { ListOption } from "./ListPicker.tsx";
+import { listGlyph, type ListOption } from "./ListPicker.tsx";
 import { trackOverlay } from "./overlay.ts";
 import { PaletteFooter } from "./PaletteFooter.tsx";
 import { matchesName } from "./search.ts";
@@ -206,7 +204,7 @@ export function MovePalette(props: {
                       <span
                         class="palette__item-icon"
                         aria-hidden="true"
-                        innerHTML={opt.id === "inbox" ? archiveSvg : fileSvg}
+                        innerHTML={listGlyph(opt.id)}
                       />
                     }
                   >

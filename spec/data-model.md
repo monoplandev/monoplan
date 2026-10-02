@@ -50,8 +50,7 @@ One child `LoroMap` under `items`, keyed by `ItemId`.
 
 Item type is implicit (currently always text). Add an `item_type` field when
 other kinds appear. Events are deliberately not a kind: an event is an
-ordinary item located in the reserved list `events` (`events-plan.md`,
-planned).
+ordinary item located in the reserved list `events` (`events-plan.md`).
 
 ### Lifecycle
 
@@ -158,9 +157,8 @@ All three are single **encoded scalar strings**. Rationale (vs a structured
 `placement_id` can never be torn apart by concurrent edits — there are no
 independently-mergeable sub-fields to conflict. It is also smaller on the wire
 and trivially comparable. The separator `:` is reserved: ids are uuid-v7 hex
-(`[0-9a-f]{32}`) or the literal `inbox` (and `events`, reserved by
-`events-plan.md`), so it can never appear inside a
-component. Parsing splits on the **first** `:`. (A bare `FocusRef` has no `:` and
+(`[0-9a-f]{32}`) or one of the literals `inbox` and `events`, so it can
+never appear inside a component. Parsing splits on the **first** `:`. (A bare `FocusRef` has no `:` and
 is a local-doc item id; the emitter writes only this form today — see
 `spec/focus.md`.)
 
@@ -306,7 +304,7 @@ Every mutation below forms **one Loro commit** (one undo step, one op group).
 - **Hard delete** — delete the item's key from `items`; best-effort remove
   its entries from its located order container. Entries elsewhere are
   invisible anyway (item lookup fails) and left to reconciliation.
-- **Delete list** — refuses for `inbox`. Deleting a list *discards its
+- **Delete list** — refuses for `inbox` and `events`. Deleting a list *discards its
   contents to the bin* rather than dumping them into Home's Open view. Every item
   locating to the list (open, done *and* binned) is moved to `inbox` with a
   fresh placement, appended to `order/inbox` in the deleted list's resolved
@@ -364,7 +362,8 @@ absent — the main nav, capture/move destinations, keyboard nav) and the
 Archived lists stay searchable, their boards stay intact, and items locating to
 them keep rendering the list's name.
 
-**`set_list_archived(list_id, archived)`** — refuses for the reserved `inbox`.
+**`set_list_archived(list_id, archived)`** — refuses for the reserved `inbox`
+and `events`.
 Archiving an active list writes `archived_at = now`; unarchiving deletes the
 key. Re-applying the current state is a no-op: no commit, no event. One commit
 otherwise; emits `ListArchivedChanged { id, archived_at }`. `ListAdded` also
@@ -388,7 +387,8 @@ Whether the nav shows an open-item count (all Open states) beside each list is g
 
 ## Built-in lists
 
-Monoplan has one reserved primary capture list:
+Monoplan has two reserved lists: the primary capture list, and the home
+of events.
 
 - `inbox` — rendered as "Inbox". This id is reserved and addressable by items,
   but it is not stored as a `ListMeta` row in the `lists` MovableList. Its
@@ -396,14 +396,19 @@ Monoplan has one reserved primary capture list:
   built-in) and it is non-renamable, non-movable, and non-deletable — there is
   no display-name override. Doc-level settings for it live in `settings`.
 
-**Planned, not built** (`events-plan.md`, decided 2026-10-02): a second
-reserved list, `events`, rendered as "Events". Same shape as `inbox` (no
-`ListMeta` row, order container `order/events`, non-renamable,
-non-archivable, non-deletable), with one difference: no list view or board
-projects it. Its items surface only on the calendar, without a checkbox.
-"Is an event" is `location.list_id == "events"` and nothing else, so the id
-is reserved now: no user list can take it (list ids are uuid-v7 hex) and no
-client should write it until the plan lands. Additive within v4.
+- `events`: rendered as "Events" (`events-plan.md`, built 2026-10-02).
+  Same shape as `inbox`: no `ListMeta` row, order container
+  `order/events`, client-defined label, non-renamable, non-movable,
+  non-archivable, non-deletable. One difference: no list view or board
+  projects it, so it has no saved default view (`set_default_view`
+  refuses it) and `order/events` is maintained but never read by a view.
+  Its items are **events**: they surface only on the calendar, without a
+  checkbox. "Is an event" is `location.list_id == "events"` and nothing
+  else (`ItemView::is_event`); moving an item in or out is the whole
+  conversion. The core does not require an event to carry a `when`
+  (independent registers; see `events-plan.md` "Why no invariant").
+  Additive within v4: an events-unaware client shows events on its agenda
+  as ordinary rows and never lists them under a list.
 
 The bin is *not* a list; it's the `binned_at` mask on items.
 
@@ -442,12 +447,12 @@ All mutations go through Loro APIs internally; the core exposes typed helpers:
 - `add_list(name) -> ListId`
 - `rename_list(list_id, name)`
 - `set_list_archived(list_id, archived)` — archives (`true`) or unarchives
-  (`false`) a user list; refuses for `inbox`. Metadata-only: performs **no**
+  (`false`) a user list; refuses for `inbox` and `events`. Metadata-only: performs **no**
   item, order, lifecycle, or Focus mutations. No-op (no commit, no event) when
   the list is already in the requested state. See "Archived lists" above.
 - `set_show_list_counts(show)` — toggles the doc-level "show counts on non-Inbox lists" flag. Inbox's count is always visible (subject to count > 0) and is not gated by this.
-- `set_default_view(list_id, view)` — saves (`Some`) or clears (`None`) a list's default view as one encoded register; accepts the reserved `inbox`, whose value lands in `settings.inbox_view` and reports via `SettingsChanged` rather than `ListDefaultViewChanged`. One commit; a no-op when unchanged. See `spec/board.md`.
-- `delete_list(list_id)` — refuses for `inbox`; see "Delete list" contract above. **Internal-only**: not surfaced in any client UI (archive is the user-facing removal).
+- `set_default_view(list_id, view)` — saves (`Some`) or clears (`None`) a list's default view as one encoded register; accepts the reserved `inbox`, whose value lands in `settings.inbox_view` and reports via `SettingsChanged` rather than `ListDefaultViewChanged`; refuses the reserved `events` (`Invalid`: it has no list or board view). One commit; a no-op when unchanged. See `spec/board.md`.
+- `delete_list(list_id)` — refuses for `inbox` and `events`; see "Delete list" contract above. **Internal-only**: not surfaced in any client UI (archive is the user-facing removal).
 - `empty_bin()` — hard-deletes all `Binned` items.
 - `delete_binned(item_id)` — hard-deletes one `Binned` item.
 - `add_to_focus(item_id, index)` / `remove_from_focus(item_id)` / `move_in_focus(item_id, index)` — curated Focus lens mutations over the `focus` container (`spec/focus.md`). Each is one commit and sweeps dead focus refs. `add_to_focus` no-ops when the item already has a visible ref.

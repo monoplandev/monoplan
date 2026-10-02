@@ -12,12 +12,13 @@
 
 use std::time::Duration;
 
+use monoplan_cli::commands::agenda::{build_agenda, unscheduled_events};
 use monoplan_cli::commands::export::write_export;
 use monoplan_cli::config::{Config, Profile, Secrets};
 use monoplan_cli::keystore::dek_to_hex;
 use monoplan_cli::storage::Account;
 use monoplan_cli::sync::Session;
-use monoplan_core::{Dek, Doc, LIST_INBOX, NotesDeltaOp};
+use monoplan_core::{Dek, Doc, LIST_EVENTS, LIST_INBOX, NotesDeltaOp};
 use monoplan_server::sync::queries;
 use uuid::Uuid;
 
@@ -521,6 +522,92 @@ async fn when_converges_across_devices() {
     assert_eq!(a_timed.when, None, "A observes B's clear");
     assert_eq!(a_timed.deadline.as_deref(), Some("2026-10-31"));
     assert_eq!(session_a2.doc().fingerprint(), fp_cleared);
+    session_a2.flush().await.unwrap();
+}
+
+#[tokio::test]
+async fn events_converge_across_devices() {
+    let server = TestServer::start().await;
+    let dek = Dek::generate();
+    let signup = signup_via_http(&server, &dek, "events-A").await;
+
+    let tmp_a = tempfile::tempdir().unwrap();
+    let profile_a = materialize_signup_profile(
+        tmp_a.path(),
+        &server.base,
+        &signup,
+        &dek,
+        "events@example.com",
+        true,
+    )
+    .await;
+
+    let device_b = register_device(&server, &signup.device_token, "events-B").await;
+    let tmp_b = tempfile::tempdir().unwrap();
+    let profile_b = materialize_profile(
+        tmp_b.path(),
+        &server.base,
+        &signup.account_id,
+        &signup.primary_doc_id,
+        &device_b.device_id,
+        &device_b.device_token,
+        &dek,
+        "events@example.com",
+        false,
+    )
+    .await;
+
+    // A: a dated event and an undated one, straight into `events`.
+    let session_a = Session::open_with_profile(profile_a, true).await.unwrap();
+    let gig = session_a.doc().add_item(LIST_EVENTS, "gig").unwrap();
+    let dinner = session_a.doc().add_item(LIST_EVENTS, "dinner").unwrap();
+    session_a
+        .doc()
+        .set_item_when(&gig, Some("2026-09-12T19:00"))
+        .unwrap();
+    let fp_added = session_a.doc().fingerprint();
+    session_a.flush().await.unwrap();
+
+    // B pulls on open: the dated event is on its agenda day, the undated
+    // one is Unscheduled, and neither is in any list view.
+    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
+    assert!(session_b.is_online());
+    assert_eq!(session_b.doc().fingerprint(), fp_added);
+    let items = session_b.doc().all_items();
+    let days = build_agenda(&items, "2026-09-09", "2026-09-23");
+    let placed: Vec<(&str, &str)> = days
+        .iter()
+        .flat_map(|d| d.rows.iter().map(|r| (d.day.as_str(), r.item.id.as_str())))
+        .collect();
+    assert_eq!(placed, vec![("2026-09-12", gig.as_str())]);
+    assert!(days[1].rows[0].item.is_event());
+    let unscheduled: Vec<&str> = unscheduled_events(&items)
+        .iter()
+        .map(|i| i.id.as_str())
+        .collect();
+    assert_eq!(unscheduled, vec![dinner.as_str()]);
+    assert!(
+        session_b
+            .doc()
+            .items_in_list(LIST_INBOX, false)
+            .iter()
+            .all(|i| i.id != gig && i.id != dinner)
+    );
+
+    // B moves the gig out of `events`: an ordinary inbox item, date intact.
+    session_b.doc().move_item(&gig, LIST_INBOX, 0).unwrap();
+    let fp_moved = session_b.doc().fingerprint();
+    session_b.flush().await.unwrap();
+
+    let session_a2 = Session::open_with_profile(reopen_profile(tmp_a.path()), true)
+        .await
+        .unwrap();
+    let a_gig = session_a2.doc().get_item(&gig).unwrap();
+    assert!(!a_gig.is_event(), "A observes B's move");
+    assert_eq!(a_gig.list_id, LIST_INBOX);
+    assert_eq!(a_gig.when.as_deref(), Some("2026-09-12T19:00"));
+    assert!(session_a2.doc().get_item(&dinner).unwrap().is_event());
+    assert_eq!(session_a2.doc().fingerprint(), fp_moved);
     session_a2.flush().await.unwrap();
 }
 

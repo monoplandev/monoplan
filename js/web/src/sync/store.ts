@@ -138,6 +138,13 @@ export const isBinned = (it: ItemView): boolean => it.binnedAt != null;
  *  per-list view. */
 export const isOpen = (it: ItemView): boolean =>
   !isBinned(it) && !isClosedState(it.state);
+/** The reserved list whose items are events (`spec/events-plan.md`).
+ *  Like `inbox` it has no `ListView` row; unlike `inbox` it has no list
+ *  or board view: its items surface only on the calendar. */
+export const LIST_EVENTS = "events";
+/** Located in the reserved `events` list. That is the whole definition
+ *  of an event: there is no item kind. */
+export const isEvent = (it: ItemView): boolean => it.listId === LIST_EVENTS;
 /** Resolved lifecycle: `binned` while the mask is present, else the
  *  workflow register's state. */
 export const lifecycleOf = (it: ItemView): Lifecycle =>

@@ -2,7 +2,10 @@
 //! deadlines folded in, then the coming days (`spec/calendar-plan.md`
 //! "Agenda"). A past `when` has gone by like an event and places nothing.
 //! Done items keep their `when` day and slot (the tick does not erase
-//! "happens on"); their deadline is settled and places nothing.
+//! "happens on"); their deadline is settled and places nothing. Events
+//! (`spec/events-plan.md`) place by the same rules and print without a
+//! state box; an Open event with no date at all has no day, so it prints
+//! in an Unscheduled group after Today.
 //!
 //! Placement, tone, and ordering are pure functions of the item views
 //! and a `today` stamp, so they are unit-tested here without a doc.
@@ -14,7 +17,7 @@ use serde::Serialize;
 
 use crate::sync::Session;
 
-use super::items::{date_tags, print_json, state_mark};
+use super::items::{date_tags, print_json, row_box};
 
 #[derive(Parser, Debug)]
 pub struct AgendaArgs {
@@ -187,6 +190,19 @@ pub fn build_agenda<'a>(items: &'a [ItemView], today: &'a str, horizon: &str) ->
     out
 }
 
+/// Open events with neither a `when` nor a `deadline`, oldest first.
+/// They have no day to sit on, and no list view shows an event, so the
+/// agenda is the one place they can surface. A past `when` is not
+/// unscheduled: it went by.
+pub fn unscheduled_events(items: &[ItemView]) -> Vec<&ItemView> {
+    let mut out: Vec<&ItemView> = items
+        .iter()
+        .filter(|i| i.is_event() && i.is_open() && i.when.is_none() && i.deadline.is_none())
+        .collect();
+    out.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
+    out
+}
+
 pub async fn run(args: AgendaArgs, sync: bool) -> anyhow::Result<()> {
     let today = match &args.today {
         Some(t) => NaiveDate::parse_from_str(t, "%Y-%m-%d")
@@ -202,26 +218,43 @@ pub async fn run(args: AgendaArgs, sync: bool) -> anyhow::Result<()> {
     let session = Session::open(sync).await?;
     let items = session.doc().all_items();
     let days = build_agenda(&items, &today_s, &horizon_s);
+    let unscheduled = unscheduled_events(&items);
     if args.json {
-        let out: Vec<DayJson<'_>> = days
+        let mut out: Vec<DayJson<'_>> = days
             .iter()
             .map(|d| DayJson {
-                day: &d.day,
+                day: Some(&d.day),
                 today: d.day == today_s,
                 rows: d.rows.iter().map(row_json).collect(),
             })
             .collect();
+        if !unscheduled.is_empty() {
+            // After Today, which `build_agenda` always puts first.
+            out.insert(
+                1,
+                DayJson {
+                    day: None,
+                    today: false,
+                    rows: unscheduled.iter().map(|i| unscheduled_json(i)).collect(),
+                },
+            );
+        }
         print_json(&out)?;
     } else {
-        print_agenda(&days, &today_s);
+        print_agenda(&days, &unscheduled, &today_s);
     }
     session.flush().await?;
     Ok(())
 }
 
-fn print_agenda(days: &[AgendaDay], today: &str) {
+fn print_agenda(days: &[AgendaDay], unscheduled: &[&ItemView], today: &str) {
     for (i, day) in days.iter().enumerate() {
         if i > 0 {
+            println!();
+        }
+        // Unscheduled sits after Today, ahead of the coming days.
+        if i == 1 && !unscheduled.is_empty() {
+            print_unscheduled(unscheduled);
             println!();
         }
         let weekday = NaiveDate::parse_from_str(&day.day, "%Y-%m-%d")
@@ -236,25 +269,38 @@ fn print_agenda(days: &[AgendaDay], today: &str) {
             println!("  (nothing)");
         }
         for row in &day.rows {
-            let mark = state_mark(row.item.state);
             let tone = row
                 .tone
                 .label()
                 .map(|l| format!("  ({l})"))
                 .unwrap_or_default();
             println!(
-                "  {}  [{mark}] {}{}{tone}",
+                "  {}  {} {}{}{tone}",
                 row.item.id,
+                row_box(&row.item),
                 row.item.text,
                 date_tags(&row.item)
             );
         }
     }
+    // Today was the only day: the group still follows it.
+    if days.len() == 1 && !unscheduled.is_empty() {
+        println!();
+        print_unscheduled(unscheduled);
+    }
+}
+
+fn print_unscheduled(unscheduled: &[&ItemView]) {
+    println!("Unscheduled");
+    for item in unscheduled {
+        println!("  {}  {} {}", item.id, row_box(item), item.text);
+    }
 }
 
 #[derive(Serialize)]
 struct DayJson<'a> {
-    day: &'a str,
+    /// `YYYY-MM-DD`, or `null` for the Unscheduled group.
+    day: Option<&'a str>,
     today: bool,
     rows: Vec<RowJson<'a>>,
 }
@@ -271,7 +317,9 @@ struct RowJson<'a> {
     duration: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     deadline: Option<&'a str>,
-    placed_by: PlacedBy,
+    /// Absent on an Unscheduled row: no field placed it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    placed_by: Option<PlacedBy>,
     tone: Tone,
 }
 
@@ -284,15 +332,29 @@ fn row_json(row: &AgendaRow) -> RowJson<'_> {
         when: row.item.when.as_deref(),
         duration: row.item.duration,
         deadline: row.item.deadline.as_deref(),
-        placed_by: row.placed_by,
+        placed_by: Some(row.placed_by),
         tone: row.tone,
+    }
+}
+
+fn unscheduled_json(item: &ItemView) -> RowJson<'_> {
+    RowJson {
+        id: &item.id,
+        text: &item.text,
+        list_id: &item.list_id,
+        state: item.state.name(),
+        when: None,
+        duration: None,
+        deadline: None,
+        placed_by: None,
+        tone: Tone::Neutral,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use monoplan_core::{LIST_INBOX, WorkflowState};
+    use monoplan_core::{LIST_EVENTS, LIST_INBOX, WorkflowState};
 
     fn item(id: &str, when: Option<&str>, deadline: Option<&str>, created_at: i64) -> ItemView {
         ItemView {
@@ -478,6 +540,64 @@ mod tests {
         );
         assert_eq!(days[1].rows[0].placed_by, PlacedBy::When);
         assert_eq!(days[1].rows[0].tone, Tone::Neutral);
+    }
+
+    #[test]
+    fn events_place_by_the_same_rules_as_tasks() {
+        let mut event = item("event", Some("2026-09-12T19:00"), None, 1);
+        event.list_id = LIST_EVENTS.to_string();
+        // A deadline on an event is legitimate and places it as usual.
+        let mut tickets = item("tickets", None, Some("2026-09-10"), 2);
+        tickets.list_id = LIST_EVENTS.to_string();
+        // A past event went by.
+        let mut past = item("past", Some("2026-09-01"), None, 3);
+        past.list_id = LIST_EVENTS.to_string();
+        let items = [event, tickets, past];
+        let days = build_agenda(&items, TODAY, HORIZON);
+        let by_day: Vec<(&str, Vec<&str>)> =
+            days.iter().map(|d| (d.day.as_str(), ids(d))).collect();
+        assert_eq!(
+            by_day,
+            vec![
+                (TODAY, vec![]),
+                ("2026-09-10", vec!["tickets"]),
+                ("2026-09-12", vec!["event"]),
+            ]
+        );
+        assert!(unscheduled_events(&items).is_empty());
+    }
+
+    #[test]
+    fn unscheduled_is_open_undated_events_oldest_first() {
+        let event = |id: &str, when: Option<&str>, deadline: Option<&str>, at: i64| {
+            let mut i = item(id, when, deadline, at);
+            i.list_id = LIST_EVENTS.to_string();
+            i
+        };
+        let mut done = event("done", None, None, 1);
+        done.state = WorkflowState::Done;
+        let mut cancelled = event("cancelled", None, None, 2);
+        cancelled.state = WorkflowState::Cancelled;
+        let mut binned = event("binned", None, None, 3);
+        binned.binned_at = Some(5);
+        let items = [
+            event("newer", None, None, 9),
+            event("older", None, None, 4),
+            // Dated either way: has a day, or went by.
+            event("dated", Some("2026-09-12"), None, 5),
+            event("due", None, Some("2026-09-12"), 6),
+            event("past", Some("2026-09-01"), None, 7),
+            // An undated task is just a task; its list shows it.
+            item("task", None, None, 8),
+            done,
+            cancelled,
+            binned,
+        ];
+        let got: Vec<&str> = unscheduled_events(&items)
+            .iter()
+            .map(|i| i.id.as_str())
+            .collect();
+        assert_eq!(got, vec!["older", "newer"]);
     }
 
     #[test]

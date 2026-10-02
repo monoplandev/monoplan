@@ -2,7 +2,7 @@
 
 Board view is a **second lens on an existing list**, not a new container kind.
 Every list (including the reserved `inbox`) can be viewed as a board. The
-planned reserved `events` list is the one exception: it has no list or board
+reserved `events` list is the one exception: it has no list or board
 view, only the calendar (`spec/events-plan.md`). Archiving
 a list (`spec/data-model.md` "Archived lists") changes nothing here: an
 archived list's board — lanes, order, saved view — remains intact and renders

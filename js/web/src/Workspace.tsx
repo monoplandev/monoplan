@@ -74,7 +74,9 @@ import {
   isCancelled,
   isClosed,
   isClosedState,
+  isEvent,
   isOpen,
+  LIST_EVENTS,
   OPEN_STATES,
   type DocApp,
   type ItemView,
@@ -357,6 +359,8 @@ export function Workspace(props: {
      *  commit (the Done lane "+" and the Done view's "Log" button). The
      *  modal shows a checked box the user can flip back off. */
     done?: boolean;
+    /** Planned date the capture opens with (the calendar's Add). */
+    when?: string;
   } | null>(null);
   // Ids to select + scroll into view in the board once they land in their
   // column (a "+" capture, a duplicated block, or a find-palette pick that
@@ -785,13 +789,24 @@ export function Workspace(props: {
     return state.listsById[v.id]?.archivedAt != null ? v.id : null;
   });
 
-  // Display label for any list id, matching the header/nav rules:
-  // `inbox` is the localized built-in label, others use the stored name.
-  // Used by Done-view rows to badge each item with its origin list.
+  // Display label for any list id, matching the header/nav rules: the
+  // reserved `inbox` and `events` carry localized built-in labels, others
+  // use the stored name. Used by Done-view rows to badge each item with
+  // its origin list.
   const listLabel = (listId: string): string =>
     listId === "inbox"
       ? m().nav.inbox
-      : (state.listsById[listId]?.name ?? listId);
+      : listId === LIST_EVENTS
+        ? m().nav.events
+        : (state.listsById[listId]?.name ?? listId);
+
+  // The list an item is filed under, for writes that need a real home: a
+  // reserved list or a ListMeta row that still exists, else the inbox.
+  const homeListId = (listId: string | undefined): string =>
+    listId !== undefined &&
+    (listId === LIST_EVENTS || app.state.listsById[listId] !== undefined)
+      ? listId
+      : "inbox";
 
   createEffect(() => {
     const next = items();
@@ -853,6 +868,14 @@ export function Workspace(props: {
       ids.forEach((id, i) => app.addToFocus(id, atIndex + i));
       return ids;
     });
+
+  // The calendar's Add: a new event, all-day on today until the user
+  // picks otherwise.
+  const newEventTarget = () => ({
+    listId: LIST_EVENTS,
+    state: "backlog" as const,
+    when: todayStamp(nowMs()),
+  });
 
   // Start a draft row: pseudo-item just below the topmost selected
   // item (or at the top if nothing is selected). Expanding it via the
@@ -1251,10 +1274,12 @@ export function Workspace(props: {
     return v.kind === "list" ? v.id : null;
   };
 
-  // Move destinations: Inbox followed by every active user list —
-  // archived lists are not offered, matching the task dialog's picker.
+  // Move destinations: Inbox, Events (moving there makes an item an
+  // event, `spec/events-plan.md`), then every active user list — archived
+  // lists are not offered, matching the task dialog's picker.
   const moveListOptions = createMemo<ListOption[]>(() => [
     { id: "inbox", name: m().nav.inbox },
+    { id: LIST_EVENTS, name: m().nav.events },
     ...activeLists().map((l) => ({ id: l.id, name: l.name, icon: l.icon })),
   ]);
 
@@ -1280,6 +1305,13 @@ export function Workspace(props: {
     // The moved rows have left this view, so a lingering selection would
     // be a phantom block anchor (see the drag-out handling below).
     actionSelection()?.clear();
+    // One item made an event with no date: open it on its date popover,
+    // as Set date… does, rather than leave it in Unscheduled unasked. A
+    // block just moves; its undated rows land in Unscheduled.
+    if (targetListId === LIST_EVENTS && ids.length === 1) {
+      const it = app.getItem(ids[0]!);
+      if (it && isOpen(it) && !it.when) openItemWhen(it.id);
+    }
   };
 
   // m: open the move palette on the current selection.
@@ -1342,7 +1374,7 @@ export function Workspace(props: {
         if (!sourceSet.has(id)) return;
         const it = app.getItem(id);
         if (!it || !isOpen(it)) return;
-        const listId = app.state.listsById[it.listId] ? it.listId : "inbox";
+        const listId = homeListId(it.listId);
         sources.push({
           id,
           idx,
@@ -1828,6 +1860,9 @@ export function Workspace(props: {
   // new controller's source has the row's index when scrollToKey lands.
   const revealItem = (id: string, target: ViewKey): void => {
     setView(target);
+    // The calendar is not a listbox: there is no row selection to anchor
+    // and no Dnd mounted to scroll. Callers open the item instead.
+    if (target.kind === "upcoming") return;
     // If the destination list renders as a board, the list-view Dnd isn't
     // mounted — hand the id to the Board's reveal path (select + scroll in
     // the resolved column) instead of the list-view scroll below.
@@ -1897,6 +1932,13 @@ export function Workspace(props: {
       setView({ kind: "list", id: r.id });
       return;
     }
+    // An Open event's home is the calendar, which has no row to select
+    // (and no day for a past one): open it there, as its link does.
+    const picked = state.itemsById[r.id];
+    if (picked && isEvent(picked) && isOpen(picked)) {
+      openItemFromUrl(r.id);
+      return;
+    }
     revealItem(
       r.id,
       r.lifecycle === "binned"
@@ -1936,7 +1978,16 @@ export function Workspace(props: {
       revealItem(id, { kind: "focus" });
       return;
     }
-    const listId = app.state.itemsById[id]?.listId;
+    const it = app.state.itemsById[id];
+    // An event's home is the calendar: go there with the item open.
+    if (it && isEvent(it)) {
+      batch(() => {
+        if (view().kind !== "upcoming") setView({ kind: "upcoming" });
+        setOpenItemId(id);
+      });
+      return;
+    }
+    const listId = it?.listId;
     revealItem(id, {
       kind: "list",
       id: listId && app.state.listsById[listId] ? listId : "inbox",
@@ -1957,14 +2008,17 @@ export function Workspace(props: {
   // (Enter, row open, a link, a click into the pane).
 
   // The view that shows `it`: Bin if binned, Done if closed (done or
-  // cancelled), else its home list. A stale list id falls back to Inbox;
-  // archived lists still render.
+  // cancelled), else its home: the calendar for an event, its list
+  // otherwise. A stale list id falls back to Inbox; archived lists still
+  // render.
   const viewForItem = (it: ItemView): ViewKey =>
     isBinned(it)
       ? { kind: "bin" }
       : isClosed(it)
         ? { kind: "done" }
-        : { kind: "list", id: state.listsById[it.listId] ? it.listId : "inbox" };
+        : isEvent(it)
+          ? { kind: "upcoming" }
+          : { kind: "list", id: state.listsById[it.listId] ? it.listId : "inbox" };
 
   // Reveal + open an item by id. False when the store doesn't have it.
   const openItemFromUrl = (id: string): boolean => {
@@ -2826,10 +2880,11 @@ export function Workspace(props: {
                 </Switch>
               </DisplayOptionsPopover>
             </Show>
-            {/* Add on the list, focus and upcoming views. Upcoming has no
-                list of its own to draft into, so it captures a new inbox
-                item through the dialog instead (the user sets a date there
-                if it belongs on the calendar). */}
+            {/* Add on the list, focus and upcoming views. The calendar is
+                the home of events (`spec/events-plan.md`) but not a
+                listbox to draft into, so it captures a new event through
+                the dialog, on today so it is never out of sight; the
+                dialog's list picker re-files it as a task. */}
             <Show
               when={
                 view().kind === "list" ||
@@ -2855,7 +2910,7 @@ export function Workspace(props: {
                   e.stopImmediatePropagation();
                   const boardId = boardListId();
                   if (view().kind === "upcoming") {
-                    setNewItemTarget({ listId: "inbox", state: "backlog" });
+                    setNewItemTarget(newEventTarget());
                   } else if (boardId !== null) {
                     // Board view has no inline draft flow; capture a new item
                     // into the first visible open lane, mirroring that
@@ -3058,12 +3113,12 @@ export function Workspace(props: {
           onAdd={
             view().kind === "upcoming"
               ? () => {
-                  // No list to draft into on the calendar: capture a new
-                  // inbox item through the dialog, as the header's Add
+                  // No listbox to draft into on the calendar: capture a
+                  // new event through the dialog, as the header's Add
                   // does on desktop.
                   setOpenItemId(null);
                   if (findOpen()) onFindOpenChange(false);
-                  setNewItemTarget({ listId: "inbox", state: "backlog" });
+                  setNewItemTarget(newEventTarget());
                 }
               : (view().kind === "list" || view().kind === "focus") &&
                   boardListId() === null

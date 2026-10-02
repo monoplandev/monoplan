@@ -28,10 +28,12 @@
 //! invariants"). Stale/duplicate entries left behind by concurrent
 //! cross-list moves are harmless and cleaned by [`Doc::reconcile`].
 //!
-//! Binned is a lifecycle & items keep their location. One well-known
-//! list id is *reserved*: [`LIST_INBOX`]. It has **no ListMeta row** —
-//! items reference it by string id and clients render it with a
-//! hardcoded label ("Inbox").
+//! Binned is a lifecycle & items keep their location. Two well-known
+//! list ids are *reserved*: [`LIST_INBOX`] and [`LIST_EVENTS`]. They have
+//! **no ListMeta row** — items reference them by string id and clients
+//! render them with hardcoded labels ("Inbox", "Events"). `events` has no
+//! list or board view: its items surface only on the calendar
+//! (`spec/events-plan.md`).
 //!
 //! The struct holds a `last_persisted_vv` — the local WAL capture
 //! cursor. Everything at or below it has been durably appended to the
@@ -62,6 +64,11 @@ use monoplan_protocol::EncryptedBlob;
 
 pub const LIST_INBOX: &str = "inbox";
 pub const INBOX_NAME: &str = "Inbox";
+/// Reserved home of events (`spec/events-plan.md`): an item located here
+/// is an event. Same shape as `inbox` (no ListMeta row), but no list or
+/// board view projects it.
+pub const LIST_EVENTS: &str = "events";
+pub const EVENTS_NAME: &str = "Events";
 
 const ROOT_ITEMS: &str = "items";
 const ROOT_LISTS: &str = "lists";
@@ -394,6 +401,11 @@ impl ItemView {
     }
     pub fn is_binned(&self) -> bool {
         self.binned_at.is_some()
+    }
+    /// Located in the reserved `events` list (`spec/events-plan.md`).
+    /// The whole definition of an event: there is no item kind.
+    pub fn is_event(&self) -> bool {
+        self.list_id == LIST_EVENTS
     }
     /// Open (visible in a per-list view): one of the four open workflow
     /// states and not binned.
@@ -2743,8 +2755,8 @@ impl Doc {
     }
 
     pub fn rename_list(&self, list_id: &str, name: &str) -> Result<(), DocError> {
-        if list_id == LIST_INBOX {
-            return Err(DocError::CannotRenameBuiltin(LIST_INBOX.into()));
+        if is_reserved_list(list_id) {
+            return Err(DocError::CannotRenameBuiltin(list_id.into()));
         }
         let name = name.trim();
         let (_, map) = self.find_list(list_id)?;
@@ -2761,11 +2773,12 @@ impl Doc {
     /// verbatim as a whole grapheme string (an emoji); a trimmed-empty
     /// value clears it (so clients fall back to the built-in glyph).
     /// No-op when the resulting value matches the current one, so repeat
-    /// saves don't emit phantom events or undo steps. Reserved `inbox`
-    /// (Inbox) has no ListMeta row, so it cannot carry an icon.
+    /// saves don't emit phantom events or undo steps. The reserved lists
+    /// (`inbox`, `events`) have no ListMeta row, so they cannot carry an
+    /// icon.
     pub fn set_list_icon(&self, list_id: &str, icon: &str) -> Result<(), DocError> {
-        if list_id == LIST_INBOX {
-            return Err(DocError::CannotRenameBuiltin(LIST_INBOX.into()));
+        if is_reserved_list(list_id) {
+            return Err(DocError::CannotRenameBuiltin(list_id.into()));
         }
         let (_, map) = self.find_list(list_id)?;
         let trimmed = icon.trim();
@@ -2802,11 +2815,18 @@ impl Doc {
     /// surfaces as a `SettingsChanged` event rather than
     /// `ListDefaultViewChanged`. No-op when the value is unchanged, so
     /// re-saving the same view emits no phantom event or undo step.
+    /// Refuses for the reserved `events`: it has no list or board view to
+    /// save (`spec/events-plan.md`).
     pub fn set_default_view(
         &self,
         list_id: &str,
         view: Option<DefaultView>,
     ) -> Result<(), DocError> {
+        if list_id == LIST_EVENTS {
+            return Err(DocError::Invalid(
+                "the events list has no list or board view".into(),
+            ));
+        }
         if list_id == LIST_INBOX {
             let settings = self.settings_map();
             if read_default_view(&settings, KEY_INBOX_VIEW) == view {
@@ -2850,10 +2870,10 @@ impl Doc {
     /// deletes the ListMeta `archived_at` register and touches nothing
     /// else — no item, order, lifecycle, or Focus mutation. Re-applying
     /// the current state is a no-op (no commit, no event). Refuses for
-    /// the reserved `inbox`.
+    /// the reserved `inbox` and `events`.
     pub fn set_list_archived(&self, list_id: &str, archived: bool) -> Result<(), DocError> {
-        if list_id == LIST_INBOX {
-            return Err(DocError::CannotDeleteBuiltin(LIST_INBOX.into()));
+        if is_reserved_list(list_id) {
+            return Err(DocError::CannotDeleteBuiltin(list_id.into()));
         }
         let (_, map) = self.find_list(list_id)?;
         let current = read_i64(&map, KEY_ARCHIVED_AT);
@@ -2882,8 +2902,8 @@ impl Doc {
     /// index here. Moving an archived list keeps raw-index semantics
     /// (no client UI reorders archived lists).
     pub fn move_list(&self, list_id: &str, target_index: usize) -> Result<(), DocError> {
-        if list_id == LIST_INBOX {
-            return Err(DocError::CannotMoveBuiltin(LIST_INBOX.into()));
+        if is_reserved_list(list_id) {
+            return Err(DocError::CannotMoveBuiltin(list_id.into()));
         }
         let lists = self.lists();
         let (from, map) = self.find_list(list_id)?;
@@ -2908,14 +2928,14 @@ impl Doc {
         Ok(())
     }
 
-    /// Refuses for the always-on `inbox` list. Every item locating to
+    /// Refuses for the reserved `inbox` and `events`. Every item locating to
     /// the deleted list (open, done and binned) is moved to `inbox` with
     /// a fresh placement, appended to `order/main` in the deleted
     /// list's resolved order. The abandoned order container remains as
     /// unreachable history.
     pub fn delete_list(&self, list_id: &str) -> Result<(), DocError> {
-        if list_id == LIST_INBOX {
-            return Err(DocError::CannotDeleteBuiltin(LIST_INBOX.into()));
+        if is_reserved_list(list_id) {
+            return Err(DocError::CannotDeleteBuiltin(list_id.into()));
         }
         let (idx, _) = self.find_list(list_id)?;
         let resolved = {
@@ -3154,6 +3174,23 @@ impl Doc {
             created_at: None,
             builtin: true,
         });
+        // The reserved `events` row rides only when something locates to
+        // it, so dumps from accounts with no events stay byte-identical.
+        let has_events = {
+            let guard = self.item_index.lock().expect("item index mutex poisoned");
+            guard.members.contains_key(LIST_EVENTS)
+        };
+        if has_events {
+            lists.push(ExportList {
+                id: LIST_EVENTS.to_string(),
+                name: EVENTS_NAME.to_string(),
+                icon: None,
+                view: None,
+                archived_at: None,
+                created_at: None,
+                builtin: true,
+            });
+        }
         lists.extend(self.all_lists().into_iter().map(|list| ExportList {
             id: list.id,
             name: list.name,
@@ -3214,7 +3251,8 @@ impl Doc {
     /// lists (new IDs); source items keep their text / notes /
     /// timestamps / done-binned state but get fresh IDs and placements
     /// and follow the id-map: anything in the source's `inbox` lands in
-    /// the local `inbox`, builtin entries are not duplicated, and items
+    /// the local `inbox` (and `events` in the local `events`), builtin
+    /// entries are not duplicated, and items
     /// whose `list_id` references a list not present in the export fall
     /// back to `inbox` (same orphan handling as `delete_list`).
     /// Focus membership (`spec/focus.md`) rides `export.focus`: refs are
@@ -3239,10 +3277,16 @@ impl Doc {
 
         let mut id_map: HashMap<String, String> = HashMap::new();
         id_map.insert(LIST_INBOX.to_string(), LIST_INBOX.to_string());
+        id_map.insert(LIST_EVENTS.to_string(), LIST_EVENTS.to_string());
 
         let lists = self.lists();
         let mut lists_added: usize = 0;
         for src_list in &export.lists {
+            // Reserved ids map onto themselves (seeded above); any other
+            // row flagged builtin collapses into the local `inbox`.
+            if src_list.id == LIST_EVENTS {
+                continue;
+            }
             if src_list.builtin || src_list.id == LIST_INBOX {
                 id_map.insert(src_list.id.clone(), LIST_INBOX.to_string());
                 continue;
@@ -4732,7 +4776,7 @@ impl Doc {
     }
 
     fn assert_list_exists(&self, list_id: &str) -> Result<(), DocError> {
-        if list_id == LIST_INBOX {
+        if is_reserved_list(list_id) {
             return Ok(());
         }
         self.find_list(list_id).map(|_| ())
@@ -4816,6 +4860,11 @@ fn assert_unique_item_ids(item_ids: &[&str]) -> Result<(), DocError> {
         }
     }
     Ok(())
+}
+
+/// The reserved list ids: addressable by items, never a ListMeta row.
+fn is_reserved_list(list_id: &str) -> bool {
+    list_id == LIST_INBOX || list_id == LIST_EVENTS
 }
 
 fn seed_builtins(doc: &LoroDoc) -> Result<bool, DocError> {
@@ -6937,6 +6986,134 @@ mod tests {
         assert_eq!(export.lists[1].name, "Errands");
         assert_eq!(export.lists[1].builtin, false);
         assert!(export.lists[1].created_at.is_some());
+    }
+
+    // ---------- reserved `events` list (`spec/events-plan.md`) ----------
+
+    #[test]
+    fn events_list_takes_items_without_a_list_meta_row() {
+        let doc = Doc::new().unwrap();
+        // Add straight into `events`, with no `when`: the core holds no
+        // "an event must be scheduled" invariant.
+        let added = doc.add_item(LIST_EVENTS, "dinner, date tbc").unwrap();
+        let view = doc.get_item(&added).unwrap();
+        assert!(view.is_event());
+        assert_eq!(view.when, None);
+        assert!(view.is_open());
+
+        // Moving is converting, in both directions; dates ride along.
+        let task = doc.add_item(LIST_INBOX, "dentist").unwrap();
+        doc.set_item_when(&task, Some("2026-10-09T09:30")).unwrap();
+        assert!(!doc.get_item(&task).unwrap().is_event());
+        doc.move_item(&task, LIST_EVENTS, 0).unwrap();
+        let moved = doc.get_item(&task).unwrap();
+        assert!(moved.is_event());
+        assert_eq!(moved.when.as_deref(), Some("2026-10-09T09:30"));
+        assert_eq!(doc.open_item_ids(LIST_EVENTS), vec![task.clone(), added]);
+        doc.move_item(&task, LIST_INBOX, 0).unwrap();
+        let back = doc.get_item(&task).unwrap();
+        assert!(!back.is_event());
+        assert_eq!(back.when.as_deref(), Some("2026-10-09T09:30"));
+
+        assert!(doc.all_lists().is_empty(), "no ListMeta row is minted");
+    }
+
+    #[test]
+    fn events_list_refuses_list_mutations() {
+        let doc = Doc::new().unwrap();
+        doc.add_item(LIST_EVENTS, "gig").unwrap();
+        assert!(matches!(
+            doc.rename_list(LIST_EVENTS, "Calendar").unwrap_err(),
+            DocError::CannotRenameBuiltin(id) if id == LIST_EVENTS
+        ));
+        assert!(matches!(
+            doc.set_list_icon(LIST_EVENTS, "📅").unwrap_err(),
+            DocError::CannotRenameBuiltin(_)
+        ));
+        assert!(matches!(
+            doc.set_list_archived(LIST_EVENTS, true).unwrap_err(),
+            DocError::CannotDeleteBuiltin(_)
+        ));
+        assert!(matches!(
+            doc.move_list(LIST_EVENTS, 0).unwrap_err(),
+            DocError::CannotMoveBuiltin(_)
+        ));
+        assert!(matches!(
+            doc.delete_list(LIST_EVENTS).unwrap_err(),
+            DocError::CannotDeleteBuiltin(_)
+        ));
+        // No list or board view to save.
+        assert!(matches!(
+            doc.set_default_view(LIST_EVENTS, Some(DefaultView::BOARD))
+                .unwrap_err(),
+            DocError::Invalid(_)
+        ));
+        assert_eq!(doc.open_item_ids(LIST_EVENTS).len(), 1);
+    }
+
+    #[test]
+    fn delete_list_relocates_to_inbox_not_events() {
+        let doc = Doc::new().unwrap();
+        let list = doc.add_list("Trip").unwrap();
+        let item = doc.add_item(&list, "book flights").unwrap();
+        doc.add_item(LIST_EVENTS, "flight out").unwrap();
+        doc.delete_list(&list).unwrap();
+        let view = doc.get_item(&item).unwrap();
+        assert_eq!(view.list_id, LIST_INBOX);
+        assert!(view.is_binned());
+        assert_eq!(doc.open_item_ids(LIST_EVENTS).len(), 1);
+    }
+
+    #[test]
+    fn json_export_emits_events_row_only_when_populated() {
+        let doc = Doc::new().unwrap();
+        doc.add_item(LIST_INBOX, "task").unwrap();
+        let export = doc.export_json();
+        assert!(export.lists.iter().all(|l| l.id != LIST_EVENTS));
+
+        let event = doc.add_item(LIST_EVENTS, "gig").unwrap();
+        doc.set_item_when(&event, Some("2026-10-09")).unwrap();
+        let export = doc.export_json();
+        assert_eq!(
+            export.lists[1],
+            ExportList {
+                id: LIST_EVENTS.to_string(),
+                name: EVENTS_NAME.to_string(),
+                icon: None,
+                view: None,
+                archived_at: None,
+                created_at: None,
+                builtin: true,
+            }
+        );
+        let exported = export.items.iter().find(|i| i.text == "gig").unwrap();
+        assert_eq!(exported.list_id, LIST_EVENTS);
+
+        // Round trip: the event lands in the local `events`, the task in
+        // the local `inbox`, and no user list is minted for either.
+        let restored = Doc::new().unwrap();
+        let summary = restored.import_json(&export).unwrap();
+        assert_eq!(summary.lists_added, 0);
+        assert!(restored.all_lists().is_empty());
+        let events = restored.items_in_list(LIST_EVENTS, false);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].text, "gig");
+        assert_eq!(events[0].when.as_deref(), Some("2026-10-09"));
+        assert_eq!(restored.items_in_list(LIST_INBOX, false).len(), 1);
+    }
+
+    #[test]
+    fn import_json_accepts_events_items_without_the_builtin_row() {
+        // A hand-edited or trimmed export: the item names `events` but no
+        // list row does. The literal is reserved, so it still resolves.
+        let source = Doc::new().unwrap();
+        source.add_item(LIST_EVENTS, "gig").unwrap();
+        let mut export = source.export_json();
+        export.lists.retain(|l| l.id != LIST_EVENTS);
+        let restored = Doc::new().unwrap();
+        restored.import_json(&export).unwrap();
+        assert_eq!(restored.items_in_list(LIST_EVENTS, false).len(), 1);
+        assert!(restored.items_in_list(LIST_INBOX, false).is_empty());
     }
 
     #[test]

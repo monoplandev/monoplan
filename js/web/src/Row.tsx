@@ -28,6 +28,7 @@ import {
   isCancelled,
   isClosed,
   isClosedState,
+  isEvent,
   isOpen,
   WORKFLOW_STATES,
   type DocApp,
@@ -167,6 +168,9 @@ export function Row(props: {
     !isDraftId(props.item().id);
   const inFocusView = (): boolean =>
     props.viewKind === "focus" && !isDraftId(props.item().id);
+  // An event that is still Open: the marker replaces the checkbox.
+  const openEvent = (): boolean =>
+    isEvent(props.item()) && isOpen(props.item());
 
   // Any inline (non-footer) badge visible on this list row? Mirrors the
   // individual `<Show>` guards below so the `.row-badges` container only
@@ -457,31 +461,45 @@ export function Row(props: {
           props.onOpen?.(props.item().id);
         }}
       >
-        <input
-          type="checkbox"
-          class="task-check"
-          tabIndex={-1}
-          checked={isClosed(props.item())}
-          data-cancelled={isCancelled(props.item()) ? "" : undefined}
-          onMouseDown={(e) => {
-            // Clicking still focuses the checkbox despite tabIndex=-1, and
-            // the lingering focus makes a later Space press re-toggle it.
-            // Preventing mousedown's default suppresses the focus move while
-            // the click (and toggle) still fire.
-            e.preventDefault();
-          }}
-          onChange={(e) => {
-            const id = props.item().id;
-            // Un-checking a lingering row in Focus re-pins it (closing
-            // dropped its ref); elsewhere it's a plain lifecycle flip. A
-            // cancelled row un-checks the same way (closed → Backlog).
-            if (!e.currentTarget.checked && props.viewKind === "focus") {
-              props.app.undoneIntoFocus([id]);
-            } else {
-              props.app.setDone(id, e.currentTarget.checked);
-            }
-          }}
-        />
+        {/* An Open event has nothing to tick (`spec/events-plan.md`): it
+            shows a marker in the checkbox's slot. Closed or binned, it
+            keeps the box, which carries the tick / cross and its undo. */}
+        <Show
+          when={!openEvent()}
+          fallback={
+            <span
+              class="task-check event-mark"
+              role="img"
+              aria-label={m().upcoming.eventMark}
+            />
+          }
+        >
+          <input
+            type="checkbox"
+            class="task-check"
+            tabIndex={-1}
+            checked={isClosed(props.item())}
+            data-cancelled={isCancelled(props.item()) ? "" : undefined}
+            onMouseDown={(e) => {
+              // Clicking still focuses the checkbox despite tabIndex=-1, and
+              // the lingering focus makes a later Space press re-toggle it.
+              // Preventing mousedown's default suppresses the focus move while
+              // the click (and toggle) still fire.
+              e.preventDefault();
+            }}
+            onChange={(e) => {
+              const id = props.item().id;
+              // Un-checking a lingering row in Focus re-pins it (closing
+              // dropped its ref); elsewhere it's a plain lifecycle flip. A
+              // cancelled row un-checks the same way (closed → Backlog).
+              if (!e.currentTarget.checked && props.viewKind === "focus") {
+                props.app.undoneIntoFocus([id]);
+              } else {
+                props.app.setDone(id, e.currentTarget.checked);
+              }
+            }}
+          />
+        </Show>
         <Show when={leadingStamp() && rowStamp()}>
           {(ts) => (
             <span
@@ -749,8 +767,10 @@ export function Row(props: {
           </Show>
           {/* Every workflow state in one place, the tick marking this
               row's current one. Hidden while binned: the bin mask
-              overrides the state and Restore is the way out. */}
-          <Show when={!isBinned(props.item())}>
+              overrides the state and Restore is the way out. Hidden for
+              an event too: the open ladder means nothing there, and Mark
+              done / Cancel / Reopen above cover the rest. */}
+          <Show when={!isBinned(props.item()) && !isEvent(props.item())}>
             <ContextMenu.Sub gutter={4}>
               <ContextMenu.SubTrigger class="context-menu-item">
                 <span>{m().workspace.status}</span>

@@ -18,9 +18,9 @@ id     = [0-9a-f]{32}          -- uuid-v7 hex, same as ItemId / ListMeta.id
 Reserved, not yet parsed (`calendar-plan.md`): `calendar` for a month-grid
 lens, and an underscore day anchor on the agenda and grid
 (`upcoming_2026-07-13`, `calendar_2026-07`).
-Planned (`events-plan.md`): the reserved `events` list gets no token of its
-own. `#list_events` will canonicalise to `#upcoming`, and `#item_<id>` for
-an Open event will resolve to the calendar, its home.
+The reserved `events` list (`events-plan.md`) has no token of its own:
+`#list_events` is accepted as an alias and canonicalised to `#upcoming`,
+its home.
 Anything else is ignored: the client keeps whatever it was showing.
 There is no `#home`: a bare URL (no fragment) restores the last view
 from local prefs, as before URLs existed.
@@ -58,8 +58,10 @@ routing key, never identity (`spec/sharing-plan.md`).
 Opening `#item_<id>`:
 
 1. Look the id up in the store. If found, navigate to the view that
-   shows it (Bin if binned, Done if closed — done or cancelled — else its home list; an
-   archived home list still resolves) and open the item.
+   shows it (Bin if binned, Done if closed — done or cancelled — else its home: the
+   calendar for an event, its list otherwise; an archived home list still
+   resolves) and open the item. An Open event opens over the calendar
+   whether or not its row is on the agenda (a past event has no day there).
 2. If not found, hold the id as *pending* and retry on every store
    change until the user navigates elsewhere. This covers a link
    opened on a device that hasn't synced the item yet. Nothing is

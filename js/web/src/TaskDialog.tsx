@@ -40,6 +40,7 @@ import {
   formatDialogStamp,
   formatElapsed,
   nowMs,
+  todayStamp,
   whenTime,
 } from "./format.tsx";
 import { useAppI18n, laneLabel } from "./i18n.tsx";
@@ -65,6 +66,7 @@ import {
   isCancelled,
   isClosed,
   isDone,
+  LIST_EVENTS,
   WORKFLOW_STATES,
   type DocApp,
   type ItemView,
@@ -89,6 +91,9 @@ export function TaskDialog(props: {
     index?: number;
     /** Log an already-completed item: created open, marked done on commit. */
     done?: boolean;
+    /** Planned date the capture opens with (the calendar's Add prefills
+     *  today so a new event is never out of sight). */
+    when?: string;
   } | null;
   setNewItem?: (
     v: {
@@ -96,6 +101,7 @@ export function TaskDialog(props: {
       state: WorkflowState;
       index?: number;
       done?: boolean;
+      when?: string;
     } | null,
   ) => void;
   app: DocApp;
@@ -209,7 +215,8 @@ export function TaskDialog(props: {
     }
   });
 
-  // Move-to-list options: Inbox followed by every *active* user list —
+  // Move-to-list options: Inbox, Events (`spec/events-plan.md`: moving
+  // there is what makes an item an event), then every *active* user list —
   // archived lists are not offered as destinations. If the open item's
   // home list is itself archived, it is appended so the picker still
   // renders the current list's name (and moving *out* to an active list
@@ -217,6 +224,7 @@ export function TaskDialog(props: {
   const listOptions = createMemo<ListOption[]>(() => {
     const opts: ListOption[] = [
       { id: "inbox", name: m().nav.inbox },
+      { id: LIST_EVENTS, name: m().nav.events },
       ...props.lists().map((l) => ({ id: l.id, name: l.name, icon: l.icon })),
     ];
     const currentId = item()?.listId;
@@ -233,6 +241,12 @@ export function TaskDialog(props: {
     if (!id || targetId === currentListId) return;
     const idx = props.app.state.listOpen[targetId]?.length ?? 0;
     props.app.moveItem(id, targetId, idx);
+    // An Open event with no date has only the Unscheduled section to sit
+    // in: offer the date straight away.
+    const it = item();
+    if (targetId === LIST_EVENTS && it && !it.when && !isClosed(it) && !isBinned(it)) {
+      props.setWhenOpen(true);
+    }
   };
 
   // Re-target a new-item capture at a different list. The insert index is
@@ -241,7 +255,15 @@ export function TaskDialog(props: {
   const setNewItemList = (targetId: string) => {
     const nw = newItemTarget();
     if (!nw || targetId === nw.listId) return;
-    props.setNewItem?.({ listId: targetId, state: nw.state, done: nw.done });
+    // An event has no lane, and should not start life unscheduled: it
+    // files as Backlog, on today unless a date is already picked.
+    const toEvents = targetId === LIST_EVENTS;
+    if (toEvents && newWhen() === null) setNewWhen(todayStamp(nowMs()));
+    props.setNewItem?.({
+      listId: targetId,
+      state: toEvents ? "backlog" : nw.state,
+      done: nw.done,
+    });
   };
   // Toggle whether a new capture is logged as already-done.
   const setNewItemDone = (done: boolean) => {
@@ -620,7 +642,7 @@ export function TaskDialog(props: {
     syncedText = t;
     setNotes(n);
     setNewDeadline(null);
-    setNewWhen(null);
+    setNewWhen(id ? null : (nw?.when ?? null));
     setNewDuration(null);
     setNewFocus(false);
     // The editors mount when the surface opens; defer so their refs exist,
@@ -1015,6 +1037,12 @@ export function TaskDialog(props: {
     return nw?.done ? "done" : (nw?.state ?? "backlog");
   };
   const vListId = () => item()?.listId ?? newItemTarget()?.listId ?? null;
+  // An event (`spec/events-plan.md`): filed under the reserved `events`
+  // list. While Open it has nothing to tick, so the header shows a marker
+  // for the checkbox and no lifecycle badge (the open ladder means nothing
+  // there); Mark done / Cancel / Reopen live in the item menu.
+  const vEvent = () => vListId() === LIST_EVENTS;
+  const vOpenEvent = () => vEvent() && !vDone() && !vBinned();
   const vPinned = () => (item() ? focused() : newFocus());
   const vWhen = () => (item() ? (item()?.when ?? null) : newWhen());
   const vDuration = () =>
@@ -1079,27 +1107,38 @@ export function TaskDialog(props: {
               the Done lane "+" and the Done view's "Log" button, and
               flippable back off to file the item as a normal open task. */}
           <div class="task-dialog-status">
-            <input
-              type="checkbox"
-              class="task-check"
-              checked={vDone()}
-              data-cancelled={vCancelled() ? "" : undefined}
-              aria-label={
-                vCancelled()
-                  ? m().workspace.reopen
-                  : vDone()
-                    ? m().workspace.markNotDone
-                    : m().workspace.markDone
+            <Show
+              when={!vOpenEvent()}
+              fallback={
+                <span
+                  class="task-check event-mark"
+                  role="img"
+                  aria-label={m().upcoming.eventMark}
+                />
               }
-              onChange={(e) => setDoneFlag(e.currentTarget.checked)}
-            />
+            >
+              <input
+                type="checkbox"
+                class="task-check"
+                checked={vDone()}
+                data-cancelled={vCancelled() ? "" : undefined}
+                aria-label={
+                  vCancelled()
+                    ? m().workspace.reopen
+                    : vDone()
+                      ? m().workspace.markNotDone
+                      : m().workspace.markDone
+                }
+                onChange={(e) => setDoneFlag(e.currentTarget.checked)}
+              />
+            </Show>
             {/* Lifecycle badge beside the checkbox: the state the item is
                 in (or a capture will be filed in), and a menu to change
                 it. Hidden while binned (the bin mask overrides the
                 workflow state; Restore is the way out). The created /
                 completed timeline lives in the activity section under
                 the notes. */}
-            <Show when={!vBinned()}>
+            <Show when={!vBinned() && !vEvent()}>
               <LifecycleBadge value={vState} onChange={setState} />
             </Show>
           </div>
@@ -1117,6 +1156,39 @@ export function TaskDialog(props: {
                 />
                 <DropdownMenu.Portal>
                   <DropdownMenu.Content class="dropdown-menu-content task-dialog-menu-content">
+                    {/* An event's closing actions: it has no checkbox or
+                        lifecycle badge while Open, and the calendar's rows
+                        have no context menu, so this is where they live. */}
+                    <Show when={vEvent() && !isBinned(it())}>
+                      <Show
+                        when={!isClosed(it())}
+                        fallback={
+                          <DropdownMenu.Item
+                            class="dropdown-menu-item"
+                            onSelect={() => props.app.setDone(it().id, false)}
+                          >
+                            {isCancelled(it())
+                              ? m().workspace.reopen
+                              : m().workspace.markNotDone}
+                          </DropdownMenu.Item>
+                        }
+                      >
+                        <DropdownMenu.Item
+                          class="dropdown-menu-item"
+                          onSelect={() => props.app.setDone(it().id, true)}
+                        >
+                          {m().workspace.markDone}
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item
+                          class="dropdown-menu-item"
+                          onSelect={() =>
+                            props.app.setLifecycle(it().id, "cancelled")
+                          }
+                        >
+                          {m().workspace.markCancelled}
+                        </DropdownMenu.Item>
+                      </Show>
+                    </Show>
                     <DropdownMenu.Item
                       class="dropdown-menu-item"
                       onSelect={() => {

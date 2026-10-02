@@ -14,6 +14,8 @@ describe("hash routes", () => {
   test("parses every token", () => {
     expect(parseHash("#inbox")).toEqual({ kind: "view", view: { kind: "list", id: "inbox" } });
     expect(parseHash("#list_inbox")).toEqual({ kind: "view", view: { kind: "list", id: "inbox" } });
+    // The reserved `events` list's home is the calendar.
+    expect(parseHash("#list_events")).toEqual({ kind: "view", view: { kind: "upcoming" } });
     expect(parseHash("#focus")).toEqual({ kind: "view", view: { kind: "focus" } });
     expect(parseHash("#upcoming")).toEqual({ kind: "view", view: { kind: "upcoming" } });
     expect(parseHash("#done")).toEqual({ kind: "view", view: { kind: "done" } });

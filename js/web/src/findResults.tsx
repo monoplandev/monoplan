@@ -7,7 +7,7 @@
 // so each surface is left holding only its own interaction model.
 
 import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js";
-import type { DocApp } from "./sync/store.ts";
+import { LIST_EVENTS, type DocApp } from "./sync/store.ts";
 import { matchesName, type SearchResult } from "./search.ts";
 import { useAppI18n } from "./i18n.tsx";
 import archiveSvg from "./icons/archive.svg?raw";
@@ -118,18 +118,19 @@ export function createFindState(app: DocApp) {
 }
 
 /** Display name of the list an item lives in, for the right-hand
- *  column. The reserved `inbox` list isn't a `ListMeta` row — it always
- *  renders the localized built-in label. Lists themselves get no label.
- *  Returns "" when there's nothing to show. */
+ *  column. The reserved `inbox` and `events` lists aren't `ListMeta`
+ *  rows — they always render the localized built-in labels. Lists
+ *  themselves get no label. Returns "" when there's nothing to show. */
 export function findResultListLabel(
   app: DocApp,
-  inboxLabel: string,
+  builtin: { inbox: string; events: string },
   item: FindResult,
 ): string {
   if (item.kind !== "item") return "";
   const listId = item.listId;
   if (!listId) return "";
-  if (listId === "inbox") return inboxLabel;
+  if (listId === "inbox") return builtin.inbox;
+  if (listId === LIST_EVENTS) return builtin.events;
   return app.state.listsById[listId]?.name ?? "";
 }
 
@@ -169,7 +170,14 @@ export function FindResultBody(props: { app: DocApp; item: FindResult }) {
       : undefined;
   const viewIcon = (): string | undefined =>
     props.item.kind === "view" ? VIEW_ICONS[props.item.id] : undefined;
-  const listLabel = () => findResultListLabel(props.app, m().nav.inbox, props.item);
+  const listLabel = () => findResultListLabel(props.app, m().nav, props.item);
+  // An Open event shows its marker, not a box it has no use for.
+  const openEvent = () =>
+    props.item.kind === "item" &&
+    props.item.listId === LIST_EVENTS &&
+    lifecycle() !== "done" &&
+    lifecycle() !== "cancelled" &&
+    lifecycle() !== "binned";
   const archived = () => findResultArchived(props.app, props.item);
   return (
     <>
@@ -178,6 +186,7 @@ export function FindResultBody(props: { app: DocApp; item: FindResult }) {
         fallback={
           <span
             class="task-check palette__item-check"
+            classList={{ "event-mark": openEvent() }}
             data-kind={props.item.kind}
             data-checked={
               lifecycle() === "done" || lifecycle() === "cancelled" ? "" : undefined

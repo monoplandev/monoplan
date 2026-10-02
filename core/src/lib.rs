@@ -8,9 +8,10 @@ pub mod sync;
 
 pub use crypto::*;
 pub use doc::{
-    DefaultView, Doc, DocError, ExportItem, ExportLifecycle, ExportList, ExportSettings,
-    INBOX_NAME, ImportSummary, ItemLifecycle, ItemView, JsonExport, LIST_INBOX, LaneSet, ListView,
-    MAX_DURATION_MINUTES, NOTES_ORIGIN_PREFIX, NotesDeltaOp, SettingsView, WorkflowState,
+    DefaultView, Doc, DocError, EVENTS_NAME, ExportItem, ExportLifecycle, ExportList,
+    ExportSettings, INBOX_NAME, ImportSummary, ItemLifecycle, ItemView, JsonExport, LIST_EVENTS,
+    LIST_INBOX, LaneSet, ListView, MAX_DURATION_MINUTES, NOTES_ORIGIN_PREFIX, NotesDeltaOp,
+    SettingsView, WorkflowState,
 };
 pub use events::AppEvent;
 pub use storage::{
