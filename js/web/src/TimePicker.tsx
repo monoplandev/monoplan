@@ -31,7 +31,7 @@ import {
   type JSX,
 } from "solid-js";
 import { Portal } from "solid-js/web";
-import { timeFormatter, type TimeParts } from "./format.tsx";
+import { formatClockTime, type TimeParts } from "./format.tsx";
 import {
   nearestQuarterIndex,
   timeSuggestions,
@@ -101,19 +101,7 @@ export function TimePicker(props: {
     if (selectedIndex() !== index) setSelectedIndex(index);
   }
 
-  // Rows and the input read "1 PM" on the hour rather than "1:00 PM":
-  // the minutes carry nothing there. A 24-hour clock keeps "13:00", where
-  // a bare "13" does not read as a time.
-  const format = (t: TimeSuggestion) => {
-    const date = new Date(2000, 0, 1, t.hour, t.minute);
-    if (t.minute === 0 && props.cycle() === 12) {
-      return new Intl.DateTimeFormat(props.locale(), {
-        hour: "numeric",
-        hourCycle: "h12",
-      }).format(date);
-    }
-    return timeFormatter(props.locale()).format(date);
-  };
+  const format = (t: TimeSuggestion) => formatClockTime(t, props.locale());
 
   const display = createMemo(() => {
     const p = preview();

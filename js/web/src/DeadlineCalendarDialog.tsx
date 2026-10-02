@@ -12,7 +12,6 @@ import Calendar from "@corvu/calendar";
 import { Dialog } from "@kobalte/core/dialog";
 import { createMemo, For, Show } from "solid-js";
 import {
-  isCompleteTime,
   localDateStamp,
   parseLocalDateParts,
   whenDay,
@@ -55,10 +54,7 @@ export function CalendarPicker(props: CalendarPickerProps) {
   });
 
   // The stored time part a `when` pick carries over to the new day.
-  const time = () => {
-    const t = whenTime(props.value() ?? "");
-    return t && isCompleteTime(t) ? t : null;
-  };
+  const time = () => whenTime(props.value() ?? "");
 
   const monthLabelFmt = createMemo(
     () => new Intl.DateTimeFormat(locale(), { month: "long", year: "numeric" }),

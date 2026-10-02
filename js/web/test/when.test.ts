@@ -135,6 +135,9 @@ describe("hourCycle", () => {
     expect(formatWhenTime("2026-07-13T14:05", "en-US")).toBe("14:05");
     setTimeFormatPref("12h");
     expect(formatWhenTime("2026-07-13T14:05", "en-GB")).toMatch(/2:05\s?PM/i);
+    expect(formatWhenTime("2026-07-13T09:00", "en-GB")).toMatch(/^9\s?AM$/i);
+    setTimeFormatPref("24h");
+    expect(formatWhenTime("2026-07-13T09:00", "en-US")).toBe("09:00");
     setTimeFormatPref("auto");
     expect(formatWhenTime("2026-07-13", "en-US")).toBe("");
   });

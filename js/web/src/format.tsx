@@ -243,7 +243,7 @@ export function whenDay(when: string): string {
  *  new-item buffer mirrors it so the end field shows before commit. */
 export const DEFAULT_DURATION_MINUTES = 60;
 
-export function whenTime(when: string): TimeParts | null {
+export function whenTime(when: string): Required<TimeParts> | null {
   const m = /^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})$/.exec(when);
   if (!m) return null;
   return { hour: Number(m[1]), minute: Number(m[2]) };
@@ -309,15 +309,23 @@ export function hourCycle(locale: string): 12 | 24 {
   }
 }
 
+/** A wall-clock time in the preferred cycle, for the time pickers and
+ *  every `when` label. On the hour a 12-hour clock reads "1 PM" rather
+ *  than "1:00 PM": the minutes carry nothing there. A 24-hour clock keeps
+ *  "13:00", where a bare "13" does not read as a time. */
+export function formatClockTime(t: Required<TimeParts>, locale: string): string {
+  const date = new Date(2000, 0, 1, t.hour, t.minute);
+  if (t.minute === 0 && hourCycle(locale) === 12) {
+    return new Intl.DateTimeFormat(locale, { hour: "numeric", hourCycle: "h12" }).format(date);
+  }
+  return timeFormatter(locale).format(date);
+}
+
 /** Local wall-clock time of a timed `when`, in the preferred cycle; empty
  *  for an all-day value. */
 export function formatWhenTime(when: string, locale: string): string {
   const t = whenTime(when);
-  const d = parseLocalDateParts(whenDay(when));
-  if (!t || !d) return "";
-  return timeFormatter(locale).format(
-    new Date(d.getFullYear(), d.getMonth(), d.getDate(), t.hour, t.minute),
-  );
+  return t ? formatClockTime(t, locale) : "";
 }
 
 export type WhenUrgency = "today" | "future";

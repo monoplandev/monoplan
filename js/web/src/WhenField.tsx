@@ -18,7 +18,6 @@ import { createMemo, Show } from "solid-js";
 import { CalendarPicker } from "./DeadlineCalendarDialog.tsx";
 import {
   addDaysToStamp,
-  isCompleteTime,
   nowMs,
   parseLocalDateParts,
   todayStamp,
@@ -51,10 +50,7 @@ export function WhenField(props: {
   // The picker hands back a complete hour + minute, or null for all-day,
   // so every change writes straight through. The row only renders against
   // a set date; today is a fallback for the type, not a path taken.
-  const time = () => {
-    const t = whenTime(props.when() ?? "");
-    return t && isCompleteTime(t) ? t : null;
-  };
+  const time = () => whenTime(props.when() ?? "");
   const onTimeChange = (t: { hour: number; minute: number } | null) => {
     const w = props.when();
     const day = w ? whenDay(w) : todayStamp(nowMs());
