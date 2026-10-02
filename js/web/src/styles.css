@@ -1266,12 +1266,14 @@ input.task-check:hover {
 
 /* Has-notes badge: same geometry as the focus badge, an inert indicator.
    No pill background: it sits inline right after the title text, so it
-   reads as a glyph in the text flow, not a detached chip. */
+   reads as a glyph in the text flow, not a detached chip. Same softened
+   colour as the origin-list badge (.row-list). */
 .row-notes-badge {
   justify-content: center;
   margin-top: -1px;
   min-height: calc(1.3em + 4px);
   background: none;
+  color: color-mix(in srgb, var(--text-badge) 80%, var(--bg));
 }
 
 .row-notes-badge svg {
