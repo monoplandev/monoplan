@@ -44,6 +44,7 @@ One child `LoroMap` under `items`, keyed by `ItemId`.
 | `deadline` | string? | optional **date-only** deadline, a floating local calendar date in `YYYY-MM-DD` format (no time, no timezone, not unix millis). Absent ≡ no deadline; clearing deletes the key. Values that are not a well-formed `YYYY-MM-DD` calendar date are rejected by the mutation. Means "owed by": past it the item is overdue. |
 | `when` | string? | optional **planned date**, shape-discriminated: `YYYY-MM-DD` (all-day, 10 chars) or `YYYY-MM-DDTHH:MM` (timed, 16 chars, `HH` 00–23, `MM` 00–59). Floating wall-clock, no seconds, no zone; an RFC 9557 `[Zone]` suffix is reserved and rejected for now. Absent ≡ unset; clearing deletes the key. One register so date and time cannot tear under concurrent edit; sorts by plain string compare (all-day leads its day). Means "happens on" or "act on". Fixed: never rewritten or rolled over by the clock, and never red past its day. A past `when` has gone by like an event: there is no "slipped" state (decided 2026-09-30, `calendar-plan.md`). Independent of `deadline`. See `calendar-plan.md`. |
 | `duration` | i64? | optional **length in whole minutes**, `1..=10080` (one week). A length rather than an end so that moving `when` on one device and setting the length on another can never produce an item that ends before it starts; the end is derived (`when` + `duration`). Meaningful only beside a timed `when`: views ignore it beside an all-day or absent one, and the register is never cross-checked against `when` (no invalid state under concurrent edit). Absent ≡ unset; clearing deletes the key. Written by `set_item_when` too: a timed `when` on an item with no duration defaults it to 60 minutes in the same commit, and clearing `when` deletes it; timed → all-day keeps it. Out-of-range values read as unset. See `calendar-plan.md`. |
+| `place` | value? | optional **atomic place register** — a plain `LoroValue` map `{label, lat?, lon?, address?, ref?}` set whole (the `lifecycle` pattern as a map), so a label and its coordinates can never be torn apart by concurrent edits. `label` is required (trimmed, 1..=200 chars); `lat` / `lon` are WGS84 decimal degrees and come as a pair or not at all; `address` is display-only; `ref` is an opaque provider hint. Absent ≡ unset; clearing deletes the key. Canonicalised and validated by `set_item_place`; a malformed value from another writer reads as unset. Shared by events ("where it happens") and tasks ("where it can be done"). See `place-plan.md`. |
 | `created_at` | i64 | unix millis (client clock) |
 | `started_at` | i64? | **reflection stamp**: set (write-once) the first time the item enters In Progress; never cleared. Feeds analytics (created → started); no view reads it. |
 | `done_at` | i64? | **reflection stamp**: set each time the item enters Done; never cleared, so it survives later binning and un-doing. Feeds analytics (started → done); view sorts use the register's `at`, not this. |
@@ -444,6 +445,15 @@ All mutations go through Loro APIs internally; the core exposes typed helpers:
   `None` deletes the key. One commit. Rejects anything else (seconds, offsets,
   the reserved zone suffix) with `Invalid`. Emits `ItemWhenChanged { id, when }`;
   `ItemAdded` carries `when` too. Export dumps carry `when` only when set.
+- `set_item_duration(item_id, duration)` — `Some(minutes)` validates
+  `1..=10080` and writes the `duration` register; `None` deletes the key. One
+  commit. Emits `ItemDurationChanged { id, duration }`.
+- `set_item_place(item_id, place)` — `Some(place)` canonicalises
+  (`Place::normalized`: trimmed strings, empty optionals dropped, coordinates
+  as a pair, bounds) and writes the `place` register as one plain map value;
+  `None` deletes the key. One commit. Rejects a bad value with `Invalid`.
+  Emits `ItemPlaceChanged { id, place }`; `ItemAdded` carries `place` too.
+  Export dumps carry `place` only when set; import drops a malformed one.
 - `add_list(name) -> ListId`
 - `rename_list(list_id, name)`
 - `set_list_archived(list_id, archived)` — archives (`true`) or unarchives

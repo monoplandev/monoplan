@@ -27,6 +27,7 @@ import {
 } from "solid-js";
 import { Portal } from "solid-js/web";
 import { DeadlineField } from "./DeadlineField.tsx";
+import { PlaceField } from "./PlaceField.tsx";
 import { WhenField } from "./WhenField.tsx";
 import { ListPicker, type ListOption } from "./ListPicker.tsx";
 import checkSvg from "./icons/check.svg?raw";
@@ -73,6 +74,7 @@ import {
   type DocApp,
   type ItemView,
   type ListView,
+  type Place,
   type WorkflowState,
 } from "./sync/store.ts";
 
@@ -292,6 +294,8 @@ export function TaskDialog(props: {
   const [newWhen, setNewWhen] = createSignal<string | null>(null);
   // New-item mode's duration buffer, applied after `newWhen`.
   const [newDuration, setNewDuration] = createSignal<number | null>(null);
+  // New-item mode's place buffer, same deal.
+  const [newPlace, setNewPlace] = createSignal<Place | null>(null);
   // New-item mode's pin-to-Focus buffer, same deal as `newDeadline`.
   const [newFocus, setNewFocus] = createSignal(false);
   // Deadline popover open state, shared by both dialog modes. The date
@@ -646,6 +650,7 @@ export function TaskDialog(props: {
     setNewDeadline(null);
     setNewWhen(id ? null : (nw?.when ?? null));
     setNewDuration(null);
+    setNewPlace(null);
     setNewFocus(false);
     // The editors mount when the surface opens; defer so their refs exist,
     // then push — but only if this target is still the one showing.
@@ -720,6 +725,8 @@ export function TaskDialog(props: {
       if (w) props.app.setItemWhen(id, w);
       const dur = newDuration();
       if (w && dur) props.app.setItemDuration(id, dur);
+      const pl = newPlace();
+      if (pl) props.app.setItemPlace(id, pl);
       // A Done capture can't hold a Focus ref (auto-remove-on-Done,
       // spec/focus.md), so the pin buffer only applies to open captures.
       if (newFocus() && !nw.done) props.app.addToFocus(id);
@@ -749,6 +756,7 @@ export function TaskDialog(props: {
     setNewDeadline(null);
     setNewWhen(null);
     setNewDuration(null);
+    setNewPlace(null);
     setNewFocus(false);
     promoting = true;
     try {
@@ -1049,6 +1057,7 @@ export function TaskDialog(props: {
     item() ? (item()?.duration ?? null) : newDuration();
   const vDeadline = () =>
     item() ? (item()?.deadline ?? null) : newDeadline();
+  const vPlace = () => (item() ? (item()?.place ?? null) : newPlace());
   // Closed / Binned: date fields render muted and the pin toggle hides
   // (neither can hold a Focus ref, spec/focus.md).
   const muted = () => vDone() || vBinned();
@@ -1094,6 +1103,11 @@ export function TaskDialog(props: {
     const it = item();
     if (it) props.app.setItemDeadline(it.id, stamp);
     else setNewDeadline(stamp);
+  };
+  const onPlaceChange = (place: Place | null) => {
+    const it = item();
+    if (it) props.app.setItemPlace(it.id, place);
+    else setNewPlace(place);
   };
 
   // The surface body, shared by the three shells below.
@@ -1292,6 +1306,12 @@ export function TaskDialog(props: {
               open={deadlineCalOpen}
               setOpen={setDeadlineCalOpen}
             />
+          </section>
+
+          {/* Place section under the deadline: a typed label, or a lookup
+              (`PlaceField`). */}
+          <section class="task-dialog-section task-dialog-place-section">
+            <PlaceField place={vPlace} muted={muted} onChange={onPlaceChange} />
           </section>
 
           <section class="task-dialog-section">

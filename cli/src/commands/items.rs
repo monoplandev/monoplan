@@ -1,5 +1,5 @@
 //! Item commands: add / ls / backlog / todo / start / review / done /
-//! bin (verb) / restore / mv / edit / when / duration / deadline.
+//! bin (verb) / restore / mv / edit / when / duration / deadline / place.
 //!
 //! Every action goes through `Session` (open → mutate → flush). The
 //! session reads from and writes to the local Loro doc; it only talks
@@ -9,7 +9,7 @@
 use std::io::{BufRead, IsTerminal};
 
 use clap::Parser;
-use monoplan_core::{ItemLifecycle, ItemView, LIST_INBOX, WorkflowState};
+use monoplan_core::{ItemLifecycle, ItemView, LIST_INBOX, Place, WorkflowState};
 use serde::Serialize;
 
 use crate::sync::Session;
@@ -116,6 +116,9 @@ struct ItemJson<'a> {
     /// Duration in whole minutes, when set.
     #[serde(skip_serializing_if = "Option::is_none")]
     duration: Option<u32>,
+    /// Place (`{label, lat?, lon?, address?, ref?}`), when set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    place: Option<&'a Place>,
 }
 
 fn item_json(item: &ItemView) -> ItemJson<'_> {
@@ -132,12 +135,14 @@ fn item_json(item: &ItemView) -> ItemJson<'_> {
         deadline: item.deadline.as_deref(),
         when: item.when.as_deref(),
         duration: item.duration,
+        place: item.place.as_ref(),
     }
 }
 
-/// Trailing date tags for a text row: ` @<when>` (with `+<duration>`
+/// Trailing tags for a text row: ` @<when>` (with `+<duration>`
 /// glued on when a timed `when` carries one, e.g. `@2026-09-12T14:00+1h30m`)
-/// then ` !<deadline>`, each only when set. Shared by `ls` and `agenda`.
+/// then ` !<deadline>`, then ` at:<place label>`, each only when set.
+/// Shared by `ls` and `agenda`.
 pub fn date_tags(item: &ItemView) -> String {
     let mut s = String::new();
     if let Some(w) = &item.when {
@@ -151,6 +156,10 @@ pub fn date_tags(item: &ItemView) -> String {
     if let Some(d) = &item.deadline {
         s.push_str(" !");
         s.push_str(d);
+    }
+    if let Some(p) = &item.place {
+        s.push_str(" at:");
+        s.push_str(&p.label);
     }
     s
 }
@@ -382,6 +391,55 @@ fn clear_or(value: &str) -> Option<&str> {
     if value == "-" { None } else { Some(value) }
 }
 
+// ---------- place ----------
+
+#[derive(Parser, Debug)]
+pub struct PlaceArgs {
+    pub item_id: String,
+    /// The place's label, or `-` to clear.
+    pub label: String,
+    /// Coordinates as `<lat>,<lon>` in decimal degrees (WGS84).
+    #[arg(long, value_name = "LAT,LON")]
+    pub at: Option<String>,
+    /// A formatted address, shown beside the label.
+    #[arg(long)]
+    pub address: Option<String>,
+}
+
+/// Parse `<lat>,<lon>` in decimal degrees; the range check is the core's.
+pub fn parse_coords(raw: &str) -> anyhow::Result<(f64, f64)> {
+    let bad = || anyhow::anyhow!("coordinates must be <lat>,<lon> in decimal degrees: {raw:?}");
+    let (lat, lon) = raw.split_once(',').ok_or_else(bad)?;
+    let lat: f64 = lat.trim().parse().map_err(|_| bad())?;
+    let lon: f64 = lon.trim().parse().map_err(|_| bad())?;
+    Ok((lat, lon))
+}
+
+/// Set or clear the place: a label, optionally with `--at lat,lon` and
+/// `--address`; `-` clears. Validation lives in the core.
+pub async fn place(args: PlaceArgs, sync: bool) -> anyhow::Result<()> {
+    let value = match clear_or(&args.label) {
+        None => None,
+        Some(label) => {
+            let coords = args.at.as_deref().map(parse_coords).transpose()?;
+            Some(Place {
+                label: label.to_string(),
+                lat: coords.map(|c| c.0),
+                lon: coords.map(|c| c.1),
+                address: args.address.clone(),
+                reference: None,
+            })
+        }
+    };
+    let session = Session::open(sync).await?;
+    session
+        .doc()
+        .set_item_place(&args.item_id, value.as_ref())?;
+    session.flush().await?;
+    println!("{}", args.item_id);
+    Ok(())
+}
+
 // ---------- edit ----------
 
 #[derive(Parser, Debug)]
@@ -412,6 +470,18 @@ mod tests {
         assert_eq!(parse_duration("0h").unwrap(), 0);
         for bad in ["", "h", "m", "1x", "30m1h", "1h30", "-5", "1.5h"] {
             assert!(parse_duration(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn coords_parse_as_lat_lon_pair() {
+        assert_eq!(
+            parse_coords("-33.8688,151.2093").unwrap(),
+            (-33.8688, 151.2093)
+        );
+        assert_eq!(parse_coords(" 10 , 20 ").unwrap(), (10.0, 20.0));
+        for bad in ["", "1", "1,", "a,b", "1;2"] {
+            assert!(parse_coords(bad).is_err(), "{bad:?}");
         }
     }
 

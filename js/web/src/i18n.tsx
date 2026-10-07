@@ -283,6 +283,24 @@ export type Messages = {
      *  start time; typing an end stores a duration. */
     end: string;
   };
+  place: {
+    /** Accessible name of the task-dialog place input. */
+    label: string;
+    /** Placeholder of the place input when no place is set. */
+    placeholder: string;
+    /** ✕ beside the input: removes the place. */
+    remove: string;
+    /** Popover note while a lookup runs. */
+    searching: string;
+    /** Popover note when a lookup found nothing. */
+    noResults: string;
+    /** Popover note when a lookup failed. */
+    error: string;
+    /** Link under the input to the place on the map. */
+    openMap: string;
+    /** Attribution line at the foot of the results popover. */
+    credit: string;
+  };
   upcoming: {
     /** Upcoming view's Today group when nothing is due today. */
     emptyToday: string;
@@ -560,6 +578,16 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       clearTime: "Quitar hora",
       end: "Fin",
     },
+    place: {
+      label: "Lugar",
+      placeholder: "Lugar",
+      remove: "Quitar lugar",
+      searching: "Buscando…",
+      noResults: "Sin resultados",
+      error: "No se pudo buscar",
+      openMap: "Abrir mapa",
+      credit: "© Colaboradores de OpenStreetMap",
+    },
     upcoming: {
       emptyToday: "Nada para hoy",
       unscheduled: "Sin fecha",
@@ -817,6 +845,16 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       time: "Time",
       clearTime: "Remove time",
       end: "End",
+    },
+    place: {
+      label: "Place",
+      placeholder: "Place",
+      remove: "Remove place",
+      searching: "Searching…",
+      noResults: "No results",
+      error: "Lookup failed",
+      openMap: "Open map",
+      credit: "© OpenStreetMap contributors",
     },
     upcoming: {
       emptyToday: "Nothing due today",

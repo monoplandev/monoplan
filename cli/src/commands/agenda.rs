@@ -12,7 +12,7 @@
 
 use chrono::{Datelike, Days, Local, NaiveDate};
 use clap::Parser;
-use monoplan_core::ItemView;
+use monoplan_core::{ItemView, Place};
 use serde::Serialize;
 
 use crate::sync::Session;
@@ -317,6 +317,8 @@ struct RowJson<'a> {
     duration: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     deadline: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    place: Option<&'a Place>,
     /// Absent on an Unscheduled row: no field placed it.
     #[serde(skip_serializing_if = "Option::is_none")]
     placed_by: Option<PlacedBy>,
@@ -332,6 +334,7 @@ fn row_json(row: &AgendaRow) -> RowJson<'_> {
         when: row.item.when.as_deref(),
         duration: row.item.duration,
         deadline: row.item.deadline.as_deref(),
+        place: row.item.place.as_ref(),
         placed_by: Some(row.placed_by),
         tone: row.tone,
     }
@@ -346,6 +349,7 @@ fn unscheduled_json(item: &ItemView) -> RowJson<'_> {
         when: None,
         duration: None,
         deadline: None,
+        place: item.place.as_ref(),
         placed_by: None,
         tone: Tone::Neutral,
     }
@@ -367,6 +371,7 @@ mod tests {
             deadline: deadline.map(str::to_string),
             when: when.map(str::to_string),
             duration: None,
+            place: None,
             created_at,
             started_at: None,
             done_at: None,

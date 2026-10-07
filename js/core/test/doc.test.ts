@@ -216,3 +216,48 @@ describe("Doc duration", () => {
     expect(after[0].duration).toBeUndefined();
   });
 });
+
+describe("Doc place", () => {
+  test("sets, reads back, clears, and rejects an empty label", () => {
+    const doc = Doc.create();
+    const id = doc.addItem(LIST_MAIN, "dinner");
+    expect(JSON.parse(doc.itemsInListJson(LIST_MAIN, false))[0].place).toBeUndefined();
+
+    doc.setItemPlace(id, JSON.stringify({ label: "  Luigi's " }));
+    expect(JSON.parse(doc.itemsInListJson(LIST_MAIN, false))[0].place).toEqual({
+      label: "Luigi's",
+    });
+
+    doc.setItemPlace(
+      id,
+      JSON.stringify({
+        label: "Luigi's",
+        lat: -33.8688,
+        lon: 151.2093,
+        address: "1 George St",
+        ref: "osm:node/1",
+      }),
+    );
+    expect(JSON.parse(doc.itemsInListJson(LIST_MAIN, false))[0].place).toEqual({
+      label: "Luigi's",
+      lat: -33.8688,
+      lon: 151.2093,
+      address: "1 George St",
+      ref: "osm:node/1",
+    });
+
+    for (const bad of [
+      { label: "" },
+      { label: "Half", lat: 1 },
+      { label: "Far", lat: 91, lon: 0 },
+    ]) {
+      expect(() => doc.setItemPlace(id, JSON.stringify(bad))).toThrow();
+    }
+    expect(() => doc.setItemPlace(id, "not json")).toThrow();
+    // The doc is untouched by the rejects.
+    expect(JSON.parse(doc.itemsInListJson(LIST_MAIN, false))[0].place.label).toBe("Luigi's");
+
+    doc.setItemPlace(id, undefined);
+    expect(JSON.parse(doc.itemsInListJson(LIST_MAIN, false))[0].place).toBeUndefined();
+  });
+});

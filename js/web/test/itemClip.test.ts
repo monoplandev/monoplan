@@ -58,6 +58,21 @@ describe("toClipItem", () => {
       state: "backlog",
     });
   });
+
+  test("carries the place whole", () => {
+    const place = {
+      label: "Luigi's",
+      lat: -33.8688,
+      lon: 151.2093,
+      address: "1 George St",
+      ref: "osm:node/1",
+    };
+    expect(toClipItem(item({ place }))).toEqual({
+      text: "Buy milk",
+      state: "backlog",
+      place,
+    });
+  });
 });
 
 describe("renderClip", () => {
@@ -134,6 +149,32 @@ describe("readClip", () => {
       { text: "A", state: "backlog" },
       { text: "B", state: "done", when: "2026-10-02" },
       { text: "C", state: "cancelled" },
+    ]);
+  });
+
+  test("places round-trip, and a malformed place is dropped", () => {
+    const good = { label: "Gym", lat: 51.5, lon: -0.12, address: "London" };
+    const labelOnly = { label: "Home" };
+    const raw = JSON.stringify({
+      v: 1,
+      items: [
+        { text: "A", state: "backlog", place: good },
+        { text: "B", state: "backlog", place: labelOnly },
+        { text: "C", state: "backlog", place: { label: "" } },
+        { text: "D", state: "backlog", place: { label: "Half", lat: 1 } },
+        { text: "E", state: "backlog", place: { label: "Far", lat: 91, lon: 0 } },
+        { text: "F", state: "backlog", place: "Luigi's" },
+        { text: "G", state: "backlog", place: { label: "Extra", bogus: 1, ref: "" } },
+      ],
+    });
+    expect(readClip(transfer({ [ITEM_CLIP_TYPE]: raw }))).toEqual([
+      { text: "A", state: "backlog", place: good },
+      { text: "B", state: "backlog", place: labelOnly },
+      { text: "C", state: "backlog" },
+      { text: "D", state: "backlog" },
+      { text: "E", state: "backlog" },
+      { text: "F", state: "backlog" },
+      { text: "G", state: "backlog", place: { label: "Extra" } },
     ]);
   });
 });

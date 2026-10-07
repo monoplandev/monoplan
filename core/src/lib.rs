@@ -10,8 +10,8 @@ pub use crypto::*;
 pub use doc::{
     DefaultView, Doc, DocError, EVENTS_NAME, ExportItem, ExportLifecycle, ExportList,
     ExportSettings, INBOX_NAME, ImportSummary, ItemLifecycle, ItemView, JsonExport, LIST_EVENTS,
-    LIST_INBOX, LaneSet, ListView, MAX_DURATION_MINUTES, NOTES_ORIGIN_PREFIX, NotesDeltaOp,
-    SettingsView, WorkflowState,
+    LIST_INBOX, LaneSet, ListView, MAX_DURATION_MINUTES, MAX_PLACE_DETAIL_CHARS,
+    MAX_PLACE_LABEL_CHARS, NOTES_ORIGIN_PREFIX, NotesDeltaOp, Place, SettingsView, WorkflowState,
 };
 pub use events::AppEvent;
 pub use storage::{

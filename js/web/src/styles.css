@@ -2988,6 +2988,155 @@ input.task-check:hover {
   }
 }
 
+/* The place field (`PlaceField`): the date input's anatomy, editable.
+   Its two inset actions (✕ while a place is set, the lookup magnifier)
+   share the right edge; the ✕ follows the date input's hover reveal, the
+   magnifier is always there since it is the only way to a lookup. */
+.task-dialog-place {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-dialog-place-input {
+  caret-color: auto;
+  cursor: text;
+  padding-right: 28px;
+}
+
+.task-dialog-place-action {
+  position: absolute;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  border-radius: 4px;
+  opacity: 0;
+}
+
+.task-dialog-when-anchor:hover .task-dialog-place-action,
+.task-dialog-when-anchor:focus-within .task-dialog-place-action {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .task-dialog-place-action {
+    opacity: 1;
+  }
+}
+
+/* The address line under the input: muted, indented past the glyph, with
+   the map link at the end. */
+.task-dialog-place-address {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 4px 0 26px;
+  font-size: 12px;
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+.task-dialog-place-address[data-muted] {
+  color: var(--text-empty);
+}
+
+.task-dialog-place-address-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-dialog-place-map {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--link);
+  text-decoration: none;
+}
+
+.task-dialog-place-map:hover {
+  text-decoration: underline;
+}
+
+.task-dialog-place-map-icon {
+  display: inline-flex;
+}
+
+.task-dialog-place-map-icon svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* The lookup results popover: a plain list of results under the input,
+   each the feature's name over its formatted address. */
+/* Sized by the popper to the input's width (`sameWidth`); the card only
+   needs to be as tall as its rows, and it stays compact while a lookup
+   runs or finds nothing. */
+.place-popover {
+  min-width: 0;
+  max-width: calc(100vw - 32px);
+  padding: 4px;
+}
+
+.place-popover-note {
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.place-popover-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.place-popover-result {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.place-popover-result:hover,
+.place-popover-result:focus-visible {
+  background: var(--bg-hover);
+  outline: none;
+}
+
+.place-popover-result-label {
+  font-size: 14px;
+}
+
+.place-popover-result-address {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.place-popover-credit {
+  padding: 4px 8px 2px;
+  font-size: 10px;
+  color: var(--text-empty);
+}
+
 /* The picker popover under the date input: shares the modal's card look
    (`.deadline-dialog`) and sits above the task dialog (z-index 100 / 101). */
 .when-popover {
@@ -3981,6 +4130,19 @@ input.task-check:hover {
 }
 
 .when-badge[data-tone="muted"] {
+  color: var(--text-badge-faint);
+}
+
+/* Place pill (`PlaceBadge`): the date pills' geometry and icon slot,
+   never toned; the label can run long, so it clips. */
+.place-badge {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.place-badge[data-tone="muted"] {
   color: var(--text-badge-faint);
 }
 

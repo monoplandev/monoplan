@@ -132,6 +132,138 @@ pub const MAX_DURATION_MINUTES: u32 = 7 * 24 * 60;
 /// duration yet: a start implies an end, and an hour is the calendar
 /// default. See `set_item_when`.
 pub const DEFAULT_DURATION_MINUTES: u32 = 60;
+/// Optional place register (`spec/place-plan.md`): one atomic plain
+/// `LoroValue` map `{label, lat?, lon?, address?, ref?}` so a label and
+/// its coordinates can never be torn apart by concurrent edits (the
+/// `lifecycle` pattern, as a map). Absent ≡ unset; the mutation deletes
+/// the key when cleared. Validated in `set_item_place`; a malformed or
+/// out-of-range value written by another client reads as unset.
+const KEY_PLACE: &str = "place";
+/// Upper bound on a place label, in chars.
+pub const MAX_PLACE_LABEL_CHARS: usize = 200;
+/// Upper bound on a place address or provider ref, in chars.
+pub const MAX_PLACE_DETAIL_CHARS: usize = 500;
+
+/// A named place, optionally pinned to coordinates. `label` is the
+/// user-facing name and the only required part; `lat` / `lon` are WGS84
+/// decimal degrees and come as a pair or not at all; `address` is a
+/// display-only formatted address from whatever geocoder found it;
+/// `reference` is an opaque provider hint (`osm:node/123`) that nothing
+/// depends on. See `spec/place-plan.md`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Place {
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub lat: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub lon: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default, rename = "ref")]
+    pub reference: Option<String>,
+}
+
+// Coordinates are finite by construction (`Place::normalized` rejects
+// NaN and infinities, and `read_place` drops them), so `PartialEq` is an
+// equivalence on every `Place` that can exist.
+impl Eq for Place {}
+
+impl Place {
+    /// Validate and canonicalise: trims every string, drops empty
+    /// optionals, requires a non-empty label within the length bounds,
+    /// and requires `lat` / `lon` to be both present (finite, in range)
+    /// or both absent.
+    pub fn normalized(&self) -> Result<Place, DocError> {
+        let label = self.label.trim();
+        if label.is_empty() {
+            return Err(DocError::Invalid("place label must not be empty".into()));
+        }
+        if label.chars().count() > MAX_PLACE_LABEL_CHARS {
+            return Err(DocError::Invalid(format!(
+                "place label must be at most {MAX_PLACE_LABEL_CHARS} chars"
+            )));
+        }
+        let (lat, lon) = match (self.lat, self.lon) {
+            (None, None) => (None, None),
+            (Some(lat), Some(lon)) => {
+                if !lat.is_finite() || !(-90.0..=90.0).contains(&lat) {
+                    return Err(DocError::Invalid(format!("place lat out of range: {lat}")));
+                }
+                if !lon.is_finite() || !(-180.0..=180.0).contains(&lon) {
+                    return Err(DocError::Invalid(format!("place lon out of range: {lon}")));
+                }
+                (Some(lat), Some(lon))
+            }
+            _ => {
+                return Err(DocError::Invalid(
+                    "place lat and lon must be set together".into(),
+                ));
+            }
+        };
+        let detail = |v: &Option<String>, what: &str| -> Result<Option<String>, DocError> {
+            let Some(s) = v.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+                return Ok(None);
+            };
+            if s.chars().count() > MAX_PLACE_DETAIL_CHARS {
+                return Err(DocError::Invalid(format!(
+                    "place {what} must be at most {MAX_PLACE_DETAIL_CHARS} chars"
+                )));
+            }
+            Ok(Some(s.to_string()))
+        };
+        Ok(Place {
+            label: label.to_string(),
+            lat,
+            lon,
+            address: detail(&self.address, "address")?,
+            reference: detail(&self.reference, "ref")?,
+        })
+    }
+
+    fn to_loro_value(&self) -> LoroValue {
+        let mut m: Vec<(String, LoroValue)> = vec![("label".into(), self.label.as_str().into())];
+        if let (Some(lat), Some(lon)) = (self.lat, self.lon) {
+            m.push(("lat".into(), lat.into()));
+            m.push(("lon".into(), lon.into()));
+        }
+        if let Some(a) = &self.address {
+            m.push(("address".into(), a.as_str().into()));
+        }
+        if let Some(r) = &self.reference {
+            m.push(("ref".into(), r.as_str().into()));
+        }
+        LoroValue::Map(m.into())
+    }
+
+    fn from_loro_value(value: &LoroValue) -> Option<Place> {
+        let LoroValue::Map(m) = value else {
+            return None;
+        };
+        let str_of = |k: &str| -> Option<String> {
+            match m.get(k) {
+                Some(LoroValue::String(s)) => Some(s.to_string()),
+                _ => None,
+            }
+        };
+        let num_of = |k: &str| -> Option<f64> {
+            match m.get(k) {
+                Some(LoroValue::Double(d)) => Some(*d),
+                Some(LoroValue::I64(n)) => Some(*n as f64),
+                _ => None,
+            }
+        };
+        Place {
+            label: str_of("label")?,
+            lat: num_of("lat"),
+            lon: num_of("lon"),
+            address: str_of("address"),
+            reference: str_of("ref"),
+        }
+        .normalized()
+        .ok()
+    }
+}
 const KEY_NAME: &str = "name";
 /// Optional per-list display icon. Stored as the literal emoji grapheme
 /// the user picked (e.g. `"📥"`); absent/empty means "no icon, render the
@@ -376,6 +508,8 @@ pub struct ItemView {
     /// Optional duration in whole minutes, `1..=MAX_DURATION_MINUTES`.
     /// `None` ≡ unset. Only meaningful beside a timed `when`.
     pub duration: Option<u32>,
+    /// Optional place (`spec/place-plan.md`). `None` ≡ unset.
+    pub place: Option<Place>,
     pub created_at: i64,
     /// Reflection stamp: first entry into In Progress (write-once).
     pub started_at: Option<i64>,
@@ -678,6 +812,10 @@ pub struct ExportItem {
     /// byte-identical.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub duration: Option<u32>,
+    /// Place (`{label, lat?, lon?, address?, ref?}`). Skipped when unset
+    /// so older dumps stay byte-identical.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub place: Option<Place>,
     pub created_at: i64,
     /// Reflection stamp (first entry into In Progress). Skipped when
     /// unset; v2 exports never carry it.
@@ -1705,6 +1843,7 @@ impl Doc {
                 deadline: None,
                 when: None,
                 duration: None,
+                place: None,
                 open_index,
             });
         }
@@ -1970,6 +2109,28 @@ impl Doc {
         self.push_event(AppEvent::ItemDurationChanged {
             id: item_id.to_string(),
             duration,
+        });
+        Ok(())
+    }
+
+    /// Set (`Some`) or clear (`None`) an item's place. The value is
+    /// canonicalised by `Place::normalized` (trimmed, bounded, coordinates
+    /// as a pair); a bad value returns `Invalid` and leaves the doc
+    /// untouched. Written as one atomic plain map value, so a label and
+    /// its coordinates always arrive together. One Loro commit.
+    pub fn set_item_place(&self, item_id: &str, place: Option<&Place>) -> Result<(), DocError> {
+        let place = place.map(Place::normalized).transpose()?;
+        let map = self.find_item(item_id)?;
+        match &place {
+            Some(p) => map.insert(KEY_PLACE, p.to_loro_value())?,
+            None => {
+                let _ = map.delete(KEY_PLACE);
+            }
+        }
+        self.inner.commit();
+        self.push_event(AppEvent::ItemPlaceChanged {
+            id: item_id.to_string(),
+            place,
         });
         Ok(())
     }
@@ -3215,6 +3376,7 @@ impl Doc {
                 deadline: item.deadline,
                 when: item.when,
                 duration: item.duration,
+                place: item.place,
                 created_at: item.created_at,
                 started_at: item.started_at,
                 done_at: item.done_at,
@@ -3390,6 +3552,10 @@ impl Doc {
                 .filter(|n| (1..=MAX_DURATION_MINUTES).contains(n))
             {
                 map.insert(KEY_DURATION, i64::from(n))?;
+            }
+            // And for a malformed place: dropped rather than rejected.
+            if let Some(place) = src_item.place.as_ref().and_then(|p| p.normalized().ok()) {
+                map.insert(KEY_PLACE, place.to_loro_value())?;
             }
             let notes = src_item.notes.trim();
             if !notes.is_empty() {
@@ -3960,6 +4126,7 @@ impl Doc {
                         KEY_DEADLINE,
                         KEY_WHEN,
                         KEY_DURATION,
+                        KEY_PLACE,
                         KEY_LIFECYCLE,
                         KEY_STARTED_AT,
                         KEY_DONE_AT,
@@ -4100,6 +4267,12 @@ impl Doc {
                         duration: view.duration,
                     });
                 }
+                if has(KEY_PLACE) {
+                    self.push_event(AppEvent::ItemPlaceChanged {
+                        id: id.clone(),
+                        place: view.place.clone(),
+                    });
+                }
                 // An open→open workflow flip (the register alone, e.g.
                 // Backlog → In Progress) changes the item's lane but not
                 // its order, so the per-list walk emits nothing for it —
@@ -4160,6 +4333,7 @@ impl Doc {
                     deadline: view.deadline,
                     when: view.when,
                     duration: view.duration,
+                    place: view.place,
                     open_index: None,
                 });
                 continue;
@@ -4224,6 +4398,7 @@ impl Doc {
                             deadline: view.deadline,
                             when: view.when,
                             duration: view.duration,
+                            place: view.place,
                             open_index: Some(i),
                         },
                     );
@@ -4490,6 +4665,7 @@ impl Doc {
                 deadline: item.deadline,
                 when: item.when,
                 duration: item.duration,
+                place: item.place,
                 open_index,
             });
         }
@@ -4588,6 +4764,7 @@ impl Doc {
             hash_opt_str(&mut hasher, i.deadline.as_deref());
             hash_opt_str(&mut hasher, i.when.as_deref());
             hash_opt_i64(&mut hasher, i.duration.map(i64::from));
+            hash_opt_place(&mut hasher, i.place.as_ref());
             hasher.update(i.created_at.to_be_bytes());
             hash_opt_i64(&mut hasher, i.started_at);
             hash_opt_i64(&mut hasher, i.done_at);
@@ -5165,6 +5342,13 @@ fn read_duration(map: &LoroMap) -> Option<u32> {
         .filter(|n| (1..=MAX_DURATION_MINUTES).contains(n))
 }
 
+/// `place` register; anything that is not a well-formed place map (a
+/// stray write, a newer shape) reads as unset.
+fn read_place(map: &LoroMap) -> Option<Place> {
+    let v = map.get(KEY_PLACE)?;
+    Place::from_loro_value(v.as_value()?)
+}
+
 fn read_i64(map: &LoroMap, key: &str) -> Option<i64> {
     let v = map.get(key)?;
     let value = v.as_value()?.clone();
@@ -5310,6 +5494,7 @@ fn item_view(map: &LoroMap) -> Option<ItemView> {
         deadline: read_string(map, KEY_DEADLINE).filter(|s| !s.is_empty()),
         when: read_string(map, KEY_WHEN).filter(|s| !s.is_empty()),
         duration: read_duration(map),
+        place: read_place(map),
         created_at: read_i64(map, KEY_CREATED_AT)?,
         started_at: read_i64(map, KEY_STARTED_AT),
         done_at: read_i64(map, KEY_DONE_AT),
@@ -5471,6 +5656,20 @@ fn hash_opt_str(hasher: &mut Sha256, v: Option<&str>) {
     }
 }
 
+fn hash_opt_place(hasher: &mut Sha256, v: Option<&Place>) {
+    match v {
+        Some(p) => {
+            hasher.update([1u8]);
+            hash_str(hasher, &p.label);
+            hash_opt_i64(hasher, p.lat.map(f64::to_bits).map(|b| b as i64));
+            hash_opt_i64(hasher, p.lon.map(f64::to_bits).map(|b| b as i64));
+            hash_opt_str(hasher, p.address.as_deref());
+            hash_opt_str(hasher, p.reference.as_deref());
+        }
+        None => hasher.update([0u8]),
+    }
+}
+
 fn hash_opt_i64(hasher: &mut Sha256, v: Option<i64>) {
     match v {
         Some(n) => {
@@ -5552,6 +5751,7 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                     deadline: post_it.deadline.clone(),
                     when: post_it.when.clone(),
                     duration: post_it.duration,
+                    place: post_it.place.clone(),
                     open_index,
                 });
             }
@@ -5584,6 +5784,12 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                     out.push(AppEvent::ItemDurationChanged {
                         id: post_it.id.clone(),
                         duration: post_it.duration,
+                    });
+                }
+                if pre_it.place != post_it.place {
+                    out.push(AppEvent::ItemPlaceChanged {
+                        id: post_it.id.clone(),
+                        place: post_it.place.clone(),
                     });
                 }
                 if pre_it.state != post_it.state
@@ -8487,6 +8693,7 @@ mod tests {
             deadline: None,
             when: None,
             duration: None,
+            place: None,
             created_at: 1,
             started_at: None,
             done_at: None,
@@ -8992,6 +9199,224 @@ mod tests {
         )));
     }
 
+    fn place(label: &str, coords: Option<(f64, f64)>) -> Place {
+        Place {
+            label: label.to_string(),
+            lat: coords.map(|c| c.0),
+            lon: coords.map(|c| c.1),
+            address: None,
+            reference: None,
+        }
+    }
+
+    #[test]
+    fn set_and_clear_item_place() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "dinner").unwrap();
+        assert_eq!(doc.get_item(&id).unwrap().place, None);
+        let _ = doc.drain_events();
+
+        // Label-only is a complete place.
+        doc.set_item_place(&id, Some(&place("  Luigi's  ", None)))
+            .unwrap();
+        let got = doc.get_item(&id).unwrap().place.unwrap();
+        assert_eq!(got, place("Luigi's", None));
+        assert_eq!(
+            doc.drain_events(),
+            vec![AppEvent::ItemPlaceChanged {
+                id: id.clone(),
+                place: Some(place("Luigi's", None)),
+            }]
+        );
+
+        // Coordinates plus the optional details round-trip, trimmed, with
+        // empty optionals dropped.
+        let full = Place {
+            label: "Luigi's".into(),
+            lat: Some(-33.8688),
+            lon: Some(151.2093),
+            address: Some(" 1 George St, Sydney ".into()),
+            reference: Some("".into()),
+        };
+        doc.set_item_place(&id, Some(&full)).unwrap();
+        let got = doc.get_item(&id).unwrap().place.unwrap();
+        assert_eq!(got.lat, Some(-33.8688));
+        assert_eq!(got.lon, Some(151.2093));
+        assert_eq!(got.address.as_deref(), Some("1 George St, Sydney"));
+        assert_eq!(got.reference, None);
+        let _ = doc.drain_events();
+
+        // Clear deletes the key.
+        doc.set_item_place(&id, None).unwrap();
+        assert_eq!(doc.get_item(&id).unwrap().place, None);
+        assert_eq!(
+            doc.drain_events(),
+            vec![AppEvent::ItemPlaceChanged {
+                id: id.clone(),
+                place: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn set_item_place_rejects_invalid_values() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "x").unwrap();
+        doc.set_item_place(&id, Some(&place("Home", Some((1.0, 2.0)))))
+            .unwrap();
+        let _ = doc.drain_events();
+        let long = "x".repeat(MAX_PLACE_LABEL_CHARS + 1);
+        let bad = [
+            place("", None),
+            place("   ", None),
+            place(&long, None),
+            place("Pole", Some((90.5, 0.0))),
+            place("Far", Some((0.0, -180.5))),
+            place("NaN", Some((f64::NAN, 0.0))),
+            place("Inf", Some((0.0, f64::INFINITY))),
+            Place {
+                lon: None,
+                ..place("Half", Some((1.0, 1.0)))
+            },
+            Place {
+                address: Some("y".repeat(MAX_PLACE_DETAIL_CHARS + 1)),
+                ..place("Long address", None)
+            },
+        ];
+        for p in &bad {
+            let err = doc.set_item_place(&id, Some(p)).unwrap_err();
+            assert!(matches!(err, DocError::Invalid(_)), "{p:?}: {err:?}");
+        }
+        // The doc is untouched by any of them.
+        assert_eq!(
+            doc.get_item(&id).unwrap().place,
+            Some(place("Home", Some((1.0, 2.0))))
+        );
+        assert!(doc.drain_events().is_empty());
+        // Boundaries are inclusive.
+        doc.set_item_place(&id, Some(&place("Edge", Some((-90.0, 180.0)))))
+            .unwrap();
+        assert_eq!(doc.get_item(&id).unwrap().place.unwrap().lon, Some(180.0));
+    }
+
+    #[test]
+    fn malformed_raw_place_reads_as_unset() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "x").unwrap();
+        let map = doc.find_item(&id).unwrap();
+        let map_of = |pairs: Vec<(&str, LoroValue)>| {
+            LoroValue::Map(
+                pairs
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v))
+                    .collect::<Vec<_>>()
+                    .into(),
+            )
+        };
+        for garbage in [
+            LoroValue::String("Luigi's".to_string().into()),
+            map_of(vec![("lat", 1.0.into()), ("lon", 2.0.into())]),
+            map_of(vec![("label", "".into())]),
+            map_of(vec![("label", "Half".into()), ("lat", 1.0.into())]),
+            map_of(vec![
+                ("label", "Far".into()),
+                ("lat", 91.0.into()),
+                ("lon", 0.0.into()),
+            ]),
+        ] {
+            map.insert(KEY_PLACE, garbage).unwrap();
+            doc.inner.commit();
+            assert_eq!(doc.get_item(&id).unwrap().place, None);
+        }
+        // An integer coordinate from a lax writer still reads.
+        map.insert(
+            KEY_PLACE,
+            map_of(vec![
+                ("label", "Int".into()),
+                ("lat", 10i64.into()),
+                ("lon", 20i64.into()),
+            ]),
+        )
+        .unwrap();
+        doc.inner.commit();
+        assert_eq!(
+            doc.get_item(&id).unwrap().place,
+            Some(place("Int", Some((10.0, 20.0))))
+        );
+    }
+
+    #[test]
+    fn export_import_preserves_place_and_drops_invalid() {
+        let src = Doc::new().unwrap();
+        let a = src.add_item(LIST_INBOX, "placed").unwrap();
+        let _b = src.add_item(LIST_INBOX, "unset").unwrap();
+        src.set_item_place(&a, Some(&place("Gym", Some((51.5, -0.12)))))
+            .unwrap();
+
+        let export = src.export_json();
+        let json = serde_json::to_string(&export).unwrap();
+        assert_eq!(json.matches("\"place\"").count(), 1);
+        assert!(json.contains("\"label\":\"Gym\""));
+
+        let dst = Doc::new().unwrap();
+        dst.import_json(&export).unwrap();
+        let imported: Vec<ItemView> = dst.iter_items().collect();
+        let find = |t: &str| imported.iter().find(|i| i.text == t).unwrap();
+        assert_eq!(
+            find("placed").place,
+            Some(place("Gym", Some((51.5, -0.12))))
+        );
+        assert_eq!(find("unset").place, None);
+
+        let mut edited = export.clone();
+        edited.items[0].place = Some(place("", None));
+        let dst2 = Doc::new().unwrap();
+        dst2.import_json(&edited).unwrap();
+        assert!(dst2.iter_items().all(|i| i.place.is_none()));
+    }
+
+    #[test]
+    fn place_converges_between_peers_as_one_value() {
+        let dek = Dek::generate();
+        let mut a = Doc::new().unwrap();
+        let id = a.add_item(LIST_INBOX, "sync me").unwrap();
+        let seed = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        let mut b = Doc::empty();
+        b.apply_remote(&dek, &seed).unwrap();
+        let _ = a.drain_events();
+        let _ = b.drain_events();
+
+        let luigis = Place {
+            address: Some("1 George St".into()),
+            reference: Some("osm:node/1".into()),
+            ..place("Luigi's", Some((-33.8688, 151.2093)))
+        };
+        a.set_item_place(&id, Some(&luigis)).unwrap();
+        let frame = a.pending_export(&dek).unwrap().unwrap();
+        b.apply_remote(&dek, &frame).unwrap();
+        assert_eq!(b.get_item(&id).unwrap().place.as_ref(), Some(&luigis));
+        assert_eq!(a.fingerprint(), b.fingerprint());
+        assert!(b.drain_events().iter().any(|e| matches!(
+            e,
+            AppEvent::ItemPlaceChanged { id: eid, place: Some(p) } if eid == &id && p == &luigis
+        )));
+
+        // Concurrent writes resolve to one whole place, never a label from
+        // one side with coordinates from the other.
+        let home = place("Home", Some((1.0, 1.0)));
+        let work = place("Work", None);
+        a.set_item_place(&id, Some(&home)).unwrap();
+        b.set_item_place(&id, Some(&work)).unwrap();
+        let fa = a.pending_export(&dek).unwrap().unwrap();
+        let fb = b.pending_export(&dek).unwrap().unwrap();
+        b.apply_remote(&dek, &fa).unwrap();
+        a.apply_remote(&dek, &fb).unwrap();
+        let got = a.get_item(&id).unwrap().place.unwrap();
+        assert_eq!(got, b.get_item(&id).unwrap().place.unwrap());
+        assert!(got == home || got == work, "{got:?}");
+    }
+
     #[test]
     fn set_item_when_rejects_malformed_values() {
         let doc = Doc::new().unwrap();
@@ -9192,6 +9617,7 @@ mod tests {
                 deadline: None,
                 when: None,
                 duration: None,
+                place: None,
                 created_at: 1_700_000_000_000,
                 started_at: None,
                 done_at: None,

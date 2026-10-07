@@ -52,6 +52,41 @@ export const WORKFLOW_STATES: readonly WorkflowState[] = [
   ...CLOSED_STATES,
 ];
 
+/** A named place, optionally pinned to coordinates (`spec/place-plan.md`).
+ *  `label` is the user-facing name and the only required part; `lat` /
+ *  `lon` are WGS84 decimal degrees and come as a pair or not at all;
+ *  `address` is a display-only formatted address from whatever geocoder
+ *  found it; `ref` is an opaque provider hint (`osm:node/123`). */
+export interface Place {
+  label: string;
+  lat?: number;
+  lon?: number;
+  address?: string;
+  ref?: string;
+}
+
+/** Parse the JSON text the wasm boundary carries a place as; `undefined`
+ *  for unset or anything that is not a place. */
+export function parsePlaceJson(json: string | undefined | null): Place | undefined {
+  if (!json) return undefined;
+  try {
+    const v = JSON.parse(json) as unknown;
+    if (typeof v !== "object" || v === null) return undefined;
+    const p = v as Record<string, unknown>;
+    if (typeof p.label !== "string" || !p.label) return undefined;
+    const out: Place = { label: p.label };
+    if (typeof p.lat === "number" && typeof p.lon === "number") {
+      out.lat = p.lat;
+      out.lon = p.lon;
+    }
+    if (typeof p.address === "string" && p.address) out.address = p.address;
+    if (typeof p.ref === "string" && p.ref) out.ref = p.ref;
+    return out;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface ItemView {
   id: string;
   text: string;
@@ -74,6 +109,8 @@ export interface ItemView {
   /** Optional duration in whole minutes. Only meaningful beside a timed
    *  `when`; views ignore it otherwise. Absent means unset. */
   duration?: number;
+  /** Optional place (`spec/place-plan.md`). Absent means unset. */
+  place?: Place;
   createdAt: number;
   /** Reflection stamp: first entry into In Progress, if any. */
   startedAt?: number;
@@ -318,6 +355,9 @@ export interface DocApp {
   /** Set (whole minutes, 1..=10080) or clear (`null`) an item's duration.
    *  Clearing `when` clears it in the core as well. */
   setItemDuration(id: string, minutes: number | null): void;
+  /** Set or clear (`null`) an item's place. A label-only place is
+   *  complete; coordinates come as a pair. Validation is the core's. */
+  setItemPlace(id: string, place: Place | null): void;
   /** Done toggle: `true` is the Done transition; `false` is un-done — a
    *  plain write to Backlog, applied only to currently-closed (Done or
    *  Cancelled) items. */
@@ -642,6 +682,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
           deadline: ev.deadline ?? undefined,
           when: ev.when ?? undefined,
           duration: ev.duration != null ? Number(ev.duration) : undefined,
+          place: parsePlaceJson(ev.place),
           createdAt: Number(ev.createdAt ?? 0),
           startedAt: ev.startedAt != null ? Number(ev.startedAt) : undefined,
           doneAt: ev.doneAt != null ? Number(ev.doneAt) : undefined,
@@ -771,6 +812,12 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
             "duration",
             ev.duration != null ? Number(ev.duration) : undefined,
           );
+        }
+        break;
+      }
+      case "itemPlaceChanged": {
+        if (state.itemsById[ev.id]) {
+          setState("itemsById", ev.id, "place", parsePlaceJson(ev.place));
         }
         break;
       }
@@ -1189,6 +1236,11 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       // never reaches the engine (where it would throw).
       if (minutes != null && (!Number.isInteger(minutes) || minutes <= 0)) return;
       mutate(() => engine.setItemDuration(id, minutes ?? undefined));
+    },
+    setItemPlace(id, place) {
+      // `JSON.stringify` drops `undefined` members, so a label-only place
+      // crosses as `{"label":...}`; the core canonicalises the rest.
+      mutate(() => engine.setItemPlace(id, place ? JSON.stringify(place) : undefined));
     },
     setDone(id, done) {
       mutate(() => engine.setItemDone(id, done));

@@ -80,6 +80,7 @@ import {
   OPEN_STATES,
   type DocApp,
   type ItemView,
+  type Place,
   type UndoOutcome,
   type ListView,
   type RecentDoneEntry,
@@ -1341,12 +1342,14 @@ export function Workspace(props: {
       deadline?: string;
       when?: string;
       duration?: number;
+      place?: Place;
     },
   ): void => {
     if (src.notes) app.setItemNotes(id, src.notes);
     if (src.deadline) app.setItemDeadline(id, src.deadline);
     if (src.when) app.setItemWhen(id, src.when);
     if (src.when && src.duration) app.setItemDuration(id, src.duration);
+    if (src.place) app.setItemPlace(id, src.place);
   };
 
   const duplicateBlock = (sourceIds: readonly string[]): void => {
@@ -1367,6 +1370,7 @@ export function Workspace(props: {
         deadline: string | undefined;
         when: string | undefined;
         duration: number | undefined;
+        place: Place | undefined;
         state: WorkflowState;
         listId: string;
       }[] = [];
@@ -1383,6 +1387,7 @@ export function Workspace(props: {
           deadline: it.deadline,
           when: it.when,
           duration: it.duration,
+          place: it.place,
           state: it.state,
           listId,
         });
@@ -1431,6 +1436,7 @@ export function Workspace(props: {
       deadline: string | undefined;
       when: string | undefined;
       duration: number | undefined;
+      place: Place | undefined;
       state: WorkflowState;
     }[] = [];
     visible.forEach((id, idx) => {
@@ -1444,6 +1450,7 @@ export function Workspace(props: {
         deadline: it.deadline,
         when: it.when,
         duration: it.duration,
+        place: it.place,
         state: it.state,
       });
     });

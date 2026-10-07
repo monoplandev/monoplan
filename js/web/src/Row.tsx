@@ -7,6 +7,7 @@ import noteSvg from "./icons/note.svg?raw";
 import { DndSelection } from "./dnd/solid";
 import { trackOverlay } from "./overlay.ts";
 import { DeadlineBadge } from "./DeadlineBadge.tsx";
+import { PlaceBadge } from "./PlaceBadge.tsx";
 import { WhenBadge } from "./WhenBadge.tsx";
 import {
   addDaysToStamp,
@@ -183,7 +184,9 @@ export function Row(props: {
         (!props.expanded() &&
           ((canPinToFocus() && focused()) ||
             (isOpen(props.item()) &&
-              (Boolean(props.item().when) || Boolean(props.item().deadline)))))));
+              (Boolean(props.item().when) ||
+                Boolean(props.item().deadline) ||
+                Boolean(props.item().place)))))));
   let textRef!: HTMLSpanElement;
   // Set by the Enter keydown handler before it dispatches the synthetic
   // Escape that drives collapse. The collapse effect reads (and resets)
@@ -627,7 +630,8 @@ export function Row(props: {
           when={
             props.deadlineInFooter &&
             !props.expanded() &&
-            ((isOpen(props.item()) && (props.item().when || props.item().deadline)) ||
+            ((isOpen(props.item()) &&
+              (props.item().when || props.item().deadline || props.item().place)) ||
               (canPinToFocus() && focused()) ||
               hasNotes() ||
               rowStamp())
@@ -650,6 +654,9 @@ export function Row(props: {
             </Show>
             <Show when={isOpen(props.item()) && props.item().deadline}>
               {(d) => <DeadlineBadge deadline={d()} />}
+            </Show>
+            <Show when={isOpen(props.item()) && props.item().place}>
+              {(p) => <PlaceBadge place={p()} />}
             </Show>
             <Show when={rowStamp()}>
               {(ts) => (
@@ -711,6 +718,16 @@ export function Row(props: {
               }
             >
               {(d) => <DeadlineBadge deadline={d()} />}
+            </Show>
+            <Show
+              when={
+                !props.deadlineInFooter &&
+                !props.expanded() &&
+                isOpen(props.item()) &&
+                props.item().place
+              }
+            >
+              {(p) => <PlaceBadge place={p()} />}
             </Show>
             <Show when={stateBadge()}>
               {(label) => <span class="badge row-state">{label()}</span>}

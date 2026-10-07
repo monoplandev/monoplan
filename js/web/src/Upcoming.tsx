@@ -22,6 +22,7 @@
 import { createMemo, For, Show } from "solid-js";
 import { groupByDay, type DayGroup, type DayRow } from "./dayGroups.ts";
 import { DeadlineBadge } from "./DeadlineBadge.tsx";
+import { PlaceBadge } from "./PlaceBadge.tsx";
 import { formatWhenTime, nowMs, todayStamp } from "./format.tsx";
 import { useAppI18n } from "./i18n.tsx";
 import { isDone, isEvent, type DocApp } from "./sync/store.ts";
@@ -127,6 +128,9 @@ export function Upcoming(props: {
                             muted={isDone(r.item)}
                           />
                         )}
+                      </Show>
+                      <Show when={r.item.place}>
+                        {(p) => <PlaceBadge place={p()} muted={isDone(r.item)} />}
                       </Show>
                       {/* No label is the event's mark: every task row
                           carries its list, an event has none to show. */}

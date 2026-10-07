@@ -10,7 +10,7 @@
 //! 0-based visible index here.
 
 use clap::{Parser, Subcommand};
-use monoplan_core::ItemView;
+use monoplan_core::{ItemView, Place};
 use serde::Serialize;
 
 use crate::sync::Session;
@@ -120,6 +120,8 @@ struct FocusItemJson<'a> {
     list_id: &'a str,
     /// Workflow register state name (`spec/data-model.md` "Lifecycle").
     state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    place: Option<&'a Place>,
 }
 
 fn item_json(pos: usize, item: &ItemView) -> FocusItemJson<'_> {
@@ -129,5 +131,6 @@ fn item_json(pos: usize, item: &ItemView) -> FocusItemJson<'_> {
         text: &item.text,
         list_id: &item.list_id,
         state: item.state.name(),
+        place: item.place.as_ref(),
     }
 }

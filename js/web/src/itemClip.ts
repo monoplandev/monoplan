@@ -23,7 +23,7 @@
 // dates, duration, workflow state) and nothing that ties an item to where
 // it came from: no id, no list, no timestamps. A structured paste is a
 // duplicate into the target view.
-import { type ItemView, type WorkflowState } from "./sync/store.ts";
+import { type ItemView, type Place, type WorkflowState } from "./sync/store.ts";
 
 export const ITEM_CLIP_TYPE = "application/x-monoplan+json";
 
@@ -38,6 +38,7 @@ export interface ClipItem {
   deadline?: string;
   when?: string;
   duration?: number;
+  place?: Place;
   state: WorkflowState;
 }
 
@@ -64,6 +65,36 @@ export const toClipItem = (it: ItemView): ClipItem => {
   if (it.deadline) out.deadline = it.deadline;
   if (it.when) out.when = it.when;
   if (it.when && it.duration) out.duration = it.duration;
+  if (it.place) out.place = { ...it.place };
+  return out;
+};
+
+/** A pasted place, or `undefined` when the value is not one: a non-empty
+ *  string label, coordinates as a finite in-range pair or not at all,
+ *  optional non-empty address / ref strings. Nothing else is carried. */
+const parseClipPlace = (raw: unknown): Place | undefined => {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const p = raw as Record<string, unknown>;
+  if (typeof p.label !== "string" || !p.label.trim()) return undefined;
+  const out: Place = { label: p.label };
+  const hasLat = p.lat !== undefined && p.lat !== null;
+  const hasLon = p.lon !== undefined && p.lon !== null;
+  if (hasLat !== hasLon) return undefined;
+  if (hasLat) {
+    if (
+      typeof p.lat !== "number" ||
+      typeof p.lon !== "number" ||
+      !Number.isFinite(p.lat) ||
+      !Number.isFinite(p.lon) ||
+      Math.abs(p.lat) > 90 ||
+      Math.abs(p.lon) > 180
+    )
+      return undefined;
+    out.lat = p.lat;
+    out.lon = p.lon;
+  }
+  if (typeof p.address === "string" && p.address) out.address = p.address;
+  if (typeof p.ref === "string" && p.ref) out.ref = p.ref;
   return out;
 };
 
@@ -152,6 +183,8 @@ const parseClip = (raw: string): ClipItem[] | null => {
       e.duration > 0
     )
       item.duration = e.duration;
+    const place = parseClipPlace(e.place);
+    if (place) item.place = place;
     items.push(item);
   }
   return items;

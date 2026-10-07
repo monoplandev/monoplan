@@ -13,8 +13,11 @@
 //! Initial attachment materializes current state explicitly. After that,
 //! consumers receive live deltas or an occasional `FullResync` request.
 
-use crate::doc::{DefaultView, NotesDeltaOp, WorkflowState};
+use crate::doc::{DefaultView, NotesDeltaOp, Place, WorkflowState};
 
+// `ItemAdded` carries every register and is intrinsically the fat variant;
+// events are pushed to a Vec and drained once, so the size gap is moot.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppEvent {
     /// The doc changed by a bulk or opaque operation that is cheaper and
@@ -58,6 +61,8 @@ pub enum AppEvent {
         when: Option<String>,
         /// Duration in whole minutes, or `None`.
         duration: Option<u32>,
+        /// Place, or `None`.
+        place: Option<Place>,
         open_index: Option<usize>,
     },
     /// Item removed from the doc (deleteBinned / emptyBin). Toggling
@@ -114,6 +119,12 @@ pub enum AppEvent {
     ItemDurationChanged {
         id: String,
         duration: Option<u32>,
+    },
+    /// Item's place changed. The payload is the canonical value after
+    /// the write, `None` when cleared.
+    ItemPlaceChanged {
+        id: String,
+        place: Option<Place>,
     },
     /// Lifecycle changed (`spec/data-model.md`). Emitted whenever the
     /// workflow register, a reflection stamp, or the `binned_at` mask
