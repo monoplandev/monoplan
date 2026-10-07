@@ -59,9 +59,17 @@ export function CalendarPicker(props: CalendarPickerProps) {
   const monthLabelFmt = createMemo(
     () => new Intl.DateTimeFormat(locale(), { month: "long", year: "numeric" }),
   );
+  // Two-letter day headings (Mo, Tu). Intl only offers three letters
+  // ("short") or one ("narrow"), so trim the short form by grapheme; the
+  // full name rides along as the cell's `abbr` for assistive tech.
   const weekdayFmt = createMemo(
     () => new Intl.DateTimeFormat(locale(), { weekday: "short" }),
   );
+  const weekdayLongFmt = createMemo(
+    () => new Intl.DateTimeFormat(locale(), { weekday: "long" }),
+  );
+  const weekdayHeading = (d: Date) =>
+    Array.from(weekdayFmt().format(d)).slice(0, 2).join("");
 
   const labels = () => (isWhen() ? m().when : m().deadline);
 
@@ -109,8 +117,11 @@ export function CalendarPicker(props: CalendarPickerProps) {
                 <tr>
                   <For each={cal.weekdays}>
                     {(weekday) => (
-                      <Calendar.HeadCell class="calendar-headcell">
-                        {weekdayFmt().format(weekday)}
+                      <Calendar.HeadCell
+                        class="calendar-headcell"
+                        abbr={weekdayLongFmt().format(weekday)}
+                      >
+                        {weekdayHeading(weekday)}
                       </Calendar.HeadCell>
                     )}
                   </For>

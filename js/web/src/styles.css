@@ -3155,7 +3155,6 @@ input.task-check:hover {
 .when-popover-quick {
   display: flex;
   gap: 4px;
-  margin-bottom: 8px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border-row);
 }
@@ -3279,7 +3278,6 @@ input.task-check:hover {
   align-items: center;
   justify-content: space-between;
   gap: 4px;
-  margin-bottom: 6px;
 }
 
 .calendar-label {
@@ -3312,13 +3310,15 @@ input.task-check:hover {
   border-collapse: collapse;
 }
 
+/* Same 32px row as the day cells below (30px trigger + 1px padding). */
 .calendar-headcell {
+  height: 30px;
+  padding: 1px;
   font-size: 11px;
   font-weight: 500;
   color: var(--text-faint);
-  text-transform: uppercase;
-  padding: 2px 0;
   text-align: center;
+  vertical-align: middle;
 }
 
 .calendar-cell {
