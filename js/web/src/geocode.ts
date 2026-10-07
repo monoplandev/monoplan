@@ -16,12 +16,18 @@
 //   constant so a self-hosted Photon (or another provider with the same
 //   shape) is a one-line swap until the server-side knob exists
 //   (`spec/place-plan.md` "Deferred").
+// - Results are biased toward where the user roughly is (`locationBias.ts`:
+//   a stored geolocation fix, else the time zone's principal city), so an
+//   ambiguous name ranks the nearby match first. The point goes in the
+//   query string, so it is as un-encrypted as the search text; it is
+//   rounded to ~1km before it ever leaves the device.
 // - Data is © OpenStreetMap contributors (ODbL); the results popover
 //   carries the credit.
 //
 // A self-hosted deployment that wants no third-party calls simply never
 // searches: a typed label is a complete place on its own.
 
+import { locationBias } from "./locationBias.ts";
 import type { Place } from "./sync/store.ts";
 
 const ENDPOINT = "https://photon.komoot.io/api/";
@@ -117,8 +123,13 @@ export function searchPlaces(
   query: string,
   opts: { signal?: AbortSignal } = {},
 ): Promise<Place[]> {
-  const key = normalise(query);
-  if (!key) return Promise.resolve([]);
+  const q = normalise(query);
+  if (!q) return Promise.resolve([]);
+  // The bias is part of the cache key: it can change once per boot (the
+  // geolocation refresh landing), and the same text ranks differently
+  // around a different point.
+  const bias = locationBias();
+  const key = bias ? `${q}@${bias.lat},${bias.lon},${bias.zoom}` : q;
   const hit = cache.get(key);
   if (hit) return Promise.resolve(hit);
   const run = async (): Promise<Place[]> => {
@@ -129,7 +140,12 @@ export function searchPlaces(
     if (wait > 0) await sleep(wait);
     opts.signal?.throwIfAborted();
     lastSentAt = Date.now();
-    const params = new URLSearchParams({ q: key, limit: String(LIMIT) });
+    const params = new URLSearchParams({ q, limit: String(LIMIT) });
+    if (bias) {
+      params.set("lat", String(bias.lat));
+      params.set("lon", String(bias.lon));
+      params.set("zoom", String(bias.zoom));
+    }
     const lang = (typeof navigator !== "undefined" ? navigator.language : "")
       .split("-")[0]
       ?.toLowerCase();

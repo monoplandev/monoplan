@@ -24,7 +24,8 @@
     "perf": "cargo run --release -p monoplan-core --example perf --",
     "fmt": "cargo fmt --all",
     "lint": "cargo clippy --workspace --all-targets -- -D warnings",
-    "typecheck": "tsc --noEmit -p js/config && tsc --noEmit -p js/core && tsc --noEmit -p js/web"
+    "typecheck": "tsc --noEmit -p js/config && tsc --noEmit -p js/core && tsc --noEmit -p js/web",
+    "vendor:tz": "bun js/web/scripts/vendor-tz.ts"
   },
   "devDependencies": {
     "typescript": "^5"

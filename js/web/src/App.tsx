@@ -11,6 +11,7 @@ import { createEffect, createSignal, onMount, Show } from "solid-js";
 import { Dek, Doc, EncryptedBlob } from "@monoplan/core/wasm";
 import { IdbStorage, readOrMintPeerSlot } from "@monoplan/core";
 import { loadPrefs } from "./prefs.ts";
+import { refreshLocationBias } from "./locationBias.ts";
 import { api } from "./api.ts";
 import { dekVault } from "./sync/dekVault.ts";
 import { useAppI18n } from "./i18n.tsx";
@@ -48,7 +49,12 @@ export function App(props: {
   // failure if it isn't); for anonymous records, the local IndexedDB
   // op log is the source of truth. If there's no record at all, mint a
   // fresh anonymous session so the user lands directly in the app.
+  //
+  // The place-lookup bias refresh rides the same mount: it is independent
+  // of the session, never throws, and is fire-and-forget so a slow or
+  // prompted geolocation call cannot hold up boot (`locationBias.ts`).
   onMount(async () => {
+    void refreshLocationBias();
     try {
       const v = await dekVault.load();
       if (v) {
