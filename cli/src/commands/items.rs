@@ -140,7 +140,8 @@ fn item_json(item: &ItemView) -> ItemJson<'_> {
 }
 
 /// Trailing tags for a text row: ` @<when>` (with `+<duration>`
-/// glued on when a timed `when` carries one, e.g. `@2026-09-12T14:00+1h30m`)
+/// glued on when a timed `when` carries one, e.g. `@2026-09-12T14:00+1h30m`,
+/// or an all-day one spans more than a day, in whole days: `@2026-09-12+3d`)
 /// then ` !<deadline>`, then ` at:<place label>`, each only when set.
 /// Shared by `ls` and `agenda`.
 pub fn date_tags(item: &ItemView) -> String {
@@ -148,9 +149,15 @@ pub fn date_tags(item: &ItemView) -> String {
     if let Some(w) = &item.when {
         s.push_str(" @");
         s.push_str(w);
-        if let Some(n) = item.duration.filter(|_| w.len() > 10) {
-            s.push('+');
-            s.push_str(&format_duration(n));
+        if let Some(n) = item.duration {
+            if w.len() > 10 {
+                s.push('+');
+                s.push_str(&format_duration(n));
+            } else if let days @ 2.. = n.div_ceil(DAY_MINUTES) {
+                // All-day: the length counts whole days
+                // (`spec/calendar-plan.md`); a single day is implied.
+                s.push_str(&format!("+{days}d"));
+            }
         }
     }
     if let Some(d) = &item.deadline {
@@ -309,30 +316,49 @@ pub struct DateArg {
     pub value: String,
 }
 
-/// Render minutes as `2h`, `45m`, or `1h30m`.
+/// Minutes in a day: the unit an all-day span's length counts in.
+const DAY_MINUTES: u32 = 24 * 60;
+
+/// Render minutes as `2h`, `45m`, `1h30m`, and past a day `1d`, `2d3h`,
+/// `1d30m`.
 pub fn format_duration(minutes: u32) -> String {
-    match (minutes / 60, minutes % 60) {
-        (0, m) => format!("{m}m"),
-        (h, 0) => format!("{h}h"),
-        (h, m) => format!("{h}h{m}m"),
+    let d = minutes / DAY_MINUTES;
+    let h = (minutes % DAY_MINUTES) / 60;
+    let m = minutes % 60;
+    let mut s = String::new();
+    if d > 0 {
+        s.push_str(&format!("{d}d"));
     }
+    if h > 0 {
+        s.push_str(&format!("{h}h"));
+    }
+    if m > 0 || s.is_empty() {
+        s.push_str(&format!("{m}m"));
+    }
+    s
 }
 
-/// Parse a duration: plain minutes (`90`), or hours and minutes with
-/// `h` / `m` suffixes in that order (`1h30m`, `2h`, `45m`). Whitespace
-/// around and between parts is tolerated; the range is the core's.
+/// Parse a duration: plain minutes (`90`), or days, hours and minutes
+/// with `d` / `h` / `m` suffixes in that order (`1h30m`, `2h`, `45m`,
+/// `3d`, `1d2h`). Whitespace around and between parts is tolerated; the
+/// range is the core's.
 pub fn parse_duration(raw: &str) -> anyhow::Result<u32> {
     let s: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
-    let bad = || anyhow::anyhow!("duration must be minutes or like 1h30m: {raw:?}");
+    let bad = || anyhow::anyhow!("duration must be minutes or like 1h30m / 3d: {raw:?}");
     if s.is_empty() {
         return Err(bad());
     }
     if s.bytes().all(|b| b.is_ascii_digit()) {
         return s.parse::<u32>().map_err(|_| bad());
     }
+    let mut days: u32 = 0;
     let mut hours: u32 = 0;
     let mut minutes: u32 = 0;
     let mut rest = s.as_str();
+    if let Some((d, tail)) = rest.split_once('d') {
+        days = d.parse().map_err(|_| bad())?;
+        rest = tail;
+    }
     if let Some((h, tail)) = rest.split_once('h') {
         hours = h.parse().map_err(|_| bad())?;
         rest = tail;
@@ -341,12 +367,12 @@ pub fn parse_duration(raw: &str) -> anyhow::Result<u32> {
         minutes = m.parse().map_err(|_| bad())?;
         rest = "";
     }
-    if !rest.is_empty() || (hours == 0 && minutes == 0 && !s.contains('h')) {
+    if !rest.is_empty() || (days == 0 && hours == 0 && minutes == 0 && !s.contains(['d', 'h'])) {
         return Err(bad());
     }
-    hours
-        .checked_mul(60)
-        .and_then(|h| h.checked_add(minutes))
+    days.checked_mul(DAY_MINUTES)
+        .and_then(|d| hours.checked_mul(60).and_then(|h| d.checked_add(h)))
+        .and_then(|dh| dh.checked_add(minutes))
         .ok_or_else(bad)
 }
 
@@ -468,7 +494,13 @@ mod tests {
         assert_eq!(parse_duration("45m").unwrap(), 45);
         assert_eq!(parse_duration(" 1h 5m ").unwrap(), 65);
         assert_eq!(parse_duration("0h").unwrap(), 0);
-        for bad in ["", "h", "m", "1x", "30m1h", "1h30", "-5", "1.5h"] {
+        assert_eq!(parse_duration("3d").unwrap(), 3 * 1440);
+        assert_eq!(parse_duration("1d2h").unwrap(), 1440 + 120);
+        assert_eq!(parse_duration("1d 30m").unwrap(), 1440 + 30);
+        assert_eq!(parse_duration("1d2h30m").unwrap(), 1440 + 150);
+        for bad in [
+            "", "h", "m", "d", "1x", "30m1h", "1h30", "-5", "1.5h", "2h1d", "1d1d",
+        ] {
             assert!(parse_duration(bad).is_err(), "{bad:?}");
         }
     }
@@ -490,5 +522,45 @@ mod tests {
         assert_eq!(format_duration(45), "45m");
         assert_eq!(format_duration(120), "2h");
         assert_eq!(format_duration(90), "1h30m");
+        assert_eq!(format_duration(1440), "1d");
+        assert_eq!(format_duration(2 * 1440 + 180), "2d3h");
+        assert_eq!(format_duration(1440 + 30), "1d30m");
+    }
+
+    #[test]
+    fn date_tags_show_all_day_spans_in_days() {
+        let base = ItemView {
+            id: "i".into(),
+            text: "t".into(),
+            notes: String::new(),
+            list_id: "l".into(),
+            state: WorkflowState::Backlog,
+            lifecycle_at: 0,
+            deadline: None,
+            when: Some("2026-10-06".into()),
+            duration: None,
+            place: None,
+            created_at: 0,
+            started_at: None,
+            done_at: None,
+            binned_at: None,
+        };
+        assert_eq!(date_tags(&base), " @2026-10-06");
+        let single = ItemView {
+            duration: Some(1440),
+            ..base.clone()
+        };
+        assert_eq!(date_tags(&single), " @2026-10-06");
+        let three = ItemView {
+            duration: Some(3 * 1440),
+            ..base.clone()
+        };
+        assert_eq!(date_tags(&three), " @2026-10-06+3d");
+        let timed = ItemView {
+            when: Some("2026-10-06T09:00".into()),
+            duration: Some(2 * 1440 + 60),
+            ..base
+        };
+        assert_eq!(date_tags(&timed), " @2026-10-06T09:00+2d1h");
     }
 }

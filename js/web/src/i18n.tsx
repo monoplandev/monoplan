@@ -282,6 +282,9 @@ export type Messages = {
     /** Accessible name + placeholder of the end-time field after the
      *  start time; typing an end stores a duration. */
     end: string;
+    /** Accessible name of the end-date field under the end time: the day
+     *  the span ends on, picked from a calendar. */
+    endDate: string;
   };
   place: {
     /** Accessible name of the task-dialog place input. */
@@ -577,6 +580,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       time: "Hora",
       clearTime: "Quitar hora",
       end: "Fin",
+      endDate: "Fecha de fin",
     },
     place: {
       label: "Lugar",
@@ -845,6 +849,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       time: "Time",
       clearTime: "Remove time",
       end: "End",
+      endDate: "End date",
     },
     place: {
       label: "Place",

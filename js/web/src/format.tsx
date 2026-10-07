@@ -84,7 +84,8 @@ export function formatDateTime(ts: number, locale: string): string {
   }).format(new Date(ts));
 }
 
-function calendarDayDiff(later: Date, earlier: Date): number {
+/** Whole calendar days from `earlier` to `later`, on local parts. */
+export function calendarDayDiff(later: Date, earlier: Date): number {
   const a = new Date(later.getFullYear(), later.getMonth(), later.getDate()).getTime();
   const b = new Date(earlier.getFullYear(), earlier.getMonth(), earlier.getDate()).getTime();
   return Math.round((a - b) / 86_400_000);
@@ -257,6 +258,9 @@ export function isCompleteTime(t: TimeParts): t is Required<TimeParts> {
 /** Minutes in a day, the wrap for end-time arithmetic. */
 const DAY_MINUTES = 24 * 60;
 
+/** The core's ceiling on `duration`: one week (`spec/data-model.md`). */
+export const MAX_DURATION_MINUTES = 7 * DAY_MINUTES;
+
 /** Wall-clock end of a timed `when` that runs for `minutes`: the start
  *  plus the length, wrapped past midnight. A span longer than a day still
  *  reads as a clock time; the day it lands on is not shown. */
@@ -265,22 +269,96 @@ export function endTimeOf(start: Required<TimeParts>, minutes: number): Required
   return { hour: Math.floor(total / 60), minute: total % 60 };
 }
 
-/** Compact length: `45m`, `2h`, `1h 30m`. Hours keep counting past a
- *  day, so a day-long span reads `24h`. */
-export function formatDurationShort(minutes: number): string {
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  if (h === 0) return `${m}m`;
-  if (m === 0) return `${h}h`;
-  return `${h}h ${m}m`;
+/** Days past the start day that the end of a `minutes`-long span lands
+ *  on: 0 for a same-day span, 1 once it crosses midnight. The end day of
+ *  a timed `when` is `addDaysToStamp(whenDay(when), endDayOffset(...))`. */
+export function endDayOffset(start: Required<TimeParts>, minutes: number): number {
+  return Math.floor((start.hour * 60 + start.minute + minutes) / DAY_MINUTES);
 }
 
-/** Length in minutes from a start to an end typed as a clock time. An end
- *  at or before the start on the clock means the next day, so 23:00 to
- *  01:00 is two hours and 09:00 to 09:00 is a full day. */
-export function durationBetween(start: Required<TimeParts>, end: Required<TimeParts>): number {
+/** Beside an all-day `when` the length counts whole days: a span of
+ *  `minutes` covers `ceil(minutes / day)` days, so its last day is that
+ *  many minus one past the start day (`spec/calendar-plan.md` "Field:
+ *  `duration`"). A length under a day, left behind by a timed value whose
+ *  time was stripped, is a single day. Null or zero is a single day too. */
+export function allDayEndOffset(minutes: number | null | undefined): number {
+  if (!minutes || minutes <= 0) return 0;
+  return Math.ceil(minutes / DAY_MINUTES) - 1;
+}
+
+/** The last day an all-day span can reach: a week of days, so six past
+ *  the start. */
+export const MAX_ALL_DAY_OFFSET = MAX_DURATION_MINUTES / DAY_MINUTES - 1;
+
+/** The length to store for an all-day span whose last day is `offset`
+ *  days past the start: whole days, or null for a single day (no span to
+ *  record; the register is dropped). */
+export function allDayDurationFor(offset: number): number | null {
+  if (offset <= 0) return null;
+  return Math.min(offset + 1, MAX_ALL_DAY_OFFSET + 1) * DAY_MINUTES;
+}
+
+/** Days past the start day a `when` ends on, timed or all-day, given the
+ *  stored length; 0 without one. */
+export function spanEndOffset(when: string, minutes: number | null | undefined): number {
+  const start = whenTime(when);
+  if (start) return minutes ? endDayOffset(start, minutes) : 0;
+  return allDayEndOffset(minutes);
+}
+
+/** A whole-day length carried from an all-day span onto a timed start
+ *  would end a day late (Tue–Thu as three days is 72h, so from Tue 09:00
+ *  it ends Fri 09:00). Reshape it to end on the same last day: the days
+ *  up to it plus the default slot. Any other length is kept as is. */
+export function durationForTimedStart(minutes: number | null | undefined): number | null {
+  if (!minutes || minutes < 2 * DAY_MINUTES || minutes % DAY_MINUTES !== 0) {
+    return minutes ?? null;
+  }
+  return minutes - DAY_MINUTES + DEFAULT_DURATION_MINUTES;
+}
+
+/** Compact length: `45m`, `2h`, `1h 30m`, and past a day `1d`, `2d 3h`,
+ *  `1d 30m`. */
+export function formatDurationShort(minutes: number): string {
+  const d = Math.floor(minutes / DAY_MINUTES);
+  const h = Math.floor((minutes % DAY_MINUTES) / 60);
+  const m = minutes % 60;
+  const parts: string[] = [];
+  if (d > 0) parts.push(`${d}d`);
+  if (h > 0) parts.push(`${h}h`);
+  if (m > 0 || parts.length === 0) parts.push(`${m}m`);
+  return parts.join(" ");
+}
+
+/** Length in minutes from a start to an end typed as a clock time, the
+ *  end landing `dayOffset` days after the start day. On the start day an
+ *  end at or before the start on the clock means the next day, so 23:00
+ *  to 01:00 is two hours and 09:00 to 09:00 is a full day; on a later day
+ *  the clock reading is taken as is, so the day holds when the time is
+ *  retyped. Capped at the core's one-week ceiling. */
+export function durationBetween(
+  start: Required<TimeParts>,
+  end: Required<TimeParts>,
+  dayOffset = 0,
+): number {
   const diff = end.hour * 60 + end.minute - (start.hour * 60 + start.minute);
-  return diff > 0 ? diff : diff + DAY_MINUTES;
+  const total = dayOffset * DAY_MINUTES + diff;
+  return Math.min(total > 0 ? total : total + DAY_MINUTES, MAX_DURATION_MINUTES);
+}
+
+/** Whether a span from `start` to `end` on the clock, ending `dayOffset`
+ *  days on, is a length the register can hold: at least a minute (so the
+ *  start day is out while the end is not past the start on the clock) and
+ *  at most a week. Drives which days the end-date picker offers. */
+export function isValidEndDayOffset(
+  start: Required<TimeParts>,
+  end: Required<TimeParts>,
+  dayOffset: number,
+): boolean {
+  if (dayOffset < 0) return false;
+  const diff = end.hour * 60 + end.minute - (start.hour * 60 + start.minute);
+  const total = dayOffset * DAY_MINUTES + diff;
+  return total >= 1 && total <= MAX_DURATION_MINUTES;
 }
 
 /** Build a `when` from a day stamp and an optional complete time. A

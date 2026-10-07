@@ -222,8 +222,11 @@ does.
 - **Several calendars.** A `kind` register on `ListMeta` marking a user
   list as an event list; `is_event` becomes a lookup. Sharing
   (`sharing-plan.md`) would then share a calendar as it shares a list.
-- **Multi-day all-day events.** Still not expressible (`calendar-plan.md`
-  "Field: `duration`"). More likely to be wanted for events than tasks.
+- **Multi-day all-day events.** Expressible since 2026-10-07: `duration`
+  beside an all-day `when` counts whole days (`calendar-plan.md` "Field:
+  `duration`"), set from the task dialog's end-date field. The agenda
+  still places the item on its start day only; showing it on each day it
+  covers is open.
 - **Export.** An event maps to a `VEVENT` with no caveat; the "Due:"
   prefix workaround in the iCalendar mapping applies to tasks only.
 

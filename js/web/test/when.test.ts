@@ -20,8 +20,16 @@ import {
   whenDay,
   whenFromParts,
   endTimeOf,
+  endDayOffset,
   durationBetween,
   formatDurationShort,
+  isValidEndDayOffset,
+  MAX_DURATION_MINUTES,
+  allDayEndOffset,
+  allDayDurationFor,
+  MAX_ALL_DAY_OFFSET,
+  spanEndOffset,
+  durationForTimedStart,
   whenTime,
 } from "../src/format.tsx";
 
@@ -105,13 +113,94 @@ describe("duration ⇄ end-time bridge", () => {
     expect(formatDurationShort(45)).toBe("45m");
     expect(formatDurationShort(120)).toBe("2h");
     expect(formatDurationShort(90)).toBe("1h 30m");
-    expect(formatDurationShort(24 * 60)).toBe("24h");
+    expect(formatDurationShort(24 * 60)).toBe("1d");
+    expect(formatDurationShort(2 * 24 * 60 + 180)).toBe("2d 3h");
+    expect(formatDurationShort(24 * 60 + 30)).toBe("1d 30m");
   });
 
   test("durationBetween treats an end at or before the start as next day", () => {
     expect(durationBetween({ hour: 14, minute: 0 }, { hour: 15, minute: 30 })).toBe(90);
     expect(durationBetween({ hour: 23, minute: 0 }, { hour: 1, minute: 0 })).toBe(120);
     expect(durationBetween({ hour: 9, minute: 0 }, { hour: 9, minute: 0 })).toBe(24 * 60);
+  });
+
+  test("durationBetween on a later day keeps that day, capped at a week", () => {
+    expect(durationBetween({ hour: 9, minute: 0 }, { hour: 8, minute: 0 }, 2)).toBe(2 * 1440 - 60);
+    expect(durationBetween({ hour: 9, minute: 0 }, { hour: 10, minute: 0 }, 2)).toBe(2 * 1440 + 60);
+    expect(durationBetween({ hour: 9, minute: 0 }, { hour: 10, minute: 0 }, 7)).toBe(MAX_DURATION_MINUTES);
+  });
+
+  test("endDayOffset counts the days the span runs past the start day", () => {
+    expect(endDayOffset({ hour: 9, minute: 0 }, 60)).toBe(0);
+    expect(endDayOffset({ hour: 23, minute: 0 }, 120)).toBe(1);
+    expect(endDayOffset({ hour: 9, minute: 0 }, 1440)).toBe(1);
+    expect(endDayOffset({ hour: 9, minute: 0 }, MAX_DURATION_MINUTES)).toBe(7);
+  });
+
+  test("end time + end day round-trip to the stored length", () => {
+    const start = { hour: 13, minute: 15 };
+    for (const minutes of [1, 60, 1439, 1440, 1441, 3000, MAX_DURATION_MINUTES]) {
+      const end = endTimeOf(start, minutes);
+      expect(durationBetween(start, end, endDayOffset(start, minutes))).toBe(minutes);
+    }
+  });
+
+  test("isValidEndDayOffset fences the end-date picker", () => {
+    const start = { hour: 9, minute: 0 };
+    expect(isValidEndDayOffset(start, { hour: 10, minute: 0 }, -1)).toBe(false);
+    // The start day only while the end is past the start on the clock.
+    expect(isValidEndDayOffset(start, { hour: 10, minute: 0 }, 0)).toBe(true);
+    expect(isValidEndDayOffset(start, { hour: 9, minute: 0 }, 0)).toBe(false);
+    expect(isValidEndDayOffset(start, { hour: 8, minute: 0 }, 0)).toBe(false);
+    // The week ceiling.
+    expect(isValidEndDayOffset(start, { hour: 9, minute: 0 }, 7)).toBe(true);
+    expect(isValidEndDayOffset(start, { hour: 9, minute: 1 }, 7)).toBe(false);
+    expect(isValidEndDayOffset(start, { hour: 8, minute: 0 }, 7)).toBe(true);
+    expect(isValidEndDayOffset(start, { hour: 10, minute: 0 }, 8)).toBe(false);
+  });
+});
+
+describe("all-day spans: duration as whole days", () => {
+  test("allDayEndOffset reads whole days, anything under a day as one", () => {
+    expect(allDayEndOffset(null)).toBe(0);
+    expect(allDayEndOffset(60)).toBe(0);
+    expect(allDayEndOffset(1440)).toBe(0);
+    expect(allDayEndOffset(1441)).toBe(1);
+    expect(allDayEndOffset(3 * 1440)).toBe(2);
+    expect(allDayEndOffset(MAX_DURATION_MINUTES)).toBe(MAX_ALL_DAY_OFFSET);
+  });
+
+  test("allDayDurationFor writes whole days, none for the start day", () => {
+    expect(allDayDurationFor(0)).toBeNull();
+    expect(allDayDurationFor(-1)).toBeNull();
+    expect(allDayDurationFor(2)).toBe(3 * 1440);
+    expect(allDayDurationFor(MAX_ALL_DAY_OFFSET)).toBe(MAX_DURATION_MINUTES);
+    expect(allDayDurationFor(MAX_ALL_DAY_OFFSET + 3)).toBe(MAX_DURATION_MINUTES);
+  });
+
+  test("round-trip through the register", () => {
+    for (const offset of [1, 2, MAX_ALL_DAY_OFFSET]) {
+      expect(allDayEndOffset(allDayDurationFor(offset))).toBe(offset);
+    }
+  });
+
+  test("spanEndOffset picks the reading from the when's shape", () => {
+    expect(spanEndOffset("2026-10-06", null)).toBe(0);
+    expect(spanEndOffset("2026-10-06", 3 * 1440)).toBe(2);
+    expect(spanEndOffset("2026-10-06T09:00", 3 * 1440)).toBe(3);
+    expect(spanEndOffset("2026-10-06T23:00", 120)).toBe(1);
+    expect(spanEndOffset("2026-10-06T09:00", null)).toBe(0);
+  });
+
+  test("durationForTimedStart keeps the last day of a whole-day span", () => {
+    // Tue–Thu all-day (three days) with a 09:00 start ends Thu 10:00.
+    expect(durationForTimedStart(3 * 1440)).toBe(2 * 1440 + 60);
+    expect(endDayOffset({ hour: 9, minute: 0 }, 2 * 1440 + 60)).toBe(2);
+    // A single day, a timed length, or nothing are left alone.
+    expect(durationForTimedStart(1440)).toBe(1440);
+    expect(durationForTimedStart(90)).toBe(90);
+    expect(durationForTimedStart(2 * 1440 + 60)).toBe(2 * 1440 + 60);
+    expect(durationForTimedStart(null)).toBeNull();
   });
 });
 

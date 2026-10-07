@@ -127,11 +127,13 @@ Item register, integer minutes, optional. `1..=10080` (one week).
   overnight spans need no disambiguation: 23:00 for 120 minutes ends at
   01:00 next day. iCalendar allows `DURATION` in place of `DTEND`, so the
   export mapping is unchanged.
-- **Only meaningful beside a timed `when`.** The core never cross-checks
-  the two registers (a check would reintroduce invalid states under
-  concurrent edit); views ignore a duration beside an all-day or absent
-  `when`. Clearing `when` deletes `duration` in the same commit; timed →
-  all-day keeps it so re-adding a time restores the end.
+- **Read against the shape of `when`.** The core never cross-checks the
+  two registers (a check would reintroduce invalid states under
+  concurrent edit). Beside a timed `when` the length is minutes from the
+  start. Beside an all-day `when` it counts whole days (added
+  2026-10-07, see "Multi-day all-day spans" below); beside an absent one
+  views ignore it. Clearing `when` deletes `duration` in the same commit;
+  timed → all-day keeps it so re-adding a time restores the end.
 - **A start implies an end (added 2026-09-22).** `set_item_when` with a
   timed value on an item that has no duration writes the default of 60
   minutes (`DEFAULT_DURATION_MINUTES`) in the same commit and reports it
@@ -143,8 +145,22 @@ Item register, integer minutes, optional. `1..=10080` (one week).
   field appears as soon as a start time is typed.
 - **Agenda placement is unchanged.** Day granularity on the start; an
   overnight span appears on its start day only.
-- **Multi-day all-day spans** (a Tuesday-to-Thursday conference) are not
-  expressed. Minutes are the wrong unit for that; revisit if it comes up.
+- **Multi-day all-day spans (added 2026-10-07).** A Tuesday-to-Thursday
+  conference is an all-day `when` of Tuesday with a `duration` of three
+  days in minutes (`3 × 1440`): the span covers `ceil(duration / 1440)`
+  days, so its last day is that many minus one past the start, as
+  iCalendar's `DURATION:P3D` beside an all-day `DTSTART` does. A length
+  under a day beside an all-day `when` (left behind when a timed value's
+  time is stripped) is a single day; so is no length at all, which is
+  what a single-day item stores (picking the start day as the end drops
+  the register). The week ceiling bounds a span at seven days. The
+  register is the same one, so no core change: only the reading differs
+  by the shape of `when`. Crossing shapes in the UI: timed → all-day
+  reads the minutes as days by the rule above (Tue 09:00 → Thu 10:00 is
+  `2 × 1440 + 60`, which rounds up to three days, Tue–Thu); all-day →
+  timed reshapes a whole-day span of two or more days to end on the same
+  last day with the default one-hour slot (`3 × 1440` → `2 × 1440 + 60`),
+  since taken as minutes it would end a day late.
 - **UI shows an end time, stores a length.** The task dialog's time row is
   start and end, the arrow glyph inset in the end field. The end field
   reads start + duration and renders only once a start time exists, and
@@ -154,10 +170,24 @@ Item register, integer minutes, optional. `1..=10080` (one week).
   Committing an end writes the difference in minutes; an end at or before
   the start on the clock means the next day. Moving the start leaves the
   end shifting along with it.
+- **End date (added 2026-10-07).** Under the end time, beside the date
+  input, an end-date input reads the day the span ends on (start day +
+  the days the length runs past it, by the all-day or timed reading
+  above) and opens a plain calendar: no quick actions, no Remove, since
+  the end is never absent, only implied. It shows whenever a date is set;
+  while the end is the start day itself it reads dim, like a placeholder.
+  Beside a timed start, picking a day keeps the end's clock time and
+  writes the length up to it; days the register cannot hold are dimmed
+  and inert (before the start day, the start day while the end is not
+  past the start on the clock, and anything past the one-week ceiling).
+  Once the end is on a later day, retyping the end time keeps that day
+  rather than snapping back to the start day's next-day rule. Beside an
+  all-day date, picking a day writes whole days (the start day drops the
+  length); days before the start and past the seventh are inert.
 - **Mutation** `set_item_duration(item_id, Option<u32>)`, event
   `ItemDurationChanged { id, duration }`, `ItemAdded.duration`, export
   `duration` (skipped when unset), wasm `setItemDuration`, CLI
-  `monoplan duration <id> <minutes | 1h30m | ->` and a `+<len>` suffix on
+  `monoplan duration <id> <minutes | 1h30m | 3d | ->` and a `+<len>` suffix on
   the `@when` tag.
 
 ## Mutation and events

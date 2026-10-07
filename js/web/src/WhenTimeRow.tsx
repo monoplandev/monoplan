@@ -5,8 +5,11 @@
 // hides the ✕), and, once a start exists,
 // an end picker after an arrow. The end is derived: start + the stored
 // `duration` (a length, not an end, so moving the start keeps it). Typing
-// an end writes the difference in minutes; an end at or before the start
-// on the clock means the next day; clearing it removes the duration.
+// an end writes the difference in minutes on the day the end already
+// lands on (`endDayOffset`); on the start day an end at or before the
+// start on the clock means the next day; clearing it removes the
+// duration. The end's day itself is edited in `WhenField`'s end-date
+// field under this row.
 //
 // The host owns the time (the register's time part) and the duration; the
 // row only ever hands back a complete hour + minute or null.
@@ -14,6 +17,7 @@
 import { Show } from "solid-js";
 import {
   durationBetween,
+  endDayOffset,
   endTimeOf,
   formatDurationShort,
   hourCycle,
@@ -38,13 +42,20 @@ export function WhenTimeRow(props: {
     const d = props.duration();
     return start && d ? endTimeOf(start, d) : null;
   };
+  // Days past the start day the current end lands on; a retyped end time
+  // keeps that day.
+  const dayOffset = () => {
+    const start = props.time();
+    const d = props.duration();
+    return start && d ? endDayOffset(start, d) : 0;
+  };
   const onEndChange = (t: Required<TimeParts> | null) => {
     const start = props.time();
     if (!t || !start) {
       props.onDurationChange(null);
       return;
     }
-    props.onDurationChange(durationBetween(start, t));
+    props.onDurationChange(durationBetween(start, t, dayOffset()));
   };
 
   return (
@@ -95,7 +106,9 @@ export function WhenTimeRow(props: {
           after={props.time}
           optionHint={(t) => {
             const start = props.time();
-            return start ? formatDurationShort(durationBetween(start, t)) : null;
+            return start
+              ? formatDurationShort(durationBetween(start, t, dayOffset()))
+              : null;
           }}
         />
       </Show>

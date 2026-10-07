@@ -2781,6 +2781,25 @@ input.task-check:hover {
   gap: 8px;
 }
 
+/* With an end date beside the start date, the row takes the time row's
+   two equal columns so the end date lines up under the end time. */
+.task-dialog-dates-row-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+/* The end-date input carries no ✕, so it keeps the plain right inset,
+   as the end-time input above it does. */
+.task-dialog-end-date-input {
+  padding-right: 8px;
+}
+
+/* While the end is only the start day again (nothing stored), the end
+   date reads as dim as a placeholder: implied, there to be changed. */
+.task-dialog-end-date-input[data-implied] {
+  color: var(--text-empty);
+}
+
 /* The typed time picker on its own row above the date, with the same
    anatomy as the date input below: the clock glyph inset at the input's
    left edge, the input padding past it, so the two glyphs and the two

@@ -37,6 +37,9 @@ export interface CalendarPickerProps {
   /** Clear the value. When provided and a value is set, a "Remove" button
    *  shows at the bottom. */
   onRemove?: () => void;
+  /** Days the grid shows but will not pick (dimmed, inert). The end-date
+   *  picker uses it to keep the end inside the register's range. */
+  disabled?: (day: Date) => boolean;
 }
 
 /** The picker body: month grid and the Remove footer. Owns no surface;
@@ -83,6 +86,7 @@ export function CalendarPicker(props: CalendarPickerProps) {
         // default renders them but makes them inert, which reads as
         // broken. Keep them pickable, just dimmed (see data-outside).
         disableOutsideDays={false}
+        disabled={props.disabled}
         onValueChange={(d) => {
           if (d) {
             const day = localDateStamp(d);
