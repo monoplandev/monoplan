@@ -167,10 +167,10 @@ export function PlaceField(props: {
           }}
           placement="bottom-start"
           gutter={4}
-          // A typeahead, not a picker: as wide as the input, and never
-          // over it. With no room below it flips above the input instead
-          // of sliding across it (so no `overlap`, unlike the date fields).
-          sameWidth
+          // A typeahead, not a picker: a fixed 340px card (see
+          // `.place-popover`), and never over the input. With no room
+          // below it flips above the input instead of sliding across it
+          // (so no `overlap`, unlike the date fields).
         >
           <Popover.Anchor as="span" class="task-dialog-when-anchor">
             <span

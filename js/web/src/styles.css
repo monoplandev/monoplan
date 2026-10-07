@@ -3073,13 +3073,12 @@ input.task-check:hover {
 
 /* The lookup results popover: a plain list of results under the input,
    each the feature's name over its formatted address. */
-/* Sized by the popper to the input's width (`sameWidth`); the card only
+/* A fixed 340px card (capped to the viewport on a narrow phone); it only
    needs to be as tall as its rows, and it stays compact while a lookup
-   runs or finds nothing. */
+   runs or finds nothing. Padding comes from `.when-popover`. */
 .place-popover {
-  min-width: 0;
+  width: 340px;
   max-width: calc(100vw - 32px);
-  padding: 4px;
 }
 
 .place-popover-note {
@@ -3132,15 +3131,18 @@ input.task-check:hover {
 }
 
 .place-popover-credit {
-  padding: 4px 8px 2px;
+  padding: 6px 8px 4px;
   font-size: 10px;
   color: var(--text-empty);
 }
 
-/* The picker popover under the date input: shares the modal's card look
-   (`.deadline-dialog`) and sits above the task dialog (z-index 100 / 101). */
-.when-popover {
+/* The picker popover under the date / deadline / place inputs: shares the
+   modal's card look (`.deadline-dialog`) with tighter padding, and sits
+   above the task dialog (z-index 100 / 101). Doubled up so the padding
+   beats the modal card's 12px, which is declared later. */
+.deadline-dialog.when-popover {
   z-index: 120;
+  padding: 4px;
   /* Backstop for a viewport shorter than the picker (a phone on its
      side): scroll inside the card so the Remove row stays reachable. */
   max-height: calc(100dvh - 16px);
