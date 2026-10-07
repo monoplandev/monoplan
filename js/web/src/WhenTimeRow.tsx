@@ -9,7 +9,7 @@
 // lands on (`endDayOffset`); on the start day an end at or before the
 // start on the clock means the next day; clearing it removes the
 // duration. The end's day itself is edited in `WhenField`'s end-date
-// field under this row.
+// field above this row.
 //
 // The host owns the time (the register's time part) and the duration; the
 // row only ever hands back a complete hour + minute or null.

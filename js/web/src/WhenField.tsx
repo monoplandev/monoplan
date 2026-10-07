@@ -5,7 +5,7 @@
 // calendar picker (`CalendarPicker`; Remove). The input is read-only for now: typed dates are a later step,
 // so the popover is the only writer. Anchored on the input rather than a
 // Popover.Trigger button so it can become editable without changing shape.
-// The time row (`WhenTimeRow`: start picker, ✕, end picker) sits above
+// The time row (`WhenTimeRow`: start picker, ✕, end picker) sits below
 // the input and shows only once a date is set: without one the section
 // is just the date input, and there is no day for a time to belong to.
 // The date input has an inset ✕ while a `when` is set, which removes the
@@ -13,12 +13,12 @@
 // carries no time picker of its own. Its open state is the caller's, so a
 // row context menu's "Set date…" can open the item straight onto it.
 //
-// Once a date is set, an end-date input sits after the date input, under
+// Once a date is set, an end-date input sits after the date input, over
 // the end time, with the same arrow glyph: the day the span ends on,
 // start day + `spanEndOffset`. While that is the start day itself (no
 // span) it reads dim, like a placeholder: the end is implied, not
 // stored. It is the second way to write the stored `duration` (the end
-// time above is the first). Beside a timed start, picking a day keeps the
+// time below is the first). Beside a timed start, picking a day keeps the
 // end's clock time and writes the length to it; beside an all-day date
 // the length counts whole days (Tue–Thu is three days), and picking the
 // start day drops it. Its own popover is a plain calendar, no quick
@@ -93,7 +93,7 @@ export function WhenField(props: {
 
   // The inputs read the day only ("Wed 23 Sept", the year once it isn't
   // this one) rather than the badge's relative labels: a field should say
-  // what is stored, and the time has its own row above. Judged against
+  // what is stored, and the time has its own row below. Judged against
   // the shared `nowMs()` tick so the year appears at the turn of the year
   // without a reload.
   const formatDay = (stamp: string) => {
@@ -173,18 +173,9 @@ export function WhenField(props: {
 
   return (
     <>
-      {/* Time row, only once there is a date for the time to sit on. */}
-      <Show when={props.when()}>
-        <WhenTimeRow
-          time={time}
-          onTimeChange={onTimeChange}
-          duration={props.duration}
-          onDurationChange={props.onDurationChange}
-        />
-      </Show>
       {/* Start date, and once one is set the end's day beside it: the row
           splits into the time row's two columns so the end date sits
-          under the end time. */}
+          over the end time. */}
       <div
         classList={{
           "task-dialog-dates-row": true,
@@ -348,6 +339,15 @@ export function WhenField(props: {
           </Popover>
         </Show>
       </div>
+      {/* Time row, only once there is a date for the time to sit on. */}
+      <Show when={props.when()}>
+        <WhenTimeRow
+          time={time}
+          onTimeChange={onTimeChange}
+          duration={props.duration}
+          onDurationChange={props.onDurationChange}
+        />
+      </Show>
     </>
   );
 }
