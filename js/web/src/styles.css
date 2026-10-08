@@ -3044,13 +3044,13 @@ input.task-check:hover {
   }
 }
 
-/* The address line under the input: muted, indented past the glyph, with
-   the map link at the end. */
+/* The address line under the input: muted, standard 4px horizontal padding,
+   with the map link at the end. */
 .task-dialog-place-address {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding: 0 4px 0 26px;
+  padding: 0 4px;
   font-size: 12px;
   color: var(--text-muted);
   min-width: 0;
