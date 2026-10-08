@@ -366,9 +366,14 @@ body {
   font-size: 1.25em;
   /* Padding lives on the base rule so focusing does not shift the
      text; only the surface colour changes. */
-  padding: 2px;
+  padding: 2px 4px;
   background: transparent;
   border-radius: 3px;
+}
+
+/* Same inset as the title so the two text blocks share a left edge. */
+.task-panel .task-dialog-notes {
+  padding: 2px 4px;
 }
 
 /* Editing state: a light field surface so the pane title reads as
