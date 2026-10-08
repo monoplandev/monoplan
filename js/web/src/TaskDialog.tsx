@@ -1177,9 +1177,10 @@ export function TaskDialog(props: {
                       {m().common.copyLink}
                     </DropdownMenu.Item>
                     {/* Home-list jump, mirroring the Focus row's
-                        "Show in <list>". Binned items have no list row
-                        to land on (the Bin holds them). */}
-                    <Show when={props.onReveal && !isBinned(it())}>
+                        "Show in <list>". Binned and closed items have no
+                        list row to land on (the Bin / Done view holds
+                        them). */}
+                    <Show when={props.onReveal && !isBinned(it()) && !isClosed(it())}>
                       <DropdownMenu.Item
                         class="dropdown-menu-item"
                         onSelect={() => {
