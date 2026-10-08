@@ -1,5 +1,6 @@
 //! Item commands: add / ls / backlog / todo / start / review / done /
-//! bin (verb) / restore / mv / edit / when / duration / deadline / place.
+//! bin (verb) / restore / mv / edit / when / duration / deadline / place /
+//! places.
 //!
 //! Every action goes through `Session` (open → mutate → flush). The
 //! session reads from and writes to the local Loro doc; it only talks
@@ -9,7 +10,9 @@
 use std::io::{BufRead, IsTerminal};
 
 use clap::Parser;
-use monoplan_core::{ItemLifecycle, ItemView, LIST_INBOX, Place, WorkflowState};
+use monoplan_core::{
+    ItemLifecycle, ItemView, LIST_INBOX, Place, PlaceSuggestion, WorkflowState, fold_label,
+};
 use serde::Serialize;
 
 use crate::sync::Session;
@@ -430,6 +433,9 @@ pub struct PlaceArgs {
     /// A formatted address, shown beside the label.
     #[arg(long)]
     pub address: Option<String>,
+    /// Write the label as given, even if a known place matches it.
+    #[arg(long)]
+    pub new: bool,
 }
 
 /// Parse `<lat>,<lon>` in decimal degrees; the range check is the core's.
@@ -442,28 +448,102 @@ pub fn parse_coords(raw: &str) -> anyhow::Result<(f64, f64)> {
 }
 
 /// Set or clear the place: a label, optionally with `--at lat,lon` and
-/// `--address`; `-` clears. Validation lives in the core.
+/// `--address`; `-` clears. A bare label that matches a place already on
+/// some item (case-insensitively, `spec/place-plan.md` "Reuse") takes
+/// that place whole, coordinates and address included, so `place <id>
+/// gym` finds the Gym the web client geocoded; `--at` / `--address` /
+/// `--new` write exactly what was given. Validation lives in the core.
 pub async fn place(args: PlaceArgs, sync: bool) -> anyhow::Result<()> {
+    let session = Session::open(sync).await?;
     let value = match clear_or(&args.label) {
         None => None,
         Some(label) => {
             let coords = args.at.as_deref().map(parse_coords).transpose()?;
-            Some(Place {
+            let known = if coords.is_none() && args.address.is_none() && !args.new {
+                known_place(&session.doc().place_suggestions(label, 0), label)
+            } else {
+                None
+            };
+            Some(known.unwrap_or_else(|| Place {
                 label: label.to_string(),
                 lat: coords.map(|c| c.0),
                 lon: coords.map(|c| c.1),
                 address: args.address.clone(),
                 reference: None,
-            })
+            }))
         }
     };
-    let session = Session::open(sync).await?;
     session
         .doc()
         .set_item_place(&args.item_id, value.as_ref())?;
     session.flush().await?;
     println!("{}", args.item_id);
     Ok(())
+}
+
+/// The top-ranked known place whose folded label equals `label`'s, if
+/// any. A prefix match is not enough: `place <id> gy` must not become
+/// "Gym".
+pub fn known_place(suggestions: &[PlaceSuggestion], label: &str) -> Option<Place> {
+    let want = fold_label(label);
+    suggestions
+        .iter()
+        .find(|s| fold_label(&s.place.label) == want)
+        .map(|s| s.place.clone())
+}
+
+// ---------- places ----------
+
+#[derive(Parser, Debug)]
+pub struct PlacesArgs {
+    /// Narrow to places whose label or address starts with these words.
+    pub query: Option<String>,
+    /// At most this many rows (0 = all).
+    #[arg(long, default_value_t = 0)]
+    pub limit: usize,
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// The places already on items, newest use first (`spec/place-plan.md`
+/// "Reuse"): one row per distinct place, with its address and how many
+/// items carry it.
+pub async fn places(args: PlacesArgs, sync: bool) -> anyhow::Result<()> {
+    let session = Session::open(sync).await?;
+    let rows = session
+        .doc()
+        .place_suggestions(args.query.as_deref().unwrap_or(""), args.limit);
+    if args.json {
+        print_json(&rows)?;
+    } else {
+        for row in &rows {
+            println!("{}", format_place_row(row));
+        }
+    }
+    session.flush().await?;
+    Ok(())
+}
+
+/// `<label>  <address>  (<count>)`: address only when set, count only
+/// past one, and `@<lat>,<lon>` instead of an address when there are
+/// coordinates but no address to show for them.
+pub fn format_place_row(row: &PlaceSuggestion) -> String {
+    let p = &row.place;
+    let mut s = p.label.clone();
+    match (&p.address, p.lat, p.lon) {
+        (Some(addr), _, _) => {
+            s.push_str("  ");
+            s.push_str(addr);
+        }
+        (None, Some(lat), Some(lon)) => {
+            s.push_str(&format!("  @{lat},{lon}"));
+        }
+        _ => {}
+    }
+    if row.count > 1 {
+        s.push_str(&format!("  ({})", row.count));
+    }
+    s
 }
 
 // ---------- edit ----------
@@ -485,6 +565,55 @@ pub async fn edit(args: EditArgs, sync: bool) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn suggestion(
+        label: &str,
+        coords: Option<(f64, f64)>,
+        address: Option<&str>,
+        count: usize,
+    ) -> PlaceSuggestion {
+        PlaceSuggestion {
+            place: Place {
+                label: label.to_string(),
+                lat: coords.map(|c| c.0),
+                lon: coords.map(|c| c.1),
+                address: address.map(str::to_string),
+                reference: None,
+            },
+            count,
+            last_used: 0,
+        }
+    }
+
+    #[test]
+    fn known_place_needs_a_whole_label_match() {
+        let rows = [
+            suggestion("Gym", Some((1.0, 2.0)), None, 3),
+            suggestion("Gymnasium", Some((3.0, 4.0)), None, 1),
+        ];
+        assert_eq!(known_place(&rows, "gym").unwrap().lat, Some(1.0));
+        assert_eq!(known_place(&rows, "GYM ").unwrap().lat, Some(1.0));
+        assert!(known_place(&rows, "gy").is_none());
+        assert!(known_place(&rows, "home").is_none());
+    }
+
+    #[test]
+    fn place_rows_show_address_or_coords_and_count() {
+        assert_eq!(format_place_row(&suggestion("Home", None, None, 1)), "Home");
+        assert_eq!(
+            format_place_row(&suggestion("Gym", Some((1.5, -2.0)), None, 2)),
+            "Gym  @1.5,-2  (2)"
+        );
+        assert_eq!(
+            format_place_row(&suggestion(
+                "Work",
+                Some((1.5, -2.0)),
+                Some("1 George St"),
+                1
+            )),
+            "Work  1 George St"
+        );
+    }
 
     #[test]
     fn duration_parses_minutes_and_hm_forms() {

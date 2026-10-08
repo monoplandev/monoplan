@@ -3,6 +3,7 @@
 pub mod crypto;
 pub mod doc;
 pub mod events;
+pub mod places;
 pub mod search;
 pub mod storage;
 pub mod sync;
@@ -15,6 +16,7 @@ pub use doc::{
     MAX_PLACE_LABEL_CHARS, NOTES_ORIGIN_PREFIX, NotesDeltaOp, Place, SettingsView, WorkflowState,
 };
 pub use events::AppEvent;
+pub use places::{PlaceSuggestion, fold_label, place_matches, suggest_places};
 pub use search::{SearchIndex, SearchKind, SearchResult, matches_name, tokenize};
 pub use storage::{
     BootError, BootMeta, BootState, DocId, InFlightPush, LocalSeq, LocalStorage, MemStorage,

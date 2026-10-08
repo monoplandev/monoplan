@@ -41,7 +41,7 @@ Migrations: while pre-release, keep exactly one migration file per database (`00
 | [`spec/focus.md`](spec/focus.md) | Focus lens: curated single-tier list-by-reference, FocusRef grammar, auto-remove-on-Done |
 | [`spec/calendar-plan.md`](spec/calendar-plan.md) | Plan (not built): `when` date/datetime register beside `deadline`, agenda + month grid lenses, floating-only with reserved zone suffix, no recurrence |
 | [`spec/events-plan.md`](spec/events-plan.md) | Events (built): reserved `events` list whose items surface only on the calendar, ticking optional, Unscheduled section, no item kind; recurrence unsolved |
-| [`spec/place-plan.md`](spec/place-plan.md) | Place (built 2026-10-07): optional atomic `place` register `{label, lat?, lon?, address?, ref?}` shared by events and tasks; web lookup via Komoot's public Photon, debounced on input (not E2EE); notifications deferred |
+| [`spec/place-plan.md`](spec/place-plan.md) | Place (built 2026-10-07): optional atomic `place` register `{label, lat?, lon?, address?, ref?}` shared by events and tasks; web lookup via Komoot's public Photon, debounced on input (not E2EE); known-place reuse (2026-10-08): core `place_suggestions`, CLI `places`, two-tier web field; notifications deferred |
 | [`spec/search.md`](spec/search.md) | Local search index + command palette query contract |
 | [`spec/urls.md`](spec/urls.md) | Fragment URLs for items / lists / views, history rules, internal links |
 | [`spec/cli.md`](spec/cli.md) | Commands, local key storage, device bootstrap UX |

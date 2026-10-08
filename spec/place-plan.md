@@ -1,6 +1,7 @@
 # Place: plan
 
-**Status: Phase 0 (core, CLI) and Phase 1 (web) built 2026-10-07.**
+**Status: Phase 0 (core, CLI) and Phase 1 (web) built 2026-10-07; Phase 2
+reuse (known places in core, CLI and web) built 2026-10-08.**
 Adds an optional `place` register to items: a named place, optionally
 pinned to coordinates. Events use it for "where it happens"; tasks use it
 for "where it can be done". The two share one field because they share
@@ -18,7 +19,7 @@ notifications are deliberately out of scope here; see "Deferred".
 | Why not `location`? | Taken: `location` is the atomic placement register (`"<list_id>:<placement_id>"`, `data-model.md`). |
 | Shape | **One atomic plain `LoroValue` map** `{label, lat?, lon?, address?, ref?}`, set whole, the `lifecycle` pattern as a map rather than a list. A label and its coordinates can never tear under concurrent edit: two devices writing different places resolve to one of them, never a label from one with the coordinates of the other. |
 | Is label-only a place? | **Yes.** "Dinner at Luigi's" needs nothing more. Coordinates are an optional pair (both or neither). |
-| A registry of saved places? | **No** (matches the flat-tags call in `tags-not-projects`). Reuse comes from autocompleting across the places already on items, deduped by label and rounded coordinates. The value is self-contained, so an item never dangles. Not built yet; see "Deferred". |
+| A registry of saved places? | **No** (matches the flat-tags call in `tags-not-projects`). Reuse comes from the places already on items, deduped by label and rounded coordinates and ranked by recency. The value is self-contained, so an item never dangles. Built 2026-10-08; see "Reuse". |
 | Where do coordinates come from? | **A geocoder, search-as-you-type.** Tier order per client: a platform geocoder where one exists (MapKit on Apple, keyless), else a server-configured provider, else none (label only, pasted coordinates). The web client's first cut uses Komoot's public Photon instance directly from the browser; see "Geocoding". Mapbox was considered and dropped 2026-10-07: its default geocoding forbids storing results, permanent mode has no free tier, and a browser token is the wrong shape for a self-hosted tool. |
 | Is the lookup E2EE? | **No, and the spec says so.** The query text goes to whoever runs the geocoder. The stored value is encrypted like every register. Nothing else about the item leaves the device. |
 | Notifications | **Out of scope** (decided 2026-10-07). A later `trigger` register (arrive / leave) and on-device geofencing on mobile; the server never learns a location. The place value carries nothing notification-specific (no radius) until then. |
@@ -125,6 +126,67 @@ with no third party at all (the boot-time bias fix above already holds
 the permission, so the button would reuse it). Precedence per client: platform, then
 server-configured, then none.
 
+## Reuse
+
+The doc is the cache. Every pick is stored on an item, encrypted and
+synced, so "the places I use" is a derived view, the same on every
+device, with no registry and no per-device history to drift. The web
+geocoder cache (above) still spares the service a repeated query within
+a tab; this is what spares the user the query at all.
+
+**Core query.** `Doc::place_suggestions(query, limit) ->
+Vec<PlaceSuggestion { place, count, last_used }>` (`places.rs`), a
+sibling of `Doc::search`. A full scan per call, not an index: distinct
+places are few, and the view is derived from the `ItemView`s the doc
+already produces. wasm: `placeSuggestionsJson(query, limit)` on `Doc`
+and `SyncEngine`, JSON out.
+
+- **Which items count.** Everything not binned. Done items count: last
+  week's done gym visit still makes "Gym" current. Archived lists count.
+- **Recency.** A place's `last_used` is the newest, across its items, of
+  `created_at`, `lifecycle_at` (the last state move, so a Done stamps it)
+  and `when` read as UTC midnight (a floating stand-in good enough to
+  rank by; a future `when` sorts first, since that place is being planned
+  around). There is no `touched_at` on items; when one lands it joins
+  this max.
+- **Dedup.** Group by the folded label (the search tokenizer, so case,
+  accents and punctuation never split one place), then by coordinates
+  rounded to ~4 decimals (~10 m). Label-only uses fold into the most
+  recent coordinated bucket of the same label and lend it their count
+  and recency, so a CLI-typed "gym" and a geocoded "Gym" are one
+  suggestion, the one with coordinates. Two "Office"s with different
+  coordinates stay separate; the address tells them apart. Each bucket
+  shows its most recently used value (casing, address, ref).
+- **Order.** Newest use first, then most used, then label.
+- **Query.** Every query token must prefix a token of the label or the
+  address (`matches_name`), so "geo" finds a place at "1 George St".
+  Empty matches all. Shared by `monoplan places <query>` and the web
+  field's narrowing (the web calls once per popover open with an empty
+  query and narrows the result with the same `matchesName`).
+
+**Web field.** Two tiers in one popover, known rows (a small clock glyph
+after the label) above lookup rows, ruled off when both show; the
+OpenStreetMap credit only with lookup rows.
+
+- Focusing the blank field lists the six most recent places. No network.
+- Typing narrows the known places from the first character, no
+  debounce, no three-character floor.
+- From three characters the Photon lookup runs as before and lands under
+  the known rows, minus any row that repeats a shown known place (same
+  provider ref, or same rounded coordinates). The known row wins: it
+  carries the label the user chose. The lookup's "No results" / "Lookup
+  failed" notes show only when no known row is showing.
+- Enter on text whose folded label equals a known place's reuses that
+  place whole, coordinates included, instead of writing a label-only
+  place and losing them. A prefix is not a match.
+
+**CLI.** `monoplan places [query] [--limit N] [--json]` lists the known
+places newest first, `<label>  <address | @lat,lon>  (<count>)`. `place
+<id> <label>` with no `--at` / `--address` and a label that folds equal
+to a known place's writes that place whole; `--new` writes the label as
+given. So the CLI, which has no geocoder, still gets coordinates for
+anything the web client has looked up once.
+
 ## Web
 
 - **Field.** `PlaceField` in the task dialog, under the deadline band.
@@ -132,9 +194,10 @@ server-configured, then none.
   changed label writes a label-only place (the old coordinates described
   the old label); emptying it clears. Typing runs the debounced lookup
   and lists results under the input; arrow down moves into them, and
-  picking one writes the whole place. With coordinates present, the
-  address shows muted under the input with an "Open map" link to
-  openstreetmap.org.
+  picking one writes the whole place. Known places (see "Reuse") show
+  first: on focus when blank, narrowed as you type. With coordinates
+  present, the address shows muted under the input with an "Open map"
+  link to openstreetmap.org.
 - **Badge.** `PlaceBadge` (pin glyph + label, address on hover) on rows
   beside the `when` badge, and on calendar rows. Muted on done / binned.
 - **Copy, paste, duplicate** carry the place with the item.
@@ -142,17 +205,16 @@ server-configured, then none.
 
 ## CLI
 
-- `monoplan place <item_id> <label | -> [--at <lat>,<lon>] [--address <text>]`
+- `monoplan place <item_id> <label | -> [--at <lat>,<lon>] [--address <text>] [--new]`
+- `monoplan places [query] [--limit N] [--json]`
 - `ls` / `agenda` / `focus` rows append ` at:<label>`; `--json` adds a
   `place` object when set.
-- No lookup from the CLI yet. The CLI sets a label and, if the user
-  has them, coordinates.
+- No lookup from the CLI. The CLI sets a label and, if the user has
+  them, coordinates; a label naming a known place takes its coordinates
+  (see "Reuse").
 
 ## Deferred, with their extension points
 
-- **Autocomplete across existing places** (reuse "Home", "Gym"): a
-  client-side index over `itemsById[*].place`, deduped by label plus
-  coordinates rounded to ~4 decimals. No schema change.
 - **Server-configured provider.** A `geocoder` section in `server.toml`
   and a proxy route; the web client's `searchPlaces` gets a provider
   behind it. The place shape is provider-neutral already.
@@ -170,17 +232,24 @@ server-configured, then none.
 
 - Core: set / clear / canonicalise; rejection table; malformed raw
   values read as unset; export / import; two-peer convergence with
-  concurrent writes resolving to one whole value.
-- CLI: `parse_coords`.
+  concurrent writes resolving to one whole value. Suggestions
+  (`places.rs`): `when` to millis, ranking by newest use then count,
+  label folding, label-only folding into the coordinated bucket,
+  distinct coordinates kept apart, bin skipped, query on label or
+  address; a doc-level check through `set_item_place` / `set_item_when`.
+- CLI: `parse_coords`; `known_place` needs a whole-label match; `places`
+  row formatting.
 - Web: `photonToPlace` mapping; clip round-trip; store event handling
-  via the wasm doc test.
+  via the wasm doc test; `placeSuggestionsJson` round trip; the field's
+  narrowing, exact match and lookup dedup (`placeSuggest.test.ts`).
 
 ## Phases
 
 - **Phase 0 (core, CLI)** — built 2026-10-07.
 - **Phase 1 (web)** — built 2026-10-07: field, Photon lookup, badge,
   clip.
-- **Phase 2** — place autocomplete from existing items; current
-  location.
+- **Phase 2** — reuse of known places built 2026-10-08 (core query, CLI
+  `places` + label resolution, web two-tier field). Current location
+  still open.
 - **Phase 3** — server-configured provider; platform geocoder on native
   clients.

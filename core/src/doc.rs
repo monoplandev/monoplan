@@ -60,6 +60,7 @@ use uuid::Uuid;
 
 use crate::crypto::{AEAD_NONCE_LEN, Dek};
 use crate::events::AppEvent;
+use crate::places::{PlaceSuggestion, suggest_places};
 use crate::search::{SearchIndex, SearchResult};
 use monoplan_protocol::EncryptedBlob;
 
@@ -3697,6 +3698,18 @@ impl Doc {
             Some(item) => idx.index_item(&item),
             None => idx.remove(item_id),
         }
+    }
+
+    // ---------- places ----------
+
+    /// The places already on items, deduped and ranked newest use first
+    /// (`spec/place-plan.md` "Reuse"), filtered by `query` (every token a
+    /// prefix of the label or address; empty matches all), at most
+    /// `limit` (0 = unlimited). A scan, not an index: distinct places
+    /// are few.
+    pub fn place_suggestions(&self, query: &str, limit: usize) -> Vec<PlaceSuggestion> {
+        let items: Vec<ItemView> = self.iter_items().collect();
+        suggest_places(&items, query, limit)
     }
 
     /// Per-list nav view: ids of items in this list that are neither
@@ -9432,6 +9445,37 @@ mod tests {
         let dst2 = Doc::new().unwrap();
         dst2.import_json(&edited).unwrap();
         assert!(dst2.iter_items().all(|i| i.place.is_none()));
+    }
+
+    #[test]
+    fn place_suggestions_dedupe_rank_and_skip_the_bin() {
+        let doc = Doc::new().unwrap();
+        let a = doc.add_item(LIST_INBOX, "a").unwrap();
+        let b = doc.add_item(LIST_INBOX, "b").unwrap();
+        let c = doc.add_item(LIST_INBOX, "c").unwrap();
+        let d = doc.add_item(LIST_INBOX, "d").unwrap();
+        doc.set_item_place(&a, Some(&place("gym", None))).unwrap();
+        doc.set_item_place(&b, Some(&place("Gym", Some((-33.8688, 151.2093)))))
+            .unwrap();
+        doc.set_item_place(&c, Some(&place("Home", None))).unwrap();
+        doc.set_item_place(&d, Some(&place("Secret", None)))
+            .unwrap();
+        doc.set_item_binned(&d, true).unwrap();
+        // Planning around Home makes it the newest use.
+        doc.set_item_when(&c, Some("2099-01-01")).unwrap();
+
+        let got = doc.place_suggestions("", 0);
+        let labels: Vec<&str> = got.iter().map(|s| s.place.label.as_str()).collect();
+        assert_eq!(labels, ["Home", "Gym"]);
+        assert_eq!(got[1].count, 2);
+        assert_eq!(got[1].place.lat, Some(-33.8688));
+        assert_eq!(
+            doc.place_suggestions("gy", 0)
+                .iter()
+                .map(|s| s.place.label.as_str())
+                .collect::<Vec<_>>(),
+            ["Gym"]
+        );
     }
 
     #[test]

@@ -4,20 +4,34 @@
 // is editable: the text is the place's label, and a typed label is a
 // complete place on its own. Enter or blur with a changed label writes a
 // label-only place (any coordinates belonged to the old label, so they
-// go); emptying it clears. Typing runs a debounced lookup against Photon
-// (OpenStreetMap data, `geocode.ts` for the constraints) once three
-// characters are in: a popover of results opens under the input, and
-// picking one writes the full place, coordinates and address included.
-// Arrow down moves from the input into the results. A place with
-// coordinates shows its address muted under the input with a link to the
-// map.
+// go); emptying it clears.
+//
+// Suggestions come in two tiers (`spec/place-plan.md` "Reuse"). Known
+// places, the ones already on items as core ranks them, show first:
+// focusing the blank field lists the most recent few, and typing narrows
+// them from the first character with no network. Under them, once three
+// characters are in, a debounced lookup against Photon (OpenStreetMap
+// data, `geocode.ts` for the constraints) adds places the user has never
+// used, minus any that repeat a known row. Picking either writes the
+// whole place; Enter on text that names a known place reuses it,
+// coordinates included, rather than writing a label-only one. Arrow
+// down moves from the input into the results. A place with coordinates
+// shows its address muted under the input with a link to the map.
 
 import { Popover } from "@kobalte/core/popover";
-import { createEffect, createSignal, For, on, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js";
 import { osmMapUrl, searchPlaces } from "./geocode.ts";
 import mapPinSvg from "./icons/map-pin.svg?raw";
+import clockSvg from "./icons/clock.svg?raw";
 import externalLinkSvg from "./icons/external-link.svg?raw";
 import { useAppI18n } from "./i18n.tsx";
+import {
+  dropKnown,
+  exactKnown,
+  filterKnown,
+  samePlace,
+  type PlaceSuggestion,
+} from "./placeSuggest.ts";
 import type { Place } from "./sync/store.ts";
 
 type Status = "idle" | "searching" | "empty" | "error";
@@ -26,20 +40,28 @@ type Status = "idle" | "searching" | "empty" | "error";
 const DEBOUNCE_MS = 350;
 /** Photon autocompletes from three characters. */
 const MIN_CHARS = 3;
+/** Known places shown at once: the recents on a blank field, or the
+ *  narrowed matches while typing. */
+const KNOWN_SHOWN = 6;
 
 export function PlaceField(props: {
   place: () => Place | null;
   muted: () => boolean;
   onChange: (place: Place | null) => void;
+  /** The places already on items, newest use first, read when the
+   *  popover opens (not reactive: a scan in core). */
+  knownPlaces: () => PlaceSuggestion[];
 }) {
   const { m } = useAppI18n();
   let inputRef: HTMLInputElement | undefined;
   let contentRef: HTMLDivElement | undefined;
-  let listRef: HTMLUListElement | undefined;
   const [draft, setDraft] = createSignal(props.place()?.label ?? "");
   const [open, setOpen] = createSignal(false);
   const [status, setStatus] = createSignal<Status>("idle");
-  const [results, setResults] = createSignal<Place[]>([]);
+  const [remote, setRemote] = createSignal<Place[]>([]);
+  // Loaded once per open; `null` until then so a stale list from a
+  // previous open never shows.
+  const [known, setKnown] = createSignal<PlaceSuggestion[] | null>(null);
   let debounce: ReturnType<typeof setTimeout> | undefined;
   // Latest wins: each lookup takes a ticket, and a response whose ticket
   // is no longer current is dropped. Superseded requests are left to
@@ -59,6 +81,17 @@ export function PlaceField(props: {
     ),
   );
 
+  const ensureKnown = (): PlaceSuggestion[] => {
+    const have = known();
+    if (have) return have;
+    const loaded = props.knownPlaces();
+    setKnown(loaded);
+    return loaded;
+  };
+
+  const localRows = createMemo(() => filterKnown(known() ?? [], draft(), KNOWN_SHOWN));
+  const remoteRows = createMemo(() => dropKnown(remote(), localRows()));
+
   const commit = () => {
     clearTimeout(debounce);
     const t = draft().trim();
@@ -67,32 +100,55 @@ export function PlaceField(props: {
       if (cur) props.onChange(null);
       return;
     }
-    if (t !== cur?.label) props.onChange({ label: t });
+    // An unchanged label writes nothing (a focus and blur is not an
+    // edit). A typed label that names a known place takes that place
+    // whole: "gym" reuses the geocoded Gym. Only a whole-label match
+    // counts.
+    if (t === cur?.label) return;
+    const match = exactKnown(ensureKnown(), t);
+    if (match && !samePlace(match, cur)) props.onChange(match);
+    else if (!match) props.onChange({ label: t });
   };
 
-  const closeResults = () => {
+  const stopRemote = () => {
     clearTimeout(debounce);
     ticket++;
     closer.abort();
     closer = new AbortController();
-    setOpen(false);
-    setResults([]);
+    setRemote([]);
     setStatus("idle");
+  };
+
+  const closeResults = () => {
+    stopRemote();
+    setOpen(false);
+    setKnown(null);
   };
   onCleanup(closeResults);
 
-  // Typing schedules a lookup once the text is long enough and differs
-  // from the stored label (reopening a dialog is not a search). Each
-  // keystroke restarts the clock and retires any response still to come.
-  const scheduleSearch = () => {
-    clearTimeout(debounce);
+  // Typing narrows the known places at once, and schedules a lookup once
+  // the text is long enough and differs from the stored label (reopening
+  // a dialog is not a search). Each keystroke restarts the clock and
+  // retires any response still to come.
+  const onTyped = () => {
+    ensureKnown();
     const q = draft().trim();
     if (q.length < MIN_CHARS || q === props.place()?.label) {
-      closeResults();
+      stopRemote();
+      setOpen(localRows().length > 0);
       return;
     }
+    clearTimeout(debounce);
     ticket++;
+    setOpen(true);
     debounce = setTimeout(() => void search(), DEBOUNCE_MS);
+  };
+
+  // A blank field, focused, offers the most recent places.
+  const onFocused = () => {
+    if (draft().trim() !== "") return;
+    ensureKnown();
+    if (localRows().length > 0) setOpen(true);
   };
 
   // Focus inside the popover (arrow down into the results) is not a
@@ -101,19 +157,20 @@ export function PlaceField(props: {
     target instanceof Node && contentRef !== undefined && contentRef.contains(target);
 
   const resultButtons = (): HTMLButtonElement[] =>
-    listRef ? Array.from(listRef.querySelectorAll("button")) : [];
+    contentRef ? Array.from(contentRef.querySelectorAll("button.place-popover-result")) : [];
   const focusResult = (index: number) => {
     const buttons = resultButtons();
     if (buttons.length === 0) return;
     buttons[Math.max(0, Math.min(index, buttons.length - 1))]?.focus();
   };
-  const onResultKeyDown = (e: KeyboardEvent, index: number) => {
+  const onResultKeyDown = (e: KeyboardEvent) => {
+    const index = resultButtons().indexOf(e.currentTarget as HTMLButtonElement);
     if (e.key === "ArrowDown") {
       e.preventDefault();
       focusResult(index + 1);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      if (index === 0) inputRef?.focus();
+      if (index <= 0) inputRef?.focus();
       else focusResult(index - 1);
     } else if (e.key === "Escape") {
       e.stopPropagation();
@@ -132,7 +189,7 @@ export function PlaceField(props: {
     try {
       const found = await searchPlaces(q, { signal });
       if (mine !== ticket) return;
-      setResults(found);
+      setRemote(found);
       setStatus(found.length ? "idle" : "empty");
     } catch {
       if (mine !== ticket || signal.aborted) return;
@@ -156,6 +213,36 @@ export function PlaceField(props: {
     const p = props.place();
     return p && p.lat != null && p.lon != null ? { lat: p.lat, lon: p.lon } : null;
   };
+
+  const anyRows = () => localRows().length > 0 || remoteRows().length > 0;
+
+  const resultRow = (p: Place, isKnown: boolean) => (
+    <li role="option">
+      <button
+        type="button"
+        class="place-popover-result"
+        data-known={isKnown ? "" : undefined}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => pick(p)}
+        onKeyDown={onResultKeyDown}
+      >
+        <span class="place-popover-result-label">
+          {p.label}
+          <Show when={isKnown}>
+            <span
+              class="place-popover-result-known"
+              title={m().place.known}
+              aria-label={m().place.known}
+              innerHTML={clockSvg}
+            />
+          </Show>
+        </span>
+        <Show when={p.address}>
+          {(a) => <span class="place-popover-result-address">{a()}</span>}
+        </Show>
+      </button>
+    </li>
+  );
 
   return (
     <div class="task-dialog-place">
@@ -188,9 +275,10 @@ export function PlaceField(props: {
               autocomplete="off"
               spellcheck={false}
               data-muted={props.muted() ? "" : undefined}
+              onFocus={onFocused}
               onInput={(e) => {
                 setDraft(e.currentTarget.value);
-                scheduleSearch();
+                onTyped();
               }}
               onBlur={(e) => {
                 if (insidePopover(e.relatedTarget)) return;
@@ -205,7 +293,7 @@ export function PlaceField(props: {
                 } else if (e.key === "Escape" && open()) {
                   e.stopPropagation();
                   closeResults();
-                } else if (e.key === "ArrowDown" && open() && results().length > 0) {
+                } else if (e.key === "ArrowDown" && open() && anyRows()) {
                   e.preventDefault();
                   focusResult(0);
                 }
@@ -253,40 +341,29 @@ export function PlaceField(props: {
                   closeResults();
                 }}
               >
+                <Show when={anyRows()}>
+                  <ul class="place-popover-list" role="listbox">
+                    <For each={localRows()}>{(s) => resultRow(s.place, true)}</For>
+                    <Show when={localRows().length > 0 && remoteRows().length > 0}>
+                      <li role="separator" class="place-popover-separator" />
+                    </Show>
+                    <For each={remoteRows()}>{(p) => resultRow(p, false)}</For>
+                  </ul>
+                </Show>
                 <Show when={status() === "searching"}>
                   <div class="place-popover-note">{m().place.searching}</div>
                 </Show>
-                <Show when={status() === "empty"}>
+                {/* The lookup's own notes only matter when nothing of the
+                    user's is already showing. */}
+                <Show when={status() === "empty" && !anyRows()}>
                   <div class="place-popover-note">{m().place.noResults}</div>
                 </Show>
-                <Show when={status() === "error"}>
+                <Show when={status() === "error" && !anyRows()}>
                   <div class="place-popover-note">{m().place.error}</div>
                 </Show>
-                <Show when={results().length > 0}>
-                  <ul class="place-popover-list" role="listbox" ref={listRef}>
-                    <For each={results()}>
-                      {(p, i) => (
-                        <li role="option">
-                          <button
-                            type="button"
-                            class="place-popover-result"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => pick(p)}
-                            onKeyDown={(e) => onResultKeyDown(e, i())}
-                          >
-                            <span class="place-popover-result-label">{p.label}</span>
-                            <Show when={p.address}>
-                              {(a) => (
-                                <span class="place-popover-result-address">{a()}</span>
-                              )}
-                            </Show>
-                          </button>
-                        </li>
-                      )}
-                    </For>
-                  </ul>
+                <Show when={remoteRows().length > 0}>
+                  <div class="place-popover-credit">{m().place.credit}</div>
                 </Show>
-                <div class="place-popover-credit">{m().place.credit}</div>
               </div>
             </Popover.Content>
           </Popover.Portal>

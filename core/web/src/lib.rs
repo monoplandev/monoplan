@@ -53,6 +53,10 @@ fn search_to_json(results: &[monoplan_core::SearchResult]) -> String {
     serde_json::to_string(results).unwrap_or_else(|_| "[]".to_string())
 }
 
+fn suggestions_to_json(rows: &[monoplan_core::PlaceSuggestion]) -> String {
+    serde_json::to_string(rows).unwrap_or_else(|_| "[]".to_string())
+}
+
 // ---------- lifecycle ----------
 
 /// Resolved item lifecycle (`spec/data-model.md` "Lifecycle"), mirrored
@@ -501,6 +505,14 @@ impl Doc {
     #[wasm_bindgen(js_name = searchJson)]
     pub fn search_json(&self, query: &str, limit: usize) -> String {
         search_to_json(&self.inner.search(query, limit))
+    }
+
+    /// Places already on items, deduped and ranked newest use first
+    /// (`spec/place-plan.md` "Reuse"), as a JSON array of
+    /// `{place, count, lastUsed}`; `limit` 0 = unlimited.
+    #[wasm_bindgen(js_name = placeSuggestionsJson)]
+    pub fn place_suggestions_json(&self, query: &str, limit: usize) -> String {
+        suggestions_to_json(&self.inner.place_suggestions(query, limit))
     }
 
     /// The Focus lens as a JSON array of `ItemView`s in curated order —
@@ -1874,6 +1886,14 @@ impl SyncEngine {
     #[wasm_bindgen(js_name = searchJson)]
     pub fn search_json(&self, query: &str, limit: usize) -> String {
         search_to_json(&self.inner.doc().search(query, limit))
+    }
+
+    /// Places already on items, deduped and ranked newest use first
+    /// (`spec/place-plan.md` "Reuse"), as a JSON array of
+    /// `{place, count, lastUsed}`; `limit` 0 = unlimited.
+    #[wasm_bindgen(js_name = placeSuggestionsJson)]
+    pub fn place_suggestions_json(&self, query: &str, limit: usize) -> String {
+        suggestions_to_json(&self.inner.doc().place_suggestions(query, limit))
     }
 
     /// The Focus lens as a JSON array of `ItemView`s in curated order —

@@ -84,6 +84,8 @@ enum Cmd {
     Deadline(items::DateArg),
     /// Set (a label, optionally --at lat,lon and --address) or clear (-) an item's place.
     Place(items::PlaceArgs),
+    /// Places already on items, newest use first; an optional query narrows them.
+    Places(items::PlacesArgs),
     /// Open items by day: Today (with overdue and past-dated folded in), then the coming days.
     Agenda(agenda::AgendaArgs),
     /// Curated Focus lens: list (default), add, rm, mv.
@@ -125,6 +127,7 @@ impl Cli {
             Cmd::Duration(a) => items::duration(a, sync).await,
             Cmd::Deadline(a) => items::deadline(a, sync).await,
             Cmd::Place(a) => items::place(a, sync).await,
+            Cmd::Places(a) => items::places(a, sync).await,
             Cmd::Agenda(a) => agenda::run(a, sync).await,
             Cmd::Focus(a) => focus::run(a, sync).await,
             Cmd::Lists(a) => lists::run(a, sync).await,

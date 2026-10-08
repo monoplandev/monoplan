@@ -16,6 +16,34 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
+describe("Doc place suggestions", () => {
+  test("placeSuggestionsJson dedupes, ranks newest use first, and narrows by query", () => {
+    const doc = Doc.create();
+    const a = doc.addItem(LIST_MAIN, "a");
+    const b = doc.addItem(LIST_MAIN, "b");
+    const c = doc.addItem(LIST_MAIN, "c");
+    doc.setItemPlace(a, JSON.stringify({ label: "gym" }));
+    doc.setItemPlace(b, JSON.stringify({ label: "Gym", lat: -33.8688, lon: 151.2093 }));
+    doc.setItemPlace(c, JSON.stringify({ label: "Home" }));
+    doc.setItemWhen(c, "2099-01-01");
+
+    const rows = JSON.parse(doc.placeSuggestionsJson("", 0)) as Array<{
+      place: { label: string; lat?: number };
+      count: number;
+      lastUsed: number;
+    }>;
+    expect(rows.map((r) => r.place.label)).toEqual(["Home", "Gym"]);
+    expect(rows[1].count).toBe(2);
+    expect(rows[1].place.lat).toBe(-33.8688);
+    expect(rows[0].lastUsed).toBeGreaterThan(rows[1].lastUsed);
+
+    const narrowed = JSON.parse(doc.placeSuggestionsJson("gy", 0)) as Array<{
+      place: { label: string };
+    }>;
+    expect(narrowed.map((r) => r.place.label)).toEqual(["Gym"]);
+  });
+});
+
 describe("Doc save/load", () => {
   test("addItem → save → load → fingerprint matches", () => {
     const doc = Doc.create();

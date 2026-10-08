@@ -299,6 +299,9 @@ export type Messages = {
     noResults: string;
     /** Popover note when a lookup failed. */
     error: string;
+    /** Title of the glyph on a result that is already on one of the
+     *  user's items. */
+    known: string;
     /** Link under the input to the place on the map. */
     openMap: string;
     /** Attribution line at the foot of the results popover. */
@@ -589,6 +592,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       searching: "Buscando…",
       noResults: "Sin resultados",
       error: "No se pudo buscar",
+      known: "Usado antes",
       openMap: "Abrir mapa",
       credit: "© Colaboradores de OpenStreetMap",
     },
@@ -858,6 +862,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       searching: "Searching…",
       noResults: "No results",
       error: "Lookup failed",
+      known: "Used before",
       openMap: "Open map",
       credit: "© OpenStreetMap contributors",
     },

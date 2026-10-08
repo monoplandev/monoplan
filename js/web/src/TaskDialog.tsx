@@ -78,6 +78,11 @@ import {
   type WorkflowState,
 } from "./sync/store.ts";
 
+/** Known places handed to the place field when its popover opens: enough
+ *  for prefix narrowing to always have something to show, few enough to
+ *  parse per open. */
+const KNOWN_PLACES_LIMIT = 200;
+
 export function TaskDialog(props: {
   /** The open item's id, or null when closed. */
   itemId: () => string | null;
@@ -1311,7 +1316,12 @@ export function TaskDialog(props: {
           {/* Place section under the deadline: a typed label, or a lookup
               (`PlaceField`). */}
           <section class="task-dialog-section task-dialog-place-section">
-            <PlaceField place={vPlace} muted={muted} onChange={onPlaceChange} />
+            <PlaceField
+              place={vPlace}
+              muted={muted}
+              onChange={onPlaceChange}
+              knownPlaces={() => props.app.placeSuggestions("", KNOWN_PLACES_LIMIT)}
+            />
           </section>
 
           <section class="task-dialog-section">
