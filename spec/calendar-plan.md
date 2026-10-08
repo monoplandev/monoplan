@@ -293,9 +293,10 @@ for the month grid). `groupByDeadline` becomes
   kept), and the time row only shows against a set date. The inset ✕ on the
   picker is how the user drops back to all-day without removing the date.
 - The calendar grid (`CalendarPicker`) is shared with Deadline and carries
-  no time field: the time is edited in the task surface's dates band. The
-  standalone calendar modal is Deadline-only; `when` has no surface outside
-  the task dialog / side panel.
+  no time field: the time is edited in the task surface's dates band.
+  Neither register has a surface outside the task dialog / side panel (the
+  standalone Deadline calendar modal was dropped 2026-10-08; its "Set
+  deadline…" now opens the item on the deadline popover, as Set date… does).
 - `WhenBadge` beside `DeadlineBadge` on list rows and board cards. When both
   are set, `when` renders first. Muted on done/binned items as deadline is.
 - Row context menus gain the same quick actions for When (Today, Tomorrow,

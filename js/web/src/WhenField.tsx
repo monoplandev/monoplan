@@ -30,7 +30,7 @@
 
 import { Popover } from "@kobalte/core/popover";
 import { createMemo, createSignal, Show } from "solid-js";
-import { CalendarPicker } from "./DeadlineCalendarDialog.tsx";
+import { CalendarPicker } from "./CalendarPicker.tsx";
 import {
   addDaysToStamp,
   allDayDurationFor,

@@ -38,7 +38,6 @@ import plusSvg from "./icons/plus.svg?raw";
 import trashSvg from "./icons/trash.svg?raw";
 import { Board, type BoardImperative } from "./Board.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
-import { DeadlineCalendarDialog } from "./DeadlineCalendarDialog.tsx";
 import { FindPalette } from "./FindPalette.tsx";
 import { FindSheet } from "./FindSheet.tsx";
 import type { FindResult } from "./findResults.tsx";
@@ -319,32 +318,27 @@ export function Workspace(props: {
       openedViewKey = id === null ? null : viewKey(untrack(view));
       setOpenItemIdRaw(id);
     });
-  // Whether the task surface's planned-date popover is open. Owned here
-  // rather than by the surface so a row context menu's "Set date…" can
-  // enter the item with the popover already showing. The surface clears
-  // it as it closes.
+  // Whether the task surface's planned-date / deadline popovers are open.
+  // Owned here rather than by the surface so a row context menu's "Set
+  // date…" / "Set deadline…" can enter the item with the popover already
+  // showing. The surface clears them as it closes.
   const [itemWhenOpen, setItemWhenOpen] = createSignal(false);
+  const [itemDeadlineOpen, setItemDeadlineOpen] = createSignal(false);
   const openItemWhen = (id: string) =>
     batch(() => {
       setOpenItemId(id);
       setItemWhenOpen(true);
+    });
+  const openItemDeadline = (id: string) =>
+    batch(() => {
+      setOpenItemId(id);
+      setItemDeadlineOpen(true);
     });
   // Rows the move palette will re-file (visible order), or null when the
   // palette is closed. Captured at open (from the `m` shortcut's selection
   // or a row context menu's target set) so the pick acts on what the user
   // saw, not on whatever the selection is by commit time.
   const [moveIds, setMoveIds] = createSignal<string[] | null>(null);
-  // Shared deadline calendar, opened from a row/board context menu's "Set
-  // date". Holds the target item ids and the stamp to seed the calendar
-  // with (the clicked row's current deadline, or null); one modal serves
-  // every row rather than mounting a Dialog per row.
-  const [deadlineTarget, setDeadlineTarget] = createSignal<{
-    ids: readonly string[];
-    initial: string | null;
-  } | null>(null);
-  const openDeadlineCalendar = (ids: readonly string[], initial: string | null) => {
-    if (ids.length > 0) setDeadlineTarget({ ids, initial });
-  };
   // New-item capture target for the detail dialog (board "+" buttons), or
   // null when not capturing. Mutually exclusive with `openItemId`.
   const [newItemTarget, setNewItemTarget] = createSignal<{
@@ -2305,11 +2299,12 @@ export function Workspace(props: {
       });
     }
     // Deadlines only matter while an item is open (the row badge and menu
-    // entry hide for done rows too).
-    if (openIds.length > 0) {
+    // entry hide for done rows too). Single item only: the pick happens
+    // in the item's own deadline popover, as the row menu's entry does.
+    if (openIds.length === 1) {
       out.push({
         label: `${msgs.deadline.label}: ${msgs.deadline.setDate}`,
-        run: () => openDeadlineCalendar(openIds, null),
+        run: () => openItemDeadline(openIds[0]!),
       });
     }
     out.push(
@@ -2560,6 +2555,8 @@ export function Workspace(props: {
         entered={() => openItemId() !== null}
         whenOpen={itemWhenOpen}
         setWhenOpen={setItemWhenOpen}
+        deadlineOpen={itemDeadlineOpen}
+        setDeadlineOpen={setItemDeadlineOpen}
         onClosed={restoreItemsFocus}
         onReleaseFocus={() => {
           // Handing focus back closes the entered item; the pane carries
@@ -2597,28 +2594,6 @@ export function Workspace(props: {
                 setSidePanelOpen(!sidePanelOpen(), { keepItem: true });
               }
         }
-      />
-      <DeadlineCalendarDialog
-        closeToItems
-        open={() => deadlineTarget() !== null}
-        setOpen={(o) => {
-          if (!o) setDeadlineTarget(null);
-        }}
-        value={() => deadlineTarget()?.initial ?? null}
-        onPick={(stamp) => {
-          const t = deadlineTarget();
-          if (!t) return;
-          app.withActionBatch(() => {
-            for (const id of t.ids) app.setItemDeadline(id, stamp);
-          });
-        }}
-        onRemove={() => {
-          const t = deadlineTarget();
-          if (!t) return;
-          app.withActionBatch(() => {
-            for (const id of t.ids) app.setItemDeadline(id, null);
-          });
-        }}
       />
       <ShortcutsDialog
         open={shortcutsOpen()}
@@ -3016,7 +2991,7 @@ export function Workspace(props: {
                         copyBlock={copyRows}
                         onDraftSettle={settleDraft}
                         onOpen={(id) => setOpenItemId(id)}
-                        onSetDeadline={openDeadlineCalendar}
+                        onSetDeadline={openItemDeadline}
                         onSetWhen={openItemWhen}
                         onReveal={revealItemIn}
                         onMoveToList={openMovePalette}
@@ -3034,7 +3009,7 @@ export function Workspace(props: {
               app={app}
               listId={listId}
               onOpen={(id) => setOpenItemId(id)}
-              onSetDeadline={openDeadlineCalendar}
+              onSetDeadline={openItemDeadline}
               onSetWhen={openItemWhen}
               onReveal={revealItemIn}
               onMoveToList={openMovePalette}

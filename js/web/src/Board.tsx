@@ -77,7 +77,7 @@ export function Board(props: {
   app: DocApp;
   listId: string;
   onOpen: (id: string) => void;
-  onSetDeadline: (ids: readonly string[], initial: string | null) => void;
+  onSetDeadline: (id: string) => void;
   onSetWhen: (id: string) => void;
   /** Row context-menu jump to the item's other appearance (the Focus
    *  lens). Forwarded to each card. */
@@ -668,7 +668,7 @@ function BoardColumn(props: {
   /** Open the new-item dialog targeting this lane. */
   onAddItem: () => void;
   onOpen: (id: string) => void;
-  onSetDeadline: (ids: readonly string[], initial: string | null) => void;
+  onSetDeadline: (id: string) => void;
   onSetWhen: (id: string) => void;
   onReveal?: (id: string, where: "list" | "focus") => void;
   onMoveToList?: (ids: readonly string[]) => void;

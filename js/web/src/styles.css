@@ -3190,9 +3190,9 @@ input.task-check:hover {
 }
 
 /* The picker popover under the date / deadline / place inputs: shares the
-   modal's card look (`.deadline-dialog`) with tighter padding, and sits
+   card look (`.deadline-dialog`) with tighter padding, and sits
    above the task dialog (z-index 100 / 101). Doubled up so the padding
-   beats the modal card's 12px, which is declared later. */
+   beats the card's 12px, which is declared later. */
 .deadline-dialog.when-popover {
   z-index: 120;
   padding: 4px;
@@ -3261,17 +3261,9 @@ input.task-check:hover {
   height: 12px;
 }
 
-/* ---------- calendar dialog (@corvu/calendar) ---------- */
-/* Nested modal opened from the task dialog, so its overlay / positioner sit
-   above the task dialog's (z-index 100 / 101). */
-.deadline-dialog-overlay {
-  z-index: 120;
-}
-
-.deadline-dialog-positioner {
-  z-index: 121;
-}
-
+/* ---------- calendar popover (@corvu/calendar) ---------- */
+/* Card look shared by the task surface's date / deadline / place popovers
+   (`.when-popover` tightens it). */
 .deadline-dialog {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -3284,13 +3276,6 @@ input.task-check:hover {
 
 [data-theme="dark"] .deadline-dialog {
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
-}
-
-.deadline-dialog-title {
-  margin: 0 0 10px;
-  font-size: 14px;
-  font-weight: 600;
-  text-align: center;
 }
 
 .deadline-dialog-footer {

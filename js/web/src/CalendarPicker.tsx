@@ -1,15 +1,12 @@
 // corvu's headless `@corvu/calendar` as a picker for a deadline or a
 // planned date (`kind`). `CalendarPicker` is the body (grid, Remove
 // footer), hosted in a Popover by the task surface's date and deadline
-// fields (`WhenField.tsx`, `DeadlineField.tsx`). `DeadlineCalendarDialog`
-// wraps it in a centered modal for deadlines, fully controlled +
-// triggerless so a list/board row's context menu can drive it for a whole
-// selection. The planned date has no such modal: its "Set date…" opens the
-// item with the date popover showing, and the time is edited in the task
-// surface's dates band (`WhenTimeRow`), not here.
+// fields (`WhenField.tsx`, `DeadlineField.tsx`). There is no standalone
+// modal: a row's "Set date…" / "Set deadline…" opens the item with the
+// matching popover showing, and the time is edited in the task surface's
+// dates band (`WhenTimeRow`), not here.
 
 import Calendar from "@corvu/calendar";
-import { Dialog } from "@kobalte/core/dialog";
 import { createMemo, For, Show } from "solid-js";
 import {
   localDateStamp,
@@ -19,7 +16,6 @@ import {
   whenTime,
 } from "./format.tsx";
 import { useAppI18n } from "./i18n.tsx";
-import { closeToItems } from "./overlay.ts";
 
 export interface CalendarPickerProps {
   setOpen: (v: boolean) => void;
@@ -175,34 +171,5 @@ export function CalendarPicker(props: CalendarPickerProps) {
         </div>
       </Show>
     </>
-  );
-}
-
-export function DeadlineCalendarDialog(
-  props: Omit<CalendarPickerProps, "kind"> & {
-    open: () => boolean;
-    /** Send focus to the items listbox on close (the workspace-level
-     *  mount, opened from a row) rather than Kobalte's default
-     *  return-to-opener. */
-    closeToItems?: boolean;
-  },
-) {
-  const { m } = useAppI18n();
-  const title = () => m().deadline.dialogTitle;
-  return (
-    <Dialog open={props.open()} onOpenChange={props.setOpen} modal>
-      <Dialog.Portal>
-        <Dialog.Overlay class="dialog-overlay deadline-dialog-overlay" />
-        <div class="dialog-positioner deadline-dialog-positioner">
-          <Dialog.Content
-            class="deadline-dialog"
-            onCloseAutoFocus={props.closeToItems ? closeToItems : undefined}
-          >
-            <Dialog.Title class="deadline-dialog-title">{title()}</Dialog.Title>
-            <CalendarPicker {...props} />
-          </Dialog.Content>
-        </div>
-      </Dialog.Portal>
-    </Dialog>
   );
 }

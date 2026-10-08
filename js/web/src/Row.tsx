@@ -88,12 +88,11 @@ export function Row(props: {
    *  state (client-local per-list display option). The board shows state
    *  as the lane itself, so cards never take it. */
   showState?: () => boolean;
-  /** Open the shared calendar modal to set a deadline on the target set.
-   *  `initial` seeds the calendar (this row's current deadline, or null). */
-  onSetDeadline?: (ids: readonly string[], initial: string | null) => void;
-  /** Open this item's task surface with its planned-date popover
-   *  showing. Single-item only: the menu entry hides for a multi-row
-   *  target, which keeps the Today / Tomorrow / Remove quick actions. */
+  /** Open this item's task surface with its deadline / planned-date
+   *  popover showing. Single-item only: the menu entries hide for a
+   *  multi-row target, which keeps the Today / Tomorrow / Remove quick
+   *  actions. */
+  onSetDeadline?: (id: string) => void;
   onSetWhen?: (id: string) => void;
   /** Jump to the item's other appearance and select it there: from the
    *  Focus lens to its home list, or from a list / board to the Focus
@@ -411,7 +410,7 @@ export function Row(props: {
     });
   };
   const onSetDate = () => {
-    props.onSetDeadline?.(targetIds(), props.item().deadline ?? null);
+    props.onSetDeadline?.(props.item().id);
   };
   // Planned-date actions, same target-set rule. Today / Tomorrow keep
   // this row's time part, if any, so a timed item moves days intact.
@@ -937,7 +936,7 @@ export function Row(props: {
                       <span>{m().deadline.remove}</span>
                     </ContextMenu.Item>
                   </Show>
-                  <Show when={props.onSetDeadline}>
+                  <Show when={props.onSetDeadline && targetIds().length === 1}>
                     <ContextMenu.Item
                       class="context-menu-item"
                       onSelect={onSetDate}
