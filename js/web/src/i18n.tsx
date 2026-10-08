@@ -718,7 +718,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       prereleaseNotice:
         "This is a pre-release build. Data will be regularly deleted.",
       prereleaseLink:
-        "Sign up to our mailing list to get notified when Monoplan releases.",
+        "Sign up to the mailing list to get notified when Monoplan releases.",
     },
     nav: {
       inbox: "Inbox",

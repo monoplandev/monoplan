@@ -5,6 +5,9 @@
 :root {
   --bg: #f7f8fa;
   --bg-board-col: #fbfcfd;
+  /* Auth branding ground: behind the logo artwork and under the
+     sign-in submit button. */
+  --brand-bg: #e5ebff;
   --bg-elevated: #ffffff;
   --surface: #ffffff;
   --bg-hover: rgba(0, 0, 0, 0.04);
@@ -1968,14 +1971,14 @@ input.task-check:hover {
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
 }
 
-/* Left half: logo artwork, letterboxed on its own cream ground so the
+/* Left half: logo artwork, letterboxed on its own brand ground so the
    wordmark never crops. On narrow viewports it becomes a short band
    above the form (see the media query). */
 .auth-dialog-art {
   min-height: 320px;
   padding: 4em;
   box-sizing: border-box;
-  background: #fefbf4;
+  background: var(--brand-bg);
   border-right: 1px solid var(--border);
 }
 
@@ -1983,6 +1986,8 @@ input.task-check:hover {
   display: block;
   width: 100%;
   height: 100%;
+  max-width: 120px;
+  margin: 0 auto;
   object-fit: contain;
   object-position: center;
 }
@@ -2148,7 +2153,7 @@ input.task-check:hover {
   margin-top: 4px;
   padding: 10px;
   border: none;
-  background: #fefbf4;
+  background: var(--brand-bg);
   box-shadow: 0 3px #d3cdbf;
   color: black;
   border-radius: 4px;

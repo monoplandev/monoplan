@@ -47,7 +47,7 @@ export interface Session {
 /** Illustration shown as the left half of the auth dialog on wide
  *  screens; a header band above the form on narrow viewports (see
  *  `.auth-dialog-art`). */
-const AUTH_ART_URL = "/monoplan-badge.png";
+const AUTH_ART_URL = "/monoplan-logo.png";
 
 /** Mailing-list signup linked from the pre-release notice. */
 const MAILING_LIST_URL = "https://monoplan.app/#mailing-list";
