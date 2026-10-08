@@ -2,6 +2,8 @@
 
 Current search is a **local, client-side, plaintext index** over the already-decrypted account doc. Its first consumer is the web command palette (`cmd/ctrl+f`). The server does not participate.
 
+**Status (2026-10-08): the engine lives in core** (`core/src/search.rs`, `Doc::search`). Every client gets the same tokenizer and ranking; the web client is a thin query bridge over wasm (`searchJson`, `tokenize`, `matchesName`). The JS implementation this spec was first written against has been removed.
+
 ## Goals
 
 - Instant search over items and lists in the active account. **Archived lists
@@ -23,18 +25,13 @@ Current search is a **local, client-side, plaintext index** over the already-dec
 
 ## Placement
 
-The search index lives on the **client**, beside the local projection of the doc.
+The search index lives on the **client**, inside the core `Doc`, beside the projection index.
 
 - The server cannot read op contents or run a doc, so it cannot own search. See `spec/architecture.md`.
 - The index must not live inside the palette component itself; the palette is a query/view surface, not the source of truth.
-- The index should be built and maintained at the same boundary that already consumes `AppEvent`s and mirrors them into client state.
+- The index is maintained by core, not mirrored by each client. Core already sees every mutation (local commits and translated remote imports) through one event funnel, so it is the one place that cannot drift from the doc.
 
-For the current web app this means:
-
-- Build the initial index after boot, from the synthetic initial `AppEvent` burst or from the fully materialized local state.
-- Apply incremental index updates from the same `AppEvent` dispatcher path used for state updates.
-
-Future clients may implement the same contract in their own host language, or we may later move the implementation into `core/` if identical ranking behavior across clients becomes important.
+Clients call `Doc::search(query, limit)` (wasm: `searchJson`). Nothing else is needed: no rebuild call on attach, no per-event apply. A client that wants to fold names the same way (pickers, non-doc indexes) calls `tokenize` / `matches_name` from core rather than keeping its own copy.
 
 ## Source data
 
@@ -156,9 +153,14 @@ This is intentionally not BM25/Tf-Idf territory. The corpus is small and the UX 
 
 ## Update model
 
-The index must be maintained incrementally from domain events.
+The index is maintained incrementally from domain events via a **dirty set**, reconciled against the doc on the next query.
 
-Required behaviors by event kind:
+- Every `AppEvent` core enqueues is inspected as it is pushed. Item events that affect indexed fields mark the item id dirty; `ListAdded` / `ListRemoved` / `ListRenamed` mark the list id dirty; `FullResync` and every bulk path that rebuilds the projection index (boot replay, import, translation fallback) mark the whole index dirty.
+- `search()` first drains the dirty set: a whole-dirty index rebuilds from `all_lists` + every item; otherwise each dirty list is re-read (indexed or dropped) and every item currently indexed under it is re-read for context tokens, then each dirty item is re-read (indexed or dropped).
+- Reconciling reads the doc, never the event payload, so the index only depends on an event naming the right id. Events that are pure ordering or touch unindexed registers (`when`, `deadline`, `place`, icons, settings) are ignored.
+- Recency (`updatedAt`) is the item's `binned_at`, else its workflow transition time (`lifecycle_at`, which falls back to `created_at`); for lists it is `created_at`. It is read from the doc, so it is deterministic across clients and does not bump on a text edit.
+
+The required behaviors, stated per event kind, are unchanged:
 
 - `ItemAdded`: build a new indexed doc and insert postings
 - `ItemRemoved`: remove doc and its postings
@@ -176,14 +178,9 @@ Implementations may do targeted updates or opportunistic small rebuilds, but the
 
 ## Build timing
 
-The initial build point is:
+A fresh `Doc` starts whole-dirty, so the first `search()` call builds the index from the doc. This is deliberate: core is shared with the CLI, whose commands never search, and an eager build at boot would be pure cost on the load path `spec/tui-plan.md` measures. The build is one pass over items and lists in Rust and is not measurable at current data limits (`spec/data-model.md`). If a client ever observes a first-open hitch, it may issue a throwaway `search("", 0)`-style warm call after attach; none does today.
 
-- after the local doc is loaded and materialized in memory
-- before the palette begins querying
-
-Do not lazily build the index on first palette open. That couples search latency to a UI interaction and guarantees a first-open hitch.
-
-Do not rebuild the entire index after every mutation. The event stream already gives the minimal invalidation surface.
+Do not rebuild the entire index after every mutation. The dirty set gives the minimal invalidation surface, and at most one reconcile happens per query, not per mutation.
 
 ## Persistence
 
@@ -233,6 +230,16 @@ Start with `Map`/`Set`-style inverted index structures first.
 
 ## Client contract
 
+Core exposes:
+
+```rust
+pub fn tokenize(input: &str) -> Vec<String>;
+pub fn matches_name(name: &str, query: &str) -> bool;
+impl Doc { pub fn search(&self, input: &str, limit: usize) -> Vec<SearchResult>; }
+```
+
+and wasm mirrors them as `tokenize`, `matchesName` and `Doc.searchJson` / `SyncEngine.searchJson` (a JSON array of the result shape below, `lifecycle` as its wire name, `body` / `listId` / `lifecycle` omitted when unset).
+
 The palette/query surface should consume a narrow interface, e.g.:
 
 ```ts
@@ -247,15 +254,13 @@ type SearchResult = {
 };
 
 interface SearchEngine {
-  rebuild(state: WorkspaceState): void;
-  apply(event: AppEvent): void;
   query(input: string, limit?: number): SearchResult[];
 }
 ```
 
 The exact API may differ by client, but the separation is load-bearing:
 
-- mutation/update path is distinct from query path
+- the update path is core's alone; clients never feed the index
 - palette UI depends on `query(...)`, not on the index internals
 
 ## Palette-level entries (built-in views)
@@ -298,12 +303,12 @@ Minimum test coverage:
 8. last-token prefix queries
 9. ranking preference: in_progress over review over todo over backlog over done / cancelled over binned when textual match is otherwise equal
 
-Where feasible, use the same event stream the app uses rather than bespoke test-only mutation paths.
+Where feasible, drive the index through the ordinary `Doc` mutation API rather than bespoke test-only paths. Core's coverage is `core/tests/search.rs`; the web keeps one boundary test (`js/web/test/search.test.ts`) that the wasm exports round-trip.
 
 ## Open questions
 
 - Whether item `notes` should appear in the palette result preview, or only participate in matching.
-- Whether CLI should expose `monoplan find <query>` or defer search to the web UI first.
+- Whether CLI should expose `monoplan find <query>` or defer search to the web UI first. The engine is now in core, so the verb is a thin wrapper when wanted.
 
 Resolved: built-in view labels are matched at the palette layer by their
 rendered (localized) names rather than indexed by the engine — see

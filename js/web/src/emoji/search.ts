@@ -1,13 +1,15 @@
 // Search over the vendored emoji dataset.
 //
-// Deliberately *not* an inverted index like `../search.ts`. That one indexes
-// a live, mutating corpus of unbounded size and has to support incremental
-// updates from the event stream. This corpus is ~1900 fixed records loaded
-// once, so a linear scan over pre-tokenised fields is both faster to build
-// and far less code — no postings, no prefix bucket, nothing to invalidate.
+// Deliberately *not* an inverted index like the workspace search in core
+// (`core/src/search.rs`). That one indexes a live, mutating corpus of
+// unbounded size and has to track every doc change. This corpus is ~1900
+// fixed records loaded once, so a linear scan over pre-tokenised fields is
+// both faster to build and far less code — no postings, no prefix bucket,
+// nothing to invalidate.
 //
-// Tokenisation is shared with the workspace index so the folding rules in
-// spec/search.md (case, accents, punctuation) apply identically here.
+// Tokenisation is the core tokenizer, re-exported through `../search.ts`,
+// so the folding rules in spec/search.md (case, accents, punctuation)
+// apply identically here.
 
 import type { Emoji } from "./data.ts";
 import { tokenize } from "../search.ts";

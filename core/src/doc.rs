@@ -60,6 +60,7 @@ use uuid::Uuid;
 
 use crate::crypto::{AEAD_NONCE_LEN, Dek};
 use crate::events::AppEvent;
+use crate::search::{SearchIndex, SearchResult};
 use monoplan_protocol::EncryptedBlob;
 
 pub const LIST_INBOX: &str = "inbox";
@@ -463,6 +464,14 @@ impl From<WorkflowState> for ItemLifecycle {
 }
 
 impl ItemLifecycle {
+    /// Wire / display name: the workflow state's name, or `"binned"`.
+    pub fn name(self) -> &'static str {
+        match self.workflow_state() {
+            Some(s) => s.name(),
+            None => "binned",
+        }
+    }
+
     /// The workflow state this lifecycle names, or `None` for `Binned`
     /// (which is the mask, not a register state).
     pub fn workflow_state(self) -> Option<WorkflowState> {
@@ -1472,6 +1481,10 @@ pub struct Doc {
     /// UTF-16 needs the text as it was before the change; this is it.
     /// Updated on every local delta and every translated remote delta.
     notes_shadows: Mutex<HashMap<String, String>>,
+    /// Plaintext search index (`spec/search.md`). Kept current lazily: the
+    /// event funnel marks touched ids dirty, the bulk paths mark it whole,
+    /// and [`Doc::search`] reconciles against the doc before answering.
+    search: Mutex<SearchIndex>,
     /// Root diff subscription feeding `diff_capture`. Dropping it
     /// unsubscribes, so it lives exactly as long as the doc.
     _diff_sub: Subscription,
@@ -1524,6 +1537,7 @@ impl Doc {
             item_index,
             diff_capture,
             notes_shadows: Mutex::new(HashMap::new()),
+            search: Mutex::new(SearchIndex::new()),
             _diff_sub,
         })
     }
@@ -1556,6 +1570,7 @@ impl Doc {
             item_index,
             diff_capture,
             notes_shadows: Mutex::new(HashMap::new()),
+            search: Mutex::new(SearchIndex::new()),
             _diff_sub,
         }
     }
@@ -1603,6 +1618,12 @@ impl Doc {
     /// translation fallback.
     fn rebuild_index(&self) {
         *self.item_index.lock().expect("item index mutex poisoned") = self.compute_index();
+        // Whatever reached here changed more than any event names; the
+        // search index rebuilds whole on its next query.
+        self.search
+            .lock()
+            .expect("search index mutex poisoned")
+            .mark_all_dirty();
     }
 
     /// Build a fresh [`ProjectionIndex`] straight from the Loro
@@ -3638,6 +3659,46 @@ impl Doc {
         list_view(&map)
     }
 
+    // ---------- search ----------
+
+    /// Ranked search over items and lists (`spec/search.md`): AND across
+    /// query tokens, last token as prefix, at most `limit` hits. Brings
+    /// the index up to date with the doc first, so a hit always reflects
+    /// current state regardless of which events have been drained.
+    pub fn search(&self, input: &str, limit: usize) -> Vec<SearchResult> {
+        let mut idx = self.search.lock().expect("search index mutex poisoned");
+        if let Some(dirty) = idx.take_dirty() {
+            if dirty.all {
+                let lists = self.all_lists();
+                let items: Vec<ItemView> = self.iter_items().collect();
+                idx.rebuild(&lists, &items);
+            } else {
+                for list_id in &dirty.lists {
+                    match self.get_list_meta(list_id) {
+                        Some(list) => idx.index_list(&list),
+                        None => idx.remove_list(list_id),
+                    }
+                    // Context tokens follow the list name, so every item
+                    // under it is re-read.
+                    for item_id in idx.item_ids_in_list(list_id) {
+                        self.reconcile_search_item(&mut idx, &item_id);
+                    }
+                }
+                for item_id in &dirty.items {
+                    self.reconcile_search_item(&mut idx, item_id);
+                }
+            }
+        }
+        idx.query(input, limit)
+    }
+
+    fn reconcile_search_item(&self, idx: &mut SearchIndex, item_id: &str) {
+        match self.get_item(item_id) {
+            Some(item) => idx.index_item(&item),
+            None => idx.remove(item_id),
+        }
+    }
+
     /// Per-list nav view: ids of items in this list that are neither
     /// done nor binned, in resolved order.
     pub fn open_item_ids(&self, list_id: &str) -> Vec<String> {
@@ -4673,6 +4734,9 @@ impl Doc {
     }
 
     fn push_event(&self, ev: AppEvent) {
+        if let Ok(mut idx) = self.search.lock() {
+            idx.note_event(&ev);
+        }
         if let Ok(mut q) = self.events.lock() {
             q.push_back(ev);
         }
@@ -4713,6 +4777,7 @@ impl Doc {
             undo,
             diff_capture,
             notes_shadows: Mutex::new(HashMap::new()),
+            search: Mutex::new(SearchIndex::new()),
             _diff_sub,
         };
         doc.rebuild_index();
@@ -4964,11 +5029,8 @@ impl Doc {
         let mut emitted = Vec::new();
         diff_items(pre_items, &post_items, &mut emitted);
         self.emit_notes_deltas_for(&emitted);
-        if !emitted.is_empty() {
-            let mut q = self.events.lock().expect("events mutex poisoned");
-            for ev in emitted {
-                q.push_back(ev);
-            }
+        for ev in emitted {
+            self.push_event(ev);
         }
     }
 
@@ -5011,11 +5073,8 @@ impl Doc {
         diff_lists(pre_lists, &post_lists, &mut emitted);
         diff_items(pre_items, &post_items, &mut emitted);
         self.emit_notes_deltas_for(&emitted);
-        if !emitted.is_empty() {
-            let mut q = self.events.lock().expect("events mutex poisoned");
-            for ev in emitted {
-                q.push_back(ev);
-            }
+        for ev in emitted {
+            self.push_event(ev);
         }
     }
 }
@@ -9739,6 +9798,7 @@ mod tests {
             undo,
             diff_capture,
             notes_shadows: Mutex::new(HashMap::new()),
+            search: Mutex::new(SearchIndex::new()),
             _diff_sub,
         };
         restored.rebuild_index();

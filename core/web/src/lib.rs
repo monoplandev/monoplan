@@ -34,6 +34,25 @@ fn js_err<E: std::fmt::Display>(e: E) -> JsError {
     JsError::new(&e.to_string())
 }
 
+/// Search tokenizer (`spec/search.md` "Normalization"), exported so JS
+/// surfaces that fold names the same way (pickers, the emoji index) share
+/// one implementation with the engine.
+#[wasm_bindgen]
+pub fn tokenize(input: &str) -> Vec<String> {
+    monoplan_core::tokenize(input)
+}
+
+/// Name-only filter: every query token must prefix some token of `name`;
+/// an empty query matches everything.
+#[wasm_bindgen(js_name = matchesName)]
+pub fn matches_name(name: &str, query: &str) -> bool {
+    monoplan_core::matches_name(name, query)
+}
+
+fn search_to_json(results: &[monoplan_core::SearchResult]) -> String {
+    serde_json::to_string(results).unwrap_or_else(|_| "[]".to_string())
+}
+
 // ---------- lifecycle ----------
 
 /// Resolved item lifecycle (`spec/data-model.md` "Lifecycle"), mirrored
@@ -475,6 +494,13 @@ impl Doc {
     #[wasm_bindgen(js_name = focusRefIds)]
     pub fn focus_ref_ids(&self) -> Vec<String> {
         self.inner.focus_refs()
+    }
+
+    /// Ranked search over items and lists (`spec/search.md`) as a JSON
+    /// array of `{id, kind, title, body?, listId?, lifecycle?, score}`.
+    #[wasm_bindgen(js_name = searchJson)]
+    pub fn search_json(&self, query: &str, limit: usize) -> String {
+        search_to_json(&self.inner.search(query, limit))
     }
 
     /// The Focus lens as a JSON array of `ItemView`s in curated order —
@@ -1841,6 +1867,13 @@ impl SyncEngine {
     #[wasm_bindgen(js_name = focusRefIds)]
     pub fn focus_ref_ids(&self) -> Vec<String> {
         self.inner.doc().focus_refs()
+    }
+
+    /// Ranked search over items and lists (`spec/search.md`) as a JSON
+    /// array of `{id, kind, title, body?, listId?, lifecycle?, score}`.
+    #[wasm_bindgen(js_name = searchJson)]
+    pub fn search_json(&self, query: &str, limit: usize) -> String {
+        search_to_json(&self.inner.doc().search(query, limit))
     }
 
     /// The Focus lens as a JSON array of `ItemView`s in curated order —

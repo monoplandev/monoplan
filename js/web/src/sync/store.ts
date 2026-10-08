@@ -148,7 +148,7 @@ function lifecycleEnum(l: Lifecycle): ItemLifecycle {
 /** Normalize a wire state string onto the known ladder; anything a newer
  *  client wrote degrades to `backlog` (visible and open), mirroring the
  *  core's unparseable-register fallback. */
-export function parseWorkflowState(s: string | undefined): WorkflowState {
+function parseWorkflowState(s: string | undefined): WorkflowState {
   switch (s) {
     case "todo":
     case "in_progress":
@@ -194,11 +194,6 @@ export const EVENT_STATES: readonly WorkflowState[] = [
  *  single open choice whatever open state it holds underneath. */
 export const statusValue = (it: ItemView): WorkflowState =>
   isEvent(it) && !isClosedState(it.state) ? "backlog" : it.state;
-/** Resolved lifecycle: `binned` while the mask is present, else the
- *  workflow register's state. */
-export const lifecycleOf = (it: ItemView): Lifecycle =>
-  isBinned(it) ? "binned" : it.state;
-
 export interface ListView {
   id: string;
   name: string;
@@ -272,10 +267,9 @@ export interface SettingsView {
 export interface DocApp {
   engine: SyncEngine;
   state: WorkspaceState;
-  /** Local plaintext search index over items + lists in the active
-   *  account. Built once after initial materialization and maintained
-   *  incrementally from the same AppEvent stream that drives the store.
-   *  See `spec/search.md`. */
+  /** Query surface over the engine's search index (items + lists in the
+   *  active account). The index lives in core and tracks the doc itself;
+   *  the store neither builds nor maintains it. See `spec/search.md`. */
   search: SearchEngine;
   /** Bumps every time at least one event is dispatched (local or
    *  remote). The persistence layer reads this to debounce-save the
@@ -555,7 +549,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
   const [recentDone, setRecentDone] = createSignal<readonly RecentDoneEntry[]>(
     [],
   );
-  const search = createSearchEngine();
+  const search = createSearchEngine(engine);
   let actionBatchDepth = 0;
   let flushDeferred = false;
   let actionBatchStartVersion = 0;
@@ -950,17 +944,12 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       if (fullResync || coarse) {
         const next = materializeEngineSnapshot(engine);
         setState(reconcile(next));
-        // The bulk path skips per-event store dispatch, so let the
-        // search engine do a wholesale rebuild from the fresh state
-        // rather than try to track which events fell into the bucket.
-        search.rebuild(next);
         // Any per-item delta in the bucket is lost with it; subscribed
         // editors reload from the fresh state.
         for (const cb of notesListeners) cb("", null);
       } else {
         for (const ev of events) {
           dispatch(ev);
-          search.apply(ev);
         }
         // Focus visibility depends on both focus-container mutations
         // (`focusChanged`) and item add/remove/lifecycle events elsewhere
@@ -981,7 +970,6 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
   // historical event queue remains empty.
   const initialState = materializeEngineSnapshot(engine);
   setState(reconcile(initialState));
-  search.rebuild(initialState);
 
   let onFlush: () => void = () => {};
   let beforeFlush: () => void = () => {};
@@ -1203,9 +1191,10 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     },
     applyNotesDelta(id, ops) {
       if (ops.length === 0) return;
-      // Commits into the doc now (the store and search index see the
-      // new string on this drain) without recording a workspace undo
-      // step; the durable capture + push waits for the idle timer.
+      // Commits into the doc now (the store sees the new string on this
+      // drain; core's search index tracks the doc directly) without
+      // recording a workspace undo step; the durable capture + push
+      // waits for the idle timer.
       engine.applyNotesDelta(id, JSON.stringify(ops));
       drainEvents();
       notesFlushPending = true;

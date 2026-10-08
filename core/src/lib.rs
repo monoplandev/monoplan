@@ -3,6 +3,7 @@
 pub mod crypto;
 pub mod doc;
 pub mod events;
+pub mod search;
 pub mod storage;
 pub mod sync;
 
@@ -14,6 +15,7 @@ pub use doc::{
     MAX_PLACE_LABEL_CHARS, NOTES_ORIGIN_PREFIX, NotesDeltaOp, Place, SettingsView, WorkflowState,
 };
 pub use events::AppEvent;
+pub use search::{SearchIndex, SearchKind, SearchResult, matches_name, tokenize};
 pub use storage::{
     BootError, BootMeta, BootState, DocId, InFlightPush, LocalSeq, LocalStorage, MemStorage,
     PushId, RemoteWalRow, ServerSeq, SnapshotRow, StorageError, WalRow, boot_doc, has_unsynced_ops,
