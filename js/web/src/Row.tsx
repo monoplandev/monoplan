@@ -973,9 +973,11 @@ export function Row(props: {
             <span>{m().common.copy}</span>
             <kbd class="menu-shortcut">⌘C</kbd>
           </ContextMenu.Item>
-          <ContextMenu.Item class="context-menu-item" onSelect={onCopyLink}>
-            <span>{m().common.copyLink}</span>
-          </ContextMenu.Item>
+          <Show when={targetIds().length === 1}>
+            <ContextMenu.Item class="context-menu-item" onSelect={onCopyLink}>
+              <span>{m().common.copyLink}</span>
+            </ContextMenu.Item>
+          </Show>
           <Show when={isOpen(props.item())}>
             <ContextMenu.Item class="context-menu-item" onSelect={onDuplicate}>
               <span>{m().workspace.duplicate}</span>
