@@ -24,7 +24,9 @@ import { osmMapUrl, searchPlaces } from "./geocode.ts";
 import mapPinSvg from "./icons/map-pin.svg?raw";
 import clockSvg from "./icons/clock.svg?raw";
 import externalLinkSvg from "./icons/external-link.svg?raw";
+import spinnerSvg from "./icons/spinner.svg?raw";
 import { useAppI18n } from "./i18n.tsx";
+import { trackOverlay } from "./overlay.ts";
 import {
   dropKnown,
   exactKnown,
@@ -57,6 +59,12 @@ export function PlaceField(props: {
   let contentRef: HTMLDivElement | undefined;
   const [draft, setDraft] = createSignal(props.place()?.label ?? "");
   const [open, setOpen] = createSignal(false);
+  // The results are portaled out of the task surface, so a focused result
+  // sits outside its `data-shortcuts-inert` region. In the side pane
+  // (no modal overlay) the workspace's shortcuts would otherwise fire on
+  // keystrokes there: Enter's "open the selected item" preventDefault
+  // swallowed the button's own click.
+  trackOverlay(open);
   const [status, setStatus] = createSignal<Status>("idle");
   const [remote, setRemote] = createSignal<Place[]>([]);
   // Loaded once per open; `null` until then so a stale list from a
@@ -140,6 +148,10 @@ export function PlaceField(props: {
     }
     clearTimeout(debounce);
     ticket++;
+    // The lookup is pending from this keystroke, not from when the timer
+    // fires: showing "Searching…" now keeps the card from opening blank
+    // (or holding the last query's "No results") through the debounce.
+    setStatus("searching");
     setOpen(true);
     debounce = setTimeout(() => void search(), DEBOUNCE_MS);
   };
@@ -163,9 +175,15 @@ export function PlaceField(props: {
     if (buttons.length === 0) return;
     buttons[Math.max(0, Math.min(index, buttons.length - 1))]?.focus();
   };
-  const onResultKeyDown = (e: KeyboardEvent) => {
+  const onResultKeyDown = (e: KeyboardEvent, p: Place) => {
     const index = resultButtons().indexOf(e.currentTarget as HTMLButtonElement);
-    if (e.key === "ArrowDown") {
+    if (e.key === "Enter") {
+      // Pick explicitly rather than ride the button's synthesized click,
+      // so the key never reaches the dialog's Enter handling.
+      e.preventDefault();
+      e.stopPropagation();
+      pick(p);
+    } else if (e.key === "ArrowDown") {
       e.preventDefault();
       focusResult(index + 1);
     } else if (e.key === "ArrowUp") {
@@ -224,7 +242,7 @@ export function PlaceField(props: {
         data-known={isKnown ? "" : undefined}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => pick(p)}
-        onKeyDown={onResultKeyDown}
+        onKeyDown={(e) => onResultKeyDown(e, p)}
       >
         <span class="place-popover-result-label">
           {p.label}
@@ -351,7 +369,10 @@ export function PlaceField(props: {
                   </ul>
                 </Show>
                 <Show when={status() === "searching"}>
-                  <div class="place-popover-note">{m().place.searching}</div>
+                  <div class="place-popover-note place-popover-searching">
+                    <span class="place-popover-spinner" innerHTML={spinnerSvg} />
+                    {m().place.searching}
+                  </div>
                 </Show>
                 {/* The lookup's own notes only matter when nothing of the
                     user's is already showing. */}

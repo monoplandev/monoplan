@@ -3116,6 +3116,35 @@ input.task-check:hover {
   color: var(--text-muted);
 }
 
+/* The lookup-in-flight note: a thin open arc turning beside the text. */
+.place-popover-searching {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.place-popover-spinner {
+  display: inline-flex;
+  animation: place-spin 0.9s linear infinite;
+}
+
+.place-popover-spinner svg {
+  width: 12px;
+  height: 12px;
+}
+
+@keyframes place-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .place-popover-spinner {
+    animation: none;
+  }
+}
+
 .place-popover-list {
   list-style: none;
   margin: 0;
