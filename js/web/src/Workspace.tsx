@@ -1087,6 +1087,43 @@ export function Workspace(props: {
       .filter((id) => visibleSet.has(id));
   };
 
+  // The row to select once `removed` leaves the view: the first survivor
+  // after the bottom-most removed row, else the new last survivor, else
+  // null when nothing is left. `visibleIds` is the pre-removal order.
+  const survivorAfter = (
+    visibleIds: readonly string[],
+    removed: ReadonlySet<string>,
+  ): string | null => {
+    let lastIdx = -1;
+    for (let i = visibleIds.length - 1; i >= 0; i--) {
+      if (removed.has(visibleIds[i])) {
+        lastIdx = i;
+        break;
+      }
+    }
+    for (let i = lastIdx + 1; i < visibleIds.length; i++) {
+      if (!removed.has(visibleIds[i])) return visibleIds[i];
+    }
+    for (let i = visibleIds.length - 1; i >= 0; i--) {
+      if (!removed.has(visibleIds[i])) return visibleIds[i];
+    }
+    return null;
+  };
+
+  // Re-anchor `sel` on `nextId` after rows left the view. The survivor is
+  // chosen in list order, which on the board may sit in a different
+  // column than the active selection — so only re-select in the flat
+  // list view; on the board just drop the (now-removed) selection.
+  const selectSurvivor = (sel: DndSelection, nextId: string | null) => {
+    if (nextId === null || boardListId() !== null) {
+      sel.clear();
+    } else {
+      // Wait for the dnd source to absorb the removals before
+      // selecting — matches onDuplicate/onPaste.
+      queueMicrotask(() => sel.selectOnly(nextId));
+    }
+  };
+
   // Bin live or done items, hard-delete binned ones (the Bin view), then
   // move the selection onto a survivor. Shared by ⌫ and the side panel's
   // multi-select actions; `ids` are already visibility-filtered.
@@ -1094,45 +1131,13 @@ export function Workspace(props: {
     const sel = actionSelection();
     if (!sel || ids.length === 0) return;
     const v = view();
-    const visibleIds = items().map((it) => it.id);
-    const deleteSet = new Set(ids);
-    // Pick the survivor to focus next: first surviving id after the
-    // bottom-most deleted row, else the new last surviving id.
-    let lastIdx = -1;
-    for (let i = visibleIds.length - 1; i >= 0; i--) {
-      if (deleteSet.has(visibleIds[i])) {
-        lastIdx = i;
-        break;
-      }
-    }
-    let nextId: string | null = null;
-    for (let i = lastIdx + 1; i < visibleIds.length; i++) {
-      if (!deleteSet.has(visibleIds[i])) {
-        nextId = visibleIds[i];
-        break;
-      }
-    }
-    if (nextId === null) {
-      for (let i = visibleIds.length - 1; i >= 0; i--) {
-        if (!deleteSet.has(visibleIds[i])) {
-          nextId = visibleIds[i];
-          break;
-        }
-      }
-    }
+    const nextId = survivorAfter(
+      items().map((it) => it.id),
+      new Set(ids),
+    );
     if (v.kind === "bin") app.deleteBinnedMany(ids);
     else app.setBinnedMany(ids, true);
-    // The survivor is chosen in list order, which on the board may sit in a
-    // different column than the active selection — so only re-select in the
-    // flat list view; on the board just drop the (now-removed) selection.
-    if (nextId === null || boardListId() !== null) {
-      sel.clear();
-    } else {
-      const target = nextId;
-      // Wait for the dnd source to absorb the removals before
-      // selecting — matches onDuplicate/onPaste.
-      queueMicrotask(() => sel.selectOnly(target));
-    }
+    selectSurvivor(sel, nextId);
   };
 
   // Delete / Backspace on the active view: bin live or done items, hard-
@@ -1291,15 +1296,25 @@ export function Workspace(props: {
       const it = app.getItem(id);
       return it !== undefined && isBinned(it);
     });
+    const sel = actionSelection();
+    const beforeIds = items().map((it) => it.id);
     app.withActionBatch(() => {
       if (toUnbin.length > 0) app.setBinnedMany(toUnbin, false);
       for (const [i, id] of ids.entries()) {
         app.moveItem(id, targetListId, i);
       }
     });
-    // The moved rows have left this view, so a lingering selection would
-    // be a phantom block anchor (see the drag-out handling below).
-    actionSelection()?.clear();
+    // Where the moved rows stay in view (Focus and Done are cross-list
+    // lenses) the selection stays with them. Where they leave (a list,
+    // or the Bin, which the un-bin empties them out of) a lingering
+    // selection would be a phantom block anchor (see the drag-out
+    // handling below), so re-anchor on the nearest survivor as ⌫ does.
+    if (sel) {
+      const after = new Set(items().map((it) => it.id));
+      const moved = new Set(ids);
+      const stillHere = ids.some((id) => after.has(id));
+      if (!stillHere) selectSurvivor(sel, survivorAfter(beforeIds, moved));
+    }
     // One item made an event with no date: open it on its date popover,
     // as Set date… does, rather than leave it in Unscheduled unasked. A
     // block just moves; its undated rows land in Unscheduled.
