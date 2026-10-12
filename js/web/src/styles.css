@@ -4387,8 +4387,46 @@ input.task-check:hover {
 }
 
 .mobile-bar-icon {
+  position: relative;
   display: inline-flex;
   line-height: 0;
+}
+
+/* Count bubble on the Inbox / Upcoming icons: a small solid pill pinned
+   to the icon's top-right corner, overlapping it slightly, with a ring in
+   the glass colour so it cuts out of the glyph instead of touching it.
+   Upcoming's bubble takes the agenda's urgency tones (overdue, due
+   today), like `.nav-item-count`; otherwise the accent fill. */
+.mobile-bar-count {
+  position: absolute;
+  top: -5px;
+  right: -8px;
+  box-sizing: border-box;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 99px;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.75);
+  background: #4da3ef;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+[data-theme="dark"] .mobile-bar-count {
+  box-shadow: 0 0 0 2px rgba(30, 30, 32, 0.85);
+}
+
+.mobile-bar-count[data-tone="overdue"] {
+  background: var(--overdue-text);
+}
+
+.mobile-bar-count[data-tone="warning"] {
+  background: var(--due-today-text);
 }
 
 .mobile-bar-label {

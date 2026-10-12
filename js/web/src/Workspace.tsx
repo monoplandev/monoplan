@@ -3099,6 +3099,8 @@ export function Workspace(props: {
       <Show when={isMobile()}>
         <MobileBars
           view={view()}
+          inboxCount={openCountsByList()["inbox"] ?? 0}
+          upcomingBadge={upcomingBadge()}
           setView={(v) => {
             // The pills stay live over an open item's page and over the
             // Find page; close both so the destination view is visible.

@@ -10,8 +10,15 @@
 // the page sits under these pills and the Find button toggles it, marked
 // active while it's up); the right pill is Add. No custom drawer: the
 // DOM can't fake a native sheet convincingly, so we don't try.
+//
+// Inbox and Upcoming carry a count bubble on the icon's corner, fed by the
+// same sources as the desktop nav (`openCountsByList["inbox"]` and
+// `attentionBadge`), so a glance at the pill says whether anything is
+// waiting. Zero renders nothing rather than "-": there is no room for a
+// placeholder on an icon, and an absent bubble already reads as clear.
 
 import { Show } from "solid-js";
+import type { AttentionBadge } from "./dayGroups.ts";
 import { useAppI18n } from "./i18n.tsx";
 import archiveSvg from "./icons/archive.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
@@ -31,6 +38,11 @@ export function MobileBars(props: {
   /** null hides the add pill (views that can't capture). */
   onAdd: (() => void) | null;
   addDisabled: boolean;
+  /** Inbox's open-item count (Backlog + Live); 0 hides the bubble. */
+  inboxCount: number;
+  /** Upcoming's "needs you today" count and urgency tone (see
+      `attentionBadge`); 0 hides the bubble. */
+  upcomingBadge: AttentionBadge;
 }) {
   const { m } = useAppI18n();
   // One active pill at a time: while the Find page is up it covers the
@@ -58,7 +70,12 @@ export function MobileBars(props: {
           )}
           onClick={() => props.setView({ kind: "list", id: "inbox" })}
         >
-          <span class="mobile-bar-icon" innerHTML={archiveSvg} aria-hidden="true" />
+          <span class="mobile-bar-icon" aria-hidden="true">
+            <span innerHTML={archiveSvg} />
+            <Show when={props.inboxCount > 0}>
+              <span class="mobile-bar-count">{props.inboxCount}</span>
+            </Show>
+          </span>
           <span class="mobile-bar-label">{m().nav.inbox}</span>
         </button>
         <button
@@ -67,7 +84,14 @@ export function MobileBars(props: {
           data-active={viewActive(props.view.kind === "upcoming")}
           onClick={() => props.setView({ kind: "upcoming" })}
         >
-          <span class="mobile-bar-icon" innerHTML={calendarSvg} aria-hidden="true" />
+          <span class="mobile-bar-icon" aria-hidden="true">
+            <span innerHTML={calendarSvg} />
+            <Show when={props.upcomingBadge.count > 0}>
+              <span class="mobile-bar-count" data-tone={props.upcomingBadge.tone}>
+                {props.upcomingBadge.count}
+              </span>
+            </Show>
+          </span>
           <span class="mobile-bar-label">{m().nav.upcoming}</span>
         </button>
         <button
