@@ -36,9 +36,9 @@ import checkSvg from "./icons/check.svg?raw";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import mapPinSvg from "./icons/map-pin.svg?raw";
 import timerSvg from "./icons/timer.svg?raw";
-import drawingPinSvg from "./icons/drawing-pin.svg?raw";
-import drawingPinFilledSvg from "./icons/drawing-pin-filled.svg?raw";
 import sidebarRightSvg from "./icons/sidebar-right.svg?raw";
+import starSvg from "./icons/star.svg?raw";
+import starFilledSvg from "./icons/star-filled.svg?raw";
 import {
   DEFAULT_DURATION_MINUTES,
   formatDateTime,
@@ -1743,7 +1743,7 @@ function PinToggle(props: {
       aria-label={label()}
       title={label()}
       onClick={props.onToggle}
-      innerHTML={props.pinned() ? drawingPinFilledSvg : drawingPinSvg}
+      innerHTML={props.pinned() ? starFilledSvg : starSvg}
     />
   );
 }

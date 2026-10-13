@@ -2,7 +2,7 @@ import { createEffect, createMemo, createSignal, For, on, Show } from "solid-js"
 import { ContextMenu } from "@kobalte/core/context-menu";
 import checkSvg from "./icons/check.svg?raw";
 import crossSvg from "./icons/cross.svg?raw";
-import drawingPinFilledSvg from "./icons/drawing-pin-filled.svg?raw";
+import starFilledSvg from "./icons/star-filled.svg?raw";
 import noteSvg from "./icons/note.svg?raw";
 import { DndSelection } from "./dnd/solid";
 import { trackOverlay } from "./overlay.ts";
@@ -645,7 +645,7 @@ export function Row(props: {
                 class="badge row-focus-badge"
                 title={m().focus.badge}
                 aria-label={m().focus.badge}
-                innerHTML={drawingPinFilledSvg}
+                innerHTML={starFilledSvg}
               />
             </Show>
             <Show when={isOpen(props.item()) && props.item().when}>
@@ -682,7 +682,7 @@ export function Row(props: {
             gap still separates the group from the title. */}
         <Show when={showInlineBadges()}>
           <div class="row-badges">
-            {/* Focus-membership badge — a static, non-interactive pin glyph
+            {/* Focus-membership badge — a static, non-interactive star glyph
                 shown only when the item is pinned to Focus; nothing otherwise.
                 There is no hover toggle: adding / removing goes through the row
                 context menu (spec/focus.md). */}
@@ -695,7 +695,7 @@ export function Row(props: {
                 class="badge row-focus-badge"
                 title={m().focus.badge}
                 aria-label={m().focus.badge}
-                innerHTML={drawingPinFilledSvg}
+                innerHTML={starFilledSvg}
               />
             </Show>
             <Show

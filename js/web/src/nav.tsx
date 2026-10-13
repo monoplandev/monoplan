@@ -22,7 +22,7 @@ import cloudSvg from "./icons/cloud.svg?raw";
 import cloudOffSvg from "./icons/cloud-off.svg?raw";
 import crumpledPaperSvg from "./icons/crumpled-paper.svg?raw";
 import dotsVerticalSvg from "./icons/dots-vertical.svg?raw";
-import drawingPinSvg from "./icons/drawing-pin.svg?raw";
+import starSvg from "./icons/star.svg?raw";
 import externalLinkSvg from "./icons/external-link.svg?raw";
 import fileSvg from "./icons/file.svg?raw";
 import magnifyingGlassSvg from "./icons/magnifying-glass.svg?raw";
@@ -538,7 +538,7 @@ export function Nav(props: {
           tabIndex={-1}
           onClick={() => props.setView({ kind: "focus" })}
         >
-          <span class="nav-item-icon" innerHTML={drawingPinSvg} />
+          <span class="nav-item-icon" innerHTML={starSvg} />
           {m().nav.focus}
           <Show when={props.focusCount > 0}>
             <span class="nav-item-count">{props.focusCount}</span>

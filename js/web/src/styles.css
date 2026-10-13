@@ -548,8 +548,8 @@ body {
 }
 
 .icon-button svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
 
 .icon-button:hover:not(:disabled) {
@@ -1248,7 +1248,7 @@ input.task-check:hover {
 /* Remove (×) affordance shown inside the Focus lens, at the row's trailing
    edge; stays hidden until the row is hovered / selected — removing a
    pinned item must be as cheap as adding it (spec/focus.md). */
-/* Static Focus-membership badge on list rows — a non-interactive pin
+/* Static Focus-membership badge on list rows — a non-interactive star
    glyph, always visible (not hover-gated) so Focus membership is
    glanceable while scanning a list. Add / remove happens via the row
    context menu. No pill background — like the notes badge it reads as a
@@ -3258,8 +3258,9 @@ input.task-check:hover {
 }
 
 /* Pin-to-Focus toggle in the header actions, before the item menu: an
-   icon button like its neighbours. Outline pin when unpinned, filled pin
-   in the text colour when pressed (`aria-pressed`). Disabled (Done /
+   icon button like its neighbours. Outline star when unpinned, filled
+   star in the text colour when pressed (Phosphor's pair, the one set
+   here not from Radix: its points are rounded) (`aria-pressed`). Disabled (Done /
    Binned items — no Focus refs, spec/focus.md) just loses the pointer. */
 .task-dialog-pin-toggle[aria-pressed="true"] {
   color: var(--text);

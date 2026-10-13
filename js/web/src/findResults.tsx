@@ -14,7 +14,7 @@ import archiveSvg from "./icons/archive.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
 import checkSvg from "./icons/check.svg?raw";
 import crumpledPaperSvg from "./icons/crumpled-paper.svg?raw";
-import drawingPinSvg from "./icons/drawing-pin.svg?raw";
+import starSvg from "./icons/star.svg?raw";
 import fileSvg from "./icons/file.svg?raw";
 
 // The built-in views (Focus / Upcoming / Done / Bin / Inbox) aren't
@@ -40,7 +40,7 @@ export function isFixedView(item: FindResult): boolean {
 // Fixed nav icons, mirrored so a built-in reads the same here as in the
 // sidebar.
 const VIEW_ICONS: Record<ViewResultId, string> = {
-  focus: drawingPinSvg,
+  focus: starSvg,
   inbox: archiveSvg,
   upcoming: calendarSvg,
   done: checkSvg,

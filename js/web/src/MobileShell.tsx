@@ -22,7 +22,7 @@ import type { AttentionBadge } from "./dayGroups.ts";
 import { useAppI18n } from "./i18n.tsx";
 import archiveSvg from "./icons/archive.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
-import drawingPinSvg from "./icons/drawing-pin.svg?raw";
+import starSvg from "./icons/star.svg?raw";
 import hamburgerMenuSvg from "./icons/hamburger-menu.svg?raw";
 import plusSvg from "./icons/plus.svg?raw";
 import type { ViewKey } from "./prefs.ts";
@@ -59,7 +59,7 @@ export function MobileBars(props: {
           data-active={viewActive(props.view.kind === "focus")}
           onClick={() => props.setView({ kind: "focus" })}
         >
-          <span class="mobile-bar-icon" innerHTML={drawingPinSvg} aria-hidden="true" />
+          <span class="mobile-bar-icon" innerHTML={starSvg} aria-hidden="true" />
           <span class="mobile-bar-label">{m().nav.focus}</span>
         </button>
         <button

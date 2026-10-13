@@ -28,7 +28,7 @@ import cardStackSvg from "./icons/card-stack.svg?raw";
 import checkSvg from "./icons/check.svg?raw";
 import crumpledPaperSvg from "./icons/crumpled-paper.svg?raw";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
-import drawingPinSvg from "./icons/drawing-pin.svg?raw";
+import starSvg from "./icons/star.svg?raw";
 import eyeNoneSvg from "./icons/eye-none.svg?raw";
 import eyeOpenSvg from "./icons/eye-open.svg?raw";
 import listBulletSvg from "./icons/list-bullet.svg?raw";
@@ -3172,7 +3172,7 @@ function viewTitle(
  *  or `null` for user lists (which carry their own `ListIconPicker`). Keep
  *  these in sync with the icons used in `nav.tsx`. */
 function viewIcon(v: ViewKey): string | null {
-  if (v.kind === "focus") return drawingPinSvg;
+  if (v.kind === "focus") return starSvg;
   if (v.kind === "upcoming") return calendarSvg;
   if (v.kind === "done") return checkSvg;
   if (v.kind === "bin") return crumpledPaperSvg;
