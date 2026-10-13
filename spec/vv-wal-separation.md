@@ -26,7 +26,7 @@
       - from_vv
       - to_vv
 
-  The in-memory WAL capture cursor should be renamed from last_pushed_vv to something accurate such as last_persisted_vv. It advances after an update is durably appended to the
+  The in-memory WAL capture cursor is last_persisted_vv. It advances after an update is durably appended to the
   WAL, not after server acknowledgement.
 
   ## Local write path

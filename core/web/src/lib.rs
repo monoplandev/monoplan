@@ -1498,7 +1498,7 @@ impl SyncEngine {
     /// Plaintext full-state Loro snapshot — a lossless, round-trippable
     /// backup. Currently unexposed in the UI (there's no matching import
     /// path yet); kept for the eventual lossless restore. Side-effect-free;
-    /// doesn't touch `last_pushed_vv` or the oplog frontier.
+    /// doesn't touch `last_persisted_vv` or the oplog frontier.
     #[wasm_bindgen(js_name = exportSnapshot)]
     pub fn export_snapshot(&self) -> Result<Vec<u8>, JsError> {
         self.inner.doc().export_snapshot_bytes().map_err(js_err)
