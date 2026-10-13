@@ -122,6 +122,14 @@ function ConnectionStatusPopover(props: {
     props.app.version();
     return String(props.app.engine.lastContiguousSeq());
   };
+  // Epoch arrives on HelloAck, which dispatches no event of its own,
+  // so also key on the link state: it flips to online right after.
+  const epochLabel = (): string | null => {
+    props.app.version();
+    props.online;
+    const epoch = props.app.engine.serverEpoch();
+    return epoch === undefined ? null : String(epoch);
+  };
   const fingerprintHex = (): string => {
     props.app.version();
     const buf = props.app.engine.fingerprint();
@@ -222,6 +230,11 @@ function ConnectionStatusPopover(props: {
             {(label) => <div class="status-line status-muted">{label()}</div>}
           </Show>
           <div class="status-line status-muted">{m().nav.seqLabel(seqLabel())}</div>
+          <Show when={epochLabel()}>
+            {(n) => (
+              <div class="status-line status-muted">{m().nav.epochLabel(n())}</div>
+            )}
+          </Show>
           <div class="status-fingerprint status-muted status-mono">
             {fingerprintHex()}
           </div>

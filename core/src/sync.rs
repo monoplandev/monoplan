@@ -165,6 +165,10 @@ pub struct SyncEngine {
     /// ships an Ack for a seq the host has confirmed durable via
     /// `notify_oplog_durable`.
     last_contiguous_seq: u64,
+    /// The doc's history epoch as reported by the server on the last
+    /// `HelloAck` (`spec/storage.md` §Epochs). `None` until the first
+    /// successful handshake. Display-only today.
+    server_epoch: Option<u64>,
     /// Contiguous-prefix seq the host has confirmed locally durable
     /// (encrypted WAL row committed for the bytes covering this seq).
     /// `<= last_contiguous_seq`. This is the value the engine sends
@@ -212,6 +216,7 @@ impl SyncEngine {
             opts,
             state: ConnState::Disconnected,
             last_contiguous_seq: last_acked_seq,
+            server_epoch: None,
             last_durable_seq: last_acked_seq,
             last_sent_ack: last_acked_seq,
             outbox: VecDeque::new(),
@@ -407,6 +412,12 @@ impl SyncEngine {
         self.last_contiguous_seq
     }
 
+    /// The doc's history epoch from the last `HelloAck`, or `None`
+    /// before the first successful handshake.
+    pub fn server_epoch(&self) -> Option<u64> {
+        self.server_epoch
+    }
+
     /// Contiguous-prefix seq the host has confirmed locally durable.
     /// This is the value the engine has shipped (or will ship) in
     /// `Ack` frames, and the value callers persist between sessions
@@ -583,6 +594,7 @@ impl SyncEngine {
                 self.go_disconnected();
                 return;
             }
+            self.server_epoch = Some(ack.epoch);
             self.state = ConnState::Pulling;
             let frame = ClientFrame::PullOps {
                 since_seq: self.last_contiguous_seq,
@@ -1144,6 +1156,7 @@ mod tests {
         eng.handle_server_bytes(&enc(&HelloAck {
             server_version: "test".into(),
             protocol_version: PROTOCOL_VERSION,
+            epoch: 0,
         }));
         let _pull = eng
             .pop_outbox()
@@ -1185,6 +1198,7 @@ mod tests {
         eng.handle_server_bytes(&enc(&HelloAck {
             server_version: "s".into(),
             protocol_version: PROTOCOL_VERSION,
+            epoch: 0,
         }));
         let pull: ClientFrame = dec(&eng.pop_outbox().unwrap());
         assert!(matches!(pull, ClientFrame::PullOps { since_seq: 0 }));
@@ -1212,6 +1226,7 @@ mod tests {
         eng.handle_server_bytes(&enc(&HelloAck {
             server_version: "s".into(),
             protocol_version: PROTOCOL_VERSION,
+            epoch: 0,
         }));
         let _pull = eng.pop_outbox().unwrap();
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
@@ -1252,6 +1267,7 @@ mod tests {
         eng.handle_server_bytes(&enc(&HelloAck {
             server_version: "s".into(),
             protocol_version: 9999,
+            epoch: 0,
         }));
         assert!(!eng.is_online());
         let events = drain_events(&mut eng);
@@ -1413,6 +1429,7 @@ mod tests {
         eng.handle_server_bytes(&enc(&HelloAck {
             server_version: "s".into(),
             protocol_version: PROTOCOL_VERSION,
+            epoch: 0,
         }));
         let _pull = eng.pop_outbox().unwrap();
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
@@ -1519,6 +1536,7 @@ mod tests {
         eng.handle_server_bytes(&enc(&HelloAck {
             server_version: "s".into(),
             protocol_version: PROTOCOL_VERSION,
+            epoch: 0,
         }));
         let _ = eng.pop_outbox().unwrap(); // PullOps
 
@@ -1683,6 +1701,7 @@ mod tests {
         eng.handle_server_bytes(&enc(&HelloAck {
             server_version: "s".into(),
             protocol_version: PROTOCOL_VERSION,
+            epoch: 0,
         }));
         let _ = eng.pop_outbox().unwrap();
 
@@ -1756,6 +1775,7 @@ mod tests {
         eng.handle_server_bytes(&enc(&HelloAck {
             server_version: "s".into(),
             protocol_version: PROTOCOL_VERSION,
+            epoch: 0,
         }));
         let _ = eng.pop_outbox().unwrap();
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
@@ -1805,6 +1825,7 @@ mod tests {
         eng.handle_server_bytes(&enc(&HelloAck {
             server_version: "s".into(),
             protocol_version: PROTOCOL_VERSION,
+            epoch: 0,
         }));
         let _pull = eng.pop_outbox().unwrap();
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
@@ -1961,6 +1982,7 @@ mod tests {
         eng.handle_server_bytes(&enc(&HelloAck {
             server_version: "s".into(),
             protocol_version: PROTOCOL_VERSION,
+            epoch: 0,
         }));
         let pull: ClientFrame = dec(&eng.pop_outbox().unwrap());
         assert!(matches!(pull, ClientFrame::PullOps { since_seq: 42 }));
@@ -2061,6 +2083,7 @@ mod tests {
         eng.handle_server_bytes(&enc(&HelloAck {
             server_version: "s".into(),
             protocol_version: PROTOCOL_VERSION,
+            epoch: 0,
         }));
         let _ = eng.pop_outbox().unwrap(); // PullOps
 
@@ -2161,6 +2184,7 @@ mod tests {
         eng.handle_server_bytes(&enc(&HelloAck {
             server_version: "s".into(),
             protocol_version: PROTOCOL_VERSION,
+            epoch: 0,
         }));
         let _ = eng.pop_outbox().unwrap(); // PullOps
         eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequired { up_to_seq: 42 }));
@@ -2215,6 +2239,7 @@ mod tests {
         eng.handle_server_bytes(&enc(&HelloAck {
             server_version: "s".into(),
             protocol_version: PROTOCOL_VERSION,
+            epoch: 0,
         }));
         let _ = eng.pop_outbox().unwrap(); // PullOps
         eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequired { up_to_seq: 10 }));
@@ -2274,6 +2299,7 @@ mod tests {
         a.handle_server_bytes(&enc(&HelloAck {
             server_version: "s".into(),
             protocol_version: PROTOCOL_VERSION,
+            epoch: 0,
         }));
         let _ = a.pop_outbox().unwrap();
         a.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
@@ -2378,6 +2404,7 @@ mod tests {
         b.handle_server_bytes(&enc(&HelloAck {
             server_version: "s".into(),
             protocol_version: PROTOCOL_VERSION,
+            epoch: 0,
         }));
         let pull: ClientFrame = dec(&b.pop_outbox().unwrap());
         assert!(matches!(pull, ClientFrame::PullOps { since_seq: 0 }));
@@ -2540,6 +2567,7 @@ mod tests {
         a.handle_server_bytes(&enc(&HelloAck {
             server_version: "s".into(),
             protocol_version: PROTOCOL_VERSION,
+            epoch: 0,
         }));
         let _ = a.pop_outbox().unwrap();
         a.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
@@ -2593,6 +2621,7 @@ mod tests {
         b.handle_server_bytes(&enc(&HelloAck {
             server_version: "s".into(),
             protocol_version: PROTOCOL_VERSION,
+            epoch: 0,
         }));
         let _ = b.pop_outbox().unwrap();
         b.handle_server_bytes(&enc(&ServerFrame::OpsBatch {

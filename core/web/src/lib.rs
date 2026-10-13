@@ -1419,6 +1419,13 @@ impl SyncEngine {
         self.inner.last_contiguous_seq()
     }
 
+    /// The doc's history epoch from the last `HelloAck`, or
+    /// `undefined` before the first successful handshake.
+    #[wasm_bindgen(js_name = serverEpoch)]
+    pub fn server_epoch(&self) -> Option<u64> {
+        self.inner.server_epoch()
+    }
+
     /// Contiguous-prefix seq the host has confirmed locally durable.
     /// Equals the highest `last_acked_seq` the engine has shipped (or
     /// will ship) in `Ack` frames. Persist this between sessions.

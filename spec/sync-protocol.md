@@ -30,7 +30,7 @@ Server-assigned `seq` is **per-account** and **dense / gap-free**. The server bu
 First frame on every WS connection, before any payload exchange:
 
 - Client → Server: `Hello { client: "monoplan-cli", client_version: "0.1.0", supported_protocol_versions: [1] }`
-- Server → Client: `HelloAck { server_version: "0.1.0", protocol_version: 1 }` — server picks the highest version it shares with the client. If no overlap → `HelloRejected { reason }` and connection closes.
+- Server → Client: `HelloAck { server_version: "0.1.0", protocol_version: 1, epoch: 0 }` — server picks the highest version it shares with the client. `epoch` is the doc's current history epoch (`storage.md` §Epochs); informational until trimmed snapshots land, and a mid-session advance is not yet signalled. If no overlap → `HelloRejected { reason }` and connection closes.
 
 All subsequent frames are interpreted under the agreed `protocol_version`. Belt-and-braces against breaking changes; MessagePack handles additive evolution within a version on its own.
 

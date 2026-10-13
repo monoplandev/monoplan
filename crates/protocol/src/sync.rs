@@ -80,6 +80,11 @@ pub struct Hello {
 pub struct HelloAck {
     pub server_version: String,
     pub protocol_version: u32,
+    /// The doc's current history epoch (`spec/storage.md` §Epochs).
+    /// Informational for now: nothing advances it until trimmed
+    /// snapshots land, and a mid-session advance is not yet signalled.
+    #[serde(default)]
+    pub epoch: u64,
 }
 
 /// Server's negative response to `Hello`. Connection closes after.

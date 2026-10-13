@@ -96,6 +96,7 @@ export type Messages = {
     syncing: string;
     lastSynced: (rel: string) => string;
     seqLabel: (n: string) => string;
+    epochLabel: (n: string) => string;
     itemsListsCount: (items: number, lists: number) => string;
     undo: string;
     redo: string;
@@ -468,6 +469,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       syncing: "Sincronizando",
       lastSynced: (rel) => `Sincronizado ${rel}`,
       seqLabel: (n) => `seq #${n}`,
+      epochLabel: (n) => `epoch ${n}`,
       itemsListsCount: (items, lists) =>
         `${items} elemento${items === 1 ? "" : "s"}, ${lists} lista${lists === 1 ? "" : "s"}`,
       undo: "Deshacer",
@@ -737,6 +739,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       syncing: "Syncing",
       lastSynced: (rel) => `Synced ${rel}`,
       seqLabel: (n) => `seq #${n}`,
+      epochLabel: (n) => `epoch ${n}`,
       itemsListsCount: (items, lists) =>
         `${items} item${items === 1 ? "" : "s"}, ${lists} list${lists === 1 ? "" : "s"}`,
       undo: "Undo",

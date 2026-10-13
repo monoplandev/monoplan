@@ -132,6 +132,7 @@ async fn run_session(
     auth: DeviceAuth,
 ) -> Result<(), SessionError> {
     let handshake_span = tracing::info_span!("ws.handshake");
+    let doc_epoch = queries::doc_epoch(&state.db, auth.primary_doc_id).await?;
     let _hello: Hello = async {
         let hello: Hello = recv_msgpack(&mut socket).await?;
         if !hello
@@ -162,6 +163,7 @@ async fn run_session(
             &HelloAck {
                 server_version: SERVER_VERSION.into(),
                 protocol_version: PROTOCOL_VERSION,
+                epoch: doc_epoch,
             },
         )
         .await?;
