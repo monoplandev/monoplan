@@ -45,8 +45,8 @@ Note: the per-list order-container CRDT schema (`spec/data-model.md` "Schema ver
 | `PushOps` | `{ ops: [PushBlob] }` | Append ops. Server assigns per-account seqs. `PushBlob = { push_id: uuid, blob: EncryptedBlob }` — see §Push identity & retry. |
 | `PullOps` | `{ since_seq: u64 }` | Request ops with seq > since_seq. |
 | `Ack` | `{ last_acked_seq: u64 }` | Advance this device's contiguous-prefix frontier. |
-| `PushSnapshot` | `{ up_to_seq: u64, compaction_floor_seq: u64, blob: EncryptedBlob }` | In response to `SnapshotRequest`. `up_to_seq` = encoded state frontier; `compaction_floor_seq` = echo of the server's requested compaction floor (server-side op-blob GC bookkeeping; does not affect the produced blob). |
-| `PullSnapshot` | `{}` | Request the latest snapshot blob. |
+| `PushSnapshot` | `{ up_to_seq: u64, compaction_floor_seq: u64, from_seq: Option<u64>, up_to_vv: EncryptedBlob, blob: EncryptedBlob }` | In response to `SnapshotRequest`. `up_to_seq` = encoded state frontier; `compaction_floor_seq` = echo of the server's requested compaction floor (server-side op-blob GC bookkeeping; does not affect the produced blob); `from_seq` = echo of `base.seq` (`Some` = delta, `None` = full); `up_to_vv` = the producer's Loro VV at `up_to_seq`, sealed under the DEK (the server stores it opaquely and hands it back as the next delta's base). |
+| `PullSnapshot` | `{}` | Request the latest snapshot chain. |
 
 ## Server → Client
 
@@ -57,8 +57,8 @@ Note: the per-list order-container CRDT schema (`spec/data-model.md` "Schema ver
 | `OpsAck` | `{ acks: [PushAck] }` | Response to `PushOps`. One `PushAck = { push_id: uuid, seq: u64 }` per pushed blob, in input order — self-describing across retries (see §Push identity & retry). |
 | `OpsBatch` | `{ ops: [(u64, EncryptedBlob)], complete: bool }` | Response to `PullOps`; may chunk. Each tuple's `u64` is the per-account `seq`. |
 | `OpsBroadcast` | `{ ops: [(u64, EncryptedBlob)] }` | Pushed when another device sends ops. |
-| `SnapshotRequest` | `{ up_to_seq: u64, compaction_floor_seq: u64 }` | Server asks a connected client to produce a snapshot. `up_to_seq` = state frontier to encode at (= the producer's `last_acked_seq`); `compaction_floor_seq` = seq at/below which op blobs become eligible for GC once this snapshot lands (= `max(horizon, prev compaction_floor_seq)`). |
-| `Snapshot` | `{ up_to_seq: u64, blob: EncryptedBlob }` | Response to `PullSnapshot`. `up_to_seq` is the encoded state frontier; the bootstrapping client uses it as its next `since_seq`. |
+| `SnapshotRequest` | `{ up_to_seq: u64, compaction_floor_seq: u64, base: Option<SnapshotBase> }` | Server asks a connected client to produce a snapshot. `up_to_seq` = state frontier to encode at (= the producer's `last_acked_seq`); `compaction_floor_seq` = seq at/below which op blobs become eligible for GC once this snapshot lands (= `max(horizon, prev compaction_floor_seq)`); `base` = `None` for a full snapshot, or `{ seq, vv }` (the latest stored snapshot's `up_to_seq` and sealed `up_to_vv`) for a delta strictly after it. |
+| `Snapshot` | `{ up_to_seq: u64, blobs: Vec<EncryptedBlob> }` | Response to `PullSnapshot`. `blobs` is the stored chain in import order: the latest full snapshot, then each delta after it. `up_to_seq` is the chain's final state frontier; the bootstrapping client uses it as its next `since_seq`. |
 | `SnapshotRequired` | `{ up_to_seq: u64 }` | Sent in lieu of `OpsBatch` when the client's `since_seq` is below the latest snapshot's `compaction_floor_seq` — server can't serve the missing ops. Client must bootstrap from snapshot before resuming ops. `up_to_seq` is informational; the authoritative state frontier is the one returned in `Snapshot`. |
 
 `EncryptedBlob = { nonce: bytes, ciphertext: bytes }`.
@@ -111,9 +111,18 @@ The `complete: bool` on `OpsBatch` signals "no more chunks for this `PullOps`" �
 
 ## Snapshot orchestration
 
-**Status:** Implemented. `SnapshotCoordinator` enforces the lease/trigger model; `push_snapshot` in `ws.rs` accepts only matching in-flight requests; opportunistic compaction runs after each accepted snapshot.
+**Status:** Implemented. `SnapshotCoordinator` enforces the lease/trigger model and picks the shape (full or delta); `push_snapshot` in `ws.rs` accepts only matching in-flight requests and only deltas that chain onto the latest row; opportunistic compaction runs after each accepted snapshot.
 
 Snapshotting is **server-orchestrated, best-effort, and must never wedge sync**. It exists to bound bootstrap / compaction cost, not to gate normal operation.
+
+A snapshot comes in **two shapes**, stored as rows of one append-only chain per doc (`storage.md` §Schema):
+
+- **Full** — a full-history Loro snapshot at the producer's server-known frontier. The head of a chain.
+- **Delta** — the Loro updates strictly after the previous row's frontier, up to the producer's. Linked to the previous row by `from_seq = previous.up_to_seq`. Lossless (no CRDT history is trimmed), so a chain `[full, delta, delta, …]` imports to exactly the state a full snapshot at the last row's `up_to_seq` would.
+
+Why deltas: a full snapshot costs O(doc) to export, upload and store every time the threshold trips, which for a long-lived doc is paying the whole history again for 500 new ops. A delta costs O(new ops). There is no periodic fold back to a full snapshot: the chain is one full head plus one delta per threshold crossing, for the life of the epoch. At the default threshold a busy single user adds a delta every few weeks, so a bootstrap imports on the order of a dozen blobs a year, and the total bytes are the history either way. Cutting the chain is the trimmed snapshot's job (`storage.md` §Epochs): a trimmed snapshot becomes the new chain head and compaction drops everything before it.
+
+Every row also carries **`up_to_vv`**, the producer's Loro version vector at `up_to_seq`, sealed under the DEK. This is what makes the delta possible: a server seq has no mapping to Loro peer/counter pairs and the server can't decrypt, so the only party that can name "where the previous snapshot ends" in Loro terms is the client that produced it. It names it once, the server stores the name opaquely, and the next producer gets it back as its delta base. No client keeps any seq-to-VV history of its own; a device that joined after the previous snapshot can still produce the next delta.
 
 A snapshot carries **two seqs** that serve unrelated jobs:
 
@@ -129,10 +138,12 @@ Orchestration:
   - the triggering device is caught up to `server_last_seq` — that's what we set `up_to_seq` to, so the producer must be at that point to encode it. Lagging connections are skipped as producers but still contribute to horizon.
   Counts blobs, not user actions or bytes — see §"Terminology" for why that matters.
   Horizon is intentionally **not** a trigger condition. Snapshotting is valuable for bootstrap perf independent of compaction — a single snapshot row replaces an arbitrarily long `OpsBatch` replay. If horizon hasn't moved, the new snapshot's `compaction_floor_seq` is the same as the previous one, so compaction doesn't advance — but the new snapshot still cuts bootstrap cost.
+- Shape: **full** when the doc has no snapshot yet (the chain head), otherwise **delta** from the latest row. Nothing folds the chain in steady state.
 - `up_to_seq` = the producer's `last_acked_seq` = `server_last_seq` (since the producer is caught up).
 - `compaction_floor_seq` = `max(horizon, previous_snapshot.compaction_floor_seq)`. Normally just horizon; the `max` enforces monotonicity for the edge case where a fresh device's join drops horizon below the existing floor — compaction is one-way, so the floor stays put.
-- Production: server sends `SnapshotRequest { up_to_seq, compaction_floor_seq }`. The client exports a full Loro snapshot **at the frontiers of its `server_known_vv`** (`fork_at`) — exactly the state/history the server op stream represents, never the current doc, which may contain unsent local operations that must not leak into a blob other devices bootstrap from (`spec/vv-wal-separation.md` §Server snapshots). It encrypts with the DEK and uploads via `PushSnapshot { up_to_seq, compaction_floor_seq, blob }`, tagging `up_to_seq` with its `last_contiguous_seq` (the seq-coordinate twin of `server_known_vv`). `compaction_floor_seq` is echoed unchanged — the client does not interpret it.
-- Compaction: after a snapshot is durable, compaction may delete ops with `seq ≤ snapshot.compaction_floor_seq`.
+- `base` = `None` for a full snapshot, else `{ seq: latest.up_to_seq, vv: latest.up_to_vv }`. The producer is caught up to `server_last_seq ≥ latest.up_to_seq`, so it holds everything in `base.vv` by construction (`server_known_vv` at a seq is the union of every blob's declared range at or below it, which is monotone in seq).
+- Production: server sends `SnapshotRequest { up_to_seq, compaction_floor_seq, base }`. The client exports **at the frontiers of its `server_known_vv`** — exactly the state/history the server op stream represents, never the current doc, which may contain unsent local operations that must not leak into a blob other devices bootstrap from (`spec/vv-wal-separation.md` §Server snapshots). Full: a Loro snapshot of a `fork_at` those frontiers. Delta: `ExportMode::updates_in_range` over the id spans in `server_known_vv` but not in `base.vv` (`Doc::delta_blob_between`), which bounds the blob on both ends with no fork. If `base.vv` is not included in `server_known_vv` the client declines (emits an error, sends nothing) rather than fork the chain; the lease times out onto another producer. It encrypts with the DEK and uploads via `PushSnapshot { up_to_seq, compaction_floor_seq, from_seq, up_to_vv, blob }`, tagging `up_to_seq` with its `last_contiguous_seq` (the seq-coordinate twin of `server_known_vv`) and `up_to_vv` with `server_known_vv` sealed under the DEK. `compaction_floor_seq` and `from_seq` are echoed unchanged — the client does not interpret them.
+- Compaction: after a snapshot is durable, compaction may delete ops with `seq ≤ snapshot.compaction_floor_seq`. Snapshot rows are never deleted.
 
 Server keeps **at most one in-flight snapshot request per account**:
 
@@ -161,14 +172,14 @@ Correctness / acceptance rules:
 - `PushSnapshot` is accepted only if it matches the **current** in-flight request for that account/device.
 - Late snapshots from a timed-out, disconnected, or superseded assignee are ignored.
 - Unsolicited snapshots (no in-flight request) are ignored.
-- Server stores only the latest durable snapshot; no multi-snapshot chain is required.
+- The server stores one linear chain per doc: the latest full snapshot and the deltas after it. A delta is accepted only if its `from_seq` equals the latest stored row's `up_to_seq` and its `up_to_seq` is not below `from_seq`, checked in the insert transaction; otherwise it is ignored and nothing is written. A mislinked delta would corrupt every later bootstrap, which is why this is a hard check and not a log line.
 - The uploaded `up_to_seq` must be **at least** the requested `up_to_seq`, and `compaction_floor_seq` must equal the requested value (the server is asserting a specific compaction floor, not a range). Mismatched snapshots are ignored.
-- A newer snapshot may replace an older one atomically once durable.
 
 Operational notes:
 
 - Keep the policy coarse. One candidate at a time, one deadline, one retry decision per failure is enough.
-- Large accounts increase snapshot upload/download cost, but do **not** change the orchestration model.
+- Large accounts increase full-snapshot upload/download cost, but do **not** change the orchestration model; deltas keep routine production proportional to new ops.
+- A corrupt blob anywhere in the chain breaks bootstrap for every device below the floor until a new chain head replaces it. The server cannot validate blob contents; this is the same trust placed in each op blob, over a larger range.
 - Server should log: request issued, request timed out, assignee disconnected, snapshot accepted, snapshot ignored as stale/mismatched, and retry abandoned for lack of candidates.
 
 ## Shallow snapshots (future)
@@ -184,9 +195,9 @@ The planned design decouples the two horizons rather than trying to translate be
 
 Open questions, parked until this lands:
 
-- Encoding of Loro Frontiers on the wire — Loro provides a canonical byte form; we just need to confirm it round-trips through MessagePack as opaque `bytes`.
 - Report cadence: ack-piggyback vs. dedicated frame, and whether to throttle further when the doc is idle.
-- Whether the snapshot envelope persists the producer's VV alongside the blob, or relies on Loro to recover it from the blob on import.
+
+Settled by the delta-snapshot work: a Loro VV round-trips as `VersionVector::encode` bytes sealed under the DEK (`SnapshotBase.vv`), and every snapshot row persists the producer's VV (`snapshots.up_to_vv`) rather than recovering it from the blob. A trim point, when it comes, is a VV the server already holds in this form.
 
 Until shallow snapshotting ships, the producer's snapshot blob is full-history and `compaction_floor_seq` only affects whether/when op rows get deleted on the server.
 
@@ -196,7 +207,7 @@ Until shallow snapshotting ships, the producer's snapshot blob is full-history a
 
 A device whose `since_seq` is below the latest snapshot's `compaction_floor_seq` cannot resume from ops alone — the ops it needs have been compacted. (Devices whose `since_seq` is between `compaction_floor_seq` and `up_to_seq` *can* still delta-pull, because those ops are preserved by horizon-bounded compaction.) On receiving a `PullOps` with `since_seq < compaction_floor_seq`, the server replies `SnapshotRequired { up_to_seq }` instead of `OpsBatch`. The client then:
 
-1. `PullSnapshot` → server returns `Snapshot { up_to_seq, blob }`.
+1. `PullSnapshot` → server returns `Snapshot { up_to_seq, blobs }`: the latest full snapshot followed by each delta chained after it, in import order. The client imports them as one batch (`apply_remote_batch`); the union of their declared ranges is the chain's frontier.
 2. Decrypt the blob and apply it to the local doc (Loro merges — local-only commits not yet pushed are preserved automatically; CRDT op-id reconciliation handles overlap with the device's own prior contributions). Merge the blob's declared Loro range into `server_known_vv` and persist it.
 3. Write the local checkpoint: a fresh full-history export of the **merged** doc (server state ∪ any unsent local work), replacing the local snapshot and pruning the whole WAL prefix. The server blob alone would not be a valid checkpoint — it lacks unsent local operations the pruned WAL rows carried; the merged export contains them and the next push still derives them from `server_known_vv` (see `spec/local-storage.md` §Server snapshots vs local snapshots).
 4. Emit one application-level `FullResync` control event; consumers materialize current state once rather than processing one synthetic event per item.

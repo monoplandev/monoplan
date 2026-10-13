@@ -50,8 +50,8 @@ use std::sync::{Arc, Mutex};
 
 use loro::event::{Diff as LoroDiff, DiffEvent, ListDiffItem};
 use loro::{
-    CommitOptions, Container, ContainerID, EventTriggerKind, ExportMode, Index, LoroDoc, LoroMap,
-    LoroMovableList, LoroValue, Subscription, TextDelta, UndoManager, ValueOrContainer,
+    CommitOptions, Container, ContainerID, EventTriggerKind, ExportMode, IdSpan, Index, LoroDoc,
+    LoroMap, LoroMovableList, LoroValue, Subscription, TextDelta, UndoManager, ValueOrContainer,
     VersionVector,
 };
 use serde::{Deserialize, Serialize};
@@ -3875,6 +3875,39 @@ impl Doc {
         let frontiers = self.inner.vv_to_frontiers(vv);
         let fork = self.inner.fork_at(&frontiers)?;
         let plaintext = fork.export(ExportMode::Snapshot)?;
+        let (ciphertext, nonce) = dek.seal(&plaintext)?;
+        Ok(EncryptedBlob {
+            nonce: nonce.to_vec(),
+            ciphertext,
+        })
+    }
+
+    /// Encrypted Loro updates strictly after `from`, bounded by `to`:
+    /// the body of a *delta* snapshot (`spec/sync-protocol.md`
+    /// §"Snapshot orchestration"). Exported by id span — exactly the
+    /// operations in `to` that are not in `from` — so nothing outside
+    /// `(from, to]` leaks in; in particular no unsent local operation
+    /// past `to = server_known_vv`. A fresh peer that imports the full
+    /// snapshot at `from` followed by this blob lands exactly at `to`.
+    /// `from` must be included in `to`.
+    pub fn delta_blob_between(
+        &self,
+        dek: &Dek,
+        from: &VersionVector,
+        to: &VersionVector,
+    ) -> Result<EncryptedBlob, DocError> {
+        if !to.includes_vv(from) {
+            return Err(DocError::Invalid(
+                "delta base is not included in the target frontier".into(),
+            ));
+        }
+        let spans: Vec<IdSpan> = from
+            .diff(to)
+            .forward
+            .into_iter()
+            .map(|(peer, counter)| IdSpan { peer, counter })
+            .collect();
+        let plaintext = self.inner.export(ExportMode::updates_in_range(spans))?;
         let (ciphertext, nonce) = dek.seal(&plaintext)?;
         Ok(EncryptedBlob {
             nonce: nonce.to_vec(),
@@ -8300,6 +8333,48 @@ mod tests {
             "batch catch-up should emit final-state delta, not intermediate edit churn: {evs:?}"
         );
         assert_eq!(dst.fingerprint(), src.fingerprint());
+    }
+
+    #[test]
+    fn delta_blob_between_covers_exactly_the_requested_range() {
+        // Full snapshot at v1, delta over (v1, v2], and an op past v2
+        // that must stay out. A fresh peer importing [full, delta]
+        // lands exactly at v2.
+        let dek = Dek::generate();
+        let a = Doc::new().unwrap();
+        a.add_item(LIST_INBOX, "one").unwrap();
+        let v1 = VersionVector::decode(&a.oplog_vv_bytes()).unwrap();
+        let full = a.snapshot_blob_at(&dek, &v1).unwrap();
+
+        a.add_item(LIST_INBOX, "two").unwrap();
+        let v2 = VersionVector::decode(&a.oplog_vv_bytes()).unwrap();
+        let unsent = a.add_item(LIST_INBOX, "three").unwrap();
+
+        let delta = a.delta_blob_between(&dek, &v1, &v2).unwrap();
+
+        let mut b = Doc::empty();
+        let imported = b.apply_remote_batch(&dek, [&full, &delta]).unwrap();
+        assert!(imported.includes_vv(&v2), "delta must declare up to v2");
+        let texts: Vec<String> = b
+            .items_in_list(LIST_INBOX, false)
+            .into_iter()
+            .map(|i| i.text)
+            .collect();
+        assert!(texts.contains(&"one".to_string()));
+        assert!(texts.contains(&"two".to_string()));
+        assert!(
+            b.get_item(&unsent).is_none(),
+            "op past `to` leaked into the delta"
+        );
+
+        // Same state as a full snapshot taken at v2.
+        let mut c = Doc::empty();
+        c.apply_remote(&dek, &a.snapshot_blob_at(&dek, &v2).unwrap())
+            .unwrap();
+        assert_eq!(b.fingerprint(), c.fingerprint());
+
+        // A base the target doesn't include is refused.
+        assert!(a.delta_blob_between(&dek, &v2, &v1).is_err());
     }
 
     #[test]

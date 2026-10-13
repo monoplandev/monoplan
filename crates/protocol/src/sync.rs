@@ -63,6 +63,16 @@ pub struct PushAck {
     pub seq: u64,
 }
 
+/// The starting point of a delta snapshot: the previous snapshot's
+/// `up_to_seq` and its sealed `up_to_vv`, exactly as the producer of
+/// that snapshot uploaded them. The server round-trips `vv` as opaque
+/// bytes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SnapshotBase {
+    pub seq: u64,
+    pub vv: EncryptedBlob,
+}
+
 // ---------- handshake ----------
 
 /// First frame on every WS connection (client → server).
@@ -114,12 +124,27 @@ pub enum ClientFrame {
     /// op blobs become eligible for server-side GC once this snapshot
     /// lands. Echoed verbatim from `SnapshotRequest` — the producing
     /// client doesn't compute it.
+    ///
+    /// `up_to_vv` is the producer's Loro version vector at `up_to_seq`
+    /// (`VersionVector::encode`, sealed under the DEK). The server
+    /// stores it beside the blob and hands it back as the `from` base
+    /// of the next `SnapshotRequest`, so the next producer knows where
+    /// its delta starts without any seq-to-VV mapping of its own. The
+    /// server never reads it.
+    ///
+    /// `from_seq` echoes `SnapshotRequest.base.seq`: `Some` means the
+    /// blob is a *delta* (Loro updates strictly after the base VV, up
+    /// to `up_to_vv`), `None` means a full snapshot. The server rejects
+    /// a delta whose `from_seq` is not the latest stored snapshot's
+    /// `up_to_seq`, so the chain can't fork.
     PushSnapshot {
         up_to_seq: u64,
         compaction_floor_seq: u64,
+        from_seq: Option<u64>,
+        up_to_vv: EncryptedBlob,
         blob: EncryptedBlob,
     },
-    /// Request the latest snapshot blob. Reserved for the snapshot work.
+    /// Request the latest snapshot chain (see `ServerFrame::Snapshot`).
     PullSnapshot,
 }
 
@@ -147,17 +172,29 @@ pub enum ServerFrame {
     /// once this snapshot lands (= `max(horizon, prev snapshot's
     /// compaction_floor_seq)`). The client echoes `compaction_floor_seq`
     /// back verbatim in `PushSnapshot`; it does not influence the
-    /// produced blob today. (Loro shallow snapshotting will be driven
-    /// by a separate VV-horizon mechanism — see
-    /// `spec/sync-protocol.md` §"Shallow snapshots (future)".)
+    /// produced blob.
+    ///
+    /// `base` selects the shape of the blob. `None`: a full Loro
+    /// snapshot at the producer's server-known frontier. `Some`: a
+    /// *delta* — Loro updates strictly after `base.vv` (the latest
+    /// stored snapshot's `up_to_vv`, opaque to the server) up to the
+    /// producer's server-known frontier. The producer must already
+    /// hold everything in `base.vv`, which the server guarantees by
+    /// only asking a device acked at or past `base.seq`.
     SnapshotRequest {
         up_to_seq: u64,
         compaction_floor_seq: u64,
+        base: Option<SnapshotBase>,
     },
-    /// Response to `PullSnapshot`. `up_to_seq` is the snapshot's
-    /// encoded state frontier; the bootstrapping client uses it as
-    /// its next `since_seq` for `PullOps`.
-    Snapshot { up_to_seq: u64, blob: EncryptedBlob },
+    /// Response to `PullSnapshot`. `blobs` is the stored chain in
+    /// import order: the latest full snapshot first, then every delta
+    /// landed after it. `up_to_seq` is the chain's final state
+    /// frontier; the bootstrapping client uses it as its next
+    /// `since_seq` for `PullOps`.
+    Snapshot {
+        up_to_seq: u64,
+        blobs: Vec<EncryptedBlob>,
+    },
     /// Sent in lieu of `OpsBatch` when the client's `since_seq` is
     /// below the latest snapshot's `compaction_floor_seq` — the ops it
     /// needs have been compacted, so it can't resume from ops alone.

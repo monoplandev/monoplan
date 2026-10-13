@@ -197,24 +197,58 @@ pub async fn advance_last_acked_seq(
     Ok(())
 }
 
-/// Latest snapshot for a doc (highest `id`, which monotonically
-/// tracks `up_to_seq` since snapshots are append-only). Returns
-/// `None` when no snapshot exists yet — the bootstrap path is dormant
-/// in that case and `pull_ops` falls through to op streaming.
+/// The latest snapshot row for a doc (highest `id`, which monotonically
+/// tracks `up_to_seq` since snapshots are append-only), payload
+/// included. Tests and diagnostics; the bootstrap path serves
+/// [`snapshot_chain`] instead. `None` when no snapshot exists yet.
 pub struct LatestSnapshot {
     pub up_to_seq: u64,
     pub compaction_floor_seq: u64,
     pub epoch: u64,
+    /// `None` = full snapshot; `Some(seq)` = delta chained after the
+    /// row whose `up_to_seq` is `seq`.
+    pub from_seq: Option<u64>,
+    /// Producer's Loro VV at `up_to_seq`, sealed under the DEK.
+    pub up_to_vv: EncryptedBlob,
     pub blob: EncryptedBlob,
 }
 
-/// The seq columns and epoch of the latest snapshot, without the
-/// payload. Hot path for `pull_ops` (compaction-floor check) and the
-/// snapshot coordinator (trigger eval). `None` if no snapshot exists.
+/// The latest snapshot's seq columns, epoch, chain shape and sealed
+/// VV, without the payload. Hot path for `pull_ops` (compaction-floor
+/// check) and the snapshot coordinator (trigger eval + delta base).
+/// `None` if no snapshot exists.
 pub struct LatestSnapshotMeta {
     pub up_to_seq: u64,
     pub compaction_floor_seq: u64,
     pub epoch: u64,
+    pub from_seq: Option<u64>,
+    pub up_to_vv: EncryptedBlob,
+}
+
+/// What a bootstrapping device imports: the latest full snapshot
+/// followed by every delta landed after it, in import order.
+pub struct SnapshotChain {
+    /// The chain's final state frontier (= the last row's `up_to_seq`).
+    pub up_to_seq: u64,
+    pub compaction_floor_seq: u64,
+    pub epoch: u64,
+    pub blobs: Vec<EncryptedBlob>,
+}
+
+/// Outcome of [`insert_snapshot`].
+#[derive(Debug)]
+pub enum InsertSnapshot {
+    Inserted {
+        id: u64,
+    },
+    /// A delta's `from_seq` did not match the latest stored row's
+    /// `up_to_seq` (or there was no row to chain onto), or its
+    /// `up_to_seq` sat below `from_seq`. Nothing was written: the
+    /// chain must stay linear, and a mislinked delta would corrupt
+    /// every later bootstrap.
+    ChainMismatch {
+        latest_up_to_seq: Option<u64>,
+    },
 }
 
 /// A doc's current history epoch (`spec/storage.md` §Epochs). Docs
@@ -236,32 +270,63 @@ fn read_doc_epoch(c: &rusqlite::Connection, doc_bytes: &[u8]) -> rusqlite::Resul
     .map(|v| v.unwrap_or(0))
 }
 
+fn read_latest_up_to_seq(
+    c: &rusqlite::Connection,
+    doc_bytes: &[u8],
+) -> rusqlite::Result<Option<i64>> {
+    c.query_row(
+        "SELECT up_to_seq FROM snapshots WHERE doc_id = ? ORDER BY id DESC LIMIT 1",
+        [doc_bytes],
+        |r| r.get::<_, i64>(0),
+    )
+    .optional()
+}
+
 /// Insert a snapshot row, stamped with the doc's current epoch. Every
-/// snapshot today is full-history, so it belongs to the epoch it was
-/// taken in; a future *trimmed* snapshot is the one that advances
-/// `doc_sequences.epoch` (in this same transaction) and is stamped
-/// with the new value. Used by snapshot orchestration; integration
-/// tests also call this directly to seed snapshot state.
+/// snapshot today is full-history or a lossless delta on one, so it
+/// belongs to the epoch it was taken in; a future *trimmed* snapshot
+/// is the one that advances `doc_sequences.epoch` (in this same
+/// transaction) and is stamped with the new value.
+///
+/// `from_seq = Some(s)` declares a delta chained onto the latest row,
+/// which must have `up_to_seq == s`; the check runs under the same
+/// transaction as the insert so two producers can't both chain onto
+/// the same base. Used by snapshot orchestration; integration tests
+/// also call this directly to seed snapshot state.
 pub async fn insert_snapshot(
     db: &Db,
     doc_id: Uuid,
     up_to_seq: u64,
     compaction_floor_seq: u64,
+    from_seq: Option<u64>,
+    up_to_vv: EncryptedBlob,
     blob: EncryptedBlob,
-) -> anyhow::Result<u64> {
+) -> anyhow::Result<InsertSnapshot> {
     let doc_bytes = doc_id.as_bytes().to_vec();
     let now = now_millis();
     db.call(move |c| {
         let tx = c.transaction()?;
+        if let Some(from) = from_seq {
+            let latest = read_latest_up_to_seq(&tx, &doc_bytes)?;
+            if latest != Some(from as i64) || up_to_seq < from {
+                tx.commit()?;
+                return Ok(InsertSnapshot::ChainMismatch {
+                    latest_up_to_seq: latest.map(|v| v as u64),
+                });
+            }
+        }
         let epoch = read_doc_epoch(&tx, &doc_bytes)?;
         tx.execute(
-            "INSERT INTO snapshots (doc_id, up_to_seq, compaction_floor_seq, epoch, payload, payload_nonce, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO snapshots (doc_id, up_to_seq, compaction_floor_seq, epoch, from_seq, up_to_vv, up_to_vv_nonce, payload, payload_nonce, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 doc_bytes,
                 up_to_seq as i64,
                 compaction_floor_seq as i64,
                 epoch,
+                from_seq.map(|v| v as i64),
+                up_to_vv.ciphertext,
+                up_to_vv.nonce,
                 blob.ciphertext,
                 blob.nonce,
                 now,
@@ -269,7 +334,7 @@ pub async fn insert_snapshot(
         )?;
         let id = tx.last_insert_rowid() as u64;
         tx.commit()?;
-        Ok(id)
+        Ok(InsertSnapshot::Inserted { id })
     })
     .await
 }
@@ -277,33 +342,31 @@ pub async fn insert_snapshot(
 pub async fn latest_snapshot(db: &Db, doc_id: Uuid) -> anyhow::Result<Option<LatestSnapshot>> {
     let doc_bytes = doc_id.as_bytes().to_vec();
     db.call(move |c| {
-        let row = c
-            .query_row(
-                "SELECT up_to_seq, compaction_floor_seq, epoch, payload, payload_nonce
-                 FROM snapshots
-                 WHERE doc_id = ?
-                 ORDER BY id DESC
-                 LIMIT 1",
-                [doc_bytes],
-                |r| {
-                    Ok((
-                        r.get::<_, i64>(0)? as u64,
-                        r.get::<_, i64>(1)? as u64,
-                        r.get::<_, i64>(2)? as u64,
-                        r.get::<_, Vec<u8>>(3)?,
-                        r.get::<_, Vec<u8>>(4)?,
-                    ))
-                },
-            )
-            .optional()?;
-        Ok(row.map(
-            |(up_to_seq, compaction_floor_seq, epoch, ciphertext, nonce)| LatestSnapshot {
-                up_to_seq,
-                compaction_floor_seq,
-                epoch,
-                blob: EncryptedBlob { nonce, ciphertext },
+        c.query_row(
+            "SELECT up_to_seq, compaction_floor_seq, epoch, from_seq, up_to_vv, up_to_vv_nonce, payload, payload_nonce
+             FROM snapshots
+             WHERE doc_id = ?
+             ORDER BY id DESC
+             LIMIT 1",
+            [doc_bytes],
+            |r| {
+                Ok(LatestSnapshot {
+                    up_to_seq: r.get::<_, i64>(0)? as u64,
+                    compaction_floor_seq: r.get::<_, i64>(1)? as u64,
+                    epoch: r.get::<_, i64>(2)? as u64,
+                    from_seq: r.get::<_, Option<i64>>(3)?.map(|v| v as u64),
+                    up_to_vv: EncryptedBlob {
+                        ciphertext: r.get::<_, Vec<u8>>(4)?,
+                        nonce: r.get::<_, Vec<u8>>(5)?,
+                    },
+                    blob: EncryptedBlob {
+                        ciphertext: r.get::<_, Vec<u8>>(6)?,
+                        nonce: r.get::<_, Vec<u8>>(7)?,
+                    },
+                })
             },
-        ))
+        )
+        .optional()
     })
     .await
 }
@@ -314,30 +377,94 @@ pub async fn latest_snapshot_meta(
 ) -> anyhow::Result<Option<LatestSnapshotMeta>> {
     let doc_bytes = doc_id.as_bytes().to_vec();
     db.call(move |c| {
-        let row = c
-            .query_row(
-                "SELECT up_to_seq, compaction_floor_seq, epoch
-                 FROM snapshots
-                 WHERE doc_id = ?
-                 ORDER BY id DESC
-                 LIMIT 1",
-                [doc_bytes],
-                |r| {
-                    Ok((
-                        r.get::<_, i64>(0)? as u64,
-                        r.get::<_, i64>(1)? as u64,
-                        r.get::<_, i64>(2)? as u64,
-                    ))
-                },
-            )
-            .optional()?;
-        Ok(row.map(
-            |(up_to_seq, compaction_floor_seq, epoch)| LatestSnapshotMeta {
-                up_to_seq,
-                compaction_floor_seq,
-                epoch,
+        c.query_row(
+            "SELECT up_to_seq, compaction_floor_seq, epoch, from_seq, up_to_vv, up_to_vv_nonce
+             FROM snapshots
+             WHERE doc_id = ?
+             ORDER BY id DESC
+             LIMIT 1",
+            [doc_bytes],
+            |r| {
+                Ok(LatestSnapshotMeta {
+                    up_to_seq: r.get::<_, i64>(0)? as u64,
+                    compaction_floor_seq: r.get::<_, i64>(1)? as u64,
+                    epoch: r.get::<_, i64>(2)? as u64,
+                    from_seq: r.get::<_, Option<i64>>(3)?.map(|v| v as u64),
+                    up_to_vv: EncryptedBlob {
+                        ciphertext: r.get::<_, Vec<u8>>(4)?,
+                        nonce: r.get::<_, Vec<u8>>(5)?,
+                    },
+                })
             },
-        ))
+        )
+        .optional()
+    })
+    .await
+}
+
+/// The bootstrap payload: the latest full snapshot and every delta
+/// chained after it, oldest first. `None` when no full snapshot
+/// exists. A delta whose `from_seq` doesn't link to the row before it
+/// (impossible via `insert_snapshot`, so only ever manual damage) ends
+/// the chain early with a warning rather than serving a blob the
+/// client could not import.
+pub async fn snapshot_chain(db: &Db, doc_id: Uuid) -> anyhow::Result<Option<SnapshotChain>> {
+    let doc_bytes = doc_id.as_bytes().to_vec();
+    db.call(move |c| {
+        let mut stmt = c.prepare(
+            "SELECT up_to_seq, compaction_floor_seq, epoch, from_seq, payload, payload_nonce
+             FROM snapshots
+             WHERE doc_id = ?1
+               AND id >= (SELECT COALESCE(MAX(id), 0) FROM snapshots
+                           WHERE doc_id = ?1 AND from_seq IS NULL)
+             ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map([&doc_bytes], |r| {
+            Ok((
+                r.get::<_, i64>(0)? as u64,
+                r.get::<_, i64>(1)? as u64,
+                r.get::<_, i64>(2)? as u64,
+                r.get::<_, Option<i64>>(3)?.map(|v| v as u64),
+                EncryptedBlob {
+                    ciphertext: r.get::<_, Vec<u8>>(4)?,
+                    nonce: r.get::<_, Vec<u8>>(5)?,
+                },
+            ))
+        })?;
+        let mut chain: Option<SnapshotChain> = None;
+        for row in rows {
+            let (up_to_seq, compaction_floor_seq, epoch, from_seq, blob) = row?;
+            match (&mut chain, from_seq) {
+                (None, None) => {
+                    chain = Some(SnapshotChain {
+                        up_to_seq,
+                        compaction_floor_seq,
+                        epoch,
+                        blobs: vec![blob],
+                    });
+                }
+                (None, Some(_)) => {
+                    tracing::warn!(up_to_seq, "snapshot chain has no full head; ignoring");
+                    break;
+                }
+                (Some(c), Some(from)) if from == c.up_to_seq => {
+                    c.up_to_seq = up_to_seq;
+                    c.compaction_floor_seq = compaction_floor_seq;
+                    c.epoch = epoch;
+                    c.blobs.push(blob);
+                }
+                (Some(c), from) => {
+                    tracing::warn!(
+                        up_to_seq,
+                        ?from,
+                        chain_up_to_seq = c.up_to_seq,
+                        "snapshot chain broken; serving the linked prefix"
+                    );
+                    break;
+                }
+            }
+        }
+        Ok(chain)
     })
     .await
 }
@@ -397,25 +524,17 @@ pub async fn account_horizon(
     .await
 }
 
-/// Max snapshots retained per doc after compaction (see
-/// `spec/storage.md` §"Compaction"). Older snapshots are deleted.
-pub const KEEP_SNAPSHOTS: u64 = 2;
-
 pub struct CompactionStats {
     pub ops_deleted: u64,
-    pub snapshots_deleted: u64,
 }
 
-/// Delete ops at or below the latest snapshot's `compaction_floor_seq`
-/// and prune snapshots older than the `keep_snapshots` newest. The
-/// snapshot read + both deletes run in one transaction so a concurrent
-/// `insert_snapshot` can't shift the floor mid-deletion. Returns 0/0
-/// when no snapshot exists yet.
-pub async fn compact_doc(
-    db: &Db,
-    doc_id: Uuid,
-    keep_snapshots: u64,
-) -> anyhow::Result<CompactionStats> {
+/// Delete ops at or below the latest snapshot's `compaction_floor_seq`.
+/// Snapshot rows are never deleted: the chain is one full head plus
+/// every delta since, and only a trimmed snapshot (`storage.md`
+/// §Epochs, not built) will supersede it. The floor read + delete run
+/// in one transaction so a concurrent `insert_snapshot` can't shift
+/// the floor mid-deletion. Returns 0 when no snapshot exists yet.
+pub async fn compact_doc(db: &Db, doc_id: Uuid) -> anyhow::Result<CompactionStats> {
     let doc_bytes = doc_id.as_bytes().to_vec();
     db.call(move |c| {
         let tx = c.transaction()?;
@@ -432,33 +551,14 @@ pub async fn compact_doc(
             .optional()?;
         let Some(floor) = floor else {
             tx.commit()?;
-            return Ok(CompactionStats {
-                ops_deleted: 0,
-                snapshots_deleted: 0,
-            });
+            return Ok(CompactionStats { ops_deleted: 0 });
         };
         let ops_deleted = tx.execute(
             "DELETE FROM ops WHERE doc_id = ? AND seq <= ?",
             params![doc_bytes, floor],
         )? as u64;
-        // Subquery returns NULL when fewer than keep_snapshots+1 rows
-        // exist, so `id <= NULL` evaluates false and nothing is pruned.
-        let snapshots_deleted = tx.execute(
-            "DELETE FROM snapshots
-             WHERE doc_id = ?
-               AND id <= (
-                 SELECT id FROM snapshots
-                 WHERE doc_id = ?
-                 ORDER BY id DESC
-                 LIMIT 1 OFFSET ?
-               )",
-            params![doc_bytes, doc_bytes, keep_snapshots as i64],
-        )? as u64;
         tx.commit()?;
-        Ok(CompactionStats {
-            ops_deleted,
-            snapshots_deleted,
-        })
+        Ok(CompactionStats { ops_deleted })
     })
     .await
 }

@@ -94,6 +94,9 @@ CREATE TABLE snapshots (
   up_to_seq             INTEGER NOT NULL,                        -- encoded state frontier (per-doc)
   compaction_floor_seq  INTEGER NOT NULL,                        -- seq at/below which op blobs are eligible for GC once this snapshot lands
   epoch                 INTEGER NOT NULL,                        -- epoch this snapshot belongs to; a trimmed snapshot is the first row of its epoch
+  from_seq              INTEGER,                                 -- NULL = full snapshot; else a delta starting after the previous row's up_to_seq (chain link, must equal it)
+  up_to_vv              BLOB NOT NULL,                           -- producer's Loro VV at up_to_seq, sealed under the DEK; opaque here, handed back as the next delta's base
+  up_to_vv_nonce        BLOB NOT NULL,
   payload               BLOB NOT NULL,
   payload_nonce         BLOB NOT NULL,
   created_at            INTEGER NOT NULL

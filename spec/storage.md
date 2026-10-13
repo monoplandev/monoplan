@@ -86,12 +86,17 @@ CREATE TABLE snapshots (
   up_to_seq             INTEGER NOT NULL,    -- snapshot's encoded state frontier (per-doc)
   compaction_floor_seq  INTEGER NOT NULL,    -- seq at/below which op blobs are eligible for GC once this snapshot lands (= max(horizon, prev snapshot's compaction_floor_seq) at snapshot time). Doubles as the bootstrap gate.
   epoch                 INTEGER NOT NULL,    -- epoch this snapshot belongs to; a trimmed snapshot is the first row of its epoch
+  from_seq              INTEGER,             -- NULL = full snapshot; else a delta starting after the previous row's up_to_seq (chain link, must equal it)
+  up_to_vv              BLOB NOT NULL,       -- producer's Loro VV at up_to_seq, sealed under the DEK; opaque here, handed back as the next delta's base
+  up_to_vv_nonce        BLOB NOT NULL,
   payload               BLOB NOT NULL,
   payload_nonce         BLOB NOT NULL,
   created_at            INTEGER NOT NULL
 );
 CREATE INDEX snapshots_doc_id_idx ON snapshots (doc_id, id DESC);
 ```
+
+Snapshot rows form one linear **chain** per doc: a full snapshot (`from_seq IS NULL`) followed by zero or more deltas, each linking to the row before it (`from_seq = previous.up_to_seq`, enforced in the insert transaction). The bootstrap payload is the chain from the latest full row onward, in `id` order. The latest row's `compaction_floor_seq` is the doc's floor. See `sync-protocol.md` §"Snapshot orchestration" for shapes and cadence.
 
 `ops.seq` is per-doc, dense, and gap-free. The client relies on this: seqs arrive contiguous and in order over a single connection, so the engine only ever advances its frontier over the contiguous next seq (no reorder buffering). The composite `(doc_id, seq)` PK doubles as the per-doc ordering index — no separate index needed.
 
@@ -113,7 +118,7 @@ All in one tx with `BEGIN IMMEDIATE`. The invariant "`accounts.primary_doc_id` a
 
 After a snapshot lands, a background job may, per doc:
 1. Delete `ops` rows where `doc_id = X AND seq ≤ snapshot.compaction_floor_seq`. (`compaction_floor_seq` is set to `max(horizon, prev snapshot's compaction_floor_seq)` at snapshot creation time by the orchestrator — see `sync-protocol.md` §"Snapshot orchestration" — so it's safe by construction.)
-2. Keep at most M=2 snapshots per doc; delete older.
+2. Snapshot rows are never deleted. The chain is one full head plus every delta since; superseding it is the trimmed snapshot's job (§Epochs, not built), and the pruning rule will be written with it.
 
 Horizon is computed from `devices.last_acked_seq` for the account that owns the doc — same value as the per-doc horizon while the 1:1 holds.
 
@@ -121,7 +126,7 @@ Run on a timer, not synchronous with snapshot upload. The `doc_sequences.next_se
 
 ## Epochs
 
-An **epoch** is a span of a doc's history that shares one Loro root. A doc is born in epoch 0. The epoch advances only when a *trimmed* (Loro shallow) snapshot is accepted: that snapshot discards CRDT history before the trim point, so it is the first row of the new epoch and the only lossy step in the storage story. Today every snapshot is full-history, so `epoch` stays at 0 everywhere; the columns are reserved so rows are stamped from day one and trimming can land without a schema change.
+An **epoch** is a span of a doc's history that shares one Loro root. A doc is born in epoch 0. The epoch advances only when a *trimmed* (Loro shallow) snapshot is accepted: that snapshot discards CRDT history before the trim point, so it is the first row of the new epoch and the only lossy step in the storage story. Today every snapshot is full-history or a lossless delta on one, so `epoch` stays at 0 everywhere; the columns are reserved so rows are stamped from day one and trimming can land without a schema change.
 
 Where it lives and what each copy is for:
 

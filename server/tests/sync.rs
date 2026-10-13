@@ -11,7 +11,7 @@ use monoplan_core::{Dek, derive_password_master, random_bytes};
 use monoplan_protocol::{
     ClientFrame, DeviceCredential, DeviceRegistration, EncryptedBlob, Hello, HelloAck,
     HelloRejected, KdfParams, PROTOCOL_VERSION, PushBlob, ServerFrame, SignupRequest,
-    SignupResponse, StoredBlob,
+    SignupResponse, SnapshotBase, StoredBlob,
 };
 use monoplan_server::sync::{SnapshotCoordinator, queries};
 use monoplan_server::{AppState, router};
@@ -151,6 +151,34 @@ async fn signup_account_with_snapshot_config(
     timeout: std::time::Duration,
 ) -> Account {
     signup_into(TestServer::start_with_snapshot_config(threshold_blobs, timeout).await).await
+}
+
+/// Seed a snapshot row directly (bypassing the WS handler). Panics on
+/// a chain mismatch — tests that exercise rejection call
+/// `queries::insert_snapshot` themselves.
+async fn seed_snapshot(
+    db: &monoplan_server::db::Db,
+    doc_id: Uuid,
+    up_to_seq: u64,
+    compaction_floor_seq: u64,
+    from_seq: Option<u64>,
+    seed: u8,
+) -> u64 {
+    match queries::insert_snapshot(
+        db,
+        doc_id,
+        up_to_seq,
+        compaction_floor_seq,
+        from_seq,
+        fake_blob(seed ^ 0xFF),
+        fake_blob(seed),
+    )
+    .await
+    .unwrap()
+    {
+        queries::InsertSnapshot::Inserted { id } => id,
+        other => panic!("seed snapshot rejected: {other:?}"),
+    }
 }
 
 async fn signup_into(server: TestServer) -> Account {
@@ -481,15 +509,7 @@ async fn pull_at_or_above_snapshot_floor_streams_ops_normally() {
     let acc = signup_account().await;
     // compaction_floor = up_to here means cursor=50 is *at* the floor,
     // not below — pull_ops should still stream normally without bootstrap.
-    queries::insert_snapshot(
-        &acc.server.state.db,
-        acc.primary_doc_id,
-        50,
-        50,
-        fake_blob(0xAA),
-    )
-    .await
-    .unwrap();
+    seed_snapshot(&acc.server.state.db, acc.primary_doc_id, 50, 50, None, 0xAA).await;
 
     let mut ws = connect_ws(&acc.server, &acc.device_token).await;
     handshake(&mut ws).await;
@@ -532,7 +552,7 @@ async fn push_path_triggers_snapshot_request_and_persists() {
 
     let pushes = fake_pushes(0..5);
     send_msgpack(&mut ws, &ClientFrame::PushOps { ops: pushes }).await;
-    let (up_to_seq, compaction_floor_seq) = expect_snapshot_request(&mut ws).await;
+    let (up_to_seq, compaction_floor_seq, _base) = expect_snapshot_request(&mut ws).await;
     assert_eq!(up_to_seq, 5);
     // Single device, just pushed-and-acked: horizon = 5 = up_to.
     assert_eq!(compaction_floor_seq, 5);
@@ -543,6 +563,8 @@ async fn push_path_triggers_snapshot_request_and_persists() {
         &ClientFrame::PushSnapshot {
             up_to_seq,
             compaction_floor_seq,
+            from_seq: None,
+            up_to_vv: fake_blob(0x11),
             blob: snapshot_blob.clone(),
         },
     )
@@ -579,7 +601,7 @@ async fn ack_path_triggers_snapshot_request() {
         },
     )
     .await;
-    let (up_to_seq, _compaction_floor_seq) = expect_snapshot_request(&mut ws).await;
+    let (up_to_seq, _compaction_floor_seq, _base) = expect_snapshot_request(&mut ws).await;
     assert_eq!(up_to_seq, last_id);
 }
 
@@ -596,7 +618,7 @@ async fn stale_snapshot_after_lease_expiry_rejected() {
     handshake(&mut ws_a).await;
     let pushes = fake_pushes(0..5);
     send_msgpack(&mut ws_a, &ClientFrame::PushOps { ops: pushes }).await;
-    let (up_to_seq, compaction_floor_seq) = expect_snapshot_request(&mut ws_a).await;
+    let (up_to_seq, compaction_floor_seq, _base) = expect_snapshot_request(&mut ws_a).await;
     assert_eq!(up_to_seq, 5);
     // B has never acked, so horizon == 0 — first snapshot has no
     // compaction floor, just bootstrap state.
@@ -627,7 +649,7 @@ async fn stale_snapshot_after_lease_expiry_rejected() {
         },
     )
     .await;
-    let (b_up_to, b_floor) = expect_snapshot_request(&mut ws_b).await;
+    let (b_up_to, b_floor, _base) = expect_snapshot_request(&mut ws_b).await;
     assert_eq!(b_up_to, up_to_seq);
     // Both devices now caught up → horizon advances to 5; B's lease's
     // compaction floor tracks horizon.
@@ -640,6 +662,8 @@ async fn stale_snapshot_after_lease_expiry_rejected() {
         &ClientFrame::PushSnapshot {
             up_to_seq,
             compaction_floor_seq,
+            from_seq: None,
+            up_to_vv: fake_blob(0x11),
             blob: fake_blob(0xAA),
         },
     )
@@ -655,11 +679,11 @@ async fn stale_snapshot_after_lease_expiry_rejected() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn compact_doc_deletes_ops_below_floor_and_prunes_old_snapshots() {
+async fn compact_doc_deletes_ops_below_floor_and_keeps_the_chain() {
     // Insert 10 ops + a snapshot pinning compaction_floor at 6 (so ids
     // 1..=6 are below the floor, 7..=10 are above). Run compaction:
-    // ops below should be gone, ops above intact. Then insert two more
-    // snapshots; with KEEP=2, only the newest two should survive.
+    // ops below should be gone, ops above intact, snapshot rows never
+    // touched.
     let acc = signup_account().await;
     let db = &acc.server.state.db;
     let pushes = fake_pushes(0..10);
@@ -669,24 +693,21 @@ async fn compact_doc_deletes_ops_below_floor_and_prunes_old_snapshots() {
     let ids: Vec<u64> = inserted.acks.iter().map(|a| a.seq).collect();
     assert_eq!(ids, (1..=10).collect::<Vec<_>>());
 
-    let snap1 = queries::insert_snapshot(db, acc.primary_doc_id, 10, 6, fake_blob(0xA1))
-        .await
-        .unwrap();
+    let snap1 = seed_snapshot(db, acc.primary_doc_id, 10, 6, None, 0xA1).await;
 
-    // Every snapshot today is full-history, so it is stamped with the
-    // doc's current epoch, which never leaves 0 until trimming lands.
+    // Every snapshot today is full-history or a lossless delta on one,
+    // so it is stamped with the doc's current epoch, which never
+    // leaves 0 until trimming lands.
     assert_eq!(queries::doc_epoch(db, acc.primary_doc_id).await.unwrap(), 0);
     let meta = queries::latest_snapshot_meta(db, acc.primary_doc_id)
         .await
         .unwrap()
         .expect("snapshot row");
     assert_eq!(meta.epoch, 0);
+    assert_eq!(meta.from_seq, None);
 
-    let stats = queries::compact_doc(db, acc.primary_doc_id, queries::KEEP_SNAPSHOTS)
-        .await
-        .unwrap();
+    let stats = queries::compact_doc(db, acc.primary_doc_id).await.unwrap();
     assert_eq!(stats.ops_deleted, 6);
-    assert_eq!(stats.snapshots_deleted, 0);
 
     // Surviving ops are exactly 7..=10.
     let batch = queries::fetch_ops_batch(db, acc.primary_doc_id, 0)
@@ -696,24 +717,24 @@ async fn compact_doc_deletes_ops_below_floor_and_prunes_old_snapshots() {
     assert_eq!(surviving_ids, vec![7, 8, 9, 10]);
 
     // Idempotent — second run finds no new floor movement.
-    let stats2 = queries::compact_doc(db, acc.primary_doc_id, queries::KEEP_SNAPSHOTS)
-        .await
-        .unwrap();
+    let stats2 = queries::compact_doc(db, acc.primary_doc_id).await.unwrap();
     assert_eq!(stats2.ops_deleted, 0);
-    assert_eq!(stats2.snapshots_deleted, 0);
 
-    // Pile on two more snapshots — KEEP=2 leaves only the latest pair.
-    let _snap2 = queries::insert_snapshot(db, acc.primary_doc_id, 10, 6, fake_blob(0xA2))
+    // A delta chained on snap1 joins the chain; compaction leaves
+    // both rows alone.
+    let snap2 = seed_snapshot(db, acc.primary_doc_id, 10, 6, Some(10), 0xA2).await;
+    assert!(snap1 < snap2);
+    let meta = queries::latest_snapshot_meta(db, acc.primary_doc_id)
         .await
-        .unwrap();
-    let snap3 = queries::insert_snapshot(db, acc.primary_doc_id, 10, 6, fake_blob(0xA3))
+        .unwrap()
+        .expect("snapshot row");
+    assert_eq!(meta.from_seq, Some(10));
+    queries::compact_doc(db, acc.primary_doc_id).await.unwrap();
+    let chain = queries::snapshot_chain(db, acc.primary_doc_id)
         .await
-        .unwrap();
-    let stats3 = queries::compact_doc(db, acc.primary_doc_id, queries::KEEP_SNAPSHOTS)
-        .await
-        .unwrap();
-    assert_eq!(stats3.snapshots_deleted, 1, "snap1 should be pruned");
-    assert!(snap1 < snap3);
+        .unwrap()
+        .expect("chain");
+    assert_eq!(chain.blobs, vec![fake_blob(0xA1), fake_blob(0xA2)]);
 
     // Bootstrap path still works: a fresh device pulling from 0 gets
     // SnapshotRequired (its cursor is below the compaction floor),
@@ -740,11 +761,8 @@ async fn compact_doc_with_no_snapshot_is_noop() {
     )
     .await
     .unwrap();
-    let stats = queries::compact_doc(db, acc.primary_doc_id, queries::KEEP_SNAPSHOTS)
-        .await
-        .unwrap();
+    let stats = queries::compact_doc(db, acc.primary_doc_id).await.unwrap();
     assert_eq!(stats.ops_deleted, 0);
-    assert_eq!(stats.snapshots_deleted, 0);
     // Ops untouched.
     let batch = queries::fetch_ops_batch(db, acc.primary_doc_id, 0)
         .await
@@ -764,7 +782,7 @@ async fn push_snapshot_opportunistically_compacts_ops_below_floor() {
 
     let pushes = fake_pushes(0..5);
     send_msgpack(&mut ws, &ClientFrame::PushOps { ops: pushes }).await;
-    let (up_to_seq, compaction_floor_seq) = expect_snapshot_request(&mut ws).await;
+    let (up_to_seq, compaction_floor_seq, _base) = expect_snapshot_request(&mut ws).await;
     assert_eq!(compaction_floor_seq, 5);
 
     send_msgpack(
@@ -772,6 +790,8 @@ async fn push_snapshot_opportunistically_compacts_ops_below_floor() {
         &ClientFrame::PushSnapshot {
             up_to_seq,
             compaction_floor_seq,
+            from_seq: None,
+            up_to_vv: fake_blob(0x11),
             blob: fake_blob(0xCC),
         },
     )
@@ -798,7 +818,197 @@ async fn push_snapshot_opportunistically_compacts_ops_below_floor() {
     }
 }
 
-async fn expect_snapshot_request(ws: &mut WsStream) -> (u64, u64) {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn delta_chain_requested_and_served_in_order() {
+    // threshold=2: the first snapshot is full, every later one is a
+    // delta whose request carries the previous row's sealed VV as the
+    // base. A bootstrapper gets the whole chain in order.
+    let acc = signup_account_with_snapshot_config(2, std::time::Duration::from_secs(60)).await;
+    let mut ws = connect_ws(&acc.server, &acc.device_token).await;
+    handshake(&mut ws).await;
+
+    // 1. Two ops → full snapshot requested (no base).
+    send_msgpack(
+        &mut ws,
+        &ClientFrame::PushOps {
+            ops: fake_pushes(0..2),
+        },
+    )
+    .await;
+    let (up_to, floor, base) = expect_snapshot_request(&mut ws).await;
+    assert_eq!(up_to, 2);
+    assert!(base.is_none(), "first snapshot must be full");
+    send_msgpack(
+        &mut ws,
+        &ClientFrame::PushSnapshot {
+            up_to_seq: up_to,
+            compaction_floor_seq: floor,
+            from_seq: None,
+            up_to_vv: fake_blob(0x01),
+            blob: fake_blob(0xA1),
+        },
+    )
+    .await;
+    wait_for_snapshot(&acc, 2).await;
+
+    // 2. Two more → delta requested from the full snapshot's VV.
+    send_msgpack(
+        &mut ws,
+        &ClientFrame::PushOps {
+            ops: fake_pushes(2..4),
+        },
+    )
+    .await;
+    let (up_to, floor, base) = expect_snapshot_request(&mut ws).await;
+    assert_eq!(up_to, 4);
+    assert_eq!(
+        base,
+        Some(SnapshotBase {
+            seq: 2,
+            vv: fake_blob(0x01)
+        })
+    );
+    send_msgpack(
+        &mut ws,
+        &ClientFrame::PushSnapshot {
+            up_to_seq: up_to,
+            compaction_floor_seq: floor,
+            from_seq: Some(2),
+            up_to_vv: fake_blob(0x02),
+            blob: fake_blob(0xA2),
+        },
+    )
+    .await;
+    let snap = wait_for_snapshot(&acc, 4).await;
+    assert_eq!(snap.from_seq, Some(2));
+    assert_eq!(snap.up_to_vv, fake_blob(0x02));
+
+    // A fresh device bootstraps from the chain, in order.
+    let fresh = register_second_device(&acc, "device-fresh").await;
+    let mut ws_f = connect_ws(&acc.server, &fresh.device_token).await;
+    handshake(&mut ws_f).await;
+    send_msgpack(&mut ws_f, &ClientFrame::PullSnapshot).await;
+    match recv_msgpack::<ServerFrame>(&mut ws_f).await {
+        ServerFrame::Snapshot { up_to_seq, blobs } => {
+            assert_eq!(up_to_seq, 4);
+            assert_eq!(blobs, vec![fake_blob(0xA1), fake_blob(0xA2)]);
+        }
+        other => panic!("expected Snapshot, got {other:?}"),
+    }
+
+    // 3. Two more → delta again, from the previous delta's VV; the
+    //    chain keeps growing and is served whole.
+    send_msgpack(
+        &mut ws,
+        &ClientFrame::PushOps {
+            ops: fake_pushes(4..6),
+        },
+    )
+    .await;
+    let (up_to, floor, base) = expect_snapshot_request(&mut ws).await;
+    assert_eq!(up_to, 6);
+    assert_eq!(
+        base,
+        Some(SnapshotBase {
+            seq: 4,
+            vv: fake_blob(0x02)
+        })
+    );
+    send_msgpack(
+        &mut ws,
+        &ClientFrame::PushSnapshot {
+            up_to_seq: up_to,
+            compaction_floor_seq: floor,
+            from_seq: Some(4),
+            up_to_vv: fake_blob(0x03),
+            blob: fake_blob(0xA3),
+        },
+    )
+    .await;
+    wait_for_snapshot(&acc, 6).await;
+
+    send_msgpack(&mut ws_f, &ClientFrame::PullSnapshot).await;
+    // A's pushes were broadcast to the fresh device's socket too;
+    // skip past them to the Snapshot reply.
+    let (up_to_seq, blobs) = loop {
+        match recv_msgpack::<ServerFrame>(&mut ws_f).await {
+            ServerFrame::Snapshot { up_to_seq, blobs } => break (up_to_seq, blobs),
+            ServerFrame::OpsBroadcast { .. } => continue,
+            other => panic!("expected Snapshot, got {other:?}"),
+        }
+    };
+    assert_eq!(up_to_seq, 6);
+    assert_eq!(
+        blobs,
+        vec![fake_blob(0xA1), fake_blob(0xA2), fake_blob(0xA3)]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn delta_that_does_not_chain_onto_latest_row_is_rejected() {
+    let acc = signup_account().await;
+    let db = &acc.server.state.db;
+    // Nothing to chain onto yet.
+    let r = queries::insert_snapshot(
+        db,
+        acc.primary_doc_id,
+        5,
+        0,
+        Some(0),
+        fake_blob(1),
+        fake_blob(2),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        r,
+        queries::InsertSnapshot::ChainMismatch {
+            latest_up_to_seq: None
+        }
+    ));
+
+    seed_snapshot(db, acc.primary_doc_id, 10, 0, None, 0xA1).await;
+    // Stale base: latest is at 10, delta claims to start after 5.
+    let r = queries::insert_snapshot(
+        db,
+        acc.primary_doc_id,
+        12,
+        0,
+        Some(5),
+        fake_blob(1),
+        fake_blob(2),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        r,
+        queries::InsertSnapshot::ChainMismatch {
+            latest_up_to_seq: Some(10)
+        }
+    ));
+    // Delta ending before its own base.
+    let r = queries::insert_snapshot(
+        db,
+        acc.primary_doc_id,
+        9,
+        0,
+        Some(10),
+        fake_blob(1),
+        fake_blob(2),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(r, queries::InsertSnapshot::ChainMismatch { .. }));
+    // Nothing landed; the chain is still just the full row.
+    let chain = queries::snapshot_chain(db, acc.primary_doc_id)
+        .await
+        .unwrap()
+        .expect("chain");
+    assert_eq!(chain.blobs, vec![fake_blob(0xA1)]);
+    assert_eq!(chain.up_to_seq, 10);
+}
+
+async fn expect_snapshot_request(ws: &mut WsStream) -> (u64, u64, Option<SnapshotBase>) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     loop {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
@@ -810,7 +1020,8 @@ async fn expect_snapshot_request(ws: &mut WsStream) -> (u64, u64) {
             ServerFrame::SnapshotRequest {
                 up_to_seq,
                 compaction_floor_seq,
-            } => return (up_to_seq, compaction_floor_seq),
+                base,
+            } => return (up_to_seq, compaction_floor_seq, base),
             ServerFrame::OpsAck { .. } | ServerFrame::OpsBroadcast { .. } => continue,
             other => panic!("unexpected frame while waiting for SnapshotRequest: {other:?}"),
         }
@@ -829,6 +1040,7 @@ async fn assert_no_snapshot_request(ws: &mut WsStream, window: std::time::Durati
             Ok(ServerFrame::SnapshotRequest {
                 up_to_seq,
                 compaction_floor_seq,
+                ..
             }) => {
                 panic!(
                     "unexpected SnapshotRequest up_to_seq={up_to_seq} compaction_floor_seq={compaction_floor_seq}"

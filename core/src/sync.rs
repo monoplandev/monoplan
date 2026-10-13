@@ -43,8 +43,8 @@ use std::collections::VecDeque;
 
 use loro::VersionVector;
 use monoplan_protocol::{
-    ClientFrame, Hello, HelloAck, HelloRejected, PROTOCOL_VERSION, PushBlob, ServerFrame,
-    StoredBlob,
+    ClientFrame, EncryptedBlob, Hello, HelloAck, HelloRejected, PROTOCOL_VERSION, PushBlob,
+    ServerFrame, StoredBlob,
 };
 use serde::Serialize;
 
@@ -185,6 +185,26 @@ pub struct SyncEngine {
 
 fn blob_len(blob: &monoplan_protocol::EncryptedBlob) -> u64 {
     (blob.ciphertext.len() + blob.nonce.len()) as u64
+}
+
+/// Seal an encoded Loro version vector under the DEK — the
+/// `PushSnapshot.up_to_vv` envelope. The server stores and returns it
+/// without reading it (`spec/sync-protocol.md` §"Snapshot orchestration").
+fn seal_vv(dek: &Dek, vv: &VersionVector) -> Result<EncryptedBlob, String> {
+    let (ciphertext, nonce) = dek.seal(&vv.encode()).map_err(|e| e.to_string())?;
+    Ok(EncryptedBlob {
+        nonce: nonce.to_vec(),
+        ciphertext,
+    })
+}
+
+/// Inverse of [`seal_vv`]: the `SnapshotRequest.base.vv` a producer
+/// starts its delta from.
+fn open_vv(dek: &Dek, blob: &EncryptedBlob) -> Result<VersionVector, String> {
+    let plaintext = dek
+        .open(&blob.ciphertext, &blob.nonce)
+        .map_err(|e| e.to_string())?;
+    VersionVector::decode(&plaintext).map_err(|e| e.to_string())
 }
 
 impl SyncEngine {
@@ -741,7 +761,7 @@ impl SyncEngine {
                     self.go_disconnected();
                 }
             }
-            ServerFrame::Snapshot { up_to_seq, blob } => {
+            ServerFrame::Snapshot { up_to_seq, blobs } => {
                 if !matches!(self.state, ConnState::Bootstrapping) {
                     self.events.push_back(Event::Error(format!(
                         "Snapshot received in unexpected state {:?}",
@@ -749,9 +769,16 @@ impl SyncEngine {
                     )));
                     return;
                 }
-                // Apply and learn the snapshot's exact declared frontier:
+                if blobs.is_empty() {
+                    self.events
+                        .push_back(Event::Error("Snapshot frame carried no blobs".into()));
+                    self.go_disconnected();
+                    return;
+                }
+                // Apply the chain (full snapshot, then each delta in
+                // order) and learn its exact declared frontier:
                 // everything it contains is proven server history.
-                let imported_vv = match self.doc.apply_remote(&self.dek, &blob) {
+                let imported_vv = match self.doc.apply_remote_batch(&self.dek, blobs.iter()) {
                     Ok(vv) => vv,
                     Err(e) => {
                         self.events
@@ -823,6 +850,7 @@ impl SyncEngine {
             ServerFrame::SnapshotRequest {
                 up_to_seq: _,
                 compaction_floor_seq,
+                base,
             } => {
                 // Server picked us as the snapshot producer. Produce at
                 // the frontiers of `server_known_vv` — exactly the
@@ -832,20 +860,60 @@ impl SyncEngine {
                 // local operations, and a bootstrapping device must not
                 // receive ops the server op stream doesn't have.
                 //
+                // With a `base` the server wants a *delta*: the updates
+                // strictly after the previous snapshot's VV (which the
+                // server stored sealed and hands back opaquely). The
+                // base must sit inside our server-known frontier; if it
+                // doesn't we decline rather than upload a blob that
+                // would break the chain, and the server's lease times
+                // out onto another producer.
+                //
                 // `compaction_floor_seq` is server-side bookkeeping for
                 // op-blob GC and is echoed back verbatim — it doesn't
                 // influence the produced blob.
-                let blob = match self.doc.snapshot_blob_at(&self.dek, &self.server_known_vv) {
+                let produced = match &base {
+                    None => self.doc.snapshot_blob_at(&self.dek, &self.server_known_vv),
+                    Some(b) => match open_vv(&self.dek, &b.vv) {
+                        Ok(from_vv) if self.server_known_vv.includes_vv(&from_vv) => self
+                            .doc
+                            .delta_blob_between(&self.dek, &from_vv, &self.server_known_vv),
+                        Ok(_) => {
+                            self.events.push_back(Event::Error(format!(
+                                "SnapshotRequest: delta base at seq {} is outside our \
+                                 server-known frontier; declining",
+                                b.seq
+                            )));
+                            return;
+                        }
+                        Err(e) => {
+                            self.events.push_back(Event::Error(format!(
+                                "SnapshotRequest: cannot open delta base: {e}"
+                            )));
+                            return;
+                        }
+                    },
+                };
+                let blob = match produced {
                     Ok(b) => b,
                     Err(e) => {
                         self.events
-                            .push_back(Event::Error(format!("snapshot_blob_at: {e}")));
+                            .push_back(Event::Error(format!("snapshot export: {e}")));
+                        return;
+                    }
+                };
+                let up_to_vv = match seal_vv(&self.dek, &self.server_known_vv) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        self.events
+                            .push_back(Event::Error(format!("seal up_to_vv: {e}")));
                         return;
                     }
                 };
                 let frame = ClientFrame::PushSnapshot {
                     up_to_seq: self.last_contiguous_seq,
                     compaction_floor_seq,
+                    from_seq: base.as_ref().map(|b| b.seq),
+                    up_to_vv,
                     blob,
                 };
                 if let Err(e) = self.encode_into_outbox(&frame) {
@@ -1058,7 +1126,7 @@ mod tests {
     use super::*;
     use crate::doc::{Doc, LIST_INBOX};
     use crate::storage::MemStorage;
-    use monoplan_protocol::{EncryptedBlob, PushAck, ServerFrame, StoredBlob};
+    use monoplan_protocol::{EncryptedBlob, PushAck, ServerFrame, SnapshotBase, StoredBlob};
 
     fn opts() -> EngineOptions {
         EngineOptions {
@@ -2016,18 +2084,26 @@ mod tests {
         eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequest {
             up_to_seq: 1,
             compaction_floor_seq: 0,
+            base: None,
         }));
         let push: ClientFrame = dec(&eng.pop_outbox().expect("PushSnapshot"));
-        let (tagged_up_to, tagged_floor, blob) = match push {
+        let (tagged_up_to, tagged_floor, from_seq, up_to_vv, blob) = match push {
             ClientFrame::PushSnapshot {
                 up_to_seq,
                 compaction_floor_seq,
+                from_seq,
+                up_to_vv,
                 blob,
-            } => (up_to_seq, compaction_floor_seq, blob),
+            } => (up_to_seq, compaction_floor_seq, from_seq, up_to_vv, blob),
             other => panic!("expected PushSnapshot, got {other:?}"),
         };
         assert_eq!(tagged_up_to, 1);
         assert_eq!(tagged_floor, 0);
+        assert_eq!(from_seq, None);
+        // The sealed VV is the server-known frontier, not the doc's.
+        let vv = open_vv(&dek, &up_to_vv).unwrap();
+        assert_eq!(vv, eng.server_known_vv);
+        assert!(!vv.includes_vv(&VersionVector::decode(&eng.doc().oplog_vv_bytes()).unwrap()));
 
         // The snapshot contains the synced peer item but NOT the
         // unsent local op.
@@ -2048,16 +2124,130 @@ mod tests {
     }
 
     #[test]
+    fn delta_snapshot_request_exports_only_ops_after_base() {
+        // Two synced peer ops (seq 1, 2). The server holds the VV at
+        // seq 1 from an earlier full snapshot and asks for a delta
+        // from it. The delta must carry seq 2's ops, nothing from seq
+        // 1, and nothing unsent.
+        let mut eng = fresh_engine_clean();
+        let dek = eng.dek.clone();
+        drive_to_idle(&mut eng);
+        let _ = drain_events(&mut eng);
+        let _ = drain_outbox(&mut eng);
+
+        let first = make_remote_blob(&dek, |d| {
+            d.add_item(LIST_INBOX, "first").unwrap();
+        });
+        eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+            ops: vec![StoredBlob {
+                seq: 1,
+                blob: first,
+            }],
+        }));
+        let base_vv = eng.server_known_vv.clone();
+        let full_at_base = eng.doc().snapshot_blob_at(&dek, &base_vv).unwrap();
+
+        let second = make_remote_blob(&dek, |d| {
+            d.add_item(LIST_INBOX, "second").unwrap();
+        });
+        eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+            ops: vec![StoredBlob {
+                seq: 2,
+                blob: second,
+            }],
+        }));
+        let _ = drain_outbox(&mut eng);
+        let unsent_id = eng.doc_mut().add_item(LIST_INBOX, "unsent-local").unwrap();
+
+        eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequest {
+            up_to_seq: 2,
+            compaction_floor_seq: 0,
+            base: Some(SnapshotBase {
+                seq: 1,
+                vv: seal_vv(&dek, &base_vv).unwrap(),
+            }),
+        }));
+        let push: ClientFrame = dec(&eng.pop_outbox().expect("PushSnapshot"));
+        let (up_to, from_seq, up_to_vv, delta) = match push {
+            ClientFrame::PushSnapshot {
+                up_to_seq,
+                from_seq,
+                up_to_vv,
+                blob,
+                ..
+            } => (up_to_seq, from_seq, up_to_vv, blob),
+            other => panic!("expected PushSnapshot, got {other:?}"),
+        };
+        assert_eq!(up_to, 2);
+        assert_eq!(from_seq, Some(1));
+        assert_eq!(open_vv(&dek, &up_to_vv).unwrap(), eng.server_known_vv);
+
+        // The delta alone is strictly the (base, frontier] range: it
+        // declares nothing the base already covered.
+        let plaintext = dek.open(&delta.ciphertext, &delta.nonce).unwrap();
+        let meta = loro::LoroDoc::decode_import_blob_meta(&plaintext, false).unwrap();
+        assert!(base_vv.includes_vv(&meta.partial_start_vv));
+        assert!(eng.server_known_vv.includes_vv(&meta.partial_end_vv));
+        assert!(!base_vv.includes_vv(&meta.partial_end_vv));
+
+        // Chain = full-at-base + delta reproduces the server frontier.
+        let mut peer = Doc::empty();
+        peer.apply_remote_batch(&dek, [&full_at_base, &delta])
+            .unwrap();
+        let texts: Vec<String> = peer
+            .items_in_list(LIST_INBOX, false)
+            .into_iter()
+            .map(|i| i.text)
+            .collect();
+        assert!(texts.contains(&"first".to_string()));
+        assert!(texts.contains(&"second".to_string()));
+        assert!(
+            peer.get_item(&unsent_id).is_none(),
+            "unsent op leaked into the delta"
+        );
+    }
+
+    #[test]
+    fn delta_request_with_base_outside_frontier_is_declined() {
+        // A base VV we don't hold (another doc's history) must not
+        // produce a blob — that would fork the server's chain.
+        let mut eng = fresh_engine_clean();
+        let dek = eng.dek.clone();
+        drive_to_idle(&mut eng);
+        let _ = drain_events(&mut eng);
+        let _ = drain_outbox(&mut eng);
+
+        let foreign = Doc::new().unwrap();
+        foreign.add_item(LIST_INBOX, "foreign").unwrap();
+        let foreign_vv = VersionVector::decode(&foreign.oplog_vv_bytes()).unwrap();
+        assert!(!foreign_vv.is_empty());
+        eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequest {
+            up_to_seq: 0,
+            compaction_floor_seq: 0,
+            base: Some(SnapshotBase {
+                seq: 7,
+                vv: seal_vv(&dek, &foreign_vv).unwrap(),
+            }),
+        }));
+        assert!(
+            eng.pop_outbox().is_none(),
+            "no PushSnapshot for a foreign base"
+        );
+        let evs = drain_events(&mut eng);
+        assert!(matches!(evs.as_slice(), [Event::Error(s)] if s.contains("declining")));
+    }
+
+    #[test]
     fn unsolicited_snapshot_in_idle_is_an_error() {
         let mut eng = fresh_engine_clean();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
         eng.handle_server_bytes(&enc(&ServerFrame::Snapshot {
             up_to_seq: 99,
-            blob: EncryptedBlob {
+            blobs: vec![EncryptedBlob {
                 nonce: vec![0; 24],
                 ciphertext: vec![],
-            },
+            }],
         }));
         let evs = drain_events(&mut eng);
         assert!(matches!(evs.as_slice(), [Event::Error(s)] if s.contains("Snapshot")));
@@ -2098,7 +2288,7 @@ mod tests {
         });
         eng.handle_server_bytes(&enc(&ServerFrame::Snapshot {
             up_to_seq: 42,
-            blob: snapshot_blob.clone(),
+            blobs: vec![snapshot_blob.clone()],
         }));
 
         // The local checkpoint (a re-export of the merged doc) is
@@ -2194,7 +2384,7 @@ mod tests {
         });
         eng.handle_server_bytes(&enc(&ServerFrame::Snapshot {
             up_to_seq: 42,
-            blob: snapshot_blob,
+            blobs: vec![snapshot_blob],
         }));
 
         // The WAL is fully pruned, but the checkpoint contains the
@@ -2348,25 +2538,76 @@ mod tests {
         let _ = drain_outbox(&mut a);
         assert_eq!(a.last_contiguous_seq(), next_seq);
 
-        // -- Server requests a snapshot from A --
+        // -- Server requests a full snapshot from A --
         a.handle_server_bytes(&enc(&ServerFrame::SnapshotRequest {
             up_to_seq: next_seq,
             compaction_floor_seq: next_seq,
+            base: None,
         }));
         let push: ClientFrame = dec(&a.pop_outbox().expect("PushSnapshot"));
-        let (snapshot_up_to, snapshot_floor, snapshot_blob) = match push {
+        let (full_up_to, snapshot_floor, full_from, full_vv, full_blob) = match push {
             ClientFrame::PushSnapshot {
                 up_to_seq,
                 compaction_floor_seq,
+                from_seq,
+                up_to_vv,
                 blob,
-            } => (up_to_seq, compaction_floor_seq, blob),
+            } => (up_to_seq, compaction_floor_seq, from_seq, up_to_vv, blob),
+            other => panic!("expected PushSnapshot, got {other:?}"),
+        };
+        assert_eq!(full_up_to, next_seq);
+        assert_eq!(snapshot_floor, next_seq);
+        assert_eq!(full_from, None);
+
+        // -- A mutates again; the server then asks for a *delta* from
+        //    the full snapshot's stored VV. --
+        let mid_id = a.doc_mut().add_item(LIST_INBOX, "in-delta").unwrap();
+        a.flush();
+        while let Some(bytes) = a.pop_outbox() {
+            if let Ok(ClientFrame::PushOps { ops }) = rmp_serde::from_slice::<ClientFrame>(&bytes) {
+                let mut acks = Vec::new();
+                for op in ops {
+                    next_seq += 1;
+                    ops_log.push(StoredBlob {
+                        seq: next_seq,
+                        blob: op.blob,
+                    });
+                    acks.push(PushAck {
+                        push_id: op.push_id,
+                        seq: next_seq,
+                    });
+                }
+                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { acks }));
+            }
+        }
+        let _ = drain_outbox(&mut a);
+        assert!(
+            next_seq > full_up_to,
+            "expected an op after the full snapshot"
+        );
+        a.handle_server_bytes(&enc(&ServerFrame::SnapshotRequest {
+            up_to_seq: next_seq,
+            compaction_floor_seq: snapshot_floor,
+            base: Some(SnapshotBase {
+                seq: full_up_to,
+                vv: full_vv,
+            }),
+        }));
+        let push: ClientFrame = dec(&a.pop_outbox().expect("PushSnapshot"));
+        let (snapshot_up_to, delta_from, delta_blob) = match push {
+            ClientFrame::PushSnapshot {
+                up_to_seq,
+                from_seq,
+                blob,
+                ..
+            } => (up_to_seq, from_seq, blob),
             other => panic!("expected PushSnapshot, got {other:?}"),
         };
         assert_eq!(snapshot_up_to, next_seq);
-        assert_eq!(snapshot_floor, next_seq);
+        assert_eq!(delta_from, Some(full_up_to));
 
-        // -- A keeps mutating after the snapshot was taken, so B's
-        //    bootstrap exercises both the snapshot apply *and* the
+        // -- A keeps mutating after the delta was taken, so B's
+        //    bootstrap exercises the chain apply *and* the
         //    post-snapshot catch-up via OpsBatch. --
         let post_snap_id = a.doc_mut().add_item(LIST_INBOX, "post-snap").unwrap();
         a.flush();
@@ -2417,7 +2658,7 @@ mod tests {
 
         b.handle_server_bytes(&enc(&ServerFrame::Snapshot {
             up_to_seq: snapshot_up_to,
-            blob: snapshot_blob,
+            blobs: vec![full_blob, delta_blob],
         }));
 
         // B should re-issue PullOps from the snapshot's up_to.
@@ -2441,6 +2682,7 @@ mod tests {
             b.doc().get_item(&item_id).is_some(),
             "snapshot item missing"
         );
+        assert!(b.doc().get_item(&mid_id).is_some(), "delta item missing");
         assert!(
             b.doc().get_item(&post_snap_id).is_some(),
             "post-snapshot item missing",

@@ -28,7 +28,7 @@ use crate::auth::tokens::{decode_token, sha256};
 use crate::error::ApiError;
 use crate::http::request_id::RequestId;
 use crate::state::AppState;
-use crate::sync::snapshot::{Decision, ReleaseResult};
+use crate::sync::snapshot::{Decision, PrevSnapshot, ReleaseResult};
 
 use super::queries;
 
@@ -242,8 +242,21 @@ async fn handle_frame(
         ClientFrame::PushSnapshot {
             up_to_seq,
             compaction_floor_seq,
+            from_seq,
+            up_to_vv,
             blob,
-        } => push_snapshot(state, ws_session, up_to_seq, compaction_floor_seq, blob).await,
+        } => {
+            push_snapshot(
+                state,
+                ws_session,
+                up_to_seq,
+                compaction_floor_seq,
+                from_seq,
+                up_to_vv,
+                blob,
+            )
+            .await
+        }
     }
 }
 
@@ -260,10 +273,13 @@ async fn evaluate_snapshot_decision(
 ) -> Result<Decision, SessionError> {
     let account_id = ws_session.auth.account_id;
     let doc_id = ws_session.auth.primary_doc_id;
-    let (prev_snap_up_to, prev_compaction_floor) = queries::latest_snapshot_meta(&state.db, doc_id)
+    let prev = queries::latest_snapshot_meta(&state.db, doc_id)
         .await?
-        .map(|m| (m.up_to_seq, m.compaction_floor_seq))
-        .unwrap_or((0, 0));
+        .map(|m| PrevSnapshot {
+            up_to_seq: m.up_to_seq,
+            compaction_floor_seq: m.compaction_floor_seq,
+            up_to_vv: m.up_to_vv,
+        });
     let server_last_seq = queries::latest_doc_seq(&state.db, doc_id).await?;
     // Horizon stays account-scoped: devices are still per-account, and while
     // each account has exactly one doc the per-account horizon equals the
@@ -277,8 +293,7 @@ async fn evaluate_snapshot_decision(
     .await?;
     Ok(state.snapshot_coordinator.evaluate(
         doc_id,
-        prev_snap_up_to,
-        prev_compaction_floor,
+        prev.as_ref(),
         server_last_seq,
         horizon,
         device_last_acked_seq,
@@ -295,14 +310,17 @@ async fn issue_snapshot_request(
         lease_id,
         up_to_seq,
         compaction_floor_seq,
+        base,
     } = decision
     {
         ws_session.snapshot_lease = Some(lease_id);
+        let from_seq = base.as_ref().map(|b| b.seq);
         send_msgpack(
             socket,
             &ServerFrame::SnapshotRequest {
                 up_to_seq,
                 compaction_floor_seq,
+                base,
             },
         )
         .await?;
@@ -310,6 +328,7 @@ async fn issue_snapshot_request(
             lease_id,
             up_to_seq,
             compaction_floor_seq,
+            from_seq,
             "ws snapshot requested"
         );
     }
@@ -485,12 +504,15 @@ async fn push_snapshot(
     ws_session: &mut WSSession,
     up_to_seq: u64,
     compaction_floor_seq: u64,
+    from_seq: Option<u64>,
+    up_to_vv: EncryptedBlob,
     blob: EncryptedBlob,
 ) -> Result<(), SessionError> {
     let span = tracing::info_span!(
         "ws.push_snapshot",
         up_to_seq = up_to_seq,
         compaction_floor_seq = compaction_floor_seq,
+        from_seq = from_seq,
         blob_bytes = blob.ciphertext.len(),
     );
     async {
@@ -505,11 +527,33 @@ async fn push_snapshot(
             return Ok(());
         }
         ws_session.snapshot_lease = None;
-        // TODO: While this is inserting, an entire other snapshot could feasibly go through..
-        let row_id =
-            queries::insert_snapshot(&state.db, doc_id, up_to_seq, compaction_floor_seq, blob)
-                .await?;
-        tracing::info!(snapshot_row_id = row_id, "ws push_snapshot persisted");
+        // One lease per doc means at most one producer reaches this
+        // insert at a time; the chain check inside `insert_snapshot`
+        // is the backstop for a delta that no longer links to the
+        // latest row (it is rejected, nothing is written, and the
+        // next trigger re-evaluates from the stored state).
+        match queries::insert_snapshot(
+            &state.db,
+            doc_id,
+            up_to_seq,
+            compaction_floor_seq,
+            from_seq,
+            up_to_vv,
+            blob,
+        )
+        .await?
+        {
+            queries::InsertSnapshot::Inserted { id } => {
+                tracing::info!(snapshot_row_id = id, "ws push_snapshot persisted");
+            }
+            queries::InsertSnapshot::ChainMismatch { latest_up_to_seq } => {
+                tracing::warn!(
+                    latest_up_to_seq,
+                    "ignoring delta snapshot that does not chain onto the latest row"
+                );
+                return Ok(());
+            }
+        }
 
         // Opportunistic compaction: a snapshot just landed, so the
         // floor moved (or stayed put, in which case the delete is a
@@ -523,12 +567,10 @@ async fn push_snapshot(
         );
         tokio::spawn(
             async move {
-                match queries::compact_doc(&db, doc_id, queries::KEEP_SNAPSHOTS).await {
-                    Ok(stats) => tracing::info!(
-                        ops_deleted = stats.ops_deleted,
-                        snapshots_deleted = stats.snapshots_deleted,
-                        "compaction completed"
-                    ),
+                match queries::compact_doc(&db, doc_id).await {
+                    Ok(stats) => {
+                        tracing::info!(ops_deleted = stats.ops_deleted, "compaction completed")
+                    }
                     Err(e) => tracing::warn!(error = %e, "compaction failed"),
                 }
             }
@@ -551,14 +593,18 @@ async fn pull_snapshot(
 ) -> Result<(), SessionError> {
     let span = tracing::info_span!("ws.pull_snapshot");
     async {
-        match queries::latest_snapshot(&state.db, auth.primary_doc_id).await? {
-            Some(snap) => {
-                tracing::info!(up_to_seq = snap.up_to_seq, "ws pull_snapshot served");
+        match queries::snapshot_chain(&state.db, auth.primary_doc_id).await? {
+            Some(chain) => {
+                tracing::info!(
+                    up_to_seq = chain.up_to_seq,
+                    blob_count = chain.blobs.len(),
+                    "ws pull_snapshot served"
+                );
                 send_msgpack(
                     socket,
                     &ServerFrame::Snapshot {
-                        up_to_seq: snap.up_to_seq,
-                        blob: snap.blob,
+                        up_to_seq: chain.up_to_seq,
+                        blobs: chain.blobs,
                     },
                 )
                 .await
