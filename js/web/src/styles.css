@@ -993,9 +993,9 @@ body {
      it to the top as the height animates. */
   align-items: flex-start;
   gap: 8px;
-  /* Standard density: 8px vertical padding + hairline divider. Compact
-     drops both. Row height is fixed by the virtualizer (density.ts
-     rowHeight), so these paddings must stay in step with it. */
+  /* 8px vertical padding + hairline divider. Row height is fixed by the
+     virtualizer (Workspace.tsx rowHeight), so this padding must stay in
+     step with it. */
   padding: 8px 6px;
   border-bottom: 0.5px solid var(--row-divider);
   height: 100%;
@@ -1011,11 +1011,6 @@ body {
    border, so its last card keeps its bottom edge. */
 .dnd-item[data-last] .row:not(.row-card) {
   border-bottom-color: transparent;
-}
-
-[data-density="compact"] .row {
-  padding: 6px;
-  border-bottom: 0;
 }
 
 .dnd-host[data-expanded] .row:not([data-expanded]) {

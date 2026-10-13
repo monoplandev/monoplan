@@ -15,7 +15,6 @@ import dotsVerticalSvg from "./icons/dots-vertical.svg?raw";
 import type { Session } from "./Login.tsx";
 import { useAppI18n } from "./i18n.tsx";
 import { closeToItems, trackOverlay } from "./overlay.ts";
-import { densityPref, setDensityPref, type ListDensity } from "./density.ts";
 import type { ThemePreference } from "./theme.ts";
 import {
   setTimeFormatPref,
@@ -269,33 +268,6 @@ export function Settings(props: {
                         aria-label={m().settings.dark}
                       >
                         <MoonIcon />
-                      </SegmentedControl.ItemControl>
-                    </SegmentedControl.Item>
-                  </SegmentedControl>
-                </div>
-                <div class="settings-row">
-                  <div class="settings-row-label">{m().settings.density}</div>
-                  <SegmentedControl
-                    class="theme-segmented"
-                    aria-label={m().settings.density}
-                    value={densityPref()}
-                    onChange={(value) => setDensityPref(value as ListDensity)}
-                  >
-                    <SegmentedControl.Indicator class="theme-segment-indicator" />
-                    <SegmentedControl.Item value="standard" class="theme-segment">
-                      <SegmentedControl.ItemInput />
-                      <SegmentedControl.ItemControl class="theme-segment-control">
-                        <SegmentedControl.ItemLabel>
-                          {m().settings.densityStandard}
-                        </SegmentedControl.ItemLabel>
-                      </SegmentedControl.ItemControl>
-                    </SegmentedControl.Item>
-                    <SegmentedControl.Item value="compact" class="theme-segment">
-                      <SegmentedControl.ItemInput />
-                      <SegmentedControl.ItemControl class="theme-segment-control">
-                        <SegmentedControl.ItemLabel>
-                          {m().settings.densityCompact}
-                        </SegmentedControl.ItemLabel>
                       </SegmentedControl.ItemControl>
                     </SegmentedControl.Item>
                   </SegmentedControl>

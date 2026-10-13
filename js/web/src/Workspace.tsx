@@ -85,7 +85,6 @@ import {
   type RecentDoneEntry,
   type WorkflowState,
 } from "./sync/store.ts";
-import { rowHeight } from "./density.ts";
 import { createTheme, type ThemePreference } from "./theme.ts";
 import { parseHash, stateHash, type Route } from "./url.ts";
 import {
@@ -102,6 +101,13 @@ import {
 // The state change is instant — this is purely a render-time tail
 // derived from doneAt, not a separate "pending" set.
 const DONE_LINGER_MS = 3_000;
+
+/** Fixed list-row height for the virtualizer. Must agree with the
+ *  `.row` padding in styles.css: 8px + 1.3em line + 8px. Touch
+ *  viewports add 12px for a comfortable thumb target. */
+function rowHeight(mobile: boolean): number {
+  return mobile ? 44 : 32;
+}
 
 // Module-level so the OS-preference listener is registered exactly
 // once for the lifetime of the page.
@@ -556,10 +562,9 @@ export function Workspace(props: {
   const [expandedKey, setExpandedKey] = createSignal<string | null>(null);
 
   // Touch viewports get taller rows so each item's a comfortable tap
-  // target (the desktop height is too tight for a thumb). Row height
-  // also follows the density preference (see density.ts). Dnd's cfg()
-  // reads itemHeight reactively via setConfig, so flipping either
-  // signal live-updates the controller.
+  // target (the desktop height is too tight for a thumb). Dnd's cfg()
+  // reads itemHeight reactively via setConfig, so flipping the signal
+  // live-updates the controller.
   const itemsMobileMq = window.matchMedia("(max-width: 768px) and (pointer: coarse)");
   const [itemsIsMobile, setItemsIsMobile] = createSignal(itemsMobileMq.matches);
   const onItemsMqChange = (e: MediaQueryListEvent) => setItemsIsMobile(e.matches);

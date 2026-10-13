@@ -385,10 +385,6 @@ export type Messages = {
     auto: string;
     light: string;
     dark: string;
-    /** List row density: taller rows with dividers vs tight rows. */
-    density: string;
-    densityStandard: string;
-    densityCompact: string;
     showListCounts: string;
     /** 12 / 24-hour clock preference; "Auto" reuses `auto`. */
     timeFormat: string;
@@ -657,9 +653,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       auto: "Auto",
       light: "Claro",
       dark: "Oscuro",
-      density: "Densidad",
-      densityStandard: "Estándar",
-      densityCompact: "Compacta",
       showListCounts: "Mostrar contadores de listas",
       timeFormat: "Formato de hora",
       timeFormat12: "12 h",
@@ -926,9 +919,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       auto: "Auto",
       light: "Light",
       dark: "Dark",
-      density: "Density",
-      densityStandard: "Standard",
-      densityCompact: "Compact",
       showListCounts: "Show list counts",
       timeFormat: "Time format",
       timeFormat12: "12h",
