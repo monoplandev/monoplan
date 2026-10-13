@@ -2,7 +2,7 @@
 //! harness; a quick "what does N items look like" probe. Run via
 //! `bun run perf [scenario] [items] [paras-per-item]` from the workspace
 //! root (release build). Scenarios: `all` (default), `scale`, `commit`,
-//! `import`.
+//! `import`, `chain`.
 //!
 //! - `scale`: 10k items (default) with two paragraphs of notes each, in three
 //!   shapes: today's string register through the monoplan `Doc`, the v4
@@ -12,14 +12,22 @@
 //! - `commit`: per-call cost of `add_item` vs `apply_notes_delta` vs the
 //!   bulk `add_items_at`, to separate commit cost from index cost.
 //! - `import`: `import_json` of a synthetic v3 export of the same size.
+//! - `chain`: materialisation cost of one full snapshot vs a full head
+//!   plus coalesced update deltas (one per `every` ops), vs today's
+//!   per-op WAL rows. `bun run perf chain [ops] [every]` (defaults
+//!   10_000 / 500). Not part of `all`: its arguments mean something else.
 
-use loro::{Container, ExportMode, LoroDoc, LoroMap, LoroValue, UpdateOptions, ValueOrContainer};
+use loro::{
+    Container, ExportMode, LoroDoc, LoroMap, LoroValue, UpdateOptions, ValueOrContainer,
+    VersionVector,
+};
 use monoplan_core::doc::Doc;
 use monoplan_core::{
     Dek, ExportItem, ExportLifecycle, ExportList, ExportSettings, JsonExport, LIST_INBOX,
     NotesDeltaOp,
 };
-use std::time::Instant;
+use monoplan_protocol::EncryptedBlob;
+use std::time::{Duration, Instant};
 
 const WORDS: &[&str] = &[
     "the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog", "milk", "coles", "call",
@@ -64,6 +72,12 @@ fn mib(n: usize) -> String {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let scenario = args.first().map(String::as_str).unwrap_or("all");
+    if scenario == "chain" {
+        let ops = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(10_000);
+        let every = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(500);
+        chain(ops, every);
+        return;
+    }
     let cfg = Cfg {
         items: args.get(1).and_then(|s| s.parse().ok()).unwrap_or(10_000),
         paras: args.get(2).and_then(|s| s.parse().ok()).unwrap_or(2),
@@ -85,7 +99,7 @@ fn main() {
             import(&cfg);
         }
         other => {
-            eprintln!("unknown scenario {other:?}; use all | scale | commit | import");
+            eprintln!("unknown scenario {other:?}; use all | scale | commit | import | chain");
             std::process::exit(2);
         }
     }
@@ -349,4 +363,159 @@ fn import(cfg: &Cfg) {
     let t = Instant::now();
     let bytes = doc.save().unwrap();
     println!("  save {:?}, envelope {}", t.elapsed(), mib(bytes.len()));
+}
+
+// ---------- chain ----------
+
+/// How long does a fresh `Doc` take to materialise the same final state
+/// from each storage shape? Mirrors `boot_doc`: decrypt + one
+/// `apply_remote_batch` over the blobs in order, events discarded.
+///
+/// Shapes, all landing on the same oplog VV:
+/// - `full`: one `ExportMode::Snapshot` of the whole doc (state + oplog).
+/// - `head + k deltas`: a full snapshot at the checkpoint `k` intervals
+///   back, then one coalesced `updates_in_range` blob per interval. The
+///   server chain shape, and the proposed local "coalesced WAL fold".
+/// - `head + rows`: a full snapshot at the checkpoint, then one blob per
+///   op. Today's local WAL shape when the fold threshold hasn't fired.
+///
+/// Also prints the producer-side cost (full export vs one delta export)
+/// so the write/read trade-off is on one screen.
+fn chain(ops: usize, every: usize) {
+    let every = every.max(1);
+    let dek = Dek::generate();
+    let mut doc = Doc::new().unwrap();
+
+    // Checkpoint VVs: `vvs[0]` is the seeded doc (lists, settings),
+    // `vvs[j]` is after `j * every` ops. Per-op WAL rows captured as
+    // the host would: `pending_export` after every commit.
+    let mut vvs: Vec<VersionVector> = vec![doc.oplog_vv()];
+    let mut rows: Vec<EncryptedBlob> = Vec::with_capacity(ops);
+    let mut ids: Vec<String> = Vec::new();
+    let mut x: usize = 0x9e3779b9;
+    let mut next = || {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        x
+    };
+    let t = Instant::now();
+    for i in 0..ops {
+        // Mix: half adds, a third edits, the rest done-toggles — one
+        // commit each, like interactive use.
+        let r = next() % 10;
+        if ids.is_empty() || r < 5 {
+            ids.push(doc.add_item(LIST_INBOX, &format!("item {i}")).unwrap());
+        } else if r < 8 {
+            let id = &ids[next() % ids.len()];
+            doc.edit_item_text(id, &format!("item {i} edited")).unwrap();
+        } else {
+            let id = &ids[next() % ids.len()];
+            doc.set_item_done(id, next() % 2 == 0).unwrap();
+        }
+        if let Some(b) = doc.pending_export(&dek).unwrap() {
+            rows.push(b);
+        }
+        doc.mark_persisted();
+        if (i + 1) % every == 0 {
+            vvs.push(doc.oplog_vv());
+        }
+    }
+    if vvs.last() != Some(&doc.oplog_vv()) {
+        vvs.push(doc.oplog_vv());
+    }
+    let _ = doc.drain_events();
+    let final_vv = doc.oplog_vv();
+    let n_items = doc.all_items().len();
+    let row_bytes: usize = rows.iter().map(blob_len).sum();
+    println!(
+        "[chain] {ops} ops ({n_items} items), delta every {every} ops, {} checkpoints, build {:?}",
+        vvs.len() - 1,
+        t.elapsed()
+    );
+    println!(
+        "  per-op WAL rows: {} blobs, {} ({} B/blob avg)",
+        rows.len(),
+        mib(row_bytes),
+        row_bytes / rows.len().max(1)
+    );
+
+    // Producer side.
+    let t = Instant::now();
+    let full = doc.snapshot_blob(&dek).unwrap();
+    let full_export = t.elapsed();
+    let last = vvs.len() - 1;
+    let t = Instant::now();
+    let one_delta = doc
+        .delta_blob_between(&dek, &vvs[last - 1], &vvs[last])
+        .unwrap();
+    let delta_export = t.elapsed();
+    println!(
+        "\n  produce: full snapshot {} in {full_export:?}; one {every}-op delta {} in {delta_export:?}",
+        mib(blob_len(&full)),
+        mib(blob_len(&one_delta))
+    );
+
+    // Consumer side.
+    let materialise = |label: &str, blobs: &[EncryptedBlob]| {
+        let bytes: usize = blobs.iter().map(blob_len).sum();
+        let mut best = Duration::MAX;
+        for _ in 0..3 {
+            let mut d = Doc::empty();
+            let t = Instant::now();
+            d.apply_remote_batch(&dek, blobs.iter()).unwrap();
+            let _ = d.drain_events();
+            let elapsed = t.elapsed();
+            assert_eq!(d.oplog_vv(), final_vv, "{label}: chain is not lossless");
+            assert_eq!(d.all_items().len(), n_items, "{label}: item count differs");
+            best = best.min(elapsed);
+        }
+        println!(
+            "  {label:<30} {:>5} blobs {:>10}  materialise {best:?}",
+            blobs.len(),
+            mib(bytes)
+        );
+    };
+
+    println!("\n  materialise (min of 3, decrypt + apply_remote_batch into Doc::empty):");
+    materialise("full", std::slice::from_ref(&full));
+
+    let mut ks: Vec<usize> = [1usize, 2, 5, 10, 20, 50, 100]
+        .into_iter()
+        .filter(|&k| k < last)
+        .collect();
+    ks.push(last);
+    for k in ks {
+        let head_at = last - k;
+        let mut blobs = vec![doc.snapshot_blob_at(&dek, &vvs[head_at]).unwrap()];
+        for j in head_at..last {
+            blobs.push(doc.delta_blob_between(&dek, &vvs[j], &vvs[j + 1]).unwrap());
+        }
+        let label = if k == last {
+            format!("seed head + {k} deltas (all)")
+        } else {
+            format!("head + {k} deltas")
+        };
+        materialise(&label, &blobs);
+    }
+
+    // Today's shape: head + one row per op since. One interval's worth,
+    // and everything.
+    let since = rows.len().saturating_sub(every);
+    let head_rows = {
+        let mut b = vec![doc.snapshot_blob_at(&dek, &vvs[last - 1]).unwrap()];
+        b.extend(rows[since..].iter().cloned());
+        b
+    };
+    materialise(&format!("head + {} rows", rows.len() - since), &head_rows);
+    let all_rows = {
+        let mut b = vec![doc.snapshot_blob_at(&dek, &vvs[0]).unwrap()];
+        b.extend(rows.iter().cloned());
+        b
+    };
+    materialise(&format!("seed head + {} rows (all)", rows.len()), &all_rows);
+}
+
+fn blob_len(b: &EncryptedBlob) -> usize {
+    b.ciphertext.len() + b.nonce.len()
 }
