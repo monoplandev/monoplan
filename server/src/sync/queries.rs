@@ -75,20 +75,23 @@ pub async fn insert_ops(
             }
             // Reserve one seq atomically. UPSERT keeps the counter row
             // initialisation in the same write so we don't need a
-            // separate bootstrap step at doc creation.
-            let seq: i64 = tx.query_row(
+            // separate bootstrap step at doc creation. The doc's
+            // current epoch rides along under the same row lock so
+            // the op row is stamped consistently with it.
+            let (seq, epoch): (i64, i64) = tx.query_row(
                 "INSERT INTO doc_sequences (doc_id, next_seq) VALUES (?, 2)
                  ON CONFLICT(doc_id) DO UPDATE SET next_seq = next_seq + 1
-                 RETURNING next_seq - 1",
+                 RETURNING next_seq - 1, epoch",
                 params![doc_bytes],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )?;
             tx.execute(
-                "INSERT INTO ops (doc_id, seq, device_id, push_id, payload, payload_nonce, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO ops (doc_id, seq, epoch, device_id, push_id, payload, payload_nonce, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     doc_bytes,
                     seq,
+                    epoch,
                     dev_bytes,
                     push_bytes,
                     op.blob.ciphertext,
@@ -201,18 +204,43 @@ pub async fn advance_last_acked_seq(
 pub struct LatestSnapshot {
     pub up_to_seq: u64,
     pub compaction_floor_seq: u64,
+    pub epoch: u64,
     pub blob: EncryptedBlob,
 }
 
-/// Just the two seq columns of the latest snapshot, without the
+/// The seq columns and epoch of the latest snapshot, without the
 /// payload. Hot path for `pull_ops` (compaction-floor check) and the
 /// snapshot coordinator (trigger eval). `None` if no snapshot exists.
 pub struct LatestSnapshotMeta {
     pub up_to_seq: u64,
     pub compaction_floor_seq: u64,
+    pub epoch: u64,
 }
 
-/// Insert a snapshot row. Used by snapshot orchestration; integration
+/// A doc's current history epoch (`spec/storage.md` §Epochs). Docs
+/// with no `doc_sequences` row yet (nothing pushed) are in epoch 0.
+pub async fn doc_epoch(db: &Db, doc_id: Uuid) -> anyhow::Result<u64> {
+    let doc_bytes = doc_id.as_bytes().to_vec();
+    db.call(move |c| read_doc_epoch(c, &doc_bytes))
+        .await
+        .map(|v| v as u64)
+}
+
+fn read_doc_epoch(c: &rusqlite::Connection, doc_bytes: &[u8]) -> rusqlite::Result<i64> {
+    c.query_row(
+        "SELECT epoch FROM doc_sequences WHERE doc_id = ?",
+        [doc_bytes],
+        |r| r.get::<_, i64>(0),
+    )
+    .optional()
+    .map(|v| v.unwrap_or(0))
+}
+
+/// Insert a snapshot row, stamped with the doc's current epoch. Every
+/// snapshot today is full-history, so it belongs to the epoch it was
+/// taken in; a future *trimmed* snapshot is the one that advances
+/// `doc_sequences.epoch` (in this same transaction) and is stamped
+/// with the new value. Used by snapshot orchestration; integration
 /// tests also call this directly to seed snapshot state.
 pub async fn insert_snapshot(
     db: &Db,
@@ -224,19 +252,24 @@ pub async fn insert_snapshot(
     let doc_bytes = doc_id.as_bytes().to_vec();
     let now = now_millis();
     db.call(move |c| {
-        c.execute(
-            "INSERT INTO snapshots (doc_id, up_to_seq, compaction_floor_seq, payload, payload_nonce, created_at)
-             VALUES (?, ?, ?, ?, ?, ?)",
+        let tx = c.transaction()?;
+        let epoch = read_doc_epoch(&tx, &doc_bytes)?;
+        tx.execute(
+            "INSERT INTO snapshots (doc_id, up_to_seq, compaction_floor_seq, epoch, payload, payload_nonce, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
             params![
                 doc_bytes,
                 up_to_seq as i64,
                 compaction_floor_seq as i64,
+                epoch,
                 blob.ciphertext,
                 blob.nonce,
                 now,
             ],
         )?;
-        Ok(c.last_insert_rowid() as u64)
+        let id = tx.last_insert_rowid() as u64;
+        tx.commit()?;
+        Ok(id)
     })
     .await
 }
@@ -246,7 +279,7 @@ pub async fn latest_snapshot(db: &Db, doc_id: Uuid) -> anyhow::Result<Option<Lat
     db.call(move |c| {
         let row = c
             .query_row(
-                "SELECT up_to_seq, compaction_floor_seq, payload, payload_nonce
+                "SELECT up_to_seq, compaction_floor_seq, epoch, payload, payload_nonce
                  FROM snapshots
                  WHERE doc_id = ?
                  ORDER BY id DESC
@@ -256,16 +289,18 @@ pub async fn latest_snapshot(db: &Db, doc_id: Uuid) -> anyhow::Result<Option<Lat
                     Ok((
                         r.get::<_, i64>(0)? as u64,
                         r.get::<_, i64>(1)? as u64,
-                        r.get::<_, Vec<u8>>(2)?,
+                        r.get::<_, i64>(2)? as u64,
                         r.get::<_, Vec<u8>>(3)?,
+                        r.get::<_, Vec<u8>>(4)?,
                     ))
                 },
             )
             .optional()?;
         Ok(row.map(
-            |(up_to_seq, compaction_floor_seq, ciphertext, nonce)| LatestSnapshot {
+            |(up_to_seq, compaction_floor_seq, epoch, ciphertext, nonce)| LatestSnapshot {
                 up_to_seq,
                 compaction_floor_seq,
+                epoch,
                 blob: EncryptedBlob { nonce, ciphertext },
             },
         ))
@@ -281,21 +316,28 @@ pub async fn latest_snapshot_meta(
     db.call(move |c| {
         let row = c
             .query_row(
-                "SELECT up_to_seq, compaction_floor_seq
+                "SELECT up_to_seq, compaction_floor_seq, epoch
                  FROM snapshots
                  WHERE doc_id = ?
                  ORDER BY id DESC
                  LIMIT 1",
                 [doc_bytes],
-                |r| Ok((r.get::<_, i64>(0)? as u64, r.get::<_, i64>(1)? as u64)),
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)? as u64,
+                        r.get::<_, i64>(1)? as u64,
+                        r.get::<_, i64>(2)? as u64,
+                    ))
+                },
             )
             .optional()?;
-        Ok(
-            row.map(|(up_to_seq, compaction_floor_seq)| LatestSnapshotMeta {
+        Ok(row.map(
+            |(up_to_seq, compaction_floor_seq, epoch)| LatestSnapshotMeta {
                 up_to_seq,
                 compaction_floor_seq,
-            }),
-        )
+                epoch,
+            },
+        ))
     })
     .await
 }

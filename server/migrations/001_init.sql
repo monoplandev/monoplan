@@ -52,14 +52,25 @@ CREATE INDEX devices_token_hash_idx ON devices (auth_token_hash);
 -- that inserts ops so seqs are dense, contiguous, and gap-free for any
 -- single doc — clients spot real holes (replica lag, dropped frames)
 -- instead of confusing them with "another doc got that id".
+--
+-- `epoch` is the doc's current history epoch. A doc is born in epoch 0
+-- and the epoch advances only when a *trimmed* (Loro shallow) snapshot
+-- is accepted, the one lossy step in the storage story. Today every
+-- snapshot is full-history, so the value never moves; the column is
+-- reserved so ops and snapshots are stamped from day one. It lives
+-- here rather than on `docs` because `insert_ops` already holds this
+-- row's lock and reads both values in one statement. `seq` never
+-- resets at an epoch boundary.
 CREATE TABLE doc_sequences (
   doc_id       BLOB PRIMARY KEY REFERENCES docs(id),
-  next_seq     INTEGER NOT NULL DEFAULT 1
+  next_seq     INTEGER NOT NULL DEFAULT 1,
+  epoch        INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE ops (
   doc_id          BLOB NOT NULL REFERENCES docs(id),
   seq             INTEGER NOT NULL,                            -- per-doc monotonic, gap-free
+  epoch           INTEGER NOT NULL,                            -- doc's epoch at insert (stamped server-side; NOT the GC predicate, see storage.md §Epochs)
   device_id       BLOB,                                        -- originating device (uuid bytes)
   push_id         BLOB,                                        -- client-minted durable push id (uuid bytes)
   payload         BLOB NOT NULL,
@@ -82,6 +93,7 @@ CREATE TABLE snapshots (
   doc_id                BLOB NOT NULL REFERENCES docs(id),
   up_to_seq             INTEGER NOT NULL,                        -- encoded state frontier (per-doc)
   compaction_floor_seq  INTEGER NOT NULL,                        -- seq at/below which op blobs are eligible for GC once this snapshot lands
+  epoch                 INTEGER NOT NULL,                        -- epoch this snapshot belongs to; a trimmed snapshot is the first row of its epoch
   payload               BLOB NOT NULL,
   payload_nonce         BLOB NOT NULL,
   created_at            INTEGER NOT NULL

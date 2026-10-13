@@ -673,6 +673,15 @@ async fn compact_doc_deletes_ops_below_floor_and_prunes_old_snapshots() {
         .await
         .unwrap();
 
+    // Every snapshot today is full-history, so it is stamped with the
+    // doc's current epoch, which never leaves 0 until trimming lands.
+    assert_eq!(queries::doc_epoch(db, acc.primary_doc_id).await.unwrap(), 0);
+    let meta = queries::latest_snapshot_meta(db, acc.primary_doc_id)
+        .await
+        .unwrap()
+        .expect("snapshot row");
+    assert_eq!(meta.epoch, 0);
+
     let stats = queries::compact_doc(db, acc.primary_doc_id, queries::KEEP_SNAPSHOTS)
         .await
         .unwrap();
