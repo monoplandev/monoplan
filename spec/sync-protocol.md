@@ -17,11 +17,11 @@ Consequences worth remembering:
 
 A future move to byte-based eligibility / compaction would close the asymmetry; tracked in `roadmap.md`.
 
-## Per-account `seq`
+## Per-doc `seq`
 
 **Status:** Implemented.
 
-Server-assigned `seq` is **per-account** and **dense / gap-free**. The server bumps a per-account counter (`account_sequences.next_seq` in sqlite; the same shape in Postgres) in the same transaction that inserts ops, so consecutive ops for one account get consecutive seqs (1, 2, 3, …). Different accounts have independent counters.
+Server-assigned `seq` is **per-doc** and **dense / gap-free**. The server bumps a per-doc counter (`doc_sequences.next_seq` in sqlite; the same shape in Postgres) in the same transaction that inserts ops, so consecutive ops for one doc get consecutive seqs (1, 2, 3, …). Different docs have independent counters. Today every account has exactly one doc (its primary / Home doc), so per-doc and per-account coincide.
 
 ## Version handshake
 
@@ -30,11 +30,25 @@ Server-assigned `seq` is **per-account** and **dense / gap-free**. The server bu
 First frame on every WS connection, before any payload exchange:
 
 - Client → Server: `Hello { client: "monoplan-cli", client_version: "0.1.0", supported_protocol_versions: [1] }`
-- Server → Client: `HelloAck { server_version: "0.1.0", protocol_version: 1, epoch: 0 }` — server picks the highest version it shares with the client. `epoch` is the doc's current history epoch (`storage.md` §Epochs); informational until trimmed snapshots land, and a mid-session advance is not yet signalled. If no overlap → `HelloRejected { reason }` and connection closes.
+- Server → Client: `HelloAck { server_version: "0.1.0", protocol_version: 1 }` — server picks the highest version it shares with the client. If no overlap → `HelloRejected { reason }` and connection closes.
 
-All subsequent frames are interpreted under the agreed `protocol_version`. Belt-and-braces against breaking changes; MessagePack handles additive evolution within a version on its own.
+All subsequent frames are interpreted under the agreed `protocol_version`. Belt-and-braces against breaking changes; MessagePack handles additive evolution within a version on its own. `HelloAck` is connection-scoped: anything about a particular doc arrives on `DocOpened`.
 
 Note: the per-list order-container CRDT schema (`spec/data-model.md` "Schema versioning & compatibility") shipped without a wire bump — the frames are identical and op blobs are opaque to the protocol. The doc layouts are mutually incompatible, but pre-release with a single user the cutover is handled operationally (export JSON → wipe → import), not fenced at the handshake. If a schema break ever needs to coexist with live old clients, bump this version then.
+
+## Doc binding
+
+**Status:** Implemented.
+
+A connection is bound to `(account, device)` at upgrade; docs are bound per frame. After the version handshake the client sends `OpenDoc { doc_id }` for the doc it wants to sync. The server checks the device's account may access the doc (today: it is the account's primary doc; the check lives in one place, `can_open`, and becomes the membership lookup when sharing lands), subscribes the connection to the doc's broadcasts, and replies `DocOpened { doc_id, epoch }`. `epoch` is the doc's current history epoch (`storage.md` §Epochs); informational until trimmed snapshots land, and a mid-session advance is not yet signalled.
+
+Rules:
+
+- Every payload frame in both directions carries the `doc_id` it is about. Clients stamp their own on the way out and drop any inbound frame for another doc; a host that multiplexes several docs over one socket routes by the field.
+- A payload frame for a doc that is not open on the connection is a protocol violation: the server closes the connection. Same for a doc the account may not access.
+- `OpenDoc` for a doc the account may not access is answered with `DocRejected { doc_id, reason }` and the connection closes.
+- The server subscribes **before** replying `DocOpened`, so once a client sees `DocOpened` there is no window in which a peer's push could slip past unregistered.
+- Re-opening the already-open doc is idempotent (another `DocOpened`, no second subscription). A connection holds one open doc today; opening a second, different doc is refused with `DocRejected`. Lifting that to N open docs per connection is the multiplexing step in `spec/sharing-plan.md`; the frame shapes do not change for it.
 
 ## Client → Server
 
@@ -42,11 +56,12 @@ Note: the per-list order-container CRDT schema (`spec/data-model.md` "Schema ver
 
 | Type | Body | Purpose |
 |---|---|---|
-| `PushOps` | `{ ops: [PushBlob] }` | Append ops. Server assigns per-account seqs. `PushBlob = { push_id: uuid, blob: EncryptedBlob }` — see §Push identity & retry. |
-| `PullOps` | `{ since_seq: u64 }` | Request ops with seq > since_seq. |
-| `Ack` | `{ last_acked_seq: u64 }` | Advance this device's contiguous-prefix frontier. |
-| `PushSnapshot` | `{ up_to_seq: u64, compaction_floor_seq: u64, from_seq: Option<u64>, up_to_vv: EncryptedBlob, blob: EncryptedBlob }` | In response to `SnapshotRequest`. `up_to_seq` = encoded state frontier; `compaction_floor_seq` = echo of the server's requested compaction floor (server-side op-blob GC bookkeeping; does not affect the produced blob); `from_seq` = echo of `base.seq` (`Some` = delta, `None` = full); `up_to_vv` = the producer's Loro VV at `up_to_seq`, sealed under the DEK (the server stores it opaquely and hands it back as the next delta's base). |
-| `PullSnapshot` | `{}` | Request the latest snapshot chain. |
+| `OpenDoc` | `{ doc_id: uuid }` | Bind a doc to the connection; see §Doc binding. Must precede any payload frame for that doc. |
+| `PushOps` | `{ doc_id, ops: [PushBlob] }` | Append ops. Server assigns per-doc seqs. `PushBlob = { push_id: uuid, blob: EncryptedBlob }` — see §Push identity & retry. |
+| `PullOps` | `{ doc_id, since_seq: u64 }` | Request ops with seq > since_seq. |
+| `Ack` | `{ doc_id, last_acked_seq: u64 }` | Advance this device's contiguous-prefix frontier on the doc. |
+| `PushSnapshot` | `{ doc_id, up_to_seq: u64, compaction_floor_seq: u64, from_seq: Option<u64>, up_to_vv: EncryptedBlob, blob: EncryptedBlob }` | In response to `SnapshotRequest`. `up_to_seq` = encoded state frontier; `compaction_floor_seq` = echo of the server's requested compaction floor (server-side op-blob GC bookkeeping; does not affect the produced blob); `from_seq` = echo of `base.seq` (`Some` = delta, `None` = full); `up_to_vv` = the producer's Loro VV at `up_to_seq`, sealed under the DEK (the server stores it opaquely and hands it back as the next delta's base). |
+| `PullSnapshot` | `{ doc_id }` | Request the latest snapshot chain. |
 
 ## Server → Client
 
@@ -54,12 +69,14 @@ Note: the per-list order-container CRDT schema (`spec/data-model.md` "Schema ver
 
 | Type | Body | Purpose |
 |---|---|---|
-| `OpsAck` | `{ acks: [PushAck] }` | Response to `PushOps`. One `PushAck = { push_id: uuid, seq: u64 }` per pushed blob, in input order — self-describing across retries (see §Push identity & retry). |
-| `OpsBatch` | `{ ops: [(u64, EncryptedBlob)], complete: bool }` | Response to `PullOps`; may chunk. Each tuple's `u64` is the per-account `seq`. |
-| `OpsBroadcast` | `{ ops: [(u64, EncryptedBlob)] }` | Pushed when another device sends ops. |
-| `SnapshotRequest` | `{ up_to_seq: u64, compaction_floor_seq: u64, base: Option<SnapshotBase> }` | Server asks a connected client to produce a snapshot. `up_to_seq` = state frontier to encode at (= the producer's `last_acked_seq`); `compaction_floor_seq` = seq at/below which op blobs become eligible for GC once this snapshot lands (= `max(horizon, prev compaction_floor_seq)`); `base` = `None` for a full snapshot, or `{ seq, vv }` (the latest stored snapshot's `up_to_seq` and sealed `up_to_vv`) for a delta strictly after it. |
-| `Snapshot` | `{ up_to_seq: u64, blob: EncryptedBlob, complete: bool }` | One row of the stored chain, in reply to `PullSnapshot`. The server streams the chain one row per frame in import order (the latest full snapshot, then each delta after it), fire-and-forget like `OpsBatch`, with `complete: true` on the last row. `up_to_seq` is this row's state frontier; on the `complete` frame it is the chain's final frontier, which the bootstrapping client uses as its next `since_seq`. |
-| `SnapshotRequired` | `{ up_to_seq: u64 }` | Sent in lieu of `OpsBatch` when the client's `since_seq` is below the latest snapshot's `compaction_floor_seq` — server can't serve the missing ops. Client must bootstrap from snapshot before resuming ops. `up_to_seq` is informational; the authoritative state frontier is the one returned in `Snapshot`. |
+| `DocOpened` | `{ doc_id, epoch: u64 }` | Response to `OpenDoc`; see §Doc binding. |
+| `DocRejected` | `{ doc_id, reason: string }` | Response to an `OpenDoc` the account may not access (or the connection cannot take on). Connection closes after. |
+| `OpsAck` | `{ doc_id, acks: [PushAck] }` | Response to `PushOps`. One `PushAck = { push_id: uuid, seq: u64 }` per pushed blob, in input order — self-describing across retries (see §Push identity & retry). |
+| `OpsBatch` | `{ doc_id, ops: [(u64, EncryptedBlob)], complete: bool }` | Response to `PullOps`; may chunk. Each tuple's `u64` is the per-doc `seq`. |
+| `OpsBroadcast` | `{ doc_id, ops: [(u64, EncryptedBlob)] }` | Pushed when another device with the doc open sends ops. |
+| `SnapshotRequest` | `{ doc_id, up_to_seq: u64, compaction_floor_seq: u64, base: Option<SnapshotBase> }` | Server asks a connected client to produce a snapshot. `up_to_seq` = state frontier to encode at (= the producer's `last_acked_seq`); `compaction_floor_seq` = seq at/below which op blobs become eligible for GC once this snapshot lands (= `max(horizon, prev compaction_floor_seq)`); `base` = `None` for a full snapshot, or `{ seq, vv }` (the latest stored snapshot's `up_to_seq` and sealed `up_to_vv`) for a delta strictly after it. |
+| `Snapshot` | `{ doc_id, up_to_seq: u64, blob: EncryptedBlob, complete: bool }` | One row of the stored chain, in reply to `PullSnapshot`. The server streams the chain one row per frame in import order (the latest full snapshot, then each delta after it), fire-and-forget like `OpsBatch`, with `complete: true` on the last row. `up_to_seq` is this row's state frontier; on the `complete` frame it is the chain's final frontier, which the bootstrapping client uses as its next `since_seq`. |
+| `SnapshotRequired` | `{ doc_id, up_to_seq: u64 }` | Sent in lieu of `OpsBatch` when the client's `since_seq` is below the latest snapshot's `compaction_floor_seq` — server can't serve the missing ops. Client must bootstrap from snapshot before resuming ops. `up_to_seq` is informational; the authoritative state frontier is the one returned in `Snapshot`. |
 
 `EncryptedBlob = { nonce: bytes, ciphertext: bytes }`.
 
@@ -77,12 +94,12 @@ Every pushed blob carries a client-minted **`push_id`** (uuid, 16 raw bytes unde
 
 ## Ordering & ack flow
 
-**Status:** Implemented. `last_contiguous_seq` advances only over the contiguous next seq. Because per-account seqs are dense and gap-free at the server and delivered in order over a single connection, that always equals the max seq seen — so no reorder buffering or gap detection is needed. (A forward gap is structurally impossible here; the engine `debug_assert!`s against one rather than carrying recovery machinery for a case that can't arise under this deployment.)
+**Status:** Implemented. `last_contiguous_seq` advances only over the contiguous next seq. Because per-doc seqs are dense and gap-free at the server and delivered in order over a single connection, that always equals the max seq seen — so no reorder buffering or gap detection is needed. (A forward gap is structurally impossible here; the engine `debug_assert!`s against one rather than carrying recovery machinery for a case that can't arise under this deployment.)
 
-- Server orders ops by per-account `seq` of arrival. Per-account FIFO is the only ordering that matters — different accounts' streams are independent.
+- Server orders ops by per-doc `seq` of arrival. Per-doc FIFO is the only ordering that matters — different docs' streams are independent.
 - Client decrypts ops and applies via Loro **immediately on receipt**, regardless of seq contiguity. Server `seq` is a *delivery* sequence, not a *causal* one; Loro's CRDT handles real causal ordering off the encoded VV. Applying out-of-order is safe and keeps the UI responsive under replica-lag conditions.
-- Client sends `Ack { last_acked_seq: last_contiguous_seq }` — the contiguous prefix from the persisted start. Server stores in `devices.last_acked_seq`.
-- **Horizon** = `min(last_acked_seq)` across all non-revoked devices for the account. Drives the **op-blob compaction floor** (`compaction_floor_seq`): every device has every op blob at or below the horizon, so those blobs are safe for server-side GC. This is purely seq-level bookkeeping — the server doesn't see Loro VVs and doesn't need to. Time-based eviction is deliberately *not* used to advance the horizon: deleting blobs a stale device hasn't acked would force a full bootstrap on its next reconnect even when the lag is small. The user-facing escape hatch is explicit revoke via `DELETE /api/devices/:id` — revoking a stale device immediately drops it from the horizon calc, unblocking compaction. (Loro-level *shallow snapshotting* — trimming CRDT history rather than op blobs — is a separate, future concern; see §"Shallow snapshots (future)".)
+- Client sends `Ack { doc_id, last_acked_seq: last_contiguous_seq }` — the contiguous prefix from the persisted start. Server stores it in `device_doc_frontiers (device_id, doc_id)`; a device with no row for a doc is at 0.
+- **Horizon** = `min(last_acked_seq)` across all non-revoked devices that can open the doc (today: the owning account's devices). Drives the **op-blob compaction floor** (`compaction_floor_seq`): every device has every op blob at or below the horizon, so those blobs are safe for server-side GC. This is purely seq-level bookkeeping — the server doesn't see Loro VVs and doesn't need to. Time-based eviction is deliberately *not* used to advance the horizon: deleting blobs a stale device hasn't acked would force a full bootstrap on its next reconnect even when the lag is small. The user-facing escape hatch is explicit revoke via `DELETE /api/devices/:id` — revoking a stale device immediately drops it from the horizon calc, unblocking compaction. (Loro-level *shallow snapshotting* — trimming CRDT history rather than op blobs — is a separate, future concern; see §"Shallow snapshots (future)".)
 - **`OpsBroadcast` is post-commit only.** Server fans out to other devices only after the originating `PushOps` is durable in storage. Otherwise a crash between broadcast and fsync could leave peers holding ops the sender will re-push (under new seqs) on reconnect.
 
 ## Commit origin tagging
@@ -145,13 +162,13 @@ Orchestration:
 - Production: server sends `SnapshotRequest { up_to_seq, compaction_floor_seq, base }`. The client exports **at the frontiers of its `server_known_vv`** — exactly the state/history the server op stream represents, never the current doc, which may contain unsent local operations that must not leak into a blob other devices bootstrap from (`spec/vv-wal-separation.md` §Server snapshots). Full: a Loro snapshot of a `fork_at` those frontiers. Delta: `ExportMode::updates_in_range` over the id spans in `server_known_vv` but not in `base.vv` (`Doc::delta_blob_between`), which bounds the blob on both ends with no fork. If `base.vv` is not included in `server_known_vv` the client declines (emits an error, sends nothing) rather than fork the chain; the lease times out onto another producer. It encrypts with the DEK and uploads via `PushSnapshot { up_to_seq, compaction_floor_seq, from_seq, up_to_vv, blob }`, tagging `up_to_seq` with its `last_contiguous_seq` (the seq-coordinate twin of `server_known_vv`) and `up_to_vv` with `server_known_vv` sealed under the DEK. `compaction_floor_seq` and `from_seq` are echoed unchanged — the client does not interpret them.
 - Compaction: after a snapshot is durable, compaction may delete ops with `seq ≤ snapshot.compaction_floor_seq`. Snapshot rows are never deleted.
 
-Server keeps **at most one in-flight snapshot request per account**:
+Server keeps **at most one in-flight snapshot request per doc**:
 
 - State:
   - `Idle`
   - `Requested { device_id, up_to_seq, deadline }`
 - Transition to `Requested` only when no request is already in flight.
-- Snapshot orchestration is per-account; one stuck or slow account must not block others.
+- Snapshot orchestration is per-doc; one stuck or slow doc must not block others.
 
 Request lifecycle:
 
@@ -190,7 +207,7 @@ Loro shallow snapshotting — `ExportMode::shallow_snapshot(frontier)` — trims
 
 The planned design decouples the two horizons rather than trying to translate between them:
 
-- **Op-blob horizon (existing).** `min(last_acked_seq)` across devices → `compaction_floor_seq`. Drives server-side op-blob GC. Server reads this directly from `devices.last_acked_seq`.
+- **Op-blob horizon (existing).** `min(last_acked_seq)` across devices → `compaction_floor_seq`. Drives server-side op-blob GC. Server reads this directly from `device_doc_frontiers`.
 - **VV horizon (planned).** Each device periodically reports its current Loro VV/Frontiers to the server (e.g. piggybacked on `Ack`, or via a dedicated `ReportVV` frame on a coarse cadence — single-digit minutes is fine; this isn't on the hot path). Server stores the latest VV per device and computes the **VV meet** across devices when it needs to issue a shallow snapshot. The meet is sent in `SnapshotRequest` alongside the existing fields; the producing client passes it to `ExportMode::shallow_snapshot(frontier)`.
 
 Open questions, parked until this lands:
@@ -221,6 +238,6 @@ The `up_to_seq` carried by `SnapshotRequired` is informational; the authoritativ
 
 **Status:** Partial. Resume-from-`last_acked_seq` is implemented in both CLI and web engines. Exponential backoff with jitter is implemented in the JS sync bridge (`js/core/src/sync-bridge.ts`); the CLI runs one-shot so backoff doesn't apply there.
 
-Client maintains `last_acked_seq` in local state. On reconnect: WS upgrade with token → `PullOps { since_seq: last_acked_seq }` → resume.
+Client maintains `last_acked_seq` in local state. On reconnect: WS upgrade with token → `Hello` / `HelloAck` → `OpenDoc` / `DocOpened` → `PullOps { since_seq: last_acked_seq }` → resume.
 
 Exponential backoff 1s → 30s.

@@ -5,6 +5,14 @@
 //! someone wiring the wrong serializer to the wrong endpoint. The
 //! protocol version is negotiated on connect via the `Hello` /
 //! `HelloAck` exchange before any payload frame is exchanged.
+//!
+//! A connection is bound to `(account, device)` at upgrade; docs are
+//! bound per frame. Every payload frame carries the `doc_id` it is
+//! about, and a doc must be opened (`OpenDoc` → `DocOpened`) before
+//! any payload frame names it. Today an account has exactly one doc
+//! (its primary / Home doc), so a connection opens exactly one doc;
+//! the field is the routing key multi-doc sharing will multiplex on
+//! (`spec/sharing-plan.md`).
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -17,7 +25,8 @@ use uuid::Uuid;
 /// unchanged and the doc layout inside the encrypted blobs is opaque
 /// to the protocol. Pre-release, single-user: the schema cutover is
 /// handled operationally (export JSON → wipe → import), not fenced at
-/// the handshake.
+/// the handshake. Likewise `doc_id` landing on every frame and the
+/// `OpenDoc` exchange went in without a bump.
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Encrypted op or snapshot payload. Server-side these are opaque
@@ -30,8 +39,8 @@ pub struct EncryptedBlob {
     pub ciphertext: Vec<u8>,
 }
 
-/// Server-assigned per-account sequence number paired with the encrypted
-/// payload. `seq` is dense and gap-free within an account — see
+/// Server-assigned per-doc sequence number paired with the encrypted
+/// payload. `seq` is dense and gap-free within a doc — see
 /// `spec/storage.md` for the counter mechanism.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StoredBlob {
@@ -85,16 +94,13 @@ pub struct Hello {
     pub supported_protocol_versions: Vec<u32>,
 }
 
-/// Server's positive response to `Hello`.
+/// Server's positive response to `Hello`. Connection-scoped only:
+/// anything about a particular doc (its epoch, for one) arrives on
+/// `DocOpened`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HelloAck {
     pub server_version: String,
     pub protocol_version: u32,
-    /// The doc's current history epoch (`spec/storage.md` §Epochs).
-    /// Informational for now: nothing advances it until trimmed
-    /// snapshots land, and a mid-session advance is not yet signalled.
-    #[serde(default)]
-    pub epoch: u64,
 }
 
 /// Server's negative response to `Hello`. Connection closes after.
@@ -108,17 +114,24 @@ pub struct HelloRejected {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ClientFrame {
-    /// Append ops. Server assigns per-account seqs and replies `OpsAck`.
+    /// Bind a doc to this connection. Must precede any payload frame
+    /// naming `doc_id`. The server checks the device's account may
+    /// access the doc (today: it is the account's primary doc),
+    /// subscribes the connection to the doc's broadcasts, and replies
+    /// `DocOpened` — or `DocRejected`, after which the connection
+    /// closes. Re-opening an already-open doc is idempotent.
+    OpenDoc { doc_id: Uuid },
+    /// Append ops. Server assigns per-doc seqs and replies `OpsAck`.
     /// Each blob carries a durable `push_id`; re-sending a previously
     /// inserted `(device, push_id)` is idempotent (see [`PushBlob`]).
-    PushOps { ops: Vec<PushBlob> },
+    PushOps { doc_id: Uuid, ops: Vec<PushBlob> },
     /// Request all ops with seq > since_seq. Streamed back as one or
     /// more `OpsBatch` frames; the last carries `complete=true`.
-    PullOps { since_seq: u64 },
-    /// Advance this device's frontier. Sent after Loro accepts the ops
-    /// locally — never on raw byte receipt. Carries the contiguous
-    /// prefix of seqs the device has applied.
-    Ack { last_acked_seq: u64 },
+    PullOps { doc_id: Uuid, since_seq: u64 },
+    /// Advance this device's frontier on `doc_id`. Sent after Loro
+    /// accepts the ops locally — never on raw byte receipt. Carries
+    /// the contiguous prefix of seqs the device has applied.
+    Ack { doc_id: Uuid, last_acked_seq: u64 },
     /// Response to a `SnapshotRequest`. `up_to_seq` is the encoded
     /// state frontier; `compaction_floor_seq` is the seq at/below which
     /// op blobs become eligible for server-side GC once this snapshot
@@ -138,6 +151,7 @@ pub enum ClientFrame {
     /// a delta whose `from_seq` is not the latest stored snapshot's
     /// `up_to_seq`, so the chain can't fork.
     PushSnapshot {
+        doc_id: Uuid,
         up_to_seq: u64,
         compaction_floor_seq: u64,
         from_seq: Option<u64>,
@@ -145,7 +159,21 @@ pub enum ClientFrame {
         blob: EncryptedBlob,
     },
     /// Request the latest snapshot chain (see `ServerFrame::Snapshot`).
-    PullSnapshot,
+    PullSnapshot { doc_id: Uuid },
+}
+
+impl ClientFrame {
+    /// The doc this frame is about.
+    pub fn doc_id(&self) -> Uuid {
+        match self {
+            ClientFrame::OpenDoc { doc_id }
+            | ClientFrame::PushOps { doc_id, .. }
+            | ClientFrame::PullOps { doc_id, .. }
+            | ClientFrame::Ack { doc_id, .. }
+            | ClientFrame::PushSnapshot { doc_id, .. }
+            | ClientFrame::PullSnapshot { doc_id } => *doc_id,
+        }
+    }
 }
 
 // ---------- server → client frames ----------
@@ -153,18 +181,27 @@ pub enum ClientFrame {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ServerFrame {
+    /// Response to `OpenDoc`: the doc is bound to this connection and
+    /// its broadcasts are flowing. `epoch` is the doc's current
+    /// history epoch (`spec/storage.md` §Epochs). Informational for
+    /// now: nothing advances it until trimmed snapshots land, and a
+    /// mid-session advance is not yet signalled.
+    DocOpened { doc_id: Uuid, epoch: u64 },
+    /// Response to an `OpenDoc` the account may not access (or that
+    /// this connection cannot take on). The connection closes after.
+    DocRejected { doc_id: Uuid, reason: String },
     /// Response to `PushOps`. One `PushAck` per pushed blob, in input
     /// order, each identifying the acknowledged `push_id` and its
     /// (possibly pre-existing, when deduplicated) server seq.
-    OpsAck { acks: Vec<PushAck> },
+    OpsAck { doc_id: Uuid, acks: Vec<PushAck> },
     /// Chunk of pulled ops. May be one of several frames per `PullOps`.
     OpsBatch {
+        doc_id: Uuid,
         ops: Vec<StoredBlob>,
         complete: bool,
     },
-    /// Pushed when another device on the same account commits ops.
-    /// Reserved for the broadcast work.
-    OpsBroadcast { ops: Vec<StoredBlob> },
+    /// Pushed when another device with the doc open commits ops.
+    OpsBroadcast { doc_id: Uuid, ops: Vec<StoredBlob> },
     /// Server asks a connected, caught-up client to produce a snapshot.
     /// `up_to_seq` is the requested state frontier (= server's idea of
     /// the producer's `last_acked_seq`); `compaction_floor_seq` is the
@@ -182,6 +219,7 @@ pub enum ServerFrame {
     /// hold everything in `base.vv`, which the server guarantees by
     /// only asking a device acked at or past `base.seq`.
     SnapshotRequest {
+        doc_id: Uuid,
         up_to_seq: u64,
         compaction_floor_seq: u64,
         base: Option<SnapshotBase>,
@@ -196,6 +234,7 @@ pub enum ServerFrame {
     /// fire-and-forget like `OpsBatch`: the client imports each row as
     /// it lands rather than buffering the chain.
     Snapshot {
+        doc_id: Uuid,
         up_to_seq: u64,
         blob: EncryptedBlob,
         complete: bool,
@@ -209,5 +248,21 @@ pub enum ServerFrame {
     /// then re-issue `PullOps` from the snapshot's state frontier.
     /// `up_to_seq` here is informational; the authoritative value is
     /// the one in the `Snapshot` frame.
-    SnapshotRequired { up_to_seq: u64 },
+    SnapshotRequired { doc_id: Uuid, up_to_seq: u64 },
+}
+
+impl ServerFrame {
+    /// The doc this frame is about.
+    pub fn doc_id(&self) -> Uuid {
+        match self {
+            ServerFrame::DocOpened { doc_id, .. }
+            | ServerFrame::DocRejected { doc_id, .. }
+            | ServerFrame::OpsAck { doc_id, .. }
+            | ServerFrame::OpsBatch { doc_id, .. }
+            | ServerFrame::OpsBroadcast { doc_id, .. }
+            | ServerFrame::SnapshotRequest { doc_id, .. }
+            | ServerFrame::Snapshot { doc_id, .. }
+            | ServerFrame::SnapshotRequired { doc_id, .. } => *doc_id,
+        }
+    }
 }

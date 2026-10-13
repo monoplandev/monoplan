@@ -4,8 +4,9 @@
 //! account has exactly one doc (their primary), so the per-doc keying is
 //! 1:1 with per-account — but the storage layer already speaks docs so the
 //! eventual multi-doc / sharing migration (`spec/sharing-plan.md`) doesn't
-//! need to re-key the data plane. Device frontiers stay per-device (which
-//! is also per-doc while 1:1 holds).
+//! need to re-key the data plane. Device frontiers are per-(device, doc)
+//! (`device_doc_frontiers`); the horizon for a doc spans the devices of
+//! every account that can open it (today: just the owner).
 
 use monoplan_protocol::{EncryptedBlob, PushAck, PushBlob, StoredBlob};
 use rusqlite::{OptionalExtension, params};
@@ -176,21 +177,26 @@ pub async fn fetch_ops_batch(
     .await
 }
 
-/// Advance a device's frontier. Monotonic — silently ignores attempts
-/// to move backwards so a slow client retransmitting old acks can't
-/// corrupt the horizon calculation.
+/// Advance a device's frontier on a doc. Monotonic — silently ignores
+/// attempts to move backwards so a slow client retransmitting old acks
+/// can't corrupt the horizon calculation. The `(device, doc)` row is
+/// created on the first ack.
 pub async fn advance_last_acked_seq(
     db: &Db,
     device_id: Uuid,
+    doc_id: Uuid,
     last_acked: u64,
 ) -> anyhow::Result<()> {
     let dev_bytes = device_id.as_bytes().to_vec();
+    let doc_bytes = doc_id.as_bytes().to_vec();
     db.call(move |c| {
         c.execute(
-            "UPDATE devices
-             SET last_acked_seq = ?
-             WHERE id = ? AND last_acked_seq < ?",
-            params![last_acked as i64, dev_bytes, last_acked as i64],
+            "INSERT INTO device_doc_frontiers (device_id, doc_id, last_acked_seq)
+             VALUES (?, ?, ?)
+             ON CONFLICT(device_id, doc_id) DO UPDATE
+               SET last_acked_seq = excluded.last_acked_seq
+               WHERE excluded.last_acked_seq > device_doc_frontiers.last_acked_seq",
+            params![dev_bytes, doc_bytes, last_acked as i64],
         )
     })
     .await?;
@@ -476,23 +482,28 @@ pub async fn snapshot_chain(db: &Db, doc_id: Uuid) -> anyhow::Result<Option<Snap
     .await
 }
 
-/// Read a device's recorded frontier. Used by tests; production paths
-/// just call `advance_last_acked_seq`.
-pub async fn get_last_acked_seq(db: &Db, device_id: Uuid) -> anyhow::Result<u64> {
+/// Read a device's recorded frontier on a doc (0 when it has never
+/// acked). Used by tests; production paths just call
+/// `advance_last_acked_seq`.
+pub async fn get_last_acked_seq(db: &Db, device_id: Uuid, doc_id: Uuid) -> anyhow::Result<u64> {
     let dev_bytes = device_id.as_bytes().to_vec();
+    let doc_bytes = doc_id.as_bytes().to_vec();
     db.call(move |c| {
-        c.query_row(
-            "SELECT last_acked_seq FROM devices WHERE id = ?",
-            [dev_bytes],
-            |r| r.get::<_, i64>(0),
-        )
+        let v: Option<i64> = c
+            .query_row(
+                "SELECT last_acked_seq FROM device_doc_frontiers
+                 WHERE device_id = ? AND doc_id = ?",
+                params![dev_bytes, doc_bytes],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?;
+        Ok(v.unwrap_or(0) as u64)
     })
     .await
-    .map(|v| v as u64)
 }
 
-/// Horizon: `min(last_acked_seq)` across all of an account's
-/// devices, with `override_device_id`'s row replaced by
+/// Horizon for a doc: `min(last_acked_seq)` across every device that
+/// syncs it, with `override_device_id`'s row replaced by
 /// `override_value`. Used as the compaction-floor input to the
 /// snapshot coordinator (see `spec/sync-protocol.md` §"Snapshot
 /// orchestration") and computed from the calling device's optimistic
@@ -501,29 +512,35 @@ pub async fn get_last_acked_seq(db: &Db, device_id: Uuid) -> anyhow::Result<u64>
 /// horizon down artificially. Substituting the optimistic value
 /// reflects the device's true frontier.
 ///
-/// Takes `account_id` because devices are still account-scoped — the
-/// frontier-bearing entity is the device, and devices belong to
-/// accounts, not docs. While each account has exactly one doc (1:1),
-/// the per-account horizon equals the per-doc horizon. When per-doc
-/// memberships land (`spec/sharing-plan.md`) this becomes
-/// `min(last_acked_seq)` over `device_doc_frontiers` rows for that doc,
-/// joined to active memberships.
+/// A device with no `device_doc_frontiers` row for the doc counts as
+/// 0 — it has acked nothing, so nothing below it is safe to compact.
+///
+/// The set of devices is "every device of `account_id`" because an
+/// account's devices are the only ones that can open its doc today.
+/// When memberships land (`spec/sharing-plan.md`) the device set
+/// becomes the devices of every active member, and `account_id`
+/// goes away.
 ///
 /// Returns 0 when the account has no devices — caller treats that
 /// as "no compaction possible" via the trigger's horizon guard.
-pub async fn account_horizon(
+pub async fn doc_horizon(
     db: &Db,
+    doc_id: Uuid,
     account_id: Uuid,
     override_device_id: Uuid,
     override_value: u64,
 ) -> anyhow::Result<u64> {
+    let doc_bytes = doc_id.as_bytes().to_vec();
     let acc_bytes = account_id.as_bytes().to_vec();
     let dev_bytes = override_device_id.as_bytes().to_vec();
     db.call(move |c| {
         let v: Option<i64> = c.query_row(
-            "SELECT MIN(CASE WHEN id = ? THEN ? ELSE last_acked_seq END)
-             FROM devices WHERE account_id = ?",
-            params![dev_bytes, override_value as i64, acc_bytes],
+            "SELECT MIN(CASE WHEN d.id = ? THEN ? ELSE COALESCE(f.last_acked_seq, 0) END)
+             FROM devices d
+             LEFT JOIN device_doc_frontiers f
+               ON f.device_id = d.id AND f.doc_id = ?
+             WHERE d.account_id = ?",
+            params![dev_bytes, override_value as i64, doc_bytes, acc_bytes],
             |r| r.get::<_, Option<i64>>(0),
         )?;
         Ok(v.unwrap_or(0) as u64)

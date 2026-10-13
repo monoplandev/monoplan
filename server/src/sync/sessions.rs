@@ -120,7 +120,7 @@ impl SyncSessions {
         if ops.is_empty() {
             return 0;
         }
-        let bytes = match rmp_serde::to_vec_named(&ServerFrame::OpsBroadcast { ops }) {
+        let bytes = match rmp_serde::to_vec_named(&ServerFrame::OpsBroadcast { doc_id, ops }) {
             Ok(b) => b,
             Err(e) => {
                 tracing::error!(error = %e, "failed to encode OpsBroadcast");

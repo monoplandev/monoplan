@@ -39,6 +39,7 @@ pub struct DeviceRow {
     /// the proxy in front of it). `None` until first authed request.
     pub last_seen_ip: Option<String>,
     pub created_at: i64,
+    /// Frontier on the doc `list_devices` was asked about.
     pub last_acked_seq: i64,
 }
 
@@ -120,8 +121,8 @@ pub async fn create_account(db: &Db, new: NewAccount) -> anyhow::Result<CreatedA
                 ],
             )?;
             tx.execute(
-                "INSERT INTO devices (id, account_id, name, auth_token_hash, last_acked_seq, last_seen_at, created_at)
-                 VALUES (?, ?, ?, ?, 0, ?, ?)",
+                "INSERT INTO devices (id, account_id, name, auth_token_hash, last_seen_at, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?)",
                 params![
                     dev_bytes,
                     acc_bytes,
@@ -235,8 +236,8 @@ pub async fn create_device(
     let now = now_millis();
     db.call(move |c| {
         c.execute(
-            "INSERT INTO devices (id, account_id, name, auth_token_hash, last_acked_seq, last_seen_at, created_at)
-             VALUES (?, ?, ?, ?, 0, ?, ?)",
+            "INSERT INTO devices (id, account_id, name, auth_token_hash, last_seen_at, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
             params![id_bytes, acc_bytes, name, token_hash, now, now],
         )
     })
@@ -244,15 +245,27 @@ pub async fn create_device(
     Ok(device_id)
 }
 
-pub async fn list_devices(db: &Db, account_id: Uuid) -> anyhow::Result<Vec<DeviceRow>> {
+/// List an account's devices. `last_acked_seq` on each row is the
+/// device's frontier on `doc_id` (the caller passes the account's
+/// primary doc; a device with no frontier row yet reads as 0).
+pub async fn list_devices(
+    db: &Db,
+    account_id: Uuid,
+    doc_id: Uuid,
+) -> anyhow::Result<Vec<DeviceRow>> {
     let acc_bytes = account_id.as_bytes().to_vec();
+    let doc_bytes = doc_id.as_bytes().to_vec();
     db.call(move |c| {
         let mut stmt = c.prepare(
-            "SELECT id, account_id, name, last_seen_at, created_at, last_acked_seq, last_seen_ip
-             FROM devices WHERE account_id = ? ORDER BY created_at",
+            "SELECT d.id, d.account_id, d.name, d.last_seen_at, d.created_at,
+                    COALESCE(f.last_acked_seq, 0), d.last_seen_ip
+             FROM devices d
+             LEFT JOIN device_doc_frontiers f
+               ON f.device_id = d.id AND f.doc_id = ?
+             WHERE d.account_id = ? ORDER BY d.created_at",
         )?;
         let rows = stmt
-            .query_map([acc_bytes], row_to_device)?
+            .query_map(params![doc_bytes, acc_bytes], row_to_device)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     })

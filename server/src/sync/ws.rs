@@ -1,10 +1,18 @@
-//! WebSocket sync endpoint: handshake → push / pull / ack loop with
-//! peer broadcast on push.
+//! WebSocket sync endpoint: handshake → open doc → push / pull / ack
+//! loop with peer broadcast on push.
 //!
 //! Auth happens on the upgrade via the same bearer extractor used by
 //! HTTP routes — token validation runs *before* the upgrade response
 //! goes out, so an unauthorized client never gets a socket.
 //!
+//! The connection is `(account, device)`-bound; docs are bound per
+//! frame. After the version handshake the client sends `OpenDoc` for
+//! the doc it wants to sync, the server checks access and subscribes
+//! the connection to that doc's broadcasts, and every payload frame
+//! after that names the doc it is about. One doc per connection
+//! today (an account has exactly one); the per-frame `doc_id` and the
+//! open step are the seams multi-doc multiplexing slots into
+//! (`spec/sharing-plan.md`).
 use std::time::Instant;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -28,6 +36,7 @@ use crate::auth::tokens::{decode_token, sha256};
 use crate::error::ApiError;
 use crate::http::request_id::RequestId;
 use crate::state::AppState;
+use crate::sync::sessions::Subscription;
 use crate::sync::snapshot::{Decision, PrevSnapshot, ReleaseResult};
 
 use super::queries;
@@ -45,10 +54,40 @@ pub struct WsAuthQuery {
     token: Option<String>,
 }
 
+/// A doc bound to this connection by `OpenDoc`.
+struct OpenDoc {
+    doc_id: Uuid,
+    sub: Subscription,
+    snapshot_lease: Option<u64>,
+}
+
 struct WSSession {
     auth: DeviceAuth,
-    sub_id: u64,
-    snapshot_lease: Option<u64>,
+    /// The doc this connection has opened, if any. Payload frames are
+    /// refused until one is open, and must name this doc.
+    open: Option<OpenDoc>,
+}
+
+impl WSSession {
+    /// The open doc a payload frame for `doc_id` may act on.
+    fn open_doc(&mut self, doc_id: Uuid) -> Result<&mut OpenDoc, SessionError> {
+        match self.open.as_mut() {
+            Some(open) if open.doc_id == doc_id => Ok(open),
+            Some(open) => Err(SessionError::DocNotOpen {
+                doc_id,
+                open: Some(open.doc_id),
+            }),
+            None => Err(SessionError::DocNotOpen { doc_id, open: None }),
+        }
+    }
+}
+
+/// May this device open `doc_id`? Today an account can reach exactly
+/// one doc — its primary — so this is an equality check. It becomes
+/// the membership lookup when sharing lands; keep every access
+/// decision behind it.
+fn can_open(auth: &DeviceAuth, doc_id: Uuid) -> bool {
+    doc_id == auth.primary_doc_id
 }
 
 pub async fn ws_handler(
@@ -122,6 +161,10 @@ enum SessionError {
     Sql(#[from] anyhow::Error),
     #[error("handshake failed: {0}")]
     Handshake(String),
+    #[error("open doc {doc_id} refused: {reason}")]
+    OpenRefused { doc_id: Uuid, reason: String },
+    #[error("payload frame for doc {doc_id} but open doc is {open:?}")]
+    DocNotOpen { doc_id: Uuid, open: Option<Uuid> },
     #[error("broadcast channel dropped — slow client")]
     BroadcastLagged,
 }
@@ -132,7 +175,6 @@ async fn run_session(
     auth: DeviceAuth,
 ) -> Result<(), SessionError> {
     let handshake_span = tracing::info_span!("ws.handshake");
-    let doc_epoch = queries::doc_epoch(&state.db, auth.primary_doc_id).await?;
     let _hello: Hello = async {
         let hello: Hello = recv_msgpack(&mut socket).await?;
         if !hello
@@ -163,7 +205,6 @@ async fn run_session(
             &HelloAck {
                 server_version: SERVER_VERSION.into(),
                 protocol_version: PROTOCOL_VERSION,
-                epoch: doc_epoch,
             },
         )
         .await?;
@@ -173,22 +214,7 @@ async fn run_session(
     .instrument(handshake_span)
     .await?;
 
-    // Subscribe *after* a successful handshake so we never deliver
-    // peer broadcasts to a session that hasn't agreed on the protocol
-    // version. Subscription is RAII — dropping deregisters. Subscription
-    // is keyed by the doc the device is syncing (today: always its
-    // account's primary doc).
-    let mut sub = state
-        .sync_sessions
-        .subscribe(auth.primary_doc_id, auth.device_id);
-
-    let sub_id = sub.sub_id();
-
-    let mut ws_session = WSSession {
-        auth,
-        sub_id,
-        snapshot_lease: None,
-    };
+    let mut ws_session = WSSession { auth, open: None };
 
     let result = loop {
         tokio::select! {
@@ -199,7 +225,15 @@ async fn run_session(
                     Err(e) => break Err(e),
                 }
             }
-            broadcast = sub.rx.recv() => {
+            // No broadcasts flow until a doc is open: the branch
+            // parks on a never-ready future rather than polling a
+            // subscription that doesn't exist yet.
+            broadcast = async {
+                match ws_session.open.as_mut() {
+                    Some(open) => open.sub.rx.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => {
                 let bytes = broadcast.ok_or(SessionError::BroadcastLagged)?;
                 let broadcast_span = tracing::info_span!(
                     "ws.broadcast_send",
@@ -210,11 +244,12 @@ async fn run_session(
             }
         }
     };
-    drop(sub);
-    if let Some(lease_id) = ws_session.snapshot_lease.take() {
-        state
-            .snapshot_coordinator
-            .release(ws_session.auth.primary_doc_id, lease_id);
+    // Dropping the open doc's subscription deregisters the subscriber;
+    // an unfinished snapshot lease goes back to the coordinator.
+    if let Some(open) = ws_session.open.take()
+        && let Some(lease_id) = open.snapshot_lease
+    {
+        state.snapshot_coordinator.release(open.doc_id, lease_id);
     }
     result
 }
@@ -226,20 +261,37 @@ async fn handle_frame(
     frame: ClientFrame,
 ) -> Result<(), SessionError> {
     match frame {
-        ClientFrame::PushOps { ops } => push_ops(socket, state, ws_session, ops).await,
-        ClientFrame::PullOps { since_seq } => {
-            pull_ops(socket, state, &ws_session.auth, since_seq).await
+        ClientFrame::OpenDoc { doc_id } => open_doc(socket, state, ws_session, doc_id).await,
+        ClientFrame::PushOps { doc_id, ops } => {
+            push_ops(socket, state, ws_session, doc_id, ops).await
         }
-        ClientFrame::Ack { last_acked_seq } => {
+        ClientFrame::PullOps { doc_id, since_seq } => {
+            ws_session.open_doc(doc_id)?;
+            pull_ops(socket, state, doc_id, since_seq).await
+        }
+        ClientFrame::Ack {
+            doc_id,
+            last_acked_seq,
+        } => {
+            ws_session.open_doc(doc_id)?;
             let ack_span = tracing::info_span!("ws.ack", last_acked_seq = last_acked_seq);
-            queries::advance_last_acked_seq(&state.db, ws_session.auth.device_id, last_acked_seq)
-                .await?;
-            evaluate_snapshot(socket, state, ws_session, last_acked_seq).await?;
+            queries::advance_last_acked_seq(
+                &state.db,
+                ws_session.auth.device_id,
+                doc_id,
+                last_acked_seq,
+            )
+            .await?;
+            evaluate_snapshot(socket, state, ws_session, doc_id, last_acked_seq).await?;
             tracing::debug!(parent: &ack_span, "ws ack applied");
             Ok(())
         }
-        ClientFrame::PullSnapshot => pull_snapshot(socket, state, &ws_session.auth).await,
+        ClientFrame::PullSnapshot { doc_id } => {
+            ws_session.open_doc(doc_id)?;
+            pull_snapshot(socket, state, doc_id).await
+        }
         ClientFrame::PushSnapshot {
+            doc_id,
             up_to_seq,
             compaction_floor_seq,
             from_seq,
@@ -249,6 +301,7 @@ async fn handle_frame(
             push_snapshot(
                 state,
                 ws_session,
+                doc_id,
                 up_to_seq,
                 compaction_floor_seq,
                 from_seq,
@@ -260,6 +313,65 @@ async fn handle_frame(
     }
 }
 
+/// Bind `doc_id` to the connection: access check, broadcast
+/// subscription, `DocOpened`. A refusal sends `DocRejected` and then
+/// ends the session — there is nothing else a client can usefully do
+/// on this connection, and a loud close beats a silent ignore.
+async fn open_doc(
+    socket: &mut WebSocket,
+    state: &AppState,
+    ws_session: &mut WSSession,
+    doc_id: Uuid,
+) -> Result<(), SessionError> {
+    let span = tracing::info_span!("ws.open_doc", doc_id = %doc_id);
+    async {
+        let refusal = if !can_open(&ws_session.auth, doc_id) {
+            Some("not a member of this doc")
+        } else if ws_session.open.as_ref().is_some_and(|o| o.doc_id != doc_id) {
+            // One doc per connection until multiplexing lands; make
+            // the limit explicit rather than silently swapping docs.
+            Some("connection already has a different doc open")
+        } else {
+            None
+        };
+        if let Some(reason) = refusal {
+            tracing::warn!(reason, "ws open_doc refused");
+            let _ = send_msgpack(
+                socket,
+                &ServerFrame::DocRejected {
+                    doc_id,
+                    reason: reason.into(),
+                },
+            )
+            .await;
+            return Err(SessionError::OpenRefused {
+                doc_id,
+                reason: reason.into(),
+            });
+        }
+        let epoch = queries::doc_epoch(&state.db, doc_id).await?;
+        if ws_session.open.is_none() {
+            // Subscribe *before* replying: once the client sees
+            // `DocOpened` it may rely on broadcasts for everything
+            // after its pull, so there must be no window in which a
+            // peer's push could slip past unregistered.
+            let sub = state
+                .sync_sessions
+                .subscribe(doc_id, ws_session.auth.device_id);
+            ws_session.open = Some(OpenDoc {
+                doc_id,
+                sub,
+                snapshot_lease: None,
+            });
+        }
+        send_msgpack(socket, &ServerFrame::DocOpened { doc_id, epoch }).await?;
+        tracing::info!(epoch, "ws doc opened");
+        Ok(())
+    }
+    .instrument(span)
+    .await
+}
+
 /// Read snapshot/horizon state, compute the decision. Does no sends —
 /// caller is responsible for emitting `SnapshotRequest` when the
 /// decision is `Issue`. Separating compute from send lets the push
@@ -269,10 +381,9 @@ async fn handle_frame(
 async fn evaluate_snapshot_decision(
     state: &AppState,
     ws_session: &WSSession,
+    doc_id: Uuid,
     device_last_acked_seq: u64,
 ) -> Result<Decision, SessionError> {
-    let account_id = ws_session.auth.account_id;
-    let doc_id = ws_session.auth.primary_doc_id;
     let prev = queries::latest_snapshot_meta(&state.db, doc_id)
         .await?
         .map(|m| PrevSnapshot {
@@ -281,12 +392,10 @@ async fn evaluate_snapshot_decision(
             up_to_vv: m.up_to_vv,
         });
     let server_last_seq = queries::latest_doc_seq(&state.db, doc_id).await?;
-    // Horizon stays account-scoped: devices are still per-account, and while
-    // each account has exactly one doc the per-account horizon equals the
-    // per-doc horizon. See `account_horizon` doc comment.
-    let horizon = queries::account_horizon(
+    let horizon = queries::doc_horizon(
         &state.db,
-        account_id,
+        doc_id,
+        ws_session.auth.account_id,
         ws_session.auth.device_id,
         device_last_acked_seq,
     )
@@ -304,6 +413,7 @@ async fn evaluate_snapshot_decision(
 async fn issue_snapshot_request(
     socket: &mut WebSocket,
     ws_session: &mut WSSession,
+    doc_id: Uuid,
     decision: Decision,
 ) -> Result<(), SessionError> {
     if let Decision::Issue {
@@ -313,11 +423,12 @@ async fn issue_snapshot_request(
         base,
     } = decision
     {
-        ws_session.snapshot_lease = Some(lease_id);
+        ws_session.open_doc(doc_id)?.snapshot_lease = Some(lease_id);
         let from_seq = base.as_ref().map(|b| b.seq);
         send_msgpack(
             socket,
             &ServerFrame::SnapshotRequest {
+                doc_id,
                 up_to_seq,
                 compaction_floor_seq,
                 base,
@@ -339,23 +450,34 @@ async fn evaluate_snapshot(
     socket: &mut WebSocket,
     state: &AppState,
     ws_session: &mut WSSession,
+    doc_id: Uuid,
     device_last_acked_seq: u64,
 ) -> Result<(), SessionError> {
-    let decision = evaluate_snapshot_decision(state, ws_session, device_last_acked_seq).await?;
-    issue_snapshot_request(socket, ws_session, decision).await
+    let decision =
+        evaluate_snapshot_decision(state, ws_session, doc_id, device_last_acked_seq).await?;
+    issue_snapshot_request(socket, ws_session, doc_id, decision).await
 }
 
 async fn push_ops(
     socket: &mut WebSocket,
     state: &AppState,
     ws_session: &mut WSSession,
+    doc_id: Uuid,
     ops: Vec<PushBlob>,
 ) -> Result<(), SessionError> {
+    let sub_id = ws_session.open_doc(doc_id)?.sub.sub_id();
     let push_span = tracing::info_span!("ws.push_ops", op_count = ops.len());
     if ops.is_empty() {
         return async {
             tracing::debug!("ws push_ops empty");
-            send_msgpack(socket, &ServerFrame::OpsAck { acks: Vec::new() }).await
+            send_msgpack(
+                socket,
+                &ServerFrame::OpsAck {
+                    doc_id,
+                    acks: Vec::new(),
+                },
+            )
+            .await
         }
         .instrument(push_span)
         .await;
@@ -365,13 +487,8 @@ async fn push_ops(
         // Insert with (device, push_id) dedup: a crash-retry of an
         // already-inserted push acks its original seq without a second
         // row.
-        let inserted = queries::insert_ops(
-            &state.db,
-            ws_session.auth.primary_doc_id,
-            ws_session.auth.device_id,
-            ops,
-        )
-        .await?;
+        let inserted =
+            queries::insert_ops(&state.db, doc_id, ws_session.auth.device_id, ops).await?;
 
         // Post-commit fan-out, before acking the originator — but only
         // the FRESH rows: a deduplicated retry was already broadcast on
@@ -381,11 +498,9 @@ async fn push_ops(
         // done pushing" signal.
         let fresh_count = inserted.fresh.len();
         if fresh_count > 0 {
-            state.sync_sessions.broadcast(
-                ws_session.auth.primary_doc_id,
-                ws_session.sub_id,
-                inserted.fresh,
-            );
+            state
+                .sync_sessions
+                .broadcast(doc_id, sub_id, inserted.fresh);
         }
 
         tracing::info!(
@@ -405,7 +520,7 @@ async fn push_ops(
         // landing a snapshot with `up_to < compaction_floor`, which
         // traps later bootstrappers in an infinite SnapshotRequired loop.
         let snapshot_decision = if let Some(latest_seq) = inserted.acks.last().map(|a| a.seq) {
-            Some(evaluate_snapshot_decision(state, ws_session, latest_seq).await?)
+            Some(evaluate_snapshot_decision(state, ws_session, doc_id, latest_seq).await?)
         } else {
             None
         };
@@ -413,13 +528,14 @@ async fn push_ops(
         send_msgpack(
             socket,
             &ServerFrame::OpsAck {
+                doc_id,
                 acks: inserted.acks,
             },
         )
         .await?;
 
         if let Some(decision) = snapshot_decision {
-            issue_snapshot_request(socket, ws_session, decision).await?;
+            issue_snapshot_request(socket, ws_session, doc_id, decision).await?;
         }
 
         Ok(())
@@ -431,11 +547,10 @@ async fn push_ops(
 async fn pull_ops(
     socket: &mut WebSocket,
     state: &AppState,
-    auth: &DeviceAuth,
+    doc_id: Uuid,
     since_seq: u64,
 ) -> Result<(), SessionError> {
     let pull_span = tracing::info_span!("ws.pull_ops", since_seq = since_seq);
-    let doc_id = auth.primary_doc_id;
     // Bootstrap-from-snapshot precondition: if the latest snapshot's
     // `up_to_seq` is ahead of the client's cursor, the client cannot
     // resume from ops alone (compacted ops below the floor are gone,
@@ -457,6 +572,7 @@ async fn pull_ops(
                 send_msgpack(
                     socket,
                     &ServerFrame::SnapshotRequired {
+                        doc_id,
                         up_to_seq: meta.up_to_seq,
                     },
                 )
@@ -476,6 +592,7 @@ async fn pull_ops(
             send_msgpack(
                 socket,
                 &ServerFrame::OpsBatch {
+                    doc_id,
                     ops: batch.ops,
                     complete,
                 },
@@ -499,15 +616,18 @@ async fn pull_ops(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn push_snapshot(
     state: &AppState,
     ws_session: &mut WSSession,
+    doc_id: Uuid,
     up_to_seq: u64,
     compaction_floor_seq: u64,
     from_seq: Option<u64>,
     up_to_vv: EncryptedBlob,
     blob: EncryptedBlob,
 ) -> Result<(), SessionError> {
+    let open = ws_session.open_doc(doc_id)?;
     let span = tracing::info_span!(
         "ws.push_snapshot",
         up_to_seq = up_to_seq,
@@ -516,17 +636,16 @@ async fn push_snapshot(
         blob_bytes = blob.ciphertext.len(),
     );
     async {
-        let Some(snapshot_lease) = ws_session.snapshot_lease else {
+        let Some(snapshot_lease) = open.snapshot_lease else {
             tracing::warn!("no snapshot lease found");
             return Ok(());
         };
-        let doc_id = ws_session.auth.primary_doc_id;
         let result = state.snapshot_coordinator.release(doc_id, snapshot_lease);
         if let ReleaseResult::Stale = result {
             tracing::warn!("ignoring unsolicited or stale PushSnapshot");
             return Ok(());
         }
-        ws_session.snapshot_lease = None;
+        open.snapshot_lease = None;
         // One lease per doc means at most one producer reaches this
         // insert at a time; the chain check inside `insert_snapshot`
         // is the backstop for a delta that no longer links to the
@@ -589,11 +708,11 @@ async fn push_snapshot(
 async fn pull_snapshot(
     socket: &mut WebSocket,
     state: &AppState,
-    auth: &DeviceAuth,
+    doc_id: Uuid,
 ) -> Result<(), SessionError> {
     let span = tracing::info_span!("ws.pull_snapshot");
     async {
-        match queries::snapshot_chain(&state.db, auth.primary_doc_id).await? {
+        match queries::snapshot_chain(&state.db, doc_id).await? {
             Some(chain) => {
                 tracing::info!(
                     up_to_seq = chain.up_to_seq,
@@ -609,6 +728,7 @@ async fn pull_snapshot(
                     send_msgpack(
                         socket,
                         &ServerFrame::Snapshot {
+                            doc_id,
                             up_to_seq: row.up_to_seq,
                             blob: row.blob,
                             complete: i == last,

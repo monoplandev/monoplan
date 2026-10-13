@@ -45,12 +45,22 @@ CREATE TABLE devices (
   account_id      BLOB NOT NULL REFERENCES accounts(id),
   name            TEXT NOT NULL,
   auth_token_hash TEXT NOT NULL,
-  last_acked_seq  INTEGER NOT NULL DEFAULT 0,              -- per-account contiguous-prefix frontier
   last_seen_at    INTEGER NOT NULL,
   last_seen_ip    TEXT,                                    -- client IP at last_seen_at; overwritten, never a history
   created_at      INTEGER NOT NULL
 );
 CREATE INDEX devices_account_id_idx ON devices (account_id);
+
+-- Per-(device, doc) contiguous-prefix frontier. Rows appear on first
+-- `Ack`; a device with no row is at 0. Revoking a device cascades its
+-- rows away, dropping it from every horizon it was pinning.
+CREATE TABLE device_doc_frontiers (
+  device_id        BLOB NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  doc_id           BLOB NOT NULL REFERENCES docs(id),
+  last_acked_seq   INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (device_id, doc_id)
+);
+CREATE INDEX device_doc_frontiers_doc_id_idx ON device_doc_frontiers (doc_id);
 
 -- Per-doc monotonic counter. UPDATEd in the same tx as the op
 -- insert so seqs are dense and gap-free for any single doc.
@@ -102,7 +112,7 @@ Snapshot rows form one linear **chain** per doc: a full snapshot (`from_seq IS N
 
 The `doc_sequences` row for a doc is created on first `insert_ops` via `INSERT … ON CONFLICT DO UPDATE`, so signup doesn't need a separate seed step. Reads (`SELECT seq … ORDER BY seq`) never touch the counter; only writers contend on the per-doc row.
 
-`devices.last_acked_seq` stays per-device. While each account has exactly one doc (today's 1:1 between account and doc), per-device equals per-(device, doc); the field's value lives in the doc's seq space. Per-(device, doc) frontiers are needed when an account joins multiple docs; deferred — see `sharing-plan.md`.
+Device frontiers are per-(device, doc) in `device_doc_frontiers`, keyed to match the per-doc `seq` space they live in. The row is upserted on `Ack` and only ever moves forward. `GET /api/devices` reports each device's frontier on the account's primary doc.
 
 ## Insertion order at signup
 
@@ -120,7 +130,7 @@ After a snapshot lands, a background job may, per doc:
 1. Delete `ops` rows where `doc_id = X AND seq ≤ snapshot.compaction_floor_seq`. (`compaction_floor_seq` is set to `max(horizon, prev snapshot's compaction_floor_seq)` at snapshot creation time by the orchestrator — see `sync-protocol.md` §"Snapshot orchestration" — so it's safe by construction.)
 2. Snapshot rows are never deleted. The chain is one full head plus every delta since; superseding it is the trimmed snapshot's job (§Epochs, not built), and the pruning rule will be written with it.
 
-Horizon is computed from `devices.last_acked_seq` for the account that owns the doc — same value as the per-doc horizon while the 1:1 holds.
+Horizon is `min(last_acked_seq)` over the doc's `device_doc_frontiers` rows across the devices of every account that can open it — today the owning account's devices, joined so that a device with no row counts as 0.
 
 Run on a timer, not synchronous with snapshot upload. The `doc_sequences.next_seq` counter is **not** rewound by compaction — `next_seq` keeps climbing even when the rows below the snapshot floor are pruned.
 
@@ -136,7 +146,7 @@ Where it lives and what each copy is for:
 
 `seq` never resets at an epoch boundary; `since_seq`, acks and the push_id dedup index all keep working across epochs.
 
-Compatibility rule (for when trimming lands): a device whose `last_acked_seq` is at or above the current epoch's trim floor stays compatible and keeps delta-pulling and pushing. Its unsent work was created against a frontier it had already pushed past (the ack-after-push client invariant), so it sits at or after the shallow root. A device below the floor must bootstrap from the trimmed snapshot and rebase unsent work. The server enforces this on push from `devices.last_acked_seq` against the floor; it needs no client declaration, though the wire will also carry `epoch` for clarity. Rejecting on push matters because a stale-history blob that lands would stall every device's import at that seq.
+Compatibility rule (for when trimming lands): a device whose `last_acked_seq` is at or above the current epoch's trim floor stays compatible and keeps delta-pulling and pushing. Its unsent work was created against a frontier it had already pushed past (the ack-after-push client invariant), so it sits at or after the shallow root. A device below the floor must bootstrap from the trimmed snapshot and rebase unsent work. The server enforces this on push from the device's `device_doc_frontiers` row against the floor; it needs no client declaration, though the wire will also carry `epoch` for clarity. Rejecting on push matters because a stale-history blob that lands would stall every device's import at that seq.
 
 ## Sqlite settings
 

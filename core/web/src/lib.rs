@@ -1419,7 +1419,7 @@ impl SyncEngine {
         self.inner.last_contiguous_seq()
     }
 
-    /// The doc's history epoch from the last `HelloAck`, or
+    /// The doc's history epoch from the last `DocOpened`, or
     /// `undefined` before the first successful handshake.
     #[wasm_bindgen(js_name = serverEpoch)]
     pub fn server_epoch(&self) -> Option<u64> {

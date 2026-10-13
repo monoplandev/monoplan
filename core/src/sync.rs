@@ -36,8 +36,17 @@
 //!        │                 │       mid-push│  │ ack arrived &   │
 //!     HelloAck             │               ▼  │ nothing more    │
 //!        ▼                 │       PushingDirty                 │
+//!     Opening              │                                    │
+//!        │                 │                                    │
+//!     DocOpened            │                                    │
+//!        ▼                 │                                    │
 //!     Pulling ── complete ─▶ Idle ◀──────────────────────────── ┘
 //! ```
+//!
+//! Every payload frame in both directions names the doc it is about
+//! (`doc_id`); the engine stamps its own on the way out and drops any
+//! inbound frame for another doc. A host that multiplexes several
+//! docs over one socket routes by that field.
 
 use std::collections::VecDeque;
 
@@ -100,6 +109,8 @@ pub struct EngineOptions {
 enum ConnState {
     Disconnected,
     Hello,
+    /// `HelloAck` received; `OpenDoc` sent, awaiting `DocOpened`.
+    Opening,
     Pulling,
     /// Snapshot bootstrap path: we've received `SnapshotRequired`,
     /// emitted `PullSnapshot`, and are waiting for the `Snapshot`
@@ -166,7 +177,7 @@ pub struct SyncEngine {
     /// `notify_oplog_durable`.
     last_contiguous_seq: u64,
     /// The doc's history epoch as reported by the server on the last
-    /// `HelloAck` (`spec/storage.md` §Epochs). `None` until the first
+    /// `DocOpened` (`spec/storage.md` §Epochs). `None` until the first
     /// successful handshake. Display-only today.
     server_epoch: Option<u64>,
     /// Contiguous-prefix seq the host has confirmed locally durable
@@ -432,7 +443,7 @@ impl SyncEngine {
         self.last_contiguous_seq
     }
 
-    /// The doc's history epoch from the last `HelloAck`, or `None`
+    /// The doc's history epoch from the last `DocOpened`, or `None`
     /// before the first successful handshake.
     pub fn server_epoch(&self) -> Option<u64> {
         self.server_epoch
@@ -556,7 +567,7 @@ impl SyncEngine {
     /// this periodically (e.g., every ~1s via setInterval /
     /// tokio::time::interval).
     pub fn handle_timeout(&mut self) {
-        if matches!(self.state, ConnState::Hello) {
+        if matches!(self.state, ConnState::Hello | ConnState::Opening) {
             self.events
                 .push_back(Event::Error("handshake timed out".into()));
         }
@@ -571,7 +582,8 @@ impl SyncEngine {
                 ));
             }
             ConnState::Hello => self.handle_hello_response(bytes),
-            ConnState::Pulling
+            ConnState::Opening
+            | ConnState::Pulling
             | ConnState::Bootstrapping
             | ConnState::Idle
             | ConnState::Pushing
@@ -591,6 +603,7 @@ impl SyncEngine {
             ConnState::PushingDirty
             | ConnState::Pulling
             | ConnState::Bootstrapping
+            | ConnState::Opening
             | ConnState::Hello
             | ConnState::Disconnected => {
                 // Nothing to send right now — the next Idle transition
@@ -614,14 +627,15 @@ impl SyncEngine {
                 self.go_disconnected();
                 return;
             }
-            self.server_epoch = Some(ack.epoch);
-            self.state = ConnState::Pulling;
-            let frame = ClientFrame::PullOps {
-                since_seq: self.last_contiguous_seq,
+            // Version agreed; now bind our doc to the connection. The
+            // pull waits for `DocOpened`, which also carries the epoch.
+            self.state = ConnState::Opening;
+            let frame = ClientFrame::OpenDoc {
+                doc_id: self.doc_id.0,
             };
             if let Err(e) = self.encode_into_outbox(&frame) {
                 self.events
-                    .push_back(Event::Error(format!("encode PullOps: {e}")));
+                    .push_back(Event::Error(format!("encode OpenDoc: {e}")));
                 self.go_disconnected();
             }
             return;
@@ -647,8 +661,51 @@ impl SyncEngine {
                 return;
             }
         };
+        // Every payload frame names its doc. This engine drives exactly
+        // one, so anything else is a routing error upstream — surface
+        // it and leave the state machine untouched.
+        if frame.doc_id() != self.doc_id.0 {
+            self.events.push_back(Event::Error(format!(
+                "frame for doc {} but this engine syncs {}",
+                frame.doc_id(),
+                self.doc_id.0
+            )));
+            return;
+        }
         match frame {
-            ServerFrame::OpsBatch { ops, complete } => {
+            ServerFrame::DocOpened { doc_id: _, epoch } => {
+                if !matches!(self.state, ConnState::Opening) {
+                    self.events.push_back(Event::Error(format!(
+                        "DocOpened received in unexpected state {:?}",
+                        self.state
+                    )));
+                    return;
+                }
+                self.server_epoch = Some(epoch);
+                self.state = ConnState::Pulling;
+                let frame = ClientFrame::PullOps {
+                    doc_id: self.doc_id.0,
+                    since_seq: self.last_contiguous_seq,
+                };
+                if let Err(e) = self.encode_into_outbox(&frame) {
+                    self.events
+                        .push_back(Event::Error(format!("encode PullOps: {e}")));
+                    self.go_disconnected();
+                }
+            }
+            ServerFrame::DocRejected { doc_id: _, reason } => {
+                // The server closes after this; nothing on this
+                // connection can succeed, so go down now rather than
+                // wait for the socket to drop.
+                self.events
+                    .push_back(Event::Error(format!("doc rejected: {reason}")));
+                self.go_disconnected();
+            }
+            ServerFrame::OpsBatch {
+                doc_id: _,
+                ops,
+                complete,
+            } => {
                 if matches!(self.state, ConnState::Bootstrapping) {
                     self.events.push_back(Event::Error(
                         "OpsBatch received during Bootstrapping".into(),
@@ -669,7 +726,7 @@ impl SyncEngine {
                     self.try_start_push();
                 }
             }
-            ServerFrame::OpsBroadcast { ops } => {
+            ServerFrame::OpsBroadcast { doc_id: _, ops } => {
                 if matches!(self.state, ConnState::Bootstrapping) {
                     // Broadcasts during bootstrap would either re-fire
                     // AppEvents on next pull or land before the snapshot
@@ -680,7 +737,7 @@ impl SyncEngine {
                 self.apply_remote_ops(ops);
                 // Ack gated on host's `notify_oplog_durable`.
             }
-            ServerFrame::OpsAck { acks } => {
+            ServerFrame::OpsAck { doc_id: _, acks } => {
                 if !matches!(self.state, ConnState::Pushing | ConnState::PushingDirty) {
                     self.events.push_back(Event::Error(format!(
                         "OpsAck received in unexpected state {:?}",
@@ -743,7 +800,10 @@ impl SyncEngine {
                 // when nothing is pending.
                 self.try_start_push();
             }
-            ServerFrame::SnapshotRequired { up_to_seq: _ } => {
+            ServerFrame::SnapshotRequired {
+                doc_id: _,
+                up_to_seq: _,
+            } => {
                 if !matches!(self.state, ConnState::Pulling) {
                     self.events.push_back(Event::Error(format!(
                         "SnapshotRequired received in unexpected state {:?}",
@@ -754,7 +814,9 @@ impl SyncEngine {
                 // `up_to_seq` is informational — the authoritative
                 // value is the one returned in the `Snapshot` frame.
                 self.state = ConnState::Bootstrapping;
-                let frame = ClientFrame::PullSnapshot;
+                let frame = ClientFrame::PullSnapshot {
+                    doc_id: self.doc_id.0,
+                };
                 if let Err(e) = self.encode_into_outbox(&frame) {
                     self.events
                         .push_back(Event::Error(format!("encode PullSnapshot: {e}")));
@@ -762,6 +824,7 @@ impl SyncEngine {
                 }
             }
             ServerFrame::Snapshot {
+                doc_id: _,
                 up_to_seq,
                 blob,
                 complete,
@@ -851,6 +914,7 @@ impl SyncEngine {
                 // snapshot was taken.
                 self.state = ConnState::Pulling;
                 let frame = ClientFrame::PullOps {
+                    doc_id: self.doc_id.0,
                     since_seq: self.last_contiguous_seq,
                 };
                 if let Err(e) = self.encode_into_outbox(&frame) {
@@ -860,6 +924,7 @@ impl SyncEngine {
                 }
             }
             ServerFrame::SnapshotRequest {
+                doc_id: _,
                 up_to_seq: _,
                 compaction_floor_seq,
                 base,
@@ -922,6 +987,7 @@ impl SyncEngine {
                     }
                 };
                 let frame = ClientFrame::PushSnapshot {
+                    doc_id: self.doc_id.0,
                     up_to_seq: self.last_contiguous_seq,
                     compaction_floor_seq,
                     from_seq: base.as_ref().map(|b| b.seq),
@@ -1040,6 +1106,7 @@ impl SyncEngine {
     fn queue_ack_if_advanced(&mut self) {
         if self.last_durable_seq > self.last_sent_ack {
             let ack = ClientFrame::Ack {
+                doc_id: self.doc_id.0,
                 last_acked_seq: self.last_durable_seq,
             };
             if self.encode_into_outbox(&ack).is_ok() {
@@ -1099,6 +1166,7 @@ impl SyncEngine {
         }
         let in_flight = self.in_flight.as_ref().expect("just ensured");
         let frame = ClientFrame::PushOps {
+            doc_id: self.doc_id.0,
             ops: vec![PushBlob {
                 push_id: in_flight.push_id.0,
                 blob: in_flight.payload.clone(),
@@ -1151,10 +1219,32 @@ mod tests {
         Box::new(MemStorage::new())
     }
 
-    /// Tests don't care which doc — the trait isn't load-bearing on
-    /// the wire yet, and `MemStorage` instances are per-engine.
+    /// The one doc every test engine syncs. `MemStorage` instances are
+    /// per-engine, so the value only has to match between the engine
+    /// and the frames a test feeds it.
+    const DOC: uuid::Uuid = uuid::Uuid::nil();
+
     fn fake_doc_id() -> DocId {
-        DocId(uuid::Uuid::nil())
+        DocId(DOC)
+    }
+
+    /// Drive a freshly connected engine from `Hello` to `Pulling`:
+    /// accept the version, consume the `OpenDoc` that provokes, and
+    /// open the doc. Leaves the engine's `PullOps` in the outbox.
+    fn open_doc(eng: &mut SyncEngine) {
+        eng.handle_server_bytes(&enc(&HelloAck {
+            server_version: "s".into(),
+            protocol_version: PROTOCOL_VERSION,
+        }));
+        let open: ClientFrame = dec(&eng.pop_outbox().expect("OpenDoc after HelloAck"));
+        assert!(
+            matches!(open, ClientFrame::OpenDoc { doc_id } if doc_id == DOC),
+            "expected OpenDoc for the engine's doc, got {open:?}"
+        );
+        eng.handle_server_bytes(&enc(&ServerFrame::DocOpened {
+            doc_id: DOC,
+            epoch: 0,
+        }));
     }
 
     /// Engine over a fresh doc. Its seeded built-ins are pending
@@ -1213,9 +1303,10 @@ mod tests {
     fn ack_frame(push_bytes: &[u8], seq: u64) -> ServerFrame {
         let frame: ClientFrame = dec(push_bytes);
         match frame {
-            ClientFrame::PushOps { ops } => {
+            ClientFrame::PushOps { ops, .. } => {
                 assert_eq!(ops.len(), 1, "engine ships exactly one blob per push");
                 ServerFrame::OpsAck {
+                    doc_id: DOC,
                     acks: vec![PushAck {
                         push_id: ops[0].push_id,
                         seq,
@@ -1233,15 +1324,12 @@ mod tests {
         let _hello = eng
             .pop_outbox()
             .expect("Hello should be queued after handle_connected()");
-        eng.handle_server_bytes(&enc(&HelloAck {
-            server_version: "test".into(),
-            protocol_version: PROTOCOL_VERSION,
-            epoch: 0,
-        }));
+        open_doc(eng);
         let _pull = eng
             .pop_outbox()
             .expect("PullOps should be queued after successful HelloAck()");
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
             ops: vec![],
             complete: true,
         }));
@@ -1275,15 +1363,12 @@ mod tests {
             [Event::ConnStateChanged { online: true }]
         ));
 
-        eng.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: PROTOCOL_VERSION,
-            epoch: 0,
-        }));
+        open_doc(&mut eng);
         let pull: ClientFrame = dec(&eng.pop_outbox().unwrap());
-        assert!(matches!(pull, ClientFrame::PullOps { since_seq: 0 }));
+        assert!(matches!(pull, ClientFrame::PullOps { since_seq: 0, .. }));
 
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
             ops: vec![],
             complete: true,
         }));
@@ -1303,13 +1388,10 @@ mod tests {
         let mut eng = fresh_engine();
         eng.handle_connected();
         let _hello = eng.pop_outbox().unwrap();
-        eng.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: PROTOCOL_VERSION,
-            epoch: 0,
-        }));
+        open_doc(&mut eng);
         let _pull = eng.pop_outbox().unwrap();
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
             ops: vec![],
             complete: true,
         }));
@@ -1347,7 +1429,6 @@ mod tests {
         eng.handle_server_bytes(&enc(&HelloAck {
             server_version: "s".into(),
             protocol_version: 9999,
-            epoch: 0,
         }));
         assert!(!eng.is_online());
         let events = drain_events(&mut eng);
@@ -1405,7 +1486,13 @@ mod tests {
         // Host signals "WAL row covering seq 1 is on disk" → ack ships.
         eng.notify_oplog_durable(1);
         let ack: ClientFrame = dec(&eng.pop_outbox().expect("Ack"));
-        assert!(matches!(ack, ClientFrame::Ack { last_acked_seq: 1 }));
+        assert!(matches!(
+            ack,
+            ClientFrame::Ack {
+                last_acked_seq: 1,
+                ..
+            }
+        ));
 
         // No double-push: `server_known_vv` covers the acked ops.
         eng.flush();
@@ -1506,20 +1593,17 @@ mod tests {
         // Idle.)
         eng.handle_connected();
         let _hello = eng.pop_outbox().unwrap();
-        eng.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: PROTOCOL_VERSION,
-            epoch: 0,
-        }));
+        open_doc(&mut eng);
         let _pull = eng.pop_outbox().unwrap();
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
             ops: vec![],
             complete: true,
         }));
         let push_bytes = eng.pop_outbox().expect("push of folded-but-unsent op");
         let frame: ClientFrame = dec(&push_bytes);
         let blob = match frame {
-            ClientFrame::PushOps { ops } => ops.into_iter().next().unwrap().blob,
+            ClientFrame::PushOps { ops, .. } => ops.into_iter().next().unwrap().blob,
             other => panic!("expected PushOps, got {other:?}"),
         };
         // A peer applying the blob sees the folded op.
@@ -1595,13 +1679,13 @@ mod tests {
         let dek = eng.dek.clone();
         let frame: ClientFrame = dec(&follow_up);
         let blob = match frame {
-            ClientFrame::PushOps { ops } => ops.into_iter().next().unwrap().blob,
+            ClientFrame::PushOps { ops, .. } => ops.into_iter().next().unwrap().blob,
             other => panic!("expected PushOps, got {other:?}"),
         };
         let mut peer = Doc::new().unwrap();
         // Peer needs the first push too for causal completeness.
         let first_frame: ClientFrame = dec(&first_push);
-        if let ClientFrame::PushOps { ops } = first_frame {
+        if let ClientFrame::PushOps { ops, .. } = first_frame {
             peer.apply_remote(&dek, &ops[0].blob).unwrap();
         }
         peer.apply_remote(&dek, &blob).unwrap();
@@ -1613,11 +1697,7 @@ mod tests {
         let mut eng = fresh_engine_clean();
         eng.handle_connected();
         let _ = eng.pop_outbox().unwrap();
-        eng.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: PROTOCOL_VERSION,
-            epoch: 0,
-        }));
+        open_doc(&mut eng);
         let _ = eng.pop_outbox().unwrap(); // PullOps
 
         // User mutates and flushes while we're still Pulling.
@@ -1627,6 +1707,7 @@ mod tests {
 
         // Pull completes — engine should self-trigger the push.
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
             ops: vec![],
             complete: true,
         }));
@@ -1645,6 +1726,7 @@ mod tests {
             d.add_item(LIST_INBOX, "from peer").unwrap();
         });
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+            doc_id: DOC,
             ops: vec![StoredBlob {
                 seq: 1,
                 blob: remote_blob,
@@ -1667,7 +1749,13 @@ mod tests {
         );
         eng.notify_oplog_durable(1);
         let ack: ClientFrame = dec(&eng.pop_outbox().expect("Ack"));
-        assert!(matches!(ack, ClientFrame::Ack { last_acked_seq: 1 }));
+        assert!(matches!(
+            ack,
+            ClientFrame::Ack {
+                last_acked_seq: 1,
+                ..
+            }
+        ));
 
         // Local doc reflects the applied peer op.
         let names: Vec<_> = eng
@@ -1695,6 +1783,7 @@ mod tests {
         let _ = drain_outbox(&mut eng);
 
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
             ops: vec![
                 StoredBlob {
                     seq: 1,
@@ -1724,7 +1813,13 @@ mod tests {
         assert!(eng.pop_outbox().is_none());
         eng.notify_oplog_durable(2);
         let ack: ClientFrame = dec(&eng.pop_outbox().expect("Ack"));
-        assert!(matches!(ack, ClientFrame::Ack { last_acked_seq: 2 }));
+        assert!(matches!(
+            ack,
+            ClientFrame::Ack {
+                last_acked_seq: 2,
+                ..
+            }
+        ));
         assert_eq!(eng.last_contiguous_seq(), 2);
         assert_eq!(eng.last_durable_seq(), 2);
     }
@@ -1746,6 +1841,7 @@ mod tests {
             d.add_item(LIST_INBOX, "peer-during-push").unwrap();
         });
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+            doc_id: DOC,
             ops: vec![StoredBlob {
                 seq: 1,
                 blob: remote_blob,
@@ -1778,17 +1874,14 @@ mod tests {
         let dek = eng.dek.clone();
         eng.handle_connected();
         let _ = eng.pop_outbox().unwrap();
-        eng.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: PROTOCOL_VERSION,
-            epoch: 0,
-        }));
+        open_doc(&mut eng);
         let _ = eng.pop_outbox().unwrap();
 
         let blob1 = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "p1").unwrap();
         });
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
             ops: vec![StoredBlob {
                 seq: 1,
                 blob: blob1,
@@ -1803,6 +1896,7 @@ mod tests {
             d.add_item(LIST_INBOX, "p2").unwrap();
         });
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
             ops: vec![StoredBlob {
                 seq: 2,
                 blob: blob2,
@@ -1839,7 +1933,7 @@ mod tests {
         eng.flush();
         let first_push = eng.pop_outbox().unwrap();
         let first_id = match dec::<ClientFrame>(&first_push) {
-            ClientFrame::PushOps { ops } => ops[0].push_id,
+            ClientFrame::PushOps { ops, .. } => ops[0].push_id,
             other => panic!("expected PushOps, got {other:?}"),
         };
         let _ = drain_events(&mut eng);
@@ -1852,19 +1946,16 @@ mod tests {
         // Re-connect, run an empty pull; the retry ships the same id.
         eng.handle_connected();
         let _ = eng.pop_outbox().unwrap();
-        eng.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: PROTOCOL_VERSION,
-            epoch: 0,
-        }));
+        open_doc(&mut eng);
         let _ = eng.pop_outbox().unwrap();
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
             ops: vec![],
             complete: true,
         }));
         let retry = eng.pop_outbox().expect("re-push after reconnect");
         match dec::<ClientFrame>(&retry) {
-            ClientFrame::PushOps { ops } => assert_eq!(ops[0].push_id, first_id),
+            ClientFrame::PushOps { ops, .. } => assert_eq!(ops[0].push_id, first_id),
             other => panic!("expected PushOps, got {other:?}"),
         }
 
@@ -1902,19 +1993,16 @@ mod tests {
         // Pushing rather than Idle.
         eng.handle_connected();
         let _hello = eng.pop_outbox().unwrap();
-        eng.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: PROTOCOL_VERSION,
-            epoch: 0,
-        }));
+        open_doc(&mut eng);
         let _pull = eng.pop_outbox().unwrap();
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
             ops: vec![],
             complete: true,
         }));
         let retry = eng.pop_outbox().expect("seeded push resent");
         match dec::<ClientFrame>(&retry) {
-            ClientFrame::PushOps { ops } => assert_eq!(ops[0].push_id, push.push_id.0),
+            ClientFrame::PushOps { ops, .. } => assert_eq!(ops[0].push_id, push.push_id.0),
             other => panic!("expected PushOps, got {other:?}"),
         }
 
@@ -1950,6 +2038,7 @@ mod tests {
             d.add_item(LIST_INBOX, "peer").unwrap();
         });
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+            doc_id: DOC,
             ops: vec![StoredBlob {
                 seq: 1,
                 blob: remote_blob,
@@ -1992,6 +2081,7 @@ mod tests {
             d.add_item(LIST_INBOX, "dup").unwrap();
         });
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+            doc_id: DOC,
             ops: vec![StoredBlob {
                 seq: 1,
                 blob: remote_blob.clone(),
@@ -2004,6 +2094,7 @@ mod tests {
         eng.server_known_vv = vv.clone();
         // Re-deliver the same blob at the same seq (re-pull overlap).
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
             ops: vec![StoredBlob {
                 seq: 1,
                 blob: remote_blob,
@@ -2043,6 +2134,7 @@ mod tests {
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
         eng.handle_server_bytes(&enc(&ServerFrame::OpsAck {
+            doc_id: DOC,
             acks: vec![PushAck {
                 push_id: uuid::Uuid::new_v4(),
                 seq: 42,
@@ -2059,13 +2151,9 @@ mod tests {
         let mut eng = SyncEngine::new(doc, fake_doc_id(), Dek::generate(), 42, opts(), mem());
         eng.handle_connected();
         let _hello = eng.pop_outbox().unwrap();
-        eng.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: PROTOCOL_VERSION,
-            epoch: 0,
-        }));
+        open_doc(&mut eng);
         let pull: ClientFrame = dec(&eng.pop_outbox().unwrap());
-        assert!(matches!(pull, ClientFrame::PullOps { since_seq: 42 }));
+        assert!(matches!(pull, ClientFrame::PullOps { since_seq: 42, .. }));
     }
 
     #[test]
@@ -2083,6 +2171,7 @@ mod tests {
             d.add_item(LIST_INBOX, "synced-peer-item").unwrap();
         });
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+            doc_id: DOC,
             ops: vec![StoredBlob {
                 seq: 1,
                 blob: peer_blob,
@@ -2094,6 +2183,7 @@ mod tests {
         let unsent_id = eng.doc_mut().add_item(LIST_INBOX, "unsent-local").unwrap();
 
         eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequest {
+            doc_id: DOC,
             up_to_seq: 1,
             compaction_floor_seq: 0,
             base: None,
@@ -2101,6 +2191,7 @@ mod tests {
         let push: ClientFrame = dec(&eng.pop_outbox().expect("PushSnapshot"));
         let (tagged_up_to, tagged_floor, from_seq, up_to_vv, blob) = match push {
             ClientFrame::PushSnapshot {
+                doc_id: _,
                 up_to_seq,
                 compaction_floor_seq,
                 from_seq,
@@ -2151,6 +2242,7 @@ mod tests {
             d.add_item(LIST_INBOX, "first").unwrap();
         });
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+            doc_id: DOC,
             ops: vec![StoredBlob {
                 seq: 1,
                 blob: first,
@@ -2163,6 +2255,7 @@ mod tests {
             d.add_item(LIST_INBOX, "second").unwrap();
         });
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+            doc_id: DOC,
             ops: vec![StoredBlob {
                 seq: 2,
                 blob: second,
@@ -2172,6 +2265,7 @@ mod tests {
         let unsent_id = eng.doc_mut().add_item(LIST_INBOX, "unsent-local").unwrap();
 
         eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequest {
+            doc_id: DOC,
             up_to_seq: 2,
             compaction_floor_seq: 0,
             base: Some(SnapshotBase {
@@ -2182,6 +2276,7 @@ mod tests {
         let push: ClientFrame = dec(&eng.pop_outbox().expect("PushSnapshot"));
         let (up_to, from_seq, up_to_vv, delta) = match push {
             ClientFrame::PushSnapshot {
+                doc_id: _,
                 up_to_seq,
                 from_seq,
                 up_to_vv,
@@ -2234,6 +2329,7 @@ mod tests {
         let foreign_vv = VersionVector::decode(&foreign.oplog_vv_bytes()).unwrap();
         assert!(!foreign_vv.is_empty());
         eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequest {
+            doc_id: DOC,
             up_to_seq: 0,
             compaction_floor_seq: 0,
             base: Some(SnapshotBase {
@@ -2255,6 +2351,7 @@ mod tests {
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
         eng.handle_server_bytes(&enc(&ServerFrame::Snapshot {
+            doc_id: DOC,
             up_to_seq: 99,
             blob: EncryptedBlob {
                 nonce: vec![0; 24],
@@ -2283,23 +2380,23 @@ mod tests {
         );
         eng.handle_connected();
         let _ = eng.pop_outbox().unwrap();
-        eng.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: PROTOCOL_VERSION,
-            epoch: 0,
-        }));
+        open_doc(&mut eng);
         let _ = eng.pop_outbox().unwrap(); // PullOps
 
         // Server says cursor is below the floor.
-        eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequired { up_to_seq: 42 }));
+        eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequired {
+            doc_id: DOC,
+            up_to_seq: 42,
+        }));
         let pull_snap: ClientFrame = dec(&eng.pop_outbox().expect("PullSnapshot"));
-        assert!(matches!(pull_snap, ClientFrame::PullSnapshot));
+        assert!(matches!(pull_snap, ClientFrame::PullSnapshot { .. }));
         assert!(!eng.is_idle());
 
         let snapshot_blob = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "from-snapshot").unwrap();
         });
         eng.handle_server_bytes(&enc(&ServerFrame::Snapshot {
+            doc_id: DOC,
             up_to_seq: 42,
             blob: snapshot_blob.clone(),
             complete: true,
@@ -2339,12 +2436,18 @@ mod tests {
         assert!(
             frames
                 .iter()
-                .any(|f| matches!(f, ClientFrame::PullOps { since_seq: 42 }))
+                .any(|f| matches!(f, ClientFrame::PullOps { since_seq: 42, .. }))
         );
 
         eng.notify_oplog_durable(42);
         let ack: ClientFrame = dec(&eng.pop_outbox().expect("Ack"));
-        assert!(matches!(ack, ClientFrame::Ack { last_acked_seq: 42 }));
+        assert!(matches!(
+            ack,
+            ClientFrame::Ack {
+                last_acked_seq: 42,
+                ..
+            }
+        ));
 
         assert!(
             eng.doc()
@@ -2354,6 +2457,7 @@ mod tests {
         );
 
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
             ops: vec![],
             complete: true,
         }));
@@ -2385,18 +2489,18 @@ mod tests {
 
         eng.handle_connected();
         let _ = eng.pop_outbox().unwrap();
-        eng.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: PROTOCOL_VERSION,
-            epoch: 0,
-        }));
+        open_doc(&mut eng);
         let _ = eng.pop_outbox().unwrap(); // PullOps
-        eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequired { up_to_seq: 42 }));
+        eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequired {
+            doc_id: DOC,
+            up_to_seq: 42,
+        }));
         let _ = eng.pop_outbox().unwrap(); // PullSnapshot
         let snapshot_blob = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "from-snapshot").unwrap();
         });
         eng.handle_server_bytes(&enc(&ServerFrame::Snapshot {
+            doc_id: DOC,
             up_to_seq: 42,
             blob: snapshot_blob,
             complete: true,
@@ -2418,15 +2522,16 @@ mod tests {
         // The Snapshot frame queued the resume PullOps — drain it
         // before finishing the catch-up.
         let resume: ClientFrame = dec(&eng.pop_outbox().expect("resume PullOps"));
-        assert!(matches!(resume, ClientFrame::PullOps { since_seq: 42 }));
+        assert!(matches!(resume, ClientFrame::PullOps { since_seq: 42, .. }));
         // Finish the catch-up; the push derives the unsent op.
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
             ops: vec![],
             complete: true,
         }));
         let push = eng.pop_outbox().expect("push of unsent local op");
         let blob = match dec::<ClientFrame>(&push) {
-            ClientFrame::PushOps { ops } => ops.into_iter().next().unwrap().blob,
+            ClientFrame::PushOps { ops, .. } => ops.into_iter().next().unwrap().blob,
             other => panic!("expected PushOps, got {other:?}"),
         };
         // Applied on top of the snapshot state, the delta must carry
@@ -2441,19 +2546,19 @@ mod tests {
         let mut eng = SyncEngine::new(Doc::empty(), fake_doc_id(), dek.clone(), 0, opts(), mem());
         eng.handle_connected();
         let _ = eng.pop_outbox().unwrap();
-        eng.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: PROTOCOL_VERSION,
-            epoch: 0,
-        }));
+        open_doc(&mut eng);
         let _ = eng.pop_outbox().unwrap(); // PullOps
-        eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequired { up_to_seq: 10 }));
+        eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequired {
+            doc_id: DOC,
+            up_to_seq: 10,
+        }));
         let _ = eng.pop_outbox().unwrap(); // PullSnapshot
 
         let stray = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "should-not-appear").unwrap();
         });
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+            doc_id: DOC,
             ops: vec![StoredBlob {
                 seq: 11,
                 blob: stray,
@@ -2501,19 +2606,18 @@ mod tests {
         // -- A connects; the pull-complete triggers its seed push --
         a.handle_connected();
         let _ = a.pop_outbox().unwrap();
-        a.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: PROTOCOL_VERSION,
-            epoch: 0,
-        }));
+        open_doc(&mut a);
         let _ = a.pop_outbox().unwrap();
         a.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
             ops: vec![],
             complete: true,
         }));
         // Drain A's pushes; store + ack each.
         while let Some(bytes) = a.pop_outbox() {
-            if let Ok(ClientFrame::PushOps { ops }) = rmp_serde::from_slice::<ClientFrame>(&bytes) {
+            if let Ok(ClientFrame::PushOps { ops, .. }) =
+                rmp_serde::from_slice::<ClientFrame>(&bytes)
+            {
                 let mut acks = Vec::new();
                 for op in ops {
                     next_seq += 1;
@@ -2526,7 +2630,7 @@ mod tests {
                         seq: next_seq,
                     });
                 }
-                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { acks }));
+                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { doc_id: DOC, acks }));
             }
         }
 
@@ -2534,7 +2638,9 @@ mod tests {
         let item_id = a.doc_mut().add_item(LIST_INBOX, "snapshotted").unwrap();
         a.flush();
         while let Some(bytes) = a.pop_outbox() {
-            if let Ok(ClientFrame::PushOps { ops }) = rmp_serde::from_slice::<ClientFrame>(&bytes) {
+            if let Ok(ClientFrame::PushOps { ops, .. }) =
+                rmp_serde::from_slice::<ClientFrame>(&bytes)
+            {
                 let mut acks = Vec::new();
                 for op in ops {
                     next_seq += 1;
@@ -2547,7 +2653,7 @@ mod tests {
                         seq: next_seq,
                     });
                 }
-                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { acks }));
+                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { doc_id: DOC, acks }));
             }
         }
         let _ = drain_outbox(&mut a);
@@ -2555,6 +2661,7 @@ mod tests {
 
         // -- Server requests a full snapshot from A --
         a.handle_server_bytes(&enc(&ServerFrame::SnapshotRequest {
+            doc_id: DOC,
             up_to_seq: next_seq,
             compaction_floor_seq: next_seq,
             base: None,
@@ -2562,6 +2669,7 @@ mod tests {
         let push: ClientFrame = dec(&a.pop_outbox().expect("PushSnapshot"));
         let (full_up_to, snapshot_floor, full_from, full_vv, full_blob) = match push {
             ClientFrame::PushSnapshot {
+                doc_id: _,
                 up_to_seq,
                 compaction_floor_seq,
                 from_seq,
@@ -2579,7 +2687,9 @@ mod tests {
         let mid_id = a.doc_mut().add_item(LIST_INBOX, "in-delta").unwrap();
         a.flush();
         while let Some(bytes) = a.pop_outbox() {
-            if let Ok(ClientFrame::PushOps { ops }) = rmp_serde::from_slice::<ClientFrame>(&bytes) {
+            if let Ok(ClientFrame::PushOps { ops, .. }) =
+                rmp_serde::from_slice::<ClientFrame>(&bytes)
+            {
                 let mut acks = Vec::new();
                 for op in ops {
                     next_seq += 1;
@@ -2592,7 +2702,7 @@ mod tests {
                         seq: next_seq,
                     });
                 }
-                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { acks }));
+                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { doc_id: DOC, acks }));
             }
         }
         let _ = drain_outbox(&mut a);
@@ -2601,6 +2711,7 @@ mod tests {
             "expected an op after the full snapshot"
         );
         a.handle_server_bytes(&enc(&ServerFrame::SnapshotRequest {
+            doc_id: DOC,
             up_to_seq: next_seq,
             compaction_floor_seq: snapshot_floor,
             base: Some(SnapshotBase {
@@ -2611,6 +2722,7 @@ mod tests {
         let push: ClientFrame = dec(&a.pop_outbox().expect("PushSnapshot"));
         let (snapshot_up_to, delta_from, delta_blob) = match push {
             ClientFrame::PushSnapshot {
+                doc_id: _,
                 up_to_seq,
                 from_seq,
                 blob,
@@ -2628,7 +2740,9 @@ mod tests {
         a.flush();
         let mut post_snap_ops: Vec<StoredBlob> = Vec::new();
         while let Some(bytes) = a.pop_outbox() {
-            if let Ok(ClientFrame::PushOps { ops }) = rmp_serde::from_slice::<ClientFrame>(&bytes) {
+            if let Ok(ClientFrame::PushOps { ops, .. }) =
+                rmp_serde::from_slice::<ClientFrame>(&bytes)
+            {
                 let mut acks = Vec::new();
                 for op in ops {
                     next_seq += 1;
@@ -2645,7 +2759,7 @@ mod tests {
                         seq: next_seq,
                     });
                 }
-                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { acks }));
+                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { doc_id: DOC, acks }));
             }
         }
         let _ = drain_outbox(&mut a);
@@ -2657,23 +2771,21 @@ mod tests {
         // -- B connects fresh, since=0 < snapshot floor --
         b.handle_connected();
         let _ = b.pop_outbox().unwrap();
-        b.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: PROTOCOL_VERSION,
-            epoch: 0,
-        }));
+        open_doc(&mut b);
         let pull: ClientFrame = dec(&b.pop_outbox().unwrap());
-        assert!(matches!(pull, ClientFrame::PullOps { since_seq: 0 }));
+        assert!(matches!(pull, ClientFrame::PullOps { since_seq: 0, .. }));
 
         b.handle_server_bytes(&enc(&ServerFrame::SnapshotRequired {
+            doc_id: DOC,
             up_to_seq: snapshot_up_to,
         }));
         let pull_snap: ClientFrame = dec(&b.pop_outbox().expect("PullSnapshot"));
-        assert!(matches!(pull_snap, ClientFrame::PullSnapshot));
+        assert!(matches!(pull_snap, ClientFrame::PullSnapshot { .. }));
 
         // The chain arrives one row per frame; nothing resumes until
         // the `complete` row lands.
         b.handle_server_bytes(&enc(&ServerFrame::Snapshot {
+            doc_id: DOC,
             up_to_seq: full_up_to,
             blob: full_blob,
             complete: false,
@@ -2683,6 +2795,7 @@ mod tests {
             "no PullOps before the chain completes"
         );
         b.handle_server_bytes(&enc(&ServerFrame::Snapshot {
+            doc_id: DOC,
             up_to_seq: snapshot_up_to,
             blob: delta_blob,
             complete: true,
@@ -2692,7 +2805,7 @@ mod tests {
         let mut saw_resume_pull = false;
         while let Some(bytes) = b.pop_outbox() {
             if let Ok(frame) = rmp_serde::from_slice::<ClientFrame>(&bytes)
-                && matches!(frame, ClientFrame::PullOps { since_seq } if since_seq == snapshot_up_to)
+                && matches!(frame, ClientFrame::PullOps { since_seq, .. } if since_seq == snapshot_up_to)
             {
                 saw_resume_pull = true;
             }
@@ -2700,6 +2813,7 @@ mod tests {
         assert!(saw_resume_pull, "B must PullOps from snapshot.up_to");
 
         b.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
             ops: post_snap_ops,
             complete: true,
         }));
@@ -2722,7 +2836,10 @@ mod tests {
         let mut eng = fresh_engine_clean();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
-        eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequired { up_to_seq: 1 }));
+        eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequired {
+            doc_id: DOC,
+            up_to_seq: 1,
+        }));
         let evs = drain_events(&mut eng);
         assert!(matches!(evs.as_slice(), [Event::Error(s)] if s.contains("SnapshotRequired")));
     }
@@ -2738,13 +2855,20 @@ mod tests {
             d.add_item(LIST_INBOX, "x").unwrap();
         });
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+            doc_id: DOC,
             ops: vec![StoredBlob { seq: 1, blob }],
         }));
         assert_eq!(eng.last_contiguous_seq(), 1);
         eng.notify_oplog_durable(999);
         assert_eq!(eng.last_durable_seq(), 1);
         let ack: ClientFrame = dec(&eng.pop_outbox().expect("Ack"));
-        assert!(matches!(ack, ClientFrame::Ack { last_acked_seq: 1 }));
+        assert!(matches!(
+            ack,
+            ClientFrame::Ack {
+                last_acked_seq: 1,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -2758,6 +2882,7 @@ mod tests {
             d.add_item(LIST_INBOX, "a").unwrap();
         });
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+            doc_id: DOC,
             ops: vec![StoredBlob { seq: 1, blob: b1 }],
         }));
         assert!(eng.pop_outbox().is_none());
@@ -2785,6 +2910,7 @@ mod tests {
             d.add_item(LIST_INBOX, "remote").unwrap();
         });
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+            doc_id: DOC,
             ops: vec![StoredBlob { seq: 1, blob }],
         }));
 
@@ -2833,18 +2959,17 @@ mod tests {
         // -- A connects; pull-complete pushes its seed --
         a.handle_connected();
         let _ = a.pop_outbox().unwrap();
-        a.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: PROTOCOL_VERSION,
-            epoch: 0,
-        }));
+        open_doc(&mut a);
         let _ = a.pop_outbox().unwrap();
         a.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
             ops: vec![],
             complete: true,
         }));
         while let Some(bytes) = a.pop_outbox() {
-            if let Ok(ClientFrame::PushOps { ops }) = rmp_serde::from_slice::<ClientFrame>(&bytes) {
+            if let Ok(ClientFrame::PushOps { ops, .. }) =
+                rmp_serde::from_slice::<ClientFrame>(&bytes)
+            {
                 let mut acks = Vec::new();
                 for op in ops {
                     next_seq += 1;
@@ -2857,7 +2982,7 @@ mod tests {
                         seq: next_seq,
                     });
                 }
-                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { acks }));
+                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { doc_id: DOC, acks }));
             }
         }
         let _ = drain_outbox(&mut a);
@@ -2866,7 +2991,9 @@ mod tests {
         let item_a = a.doc_mut().add_item(LIST_INBOX, "from-a").unwrap();
         a.flush();
         while let Some(bytes) = a.pop_outbox() {
-            if let Ok(ClientFrame::PushOps { ops }) = rmp_serde::from_slice::<ClientFrame>(&bytes) {
+            if let Ok(ClientFrame::PushOps { ops, .. }) =
+                rmp_serde::from_slice::<ClientFrame>(&bytes)
+            {
                 let mut acks = Vec::new();
                 for op in ops {
                     next_seq += 1;
@@ -2879,7 +3006,7 @@ mod tests {
                         seq: next_seq,
                     });
                 }
-                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { acks }));
+                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { doc_id: DOC, acks }));
             }
         }
         let _ = drain_outbox(&mut a);
@@ -2887,13 +3014,10 @@ mod tests {
         // -- B connects, pulls everything from the log --
         b.handle_connected();
         let _ = b.pop_outbox().unwrap();
-        b.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: PROTOCOL_VERSION,
-            epoch: 0,
-        }));
+        open_doc(&mut b);
         let _ = b.pop_outbox().unwrap();
         b.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
             ops: ops_log.clone(),
             complete: true,
         }));
@@ -2917,6 +3041,7 @@ mod tests {
             d.add_item(LIST_INBOX, "from peer B").unwrap();
         });
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
             ops: vec![
                 StoredBlob {
                     seq: 1,
@@ -2986,6 +3111,7 @@ mod tests {
             d.add_item(LIST_INBOX, "remote-item").unwrap();
         });
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+            doc_id: DOC,
             ops: vec![StoredBlob {
                 seq: 1,
                 blob: remote_blob,
@@ -2998,7 +3124,7 @@ mod tests {
         eng.flush();
         let push = eng.pop_outbox().expect("PushOps");
         let blob = match dec::<ClientFrame>(&push) {
-            ClientFrame::PushOps { ops } => ops.into_iter().next().unwrap().blob,
+            ClientFrame::PushOps { ops, .. } => ops.into_iter().next().unwrap().blob,
             other => panic!("expected PushOps, got {other:?}"),
         };
 
@@ -3055,5 +3181,86 @@ mod tests {
             mem.in_flight().is_some(),
             "in-flight record must survive disconnect"
         );
+    }
+
+    #[test]
+    fn doc_rejected_disconnects_with_error() {
+        let mut eng = fresh_engine_clean();
+        eng.handle_connected();
+        let _hello = eng.pop_outbox().unwrap();
+        let _ = drain_events(&mut eng);
+        eng.handle_server_bytes(&enc(&HelloAck {
+            server_version: "s".into(),
+            protocol_version: PROTOCOL_VERSION,
+        }));
+        let open: ClientFrame = dec(&eng.pop_outbox().expect("OpenDoc after HelloAck"));
+        assert!(matches!(open, ClientFrame::OpenDoc { doc_id } if doc_id == DOC));
+        assert!(eng.pop_outbox().is_none(), "no PullOps before DocOpened");
+
+        eng.handle_server_bytes(&enc(&ServerFrame::DocRejected {
+            doc_id: DOC,
+            reason: "not a member".into(),
+        }));
+        assert!(!eng.is_online());
+        let events = drain_events(&mut eng);
+        assert!(matches!(events[0], Event::Error(ref s) if s.contains("not a member")));
+        assert!(matches!(
+            events.last(),
+            Some(Event::ConnStateChanged { online: false })
+        ));
+    }
+
+    #[test]
+    fn handle_timeout_while_opening_emits_error() {
+        let mut eng = fresh_engine_clean();
+        eng.handle_connected();
+        let _hello = eng.pop_outbox().unwrap();
+        eng.handle_server_bytes(&enc(&HelloAck {
+            server_version: "s".into(),
+            protocol_version: PROTOCOL_VERSION,
+        }));
+        let _open = eng.pop_outbox().unwrap();
+        let _ = drain_events(&mut eng);
+        eng.handle_timeout();
+        let events = drain_events(&mut eng);
+        assert!(matches!(events.as_slice(), [Event::Error(s)] if s.contains("timed out")));
+        assert!(
+            eng.is_online(),
+            "timeout only reports; the host decides to drop"
+        );
+    }
+
+    #[test]
+    fn frame_for_another_doc_is_ignored() {
+        let mut eng = fresh_engine_clean();
+        drive_to_idle(&mut eng);
+        let _ = drain_events(&mut eng);
+        let _ = drain_outbox(&mut eng);
+
+        let other = uuid::Uuid::from_u128(0xDEAD_BEEF);
+        assert_ne!(other, DOC);
+        // Garbage ciphertext: the frame must be refused on its doc id
+        // before anything tries to decrypt it.
+        eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+            doc_id: other,
+            ops: vec![StoredBlob {
+                seq: 1,
+                blob: EncryptedBlob {
+                    nonce: vec![0; 24],
+                    ciphertext: vec![0; 16],
+                },
+            }],
+        }));
+        let events = drain_events(&mut eng);
+        assert!(
+            matches!(events.as_slice(), [Event::Error(s)] if s.contains("this engine syncs")),
+            "expected a single routing error, got {events:?}"
+        );
+        assert_eq!(
+            eng.last_contiguous_seq, 0,
+            "foreign seq must not advance the frontier"
+        );
+        assert!(eng.is_idle());
+        assert!(eng.pop_outbox().is_none());
     }
 }

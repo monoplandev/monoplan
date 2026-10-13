@@ -40,13 +40,26 @@ CREATE TABLE devices (
   account_id          BLOB NOT NULL REFERENCES accounts(id),
   name                TEXT NOT NULL,
   auth_token_hash     BLOB NOT NULL,                           -- SHA-256(device_token bytes)
-  last_acked_seq      INTEGER NOT NULL DEFAULT 0,              -- per-account contiguous-prefix frontier
   last_seen_at        INTEGER NOT NULL,
   last_seen_ip        TEXT,                                    -- client IP at last_seen_at; overwritten, never a history
   created_at          INTEGER NOT NULL
 );
 CREATE INDEX devices_account_id_idx ON devices (account_id);
 CREATE INDEX devices_token_hash_idx ON devices (auth_token_hash);
+
+-- Per-(device, doc) contiguous-prefix frontier: the highest seq the
+-- device has acked on that doc. Rows appear on first `Ack`; a device
+-- with no row is at 0. The horizon for a doc is the minimum over the
+-- devices of every account that can access it (today: the owning
+-- account), which gates op-blob compaction. Revoking a device drops
+-- its rows (cascade) and so drops it from the horizon.
+CREATE TABLE device_doc_frontiers (
+  device_id        BLOB NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  doc_id           BLOB NOT NULL REFERENCES docs(id),
+  last_acked_seq   INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (device_id, doc_id)
+);
+CREATE INDEX device_doc_frontiers_doc_id_idx ON device_doc_frontiers (doc_id);
 
 -- Per-doc monotonic counter. Bumped inside the same transaction
 -- that inserts ops so seqs are dense, contiguous, and gap-free for any

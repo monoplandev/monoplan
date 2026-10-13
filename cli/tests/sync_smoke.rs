@@ -61,7 +61,7 @@ async fn session_pushes_and_acks_then_reopen_is_clean() {
 
     // Device's frontier should have advanced to the highest assigned id.
     let device_uuid = Uuid::parse_str(&signup.device_id).unwrap();
-    let acked = queries::get_last_acked_seq(&server.state.db, device_uuid)
+    let acked = queries::get_last_acked_seq(&server.state.db, device_uuid, primary_doc_id)
         .await
         .unwrap();
     assert_eq!(acked, highest_assigned);

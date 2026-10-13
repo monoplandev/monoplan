@@ -69,9 +69,9 @@ The server **cannot**:
 
 The server **can**:
 - authenticate accounts and devices
-- assign per-account monotonic, gap-free `seq`
-- track per-device `last_acked_seq`
-- compute horizon = min(`last_acked_seq`) across all non-revoked devices
+- assign per-doc monotonic, gap-free `seq`
+- track per-(device, doc) `last_acked_seq`
+- compute horizon = min(`last_acked_seq`) across all non-revoked devices that can open the doc
 - decide when a snapshot is due (op-count threshold past last snapshot, triggering device caught up)
 - ask any caught-up connected client to produce the snapshot (state frontier = `server_last_seq`, compaction floor = `max(horizon, prev snapshot's compaction_floor_seq)`)
 - replace prior snapshots and prune ops up to the snapshot's `compaction_floor_seq`

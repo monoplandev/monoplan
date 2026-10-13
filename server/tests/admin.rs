@@ -117,8 +117,8 @@ async fn seed_account_and_devices(state: &AppState, device_count: usize) {
                 transaction.execute(
                     "INSERT INTO devices (
                         id, account_id, name, auth_token_hash,
-                        last_acked_seq, last_seen_at, created_at
-                     ) VALUES (?, ?, ?, ?, 0, 1, 1)",
+                        last_seen_at, created_at
+                     ) VALUES (?, ?, ?, ?, 1, 1)",
                     params![
                         device_id.as_bytes().as_slice(),
                         account_id.as_bytes().as_slice(),

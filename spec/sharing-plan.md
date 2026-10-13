@@ -2,7 +2,9 @@
 
 **Status:** Planned, not implemented. v1 ships single-user only (one primary doc per account).
 
-This document preserves the multi-doc / sharing design discussed during early planning. Pre-release, we made a deliberate scoping decision: introduce the `docs` entity + `accounts.primary_doc_id` pointer now (so the eventual migration is incremental), but defer everything else — wire protocol changes, membership tables, per-doc DEKs, sharing UX — until there is real conviction that shared lists are part of the product.
+This document preserves the multi-doc / sharing design discussed during early planning. Pre-release, we made a deliberate scoping decision: lay the doc-keyed substrate now (so the eventual migration is incremental) but defer everything that needs a second doc to exist — membership tables, per-doc DEKs, multi-doc clients, sharing UX — until there is real conviction that shared lists are part of the product.
+
+Substrate in place as of 2026-10-13: the `docs` entity and `accounts.primary_doc_id`; ops, snapshots, seq counter, snapshot coordinator and broadcast registry keyed by doc; `device_doc_frontiers` for per-(device, doc) acks; and the wire protocol carrying `doc_id` on every payload frame behind an `OpenDoc` / `DocOpened` binding step (`sync-protocol.md` §Doc binding). The server's access decision is a single function (`can_open` in `server/src/sync/ws.rs`) that today checks "is the primary doc".
 
 Read this when:
 - Considering enabling sharing as a product direction.
@@ -17,6 +19,7 @@ The product thesis (see top of `AGENTS.md`) is "single-human-user." Sharing cont
 What the v1 bare-minimum gives us:
 - `docs` is a first-class entity with its own id and lifetime.
 - `accounts.primary_doc_id` names the doc-of-Home explicitly in code paths.
+- The wire and the server data plane are already doc-addressed, so sharing adds membership and keys without touching frame shapes or re-keying rows.
 - Future migration to multi-doc storage is incremental, not a flag-day.
 
 ---
@@ -140,17 +143,9 @@ CREATE TABLE doc_invites (
 );
 CREATE INDEX doc_invites_doc_id_idx ON doc_invites (doc_id);
 
--- Existing tables also re-key:
---   ops:          (account_id, seq) → (doc_id, seq)
---   snapshots:    account_id        → doc_id
---   account_sequences → doc_sequences
---   devices.last_acked_seq is removed in favour of:
-CREATE TABLE device_doc_frontiers (
-  device_id        BLOB NOT NULL REFERENCES devices(id),
-  doc_id           BLOB NOT NULL REFERENCES docs(id),
-  last_acked_seq   INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (device_id, doc_id)
-);
+-- Already done (2026-10-13), no change needed here:
+--   ops (doc_id, seq), snapshots.doc_id, doc_sequences,
+--   device_doc_frontiers (device_id, doc_id, last_acked_seq).
 
 -- accounts.wrapped_dek + recovery_wrapped_dek + nonces are removed
 -- (moved to doc_members).
@@ -158,26 +153,18 @@ CREATE TABLE device_doc_frontiers (
 
 ### Wire protocol changes
 
-Bump to **protocol version 2**. Every payload-carrying frame gets `doc_id`:
+**Done (2026-10-13), without a version bump.** Every payload frame carries `doc_id` and a doc is bound to the connection explicitly: `OpenDoc { doc_id }` → `DocOpened { doc_id, epoch }` (or `DocRejected`). The authoritative frame table is `sync-protocol.md`; the earlier sketch here (with `assigned_seqs`, no `from_seq` / `up_to_vv`, no `complete` on `Snapshot`) predates push ids and delta snapshots and is superseded.
 
-```
-PushOps       { doc_id, ops }
-PullOps       { doc_id, since_seq }
-Ack           { doc_id, last_acked_seq }
-PushSnapshot  { doc_id, up_to_seq, compaction_floor_seq, blob }
-PullSnapshot  { doc_id }
+Explicit open was chosen over implicit first-frame subscription because the doc's `epoch` needs a per-doc home once a connection spans docs, and because it gives one access-check point and a natural place for leave / revoke later.
 
-OpsAck            { doc_id, assigned_seqs }
-OpsBatch          { doc_id, ops, complete }
-OpsBroadcast      { doc_id, ops }
-SnapshotRequest   { doc_id, up_to_seq, compaction_floor_seq }
-Snapshot          { doc_id, up_to_seq, blob }
-SnapshotRequired  { doc_id, up_to_seq }
-```
+WS connection stays `(account, device)`-bound at upgrade. Per-doc seq is dense, gap-free; per-doc snapshot coordinator state; broadcast registry keyed by doc — all in place.
 
-WS connection stays `(account, device)`-bound at upgrade. One connection **multiplexes** sync for every doc the account is a member of. Implicit subscription: a doc is "subscribed" the first time any frame for it appears on the connection. Server checks `doc_members(doc_id, account_id)` on every payload frame and rejects if not a current member.
+Remaining for sharing:
 
-Per-doc seq is dense, gap-free. Per-doc snapshot coordinator state. Broadcast registry re-keyed as `HashMap<DocId, Vec<ConnectionRef>>`.
+- `can_open` becomes a `doc_members(doc_id, account_id)` lookup (active membership) instead of "is the primary doc".
+- A connection holds **one** open doc today (`WSSession.open: Option<OpenDoc>`); multiplexing lifts it to a map keyed by `doc_id`, with the broadcast `select!` arm polling every open subscription.
+- Horizon (`queries::doc_horizon`) takes the owning `account_id` to find the device set; under memberships it spans the devices of every active member and the parameter goes away.
+- Removal / leave severs the open doc on live connections (a `DocClosed { doc_id, reason }` frame is the obvious shape; not yet defined).
 
 ### Auth flows (memberships shape)
 
@@ -202,21 +189,20 @@ Premise at the time of writing: rip-and-replace (no v1 transition window) — pr
 
 ### Phase 1 — Protocol types + server schema (foundation)
 
-Files: protocol crate (`PushOps`, `PullOps`, `Ack`, etc.), `server/migrations/001_init.sql`.
+Files: protocol crate, `server/migrations/001_init.sql`.
 
-- Add `doc_id: DocId` to every payload-carrying frame. Bump `PROTOCOL_VERSION` to 2.
-- Replace `migrations/001_init.sql` with the full multi-doc schema. (Drop `002_*` add-on path; rip and replace.)
-- Introduce `DocId` newtype (uuid v7).
+- ~~Add `doc_id` to every payload-carrying frame.~~ Done 2026-10-13 (with `OpenDoc` / `DocOpened` / `DocRejected`), no version bump needed pre-release.
+- Edit `migrations/001_init.sql` in place: add `doc_members`, `doc_invites`; move the DEK wraps off `accounts`. (Ops, snapshots, sequences and frontiers are already doc-keyed.)
 
 Compile breaks downstream — fix in Phase 2.
 
 ### Phase 2 — Server
 
-**2a — Queries.** `server/src/sync/queries.rs` (~380 lines). Every `account_id` → `doc_id`. New helper `is_member(doc_id, account_id) -> bool`. Frontier reads/writes against `device_doc_frontiers`. Horizon: `min(last_acked_seq WHERE doc_id = ? AND device.account_id IN active_members(doc_id))`.
+**2a — Queries.** `server/src/sync/queries.rs`. Already doc-keyed, frontiers already in `device_doc_frontiers`. New helper `is_member(doc_id, account_id) -> bool`. `doc_horizon` drops its `account_id` parameter and becomes `min(last_acked_seq)` over the devices of `active_members(doc_id)`.
 
-**2b — Session + WS routing.** `server/src/sync/ws.rs`, `sessions.rs`. `Session` gains `subscribed_docs: HashSet<DocId>`. Per-frame: extract `doc_id`, membership check, insert into subscribed_docs if first frame, dispatch to per-doc handler. Broadcast registry: `HashMap<DocId, Vec<ConnectionRef>>`, fan-out per-doc.
+**2b — Session + WS routing.** `server/src/sync/ws.rs`. `can_open` → membership check. `WSSession.open: Option<OpenDoc>` → `HashMap<DocId, OpenDoc>`; the broadcast `select!` arm polls every open subscription. Per-frame doc routing and the broadcast registry (`HashMap<DocId, Vec<Subscriber>>`) already exist.
 
-**2c — Snapshot coordinator.** `server/src/sync/snapshot.rs`. State map keyed by `DocId`. Triggers, candidate selection, all log lines tagged with `doc_id`.
+**2c — Snapshot coordinator.** Already keyed by doc; nothing to do.
 
 **2d — HTTP endpoints.** `server/src/account/*`. Signup: insert docs + accounts + doc_members in one tx. Login response: `{ primary_doc_id, memberships: [...], recovery_present, device_token? }`. Recovery / password-reset / password-change: accept and return memberships arrays.
 
@@ -224,7 +210,7 @@ Compile breaks downstream — fix in Phase 2.
 
 ### Phase 3 — Core (minimal)
 
-- `core/src/sync.rs`: engine signatures gain `doc_id` (stamped on outbound frames). Engine internals unchanged.
+- `core/src/sync.rs`: ~~engine signatures gain `doc_id` (stamped on outbound frames).~~ Done: the engine stamps `doc_id` on every outbound frame, opens its doc after `HelloAck`, and drops inbound frames for any other doc. Nothing further; hosts run one engine per doc.
 - `core/src/crypto/`: no changes. DEK is still 32 bytes; wrap/unwrap unchanged.
 - HTTP body construction (if any in core): memberships shape.
 
@@ -270,9 +256,9 @@ Or split into 5 small PRs if needed: protocol → server → core+CLI → web �
 
 | Phase | Days |
 |---|---|
-| 1 — protocol + schema | 0.5 |
-| 2 — server | 2 |
-| 3 — core | 0.5 |
+| 1 — protocol + schema | 0.5 (protocol half done) |
+| 2 — server | 2 (routing substrate done; memberships, keys, multi-open remain) |
+| 3 — core | 0.5 (done) |
 | 4 — CLI | 1 |
 | 5 — web | 1.5 |
 | 6 — cleanup + verification | 0.5 |

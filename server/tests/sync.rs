@@ -128,6 +128,7 @@ struct Account {
 
 struct ExtraDevice {
     device_token: String,
+    device_id: Uuid,
 }
 
 async fn register_second_device(acc: &Account, name: &str) -> ExtraDevice {
@@ -139,6 +140,7 @@ async fn register_second_device(acc: &Account, name: &str) -> ExtraDevice {
     .await;
     ExtraDevice {
         device_token: resp.device_token,
+        device_id: Uuid::parse_str(&resp.device_id).unwrap(),
     }
 }
 
@@ -243,7 +245,8 @@ async fn recv_msgpack<T: DeserializeOwned>(ws: &mut WsStream) -> T {
     }
 }
 
-async fn handshake(ws: &mut WsStream) -> HelloAck {
+/// Version handshake only: `Hello` → `HelloAck`. No doc is open yet.
+async fn hello(ws: &mut WsStream) -> HelloAck {
     send_msgpack(
         ws,
         &Hello {
@@ -254,6 +257,25 @@ async fn handshake(ws: &mut WsStream) -> HelloAck {
     )
     .await;
     recv_msgpack(ws).await
+}
+
+/// Full connection setup as a client does it: version handshake, then
+/// `OpenDoc` for `doc_id`. Returns the doc's epoch from `DocOpened`.
+/// The server subscribes the connection before replying, so once this
+/// returns the connection receives every later broadcast on the doc.
+async fn handshake(ws: &mut WsStream, doc_id: Uuid) -> u64 {
+    hello(ws).await;
+    send_msgpack(ws, &ClientFrame::OpenDoc { doc_id }).await;
+    match recv_msgpack::<ServerFrame>(ws).await {
+        ServerFrame::DocOpened {
+            doc_id: opened,
+            epoch,
+        } => {
+            assert_eq!(opened, doc_id);
+            epoch
+        }
+        other => panic!("expected DocOpened, got {other:?}"),
+    }
 }
 
 fn fake_blob(seed: u8) -> EncryptedBlob {
@@ -278,7 +300,7 @@ fn fake_pushes(range: std::ops::Range<u8>) -> Vec<PushBlob> {
 /// Extract the assigned seqs from an OpsAck frame, in input order.
 fn ack_seqs(frame: ServerFrame) -> Vec<u64> {
     match frame {
-        ServerFrame::OpsAck { acks } => acks.into_iter().map(|a| a.seq).collect(),
+        ServerFrame::OpsAck { acks, .. } => acks.into_iter().map(|a| a.seq).collect(),
         other => panic!("expected OpsAck, got {other:?}"),
     }
 }
@@ -287,12 +309,13 @@ fn ack_seqs(frame: ServerFrame) -> Vec<u64> {
 async fn ack_does_not_move_backwards() {
     let acc = signup_account().await;
     let mut ws = connect_ws(&acc.server, &acc.device_token).await;
-    handshake(&mut ws).await;
+    handshake(&mut ws, acc.primary_doc_id).await;
 
     // Push one op so there's something to ack against.
     send_msgpack(
         &mut ws,
         &ClientFrame::PushOps {
+            doc_id: acc.primary_doc_id,
             ops: vec![fake_push(1)],
         },
     )
@@ -300,15 +323,30 @@ async fn ack_does_not_move_backwards() {
     let resp: ServerFrame = recv_msgpack(&mut ws).await;
     let id = ack_seqs(resp)[0];
 
-    send_msgpack(&mut ws, &ClientFrame::Ack { last_acked_seq: id }).await;
+    send_msgpack(
+        &mut ws,
+        &ClientFrame::Ack {
+            doc_id: acc.primary_doc_id,
+            last_acked_seq: id,
+        },
+    )
+    .await;
     wait_for_acked(&acc, id).await;
     // Stale ack from a slow client mustn't drag the frontier down.
-    send_msgpack(&mut ws, &ClientFrame::Ack { last_acked_seq: 0 }).await;
+    send_msgpack(
+        &mut ws,
+        &ClientFrame::Ack {
+            doc_id: acc.primary_doc_id,
+            last_acked_seq: 0,
+        },
+    )
+    .await;
     // Give the server time to *not* apply it.
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    let stored = queries::get_last_acked_seq(&acc.server.state.db, acc.device_id)
-        .await
-        .unwrap();
+    let stored =
+        queries::get_last_acked_seq(&acc.server.state.db, acc.device_id, acc.primary_doc_id)
+            .await
+            .unwrap();
     assert_eq!(stored, id);
 }
 
@@ -320,15 +358,16 @@ async fn repeated_push_id_dedups_to_original_seq_without_new_row() {
     let acc = signup_account().await;
     let device_b = register_second_device(&acc, "device-b").await;
     let mut ws_a = connect_ws(&acc.server, &acc.device_token).await;
-    handshake(&mut ws_a).await;
+    handshake(&mut ws_a, acc.primary_doc_id).await;
     let mut ws_b = connect_ws(&acc.server, &device_b.device_token).await;
-    handshake(&mut ws_b).await;
+    handshake(&mut ws_b, acc.primary_doc_id).await;
     wait_for_subscribers(&acc, 2).await;
 
     let push = fake_push(3);
     send_msgpack(
         &mut ws_a,
         &ClientFrame::PushOps {
+            doc_id: acc.primary_doc_id,
             ops: vec![push.clone()],
         },
     )
@@ -337,13 +376,20 @@ async fn repeated_push_id_dedups_to_original_seq_without_new_row() {
     assert_eq!(first, vec![1]);
     // B sees the original broadcast once.
     let broadcast = match recv_msgpack::<ServerFrame>(&mut ws_b).await {
-        ServerFrame::OpsBroadcast { ops } => ops,
+        ServerFrame::OpsBroadcast { ops, .. } => ops,
         other => panic!("expected OpsBroadcast on B, got {other:?}"),
     };
     assert_eq!(broadcast.len(), 1);
 
     // Retry the exact same push (simulating a lost ack).
-    send_msgpack(&mut ws_a, &ClientFrame::PushOps { ops: vec![push] }).await;
+    send_msgpack(
+        &mut ws_a,
+        &ClientFrame::PushOps {
+            doc_id: acc.primary_doc_id,
+            ops: vec![push],
+        },
+    )
+    .await;
     let second = ack_seqs(recv_msgpack::<ServerFrame>(&mut ws_a).await);
     assert_eq!(second, vec![1], "retry must ack the original seq");
 
@@ -364,6 +410,7 @@ async fn repeated_push_id_dedups_to_original_seq_without_new_row() {
     send_msgpack(
         &mut ws_a,
         &ClientFrame::PushOps {
+            doc_id: acc.primary_doc_id,
             ops: vec![fake_push(4)],
         },
     )
@@ -409,9 +456,9 @@ async fn push_on_a_broadcasts_to_b_not_a() {
     let device_b = register_second_device(&acc, "device-b").await;
 
     let mut ws_a = connect_ws(&acc.server, &acc.device_token).await;
-    handshake(&mut ws_a).await;
+    handshake(&mut ws_a, acc.primary_doc_id).await;
     let mut ws_b = connect_ws(&acc.server, &device_b.device_token).await;
-    handshake(&mut ws_b).await;
+    handshake(&mut ws_b, acc.primary_doc_id).await;
 
     // Both sessions subscribe immediately after handshake; wait for
     // the registry to reflect that before pushing into broadcast.
@@ -421,6 +468,7 @@ async fn push_on_a_broadcasts_to_b_not_a() {
     send_msgpack(
         &mut ws_a,
         &ClientFrame::PushOps {
+            doc_id: acc.primary_doc_id,
             ops: pushes.clone(),
         },
     )
@@ -434,7 +482,7 @@ async fn push_on_a_broadcasts_to_b_not_a() {
 
     // B receives the broadcast with the same ids/blobs.
     let broadcast = match recv_msgpack::<ServerFrame>(&mut ws_b).await {
-        ServerFrame::OpsBroadcast { ops } => ops,
+        ServerFrame::OpsBroadcast { ops, .. } => ops,
         other => panic!("expected OpsBroadcast on B, got {other:?}"),
     };
     let want: Vec<StoredBlob> = assigned_seqs
@@ -459,15 +507,16 @@ async fn push_on_one_tab_broadcasts_to_other_tab_same_device() {
     let acc = signup_account().await;
 
     let mut tab_a = connect_ws(&acc.server, &acc.device_token).await;
-    handshake(&mut tab_a).await;
+    handshake(&mut tab_a, acc.primary_doc_id).await;
     let mut tab_b = connect_ws(&acc.server, &acc.device_token).await;
-    handshake(&mut tab_b).await;
+    handshake(&mut tab_b, acc.primary_doc_id).await;
     wait_for_subscribers(&acc, 2).await;
 
     let pushes = vec![fake_push(11)];
     send_msgpack(
         &mut tab_a,
         &ClientFrame::PushOps {
+            doc_id: acc.primary_doc_id,
             ops: pushes.clone(),
         },
     )
@@ -479,7 +528,7 @@ async fn push_on_one_tab_broadcasts_to_other_tab_same_device() {
 
     // Tab B — receives the broadcast even though it shares device_id.
     let broadcast = match recv_msgpack::<ServerFrame>(&mut tab_b).await {
-        ServerFrame::OpsBroadcast { ops } => ops,
+        ServerFrame::OpsBroadcast { ops, .. } => ops,
         other => panic!("expected OpsBroadcast on B, got {other:?}"),
     };
     let want: Vec<StoredBlob> = assigned_seqs
@@ -496,7 +545,7 @@ async fn subscriber_unregisters_on_disconnect() {
     let _device_b = register_second_device(&acc, "device-b").await;
 
     let mut ws_a = connect_ws(&acc.server, &acc.device_token).await;
-    handshake(&mut ws_a).await;
+    handshake(&mut ws_a, acc.primary_doc_id).await;
     wait_for_subscribers(&acc, 1).await;
     drop(ws_a);
     wait_for_subscribers(&acc, 0).await;
@@ -512,9 +561,16 @@ async fn pull_at_or_above_snapshot_floor_streams_ops_normally() {
     seed_snapshot(&acc.server.state.db, acc.primary_doc_id, 50, 50, None, 0xAA).await;
 
     let mut ws = connect_ws(&acc.server, &acc.device_token).await;
-    handshake(&mut ws).await;
+    handshake(&mut ws, acc.primary_doc_id).await;
 
-    send_msgpack(&mut ws, &ClientFrame::PullOps { since_seq: 50 }).await;
+    send_msgpack(
+        &mut ws,
+        &ClientFrame::PullOps {
+            doc_id: acc.primary_doc_id,
+            since_seq: 50,
+        },
+    )
+    .await;
     let pulled = expect_complete_batch(&mut ws).await;
     assert!(pulled.is_empty());
 }
@@ -525,15 +581,23 @@ async fn no_snapshot_request_below_threshold() {
     // must never emit a SnapshotRequest.
     let acc = signup_account_with_snapshot_config(5, std::time::Duration::from_secs(60)).await;
     let mut ws = connect_ws(&acc.server, &acc.device_token).await;
-    handshake(&mut ws).await;
+    handshake(&mut ws, acc.primary_doc_id).await;
 
     let pushes = fake_pushes(0..3);
-    send_msgpack(&mut ws, &ClientFrame::PushOps { ops: pushes }).await;
+    send_msgpack(
+        &mut ws,
+        &ClientFrame::PushOps {
+            doc_id: acc.primary_doc_id,
+            ops: pushes,
+        },
+    )
+    .await;
     let assigned_seqs = ack_seqs(recv_msgpack::<ServerFrame>(&mut ws).await);
     let last_id = *assigned_seqs.last().unwrap();
     send_msgpack(
         &mut ws,
         &ClientFrame::Ack {
+            doc_id: acc.primary_doc_id,
             last_acked_seq: last_id,
         },
     )
@@ -548,10 +612,17 @@ async fn push_path_triggers_snapshot_request_and_persists() {
     // PushSnapshot; row lands in the snapshots table.
     let acc = signup_account_with_snapshot_config(5, std::time::Duration::from_secs(60)).await;
     let mut ws = connect_ws(&acc.server, &acc.device_token).await;
-    handshake(&mut ws).await;
+    handshake(&mut ws, acc.primary_doc_id).await;
 
     let pushes = fake_pushes(0..5);
-    send_msgpack(&mut ws, &ClientFrame::PushOps { ops: pushes }).await;
+    send_msgpack(
+        &mut ws,
+        &ClientFrame::PushOps {
+            doc_id: acc.primary_doc_id,
+            ops: pushes,
+        },
+    )
+    .await;
     let (up_to_seq, compaction_floor_seq, _base) = expect_snapshot_request(&mut ws).await;
     assert_eq!(up_to_seq, 5);
     // Single device, just pushed-and-acked: horizon = 5 = up_to.
@@ -561,6 +632,7 @@ async fn push_path_triggers_snapshot_request_and_persists() {
     send_msgpack(
         &mut ws,
         &ClientFrame::PushSnapshot {
+            doc_id: acc.primary_doc_id,
             up_to_seq,
             compaction_floor_seq,
             from_seq: None,
@@ -593,10 +665,11 @@ async fn ack_path_triggers_snapshot_request() {
     let last_id = inserted.acks.last().unwrap().seq;
 
     let mut ws = connect_ws(&acc.server, &acc.device_token).await;
-    handshake(&mut ws).await;
+    handshake(&mut ws, acc.primary_doc_id).await;
     send_msgpack(
         &mut ws,
         &ClientFrame::Ack {
+            doc_id: acc.primary_doc_id,
             last_acked_seq: last_id,
         },
     )
@@ -615,9 +688,16 @@ async fn stale_snapshot_after_lease_expiry_rejected() {
     let device_b = register_second_device(&acc, "device-b").await;
 
     let mut ws_a = connect_ws(&acc.server, &acc.device_token).await;
-    handshake(&mut ws_a).await;
+    handshake(&mut ws_a, acc.primary_doc_id).await;
     let pushes = fake_pushes(0..5);
-    send_msgpack(&mut ws_a, &ClientFrame::PushOps { ops: pushes }).await;
+    send_msgpack(
+        &mut ws_a,
+        &ClientFrame::PushOps {
+            doc_id: acc.primary_doc_id,
+            ops: pushes,
+        },
+    )
+    .await;
     let (up_to_seq, compaction_floor_seq, _base) = expect_snapshot_request(&mut ws_a).await;
     assert_eq!(up_to_seq, 5);
     // B has never acked, so horizon == 0 — first snapshot has no
@@ -630,6 +710,7 @@ async fn stale_snapshot_after_lease_expiry_rejected() {
     send_msgpack(
         &mut ws_a,
         &ClientFrame::Ack {
+            doc_id: acc.primary_doc_id,
             last_acked_seq: up_to_seq,
         },
     )
@@ -641,10 +722,11 @@ async fn stale_snapshot_after_lease_expiry_rejected() {
     // B acks at the same frontier — coordinator sees A's lease as
     // expired, issues a fresh one to B.
     let mut ws_b = connect_ws(&acc.server, &device_b.device_token).await;
-    handshake(&mut ws_b).await;
+    handshake(&mut ws_b, acc.primary_doc_id).await;
     send_msgpack(
         &mut ws_b,
         &ClientFrame::Ack {
+            doc_id: acc.primary_doc_id,
             last_acked_seq: up_to_seq,
         },
     )
@@ -660,6 +742,7 @@ async fn stale_snapshot_after_lease_expiry_rejected() {
     send_msgpack(
         &mut ws_a,
         &ClientFrame::PushSnapshot {
+            doc_id: acc.primary_doc_id,
             up_to_seq,
             compaction_floor_seq,
             from_seq: None,
@@ -742,10 +825,17 @@ async fn compact_doc_deletes_ops_below_floor_and_keeps_the_chain() {
     // not an OpsBatch with holes.
     let fresh_device = register_second_device(&acc, "device-fresh").await;
     let mut ws = connect_ws(&acc.server, &fresh_device.device_token).await;
-    handshake(&mut ws).await;
-    send_msgpack(&mut ws, &ClientFrame::PullOps { since_seq: 0 }).await;
+    handshake(&mut ws, acc.primary_doc_id).await;
+    send_msgpack(
+        &mut ws,
+        &ClientFrame::PullOps {
+            doc_id: acc.primary_doc_id,
+            since_seq: 0,
+        },
+    )
+    .await;
     match recv_msgpack::<ServerFrame>(&mut ws).await {
-        ServerFrame::SnapshotRequired { up_to_seq } => assert_eq!(up_to_seq, 10),
+        ServerFrame::SnapshotRequired { up_to_seq, .. } => assert_eq!(up_to_seq, 10),
         other => panic!("expected SnapshotRequired, got {other:?}"),
     }
 }
@@ -779,16 +869,24 @@ async fn push_snapshot_opportunistically_compacts_ops_below_floor() {
     // 1..=5 should disappear from the ops table.
     let acc = signup_account_with_snapshot_config(5, std::time::Duration::from_secs(60)).await;
     let mut ws = connect_ws(&acc.server, &acc.device_token).await;
-    handshake(&mut ws).await;
+    handshake(&mut ws, acc.primary_doc_id).await;
 
     let pushes = fake_pushes(0..5);
-    send_msgpack(&mut ws, &ClientFrame::PushOps { ops: pushes }).await;
+    send_msgpack(
+        &mut ws,
+        &ClientFrame::PushOps {
+            doc_id: acc.primary_doc_id,
+            ops: pushes,
+        },
+    )
+    .await;
     let (up_to_seq, compaction_floor_seq, _base) = expect_snapshot_request(&mut ws).await;
     assert_eq!(compaction_floor_seq, 5);
 
     send_msgpack(
         &mut ws,
         &ClientFrame::PushSnapshot {
+            doc_id: acc.primary_doc_id,
             up_to_seq,
             compaction_floor_seq,
             from_seq: None,
@@ -826,12 +924,13 @@ async fn delta_chain_requested_and_served_in_order() {
     // base. A bootstrapper gets the whole chain in order.
     let acc = signup_account_with_snapshot_config(2, std::time::Duration::from_secs(60)).await;
     let mut ws = connect_ws(&acc.server, &acc.device_token).await;
-    handshake(&mut ws).await;
+    handshake(&mut ws, acc.primary_doc_id).await;
 
     // 1. Two ops → full snapshot requested (no base).
     send_msgpack(
         &mut ws,
         &ClientFrame::PushOps {
+            doc_id: acc.primary_doc_id,
             ops: fake_pushes(0..2),
         },
     )
@@ -842,6 +941,7 @@ async fn delta_chain_requested_and_served_in_order() {
     send_msgpack(
         &mut ws,
         &ClientFrame::PushSnapshot {
+            doc_id: acc.primary_doc_id,
             up_to_seq: up_to,
             compaction_floor_seq: floor,
             from_seq: None,
@@ -856,6 +956,7 @@ async fn delta_chain_requested_and_served_in_order() {
     send_msgpack(
         &mut ws,
         &ClientFrame::PushOps {
+            doc_id: acc.primary_doc_id,
             ops: fake_pushes(2..4),
         },
     )
@@ -872,6 +973,7 @@ async fn delta_chain_requested_and_served_in_order() {
     send_msgpack(
         &mut ws,
         &ClientFrame::PushSnapshot {
+            doc_id: acc.primary_doc_id,
             up_to_seq: up_to,
             compaction_floor_seq: floor,
             from_seq: Some(2),
@@ -887,8 +989,14 @@ async fn delta_chain_requested_and_served_in_order() {
     // A fresh device bootstraps from the chain, in order.
     let fresh = register_second_device(&acc, "device-fresh").await;
     let mut ws_f = connect_ws(&acc.server, &fresh.device_token).await;
-    handshake(&mut ws_f).await;
-    send_msgpack(&mut ws_f, &ClientFrame::PullSnapshot).await;
+    handshake(&mut ws_f, acc.primary_doc_id).await;
+    send_msgpack(
+        &mut ws_f,
+        &ClientFrame::PullSnapshot {
+            doc_id: acc.primary_doc_id,
+        },
+    )
+    .await;
     // One row per frame, head first, `complete` on the last; each
     // frame carries its own row's frontier.
     let rows = recv_snapshot_chain(&mut ws_f).await;
@@ -902,6 +1010,7 @@ async fn delta_chain_requested_and_served_in_order() {
     send_msgpack(
         &mut ws,
         &ClientFrame::PushOps {
+            doc_id: acc.primary_doc_id,
             ops: fake_pushes(4..6),
         },
     )
@@ -918,6 +1027,7 @@ async fn delta_chain_requested_and_served_in_order() {
     send_msgpack(
         &mut ws,
         &ClientFrame::PushSnapshot {
+            doc_id: acc.primary_doc_id,
             up_to_seq: up_to,
             compaction_floor_seq: floor,
             from_seq: Some(4),
@@ -928,7 +1038,13 @@ async fn delta_chain_requested_and_served_in_order() {
     .await;
     wait_for_snapshot(&acc, 6).await;
 
-    send_msgpack(&mut ws_f, &ClientFrame::PullSnapshot).await;
+    send_msgpack(
+        &mut ws_f,
+        &ClientFrame::PullSnapshot {
+            doc_id: acc.primary_doc_id,
+        },
+    )
+    .await;
     // A's pushes were broadcast to the fresh device's socket too;
     // `recv_snapshot_chain` skips past them to the Snapshot rows.
     let rows = recv_snapshot_chain(&mut ws_f).await;
@@ -950,6 +1066,7 @@ async fn recv_snapshot_chain(ws: &mut WsStream) -> Vec<(u64, EncryptedBlob, bool
     loop {
         match recv_msgpack::<ServerFrame>(ws).await {
             ServerFrame::Snapshot {
+                doc_id: _,
                 up_to_seq,
                 blob,
                 complete,
@@ -1040,6 +1157,7 @@ async fn expect_snapshot_request(ws: &mut WsStream) -> (u64, u64, Option<Snapsho
         };
         match frame {
             ServerFrame::SnapshotRequest {
+                doc_id: _,
                 up_to_seq,
                 compaction_floor_seq,
                 base,
@@ -1060,6 +1178,7 @@ async fn assert_no_snapshot_request(ws: &mut WsStream, window: std::time::Durati
         match tokio::time::timeout(remaining, recv_msgpack::<ServerFrame>(ws)).await {
             Ok(ServerFrame::OpsAck { .. }) | Ok(ServerFrame::OpsBroadcast { .. }) => continue,
             Ok(ServerFrame::SnapshotRequest {
+                doc_id: _,
                 up_to_seq,
                 compaction_floor_seq,
                 ..
@@ -1094,7 +1213,7 @@ async fn wait_for_snapshot(acc: &Account, up_to: u64) -> queries::LatestSnapshot
 
 async fn expect_complete_batch(ws: &mut WsStream) -> Vec<StoredBlob> {
     match recv_msgpack(ws).await {
-        ServerFrame::OpsBatch { ops, complete } => {
+        ServerFrame::OpsBatch { ops, complete, .. } => {
             assert!(complete, "expected single complete batch");
             ops
         }
@@ -1103,9 +1222,9 @@ async fn expect_complete_batch(ws: &mut WsStream) -> Vec<StoredBlob> {
 }
 
 /// Poll until the hub holds at least `target` subscribers for the
-/// account. Subscription happens just after the handshake, so this
-/// closes the small window between the client seeing `HelloAck` and
-/// the server registering the subscriber.
+/// account's doc. The server subscribes before it replies `DocOpened`,
+/// so after `handshake` this is immediate; it still earns its keep for
+/// `target == 0` (waiting for a disconnect to deregister).
 async fn wait_for_subscribers(acc: &Account, target: usize) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     loop {
@@ -1130,9 +1249,10 @@ async fn wait_for_subscribers(acc: &Account, target: usize) {
 async fn wait_for_acked(acc: &Account, target: u64) -> u64 {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     loop {
-        let stored = queries::get_last_acked_seq(&acc.server.state.db, acc.device_id)
-            .await
-            .unwrap();
+        let stored =
+            queries::get_last_acked_seq(&acc.server.state.db, acc.device_id, acc.primary_doc_id)
+                .await
+                .unwrap();
         if stored >= target {
             return stored;
         }
@@ -1141,4 +1261,186 @@ async fn wait_for_acked(acc: &Account, target: u64) -> u64 {
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
+}
+
+/// Drain until the server closes the socket. Tolerates a late
+/// `DocRejected`/close handshake; panics on any other payload frame.
+async fn expect_closed(ws: &mut WsStream) {
+    let deadline = std::time::Duration::from_secs(2);
+    loop {
+        match tokio::time::timeout(deadline, ws.next()).await {
+            Ok(None) | Ok(Some(Err(_))) | Ok(Some(Ok(Message::Close(_)))) => return,
+            Ok(Some(Ok(Message::Ping(_)))) | Ok(Some(Ok(Message::Pong(_)))) => continue,
+            Ok(Some(Ok(other))) => panic!("expected close, got {other:?}"),
+            Err(_) => panic!("socket still open after {deadline:?}"),
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn open_doc_for_foreign_doc_is_rejected_and_closes() {
+    let acc = signup_account().await;
+    let mut ws = connect_ws(&acc.server, &acc.device_token).await;
+    hello(&mut ws).await;
+
+    let foreign = Uuid::now_v7();
+    send_msgpack(&mut ws, &ClientFrame::OpenDoc { doc_id: foreign }).await;
+    match recv_msgpack::<ServerFrame>(&mut ws).await {
+        ServerFrame::DocRejected { doc_id, reason } => {
+            assert_eq!(doc_id, foreign);
+            assert!(reason.contains("member"), "reason: {reason}");
+        }
+        other => panic!("expected DocRejected, got {other:?}"),
+    }
+    expect_closed(&mut ws).await;
+    assert_eq!(
+        acc.server.state.sync_sessions.subscriber_count(foreign),
+        0,
+        "a refused open must not subscribe"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn payload_frame_before_open_doc_closes_session() {
+    let acc = signup_account().await;
+    let mut ws = connect_ws(&acc.server, &acc.device_token).await;
+    hello(&mut ws).await;
+
+    // Right doc, but never opened on this connection.
+    send_msgpack(
+        &mut ws,
+        &ClientFrame::PushOps {
+            doc_id: acc.primary_doc_id,
+            ops: vec![fake_push(1)],
+        },
+    )
+    .await;
+    expect_closed(&mut ws).await;
+    let batch = queries::fetch_ops_batch(&acc.server.state.db, acc.primary_doc_id, 0)
+        .await
+        .unwrap();
+    assert!(
+        batch.ops.is_empty(),
+        "nothing may be inserted before OpenDoc"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn payload_frame_for_another_doc_closes_session() {
+    let acc = signup_account().await;
+    let mut ws = connect_ws(&acc.server, &acc.device_token).await;
+    handshake(&mut ws, acc.primary_doc_id).await;
+    wait_for_subscribers(&acc, 1).await;
+
+    send_msgpack(
+        &mut ws,
+        &ClientFrame::PullOps {
+            doc_id: Uuid::now_v7(),
+            since_seq: 0,
+        },
+    )
+    .await;
+    expect_closed(&mut ws).await;
+    wait_for_subscribers(&acc, 0).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reopening_the_same_doc_is_idempotent() {
+    let acc = signup_account().await;
+    let mut ws = connect_ws(&acc.server, &acc.device_token).await;
+    handshake(&mut ws, acc.primary_doc_id).await;
+    send_msgpack(
+        &mut ws,
+        &ClientFrame::OpenDoc {
+            doc_id: acc.primary_doc_id,
+        },
+    )
+    .await;
+    match recv_msgpack::<ServerFrame>(&mut ws).await {
+        ServerFrame::DocOpened { doc_id, .. } => assert_eq!(doc_id, acc.primary_doc_id),
+        other => panic!("expected DocOpened, got {other:?}"),
+    }
+    assert_eq!(
+        acc.server
+            .state
+            .sync_sessions
+            .subscriber_count(acc.primary_doc_id),
+        1,
+        "re-open must not double-subscribe"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn horizon_spans_device_doc_frontiers_and_drops_revoked_devices() {
+    let acc = signup_account().await;
+    let device_b = register_second_device(&acc, "device-b").await;
+    let db = &acc.server.state.db;
+    let doc = acc.primary_doc_id;
+
+    let mut ws_a = connect_ws(&acc.server, &acc.device_token).await;
+    handshake(&mut ws_a, doc).await;
+    send_msgpack(
+        &mut ws_a,
+        &ClientFrame::PushOps {
+            doc_id: doc,
+            ops: fake_pushes(1..4),
+        },
+    )
+    .await;
+    let seqs = ack_seqs(recv_msgpack(&mut ws_a).await);
+    assert_eq!(seqs, vec![1, 2, 3]);
+    send_msgpack(
+        &mut ws_a,
+        &ClientFrame::Ack {
+            doc_id: doc,
+            last_acked_seq: 3,
+        },
+    )
+    .await;
+    assert_eq!(wait_for_acked(&acc, 3).await, 3);
+
+    // B has never acked: no frontier row, counts as 0, pins the horizon.
+    let horizon = queries::doc_horizon(db, doc, acc.account_id, acc.device_id, 3)
+        .await
+        .unwrap();
+    assert_eq!(horizon, 0);
+
+    let mut ws_b = connect_ws(&acc.server, &device_b.device_token).await;
+    handshake(&mut ws_b, doc).await;
+    send_msgpack(
+        &mut ws_b,
+        &ClientFrame::Ack {
+            doc_id: doc,
+            last_acked_seq: 2,
+        },
+    )
+    .await;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let h = queries::doc_horizon(db, doc, acc.account_id, acc.device_id, 3)
+            .await
+            .unwrap();
+        if h == 2 {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "horizon stuck at {h}");
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    // Revoking B cascades its frontier rows away, so only A remains.
+    drop(ws_b);
+    let resp = http()
+        .delete(format!(
+            "{}/api/devices/{}",
+            acc.server.base, device_b.device_id
+        ))
+        .bearer_auth(&acc.device_token)
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success(), "revoke: {}", resp.status());
+    let horizon = queries::doc_horizon(db, doc, acc.account_id, acc.device_id, 3)
+        .await
+        .unwrap();
+    assert_eq!(horizon, 3);
 }
