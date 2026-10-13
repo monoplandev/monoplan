@@ -2716,7 +2716,7 @@ input.task-check:hover {
   cursor: pointer;
 }
 
-/* Badge row under the title: list picker, pin-to-Focus toggle. In the
+/* Badge row under the title: list picker, date chip, "more" menu. In the
    780px modal they run inline at their natural widths; the narrow shells
    below rearrange them. */
 .task-dialog-badges {
@@ -2735,21 +2735,21 @@ input.task-check:hover {
   box-sizing: border-box;
 }
 
-/* Narrow shells (the side pane, the mobile page): a single-row grid. The
-   list picker takes the width and the pin toggle (when shown) a
-   natural-width column at the end. The picker drops its fit-content
+/* Narrow shells (the side pane, the mobile page): one row, no wrap. The
+   list picker takes the width and the glyph pills after it (date chip,
+   "more" menu) keep their natural width. The picker drops its fit-content
    width and 10em cap, and the sort caret moves to the far edge,
-   Select-style. The pin toggle is a glyph, not a label, so it keeps its
-   natural pill. */
+   Select-style. */
 .task-panel .task-dialog-badges,
 .task-page .task-dialog-badges {
-  display: grid;
-  grid-template-columns: 1fr auto;
+  flex-wrap: nowrap;
 }
 
-.task-panel .task-dialog-badges .badge,
-.task-page .task-dialog-badges .badge {
-  width: 100%;
+.task-panel .task-dialog-badges .task-dialog-list,
+.task-page .task-dialog-badges .task-dialog-list {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
   max-width: none;
   box-sizing: border-box;
 }
@@ -2757,11 +2757,6 @@ input.task-check:hover {
 .task-panel .task-dialog-badges .task-dialog-list-caret,
 .task-page .task-dialog-badges .task-dialog-list-caret {
   margin-left: auto;
-}
-
-.task-panel .task-dialog-badges .task-dialog-pin-toggle,
-.task-page .task-dialog-badges .task-dialog-pin-toggle {
-  width: auto;
 }
 
 .task-dialog-badges .badge svg,
@@ -3262,13 +3257,18 @@ input.task-check:hover {
   outline-offset: 1px;
 }
 
-/* Pin-to-Focus toggle beside the list picker: same pill geometry as
-   `.deadline-badge` / `.row-focus-badge`. Faint outline pin when unpinned,
-   filled pin when pressed (`aria-pressed`). Colours follow the badge
-   pair: unpressed matches the unset deadline / when placeholders, pressed
-   matches every other badge. Disabled (Done / Binned items — no Focus
-   refs, spec/focus.md) just loses the pointer. */
-.task-dialog-pin-toggle {
+/* Pin-to-Focus toggle in the header actions, before the item menu: an
+   icon button like its neighbours. Outline pin when unpinned, filled pin
+   in the text colour when pressed (`aria-pressed`). Disabled (Done /
+   Binned items — no Focus refs, spec/focus.md) just loses the pointer. */
+.task-dialog-pin-toggle[aria-pressed="true"] {
+  color: var(--text);
+}
+
+/* Glyph pills after the list picker: the date chip (faint until a date
+   is set, `data-set`) and the "more" menu trigger (place / deadline while
+   unset). Faint badge colour, the badge colour on hover / set / open. */
+.task-dialog-add-chip {
   justify-content: center;
   min-height: calc(1.3em + 4px);
   color: var(--text-badge-faint);
@@ -3276,18 +3276,41 @@ input.task-check:hover {
   outline: none;
 }
 
-.task-dialog-pin-toggle[aria-pressed="true"] {
+.task-dialog-add-chip:hover,
+.task-dialog-add-chip[data-set],
+.task-dialog-add-chip[data-expanded] {
   color: var(--text-badge);
 }
 
-.task-dialog-pin-toggle:focus-visible {
+.task-dialog-add-chip:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: 2px;
 }
 
-.task-dialog-pin-toggle svg {
-  width: 12px;
-  height: 12px;
+.task-dialog-add-chip svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Glyph before a menu item's label (the "more" menu's Place / Deadline):
+   the register's icon as it appears on its chip and band. The item lays
+   out space-between for a trailing shortcut, so glyph and label share a
+   lead span to stay together. */
+.dropdown-menu-item-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dropdown-menu-item-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-badge-faint);
+}
+
+.dropdown-menu-item-icon svg {
+  width: 14px;
+  height: 14px;
 }
 
 /* ---------- calendar popover (@corvu/calendar) ---------- */

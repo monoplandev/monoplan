@@ -19,7 +19,7 @@
 // shows its address muted under the input with a link to the map.
 
 import { Popover } from "@kobalte/core/popover";
-import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { osmMapUrl, searchPlaces } from "./geocode.ts";
 import mapPinSvg from "./icons/map-pin.svg?raw";
 import clockSvg from "./icons/clock.svg?raw";
@@ -53,6 +53,12 @@ export function PlaceField(props: {
   /** The places already on items, newest use first, read when the
    *  popover opens (not reactive: a scan in core). */
   knownPlaces: () => PlaceSuggestion[];
+  /** Land the caret in the input on mount: the field was just revealed
+   *  by the dialog's "Place" chip, so the user is here to type. */
+  autoFocus?: boolean;
+  /** The input lost focus with nothing typed and no place stored. The
+   *  dialog folds the field back into its chip. */
+  onBlurEmpty?: () => void;
 }) {
   const { m } = useAppI18n();
   let inputRef: HTMLInputElement | undefined;
@@ -99,6 +105,10 @@ export function PlaceField(props: {
 
   const localRows = createMemo(() => filterKnown(known() ?? [], draft(), KNOWN_SHOWN));
   const remoteRows = createMemo(() => dropKnown(remote(), localRows()));
+
+  onMount(() => {
+    if (props.autoFocus) inputRef?.focus();
+  });
 
   const commit = () => {
     clearTimeout(debounce);
@@ -302,6 +312,7 @@ export function PlaceField(props: {
                 if (insidePopover(e.relatedTarget)) return;
                 commit();
                 closeResults();
+                if (!draft().trim() && !props.place()) props.onBlurEmpty?.();
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {

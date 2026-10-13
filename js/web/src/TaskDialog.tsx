@@ -20,6 +20,7 @@ import {
   createSignal,
   For,
   Match,
+  on,
   onCleanup,
   Show,
   Switch,
@@ -30,8 +31,11 @@ import { DeadlineField } from "./DeadlineField.tsx";
 import { PlaceField } from "./PlaceField.tsx";
 import { WhenField } from "./WhenField.tsx";
 import { ListPicker, type ListOption } from "./ListPicker.tsx";
+import calendarSvg from "./icons/calendar.svg?raw";
 import checkSvg from "./icons/check.svg?raw";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
+import mapPinSvg from "./icons/map-pin.svg?raw";
+import timerSvg from "./icons/timer.svg?raw";
 import drawingPinSvg from "./icons/drawing-pin.svg?raw";
 import drawingPinFilledSvg from "./icons/drawing-pin-filled.svg?raw";
 import sidebarRightSvg from "./icons/sidebar-right.svg?raw";
@@ -643,8 +647,10 @@ export function TaskDialog(props: {
     if (key === null) {
       props.setWhenOpen(false);
       props.setDeadlineOpen(false);
+      setPlaceRevealed(false);
       return;
     }
+    setPlaceRevealed(false);
     const it = id ? props.app.state.itemsById[id] : undefined;
     const t = it?.text ?? "";
     // The core's text is the truth for an open item (the store's copy
@@ -1067,6 +1073,43 @@ export function TaskDialog(props: {
   // Closed / Binned: date fields render muted and the pin toggle hides
   // (neither can hold a Focus ref, spec/focus.md).
   const muted = () => vDone() || vBinned();
+
+  // Promote-on-set (`spec/board.md` has none of this; it is the task
+  // surface's own layout rule): the date, deadline and place bands show
+  // only while they hold a value or are being filled. A date / deadline band is
+  // "being filled" while its popover is open, which is already the
+  // caller's state (a row menu's "Set date…" opens the item onto it); the
+  // place band is a typed input, so it carries its own reveal flag,
+  // dropped again when the input blurs empty. The date has a permanent
+  // glyph chip in the badge row; place and deadline sit in a "more" menu
+  // there until set.
+  const [placeRevealed, setPlaceRevealed] = createSignal(false);
+  const whenShown = () => vWhen() !== null || props.whenOpen();
+  const deadlineShown = () => vDeadline() !== null || props.deadlineOpen();
+  const placeShown = () => vPlace() !== null || placeRevealed();
+  // A band folded back without a value leaves focus on a detached input;
+  // put it on the chip it came from instead (the date chip, or the
+  // "more" trigger for place / deadline). Only when the fold actually
+  // took the focus: a band also hides when the pane moves to an item
+  // without that value (arrowing along a board), and focus is the
+  // board's then, not ours to take.
+  let whenChipRef: HTMLButtonElement | undefined;
+  let moreRef: HTMLButtonElement | undefined;
+  let morePick: (() => void) | null = null;
+  const refocusChip = (shown: () => boolean, chip: () => HTMLButtonElement | undefined) =>
+    createEffect(
+      on(shown, (now, before) => {
+        if (!before || now) return;
+        queueMicrotask(() => {
+          const active = document.activeElement;
+          if (active && active !== document.body && active.isConnected) return;
+          chip()?.focus();
+        });
+      }),
+    );
+  refocusChip(whenShown, () => whenChipRef);
+  refocusChip(deadlineShown, () => moreRef);
+  refocusChip(placeShown, () => moreRef);
   const setDoneFlag = (done: boolean) => {
     const it = item();
     if (it) props.app.setDone(it.id, done);
@@ -1157,6 +1200,11 @@ export function TaskDialog(props: {
           </div>
         </div>
         <div class="task-dialog-header-actions">
+          {/* Pin-to-Focus toggle; hidden on Done / Binned items, which
+              can't hold a Focus ref (spec/focus.md). */}
+          <Show when={!muted()}>
+            <PinToggle pinned={vPinned} onToggle={onPinToggle} />
+          </Show>
           {/* Item menu (link, reveal, bin / restore / delete): only once
               the item exists. */}
           <Show when={item()}>
@@ -1274,57 +1322,124 @@ export function TaskDialog(props: {
             />
           </section>
 
-          {/* Badge row: the move-to-list picker, then the pin toggle
-              that adds / removes the Focus ref; hidden on Done /
-              Binned items, which can't hold one (spec/focus.md). */}
+          {/* Badge row: the move-to-list picker, then the date chip and
+              the "more" menu (the pin toggle lives in the header). */}
           <section class="task-dialog-section task-dialog-badges">
             <ListPicker
               options={listOptions}
               value={vListId}
               onChange={onListChange}
             />
-            <Show when={!muted()}>
-              <PinToggle pinned={vPinned} onToggle={onPinToggle} />
+            {/* Date chip: always here, lit once a date is set; opens the
+                date popover in the band below. Then a "more" menu with
+                the registers the item does not carry yet (place,
+                deadline), gone once both are set. */}
+            <AddChip
+              ref={(el) => (whenChipRef = el)}
+              icon={calendarSvg}
+              label={vWhen() ? m().when.label : m().when.setDate}
+              set={vWhen() !== null}
+              onClick={() => props.setWhenOpen(true)}
+            />
+            <Show when={!placeShown() || !deadlineShown()}>
+              <DropdownMenu
+                // A pick opens a band under the row (and the deadline's
+                // popover). Done while the menu is still closing, its
+                // dismiss handling takes the new popover down with it, so
+                // the pick is held until the menu has reported closed.
+                onOpenChange={(open) => {
+                  if (open || !morePick) return;
+                  const run = morePick;
+                  morePick = null;
+                  setTimeout(run, 0);
+                }}
+              >
+                <DropdownMenu.Trigger
+                  ref={(el) => (moreRef = el)}
+                  class="badge task-dialog-add-chip"
+                  aria-label={m().common.menu}
+                  title={m().common.menu}
+                  innerHTML={dotsHorizontalSvg}
+                />
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content class="dropdown-menu-content task-dialog-menu-content">
+                    <Show when={!placeShown()}>
+                      <DropdownMenu.Item
+                        class="dropdown-menu-item"
+                        onSelect={() => {
+                          morePick = () => setPlaceRevealed(true);
+                        }}
+                      >
+                        <span class="dropdown-menu-item-lead">
+                          <span class="dropdown-menu-item-icon" aria-hidden="true" innerHTML={mapPinSvg} />
+                          {m().place.label}
+                        </span>
+                      </DropdownMenu.Item>
+                    </Show>
+                    <Show when={!deadlineShown()}>
+                      <DropdownMenu.Item
+                        class="dropdown-menu-item"
+                        onSelect={() => {
+                          morePick = () => props.setDeadlineOpen(true);
+                        }}
+                      >
+                        <span class="dropdown-menu-item-lead">
+                          <span class="dropdown-menu-item-icon" aria-hidden="true" innerHTML={timerSvg} />
+                          {m().deadline.label}
+                        </span>
+                      </DropdownMenu.Item>
+                    </Show>
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu>
             </Show>
           </section>
 
           {/* Date section: the planned date between the badges and the
               deadline. */}
-          <section class="task-dialog-section task-dialog-dates">
-            <WhenField
-              when={vWhen}
-              duration={vDuration}
-              muted={muted}
-              onChange={onWhenChange}
-              onDurationChange={onDurationChange}
-              open={props.whenOpen}
-              setOpen={props.setWhenOpen}
-            />
-          </section>
+          <Show when={whenShown()}>
+            <section class="task-dialog-section task-dialog-dates">
+              <WhenField
+                when={vWhen}
+                duration={vDuration}
+                muted={muted}
+                onChange={onWhenChange}
+                onDurationChange={onDurationChange}
+                open={props.whenOpen}
+                setOpen={props.setWhenOpen}
+              />
+            </section>
+          </Show>
 
           {/* Deadline section under the dates, before the notes.
               Clicking the field opens a popover (Today / Tomorrow /
               calendar / Remove). */}
-          <section class="task-dialog-section task-dialog-deadline">
-            <DeadlineField
-              deadline={vDeadline}
-              muted={muted}
-              onChange={onDeadlineChange}
-              open={props.deadlineOpen}
-              setOpen={props.setDeadlineOpen}
-            />
-          </section>
+          <Show when={deadlineShown()}>
+            <section class="task-dialog-section task-dialog-deadline">
+              <DeadlineField
+                deadline={vDeadline}
+                muted={muted}
+                onChange={onDeadlineChange}
+                open={props.deadlineOpen}
+                setOpen={props.setDeadlineOpen}
+              />
+            </section>
+          </Show>
 
           {/* Place section under the deadline: a typed label, or a lookup
               (`PlaceField`). */}
-          <section class="task-dialog-section task-dialog-place-section">
-            <PlaceField
-              place={vPlace}
-              muted={muted}
-              onChange={onPlaceChange}
-              knownPlaces={() => props.app.placeSuggestions("", KNOWN_PLACES_LIMIT)}
-            />
-          </section>
+          <Show when={placeShown()}>
+            <section class="task-dialog-section task-dialog-place-section">
+              <PlaceField
+                place={vPlace}
+                muted={muted}
+                onChange={onPlaceChange}
+                knownPlaces={() => props.app.placeSuggestions("", KNOWN_PLACES_LIMIT)}
+                autoFocus={vPlace() === null}
+                onBlurEmpty={() => setPlaceRevealed(false)}
+              />
+            </section>
+          </Show>
 
           <section class="task-dialog-section">
             <div
@@ -1589,6 +1704,31 @@ function LifecycleBadge(props: {
 /** Pin-to-Focus toggle shown beside the list picker: outline pin when
  *  unpinned, filled when pinned. Backed by live Focus state for open items
  *  and by the `newFocus` buffer in new-item capture mode. */
+/** A glyph-only chip in the badge row that opens a register's band
+ *  (the date). Same pill as the pin toggle: faint until the register
+ *  holds a value (`set`), then the badge colour. The register's name is
+ *  its tooltip and accessible name. */
+function AddChip(props: {
+  ref: (el: HTMLButtonElement) => void;
+  icon: string;
+  label: string;
+  set?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      ref={props.ref}
+      type="button"
+      class="badge task-dialog-add-chip"
+      data-set={props.set ? "" : undefined}
+      aria-label={props.label}
+      title={props.label}
+      onClick={props.onClick}
+      innerHTML={props.icon}
+    />
+  );
+}
+
 function PinToggle(props: {
   pinned: () => boolean;
   onToggle: () => void;
@@ -1598,7 +1738,7 @@ function PinToggle(props: {
   return (
     <button
       type="button"
-      class="badge task-dialog-pin-toggle"
+      class="icon-button task-dialog-pin-toggle"
       aria-pressed={props.pinned()}
       aria-label={label()}
       title={label()}
