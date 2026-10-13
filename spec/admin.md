@@ -34,3 +34,5 @@ Returns JSON:
 `accounts` and `devices` are counts of the current rows in their respective
 tables. Device revocation deletes the device row, so `devices` excludes revoked
 devices.
+
+e.g. curl -v -H 'Authorization: Bearer <pw>' https://alpha.monoplan.app/admin/stats
