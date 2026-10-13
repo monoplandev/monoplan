@@ -23,7 +23,7 @@ import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Sh
 import { osmMapUrl, searchPlaces } from "./geocode.ts";
 import mapPinSvg from "./icons/map-pin.svg?raw";
 import clockSvg from "./icons/clock.svg?raw";
-import externalLinkSvg from "./icons/external-link.svg?raw";
+import mapSvg from "./icons/map.svg?raw";
 import spinnerSvg from "./icons/spinner.svg?raw";
 import { useAppI18n } from "./i18n.tsx";
 import { trackOverlay } from "./overlay.ts";
@@ -412,10 +412,10 @@ export function PlaceField(props: {
               href={osmMapUrl(c().lat, c().lon)}
               target="_blank"
               rel="noopener noreferrer"
-            >
-              {m().place.openMap}
-              <span class="task-dialog-place-map-icon" innerHTML={externalLinkSvg} />
-            </a>
+              aria-label={m().place.openMap}
+              title={m().place.openMap}
+              innerHTML={mapSvg}
+            />
           </div>
         )}
       </Show>

@@ -1,13 +1,13 @@
 // The Upcoming view: the agenda. Every Open item with a planned date or a
 // deadline, bucketed by day (`dayGroups.ts`), Today always anchored so the
 // surface reads as "the days ahead" even when nothing is due. Overdue
-// deadlines sit in an Overdue section above Today, and are the only
-// placing dates that badge (the day header carries everyone else's). A
-// past `when` is over and places nothing here. The other field, when
-// present, badges beside it so a row reads "Sat 13 · due 31 Oct". Timed
-// rows lead with their time. Rows tick off in place and stay where they
-// are on their `when` day once done, muted, so the day still records what
-// happened. Click opens the task surface (dialog or side panel).
+// deadlines sit in an Overdue section above Today. A past `when` is over
+// and places nothing here. Rows carry no date pills: the day header is the
+// date, and the task surface shows the rest. The time span (or "All
+// day") leads the title line; the place is a muted line under it.
+// Rows tick off in place and stay where they are on their `when` day once
+// done, muted, so the day still records what happened. Click opens the
+// task surface (dialog or side panel).
 //
 // Events (`spec/events-plan.md`) live here and nowhere else. An event row
 // is a task row without the list label: the checkbox is there for anyone
@@ -21,12 +21,15 @@
 
 import { createMemo, For, Show } from "solid-js";
 import { groupByDay, type DayGroup, type DayRow } from "./dayGroups.ts";
-import { DeadlineBadge } from "./DeadlineBadge.tsx";
-import { PlaceBadge } from "./PlaceBadge.tsx";
-import { formatWhenTime, nowMs, todayStamp } from "./format.tsx";
+import {
+  endTimeOf,
+  formatClockTime,
+  nowMs,
+  todayStamp,
+  whenTime,
+} from "./format.tsx";
 import { useAppI18n } from "./i18n.tsx";
 import { isDone, isEvent, type DocApp } from "./sync/store.ts";
-import { WhenBadge } from "./WhenBadge.tsx";
 
 export function Upcoming(props: {
   app: DocApp;
@@ -66,12 +69,18 @@ export function Upcoming(props: {
     return g.urgency === "today" ? `${date} (${m().deadline.today})` : date;
   };
 
-  // The placing field badges only in Overdue (deadlines only), where the
-  // header carries no day; the other field always badges.
-  const showPlacingDeadline = (r: DayRow, g: DayGroup) =>
-    r.placedBy === "deadline" && g.urgency === "overdue";
-  const timeLabel = (r: DayRow) =>
-    r.placedBy === "when" ? formatWhenTime(r.item.when!, locale()) : "";
+  // "09:00–10:00" for a timed row with a length, the start alone without
+  // one, "All day" without a time. An overnight end reads as its clock
+  // time, as the task dialog shows it.
+  const timeLabel = (r: DayRow): string => {
+    if (r.placedBy !== "when") return "";
+    const start = whenTime(r.item.when!);
+    if (!start) return m().when.allDay;
+    const from = formatClockTime(start, locale());
+    const d = r.item.duration;
+    if (!d) return from;
+    return `${from}\u2013${formatClockTime(endTimeOf(start, d), locale())}`;
+  };
 
   return (
     <div class="upcoming" tabIndex={-1}>
@@ -110,28 +119,25 @@ export function Upcoming(props: {
                         props.app.setDone(r.item.id, e.currentTarget.checked)
                       }
                     />
-                    <Show when={timeLabel(r)}>
-                      {(t) => <span class="upcoming-row-time">{t()}</span>}
-                    </Show>
-                    <span class="upcoming-row-text">{r.item.text}</span>
-                    <span class="upcoming-row-meta">
-                      <Show when={r.placedBy === "deadline" && r.item.when}>
-                        {(w) => <WhenBadge when={w()} />}
-                      </Show>
-                      <Show when={showPlacingDeadline(r, g)}>
-                        <DeadlineBadge deadline={r.item.deadline!} pastAsDate />
-                      </Show>
-                      <Show when={r.placedBy === "when" && r.item.deadline}>
-                        {(d) => (
-                          <DeadlineBadge
-                            deadline={d()}
-                            muted={isDone(r.item)}
-                          />
+                    <span class="upcoming-row-body">
+                      <span class="upcoming-row-title">
+                        <Show when={timeLabel(r)}>
+                          {(t) => <span class="upcoming-row-time">{t()}</span>}
+                        </Show>
+                        <span class="upcoming-row-text">{r.item.text}</span>
+                      </span>
+                      <Show when={r.item.place}>
+                        {(p) => (
+                          <span
+                            class="upcoming-row-place"
+                            title={p().address ?? p().label}
+                          >
+                            {p().label}
+                          </span>
                         )}
                       </Show>
-                      <Show when={r.item.place}>
-                        {(p) => <PlaceBadge place={p()} muted={isDone(r.item)} />}
-                      </Show>
+                    </span>
+                    <span class="upcoming-row-meta">
                       {/* No label is the event's mark: every task row
                           carries its list, an event has none to show. */}
                       <Show when={!isEvent(r.item)}>

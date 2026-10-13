@@ -454,12 +454,41 @@ body {
   background: var(--bg-hover);
 }
 
-.upcoming-row-text {
+/* Title column: the time span then the title on one line, and under it
+   the place when there is one, as a muted second line rather than a
+   pill. */
+.upcoming-row-body {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.upcoming-row-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.upcoming-row-time {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.upcoming-row-text,
+.upcoming-row-place {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.upcoming-row-place {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-faint);
 }
 
 .upcoming-row-meta {
@@ -469,18 +498,9 @@ body {
   flex-shrink: 0;
 }
 
-/* Leading wall-clock time on a timed agenda row, fixed-width so titles
-   line up down the day. */
-.upcoming-row-time {
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-muted);
-}
-
 /* A ticked row stays on its day as the record of what happened: muted,
    the tick doing the talking. */
-.upcoming-row[data-done] .upcoming-row-text,
-.upcoming-row[data-done] .upcoming-row-time {
+.upcoming-row[data-done] .upcoming-row-text {
   color: var(--text-muted);
 }
 
@@ -3039,10 +3059,10 @@ input.task-check:hover {
 }
 
 /* The address line under the input: muted, standard 4px horizontal padding,
-   with the map link at the end. */
+   with the map button at the end. The address wraps so it reads in full. */
 .task-dialog-place-address {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 8px;
   padding: 0 4px;
   font-size: 12px;
@@ -3057,31 +3077,30 @@ input.task-check:hover {
 .task-dialog-place-address-text {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
+/* Icon-only "open map" link: the map glyph, inheriting the address
+   line's muted colour, darkening on hover. */
 .task-dialog-place-map {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  color: var(--link);
+  justify-content: center;
+  width: 18px;
+  height: 16px;
+  border-radius: 4px;
+  color: inherit;
   text-decoration: none;
 }
 
 .task-dialog-place-map:hover {
-  text-decoration: underline;
+  color: var(--text);
 }
 
-.task-dialog-place-map-icon {
-  display: inline-flex;
-}
-
-.task-dialog-place-map-icon svg {
-  width: 11px;
-  height: 11px;
+.task-dialog-place-map svg {
+  width: 14px;
+  height: 14px;
 }
 
 /* The lookup results popover: a plain list of results under the input,
