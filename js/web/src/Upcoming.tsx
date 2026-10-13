@@ -3,8 +3,9 @@
 // surface reads as "the days ahead" even when nothing is due. Overdue
 // deadlines sit in an Overdue section above Today. A past `when` is over
 // and places nothing here. Rows carry no date pills: the day header is the
-// date, and the task surface shows the rest. The time span (or "All
-// day") leads the title line; the place is a muted line under it.
+// date, and the task surface shows the rest. A fixed-width lane down the
+// left carries the start time ("All day", or "Due" on a deadline); the
+// place is a muted line under the title.
 // Rows tick off in place and stay where they are on their `when` day once
 // done, muted, so the day still records what happened. Click opens the
 // task surface (dialog or side panel).
@@ -22,13 +23,13 @@
 import { createMemo, For, Show } from "solid-js";
 import { groupByDay, type DayGroup, type DayRow } from "./dayGroups.ts";
 import {
-  endTimeOf,
   formatClockTime,
   nowMs,
   todayStamp,
   whenTime,
 } from "./format.tsx";
 import { useAppI18n } from "./i18n.tsx";
+import mapPinSvg from "./icons/map-pin.svg?raw";
 import { isDone, isEvent, type DocApp } from "./sync/store.ts";
 
 export function Upcoming(props: {
@@ -72,14 +73,15 @@ export function Upcoming(props: {
   // "09:00–10:00" for a timed row with a length, the start alone without
   // one, "All day" without a time. An overnight end reads as its clock
   // time, as the task dialog shows it.
+  // Start time only: the agenda is a glance at the day, the end sits on
+  // the task surface. An all-day item says so in the lane, and a row
+  // here on its deadline says "Due".
   const timeLabel = (r: DayRow): string => {
+    if (r.placedBy === "deadline") return m().upcoming.due;
     if (r.placedBy !== "when") return "";
     const start = whenTime(r.item.when!);
     if (!start) return m().when.allDay;
-    const from = formatClockTime(start, locale());
-    const d = r.item.duration;
-    if (!d) return from;
-    return `${from}\u2013${formatClockTime(endTimeOf(start, d), locale())}`;
+    return formatClockTime(start, locale());
   };
 
   return (
@@ -110,20 +112,23 @@ export function Upcoming(props: {
                       props.onOpen(r.item.id);
                     }}
                   >
-                    <input
-                      type="checkbox"
-                      class="task-check"
-                      checked={isDone(r.item)}
-                      aria-label={m().workspace.markDone}
-                      onChange={(e) =>
-                        props.app.setDone(r.item.id, e.currentTarget.checked)
-                      }
-                    />
+                    {/* Fixed-width time lane, kept even when empty so
+                        the checks and titles line up down the day. */}
+                    <span class="upcoming-row-time">{timeLabel(r)}</span>
                     <span class="upcoming-row-body">
                       <span class="upcoming-row-title">
-                        <Show when={timeLabel(r)}>
-                          {(t) => <span class="upcoming-row-time">{t()}</span>}
-                        </Show>
+                        <input
+                          type="checkbox"
+                          class="task-check"
+                          checked={isDone(r.item)}
+                          aria-label={m().workspace.markDone}
+                          onChange={(e) =>
+                            props.app.setDone(
+                              r.item.id,
+                              e.currentTarget.checked,
+                            )
+                          }
+                        />
                         <span class="upcoming-row-text">{r.item.text}</span>
                       </span>
                       <Show when={r.item.place}>
@@ -132,7 +137,13 @@ export function Upcoming(props: {
                             class="upcoming-row-place"
                             title={p().address ?? p().label}
                           >
-                            {p().label}
+                            <span
+                              class="upcoming-row-place-icon"
+                              innerHTML={mapPinSvg}
+                            />
+                            <span class="upcoming-row-place-label">
+                              {p().label}
+                            </span>
                           </span>
                         )}
                       </Show>

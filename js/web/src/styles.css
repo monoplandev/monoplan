@@ -18,7 +18,7 @@
   --text-badge: #5e5c68;
   --text-badge-faint: #8c8a96;
   --text: #1a1a1a;
-  --text-muted: #555;
+  --text-muted: #999;
   --text-faint: #9e9e9f;
   --text-empty: #999;
   --border: #e5e5e5;
@@ -439,9 +439,14 @@ body {
   color: var(--text-faint);
 }
 
+/* The first text line is a fixed 24px band (--upcoming-line) so the
+   time, the check, the title and the list badge all centre on it; the
+   place line then hangs below without pulling the flanks down to the
+   row's middle. 4px padding + 24px keeps a one-line row at 32px. */
 .upcoming-row {
+  --upcoming-line: 24px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   min-height: 32px;
   padding: 4px 6px;
@@ -454,9 +459,23 @@ body {
   background: var(--bg-hover);
 }
 
-/* Title column: the time span then the title on one line, and under it
-   the place when there is one, as a muted second line rather than a
-   pill. */
+/* Time lane: a fixed column at the row's left edge, wide enough for the
+   longest 12-hour form ("12:30 PM"), so the checks and titles line up
+   down the day whether or not a row has a time. */
+.upcoming-row-time {
+  flex-shrink: 0;
+  width: 4em;
+  height: var(--upcoming-line);
+  display: inline-flex;
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+/* Body column: the check and the title on the first line, and under
+   them the place when there is one, as a muted second line rather than
+   a pill. */
 .upcoming-row-body {
   flex: 1;
   min-width: 0;
@@ -466,28 +485,42 @@ body {
 
 .upcoming-row-title {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
+  min-height: var(--upcoming-line);
   min-width: 0;
 }
 
-.upcoming-row-time {
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-muted);
-}
-
 .upcoming-row-text,
-.upcoming-row-place {
+.upcoming-row-place-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Place: the pin glyph then the label, the pin sized to the date pills'
+   icon slot so the agenda and the task surface draw the same mark. It
+   starts at the body's left edge, so under the checkbox. */
 .upcoming-row-place {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
   margin-top: 2px;
+  padding-bottom: 2px;
   color: var(--text-muted);
+}
+
+.upcoming-row-place-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.upcoming-row-place-icon svg {
+  width: 12px;
+  height: 12px;
 }
 
 .upcoming-row-meta {
@@ -495,6 +528,7 @@ body {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+  height: var(--upcoming-line);
 }
 
 /* A ticked row stays on its day as the record of what happened: muted,

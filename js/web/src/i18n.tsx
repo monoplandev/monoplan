@@ -314,6 +314,8 @@ export type Messages = {
     /** What an Open event's status reads: the one label its four open
      *  states share in the status controls (`statusLabel`). */
     event: string;
+    /** Time-lane label for a row placed on its day by its deadline. */
+    due: string;
   };
   sidePanel: {
     /** Accessible name of the desktop side panel. */
@@ -595,6 +597,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       emptyToday: "Nada para hoy",
       unscheduled: "Sin fecha",
       event: "Evento",
+      due: "Vence",
     },
     sidePanel: {
       title: "Barra de contexto",
@@ -862,6 +865,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       emptyToday: "Nothing due today",
       unscheduled: "Unscheduled",
       event: "Event",
+      due: "Due",
     },
     sidePanel: {
       title: "Context sidebar",
