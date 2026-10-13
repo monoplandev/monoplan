@@ -7,7 +7,7 @@
   --bg-board-col: #fbfcfd;
   /* Auth branding ground: behind the logo artwork and under the
      sign-in submit button. */
-  --brand-bg: #e5ebff;
+  --brand-bg: #ebefff;
   --bg-elevated: #ffffff;
   --surface: #ffffff;
   --bg-hover: rgba(0, 0, 0, 0.04);
@@ -430,7 +430,7 @@ body {
 .upcoming-day-label {
   margin: 0;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 400;
   color: var(--text);
 }
 
@@ -2153,8 +2153,8 @@ input.task-check:hover {
   margin-top: 4px;
   padding: 10px;
   border: none;
-  background: var(--brand-bg);
-  box-shadow: 0 3px #d3cdbf;
+  background: #f2f2f2;
+  box-shadow: 0 3px #0000001a;
   color: black;
   border-radius: 4px;
   cursor: pointer;
