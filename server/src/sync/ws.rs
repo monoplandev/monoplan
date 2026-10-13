@@ -597,17 +597,26 @@ async fn pull_snapshot(
             Some(chain) => {
                 tracing::info!(
                     up_to_seq = chain.up_to_seq,
-                    blob_count = chain.blobs.len(),
+                    row_count = chain.rows.len(),
                     "ws pull_snapshot served"
                 );
-                send_msgpack(
-                    socket,
-                    &ServerFrame::Snapshot {
-                        up_to_seq: chain.up_to_seq,
-                        blobs: chain.blobs,
-                    },
-                )
-                .await
+                // One row per frame, fire-and-forget like `OpsBatch`:
+                // the head can be tens of MiB and the client imports
+                // each row as it lands, so never pack the chain into a
+                // single message. TCP flow control paces a slow reader.
+                let last = chain.rows.len().saturating_sub(1);
+                for (i, row) in chain.rows.into_iter().enumerate() {
+                    send_msgpack(
+                        socket,
+                        &ServerFrame::Snapshot {
+                            up_to_seq: row.up_to_seq,
+                            blob: row.blob,
+                            complete: i == last,
+                        },
+                    )
+                    .await?;
+                }
+                Ok(())
             }
             None => {
                 // A well-behaved client only sends `PullSnapshot` after

@@ -225,6 +225,13 @@ pub struct LatestSnapshotMeta {
     pub up_to_vv: EncryptedBlob,
 }
 
+/// One row of a [`SnapshotChain`]: the blob and the state frontier it
+/// brings the importer to.
+pub struct SnapshotChainRow {
+    pub up_to_seq: u64,
+    pub blob: EncryptedBlob,
+}
+
 /// What a bootstrapping device imports: the latest full snapshot
 /// followed by every delta landed after it, in import order.
 pub struct SnapshotChain {
@@ -232,7 +239,7 @@ pub struct SnapshotChain {
     pub up_to_seq: u64,
     pub compaction_floor_seq: u64,
     pub epoch: u64,
-    pub blobs: Vec<EncryptedBlob>,
+    pub rows: Vec<SnapshotChainRow>,
 }
 
 /// Outcome of [`insert_snapshot`].
@@ -440,7 +447,7 @@ pub async fn snapshot_chain(db: &Db, doc_id: Uuid) -> anyhow::Result<Option<Snap
                         up_to_seq,
                         compaction_floor_seq,
                         epoch,
-                        blobs: vec![blob],
+                        rows: vec![SnapshotChainRow { up_to_seq, blob }],
                     });
                 }
                 (None, Some(_)) => {
@@ -451,7 +458,7 @@ pub async fn snapshot_chain(db: &Db, doc_id: Uuid) -> anyhow::Result<Option<Snap
                     c.up_to_seq = up_to_seq;
                     c.compaction_floor_seq = compaction_floor_seq;
                     c.epoch = epoch;
-                    c.blobs.push(blob);
+                    c.rows.push(SnapshotChainRow { up_to_seq, blob });
                 }
                 (Some(c), from) => {
                     tracing::warn!(

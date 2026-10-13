@@ -186,14 +186,19 @@ pub enum ServerFrame {
         compaction_floor_seq: u64,
         base: Option<SnapshotBase>,
     },
-    /// Response to `PullSnapshot`. `blobs` is the stored chain in
-    /// import order: the latest full snapshot first, then every delta
-    /// landed after it. `up_to_seq` is the chain's final state
-    /// frontier; the bootstrapping client uses it as its next
-    /// `since_seq` for `PullOps`.
+    /// One row of the stored snapshot chain, in reply to
+    /// `PullSnapshot`. The server streams the chain one row per frame
+    /// in import order — the latest full snapshot first, then every
+    /// delta landed after it — and marks the last row `complete`.
+    /// `up_to_seq` is this row's state frontier; on the `complete`
+    /// frame it is the chain's final frontier, which the bootstrapping
+    /// client uses as its next `since_seq` for `PullOps`. Frames are
+    /// fire-and-forget like `OpsBatch`: the client imports each row as
+    /// it lands rather than buffering the chain.
     Snapshot {
         up_to_seq: u64,
-        blobs: Vec<EncryptedBlob>,
+        blob: EncryptedBlob,
+        complete: bool,
     },
     /// Sent in lieu of `OpsBatch` when the client's `since_seq` is
     /// below the latest snapshot's `compaction_floor_seq` — the ops it

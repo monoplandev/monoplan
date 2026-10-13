@@ -734,7 +734,8 @@ async fn compact_doc_deletes_ops_below_floor_and_keeps_the_chain() {
         .await
         .unwrap()
         .expect("chain");
-    assert_eq!(chain.blobs, vec![fake_blob(0xA1), fake_blob(0xA2)]);
+    let blobs: Vec<_> = chain.rows.iter().map(|r| r.blob.clone()).collect();
+    assert_eq!(blobs, vec![fake_blob(0xA1), fake_blob(0xA2)]);
 
     // Bootstrap path still works: a fresh device pulling from 0 gets
     // SnapshotRequired (its cursor is below the compaction floor),
@@ -888,13 +889,13 @@ async fn delta_chain_requested_and_served_in_order() {
     let mut ws_f = connect_ws(&acc.server, &fresh.device_token).await;
     handshake(&mut ws_f).await;
     send_msgpack(&mut ws_f, &ClientFrame::PullSnapshot).await;
-    match recv_msgpack::<ServerFrame>(&mut ws_f).await {
-        ServerFrame::Snapshot { up_to_seq, blobs } => {
-            assert_eq!(up_to_seq, 4);
-            assert_eq!(blobs, vec![fake_blob(0xA1), fake_blob(0xA2)]);
-        }
-        other => panic!("expected Snapshot, got {other:?}"),
-    }
+    // One row per frame, head first, `complete` on the last; each
+    // frame carries its own row's frontier.
+    let rows = recv_snapshot_chain(&mut ws_f).await;
+    assert_eq!(
+        rows,
+        vec![(2, fake_blob(0xA1), false), (4, fake_blob(0xA2), true)]
+    );
 
     // 3. Two more → delta again, from the previous delta's VV; the
     //    chain keeps growing and is served whole.
@@ -929,19 +930,39 @@ async fn delta_chain_requested_and_served_in_order() {
 
     send_msgpack(&mut ws_f, &ClientFrame::PullSnapshot).await;
     // A's pushes were broadcast to the fresh device's socket too;
-    // skip past them to the Snapshot reply.
-    let (up_to_seq, blobs) = loop {
-        match recv_msgpack::<ServerFrame>(&mut ws_f).await {
-            ServerFrame::Snapshot { up_to_seq, blobs } => break (up_to_seq, blobs),
+    // `recv_snapshot_chain` skips past them to the Snapshot rows.
+    let rows = recv_snapshot_chain(&mut ws_f).await;
+    assert_eq!(
+        rows,
+        vec![
+            (2, fake_blob(0xA1), false),
+            (4, fake_blob(0xA2), false),
+            (6, fake_blob(0xA3), true),
+        ]
+    );
+}
+
+/// Collect a streamed snapshot chain: every `Snapshot` frame up to and
+/// including the `complete` one, as `(up_to_seq, blob, complete)`.
+/// Interleaved `OpsBroadcast` frames are skipped.
+async fn recv_snapshot_chain(ws: &mut WsStream) -> Vec<(u64, EncryptedBlob, bool)> {
+    let mut rows = Vec::new();
+    loop {
+        match recv_msgpack::<ServerFrame>(ws).await {
+            ServerFrame::Snapshot {
+                up_to_seq,
+                blob,
+                complete,
+            } => {
+                rows.push((up_to_seq, blob, complete));
+                if complete {
+                    return rows;
+                }
+            }
             ServerFrame::OpsBroadcast { .. } => continue,
             other => panic!("expected Snapshot, got {other:?}"),
         }
-    };
-    assert_eq!(up_to_seq, 6);
-    assert_eq!(
-        blobs,
-        vec![fake_blob(0xA1), fake_blob(0xA2), fake_blob(0xA3)]
-    );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1004,7 +1025,8 @@ async fn delta_that_does_not_chain_onto_latest_row_is_rejected() {
         .await
         .unwrap()
         .expect("chain");
-    assert_eq!(chain.blobs, vec![fake_blob(0xA1)]);
+    assert_eq!(chain.rows.len(), 1);
+    assert_eq!(chain.rows[0].blob, fake_blob(0xA1));
     assert_eq!(chain.up_to_seq, 10);
 }
 

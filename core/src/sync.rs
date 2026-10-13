@@ -761,7 +761,11 @@ impl SyncEngine {
                     self.go_disconnected();
                 }
             }
-            ServerFrame::Snapshot { up_to_seq, blobs } => {
+            ServerFrame::Snapshot {
+                up_to_seq,
+                blob,
+                complete,
+            } => {
                 if !matches!(self.state, ConnState::Bootstrapping) {
                     self.events.push_back(Event::Error(format!(
                         "Snapshot received in unexpected state {:?}",
@@ -769,16 +773,16 @@ impl SyncEngine {
                     )));
                     return;
                 }
-                if blobs.is_empty() {
-                    self.events
-                        .push_back(Event::Error("Snapshot frame carried no blobs".into()));
-                    self.go_disconnected();
-                    return;
-                }
-                // Apply the chain (full snapshot, then each delta in
-                // order) and learn its exact declared frontier:
-                // everything it contains is proven server history.
-                let imported_vv = match self.doc.apply_remote_batch(&self.dek, blobs.iter()) {
+                // The chain streams one row per frame (full head, then
+                // each delta in order). Import each as it lands and
+                // learn its exact declared frontier: everything it
+                // contains is proven server history. Loro import is
+                // idempotent, so a chain cut short by a disconnect is
+                // simply re-pulled whole on reconnect.
+                let imported_vv = match self
+                    .doc
+                    .apply_remote_batch(&self.dek, std::iter::once(&blob))
+                {
                     Ok(vv) => vv,
                     Err(e) => {
                         self.events
@@ -788,6 +792,14 @@ impl SyncEngine {
                     }
                 };
                 self.server_known_vv.merge(&imported_vv);
+                if !complete {
+                    // More rows to come. Persisting waits for the last
+                    // one: the checkpoint export below is O(doc), and
+                    // a `server_known_vv` written ahead of its
+                    // checkpoint would claim history the stored doc
+                    // does not hold.
+                    return;
+                }
                 if let Err(e) = self
                     .storage
                     .write_server_known_vv(self.doc_id, &self.server_known_vv.encode())
@@ -2244,10 +2256,11 @@ mod tests {
         let _ = drain_events(&mut eng);
         eng.handle_server_bytes(&enc(&ServerFrame::Snapshot {
             up_to_seq: 99,
-            blobs: vec![EncryptedBlob {
+            blob: EncryptedBlob {
                 nonce: vec![0; 24],
                 ciphertext: vec![],
-            }],
+            },
+            complete: true,
         }));
         let evs = drain_events(&mut eng);
         assert!(matches!(evs.as_slice(), [Event::Error(s)] if s.contains("Snapshot")));
@@ -2288,7 +2301,8 @@ mod tests {
         });
         eng.handle_server_bytes(&enc(&ServerFrame::Snapshot {
             up_to_seq: 42,
-            blobs: vec![snapshot_blob.clone()],
+            blob: snapshot_blob.clone(),
+            complete: true,
         }));
 
         // The local checkpoint (a re-export of the merged doc) is
@@ -2384,7 +2398,8 @@ mod tests {
         });
         eng.handle_server_bytes(&enc(&ServerFrame::Snapshot {
             up_to_seq: 42,
-            blobs: vec![snapshot_blob],
+            blob: snapshot_blob,
+            complete: true,
         }));
 
         // The WAL is fully pruned, but the checkpoint contains the
@@ -2656,9 +2671,21 @@ mod tests {
         let pull_snap: ClientFrame = dec(&b.pop_outbox().expect("PullSnapshot"));
         assert!(matches!(pull_snap, ClientFrame::PullSnapshot));
 
+        // The chain arrives one row per frame; nothing resumes until
+        // the `complete` row lands.
+        b.handle_server_bytes(&enc(&ServerFrame::Snapshot {
+            up_to_seq: full_up_to,
+            blob: full_blob,
+            complete: false,
+        }));
+        assert!(
+            b.pop_outbox().is_none(),
+            "no PullOps before the chain completes"
+        );
         b.handle_server_bytes(&enc(&ServerFrame::Snapshot {
             up_to_seq: snapshot_up_to,
-            blobs: vec![full_blob, delta_blob],
+            blob: delta_blob,
+            complete: true,
         }));
 
         // B should re-issue PullOps from the snapshot's up_to.
