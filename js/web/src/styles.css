@@ -1273,15 +1273,9 @@ input.task-check:hover {
    colour as the origin-list badge (.row-list). */
 .row-notes-badge {
   justify-content: center;
-  margin-top: -1px;
-  min-height: calc(1.3em + 4px);
+  padding-inline: 0;
   background: none;
   color: color-mix(in srgb, var(--text-badge) 80%, var(--bg));
-}
-
-.row-notes-badge svg {
-  width: 12px;
-  height: 12px;
 }
 
 /* `overflow: hidden` on .dnd-item (set by primavera-dnd's inline stylesheet)

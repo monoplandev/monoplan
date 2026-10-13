@@ -3,7 +3,6 @@ import { ContextMenu } from "@kobalte/core/context-menu";
 import checkSvg from "./icons/check.svg?raw";
 import crossSvg from "./icons/cross.svg?raw";
 import starFilledSvg from "./icons/star-filled.svg?raw";
-import noteSvg from "./icons/note.svg?raw";
 import { DndSelection } from "./dnd/solid";
 import { trackOverlay } from "./overlay.ts";
 import { DeadlineBadge } from "./DeadlineBadge.tsx";
@@ -151,8 +150,9 @@ export function Row(props: {
       class="badge row-notes-badge"
       title={m().workspace.hasNotes}
       aria-label={m().workspace.hasNotes}
-      innerHTML={noteSvg}
-    />
+    >
+      …
+    </span>
   );
 
   // Whether this row currently has a visible Focus ref. `focusOrder` is a
@@ -607,8 +607,8 @@ export function Row(props: {
               if (e.key !== "Escape") e.stopPropagation();
             }}
           />
-          {/* Has-notes badge: a corner-fold glyph marking that the item
-              carries notes. Sits inline right after the
+          {/* Has-notes badge: an ellipsis marking that the item
+              carries notes (more text here). Sits inline right after the
               title — the text is the shrinking flex child of .row-body,
               so the badge hugs the last word of a short title and sits
               just past the ellipsis of a truncated one. List rows only:
