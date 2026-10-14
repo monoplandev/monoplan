@@ -570,7 +570,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       nextMonth: "Mes siguiente",
     },
     when: {
-      label: "Cuándo",
+      label: "Fecha",
       placeholder: "Fecha",
       allDay: "Todo el día",
       today: "Hoy",
@@ -838,7 +838,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       nextMonth: "Next month",
     },
     when: {
-      label: "When",
+      label: "Date",
       placeholder: "Date",
       allDay: "All day",
       today: "Today",

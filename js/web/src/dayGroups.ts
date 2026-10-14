@@ -4,10 +4,11 @@
 // Overdue group so what is owed is visible at a glance and Today reads as
 // today's plan; the group only exists while something is overdue. A past
 // `when` has gone by like an event: it places nothing, and an item with
-// only that is not selected for this view. Done items keep their calendar
-// day via `when` only ("happens on" outlives the tick, "owed by" does
-// not): they keep their slot on that day, never in Overdue and never
-// placed by deadline. Binned items never appear. Events
+// only that is not selected for this view. Closed items (done or
+// cancelled) keep their calendar day via `when` only ("happens on"
+// outlives the tick or the cross, "owed by" does not): they keep their
+// slot on that day, never in Overdue and never placed by deadline. Binned
+// items never appear. Events
 // (`spec/events-plan.md`) place by the same rules; an Open event with no
 // date at all has no day, and no list view to fall back on, so it gets an
 // Unscheduled group between Overdue and Today. Pure so it can be
@@ -16,8 +17,7 @@
 import { formatDeadlineBadge, whenDay } from "./format.tsx";
 import {
   isBinned,
-  isCancelled,
-  isDone,
+  isClosed,
   isEvent,
   isOpen,
   type ItemView,
@@ -83,16 +83,15 @@ export function groupByDay(
       unscheduled.push(it);
       continue;
     }
-    // A cancelled item did not happen: unlike a done one it keeps no
-    // calendar slot, so it drops out with the binned ones.
-    if (isBinned(it) || isCancelled(it) || (!it.when && !it.deadline)) continue;
+    if (isBinned(it) || (!it.when && !it.deadline)) continue;
     // Past days are not rendered here, so a past `when` places nothing,
     // done or not.
     const wDay = it.when && whenDay(it.when) >= today ? whenDay(it.when) : null;
     const dDay = it.deadline ?? null;
-    if (isDone(it)) {
-      // A ticked item stays put on its `when` day, unjudged. Its deadline
-      // is settled and places nothing; Overdue is Open-only.
+    if (isClosed(it)) {
+      // A ticked or crossed item stays put on its `when` day, unjudged:
+      // the day still records what happened, or what was called off. Its
+      // deadline is settled and places nothing; Overdue is Open-only.
       if (wDay === null) continue;
       placed.push({
         day: wDay,

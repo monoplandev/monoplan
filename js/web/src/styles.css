@@ -27,6 +27,8 @@
   --border-row: #efefef;
   --row-divider: #f1f1f1;
   --link: #2563eb;
+  --switch-on: #1d4ed8;
+  --switch-off: #d1d1d6;
   --error-bg: #fee2e2;
   --error-text: #991b1b;
   --overdue-bg: #ffe4e4;
@@ -64,10 +66,12 @@
   --text-empty: #666;
   --border: #272727;
   --border-surface: #2e2e2e;
-  --border-input: #333;
+  --border-input: #464646;
   --border-row: #222;
   --row-divider: #303030;
   --link: #60a5fa;
+  --switch-on: #2563eb;
+  --switch-off: #48484c;
   --error-bg: #2a1215;
   --error-text: #f87171;
   --overdue-bg: #3a1a22;
@@ -410,21 +414,21 @@ body {
 }
 
 .upcoming-day {
-  padding-bottom: 8px;
-  margin-bottom: 8px;
-  border-bottom: 0.5px solid var(--row-divider);
+  margin-bottom: 16px;
 }
 
 .upcoming-day:last-child {
-  border-bottom: none;
+  margin-bottom: 0;
 }
 
+/* The hairline sits under the day heading, not under the day's rows. */
 .upcoming-day-header {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding: 8px 4px 4px;
-  margin-bottom: 4px;
+  padding: 10px 4px 8px;
+  margin-bottom: 6px;
+  border-bottom: 0.5px solid var(--row-divider);
 }
 
 .upcoming-day-label {
@@ -464,13 +468,20 @@ body {
    down the day whether or not a row has a time. */
 .upcoming-row-time {
   flex-shrink: 0;
-  width: 4em;
+  width: 4.5em;
   height: var(--upcoming-line);
   display: inline-flex;
   align-items: center;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   color: var(--text-muted);
+}
+
+/* Spanish's "Todo el día" runs past the 12-hour lane; its clock times are
+   24-hour and short, so the lane only needs the label's width. The
+   document's lang tracks the UI locale (App.tsx). */
+.upcoming-row-time:lang(es) {
+  width: 5.5em;
 }
 
 /* Body column: the check and the title on the first line, and under
@@ -531,9 +542,9 @@ body {
   height: var(--upcoming-line);
 }
 
-/* A ticked row stays on its day as the record of what happened: muted,
-   the tick doing the talking. */
-.upcoming-row[data-done] .upcoming-row-text {
+/* A ticked or crossed row stays on its day as the record of what
+   happened, or was called off: muted, the box doing the talking. */
+.upcoming-row[data-closed] .upcoming-row-text {
   color: var(--text-muted);
 }
 
@@ -1966,34 +1977,35 @@ input.task-check:hover {
 .settings-switch-control {
   display: inline-flex;
   align-items: center;
-  width: 36px;
-  height: 20px;
+  width: 38px;
+  height: 18px;
   padding: 2px;
-  border: 1px solid var(--border-input);
   border-radius: 999px;
-  background: var(--bg);
+  background: var(--switch-off);
   cursor: pointer;
-  transition:
-    background 150ms ease,
-    border-color 150ms ease;
+  transition: background 150ms ease;
 }
 
 .settings-switch[data-checked] .settings-switch-control {
-  background: var(--link);
-  border-color: var(--link);
+  background: var(--switch-on);
 }
 
+/* Apple-style knob: white in both themes, noticeably wider than it is
+   tall. Inner track is 34×14 (38×18 minus 2px padding), so the 20px-wide
+   thumb travels 14px. */
 .settings-switch-thumb {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--bg-elevated);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  width: 20px;
+  height: 14px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.3),
+    0 0 0 0.5px rgba(0, 0, 0, 0.08);
   transition: transform 150ms ease;
 }
 
 .settings-switch[data-checked] .settings-switch-thumb {
-  transform: translateX(16px);
+  transform: translateX(14px);
 }
 
 .settings-switch-input:focus-visible + .settings-switch-control {
@@ -2763,7 +2775,7 @@ input.task-check:hover {
   cursor: pointer;
 }
 
-/* Badge row under the title: list picker, date chip, "more" menu. In the
+/* Badge row under the title: list picker, then the "more" menu. In the
    780px modal they run inline at their natural widths; the narrow shells
    below rearrange them. */
 .task-dialog-badges {
@@ -2783,8 +2795,8 @@ input.task-check:hover {
 }
 
 /* Narrow shells (the side pane, the mobile page): one row, no wrap. The
-   list picker takes the width and the glyph pills after it (date chip,
-   "more" menu) keep their natural width. The picker drops its fit-content
+   list picker takes the width and the glyph pill after it (the "more"
+   menu) keeps its natural width. The picker drops its fit-content
    width and 10em cap, and the sort caret moves to the far edge,
    Select-style. */
 .task-panel .task-dialog-badges,
@@ -3311,9 +3323,9 @@ input.task-check:hover {
   color: var(--text);
 }
 
-/* Glyph pills after the list picker: the date chip (faint until a date
-   is set, `data-set`) and the "more" menu trigger (place / deadline while
-   unset). Faint badge colour, the badge colour on hover / set / open. */
+/* Glyph pill after the list picker: the "more" menu trigger (date /
+   deadline / place while unset). Faint badge colour, the badge colour on
+   hover / open. */
 .task-dialog-add-chip {
   justify-content: center;
   min-height: calc(1.3em + 4px);
@@ -3323,7 +3335,6 @@ input.task-check:hover {
 }
 
 .task-dialog-add-chip:hover,
-.task-dialog-add-chip[data-set],
 .task-dialog-add-chip[data-expanded] {
   color: var(--text-badge);
 }
@@ -3655,7 +3666,8 @@ input.task-check:hover {
 
 .settings-content {
   position: relative;
-  padding: 12px;
+  padding: 16px 20px 20px;
+  background: var(--bg-elevated);
   overflow-y: auto;
 }
 
@@ -3681,30 +3693,57 @@ input.task-check:hover {
 }
 
 .settings-section-title {
-  margin: 0 0 20px;
+  margin: 0 0 16px;
   font-size: 16px;
   font-weight: 600;
 }
 
-.settings-row {
+/* Inset-grouped cards, as on the mobile Find sheet (`.find-sheet__group`):
+   each cluster of rows is a rounded surface set a shade off the pane
+   background (darker in light mode, lighter in dark), rows stacked edge to
+   edge with a hairline between them inset to the row's left padding. */
+.settings-group {
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--bg-board-col);
+}
+
+.settings-group + .settings-group {
+  margin-top: 20px;
+}
+
+[data-theme="dark"] .settings-group {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.settings-row,
+.device-row {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border-row);
+  min-height: 44px;
+  padding: 8px 14px;
 }
 
-.settings-row:last-child {
-  border-bottom: 0;
+.settings-row:not(:last-child)::after,
+.device-row:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--border-row);
 }
 
 .settings-row-label {
-  color: var(--text-muted);
+  color: var(--text);
 }
 
 .settings-row-value {
-  color: var(--text);
+  color: var(--text-muted);
 }
 
 .settings-logout {
@@ -3725,18 +3764,6 @@ input.task-check:hover {
   list-style: none;
   margin: 0;
   padding: 0;
-}
-
-.device-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border-row);
-}
-
-.device-row:last-child {
-  border-bottom: 0;
 }
 
 .device-row-main {

@@ -151,7 +151,7 @@ describe("groupByDay", () => {
     expect(ids(groups[1]!)).toEqual(["own-allday", "own-timed"]);
   });
 
-  test("done rows keep their when day and slot; binned never show", () => {
+  test("closed rows keep their when day and slot; binned never show", () => {
     const groups = groupByDay(
       [
         item("done-today", { when: TODAY }, { state: "done" }),
@@ -169,10 +169,17 @@ describe("groupByDay", () => {
         item("done-deadline", { deadline: "2026-09-12" }, { state: "done" }),
         // Done in the past: past days are not rendered.
         item("done-past", { when: "2026-09-01" }, { state: "done" }),
-        // Cancelled: never placed, whatever its dates — it did not happen.
+        // Cancelled: the same as done. `when` keeps the slot, the
+        // deadline is settled and places nothing.
         item(
           "cancelled",
           { when: "2026-09-10", deadline: TODAY },
+          { state: "cancelled" },
+        ),
+        // Cancelled with no `when`: nothing to show.
+        item(
+          "cancelled-deadline",
+          { deadline: "2026-09-12" },
           { state: "cancelled" },
         ),
       ],
@@ -182,11 +189,13 @@ describe("groupByDay", () => {
     );
     expect(groups.map((g) => [g.key, ids(g)])).toEqual([
       [TODAY, ["done-today", "open-today", "done-early"]],
-      ["2026-09-10", ["future", "done-both"]],
+      ["2026-09-10", ["future", "done-both", "cancelled"]],
     ]);
     expect(groups[1]!.label).toBe("Tomorrow");
-    expect(groups[1]!.rows[1]!.placedBy).toBe("when");
-    expect(groups[1]!.rows[1]!.tone).toBe("neutral");
+    expect(groups[1]!.rows.slice(1).map((r) => [r.placedBy, r.tone])).toEqual([
+      ["when", "neutral"],
+      ["when", "neutral"],
+    ]);
   });
 
   test("Today leads even when empty", () => {
@@ -239,7 +248,7 @@ describe("groupByDay: events", () => {
       ["overdue", ["owed"]],
       [TODAY, []],
       ["2026-09-10", ["tickets"]],
-      ["2026-09-12", ["done", "gig"]],
+      ["2026-09-12", ["done", "cancelled", "gig"]],
     ]);
   });
 

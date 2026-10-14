@@ -1088,12 +1088,10 @@ export function TaskDialog(props: {
   const deadlineShown = () => vDeadline() !== null || props.deadlineOpen();
   const placeShown = () => vPlace() !== null || placeRevealed();
   // A band folded back without a value leaves focus on a detached input;
-  // put it on the chip it came from instead (the date chip, or the
-  // "more" trigger for place / deadline). Only when the fold actually
-  // took the focus: a band also hides when the pane moves to an item
-  // without that value (arrowing along a board), and focus is the
+  // put it on the "more" trigger it came from instead. Only when the fold
+  // actually took the focus: a band also hides when the pane moves to an
+  // item without that value (arrowing along a board), and focus is the
   // board's then, not ours to take.
-  let whenChipRef: HTMLButtonElement | undefined;
   let moreRef: HTMLButtonElement | undefined;
   let morePick: (() => void) | null = null;
   const refocusChip = (shown: () => boolean, chip: () => HTMLButtonElement | undefined) =>
@@ -1107,7 +1105,7 @@ export function TaskDialog(props: {
         });
       }),
     );
-  refocusChip(whenShown, () => whenChipRef);
+  refocusChip(whenShown, () => moreRef);
   refocusChip(deadlineShown, () => moreRef);
   refocusChip(placeShown, () => moreRef);
   const setDoneFlag = (done: boolean) => {
@@ -1322,26 +1320,18 @@ export function TaskDialog(props: {
             />
           </section>
 
-          {/* Badge row: the move-to-list picker, then the date chip and
-              the "more" menu (the pin toggle lives in the header). */}
+          {/* Badge row: the move-to-list picker, then the "more" menu
+              (the pin toggle lives in the header). */}
           <section class="task-dialog-section task-dialog-badges">
             <ListPicker
               options={listOptions}
               value={vListId}
               onChange={onListChange}
             />
-            {/* Date chip: always here, lit once a date is set; opens the
-                date popover in the band below. Then a "more" menu with
-                the registers the item does not carry yet (place,
-                deadline), gone once both are set. */}
-            <AddChip
-              ref={(el) => (whenChipRef = el)}
-              icon={calendarSvg}
-              label={vWhen() ? m().when.label : m().when.setDate}
-              set={vWhen() !== null}
-              onClick={() => props.setWhenOpen(true)}
-            />
-            <Show when={!placeShown() || !deadlineShown()}>
+            {/* "More" menu with the registers the item does not carry yet
+                (date, deadline, place), gone once all three are set. A
+                pick opens that register's band below the row. */}
+            <Show when={!whenShown() || !placeShown() || !deadlineShown()}>
               <DropdownMenu
                 // A pick opens a band under the row (and the deadline's
                 // popover). Done while the menu is still closing, its
@@ -1363,6 +1353,19 @@ export function TaskDialog(props: {
                 />
                 <DropdownMenu.Portal>
                   <DropdownMenu.Content class="dropdown-menu-content task-dialog-menu-content">
+                    <Show when={!whenShown()}>
+                      <DropdownMenu.Item
+                        class="dropdown-menu-item"
+                        onSelect={() => {
+                          morePick = () => props.setWhenOpen(true);
+                        }}
+                      >
+                        <span class="dropdown-menu-item-lead">
+                          <span class="dropdown-menu-item-icon" aria-hidden="true" innerHTML={calendarSvg} />
+                          {m().when.label}
+                        </span>
+                      </DropdownMenu.Item>
+                    </Show>
                     <Show when={!placeShown()}>
                       <DropdownMenu.Item
                         class="dropdown-menu-item"
@@ -1704,31 +1707,6 @@ function LifecycleBadge(props: {
 /** Pin-to-Focus toggle shown beside the list picker: outline pin when
  *  unpinned, filled when pinned. Backed by live Focus state for open items
  *  and by the `newFocus` buffer in new-item capture mode. */
-/** A glyph-only chip in the badge row that opens a register's band
- *  (the date). Same pill as the pin toggle: faint until the register
- *  holds a value (`set`), then the badge colour. The register's name is
- *  its tooltip and accessible name. */
-function AddChip(props: {
-  ref: (el: HTMLButtonElement) => void;
-  icon: string;
-  label: string;
-  set?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      ref={props.ref}
-      type="button"
-      class="badge task-dialog-add-chip"
-      data-set={props.set ? "" : undefined}
-      aria-label={props.label}
-      title={props.label}
-      onClick={props.onClick}
-      innerHTML={props.icon}
-    />
-  );
-}
-
 function PinToggle(props: {
   pinned: () => boolean;
   onToggle: () => void;

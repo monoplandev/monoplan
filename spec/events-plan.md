@@ -56,7 +56,7 @@ An event is an ordinary item. Every register keeps its meaning.
 | Open, `when` before today | nowhere on the agenda: it went by. Reachable by search and by its URL; shown on its day once a month grid or backward agenda exists |
 | Open, no `when` | the calendar's Unscheduled section |
 | Done | the Done view; also the calendar on its day while `when` is today or later, muted and ticked (the existing "`when` survives Done" rule) |
-| Cancelled | the Done view with a cross; off the calendar (the existing rule) |
+| Cancelled | the Done view with a cross; also the calendar on its day while `when` is today or later, muted and crossed (the "Cancelled follows Done" rule, 2026-10-14) |
 | Binned | the Bin |
 
 - **Lifecycle is untouched.** An event is Backlog from creation and usually
@@ -239,7 +239,8 @@ does.
 - `dayGroups.test.ts`: event rows place by the existing rules;
   Unscheduled membership, order and position; an event with a deadline and
   no `when` is placed by the deadline; the badge counts unscheduled
-  events; cancelled and past events place nothing.
+  events; cancelled events keep their `when` slot; past events place
+  nothing.
 - `events.test.ts` (web store): add and move into `events`, the open
   state kept underneath while the picker shows one choice, close and
   reopen, the built-in list label in Find.

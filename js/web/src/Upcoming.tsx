@@ -7,7 +7,8 @@
 // left carries the start time ("All day", or "Due" on a deadline); the
 // place is a muted line under the title.
 // Rows tick off in place and stay where they are on their `when` day once
-// done, muted, so the day still records what happened. Click opens the
+// done or cancelled, muted (tick or cross), so the day still records what
+// happened and what was called off. Click opens the
 // task surface (dialog or side panel).
 //
 // Events (`spec/events-plan.md`) live here and nowhere else. An event row
@@ -30,7 +31,12 @@ import {
 } from "./format.tsx";
 import { useAppI18n } from "./i18n.tsx";
 import mapPinSvg from "./icons/map-pin.svg?raw";
-import { isDone, isEvent, type DocApp } from "./sync/store.ts";
+import {
+  isCancelled,
+  isClosed,
+  isEvent,
+  type DocApp,
+} from "./sync/store.ts";
 
 export function Upcoming(props: {
   app: DocApp;
@@ -105,7 +111,7 @@ export function Upcoming(props: {
                     role="button"
                     tabIndex={-1}
                     data-tone={r.tone}
-                    data-done={isDone(r.item) ? "" : undefined}
+                    data-closed={isClosed(r.item) ? "" : undefined}
                     onClick={(e) => {
                       const t = e.target as HTMLElement | null;
                       if (t?.closest("input")) return;
@@ -120,7 +126,10 @@ export function Upcoming(props: {
                         <input
                           type="checkbox"
                           class="task-check"
-                          checked={isDone(r.item)}
+                          checked={isClosed(r.item)}
+                          data-cancelled={
+                            isCancelled(r.item) ? "" : undefined
+                          }
                           aria-label={m().workspace.markDone}
                           onChange={(e) =>
                             props.app.setDone(

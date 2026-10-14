@@ -206,124 +206,126 @@ export function Settings(props: {
               </Dialog.CloseButton>
               <Show when={section() === "general"}>
                 <h2 class="settings-section-title">{m().settings.general}</h2>
-                <div class="settings-row">
-                  <div class="settings-row-label">{m().settings.language}</div>
-                  <SegmentedControl
-                    class="theme-segmented"
-                    aria-label={m().settings.language}
-                    value={language()}
-                    onChange={(value) => setLanguage(value as "es" | "en")}
-                  >
-                    <SegmentedControl.Indicator class="theme-segment-indicator" />
-                    <SegmentedControl.Item value="es" class="theme-segment">
-                      <SegmentedControl.ItemInput />
-                      <SegmentedControl.ItemControl class="theme-segment-control">
-                        <SegmentedControl.ItemLabel>
-                          {m().settings.languageSpanish}
-                        </SegmentedControl.ItemLabel>
-                      </SegmentedControl.ItemControl>
-                    </SegmentedControl.Item>
-                    <SegmentedControl.Item value="en" class="theme-segment">
-                      <SegmentedControl.ItemInput />
-                      <SegmentedControl.ItemControl class="theme-segment-control">
-                        <SegmentedControl.ItemLabel>
-                          {m().settings.languageEnglish}
-                        </SegmentedControl.ItemLabel>
-                      </SegmentedControl.ItemControl>
-                    </SegmentedControl.Item>
-                  </SegmentedControl>
-                </div>
-                <div class="settings-row">
-                  <div class="settings-row-label">{m().settings.theme}</div>
-                  <SegmentedControl
-                    class="theme-segmented"
-                    aria-label={m().settings.theme}
-                    value={props.themePref}
-                    onChange={(value) =>
-                      props.onThemeChange(value as ThemePreference)
-                    }
-                  >
-                    <SegmentedControl.Indicator class="theme-segment-indicator" />
-                    <SegmentedControl.Item value="auto" class="theme-segment">
-                      <SegmentedControl.ItemInput />
-                      <SegmentedControl.ItemControl class="theme-segment-control">
-                        <SegmentedControl.ItemLabel>
-                          {m().settings.auto}
-                        </SegmentedControl.ItemLabel>
-                      </SegmentedControl.ItemControl>
-                    </SegmentedControl.Item>
-                    <SegmentedControl.Item value="light" class="theme-segment">
-                      <SegmentedControl.ItemInput />
-                      <SegmentedControl.ItemControl
-                        class="theme-segment-control"
-                        aria-label={m().settings.light}
-                      >
-                        <SunIcon />
-                      </SegmentedControl.ItemControl>
-                    </SegmentedControl.Item>
-                    <SegmentedControl.Item value="dark" class="theme-segment">
-                      <SegmentedControl.ItemInput />
-                      <SegmentedControl.ItemControl
-                        class="theme-segment-control"
-                        aria-label={m().settings.dark}
-                      >
-                        <MoonIcon />
-                      </SegmentedControl.ItemControl>
-                    </SegmentedControl.Item>
-                  </SegmentedControl>
-                </div>
-                <div class="settings-row">
-                  <div class="settings-row-label">{m().settings.timeFormat}</div>
-                  <SegmentedControl
-                    class="theme-segmented"
-                    aria-label={m().settings.timeFormat}
-                    value={timeFormatPref()}
-                    onChange={(value) =>
-                      setTimeFormatPref(value as TimeFormatPreference)
-                    }
-                  >
-                    <SegmentedControl.Indicator class="theme-segment-indicator" />
-                    <SegmentedControl.Item value="auto" class="theme-segment">
-                      <SegmentedControl.ItemInput />
-                      <SegmentedControl.ItemControl class="theme-segment-control">
-                        <SegmentedControl.ItemLabel>
-                          {m().settings.auto}
-                        </SegmentedControl.ItemLabel>
-                      </SegmentedControl.ItemControl>
-                    </SegmentedControl.Item>
-                    <SegmentedControl.Item value="12h" class="theme-segment">
-                      <SegmentedControl.ItemInput />
-                      <SegmentedControl.ItemControl class="theme-segment-control">
-                        <SegmentedControl.ItemLabel>
-                          {m().settings.timeFormat12}
-                        </SegmentedControl.ItemLabel>
-                      </SegmentedControl.ItemControl>
-                    </SegmentedControl.Item>
-                    <SegmentedControl.Item value="24h" class="theme-segment">
-                      <SegmentedControl.ItemInput />
-                      <SegmentedControl.ItemControl class="theme-segment-control">
-                        <SegmentedControl.ItemLabel>
-                          {m().settings.timeFormat24}
-                        </SegmentedControl.ItemLabel>
-                      </SegmentedControl.ItemControl>
-                    </SegmentedControl.Item>
-                  </SegmentedControl>
-                </div>
-                <div class="settings-row">
-                  <div class="settings-row-label">
-                    {m().settings.showListCounts}
+                <div class="settings-group">
+                  <div class="settings-row">
+                    <div class="settings-row-label">{m().settings.language}</div>
+                    <SegmentedControl
+                      class="theme-segmented"
+                      aria-label={m().settings.language}
+                      value={language()}
+                      onChange={(value) => setLanguage(value as "es" | "en")}
+                    >
+                      <SegmentedControl.Indicator class="theme-segment-indicator" />
+                      <SegmentedControl.Item value="es" class="theme-segment">
+                        <SegmentedControl.ItemInput />
+                        <SegmentedControl.ItemControl class="theme-segment-control">
+                          <SegmentedControl.ItemLabel>
+                            {m().settings.languageSpanish}
+                          </SegmentedControl.ItemLabel>
+                        </SegmentedControl.ItemControl>
+                      </SegmentedControl.Item>
+                      <SegmentedControl.Item value="en" class="theme-segment">
+                        <SegmentedControl.ItemInput />
+                        <SegmentedControl.ItemControl class="theme-segment-control">
+                          <SegmentedControl.ItemLabel>
+                            {m().settings.languageEnglish}
+                          </SegmentedControl.ItemLabel>
+                        </SegmentedControl.ItemControl>
+                      </SegmentedControl.Item>
+                    </SegmentedControl>
                   </div>
-                  <Switch
-                    class="settings-switch"
-                    aria-label={m().settings.showListCounts}
-                    checked={props.showListCounts}
-                    onChange={(checked) => props.onShowListCountsChange(checked)}
-                  >
-                    <Switch.Input class="settings-switch-input" />
-                    <Switch.Control class="settings-switch-control">
-                      <Switch.Thumb class="settings-switch-thumb" />
-                    </Switch.Control>
-                  </Switch>
+                  <div class="settings-row">
+                    <div class="settings-row-label">{m().settings.theme}</div>
+                    <SegmentedControl
+                      class="theme-segmented"
+                      aria-label={m().settings.theme}
+                      value={props.themePref}
+                      onChange={(value) =>
+                        props.onThemeChange(value as ThemePreference)
+                      }
+                    >
+                      <SegmentedControl.Indicator class="theme-segment-indicator" />
+                      <SegmentedControl.Item value="auto" class="theme-segment">
+                        <SegmentedControl.ItemInput />
+                        <SegmentedControl.ItemControl class="theme-segment-control">
+                          <SegmentedControl.ItemLabel>
+                            {m().settings.auto}
+                          </SegmentedControl.ItemLabel>
+                        </SegmentedControl.ItemControl>
+                      </SegmentedControl.Item>
+                      <SegmentedControl.Item value="light" class="theme-segment">
+                        <SegmentedControl.ItemInput />
+                        <SegmentedControl.ItemControl
+                          class="theme-segment-control"
+                          aria-label={m().settings.light}
+                        >
+                          <SunIcon />
+                        </SegmentedControl.ItemControl>
+                      </SegmentedControl.Item>
+                      <SegmentedControl.Item value="dark" class="theme-segment">
+                        <SegmentedControl.ItemInput />
+                        <SegmentedControl.ItemControl
+                          class="theme-segment-control"
+                          aria-label={m().settings.dark}
+                        >
+                          <MoonIcon />
+                        </SegmentedControl.ItemControl>
+                      </SegmentedControl.Item>
+                    </SegmentedControl>
+                  </div>
+                  <div class="settings-row">
+                    <div class="settings-row-label">{m().settings.timeFormat}</div>
+                    <SegmentedControl
+                      class="theme-segmented"
+                      aria-label={m().settings.timeFormat}
+                      value={timeFormatPref()}
+                      onChange={(value) =>
+                        setTimeFormatPref(value as TimeFormatPreference)
+                      }
+                    >
+                      <SegmentedControl.Indicator class="theme-segment-indicator" />
+                      <SegmentedControl.Item value="auto" class="theme-segment">
+                        <SegmentedControl.ItemInput />
+                        <SegmentedControl.ItemControl class="theme-segment-control">
+                          <SegmentedControl.ItemLabel>
+                            {m().settings.auto}
+                          </SegmentedControl.ItemLabel>
+                        </SegmentedControl.ItemControl>
+                      </SegmentedControl.Item>
+                      <SegmentedControl.Item value="12h" class="theme-segment">
+                        <SegmentedControl.ItemInput />
+                        <SegmentedControl.ItemControl class="theme-segment-control">
+                          <SegmentedControl.ItemLabel>
+                            {m().settings.timeFormat12}
+                          </SegmentedControl.ItemLabel>
+                        </SegmentedControl.ItemControl>
+                      </SegmentedControl.Item>
+                      <SegmentedControl.Item value="24h" class="theme-segment">
+                        <SegmentedControl.ItemInput />
+                        <SegmentedControl.ItemControl class="theme-segment-control">
+                          <SegmentedControl.ItemLabel>
+                            {m().settings.timeFormat24}
+                          </SegmentedControl.ItemLabel>
+                        </SegmentedControl.ItemControl>
+                      </SegmentedControl.Item>
+                    </SegmentedControl>
+                  </div>
+                  <div class="settings-row">
+                    <div class="settings-row-label">
+                      {m().settings.showListCounts}
+                    </div>
+                    <Switch
+                      class="settings-switch"
+                      aria-label={m().settings.showListCounts}
+                      checked={props.showListCounts}
+                      onChange={(checked) => props.onShowListCountsChange(checked)}
+                    >
+                      <Switch.Input class="settings-switch-input" />
+                      <Switch.Control class="settings-switch-control">
+                        <Switch.Thumb class="settings-switch-thumb" />
+                      </Switch.Control>
+                    </Switch>
+                  </div>
                 </div>
               </Show>
               <Show when={section() === "account"}>
@@ -331,7 +333,7 @@ export function Settings(props: {
                 <Show
                   when={props.session.anonymous}
                   fallback={
-                    <>
+                    <div class="settings-group">
                       <div class="settings-row">
                         <div class="settings-row-label">{m().settings.email}</div>
                         <div class="settings-row-value">
@@ -347,11 +349,13 @@ export function Settings(props: {
                           {m().nav.logOut}
                         </button>
                       </div>
-                    </>
+                    </div>
                   }
                 >
-                  <div class="settings-row">
-                    <div class="settings-row-value">{m().settings.localOnlyAccount}</div>
+                  <div class="settings-group">
+                    <div class="settings-row">
+                      <div class="settings-row-value">{m().settings.localOnlyAccount}</div>
+                    </div>
                   </div>
                 </Show>
               </Show>
@@ -360,23 +364,29 @@ export function Settings(props: {
                 <Show
                   when={!props.session.anonymous}
                   fallback={
-                    <div class="settings-row">
-                      <div class="settings-row-value">{m().settings.loginToSeeDevices}</div>
+                    <div class="settings-group">
+                      <div class="settings-row">
+                        <div class="settings-row-value">{m().settings.loginToSeeDevices}</div>
+                      </div>
                     </div>
                   }
                 >
                   <Show when={devicesLoading() && devices() === null}>
-                    <div class="settings-row">
-                      <div class="settings-row-value">{m().common.loading}</div>
+                    <div class="settings-group">
+                      <div class="settings-row">
+                        <div class="settings-row-value">{m().common.loading}</div>
+                      </div>
                     </div>
                   </Show>
                   <Show when={devicesError()}>
-                    <div class="settings-row">
-                      <div class="settings-row-value">{devicesError()}</div>
+                    <div class="settings-group">
+                      <div class="settings-row">
+                        <div class="settings-row-value">{devicesError()}</div>
+                      </div>
                     </div>
                   </Show>
                   <Show when={devices()}>
-                    <ul class="device-list">
+                    <ul class="device-list settings-group">
                       <For each={[...devices()!].sort((a, b) => b.last_seen_at - a.last_seen_at)}>
                         {(d) => (
                           <li class="device-row">
