@@ -2589,20 +2589,18 @@ input.task-check:hover {
   min-width: 0;
 }
 
-/* The list name is the picker trigger — the first badge in the dialog's
-   badge row, sharing the `.deadline-badge` pill geometry, with a small caret
-   and a hover/open lift so it reads as clickable. */
+/* The list name is the picker trigger — the first control in the dialog's
+   control row (see `.task-dialog-badges` for the shared pill geometry),
+   with a small caret and a hover/open lift so it reads as clickable. */
 .task-dialog-list {
   appearance: none;
   -webkit-appearance: none;
   width: fit-content;
-  /* Wider than the 3px badge gap so the list glyph sits clear of the
-     name at the dialog's larger badge size. */
+  /* Room between the list glyph and the name at the dialog's text size. */
   gap: 8px;
   /* Widened from 8em when the list glyph joined the trigger, so the name
      keeps roughly the same room before it ellipsizes. */
   max-width: 10em;
-  font-family: inherit;
   cursor: pointer;
 }
 
@@ -2823,7 +2821,7 @@ input.task-check:hover {
   cursor: pointer;
 }
 
-/* Badge row under the title: list picker, then the "more" menu. In the
+/* Control row under the title: list picker, then the "more" menu. In the
    780px modal they run inline at their natural widths; the narrow shells
    below rearrange them. */
 .task-dialog-badges {
@@ -2833,13 +2831,23 @@ input.task-check:hover {
   gap: 2px;
 }
 
-/* Dialog badges run a step larger than the 12px row badges; their glyphs
-   scale with them. */
-.task-dialog-badges .badge {
-  font-size: 14px;
-  padding: 4px 8px;
+/* Shared pill geometry for the row's controls. They are not badges: they
+   run at the dialog's text size, pinned to a 32px tap height, on the
+   badge surface colours. */
+.task-dialog-list,
+.task-dialog-add-chip {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
   height: 32px;
+  padding: 4px 8px;
   box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font: inherit;
+  white-space: nowrap;
+  color: var(--text-badge);
+  background: var(--bg-badge);
 }
 
 /* Narrow shells (the side pane, the mobile page): one row, no wrap. The
@@ -2866,7 +2874,7 @@ input.task-check:hover {
   margin-left: auto;
 }
 
-.task-dialog-badges .badge svg,
+.task-dialog-list svg,
 .task-dialog-badges .task-dialog-list-icon-emoji {
   width: 14px;
   height: 14px;
@@ -3608,9 +3616,10 @@ input.task-check:hover {
     padding-bottom: var(--mobile-bar-clearance);
   }
 
-  /* Wider badges: extra side padding over the desktop 8px (height is
-     pinned at 32px by the base dialog badge rule). */
-  .task-page .task-dialog-badges .badge {
+  /* Wider pills: extra side padding over the desktop 8px (height is
+     pinned at 32px by the shared control rule). */
+  .task-page .task-dialog-list,
+  .task-page .task-dialog-add-chip {
     padding: 4px 10px;
   }
 

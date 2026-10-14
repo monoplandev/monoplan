@@ -1345,7 +1345,7 @@ export function TaskDialog(props: {
               >
                 <DropdownMenu.Trigger
                   ref={(el) => (moreRef = el)}
-                  class="badge task-dialog-add-chip"
+                  class="task-dialog-add-chip"
                   aria-label={m().common.menu}
                   title={m().common.menu}
                   innerHTML={dotsHorizontalSvg}
