@@ -3392,7 +3392,7 @@ input.task-check:hover {
   fill: #ffe785;
 }
 
-/* Glyph pill after the list picker: the "more" menu trigger (date /
+/* Glyph pill after the list picker: the "+" menu trigger (date /
    deadline / place while unset). Faint badge colour, the badge colour on
    hover / open. */
 .task-dialog-add-chip {

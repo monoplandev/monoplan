@@ -35,6 +35,7 @@ import calendarSvg from "./icons/calendar.svg?raw";
 import checkSvg from "./icons/check.svg?raw";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import mapPinSvg from "./icons/map-pin.svg?raw";
+import plusSvg from "./icons/plus.svg?raw";
 import timerSvg from "./icons/timer.svg?raw";
 import starFilledSvg from "./icons/star-filled.svg?raw";
 import {
@@ -1313,9 +1314,11 @@ export function TaskDialog(props: {
               value={vListId}
               onChange={onListChange}
             />
-            {/* "More" menu with the registers the item does not carry yet
+            {/* "+" menu with the registers the item does not carry yet
                 (date, deadline, place), gone once all three are set. A
-                pick opens that register's band below the row. */}
+                pick opens that register's band below the row. The glyph
+                is a plus, not an ellipsis: the header's ellipsis is the
+                item's action menu, and this one adds a field. */}
             <Show when={!whenShown() || !placeShown() || !deadlineShown()}>
               <DropdownMenu
                 // A pick opens a band under the row (and the deadline's
@@ -1332,9 +1335,9 @@ export function TaskDialog(props: {
                 <DropdownMenu.Trigger
                   ref={(el) => (moreRef = el)}
                   class="task-dialog-add-chip"
-                  aria-label={m().common.menu}
-                  title={m().common.menu}
-                  innerHTML={dotsHorizontalSvg}
+                  aria-label={m().workspace.addField}
+                  title={m().workspace.addField}
+                  innerHTML={plusSvg}
                 />
                 <DropdownMenu.Portal>
                   <DropdownMenu.Content class="dropdown-menu-content task-dialog-menu-content">
@@ -1347,7 +1350,7 @@ export function TaskDialog(props: {
                       >
                         <span class="dropdown-menu-item-lead">
                           <span class="dropdown-menu-item-icon" aria-hidden="true" innerHTML={calendarSvg} />
-                          {m().when.label}
+                          {m().when.add}
                         </span>
                       </DropdownMenu.Item>
                     </Show>
@@ -1360,7 +1363,7 @@ export function TaskDialog(props: {
                       >
                         <span class="dropdown-menu-item-lead">
                           <span class="dropdown-menu-item-icon" aria-hidden="true" innerHTML={mapPinSvg} />
-                          {m().place.label}
+                          {m().place.add}
                         </span>
                       </DropdownMenu.Item>
                     </Show>
@@ -1373,7 +1376,7 @@ export function TaskDialog(props: {
                       >
                         <span class="dropdown-menu-item-lead">
                           <span class="dropdown-menu-item-icon" aria-hidden="true" innerHTML={timerSvg} />
-                          {m().deadline.label}
+                          {m().deadline.add}
                         </span>
                       </DropdownMenu.Item>
                     </Show>
