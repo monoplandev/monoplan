@@ -2,7 +2,7 @@ import type { DndDragEventDetail, Key, DndRenderer } from "./types";
 import { DndSource } from "./source";
 import { DndSelection } from "./selection";
 import { DndVirtualization } from "./virtualization";
-import { mapDndKeyEvent } from "./keyboard";
+import { applySelectionKeyAction, mapDndKeyEvent } from "./keyboard";
 import { DndPlaceholder } from "../dom/placeholder";
 import { DndAutoscroll } from "../dom/autoscroll";
 import { DndDragOverlay } from "../dom/drag-overlay";
@@ -673,79 +673,16 @@ export class DndController {
     e.preventDefault();
     const order = this.source.getOrder();
 
-    switch (action.type) {
-      case "select-only-first":
-        this.selection.selectOnly(this.selection.first());
-        this.scrollToKey(this.selection.first());
-        break;
-      case "select-only-last":
-        this.selection.selectOnly(this.selection.last());
-        this.scrollToKey(this.selection.last());
-        break;
-      case "navigate": {
-        if (!this.selection.hasSelection()) {
-          const key =
-            action.direction === "down" ? order[0] : order[order.length - 1];
-          if (key !== undefined) {
-            this.selection.selectOnly(key);
-            this.scrollToKey(key);
-          }
-        } else {
-          const ref =
-            action.direction === "down"
-              ? this.selection.getSelectionBottom()
-              : this.selection.getSelectionTop();
-          if (ref !== null) {
-            const target =
-              action.direction === "down"
-                ? this.selection.next(ref)
-                : this.selection.prev(ref);
-            this.selection.selectOnly(target);
-            this.scrollToKey(target);
-          }
-        }
-        break;
-      }
-      case "extend": {
-        const activeBlock = this.selection.getActiveBlock();
-        if (activeBlock !== null) {
-          const target =
-            action.direction === "down"
-              ? this.selection.next(activeBlock.to)
-              : this.selection.prev(activeBlock.to);
-          if (this.cfg.multi) this.selection.extendActive(target);
-          else this.selection.selectOnly(target);
-          this.scrollToKey(target);
-        } else {
-          const key =
-            action.direction === "down" ? order[0] : order[order.length - 1];
-          if (key !== undefined) {
-            this.selection.selectOnly(key);
-            this.scrollToKey(key);
-          }
-        }
-        break;
-      }
-      case "extend-to-first":
-        if (this.cfg.multi) this.selection.extendActive(this.selection.first());
-        else this.selection.selectOnly(this.selection.first());
-        this.scrollToKey(this.selection.first());
-        break;
-      case "extend-to-last":
-        if (this.cfg.multi) this.selection.extendActive(this.selection.last());
-        else this.selection.selectOnly(this.selection.last());
-        this.scrollToKey(this.selection.last());
-        break;
-      case "move-selection":
-        if (this.cfg.reorder) this.handleMoveSelection(action.direction);
-        break;
-      case "select-all":
-        if (this.cfg.multi) this.selection.selectAll();
-        break;
-      case "clear":
-        this.selection.clear();
-        break;
+    if (action.type === "move-selection") {
+      if (this.cfg.reorder) this.handleMoveSelection(action.direction);
+      return;
     }
+    // Selection-only keys share their logic with the agenda (which runs a
+    // DndSelection without this controller); only the scroll is ours.
+    const target = applySelectionKeyAction(this.selection, action, order, {
+      multi: this.cfg.multi,
+    });
+    if (target !== null) this.scrollToKey(target);
   };
 
   private handleMoveSelection(dir: "up" | "down"): void {

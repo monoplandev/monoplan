@@ -1,3 +1,6 @@
+import type { DndSelection } from "./selection";
+import type { Key } from "./types";
+
 export type DndKeyAction =
   | { type: "select-only-first" }
   | { type: "select-only-last" }
@@ -69,4 +72,81 @@ export function mapDndKeyEvent(e: KeyboardEvent): DndKeyAction {
   }
 
   return { type: "ignore" };
+}
+
+/**
+ * Apply a selection-only key action to `sel` over `order`, the way the
+ * listbox controller does, and return the key the caller should scroll
+ * into view (null when nothing moved). Shared with hosts that run a
+ * `DndSelection` without the `Dnd` component (the agenda), so both
+ * surfaces answer the same keys the same way. `move-selection` reorders
+ * items and is left to the caller; `mod-click` and `ignore` are no-ops.
+ */
+export function applySelectionKeyAction(
+  sel: DndSelection,
+  action: DndKeyAction,
+  order: readonly Key[],
+  opts: { multi: boolean },
+): Key | null {
+  const edge = (dir: "up" | "down"): Key | undefined =>
+    dir === "down" ? order[0] : order[order.length - 1];
+  switch (action.type) {
+    case "select-only-first":
+      if (order.length === 0) return null;
+      sel.selectOnly(sel.first());
+      return sel.first();
+    case "select-only-last":
+      if (order.length === 0) return null;
+      sel.selectOnly(sel.last());
+      return sel.last();
+    case "navigate": {
+      if (!sel.hasSelection()) {
+        const key = edge(action.direction);
+        if (key === undefined) return null;
+        sel.selectOnly(key);
+        return key;
+      }
+      const ref =
+        action.direction === "down"
+          ? sel.getSelectionBottom()
+          : sel.getSelectionTop();
+      if (ref === null) return null;
+      const target =
+        action.direction === "down" ? sel.next(ref) : sel.prev(ref);
+      sel.selectOnly(target);
+      return target;
+    }
+    case "extend": {
+      const active = sel.getActiveBlock();
+      if (active === null) {
+        const key = edge(action.direction);
+        if (key === undefined) return null;
+        sel.selectOnly(key);
+        return key;
+      }
+      const target =
+        action.direction === "down" ? sel.next(active.to) : sel.prev(active.to);
+      if (opts.multi) sel.extendActive(target);
+      else sel.selectOnly(target);
+      return target;
+    }
+    case "extend-to-first":
+      if (order.length === 0) return null;
+      if (opts.multi) sel.extendActive(sel.first());
+      else sel.selectOnly(sel.first());
+      return sel.first();
+    case "extend-to-last":
+      if (order.length === 0) return null;
+      if (opts.multi) sel.extendActive(sel.last());
+      else sel.selectOnly(sel.last());
+      return sel.last();
+    case "select-all":
+      if (opts.multi) sel.selectAll();
+      return null;
+    case "clear":
+      sel.clear();
+      return null;
+    default:
+      return null;
+  }
 }

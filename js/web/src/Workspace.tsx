@@ -44,7 +44,7 @@ import type { FindResult } from "./findResults.tsx";
 import { laneLabel, useAppI18n } from "./i18n.tsx";
 import { readClip, toClipItem, writeClip, type ClipItem } from "./itemClip.ts";
 import { ListIconPicker } from "./ListIconPicker.tsx";
-import { attentionBadge } from "./dayGroups.ts";
+import { attentionBadge, groupByDay, type DayGroup } from "./dayGroups.ts";
 import { nowMs, todayStamp } from "./format.tsx";
 import { restoreCapturedPositions } from "./linger.ts";
 import { createPopoverTooltipGuard } from "./popoverTooltip.ts";
@@ -66,7 +66,7 @@ import { SelectionPanel, type SelectionAction } from "./SelectionPanel.tsx";
 import { Settings } from "./Settings.tsx";
 import { ShortcutsDialog } from "./ShortcutsDialog.tsx";
 import { TaskDialog } from "./TaskDialog.tsx";
-import { Upcoming } from "./Upcoming.tsx";
+import { Upcoming, type UpcomingImperative } from "./Upcoming.tsx";
 import { useSession } from "./SessionContext.tsx";
 import {
   isBinned,
@@ -282,7 +282,7 @@ export function Workspace(props: {
   view: () => ViewKey;
   setView: (v: ViewKey) => void;
 }) {
-  const { m } = useAppI18n();
+  const { m, locale } = useAppI18n();
   const session = useSession();
   const app = props.app;
   const state = app.state;
@@ -691,6 +691,23 @@ export function Workspace(props: {
     }
     restoreCapturedPositions(out, captured);
   };
+  // The agenda's day groups (`dayGroups.ts`), built here rather than in
+  // `Upcoming` so the same rows, in the same order, feed `items()` below:
+  // the selection-scoped shortcuts filter by what is on screen and pick
+  // the survivor after a removal from that order.
+  const upcomingGroups = createMemo((): DayGroup[] =>
+    groupByDay(
+      Object.values(state.itemsById),
+      todayStamp(nowMs()),
+      {
+        overdue: m().deadline.overdue,
+        unscheduled: m().upcoming.unscheduled,
+        today: m().deadline.today,
+        tomorrow: m().deadline.tomorrow,
+      },
+      locale(),
+    ),
+  );
   const items = createMemo((): ItemView[] => {
     const v = view();
     if (v.kind === "list") {
@@ -726,8 +743,11 @@ export function Workspace(props: {
         .sort((a, b) => b.lifecycleAt - a.lifecycleAt);
     }
     // Upcoming renders its own day-grouped surface (`Upcoming.tsx`), not
-    // the flat listbox, so it contributes no rows here.
-    if (v.kind === "upcoming") return [];
+    // the flat listbox; its rows in agenda order are what the list
+    // selection runs over there, so they are the view's rows here too.
+    if (v.kind === "upcoming") {
+      return upcomingGroups().flatMap((g) => g.rows.map((r) => r.item));
+    }
     return Object.values(state.itemsById)
       .filter(isBinned)
       .sort((a, b) => (b.binnedAt ?? 0) - (a.binnedAt ?? 0));
@@ -1368,12 +1388,14 @@ export function Workspace(props: {
 
   const duplicateBlock = (sourceIds: readonly string[]): void => {
     const v = view();
-    if (v.kind === "focus") {
-      // Focus owns no items — each clone is created in its source's own
-      // list directly below its source (inheriting the source's lane),
-      // falling back to the top of the inbox only if that list is gone,
-      // then pinned as a contiguous block right after the bottom-most
-      // source's Focus slot. One undo step.
+    if (v.kind === "focus" || v.kind === "upcoming") {
+      // Focus and the agenda own no items — each clone is created in its
+      // source's own list directly below its source (inheriting the
+      // source's lane), falling back to the top of the inbox only if that
+      // list is gone. In Focus the clones are then pinned as a contiguous
+      // block right after the bottom-most source's Focus slot; on the
+      // agenda the copied dates place them. One undo step.
+      const pinToFocus = v.kind === "focus";
       const visible = items().map((it) => it.id);
       const sourceSet = new Set(sourceIds);
       const sources: {
@@ -1425,7 +1447,7 @@ export function Workspace(props: {
           order.splice(at, 0, id);
           copyItemDetails(id, s);
           if (s.state !== "backlog") app.setLifecycle(id, s.state);
-          app.addToFocus(id, insertAt + i);
+          if (pinToFocus) app.addToFocus(id, insertAt + i);
           created.push(id);
         });
         return created;
@@ -1646,11 +1668,13 @@ export function Workspace(props: {
 
   let dndHandle: DndImperative | null = null;
   let boardHandle: BoardImperative | null = null;
+  let upcomingHandle: UpcomingImperative | null = null;
   // Restore keyboard focus after the detail dialog closes: the board (many
-  // column listboxes) and the list view (one) each expose their own handle;
-  // only one is mounted at a time.
+  // column listboxes), the agenda and the list view (one) each expose
+  // their own handle; only one is mounted at a time.
   const restoreItemsFocus = () => {
-    if (boardListId() !== null) boardHandle?.focusActive();
+    if (view().kind === "upcoming") upcomingHandle?.focus();
+    else if (boardListId() !== null) boardHandle?.focusActive();
     else dndHandle?.focus();
   };
   // Every dialog (auth, settings, confirm, shortcuts, the calendar pickers
@@ -1881,9 +1905,16 @@ export function Workspace(props: {
   // new controller's source has the row's index when scrollToKey lands.
   const revealItem = (id: string, target: ViewKey): void => {
     setView(target);
-    // The calendar is not a listbox: there is no row selection to anchor
-    // and no Dnd mounted to scroll. Callers open the item instead.
-    if (target.kind === "upcoming") return;
+    // The agenda runs the same selection over its own rows and scrolls
+    // through its own handle; a row the agenda doesn't show (an undated
+    // task) just isn't selected.
+    if (target.kind === "upcoming") {
+      setTimeout(() => {
+        selection.selectOnly(id);
+        upcomingHandle?.scrollToKey(id);
+      }, 0);
+      return;
+    }
     // If the destination list renders as a board, the list-view Dnd isn't
     // mounted — hand the id to the Board's reveal path (select + scroll in
     // the resolved column) instead of the list-view scroll below.
@@ -2437,7 +2468,8 @@ export function Workspace(props: {
         ) {
           return;
         }
-        dndHandle?.focus();
+        if (view().kind === "upcoming") upcomingHandle?.focus();
+        else dndHandle?.focus();
       });
   };
 
@@ -3052,8 +3084,18 @@ export function Workspace(props: {
         >
           <Upcoming
             app={app}
+            groups={upcomingGroups()}
+            selection={selection}
             listLabel={listLabel}
             onOpen={(id) => setOpenItemId(id)}
+            openOnTap={itemsIsMobile}
+            ref={(h) => (upcomingHandle = h)}
+            duplicateBlock={duplicateBlock}
+            copyBlock={copyRows}
+            onSetDeadline={openItemDeadline}
+            onSetWhen={openItemWhen}
+            onReveal={revealItemIn}
+            onMoveToList={openMovePalette}
           />
         </Show>
       </main>

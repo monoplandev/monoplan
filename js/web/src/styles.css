@@ -463,6 +463,24 @@ body {
   background: var(--bg-hover);
 }
 
+/* Selection chrome follows the list view's two tokens (see the listbox
+   rules below): live while the keyboard is on the agenda, a quiet neutral
+   once focus moves on to the pane. The shared `[aria-selected] .task-check`
+   tint picks the row up by itself. */
+.upcoming {
+  --dnd-select-bg: var(--bg-active);
+  --dnd-select-border: var(--border);
+}
+
+.upcoming:focus-within {
+  --dnd-select-bg: var(--dnd-select-live-bg);
+  --dnd-select-border: var(--dnd-select-live-border);
+}
+
+.upcoming-row[aria-selected="true"] {
+  background: var(--dnd-select-bg);
+}
+
 /* Hairline between rows within a day (none under the day's last row),
    drawn as a pseudo so it stays square under the rounded hover ground. */
 .upcoming-row:not(:last-child)::after {
@@ -561,8 +579,9 @@ body {
 }
 
 /* A ticked or crossed row stays on its day as the record of what
-   happened, or was called off: muted, the box doing the talking. */
-.upcoming-row[data-closed] .upcoming-row-text {
+   happened, or was called off: muted, the box doing the talking.
+   (`data-done`: the context-menu trigger owns `data-closed`.) */
+.upcoming-row[data-done] .upcoming-row-text {
   color: var(--text-muted);
 }
 

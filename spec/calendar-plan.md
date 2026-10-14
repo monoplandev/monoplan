@@ -254,7 +254,14 @@ for the month grid). `groupByDeadline` becomes
   by `showListCounts`. Future days and done rows do not count, and neither
   does a past `when`: it has gone by like an event (`attentionBadge` in
   `dayGroups.ts`).
-- Stays the flat virtualised list it is today, not a `Dnd` listbox.
+- Not a `Dnd` listbox (day sections, rows of two heights, nothing
+  virtualised: the agenda is bounded to overdue plus today onward), but a
+  listbox in the list view's sense (web, built 2026-10-14): it runs the
+  Workspace's `DndSelection` over every day's rows concatenated and answers
+  the same keys through the shared `applySelectionKeyAction`, so ↑ / ↓ and
+  shift-ranges cross day boundaries. Click selects and the side pane
+  follows; Enter / double-click opens; `x`, `f`, `m`, ⌫, ⌘C, ⌘D act on the
+  selection as on a list. ⌘↑ / ⌘↓ (reorder) does nothing here.
   Drag-to-reschedule is deferred (see below).
 - **Capture** (web): the Add button on this view opens the task dialog on
   a new event, `when` prefilled to today; the dialog's list picker
@@ -373,9 +380,8 @@ here.
   row placed by `when` moves its `when` with the time part kept; a row placed
   by `deadline` only moves its deadline; a row with both moves `when`, the
   deadline being a commitment that moves only through the explicit control.
-  Needs the agenda to become a keyed grouped listbox, which the flat
-  virtualised list cannot host. That is the whole cost, and the reason it
-  waits.
+  The agenda already carries a selection; what is missing is a pointer
+  drag that hit-tests day section rects, or ⌘↑ / ⌘↓ nudging the day by one.
 - **Export**, per the mapping above.
 - **CalDAV carve-out.** Separate conversation.
 - **Week view, hour grid.** Not planned. (A `duration` register landed
