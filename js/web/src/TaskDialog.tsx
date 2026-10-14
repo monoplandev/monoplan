@@ -31,10 +31,8 @@ import { DeadlineField } from "./DeadlineField.tsx";
 import { PlaceField } from "./PlaceField.tsx";
 import { WhenField } from "./WhenField.tsx";
 import { ListPicker, type ListOption } from "./ListPicker.tsx";
-import calendarSvg from "./icons/calendar.svg?raw";
 import checkSvg from "./icons/check.svg?raw";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
-import mapPinSvg from "./icons/map-pin.svg?raw";
 import plusSvg from "./icons/plus.svg?raw";
 import timerSvg from "./icons/timer.svg?raw";
 import starFilledSvg from "./icons/star-filled.svg?raw";
@@ -643,10 +641,8 @@ export function TaskDialog(props: {
     if (key === null) {
       props.setWhenOpen(false);
       props.setDeadlineOpen(false);
-      setPlaceRevealed(false);
       return;
     }
-    setPlaceRevealed(false);
     const it = id ? props.app.state.itemsById[id] : undefined;
     const t = it?.text ?? "";
     // The core's text is the truth for an open item (the store's copy
@@ -1060,23 +1056,18 @@ export function TaskDialog(props: {
   // (neither can hold a Focus ref, spec/focus.md).
   const muted = () => vDone() || vBinned();
 
-  // Promote-on-set (`spec/board.md` has none of this; it is the task
-  // surface's own layout rule): the date, deadline and place bands show
-  // only while they hold a value or are being filled. A date / deadline band is
-  // "being filled" while its popover is open, which is already the
-  // caller's state (a row menu's "Set date…" opens the item onto it); the
-  // place band is a typed input, so it carries its own reveal flag,
-  // dropped again when the input blurs empty. The date has a permanent
-  // glyph chip in the badge row; place and deadline sit in a "more" menu
-  // there until set.
-  const [placeRevealed, setPlaceRevealed] = createSignal(false);
-  const whenShown = () => vWhen() !== null || props.whenOpen();
+  // The date and place bands are always there, empty or not (a
+  // placeholder reads as the absence). The deadline band is the one
+  // promote-on-set register (`spec/board.md` has none of this; it is the
+  // task surface's own layout rule): it shows while it holds a value or
+  // is being filled, "being filled" meaning its popover is open, which is
+  // already the caller's state (a row menu's "Set deadline…" opens the
+  // item onto it). Until set it sits behind the "+" chip in the badge row.
   const deadlineShown = () => vDeadline() !== null || props.deadlineOpen();
-  const placeShown = () => vPlace() !== null || placeRevealed();
   // A band folded back without a value leaves focus on a detached input;
-  // put it on the "more" trigger it came from instead. Only when the fold
-  // actually took the focus: a band also hides when the pane moves to an
-  // item without that value (arrowing along a board), and focus is the
+  // put it on the "+" trigger it came from instead. Only when the fold
+  // actually took the focus: the band also hides when the pane moves to an
+  // item without a deadline (arrowing along a board), and focus is the
   // board's then, not ours to take.
   let moreRef: HTMLButtonElement | undefined;
   let morePick: (() => void) | null = null;
@@ -1091,9 +1082,7 @@ export function TaskDialog(props: {
         });
       }),
     );
-  refocusChip(whenShown, () => moreRef);
   refocusChip(deadlineShown, () => moreRef);
-  refocusChip(placeShown, () => moreRef);
   const setDoneFlag = (done: boolean) => {
     const it = item();
     if (it) props.app.setDone(it.id, done);
@@ -1314,17 +1303,17 @@ export function TaskDialog(props: {
               value={vListId}
               onChange={onListChange}
             />
-            {/* "+" menu with the registers the item does not carry yet
-                (date, deadline, place), gone once all three are set. A
-                pick opens that register's band below the row. The glyph
-                is a plus, not an ellipsis: the header's ellipsis is the
-                item's action menu, and this one adds a field. */}
-            <Show when={!whenShown() || !placeShown() || !deadlineShown()}>
+            {/* "+" menu with the register the item does not carry yet
+                (the deadline), gone once it is set. A pick opens the
+                deadline band below the row. The glyph is a plus, not an
+                ellipsis: the header's ellipsis is the item's action menu,
+                and this one adds a field. */}
+            <Show when={!deadlineShown()}>
               <DropdownMenu
-                // A pick opens a band under the row (and the deadline's
-                // popover). Done while the menu is still closing, its
-                // dismiss handling takes the new popover down with it, so
-                // the pick is held until the menu has reported closed.
+                // A pick opens the band under the row and its popover.
+                // Done while the menu is still closing, its dismiss
+                // handling takes the new popover down with it, so the
+                // pick is held until the menu has reported closed.
                 onOpenChange={(open) => {
                   if (open || !morePick) return;
                   const run = morePick;
@@ -1335,51 +1324,23 @@ export function TaskDialog(props: {
                 <DropdownMenu.Trigger
                   ref={(el) => (moreRef = el)}
                   class="task-dialog-add-chip"
-                  aria-label={m().workspace.addField}
-                  title={m().workspace.addField}
+                  aria-label={m().deadline.add}
+                  title={m().deadline.add}
                   innerHTML={plusSvg}
                 />
                 <DropdownMenu.Portal>
                   <DropdownMenu.Content class="dropdown-menu-content task-dialog-menu-content">
-                    <Show when={!whenShown()}>
-                      <DropdownMenu.Item
-                        class="dropdown-menu-item"
-                        onSelect={() => {
-                          morePick = () => props.setWhenOpen(true);
-                        }}
-                      >
-                        <span class="dropdown-menu-item-lead">
-                          <span class="dropdown-menu-item-icon" aria-hidden="true" innerHTML={calendarSvg} />
-                          {m().when.add}
-                        </span>
-                      </DropdownMenu.Item>
-                    </Show>
-                    <Show when={!placeShown()}>
-                      <DropdownMenu.Item
-                        class="dropdown-menu-item"
-                        onSelect={() => {
-                          morePick = () => setPlaceRevealed(true);
-                        }}
-                      >
-                        <span class="dropdown-menu-item-lead">
-                          <span class="dropdown-menu-item-icon" aria-hidden="true" innerHTML={mapPinSvg} />
-                          {m().place.add}
-                        </span>
-                      </DropdownMenu.Item>
-                    </Show>
-                    <Show when={!deadlineShown()}>
-                      <DropdownMenu.Item
-                        class="dropdown-menu-item"
-                        onSelect={() => {
-                          morePick = () => props.setDeadlineOpen(true);
-                        }}
-                      >
-                        <span class="dropdown-menu-item-lead">
-                          <span class="dropdown-menu-item-icon" aria-hidden="true" innerHTML={timerSvg} />
-                          {m().deadline.add}
-                        </span>
-                      </DropdownMenu.Item>
-                    </Show>
+                    <DropdownMenu.Item
+                      class="dropdown-menu-item"
+                      onSelect={() => {
+                        morePick = () => props.setDeadlineOpen(true);
+                      }}
+                    >
+                      <span class="dropdown-menu-item-lead">
+                        <span class="dropdown-menu-item-icon" aria-hidden="true" innerHTML={timerSvg} />
+                        {m().deadline.add}
+                      </span>
+                    </DropdownMenu.Item>
                   </DropdownMenu.Content>
                 </DropdownMenu.Portal>
               </DropdownMenu>
@@ -1387,20 +1348,18 @@ export function TaskDialog(props: {
           </section>
 
           {/* Date section: the planned date between the badges and the
-              deadline. */}
-          <Show when={whenShown()}>
-            <section class="task-dialog-section task-dialog-dates">
-              <WhenField
-                when={vWhen}
-                duration={vDuration}
-                muted={muted}
-                onChange={onWhenChange}
-                onDurationChange={onDurationChange}
-                open={props.whenOpen}
-                setOpen={props.setWhenOpen}
-              />
-            </section>
-          </Show>
+              deadline, always present. */}
+          <section class="task-dialog-section task-dialog-dates">
+            <WhenField
+              when={vWhen}
+              duration={vDuration}
+              muted={muted}
+              onChange={onWhenChange}
+              onDurationChange={onDurationChange}
+              open={props.whenOpen}
+              setOpen={props.setWhenOpen}
+            />
+          </section>
 
           {/* Deadline section under the dates, before the notes.
               Clicking the field opens a popover (Today / Tomorrow /
@@ -1417,20 +1376,16 @@ export function TaskDialog(props: {
             </section>
           </Show>
 
-          {/* Place section under the deadline: a typed label, or a lookup
-              (`PlaceField`). */}
-          <Show when={placeShown()}>
-            <section class="task-dialog-section task-dialog-place-section">
-              <PlaceField
-                place={vPlace}
-                muted={muted}
-                onChange={onPlaceChange}
-                knownPlaces={() => props.app.placeSuggestions("", KNOWN_PLACES_LIMIT)}
-                autoFocus={vPlace() === null}
-                onBlurEmpty={() => setPlaceRevealed(false)}
-              />
-            </section>
-          </Show>
+          {/* Place section under the deadline, always present: a typed
+              label, or a lookup (`PlaceField`). */}
+          <section class="task-dialog-section task-dialog-place-section">
+            <PlaceField
+              place={vPlace}
+              muted={muted}
+              onChange={onPlaceChange}
+              knownPlaces={() => props.app.placeSuggestions("", KNOWN_PLACES_LIMIT)}
+            />
+          </section>
 
           <section class="task-dialog-section">
             <div

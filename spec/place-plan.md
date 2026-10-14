@@ -197,7 +197,9 @@ anything the web client has looked up once.
   the label as a link that opens the map in a new tab: the pin on
   openstreetmap.org when the place has coordinates, the map's search for
   the label when it has none. The blank run of the band beside the label
-  starts an edit; so does the dialog's reveal of a blank field. While
+  starts an edit. The band is always in the dialog, a "Place" placeholder
+  when unset (since 2026-10-15; before, it hid behind the "+" menu until
+  set). While
   editing, the band is a text input holding the label: Enter or blur
   with a changed label writes a label-only place, always, so a new label
   never keeps the old coordinates, address or ref; emptying it clears.

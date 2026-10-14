@@ -23,7 +23,7 @@
 // results past the typed row (it is already the selection).
 
 import { Popover } from "@kobalte/core/popover";
-import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js";
 import { placeUrl, searchPlaces } from "./geocode.ts";
 import mapPinSvg from "./icons/map-pin.svg?raw";
 import clockSvg from "./icons/clock.svg?raw";
@@ -52,12 +52,6 @@ export function PlaceField(props: {
   /** The places already on items, newest use first, read when the
    *  popover opens (not reactive: a scan in core). */
   knownPlaces: () => PlaceSuggestion[];
-  /** Land the caret in the input on mount: the field was just revealed
-   *  by the dialog's "Place" chip, so the user is here to type. */
-  autoFocus?: boolean;
-  /** The input lost focus with nothing typed and no place stored. The
-   *  dialog folds the field back into its chip. */
-  onBlurEmpty?: () => void;
 }) {
   const { m } = useAppI18n();
   let inputRef: HTMLInputElement | undefined;
@@ -91,15 +85,19 @@ export function PlaceField(props: {
   let closer = new AbortController();
 
   // The stored label is the input's truth whenever it changes underneath
-  // (another device, a pick, a clear); a draft mid-edit is only ever one
-  // blur away from being written anyway. A clear leaves nothing to link
-  // to, so the input comes back.
+  // (another device, a pick, a clear, the dialog moving to another item:
+  // the field stays mounted across items); a draft mid-edit is only ever
+  // one blur away from being written anyway. The face follows too: a
+  // clear leaves nothing to link to, so the input comes back, and a place
+  // arriving shows as the link, unless the caret is in the input, where
+  // the user keeps the edit they are in.
   createEffect(
     on(
       () => props.place(),
       (p) => {
         setDraft(p?.label ?? "");
         if (!p) setEditing(true);
+        else if (!inputFocused()) setEditing(false);
       },
       { defer: true },
     ),
@@ -122,17 +120,14 @@ export function PlaceField(props: {
   const localRows = createMemo(() => filterKnown(known() ?? [], draft(), KNOWN_SHOWN));
   const remoteRows = createMemo(() => dropKnown(remote(), localRows()));
 
+  /** The place the band links to: the stored one, unless an edit is up. */
+  const linked = (): Place | null => (editing() ? null : props.place());
+
   const startEdit = () => {
     setEditing(true);
     // The input mounts on the flag; focus it once it is there.
     queueMicrotask(() => inputRef?.focus());
   };
-
-  onMount(() => {
-    if (!props.autoFocus) return;
-    if (editing()) inputRef?.focus();
-    else startEdit();
-  });
 
   // Leaving the input: with a place to show, back to the link face.
   const settle = () => {
@@ -331,9 +326,62 @@ export function PlaceField(props: {
               aria-hidden="true"
               innerHTML={mapPinSvg}
             />
+            {/* The link face shows only with a place in hand (a removal
+                nulls the place a tick before the edit flag follows), the
+                input otherwise. */}
             <Show
-              when={editing()}
+              when={linked()}
               fallback={
+                <input
+                  ref={inputRef}
+                  type="text"
+                  class="task-dialog-when-input task-dialog-place-input"
+                  value={draft()}
+                  placeholder={m().place.placeholder}
+                  aria-label={m().place.label}
+                  aria-activedescendant={
+                    open() && inputFocused() && typedRow() ? TYPED_ROW_ID : undefined
+                  }
+                  autocomplete="off"
+                  spellcheck={false}
+                  data-muted={props.muted() ? "" : undefined}
+                  onFocus={() => {
+                    setInputFocused(true);
+                    onFocused();
+                  }}
+                  onInput={(e) => {
+                    setDraft(e.currentTarget.value);
+                    onTyped();
+                  }}
+                  onBlur={(e) => {
+                    setInputFocused(false);
+                    if (insidePopover(e.relatedTarget)) return;
+                    commit();
+                    closeResults();
+                    settle();
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commit();
+                      closeResults();
+                      settle();
+                    } else if (e.key === "Escape" && open()) {
+                      e.stopPropagation();
+                      closeResults();
+                    } else if (e.key === "ArrowDown" && open()) {
+                      // Past the typed row: it is the selection already.
+                      const first = typedRow() ? 1 : 0;
+                      if (resultButtons().length > first) {
+                        e.preventDefault();
+                        focusResult(first);
+                      }
+                    }
+                  }}
+                />
+              }
+            >
+              {(p) => (
                 // The link face: the label opens the map, the blank run
                 // beside it (a button with no face of its own) starts an
                 // edit. Two controls, so the row is a span, not a button.
@@ -343,12 +391,12 @@ export function PlaceField(props: {
                 >
                   <a
                     class="task-dialog-place-link"
-                    href={placeUrl(props.place()!)}
+                    href={placeUrl(p())}
                     target="_blank"
                     rel="noopener noreferrer"
-                    title={props.place()?.address ?? m().place.openMap}
+                    title={p().address ?? m().place.openMap}
                   >
-                    {props.place()?.label}
+                    {p().label}
                   </a>
                   <button
                     type="button"
@@ -357,56 +405,7 @@ export function PlaceField(props: {
                     onClick={startEdit}
                   />
                 </span>
-              }
-            >
-              <input
-                ref={inputRef}
-                type="text"
-                class="task-dialog-when-input task-dialog-place-input"
-                value={draft()}
-                placeholder={m().place.placeholder}
-                aria-label={m().place.label}
-                aria-activedescendant={
-                  open() && inputFocused() && typedRow() ? TYPED_ROW_ID : undefined
-                }
-                autocomplete="off"
-                spellcheck={false}
-                data-muted={props.muted() ? "" : undefined}
-                onFocus={() => {
-                  setInputFocused(true);
-                  onFocused();
-                }}
-                onInput={(e) => {
-                  setDraft(e.currentTarget.value);
-                  onTyped();
-                }}
-                onBlur={(e) => {
-                  setInputFocused(false);
-                  if (insidePopover(e.relatedTarget)) return;
-                  commit();
-                  closeResults();
-                  settle();
-                  if (!draft().trim() && !props.place()) props.onBlurEmpty?.();
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    commit();
-                    closeResults();
-                    settle();
-                  } else if (e.key === "Escape" && open()) {
-                    e.stopPropagation();
-                    closeResults();
-                  } else if (e.key === "ArrowDown" && open()) {
-                    // Past the typed row: it is the selection already.
-                    const first = typedRow() ? 1 : 0;
-                    if (resultButtons().length > first) {
-                      e.preventDefault();
-                      focusResult(first);
-                    }
-                  }
-                }}
-              />
+              )}
             </Show>
             <Show when={props.place()}>
               <button

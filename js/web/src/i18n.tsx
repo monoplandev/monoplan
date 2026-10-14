@@ -114,7 +114,6 @@ export type Messages = {
   workspace: {
     /** Accessible name of the task dialog's "+" chip: the menu of
      *  registers (date, deadline, place) the item does not carry yet. */
-    addField: string;
     emptyBin: string;
     emptyBinConfirm: string;
     createWithSpace: string;
@@ -266,8 +265,6 @@ export type Messages = {
   when: {
     /** Section label / accessible name for the planned-date control. */
     label: string;
-    /** Task-dialog "+" menu row that reveals the date band. */
-    add: string;
     /** Task-dialog date input placeholder when no planned date is set. */
     placeholder: string;
     /** Label of the task-dialog switch between an all-day and a timed `when`. */
@@ -295,8 +292,6 @@ export type Messages = {
   place: {
     /** Accessible name of the task-dialog place input. */
     label: string;
-    /** Task-dialog "+" menu row that reveals the place band. */
-    add: string;
     /** Placeholder of the place input when no place is set. */
     placeholder: string;
     /** ✕ beside the input: removes the place. */
@@ -493,7 +488,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       importFailed: "No se pudo importar el archivo",
     },
     workspace: {
-      addField: "Añadir fecha, fecha límite o lugar",
       emptyBin: "Vaciar papelera",
       emptyBinConfirm: "¿Seguro que quieres borrar permanentemente los elementos de la papelera?",
       createWithSpace: "Pulsa Espacio para crear un elemento nuevo",
@@ -581,7 +575,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     when: {
       label: "Fecha",
-      add: "Añadir fecha",
       placeholder: "Fecha",
       allDay: "Todo el día",
       today: "Hoy",
@@ -595,7 +588,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     place: {
       label: "Lugar",
-      add: "Añadir lugar",
       placeholder: "Lugar",
       remove: "Quitar lugar",
       edit: "Editar lugar",
@@ -763,7 +755,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       importFailed: "Could not import file",
     },
     workspace: {
-      addField: "Add date, deadline or place",
       emptyBin: "Empty",
       emptyBinConfirm: "Are you sure you want to permanently erase items in the bin?",
       createWithSpace: "Press Space to create a new item",
@@ -851,7 +842,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     when: {
       label: "Date",
-      add: "Add date",
       placeholder: "Date",
       allDay: "All day",
       today: "Today",
@@ -865,7 +855,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     place: {
       label: "Place",
-      add: "Add place",
       placeholder: "Place",
       remove: "Remove place",
       edit: "Edit place",
