@@ -3,6 +3,10 @@
  * flex/grid. */
 
 :root {
+  /* Line heights: the base is unitless so it re-scales with each element's
+     font size; one-line chrome (rows, badges) opts into the compact ratio. */
+  --lh: 1.5;
+  --lh-compact: 1.3;
   --bg: #fafafc;
   --bg-board-col: #fbfcfd;
   /* Auth branding ground: behind the logo artwork and under the
@@ -99,7 +103,7 @@
   align-items: center;
   gap: 3px;
   font-size: 12px;
-  line-height: 1.3em;
+  line-height: var(--lh-compact);
   padding: 1px 3px;
   border-radius: 6px;
   white-space: nowrap;
@@ -127,6 +131,7 @@ body,
     "Segoe UI",
     sans-serif;
   font-size: 14px;
+  line-height: var(--lh);
   color: var(--text);
   background: var(--bg);
   user-select: none;
@@ -1282,7 +1287,7 @@ input.task-check:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   outline: none;
-  line-height: 1.3em;
+  line-height: var(--lh-compact);
 }
 
 .row[data-expanded] .row-text a {
@@ -1306,7 +1311,7 @@ input.task-check:hover {
 .row-timestamp-lead {
   flex-shrink: 0;
   white-space: nowrap;
-  line-height: 1.3em;
+  line-height: var(--lh-compact);
 }
 
 .row-timestamp-icon {
@@ -2689,7 +2694,7 @@ input.task-check:hover {
   background: none;
   font: inherit;
   font-size: 14px;
-  line-height: 1.3em;
+  line-height: var(--lh-compact);
   color: var(--text-muted);
   white-space: nowrap;
   cursor: pointer;
