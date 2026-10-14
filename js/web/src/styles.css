@@ -327,7 +327,7 @@ body {
   justify-content: space-between;
   gap: 24px;
   width: 100%;
-  padding: 6px;
+  padding: 4px;
   border: 0;
   border-radius: 4px;
   background: transparent;
@@ -475,9 +475,17 @@ body {
   background: var(--row-divider);
 }
 
-/* Time lane: a fixed column at the row's left edge, wide enough for the
-   longest 12-hour form ("12:30 PM"), so the checks and titles line up
-   down the day whether or not a row has a time. */
+/* Check lane: the box leads the row, centred on the first line. */
+.upcoming-row-check {
+  flex-shrink: 0;
+  height: var(--upcoming-line);
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Time lane: a fixed column after the check, wide enough for the
+   longest 12-hour form ("12:30 PM"), so the titles line up down the
+   day whether or not a row has a time. */
 .upcoming-row-time {
   flex-shrink: 0;
   width: 4.5em;
@@ -495,9 +503,8 @@ body {
   width: 5.5em;
 }
 
-/* Body column: the check and the title on the first line, and under
-   them the place when there is one, as a muted second line rather than
-   a pill. */
+/* Body column: the title on the first line, and under it the place
+   when there is one, as a muted second line rather than a pill. */
 .upcoming-row-body {
   flex: 1;
   min-width: 0;
@@ -523,7 +530,7 @@ body {
 
 /* Place: the pin glyph then the label, the pin sized to the date pills'
    icon slot so the agenda and the task surface draw the same mark. It
-   starts at the body's left edge, so under the checkbox. */
+   starts at the body's left edge, so under the title. */
 .upcoming-row-place {
   display: inline-flex;
   align-items: center;

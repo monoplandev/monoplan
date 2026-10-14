@@ -3,9 +3,9 @@
 // surface reads as "the days ahead" even when nothing is due. Overdue
 // deadlines sit in an Overdue section above Today. A past `when` is over
 // and places nothing here. Rows carry no date pills: the day header is the
-// date, and the task surface shows the rest. A fixed-width lane down the
-// left carries the start time ("All day", or "Due" on a deadline); the
-// place is a muted line under the title.
+// date, and the task surface shows the rest. The checkbox leads each row,
+// then a fixed-width lane carries the start time ("All day", or "Due" on
+// a deadline); the place is a muted line under the title.
 // Rows tick off in place and stay where they are on their `when` day once
 // done or cancelled, muted (tick or cross), so the day still records what
 // happened and what was called off. Click opens the
@@ -24,6 +24,7 @@
 import { createMemo, For, Show } from "solid-js";
 import { groupByDay, type DayGroup, type DayRow } from "./dayGroups.ts";
 import {
+  addDaysToStamp,
   formatClockTime,
   nowMs,
   todayStamp,
@@ -61,9 +62,10 @@ export function Upcoming(props: {
   );
 
   // Every day heads with the same long-form date ("Sat 24 Sept"); Today
-  // is the only one annotated, so the eye lands on it without the other
-  // days changing shape as they approach. Overdue has no day: its rows
-  // each carry their own date. Unscheduled has no day at all.
+  // and Tomorrow lead with their name ("Today - Sat 24 Sept") so the eye
+  // lands on them without the other days changing shape as they
+  // approach. Overdue has no day: its rows each carry their own date.
+  // Unscheduled has no day at all.
   const dayHeading = (g: DayGroup): string => {
     if (g.urgency === "overdue" || g.urgency === "unscheduled") return g.label;
     const [y, mo, d] = g.key.split("-").map(Number);
@@ -73,7 +75,12 @@ export function Upcoming(props: {
       day: "numeric",
       month: "short",
     }).format(new Date(y, mo - 1, d));
-    return g.urgency === "today" ? `${date} (${m().deadline.today})` : date;
+    const today = todayStamp(nowMs());
+    if (g.key === today) return `${m().deadline.today} - ${date}`;
+    if (g.key === addDaysToStamp(today, 1)) {
+      return `${m().deadline.tomorrow} - ${date}`;
+    }
+    return date;
   };
 
   // "09:00–10:00" for a timed row with a length, the start alone without
@@ -118,26 +125,24 @@ export function Upcoming(props: {
                       props.onOpen(r.item.id);
                     }}
                   >
-                    {/* Fixed-width time lane, kept even when empty so
-                        the checks and titles line up down the day. */}
+                    {/* The check leads the row, then a fixed-width time
+                        lane kept even when empty so the titles line up
+                        down the day. */}
+                    <span class="upcoming-row-check">
+                      <input
+                        type="checkbox"
+                        class="task-check"
+                        checked={isClosed(r.item)}
+                        data-cancelled={isCancelled(r.item) ? "" : undefined}
+                        aria-label={m().workspace.markDone}
+                        onChange={(e) =>
+                          props.app.setDone(r.item.id, e.currentTarget.checked)
+                        }
+                      />
+                    </span>
                     <span class="upcoming-row-time">{timeLabel(r)}</span>
                     <span class="upcoming-row-body">
                       <span class="upcoming-row-title">
-                        <input
-                          type="checkbox"
-                          class="task-check"
-                          checked={isClosed(r.item)}
-                          data-cancelled={
-                            isCancelled(r.item) ? "" : undefined
-                          }
-                          aria-label={m().workspace.markDone}
-                          onChange={(e) =>
-                            props.app.setDone(
-                              r.item.id,
-                              e.currentTarget.checked,
-                            )
-                          }
-                        />
                         <span class="upcoming-row-text">{r.item.text}</span>
                       </span>
                       <Show when={r.item.place}>
