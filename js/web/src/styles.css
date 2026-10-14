@@ -427,7 +427,6 @@ body {
   align-items: baseline;
   gap: 8px;
   padding: 10px 4px 8px;
-  margin-bottom: 6px;
   border-bottom: 0.5px solid var(--row-divider);
 }
 
@@ -3327,12 +3326,20 @@ input.task-check:hover {
 }
 
 /* Pin-to-Focus toggle in the header actions, before the item menu: an
-   icon button like its neighbours. Outline star when unpinned, filled
-   star in the text colour when pressed (Phosphor's pair, the one set
-   here not from Radix: its points are rounded) (`aria-pressed`). Disabled (Done /
-   Binned items — no Focus refs, spec/focus.md) just loses the pointer. */
-.task-dialog-pin-toggle[aria-pressed="true"] {
-  color: var(--text);
+   icon button like its neighbours. One glyph (Phosphor's filled star,
+   rounded points) in both states: a stroked outline with no fill when
+   unpinned, and the same outline filled yellow when pressed
+   (`aria-pressed`), so only the fill changes. Stroke width is in the
+   256-unit viewBox. Disabled (Done / Binned items — no Focus refs,
+   spec/focus.md) just loses the pointer. */
+.task-dialog-pin-toggle svg {
+  fill: none;
+  stroke: #4e4e4e;
+  stroke-width: 6px;
+}
+
+.task-dialog-pin-toggle[aria-pressed="true"] svg {
+  fill: #ffe785;
 }
 
 /* Glyph pill after the list picker: the "more" menu trigger (date /
