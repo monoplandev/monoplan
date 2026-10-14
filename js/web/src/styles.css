@@ -1366,6 +1366,12 @@ input.task-check:hover {
 .row-focus-badge svg {
   width: 12px;
   height: 12px;
+  /* Same rendering as the task dialog's pinned star
+     (.task-dialog-pin-toggle[aria-pressed="true"]): yellow fill with a dark
+     outline, stroke width in the 256-unit viewBox. */
+  fill: #ffe785;
+  stroke: #4e4e4e;
+  stroke-width: 6px;
 }
 
 /* Has-notes badge: same geometry as the focus badge, an inert indicator.
