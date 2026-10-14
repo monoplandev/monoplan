@@ -22,7 +22,7 @@
   --text-faint: #9e9e9f;
   --text-empty: #999;
   --border: #e5e5e5;
-  --border-surface: #e7e7e7;
+  --border-surface: #ebebeb;
   --border-input: #d4d4d4;
   --border-row: #efefef;
   --row-divider: #f1f1f1;
@@ -454,6 +454,7 @@ body {
   gap: 8px;
   min-height: 32px;
   padding: 4px 6px;
+  position: relative;
   border-radius: 4px;
   color: var(--text);
   cursor: default;
@@ -461,6 +462,18 @@ body {
 
 .upcoming-row:hover {
   background: var(--bg-hover);
+}
+
+/* Hairline between rows within a day (none under the day's last row),
+   drawn as a pseudo so it stays square under the rounded hover ground. */
+.upcoming-row:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 0;
+  height: 0.5px;
+  background: var(--row-divider);
 }
 
 /* Time lane: a fixed column at the row's left edge, wide enough for the
@@ -474,7 +487,6 @@ body {
   align-items: center;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  color: var(--text-muted);
 }
 
 /* Spanish's "Todo el día" runs past the 12-hour lane; its clock times are
