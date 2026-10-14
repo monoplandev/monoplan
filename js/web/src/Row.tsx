@@ -624,13 +624,13 @@ export function Row(props: {
             left padding edge (under the checkbox), not the title. List
             rows show them inline after the title instead. Once an item
             leaves Open its deadline stops mattering — done/binned cards
-            show only their lifecycle timestamp. */}
+            show only their lifecycle timestamp. Place is deliberately
+            omitted from cards; it stays on list rows and in the dialog. */}
         <Show
           when={
             props.deadlineInFooter &&
             !props.expanded() &&
-            ((isOpen(props.item()) &&
-              (props.item().when || props.item().deadline || props.item().place)) ||
+            ((isOpen(props.item()) && (props.item().when || props.item().deadline)) ||
               (canPinToFocus() && focused()) ||
               hasNotes() ||
               rowStamp())
@@ -653,9 +653,6 @@ export function Row(props: {
             </Show>
             <Show when={isOpen(props.item()) && props.item().deadline}>
               {(d) => <DeadlineBadge deadline={d()} />}
-            </Show>
-            <Show when={isOpen(props.item()) && props.item().place}>
-              {(p) => <PlaceBadge place={p()} />}
             </Show>
             <Show when={rowStamp()}>
               {(ts) => (
