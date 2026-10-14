@@ -1,39 +1,36 @@
-// The task dialog's place control: a text input in its own ruled band
-// under the deadline, with the dates' anatomy (a pin glyph inset at the
-// left edge, an inset ✕ that removes the place). Unlike the date inputs it
-// is editable: the text is the place's label, and a typed label is a
-// complete place on its own. Enter or blur with a changed label writes a
-// label-only place (any coordinates belonged to the old label, so they
-// go); emptying it clears.
+// The task dialog's place control, in its own ruled band under the
+// deadline with the dates' anatomy (a pin glyph inset at the left edge,
+// an inset ✕ that removes the place).
 //
-// Suggestions come in two tiers (`spec/place-plan.md` "Reuse"). Known
-// places, the ones already on items as core ranks them, show first:
-// focusing the blank field lists the most recent few, and typing narrows
-// them from the first character with no network. Under them, once three
-// characters are in, a debounced lookup against Photon (OpenStreetMap
-// data, `geocode.ts` for the constraints) adds places the user has never
-// used, minus any that repeat a known row. Picking either writes the
-// whole place; Enter on text that names a known place reuses it,
-// coordinates included, rather than writing a label-only one. Arrow
-// down moves from the input into the results. A place with coordinates
-// shows its address muted under the input with a link to the map.
+// Two faces. With a place set and no edit under way, the band shows the
+// label as a link to the map (`placeUrl`: the pin when the place has
+// coordinates, the map's search for the label when it has none), and the
+// blank run of the band beside it starts an edit. While editing, the
+// band is a text input holding the label. Enter or blur with a changed
+// label writes a label-only place: the coordinates described the old
+// label, so a new label always drops them. Emptying it clears.
+//
+// Suggestions come in tiers (`spec/place-plan.md` "Reuse"). First, the
+// text as typed, a label-only place with no lookup behind it: it reads
+// as selected while the caret is in the input, and it is what Enter
+// writes, so there is always a row Enter takes. Then the known places, the ones already on items as core
+// ranks them: focusing the blank field lists the most recent few, and
+// typing narrows them from the first character with no network. Under
+// them, once three characters are in, a debounced lookup against Photon
+// (OpenStreetMap data, `geocode.ts` for the constraints) adds places the
+// user has never used, minus any that repeat a known row. Picking any row
+// writes that place whole. Arrow down moves from the input into the
+// results past the typed row (it is already the selection).
 
 import { Popover } from "@kobalte/core/popover";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { osmMapUrl, searchPlaces } from "./geocode.ts";
+import { placeUrl, searchPlaces } from "./geocode.ts";
 import mapPinSvg from "./icons/map-pin.svg?raw";
 import clockSvg from "./icons/clock.svg?raw";
-import mapSvg from "./icons/map.svg?raw";
 import spinnerSvg from "./icons/spinner.svg?raw";
 import { useAppI18n } from "./i18n.tsx";
 import { trackOverlay } from "./overlay.ts";
-import {
-  dropKnown,
-  exactKnown,
-  filterKnown,
-  samePlace,
-  type PlaceSuggestion,
-} from "./placeSuggest.ts";
+import { dropKnown, filterKnown, type PlaceSuggestion } from "./placeSuggest.ts";
 import type { Place } from "./sync/store.ts";
 
 type Status = "idle" | "searching" | "empty" | "error";
@@ -45,6 +42,8 @@ const MIN_CHARS = 3;
 /** Known places shown at once: the recents on a blank field, or the
  *  narrowed matches while typing. */
 const KNOWN_SHOWN = 6;
+/** The typed row's element id, for the input's `aria-activedescendant`. */
+const TYPED_ROW_ID = "place-popover-typed";
 
 export function PlaceField(props: {
   place: () => Place | null;
@@ -64,7 +63,13 @@ export function PlaceField(props: {
   let inputRef: HTMLInputElement | undefined;
   let contentRef: HTMLDivElement | undefined;
   const [draft, setDraft] = createSignal(props.place()?.label ?? "");
+  // The input is up while there is nothing to link to, or on request;
+  // otherwise the band shows the label as a link.
+  const [editing, setEditing] = createSignal(props.place() === null);
   const [open, setOpen] = createSignal(false);
+  // While the caret is in the input the typed row is the selection:
+  // Enter writes the text as typed, and the row shows it.
+  const [inputFocused, setInputFocused] = createSignal(false);
   // The results are portaled out of the task surface, so a focused result
   // sits outside its `data-shortcuts-inert` region. In the side pane
   // (no modal overlay) the workspace's shortcuts would otherwise fire on
@@ -87,11 +92,16 @@ export function PlaceField(props: {
 
   // The stored label is the input's truth whenever it changes underneath
   // (another device, a pick, a clear); a draft mid-edit is only ever one
-  // blur away from being written anyway.
+  // blur away from being written anyway. A clear leaves nothing to link
+  // to, so the input comes back.
   createEffect(
     on(
-      () => props.place()?.label ?? "",
-      (label) => setDraft(label),
+      () => props.place(),
+      (p) => {
+        setDraft(p?.label ?? "");
+        if (!p) setEditing(true);
+      },
+      { defer: true },
     ),
   );
 
@@ -103,12 +113,31 @@ export function PlaceField(props: {
     return loaded;
   };
 
+  // The typed text as a place of its own, offered whenever it would be a
+  // change: a label-only place, no lookup, no known coordinates.
+  const typedRow = createMemo((): Place | null => {
+    const t = draft().trim();
+    return t && t !== props.place()?.label ? { label: t } : null;
+  });
   const localRows = createMemo(() => filterKnown(known() ?? [], draft(), KNOWN_SHOWN));
   const remoteRows = createMemo(() => dropKnown(remote(), localRows()));
 
+  const startEdit = () => {
+    setEditing(true);
+    // The input mounts on the flag; focus it once it is there.
+    queueMicrotask(() => inputRef?.focus());
+  };
+
   onMount(() => {
-    if (props.autoFocus) inputRef?.focus();
+    if (!props.autoFocus) return;
+    if (editing()) inputRef?.focus();
+    else startEdit();
   });
+
+  // Leaving the input: with a place to show, back to the link face.
+  const settle = () => {
+    if (props.place()) setEditing(false);
+  };
 
   const commit = () => {
     clearTimeout(debounce);
@@ -119,13 +148,9 @@ export function PlaceField(props: {
       return;
     }
     // An unchanged label writes nothing (a focus and blur is not an
-    // edit). A typed label that names a known place takes that place
-    // whole: "gym" reuses the geocoded Gym. Only a whole-label match
-    // counts.
-    if (t === cur?.label) return;
-    const match = exactKnown(ensureKnown(), t);
-    if (match && !samePlace(match, cur)) props.onChange(match);
-    else if (!match) props.onChange({ label: t });
+    // edit). A changed one is the text as typed: the old coordinates
+    // described the old label.
+    if (t !== cur?.label) props.onChange({ label: t });
   };
 
   const stopRemote = () => {
@@ -144,16 +169,17 @@ export function PlaceField(props: {
   };
   onCleanup(closeResults);
 
-  // Typing narrows the known places at once, and schedules a lookup once
-  // the text is long enough and differs from the stored label (reopening
-  // a dialog is not a search). Each keystroke restarts the clock and
-  // retires any response still to come.
+  // Typing opens the results at once (the typed row is always there for
+  // a change, and the known places narrow with it), and schedules a
+  // lookup once the text is long enough and differs from the stored
+  // label (reopening a dialog is not a search). Each keystroke restarts
+  // the clock and retires any response still to come.
   const onTyped = () => {
     ensureKnown();
     const q = draft().trim();
     if (q.length < MIN_CHARS || q === props.place()?.label) {
       stopRemote();
-      setOpen(localRows().length > 0);
+      setOpen(typedRow() !== null || localRows().length > 0);
       return;
     }
     clearTimeout(debounce);
@@ -198,7 +224,8 @@ export function PlaceField(props: {
       focusResult(index + 1);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      if (index <= 0) inputRef?.focus();
+      // Back into the input, where the typed row (if any) is selected.
+      if (index <= (typedRow() ? 1 : 0)) inputRef?.focus();
       else focusResult(index - 1);
     } else if (e.key === "Escape") {
       e.stopPropagation();
@@ -225,38 +252,46 @@ export function PlaceField(props: {
     }
   };
 
+  // A pick from the results: focus was in the popover (or the input), so
+  // nothing blurs to settle the band; do it here.
   const pick = (p: Place) => {
     props.onChange(p);
     setDraft(p.label);
     closeResults();
+    setEditing(false);
   };
 
   const clear = () => {
     closeResults();
     setDraft("");
     props.onChange(null);
+    setEditing(true);
   };
 
-  const coords = () => {
-    const p = props.place();
-    return p && p.lat != null && p.lon != null ? { lat: p.lat, lon: p.lon } : null;
-  };
+  const anyRows = () =>
+    typedRow() !== null || localRows().length > 0 || remoteRows().length > 0;
 
-  const anyRows = () => localRows().length > 0 || remoteRows().length > 0;
+  const typedActive = () => inputFocused() && typedRow() !== null;
 
-  const resultRow = (p: Place, isKnown: boolean) => (
-    <li role="option">
+  const resultRow = (p: Place, kind: "typed" | "known" | "lookup") => (
+    <li
+      role="option"
+      id={kind === "typed" ? TYPED_ROW_ID : undefined}
+      aria-selected={kind === "typed" ? typedActive() : undefined}
+    >
       <button
         type="button"
         class="place-popover-result"
-        data-known={isKnown ? "" : undefined}
+        data-known={kind === "known" ? "" : undefined}
+        data-typed={kind === "typed" ? "" : undefined}
+        data-active={kind === "typed" && typedActive() ? "" : undefined}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => pick(p)}
         onKeyDown={(e) => onResultKeyDown(e, p)}
       >
         <span class="place-popover-result-label">
           {p.label}
-          <Show when={isKnown}>
+          <Show when={kind === "known"}>
             <span
               class="place-popover-result-known"
               title={m().place.known}
@@ -265,7 +300,10 @@ export function PlaceField(props: {
             />
           </Show>
         </span>
-        <Show when={p.address}>
+        <Show when={kind === "typed"}>
+          <span class="place-popover-result-address">{m().place.asTyped}</span>
+        </Show>
+        <Show when={kind !== "typed" && p.address}>
           {(a) => <span class="place-popover-result-address">{a()}</span>}
         </Show>
       </button>
@@ -293,41 +331,83 @@ export function PlaceField(props: {
               aria-hidden="true"
               innerHTML={mapPinSvg}
             />
-            <input
-              ref={inputRef}
-              type="text"
-              class="task-dialog-when-input task-dialog-place-input"
-              value={draft()}
-              placeholder={m().place.placeholder}
-              aria-label={m().place.label}
-              autocomplete="off"
-              spellcheck={false}
-              data-muted={props.muted() ? "" : undefined}
-              onFocus={onFocused}
-              onInput={(e) => {
-                setDraft(e.currentTarget.value);
-                onTyped();
-              }}
-              onBlur={(e) => {
-                if (insidePopover(e.relatedTarget)) return;
-                commit();
-                closeResults();
-                if (!draft().trim() && !props.place()) props.onBlurEmpty?.();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
+            <Show
+              when={editing()}
+              fallback={
+                // The link face: the label opens the map, the blank run
+                // beside it (a button with no face of its own) starts an
+                // edit. Two controls, so the row is a span, not a button.
+                <span
+                  class="task-dialog-when-input task-dialog-place-display"
+                  data-muted={props.muted() ? "" : undefined}
+                >
+                  <a
+                    class="task-dialog-place-link"
+                    href={placeUrl(props.place()!)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={props.place()?.address ?? m().place.openMap}
+                  >
+                    {props.place()?.label}
+                  </a>
+                  <button
+                    type="button"
+                    class="task-dialog-place-edit"
+                    aria-label={m().place.edit}
+                    onClick={startEdit}
+                  />
+                </span>
+              }
+            >
+              <input
+                ref={inputRef}
+                type="text"
+                class="task-dialog-when-input task-dialog-place-input"
+                value={draft()}
+                placeholder={m().place.placeholder}
+                aria-label={m().place.label}
+                aria-activedescendant={
+                  open() && inputFocused() && typedRow() ? TYPED_ROW_ID : undefined
+                }
+                autocomplete="off"
+                spellcheck={false}
+                data-muted={props.muted() ? "" : undefined}
+                onFocus={() => {
+                  setInputFocused(true);
+                  onFocused();
+                }}
+                onInput={(e) => {
+                  setDraft(e.currentTarget.value);
+                  onTyped();
+                }}
+                onBlur={(e) => {
+                  setInputFocused(false);
+                  if (insidePopover(e.relatedTarget)) return;
                   commit();
                   closeResults();
-                } else if (e.key === "Escape" && open()) {
-                  e.stopPropagation();
-                  closeResults();
-                } else if (e.key === "ArrowDown" && open() && anyRows()) {
-                  e.preventDefault();
-                  focusResult(0);
-                }
-              }}
-            />
+                  settle();
+                  if (!draft().trim() && !props.place()) props.onBlurEmpty?.();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    commit();
+                    closeResults();
+                    settle();
+                  } else if (e.key === "Escape" && open()) {
+                    e.stopPropagation();
+                    closeResults();
+                  } else if (e.key === "ArrowDown" && open()) {
+                    // Past the typed row: it is the selection already.
+                    const first = typedRow() ? 1 : 0;
+                    if (resultButtons().length > first) {
+                      e.preventDefault();
+                      focusResult(first);
+                    }
+                  }
+                }}
+              />
+            </Show>
             <Show when={props.place()}>
               <button
                 type="button"
@@ -368,15 +448,21 @@ export function PlaceField(props: {
                   const to = e.relatedTarget;
                   if (to === inputRef || insidePopover(to)) return;
                   closeResults();
+                  settle();
                 }}
               >
                 <Show when={anyRows()}>
                   <ul class="place-popover-list" role="listbox">
-                    <For each={localRows()}>{(s) => resultRow(s.place, true)}</For>
+                    {/* Keyed: a fresh row per typed value, so the label
+                        follows every keystroke rather than the first. */}
+                    <Show when={typedRow()} keyed>
+                      {(p) => resultRow(p, "typed")}
+                    </Show>
+                    <For each={localRows()}>{(s) => resultRow(s.place, "known")}</For>
                     <Show when={localRows().length > 0 && remoteRows().length > 0}>
                       <li role="separator" class="place-popover-separator" />
                     </Show>
-                    <For each={remoteRows()}>{(p) => resultRow(p, false)}</For>
+                    <For each={remoteRows()}>{(p) => resultRow(p, "lookup")}</For>
                   </ul>
                 </Show>
                 <Show when={status() === "searching"}>
@@ -385,12 +471,13 @@ export function PlaceField(props: {
                     {m().place.searching}
                   </div>
                 </Show>
-                {/* The lookup's own notes only matter when nothing of the
-                    user's is already showing. */}
-                <Show when={status() === "empty" && !anyRows()}>
+                {/* The lookup's own notes only matter when no known place
+                    is showing (the typed row is always there during a
+                    lookup, and says nothing about the lookup). */}
+                <Show when={status() === "empty" && localRows().length === 0}>
                   <div class="place-popover-note">{m().place.noResults}</div>
                 </Show>
-                <Show when={status() === "error" && !anyRows()}>
+                <Show when={status() === "error" && localRows().length === 0}>
                   <div class="place-popover-note">{m().place.error}</div>
                 </Show>
                 <Show when={remoteRows().length > 0}>
@@ -401,24 +488,6 @@ export function PlaceField(props: {
           </Popover.Portal>
         </Popover>
       </div>
-      <Show when={coords()}>
-        {(c) => (
-          <div class="task-dialog-place-address" data-muted={props.muted() ? "" : undefined}>
-            <span class="task-dialog-place-address-text">
-              {props.place()?.address ?? `${c().lat}, ${c().lon}`}
-            </span>
-            <a
-              class="task-dialog-place-map"
-              href={osmMapUrl(c().lat, c().lon)}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label={m().place.openMap}
-              title={m().place.openMap}
-              innerHTML={mapSvg}
-            />
-          </div>
-        )}
-      </Show>
     </div>
   );
 }

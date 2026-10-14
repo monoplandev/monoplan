@@ -171,3 +171,13 @@ export function searchPlaces(
 /** OpenStreetMap link centred on a place's coordinates. */
 export const osmMapUrl = (lat: number, lon: number): string =>
   `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=17/${lat}/${lon}`;
+
+/** The map's own search for a label with no coordinates behind it. */
+export const osmSearchUrl = (query: string): string =>
+  `https://www.openstreetmap.org/search?query=${encodeURIComponent(query)}`;
+
+/** Where a place's label links: its pin when it has coordinates, else the
+ *  map's search for the label. Every place is a link; a label-only one is
+ *  just a looser one. */
+export const placeUrl = (p: Place): string =>
+  p.lat != null && p.lon != null ? osmMapUrl(p.lat, p.lon) : osmSearchUrl(p.label);

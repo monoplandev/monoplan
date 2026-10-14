@@ -1,6 +1,6 @@
 // The place field's rules over core's known-place list
-// (`spec/place-plan.md` "Reuse"): narrowing as the user types, the exact
-// match Enter reuses, and dropping lookup rows that repeat a known place.
+// (`spec/place-plan.md` "Reuse"): narrowing as the user types, and
+// dropping lookup rows that repeat a known place.
 // The ranking and dedup of the list itself are core's
 // (`core/src/places.rs`); `js/core/test/doc.test.ts` covers the wasm
 // round trip.
@@ -9,9 +9,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   dropKnown,
-  exactKnown,
   filterKnown,
-  foldLabel,
   samePlace,
   type PlaceSuggestion,
 } from "../src/placeSuggest.ts";
@@ -39,19 +37,6 @@ describe("filterKnown", () => {
     expect(filterKnown(known, "geo", 10).map((s) => s.place.label)).toEqual(["Work"]);
     expect(filterKnown(known, "ho", 10).map((s) => s.place.label)).toEqual(["Home"]);
     expect(filterKnown(known, "zzz", 10)).toEqual([]);
-  });
-});
-
-describe("exactKnown", () => {
-  test("needs the whole label, folded, not a prefix", () => {
-    expect(exactKnown(known, "gym")).toBe(gym);
-    expect(exactKnown(known, " GYM ")).toBe(gym);
-    expect(exactKnown(known, "gy")).toBeUndefined();
-    expect(exactKnown(known, "")).toBeUndefined();
-  });
-
-  test("folds like core", () => {
-    expect(foldLabel("  Café  Noir ")).toBe("cafe noir");
   });
 });
 

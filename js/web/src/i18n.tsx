@@ -301,6 +301,10 @@ export type Messages = {
     placeholder: string;
     /** ✕ beside the input: removes the place. */
     remove: string;
+    /** The blank run of the field beside the label link: starts an edit. */
+    edit: string;
+    /** Popover row offering the typed text as the label, as is. */
+    asTyped: string;
     /** Popover note while a lookup runs. */
     searching: string;
     /** Popover note when a lookup found nothing. */
@@ -594,6 +598,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       add: "Añadir lugar",
       placeholder: "Lugar",
       remove: "Quitar lugar",
+      edit: "Editar lugar",
+      asTyped: "Tal como está escrito",
       searching: "Buscando…",
       noResults: "Sin resultados",
       error: "No se pudo buscar",
@@ -862,6 +868,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       add: "Add place",
       placeholder: "Place",
       remove: "Remove place",
+      edit: "Edit place",
+      asTyped: "As typed",
       searching: "Searching…",
       noResults: "No results",
       error: "Lookup failed",

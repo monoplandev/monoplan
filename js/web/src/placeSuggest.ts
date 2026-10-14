@@ -1,11 +1,10 @@
 // Known places for the place field (`spec/place-plan.md` "Reuse"): the
 // deduped, recency-ranked places already on items, as core computes
 // them (`Doc::place_suggestions`), plus the pure rules the field applies
-// on top: narrowing them as the user types, picking an exact match on
-// Enter, and keeping the geocoder's rows from repeating one the user
-// already has. The ranking is core's; nothing here re-sorts.
+// on top: narrowing them as the user types, and keeping the geocoder's
+// rows from repeating one the user already has. The ranking is core's; nothing here re-sorts.
 
-import { matchesName, tokenize } from "./search.ts";
+import { matchesName } from "./search.ts";
 import type { Place } from "./sync/store.ts";
 
 export interface PlaceSuggestion {
@@ -15,9 +14,6 @@ export interface PlaceSuggestion {
   /** Unix millis of the newest use. */
   lastUsed: number;
 }
-
-/** The field's label-dedup key, the search folding (`fold_label` in core). */
-export const foldLabel = (label: string): string => tokenize(label).join(" ");
 
 /** Known places matching a typed query: every query token prefixes a
  *  token of the label or the address (core's `place_matches`). An empty
@@ -37,18 +33,6 @@ export function filterKnown(
     }
   }
   return out;
-}
-
-/** The top-ranked known place whose folded label equals the typed
- *  text's, so Enter on "gym" reuses the geocoded Gym instead of writing
- *  a label-only one. A prefix is not a match. */
-export function exactKnown(
-  known: readonly PlaceSuggestion[],
-  label: string,
-): Place | undefined {
-  const want = foldLabel(label);
-  if (!want) return undefined;
-  return known.find((s) => foldLabel(s.place.label) === want)?.place;
 }
 
 /** Coordinates rounded to ~4 decimals (~10 m), core's bucket. */

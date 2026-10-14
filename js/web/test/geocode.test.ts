@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { osmMapUrl, photonToPlace } from "../src/geocode.ts";
+import { osmMapUrl, placeUrl, photonToPlace } from "../src/geocode.ts";
 
 const feature = (
   properties: NonNullable<Parameters<typeof photonToPlace>[0]["properties"]>,
@@ -86,6 +86,17 @@ describe("osmMapUrl", () => {
   test("centres the map on the coordinates with a marker", () => {
     expect(osmMapUrl(-33.8688, 151.2093)).toBe(
       "https://www.openstreetmap.org/?mlat=-33.8688&mlon=151.2093#map=17/-33.8688/151.2093",
+    );
+  });
+});
+
+describe("placeUrl", () => {
+  test("pins a place with coordinates, searches the label of one without", () => {
+    expect(placeUrl({ label: "Gym", lat: -33.8688, lon: 151.2093 })).toBe(
+      osmMapUrl(-33.8688, 151.2093),
+    );
+    expect(placeUrl({ label: "Luigi's & co" })).toBe(
+      "https://www.openstreetmap.org/search?query=Luigi's%20%26%20co",
     );
   });
 });

@@ -3069,7 +3069,6 @@ input.task-check:hover {
   border-radius: 4px;
   background: transparent;
   font: inherit;
-  font-size: 14px;
   color: var(--text);
   caret-color: transparent;
   cursor: pointer;
@@ -3127,14 +3126,14 @@ input.task-check:hover {
   }
 }
 
-/* The place field (`PlaceField`): the date input's anatomy, editable.
-   Its two inset actions (✕ while a place is set, the lookup magnifier)
-   share the right edge; the ✕ follows the date input's hover reveal, the
-   magnifier is always there since it is the only way to a lookup. */
+/* The place field (`PlaceField`): the date input's anatomy, with two
+   faces. With a place set it is the label as a link to the map, and the
+   blank run of the row beside it (an unseen button) starts an edit; while
+   editing it is a text input. The inset ✕ (while a place is set) follows
+   the date input's hover reveal. */
 .task-dialog-place {
   display: flex;
   flex-direction: column;
-  gap: 4px;
 }
 
 .task-dialog-place-input {
@@ -3164,48 +3163,56 @@ input.task-check:hover {
   }
 }
 
-/* The address line under the input: muted, standard 4px horizontal padding,
-   with the map button at the end. The address wraps so it reads in full. */
-.task-dialog-place-address {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 0 4px;
-  color: var(--text-muted);
-  min-width: 0;
-}
-
-.task-dialog-place-address[data-muted] {
-  color: var(--text-empty);
-}
-
-.task-dialog-place-address-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-/* Icon-only "open map" link: the map glyph, inheriting the address
-   line's muted colour, darkening on hover. */
-.task-dialog-place-map {
-  flex-shrink: 0;
+/* The link face: the input's box (padding and height from
+   `.task-dialog-when-input`, so the label sits where the typed text
+   did), the label a link, and the edit button filling what is left. */
+.task-dialog-place-display {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 16px;
-  border-radius: 4px;
+  padding-right: 28px;
+  cursor: default;
+}
+
+.task-dialog-place-link {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: inherit;
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-color: var(--text-empty);
+  text-underline-offset: 2px;
+  border-radius: 2px;
 }
 
-.task-dialog-place-map:hover {
-  color: var(--text);
+.task-dialog-place-link:hover {
+  color: var(--link);
+  text-decoration-color: currentColor;
 }
 
-.task-dialog-place-map svg {
-  width: 14px;
-  height: 14px;
+.task-dialog-place-link:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+/* No face of its own: the rest of the row, reading as the text field it
+   turns into on click. */
+.task-dialog-place-edit {
+  flex: 1 1 auto;
+  align-self: stretch;
+  min-width: 24px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: text;
+}
+
+.task-dialog-place-edit:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: -2px;
+  border-radius: 4px;
 }
 
 /* The lookup results popover: a plain list of results under the input,
@@ -3278,7 +3285,10 @@ input.task-check:hover {
 }
 
 .place-popover-result:hover,
-.place-popover-result:focus-visible {
+.place-popover-result:focus-visible,
+/* The typed row while the caret is in the input: the selection Enter
+   takes, shown as such. */
+.place-popover-result[data-active] {
   background: var(--bg-hover);
   outline: none;
 }

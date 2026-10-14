@@ -176,9 +176,12 @@ OpenStreetMap credit only with lookup rows.
   provider ref, or same rounded coordinates). The known row wins: it
   carries the label the user chose. The lookup's "No results" / "Lookup
   failed" notes show only when no known row is showing.
-- Enter on text whose folded label equals a known place's reuses that
-  place whole, coordinates included, instead of writing a label-only
-  place and losing them. A prefix is not a match.
+- The first row is always the text as typed (marked "As typed"): a
+  label-only place, no lookup, no known coordinates. It reads as selected
+  while the caret is in the input, and arrow down skips past it, since
+  it is what Enter writes (revised 2026-10-15; before, Enter on text folding equal to a
+  known place's label reused that place whole). A known place with the
+  same label is a separate row with its coordinates; arrow down picks it.
 
 **CLI.** `monoplan places [query] [--limit N] [--json]` lists the known
 places newest first, `<label>  <address | @lat,lon>  (<count>)`. `place
@@ -189,15 +192,20 @@ anything the web client has looked up once.
 
 ## Web
 
-- **Field.** `PlaceField` in the task dialog, under the deadline band.
-  The input holds the label and is editable: Enter or blur with a
-  changed label writes a label-only place (the old coordinates described
-  the old label); emptying it clears. Typing runs the debounced lookup
-  and lists results under the input; arrow down moves into them, and
-  picking one writes the whole place. Known places (see "Reuse") show
-  first: on focus when blank, narrowed as you type. With coordinates
-  present, the address shows muted under the input with an "Open map"
-  link to openstreetmap.org.
+- **Field.** `PlaceField` in the task dialog, under the deadline band,
+  with two faces (revised 2026-10-15). With a place set, the band shows
+  the label as a link that opens the map in a new tab: the pin on
+  openstreetmap.org when the place has coordinates, the map's search for
+  the label when it has none. The blank run of the band beside the label
+  starts an edit; so does the dialog's reveal of a blank field. While
+  editing, the band is a text input holding the label: Enter or blur
+  with a changed label writes a label-only place, always, so a new label
+  never keeps the old coordinates, address or ref; emptying it clears.
+  Typing lists, in order, the text as typed, the narrowed known places
+  (see "Reuse"), and from three characters the debounced lookup's
+  results; arrow down moves into them, and picking any row writes that
+  place whole. The address is not shown under the field (it is the
+  link's hover title); the row and calendar badges still carry it.
 - **Badge.** `PlaceBadge` (pin glyph + label, address on hover) on rows
   beside the `when` badge, and on calendar rows. Muted on done / binned.
 - **Copy, paste, duplicate** carry the place with the item.
@@ -241,7 +249,7 @@ anything the web client has looked up once.
   row formatting.
 - Web: `photonToPlace` mapping; clip round-trip; store event handling
   via the wasm doc test; `placeSuggestionsJson` round trip; the field's
-  narrowing, exact match and lookup dedup (`placeSuggest.test.ts`).
+  narrowing and lookup dedup (`placeSuggest.test.ts`).
 
 ## Phases
 
