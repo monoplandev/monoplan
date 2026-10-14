@@ -36,7 +36,6 @@ import checkSvg from "./icons/check.svg?raw";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import mapPinSvg from "./icons/map-pin.svg?raw";
 import timerSvg from "./icons/timer.svg?raw";
-import sidebarRightSvg from "./icons/sidebar-right.svg?raw";
 import starFilledSvg from "./icons/star-filled.svg?raw";
 import {
   DEFAULT_DURATION_MINUTES,
@@ -163,10 +162,6 @@ export function TaskDialog(props: {
    *  row swaps the open item in place) instead of as the centred dialog.
    *  Ignored on mobile, which keeps its page shell. */
   panelMount?: () => HTMLElement | null;
-  /** Desktop only: move the surface between its modal and side-panel
-   *  shells, keeping the open item (unlike the app menu's toggle, which
-   *  closes it). Renders the header's sidebar button when given. */
-  onSwapShell?: () => void;
   /** Jump to the view that shows this item (the Workspace reveal path:
    *  switch view, select + scroll the row). The dialog closes so the
    *  revealed row isn't hidden behind the modal. */
@@ -174,9 +169,10 @@ export function TaskDialog(props: {
 }) {
   const { m, locale } = useAppI18n();
 
-  // Shell selection. Mobile: a plain full-screen page under the floating
-  // pills. Desktop with the side panel showing: an inline pane portaled
-  // into it. Otherwise: the centred modal Dialog.
+  // Shell selection, by viewport alone (never a preference). Mobile: a
+  // plain full-screen page under the floating pills. Desktop with room
+  // for the side panel: an inline pane portaled into it. Narrow desktop:
+  // the modal Dialog, styled as a floating sheet over the content.
   const isMobileMq = window.matchMedia("(max-width: 768px) and (pointer: coarse)");
   const [isMobile, setIsMobile] = createSignal(isMobileMq.matches);
   const onMq = (e: MediaQueryListEvent) => setIsMobile(e.matches);
@@ -995,25 +991,15 @@ export function TaskDialog(props: {
     sel.removeAllRanges();
   };
 
-  // Header buttons shared by the new-item and edit forms: the shell swap
-  // (desktop only) and the close ✕. The panel shell drops the ✕ — the
-  // pane is dismissed by leaving the selection (Escape steps out to the
-  // list first, and a second Escape clears it), and the swap button
-  // stands in the corner instead.
+  // Header button shared by the new-item and edit forms: the close ✕,
+  // mobile page only. The page has no overlay and no outside to tap, so
+  // it needs an exit of its own. The pane is dismissed by leaving the
+  // selection (Escape steps out to the list first, and a second Escape
+  // clears it); the floating sheet by Escape or a click on the overlay,
+  // like the pane it stands in for.
   const shellButtons = () => (
     <>
-      <Show when={!isMobile() && props.onSwapShell}>
-        <button
-          type="button"
-          class="icon-button"
-          aria-label={
-            panelMode() ? m().sidePanel.toModal : m().sidePanel.toPanel
-          }
-          onClick={() => props.onSwapShell?.()}
-          innerHTML={sidebarRightSvg}
-        />
-      </Show>
-      <Show when={!panelMode()}>
+      <Show when={isMobile()}>
         <button
           type="button"
           class="icon-button task-dialog-close"
@@ -1512,8 +1498,8 @@ export function TaskDialog(props: {
     </>
   );
 
-  // Three shells around one body. Desktop default: a centred modal Dialog
-  // (focus trap, overlay, Escape from Kobalte). Mobile: a plain
+  // Three shells around one body. Narrow desktop: a modal Dialog (focus
+  // trap, overlay, Escape from Kobalte) floating over the content. Mobile: a plain
   // full-screen page under the floating pills — no modal, no portal, so
   // the pills stay live and nothing counts as an "outside" interaction.
   // Desktop with the side panel showing: an inline pane portaled into

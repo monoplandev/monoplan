@@ -320,11 +320,6 @@ export type Messages = {
   sidePanel: {
     /** Accessible name of the desktop side panel. */
     title: string;
-    /** App-menu toggle labels for the desktop side panel. */
-    show: string;
-    hide: string;
-    toPanel: string;
-    toModal: string;
     /** Panel heading while more than one row is selected (`n` ≥ 2). */
     selectedCount: (n: number) => string;
     /** Accessible name of the bulk-action group under that heading. */
@@ -601,10 +596,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     sidePanel: {
       title: "Barra de contexto",
-      show: "Mostrar barra de contexto",
-      hide: "Ocultar barra de contexto",
-      toPanel: "Abrir en la barra de contexto",
-      toModal: "Abrir como diálogo",
       selectedCount: (n) => `${n} elementos seleccionados`,
       selectionActions: "Acciones sobre la selección",
       clearSelection: "Deseleccionar",
@@ -869,10 +860,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     sidePanel: {
       title: "Context sidebar",
-      show: "Show context sidebar",
-      hide: "Hide context sidebar",
-      toPanel: "Open in context sidebar",
-      toModal: "Open as dialog",
       selectedCount: (n) => `${n} items selected`,
       selectionActions: "Selection actions",
       clearSelection: "Clear selection",

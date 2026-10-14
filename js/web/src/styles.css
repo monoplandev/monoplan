@@ -276,8 +276,9 @@ body {
   display: none;
 }
 
-/* Blank panel: the sidebar button sits where the task surface's header
-   buttons land (same 8px 12px inset as `.task-panel`), so it doesn't jump. */
+/* Blank panel header (multi-select only): the count sits where the task
+   surface's header lands (same 8px 12px inset as `.task-panel`), so the
+   actions below start where the surface's body would. */
 .side-panel-blank {
   display: flex;
   align-items: center;
@@ -287,13 +288,7 @@ body {
   padding: 8px 12px;
 }
 
-/* Lone sidebar button (no selection count) keeps to the right edge. */
-.side-panel-blank > .icon-button:only-child {
-  margin-left: auto;
-}
-
-/* Multi-select count, leading the blank header row opposite the sidebar
-   button. */
+/* Multi-select count, leading the blank header row. */
 .selection-panel-title {
   flex: 1;
   min-width: 0;
@@ -371,7 +366,10 @@ body {
   padding: 8px 12px;
 }
 
-.task-panel .task-dialog-title {
+/* The floating sheet (`.task-modal`) stands in for the pane on narrow
+   desktop windows, so it shares the pane's text treatment. */
+.task-panel .task-dialog-title,
+.task-modal .task-dialog-title {
   font-size: 1.25em;
   /* Padding lives on the base rule so focusing does not shift the
      text; only the surface colour changes. */
@@ -381,21 +379,24 @@ body {
 }
 
 /* Same inset as the title so the two text blocks share a left edge. */
-.task-panel .task-dialog-notes {
+.task-panel .task-dialog-notes,
+.task-modal .task-dialog-notes {
   padding: 2px 4px;
 }
 
 /* Editing state: a light field surface so the pane title reads as
    editable while it holds focus. */
-.task-panel .task-dialog-title:focus {
+.task-panel .task-dialog-title:focus,
+.task-modal .task-dialog-title:focus {
   background: var(--bg-badge);
 }
 
-/* Fixed-height hosts (the side pane, the mobile page): the body grows to
-   fill the leftover height. `flex-grow` only, no shrink, so once the
-   content outgrows the pane the surface scrolls as before. The modal
-   stays content-sized. */
+/* Fixed-height hosts (the side pane, the floating sheet, the mobile
+   page): the body grows to fill the leftover height. `flex-grow` only,
+   no shrink, so once the content outgrows the host the surface scrolls
+   as before. */
 .task-panel .task-dialog-body,
+.task-modal .task-dialog-body,
 .task-page .task-dialog-body {
   flex: 1 0 auto;
 }
@@ -404,6 +405,7 @@ body {
    `flex: 1; min-width: 0` (which is what lets the title wrap); stretch
    gives it the body's full height instead. */
 .task-panel .task-dialog-body,
+.task-modal .task-dialog-body,
 .task-page .task-dialog-body {
   align-items: stretch;
 }
@@ -629,8 +631,8 @@ body {
 }
 
 /* The one square icon button on desktop: the nav footer menu, the list
-   header's menu / display options / add, the list-icon picker, the side
-   panel's hide button and the task surface's swap / menu / close. Marker
+   header's menu / display options / add, the list-icon picker and the
+   task surface's menu / close. Marker
    classes beside it (`view-mode-trigger`, `list-icon-trigger`,
    `task-dialog-close`, `header-add-button`) carry no desktop styling of
    their own; the mobile media queries below re-size some instances to
@@ -2494,12 +2496,14 @@ input.task-check:hover {
   gap: 6px;
 }
 
-/* Sit the task dialog in the upper third rather than dead-centre. Only
-   the task dialog — other dialogs stay centred. The top padding wins over
-   the base `padding: 24px` for the top edge; sides/bottom keep 24px. */
+/* The task dialog's modal shell only shows on a desktop window too
+   narrow for the side panel, so it stands in for the panel: a floating
+   sheet docked to the right edge over the content, full height, rather
+   than a centred card. Only the task dialog — other dialogs stay centred. */
 .dialog-positioner:has(.task-dialog) {
-  align-items: flex-start;
-  padding-top: 15vh;
+  align-items: stretch;
+  justify-content: flex-end;
+  padding: 12px;
 }
 
 .settings-dialog {
@@ -2548,6 +2552,7 @@ input.task-check:hover {
 }
 
 .task-modal {
+  width: min(420px, 100%);
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 8px;

@@ -32,7 +32,6 @@ import starSvg from "./icons/star.svg?raw";
 import eyeNoneSvg from "./icons/eye-none.svg?raw";
 import eyeOpenSvg from "./icons/eye-open.svg?raw";
 import listBulletSvg from "./icons/list-bullet.svg?raw";
-import sidebarRightSvg from "./icons/sidebar-right.svg?raw";
 import mixerHzSvg from "./icons/mixer-hz.svg?raw";
 import plusSvg from "./icons/plus.svg?raw";
 import trashSvg from "./icons/trash.svg?raw";
@@ -211,22 +210,11 @@ function loadFocusShowListPref(): boolean {
 // above; visible is the default, so only the hidden state is persisted
 // (stored as "1"). Mobile ignores it — the drawer has its own state.
 const NAV_HIDDEN_PREF_KEY = "monoplan:nav-hidden";
-const SIDE_PANEL_OPEN_PREF_KEY = "monoplan:side-panel-open";
 function loadNavHiddenPref(): boolean {
   try {
     return localStorage.getItem(NAV_HIDDEN_PREF_KEY) === "1";
   } catch {
     return false;
-  }
-}
-
-// Open by default: the side panel is the primary task surface on desktop,
-// so only an explicit hide is persisted (`"0"`); a missing key means open.
-function loadSidePanelOpenPref(): boolean {
-  try {
-    return localStorage.getItem(SIDE_PANEL_OPEN_PREF_KEY) !== "0";
-  } catch {
-    return true;
   }
 }
 
@@ -2209,9 +2197,8 @@ export function Workspace(props: {
 
   // Narrow desktop: below this width the side panel's third column
   // squeezes the main surface into uselessness, so the task surface uses
-  // its modal shell instead and the panel controls are disabled. The
-  // `sidePanelOpen` preference is left untouched: widening the window
-  // brings the panel straight back if it was on.
+  // its modal shell (a floating sheet over the content) instead. Widening
+  // the window brings the panel straight back.
   const narrowMq = window.matchMedia("(max-width: 919px)");
   const [isNarrow, setIsNarrow] = createSignal(narrowMq.matches);
   const onNarrowChange = (e: MediaQueryListEvent) => setIsNarrow(e.matches);
@@ -2231,37 +2218,17 @@ export function Workspace(props: {
     }
   };
 
-  // Desktop side panel (right-hand column). Toggled from the app menu;
-  // persisted per browser like the nav. While an item is open (or a
-  // capture is in progress) the panel hosts the task surface in place of
-  // the modal dialog; otherwise it just invites a click. Deadlines live
-  // on the Upcoming view, never here.
-  const [sidePanelOpen, setSidePanelOpenSignal] = createSignal(
-    loadSidePanelOpenPref(),
-  );
-  const setSidePanelOpen = (open: boolean, opts?: { keepItem?: boolean }) => {
-    batch(() => {
-      // Hiding the sidebar closes an entered item too; otherwise the task
-      // surface would fall back to its modal shell and pop up. The
-      // dialog's load effect settles pending edits on the way out. A
-      // capture in progress is left alone (its text would be lost). The
-      // surface's own swap button opts out (`keepItem`): there the pop
-      // between shells is the point.
-      if (!open && !opts?.keepItem) setOpenItemId(null);
-      setSidePanelOpenSignal(open);
-    });
-    try {
-      if (open) localStorage.removeItem(SIDE_PANEL_OPEN_PREF_KEY);
-      else localStorage.setItem(SIDE_PANEL_OPEN_PREF_KEY, "0");
-    } catch {
-      // Quota/private-mode failures just lose the preference.
-    }
-  };
-  const sidePanelAvailable = () => !isMobile() && !isNarrow();
-  const sidePanelShown = () => sidePanelAvailable() && sidePanelOpen();
+  // Desktop side panel (right-hand column). Not a preference: it is there
+  // whenever the viewport has room for it, and the task surface's shell
+  // follows the viewport alone (panel, floating sheet, mobile page). While
+  // an item is open (or a capture is in progress) the panel hosts the
+  // task surface; otherwise it just invites a click. Deadlines live on
+  // the Upcoming view, never here.
+  const sidePanelShown = () => !isMobile() && !isNarrow();
   // The panel's task host element, set by ref while the panel is mounted.
   // Gated on `sidePanelShown` so the dialog falls back to its modal shell
-  // the moment the panel closes (the stale element is never handed out).
+  // the moment the panel loses its room (the stale element is never
+  // handed out).
   const [panelMount, setPanelMount] = createSignal<HTMLElement | null>(null);
 
   // Every mutation of the active selection (list view's, or the board's
@@ -2397,8 +2364,8 @@ export function Workspace(props: {
   // (side pane only) the followed row. Entering is what focuses the
   // editor and what the URL follows; following is ambient and keeps the
   // keys on the list. The pane losing its room (a narrow window, the
-  // mobile shell, the app menu hiding it) drops the followed half on its
-  // own, so only an entered item carries over to the modal / page shell;
+  // mobile shell) drops the followed half on its own, so only an entered
+  // item carries over to the modal / page shell;
   // the pane coming back picks the selection up again.
   const shownItemId = createMemo((): string | null => {
     const entered = openItemId();
@@ -2503,9 +2470,6 @@ export function Workspace(props: {
               onSession={session.swapSession}
               navHidden={navHidden()}
               onToggleNav={() => setNavHidden(!navHidden())}
-              sidePanelOpen={sidePanelOpen()}
-              sidePanelAvailable={sidePanelAvailable()}
-              onToggleSidePanel={() => setSidePanelOpen(!sidePanelOpen())}
             />
             <StatusSlot
               app={app}
@@ -2632,20 +2596,6 @@ export function Workspace(props: {
         }}
         onReveal={revealItemIn}
         panelMount={() => (sidePanelShown() ? panelMount() : null)}
-        onSwapShell={
-          // Too narrow for the panel: no shell to swap to, so the
-          // surface drops its sidebar button.
-          !sidePanelAvailable()
-            ? undefined
-            : () => {
-                // Swapping is an act on the item: enter it first, so a
-                // followed row survives the trip into the modal (the
-                // click alone needn't have focused the pane).
-                const id = shownItemId();
-                if (id !== null) setOpenItemId(id);
-                setSidePanelOpen(!sidePanelOpen(), { keepItem: true });
-              }
-        }
       />
       <ShortcutsDialog
         open={shortcutsOpen()}
@@ -3102,38 +3052,27 @@ export function Workspace(props: {
       </div>
       <Show when={sidePanelShown()}>
         <aside class="side-panel" aria-label={m().sidePanel.title}>
-          {/* Blank state: the sidebar button alone, in the corner where
-              the task surface's shell-swap button lands, closing the
-              panel. The surface brings its own, so this hides once it
-              mounts. */}
+          {/* Blank state: nothing while a single row (or no row) is
+              selected and no item is open. A multi-row selection shows
+              its count where the task surface's header would sit, and
+              the bulk actions stand in for the surface until the
+              selection is back to one row (or an explicit Enter opens
+              the topmost). */}
           <Show when={shownItemId() === null && newItemTarget() === null}>
-            <header class="side-panel-blank">
-              {/* Multi-select: the count shares the header row with the
-                  sidebar button (space-between), so the actions below
-                  start where the task surface's body would. */}
-              <Show when={multiSelectIds()}>
-                {(ids) => (
-                  <h2 class="selection-panel-title">
-                    {m().sidePanel.selectedCount(ids().length)}
-                  </h2>
-                )}
-              </Show>
-              <button
-                type="button"
-                class="icon-button"
-                aria-label={m().sidePanel.hide}
-                onClick={() => setSidePanelOpen(false)}
-                innerHTML={sidebarRightSvg}
-              />
-            </header>
-            {/* Multi-row selection: the bulk actions stand in for the
-                task surface until the selection is back to one row (or
-                an explicit Enter opens the topmost). */}
             <Show when={multiSelectIds()}>
-              <SelectionPanel
-                actions={multiSelectActions()}
-                onClear={() => actionSelection()?.clear()}
-              />
+              {(ids) => (
+                <>
+                  <header class="side-panel-blank">
+                    <h2 class="selection-panel-title">
+                      {m().sidePanel.selectedCount(ids().length)}
+                    </h2>
+                  </header>
+                  <SelectionPanel
+                    actions={multiSelectActions()}
+                    onClear={() => actionSelection()?.clear()}
+                  />
+                </>
+              )}
             </Show>
           </Show>
           {/* The task surface portals in here while an item is open (see

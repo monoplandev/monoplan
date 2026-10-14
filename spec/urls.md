@@ -87,9 +87,10 @@ in the modal or the panel. The same distinction decides what survives
 the panel losing its room (a narrow window, the mobile shell): a
 focused item carries over to the modal / page shell, a passive one
 closes rather than popping up unasked, and the panel re-follows the
-selection when the room comes back. Board vs list mode, lane visibility
-and the side-panel state are prefs, not URL state: the URL names
-*what*, prefs name *how*.
+selection when the room comes back. Which shell hosts the item (side
+panel, floating sheet, mobile page) follows the viewport alone and is
+never a preference. Board vs list mode and lane visibility are prefs,
+not URL state: the URL names *what*, prefs name *how*.
 
 History entries:
 
