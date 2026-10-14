@@ -133,7 +133,7 @@ body,
   font-size: 14px;
   line-height: var(--lh);
   color: var(--text);
-  background: var(--bg);
+  background: var(--surface);
   user-select: none;
   -webkit-user-select: none;
 }
@@ -154,7 +154,7 @@ body {
 }
 
 .nav {
-  background: transparent;
+  background: var(--bg);
   padding: 12px 0 4px;
   overflow: hidden;
   display: flex;
@@ -879,13 +879,12 @@ body {
   font-size: 0.9em;
   font-variant-numeric: tabular-nums;
 }
-/* Upcoming's count takes the agenda's urgency tones: an overdue deadline
-   reads danger, one due today warning; anything else stays faint. */
-.nav-item-count[data-tone="overdue"],
+/* The Find sheet's Upcoming count takes the agenda's urgency tones: an
+   overdue deadline reads danger, one due today warning; anything else
+   stays faint. The sidebar's count stays faint regardless. */
 .find-sheet__count[data-tone="overdue"] {
   color: var(--overdue-text);
 }
-.nav-item-count[data-tone="warning"],
 .find-sheet__count[data-tone="warning"] {
   color: var(--due-today-text);
 }
@@ -4567,7 +4566,7 @@ input.task-check:hover {
    to the icon's top-right corner, overlapping it slightly, with a ring in
    the glass colour so it cuts out of the glyph instead of touching it.
    Upcoming's bubble takes the agenda's urgency tones (overdue, due
-   today), like `.nav-item-count`; otherwise the accent fill. */
+   today); otherwise the accent fill. */
 .mobile-bar-count {
   position: absolute;
   top: -5px;

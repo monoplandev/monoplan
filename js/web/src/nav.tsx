@@ -354,9 +354,9 @@ export function Nav(props: {
   /** Number of visible Focus refs — the Focus nav entry's count badge, and
    *  what drives the soft "getting big" signal past the threshold. */
   focusCount: number;
-  /** The Upcoming entry's badge: Open rows owed or on today, toned by the
-   *  most urgent (red for an overdue deadline, warning for one due today).
-   *  Hidden at zero. */
+  /** The Upcoming entry's badge: Open rows owed or on today. Only the
+   *  count is shown here (the tone drives the Find sheet / mobile bar);
+   *  hidden at zero. */
   upcomingBadge: AttentionBadge;
   /** Open-item count (Backlog + Live) per list id. Inbox's row always
    *  renders a badge (showing "-" when zero); non-Inbox rows render theirs
@@ -556,9 +556,7 @@ export function Nav(props: {
           <span class="nav-item-icon" innerHTML={calendarSvg} />
           {m().nav.upcoming}
           <Show when={props.upcomingBadge.count > 0}>
-            <span class="nav-item-count" data-tone={props.upcomingBadge.tone}>
-              {props.upcomingBadge.count}
-            </span>
+            <span class="nav-item-count">{props.upcomingBadge.count}</span>
           </Show>
         </button>
         <button
