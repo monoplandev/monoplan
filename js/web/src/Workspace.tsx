@@ -206,18 +206,6 @@ function loadFocusShowListPref(): boolean {
   }
 }
 
-// Desktop "sidebar hidden" flag. Local-only chrome state like the prefs
-// above; visible is the default, so only the hidden state is persisted
-// (stored as "1"). Mobile ignores it — the drawer has its own state.
-const NAV_HIDDEN_PREF_KEY = "monoplan:nav-hidden";
-function loadNavHiddenPref(): boolean {
-  try {
-    return localStorage.getItem(NAV_HIDDEN_PREF_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
 // Heuristic for "user has a real keyboard + precise pointer" — i.e. the
 // shortcut hints are worth showing. Reactive: an iPad gaining a Magic
 // Keyboard or a laptop docked to a touchscreen will flip live.
@@ -2205,19 +2193,6 @@ export function Workspace(props: {
   narrowMq.addEventListener("change", onNarrowChange);
   onCleanup(() => narrowMq.removeEventListener("change", onNarrowChange));
 
-  // Desktop sidebar collapse. Toggled from the app menu, which lives in
-  // the sidebar's footer and floats bottom-left while the sidebar is hidden.
-  const [navHidden, setNavHiddenSignal] = createSignal(loadNavHiddenPref());
-  const setNavHidden = (hidden: boolean) => {
-    setNavHiddenSignal(hidden);
-    try {
-      if (hidden) localStorage.setItem(NAV_HIDDEN_PREF_KEY, "1");
-      else localStorage.removeItem(NAV_HIDDEN_PREF_KEY);
-    } catch {
-      // Quota/private-mode failures just lose the preference.
-    }
-  };
-
   // Desktop side panel (right-hand column). Not a preference: it is there
   // whenever the viewport has room for it, and the task surface's shell
   // follows the viewport alone (panel, floating sheet, mobile page). While
@@ -2444,7 +2419,6 @@ export function Workspace(props: {
     <div
       class="app"
       classList={{
-        "nav-hidden": navHidden(),
         "side-panel-open": sidePanelShown(),
       }}
     >
@@ -2468,8 +2442,6 @@ export function Workspace(props: {
               onOpenSettings={() => setSettingsOpen(true)}
               onOpenShortcuts={() => setShortcutsOpen(true)}
               onSession={session.swapSession}
-              navHidden={navHidden()}
-              onToggleNav={() => setNavHidden(!navHidden())}
             />
             <StatusSlot
               app={app}
@@ -2666,7 +2638,7 @@ export function Workspace(props: {
             <div class={isMobile() ? "header-group glass" : "header-group"}>
             {/* List actions menu: the same Archive / Unarchive the nav's
                 context menu offers, kept here so restoring an archived
-                list stays discoverable with the sidebar collapsed. Only
+                list stays discoverable from the view header too. Only
                 user lists — `inbox` can't be archived. */}
             <Show when={editableListId()}>
               {(listId) => (

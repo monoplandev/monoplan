@@ -369,8 +369,7 @@ export function Nav(props: {
   view: ViewKey;
   setView: (v: ViewKey) => void;
   /** Chrome pinned to the bottom of the sidebar (app menu + account/sync
-   *  widget). Rendered inside the nav so it hides and floats with it —
-   *  see `.nav-footer` in styles.css. */
+   *  widget) — see `.nav-footer` in styles.css. */
   footer?: JSX.Element;
 }) {
   const { m } = useAppI18n();
@@ -470,9 +469,7 @@ export function Nav(props: {
     if (props.view.kind === "list") void props.view.id;
     let attempts = 0;
     const tryScroll = () => {
-      // Collapsed sidebar (`.app.nav-hidden`) has no layout to scroll;
-      // the ResizeObserver below re-runs this when it comes back.
-      if (!navScrollEl || navScrollEl.clientHeight === 0) return;
+      if (!navScrollEl) return;
       const el = navScrollEl.querySelector<HTMLElement>(".nav-item[data-active]");
       if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
       else if (++attempts < 3) requestAnimationFrame(tryScroll);
@@ -485,17 +482,6 @@ export function Nav(props: {
     personalCollapsed();
     revealActiveNav();
   });
-  onMount(() => {
-    let wasHidden = navScrollEl.clientHeight === 0;
-    const ro = new ResizeObserver(() => {
-      const hidden = navScrollEl.clientHeight === 0;
-      if (wasHidden && !hidden) revealActiveNav();
-      wasHidden = hidden;
-    });
-    ro.observe(navScrollEl);
-    onCleanup(() => ro.disconnect());
-  });
-
   const onReorder = (op: DndOp<NavList>) => {
     if (op.type !== "move") return;
     const ids = props.lists.map((l) => l.id);
@@ -822,8 +808,7 @@ export function NavFindButton(props: { onClick: () => void }) {
 /** The app-menu dropdown (undo/redo, view toggles, import/export,
  *  settings, auth) plus its auxiliary chrome — the hidden import file
  *  input and the auth dialog the Sign in / Sign up items open. Lives in
- *  the sidebar footer (see `Nav`'s `footer` prop); when the sidebar is
- *  hidden that footer floats bottom-left so the menu stays reachable. */
+ *  the sidebar footer (see `Nav`'s `footer` prop). */
 export function NavMenu(props: {
   app: DocApp;
   session: Session;
@@ -831,10 +816,6 @@ export function NavMenu(props: {
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
   onSession: (s: Session) => void;
-  /** Desktop sidebar collapse state + toggle (the menu's Show / Hide
-   *  sidebar item). */
-  navHidden: boolean;
-  onToggleNav: () => void;
 }) {
   const { m } = useAppI18n();
   // Auth dialog opened from the menu's Sign in / Sign up items
@@ -961,13 +942,6 @@ export function NavMenu(props: {
             >
               <span>{m().nav.redo}</span>
               <kbd class="menu-shortcut">⌘⇧Z</kbd>
-            </DropdownMenu.Item>
-            <DropdownMenu.Separator class="dropdown-menu-separator" />
-            <DropdownMenu.Item
-              class="dropdown-menu-item"
-              onSelect={() => props.onToggleNav()}
-            >
-              {props.navHidden ? m().nav.showSidebar : m().nav.hideSidebar}
             </DropdownMenu.Item>
             <DropdownMenu.Separator class="dropdown-menu-separator" />
             <DropdownMenu.Item

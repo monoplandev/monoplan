@@ -101,8 +101,6 @@ export type Messages = {
     undo: string;
     redo: string;
     settings: string;
-    hideSidebar: string;
-    showSidebar: string;
     website: string;
     logOut: string;
     exportJson: string;
@@ -476,8 +474,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       undo: "Deshacer",
       redo: "Rehacer",
       settings: "Ajustes",
-      hideSidebar: "Ocultar barra lateral",
-      showSidebar: "Mostrar barra lateral",
       website: "Sitio web de Monoplan",
       logOut: "Cerrar sesión",
       exportJson: "Exportar JSON",
@@ -743,8 +739,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       undo: "Undo",
       redo: "Redo",
       settings: "Settings",
-      hideSidebar: "Hide sidebar",
-      showSidebar: "Show sidebar",
       website: "Monoplan website",
       logOut: "Log out",
       exportJson: "Export JSON",

@@ -143,9 +143,9 @@ body {
   overflow: hidden;
 }
 
-/* Two columns (nav | content), optionally a third for the side panel. The app chrome (menu, account/sync widget) lives in the nav's
-   own footer strip; when the nav is hidden that strip floats bottom-left
-   (see `.app.nav-hidden .nav` below). */
+/* Two columns (nav | content), optionally a third for the side panel.
+   The app chrome (menu, account/sync widget) lives in the nav's own
+   footer strip. */
 .app {
   display: grid;
   grid-template-columns: 260px 1fr;
@@ -193,58 +193,12 @@ body {
   padding: 0 12px;
 }
 
-/* Desktop sidebar collapse: `nav-hidden` drops the nav column and the
-   main surface takes the full width. The nav itself stays mounted but
-   leaves the grid (position: fixed), its scroll region hidden, so only
-   its footer remains — a floating pill in the bottom-left corner holding
-   the app menu (whose Show sidebar item brings the nav back) and the
-   account/sync widget. Mobile is unaffected — the sidebar isn't rendered
-   there. */
-.app.nav-hidden {
-  grid-template-columns: 1fr;
-}
-
-.app.nav-hidden .nav {
-  position: fixed;
-  left: 12px;
-  bottom: 12px;
-  z-index: 50;
-  padding: 0;
-  overflow: visible;
-  border-right: 0;
-}
-
-.app.nav-hidden .nav-scroll {
-  display: none;
-}
-
-.app.nav-hidden .nav-footer {
-  height: 40px;
-  padding: 0 6px;
-  border-radius: 99px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  box-shadow:
-    0 4px 14px rgba(0, 0, 0, 0.08),
-    0 1px 2px rgba(0, 0, 0, 0.05);
-}
-
-[data-theme="dark"] .app.nav-hidden .nav-footer {
-  box-shadow:
-    0 4px 14px rgba(0, 0, 0, 0.3),
-    0 1px 2px rgba(0, 0, 0, 0.2);
-}
-
 /* Desktop side panel: `side-panel-open` adds a third column on the right
-   of the main surface. Composes with `nav-hidden`. Mobile never sets the
+   of the main surface. Mobile never sets the
    class. The panel hosts the open task surface (`.task-panel`, portaled
    into `.side-panel-task`); idle, it sits blank. */
 .app.side-panel-open {
   grid-template-columns: 260px 1fr 300px;
-}
-
-.app.nav-hidden.side-panel-open {
-  grid-template-columns: 1fr 300px;
 }
 
 /* The column carries the surface frame (hairline left edge against the
