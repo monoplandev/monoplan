@@ -10,7 +10,6 @@ use monoplan_protocol::{
 };
 use uuid::Uuid;
 
-use crate::auth::DeviceAuth;
 use crate::auth::cookie;
 use crate::auth::queries::{
     DocKeyUpdate, NewAccount, PasswordResetOutcome, PasswordUpdate, PasswordUpdateOutcome,
@@ -19,6 +18,7 @@ use crate::auth::queries::{
     update_password,
 };
 use crate::auth::tokens::{encode_token, generate_token, sha256};
+use crate::auth::{DeviceAuth, normalize_email};
 use crate::error::{ApiError, ApiResult};
 use crate::http::msgpack::Msgpack;
 use crate::state::AppState;
@@ -30,9 +30,8 @@ pub async fn signup(
     State(state): State<AppState>,
     Msgpack(req): Msgpack<SignupRequest>,
 ) -> ApiResult<(HeaderMap, Msgpack<SignupResponse>)> {
-    if req.email.trim().is_empty() {
-        return Err(ApiError::BadRequest("email is required".into()));
-    }
+    let email = normalize_email(&req.email)
+        .ok_or_else(|| ApiError::BadRequest("email is required".into()))?;
     if req.device_name.trim().is_empty() {
         return Err(ApiError::BadRequest("device_name is required".into()));
     }
@@ -40,7 +39,7 @@ pub async fn signup(
     let device_token_hash = sha256(&device_token).to_vec();
     let recovery = req.recovery.as_ref();
     let new = NewAccount {
-        email: req.email,
+        email,
         password_hash: sha256(&req.auth_secret).to_vec(),
         password_salt: req.master_salt,
         kdf_params: req.kdf_params,
@@ -76,7 +75,9 @@ pub async fn prelogin(
     State(state): State<AppState>,
     Msgpack(req): Msgpack<PreloginRequest>,
 ) -> ApiResult<Msgpack<PreloginResponse>> {
-    let account = find_account_by_email(&state.db, req.email)
+    let email = normalize_email(&req.email)
+        .ok_or_else(|| ApiError::BadRequest("email is required".into()))?;
+    let account = find_account_by_email(&state.db, email)
         .await?
         .ok_or(ApiError::NotFound)?;
     Ok(Msgpack(PreloginResponse {
@@ -90,7 +91,8 @@ pub async fn login(
     State(state): State<AppState>,
     Msgpack(req): Msgpack<LoginRequest>,
 ) -> ApiResult<(HeaderMap, Msgpack<LoginResponse>)> {
-    let account = find_account_by_email(&state.db, req.email)
+    let email = normalize_email(&req.email).ok_or(ApiError::InvalidCredentials)?;
+    let account = find_account_by_email(&state.db, email)
         .await?
         .ok_or(ApiError::InvalidCredentials)?;
     let presented = sha256(&req.auth_secret);
@@ -145,7 +147,8 @@ pub async fn recover(
     State(state): State<AppState>,
     Msgpack(req): Msgpack<RecoverRequest>,
 ) -> ApiResult<Msgpack<RecoverResponse>> {
-    let account = find_account_by_email(&state.db, req.email)
+    let email = normalize_email(&req.email).ok_or(ApiError::InvalidCredentials)?;
+    let account = find_account_by_email(&state.db, email)
         .await?
         .ok_or(ApiError::InvalidCredentials)?;
     // Only accounts that opted into a recovery code can use this path.

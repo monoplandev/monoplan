@@ -16,7 +16,8 @@ CREATE TABLE docs (
 -- per-membership.
 CREATE TABLE accounts (
   id                          BLOB PRIMARY KEY,                -- uuid v7 bytes
-  email                       TEXT UNIQUE NOT NULL,
+  email                       TEXT UNIQUE NOT NULL
+                              CHECK (email = lower(trim(email))), -- canonical form, see server/src/auth/email.rs
   password_hash               BLOB NOT NULL,                   -- SHA-256(client auth_secret)
   password_salt               BLOB NOT NULL,                   -- master_salt for client KDF
   kdf_m_kib                   INTEGER NOT NULL,                -- argon2 memory (KiB)

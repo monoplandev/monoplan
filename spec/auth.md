@@ -39,7 +39,7 @@ Forever tokens in both threat models. A compromised CLI host hands the attacker 
 
 ## Account model
 
-- One account per email.
+- One account per email. The server normalises every submitted email (trim + lowercase, no provider-specific rewrites) before lookup or insert, so casing and stray whitespace never produce a duplicate account or an "unknown email" on a second device. Clients send what the user typed.
 - Password is the master key for E2EE. The server **never** sees it in any form from which the KEK could be derived.
 - **Email verification is not part of the self-hosted flow.** Email is just an account identifier; self-hosters must be able to run without an SMTP dependency. A future SaaS deployment can layer verification on top — the core auth flow stays identical, with signup/login gated on a `verified_at` column populated by a verification round-trip.
 

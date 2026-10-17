@@ -360,6 +360,47 @@ async fn signup_duplicate_email_is_409() {
 }
 
 #[tokio::test]
+async fn email_is_normalised_server_side() {
+    // Server owns the canonical form (trim + lowercase): a casing /
+    // whitespace variant of an existing email is the same account for
+    // prelogin, and a duplicate for signup.
+    let acc = signup(false).await;
+    let variant = format!("  {} ", acc.email.to_uppercase());
+
+    let status = post_msgpack_status(
+        &format!("{}/api/account/prelogin", acc.server.base),
+        &PreloginRequest {
+            email: variant.clone(),
+        },
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+
+    let kdf_params = weak_params();
+    let master_salt: [u8; 16] = random_bytes();
+    let master = derive_password_master(b"x", &master_salt, kdf_params).unwrap();
+    let kek = master.kek().unwrap();
+    let auth = master.auth_secret().unwrap();
+    let dek = Dek::generate();
+    let wrapped = kek.wrap(&dek).unwrap();
+    let status = post_msgpack_status(
+        &format!("{}/api/account/signup", acc.server.base),
+        &SignupRequest {
+            email: variant,
+            master_salt: master_salt.to_vec(),
+            kdf_params,
+            auth_secret: auth.as_bytes().to_vec(),
+            wrapped_dek: wrapped.ciphertext,
+            wrapped_dek_nonce: wrapped.nonce.to_vec(),
+            recovery: None,
+            device_name: "dup".into(),
+        },
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CONFLICT);
+}
+
+#[tokio::test]
 async fn recovery_session_token_cannot_be_reused() {
     let acc = signup(true).await;
     let recovery_code = acc.recovery_code.clone().expect("opted in");
