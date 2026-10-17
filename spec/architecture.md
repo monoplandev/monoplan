@@ -78,6 +78,24 @@ The server **can**:
 
 This thesis is load-bearing for everything in `sync-protocol.md`.
 
+### Direct device-to-device sync (out of scope, not foreclosed)
+
+Not in this product's scope; it would be a separate product. Recorded
+here (2026-10-17) so the door stays open. Every device is a full
+replica, and the core already speaks Loro's native VV-to-VV sync
+(`export_updates_since`), so a direct transport is two messages: your
+VV, my VV, missing updates each way. Everything on that wire is sealed
+under the DEK, so peer auth falls out of E2EE. The server-shaped part of
+the client is confined to the engine's seq bookkeeping; a direct
+transport would feed the same `Doc` and leave `server_known_vv` alone, so
+reconnect behaves as today (pull, then push everything the server lacks;
+duplicate rows from both sides pushing LAN-received ops are harmless and
+GC'd). What it would need that does not exist: LAN discovery and first
+pairing. What it would not give: durability; the server is also the
+off-site copy. Trim applies the same rule on every transport (a trimmed
+device accepts only ops above its root). Keep the seq; it is the cheapest
+coordination there is, and the direct mode is additive to it.
+
 ## Wire encoding
 
 All HTTP bodies and all WebSocket frames are **MessagePack** (`rmp-serde`). Single encoding everywhere; same `#[derive(Serialize, Deserialize)]` types as everything else. Native byte support means no base64-wrap of encrypted blobs. MessagePack's tagged-map semantics give us free additive compat (add a field → old decoders ignore it; remove a field → use `Option`).
