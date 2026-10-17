@@ -146,7 +146,7 @@ Where it lives and what each copy is for:
 
 `seq` never resets at an epoch boundary; `since_seq`, acks and the push_id dedup index all keep working across epochs.
 
-Compatibility rule (for when trimming lands): a device whose `last_acked_seq` is at or above the current epoch's trim floor stays compatible and keeps delta-pulling and pushing. Its unsent work was created against a frontier it had already pushed past (the ack-after-push client invariant), so it sits at or after the shallow root. A device below the floor must bootstrap from the trimmed snapshot and rebase unsent work. The server enforces this on push from the device's `device_doc_frontiers` row against the floor; it needs no client declaration, though the wire will also carry `epoch` for clarity. Rejecting on push matters because a stale-history blob that lands would stall every device's import at that seq.
+Compatibility rule: superseded by `spec/trim-plan.md`. The rule previously written here assumed an "ack-after-push" client invariant that the engine does not have (acks fire during `Pulling`, before the post-reconnect push), so a seq-based check on push cannot tell a stale device from a fresh one. Under the trim plan every device wipes and bootstraps on an epoch change, pushes carry the epoch, and the server rejects mismatches.
 
 ## Sqlite settings
 

@@ -36,6 +36,8 @@ Migrations: while pre-release, keep exactly one migration file per database (`00
 | [`spec/storage.md`](spec/storage.md) | Sqlite schema, indexes, compaction policy |
 | [`spec/data-model.md`](spec/data-model.md) | Loro doc layout, Item / ListMeta, lifecycle semantics |
 | [`spec/vv-wal-separation.md`](spec/vv-wal-separation.md) | Local WAL (crash recovery) vs VV-derived sync separation; push_id retry contract |
+| [`spec/trim-minimal.md`](spec/trim-minimal.md) | Plan (not built), read first: trim at the newest chain row under the horizon, producer validates by loading its own blob, epoch on push, devices self-trim via Loro-import-as-oracle, unsafe devices surface stranded changes then wipe and bootstrap |
+| [`spec/trim-plan.md`](spec/trim-plan.md) | Reference for trimming: verified Loro 1.16 facts with probe code (VV never shrinks, pre-root ops hard-reject, trimmed-over-stale pends, non-cut root exports unloadable), rejected designs, why the seq-based compatibility rule was unsound |
 | [`spec/peer-id-plan.md`](spec/peer-id-plan.md) | Stable per-device Loro peer id: flock-leased slot pool, VV-width bound |
 | [`spec/board.md`](spec/board.md) | Board view: fixed Backlog / Live / Done lanes driven by item lifecycle |
 | [`spec/focus.md`](spec/focus.md) | Focus lens: curated single-tier list-by-reference, FocusRef grammar, auto-remove-on-Done |
