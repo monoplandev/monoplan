@@ -4,7 +4,9 @@
 
 This document preserves the multi-doc / sharing design discussed during early planning. Pre-release, we made a deliberate scoping decision: lay the doc-keyed substrate now (so the eventual migration is incremental) but defer everything that needs a second doc to exist — membership tables, per-doc DEKs, multi-doc clients, sharing UX — until there is real conviction that shared lists are part of the product.
 
-Substrate in place as of 2026-10-13: the `docs` entity and `accounts.primary_doc_id`; ops, snapshots, seq counter, snapshot coordinator and broadcast registry keyed by doc; `device_doc_frontiers` for per-(device, doc) acks; and the wire protocol carrying `doc_id` on every payload frame behind an `OpenDoc` / `DocOpened` binding step (`sync-protocol.md` §Doc binding). The server's access decision is a single function (`can_open` in `server/src/sync/ws.rs`) that today checks "is the primary doc".
+Substrate in place as of 2026-10-13: the `docs` entity and `accounts.primary_doc_id`; ops, snapshots, seq counter, snapshot coordinator and broadcast registry keyed by doc; `device_doc_frontiers` for per-(device, doc) acks; and the wire protocol carrying `doc_id` on every payload frame behind an `OpenDoc` / `DocOpened` binding step (`sync-protocol.md` §Doc binding).
+
+Key model done as of 2026-10-17: **the DEK is a doc key.** `doc_members` holds per-membership wraps (password + recovery), `accounts` holds password material only, login returns a `memberships` array, recovery returns per-doc `doc_keys`, and password change / reset take `new_doc_keys` covering every membership (set-checked, one transaction). `can_open` is the `doc_members` lookup and the compaction horizon spans the devices of every active member. The CLI stores one DEK per doc in `secrets.toml`; the web client unwraps the primary membership only (it opens one doc). What is *not* built: any way to create a second membership (invites, `POST /api/docs`), multi-doc connections, member management.
 
 Read this when:
 - Considering enabling sharing as a product direction.
@@ -55,9 +57,9 @@ local-only. When sharing lands, a shared item can be pulled into a member's Focu
 by emitting the cross-doc form — no migration, no schema change to the focus
 container.
 
-### Per-doc DEK
+### Per-doc DEK (built 2026-10-17)
 
-DEK is generated **at doc creation** (32 bytes random). Encrypts every op + snapshot blob for that doc. Different docs have independent, unrelated DEKs. The DEK wrap is per-membership, on `doc_members`, not on `accounts`. The account row holds password material only.
+DEK is generated **at doc creation** (32 bytes random). Encrypts every op + snapshot blob for that doc. Different docs have independent, unrelated DEKs. The DEK wrap is per-membership, on `doc_members`, not on `accounts`. The account row holds password material only. See `encryption.md` for the flows.
 
 Server is blind to which DEK encrypted any given blob; `doc_id` on the wire is solely a routing key.
 
@@ -117,7 +119,10 @@ DELETE /api/docs/:doc_id/members/:account_id              -- remove or leave
 
 ### Planned schema additions
 
+`doc_members` is built (see `storage.md`); `doc_invites` is not.
+
 ```sql
+-- Built 2026-10-17 (authoritative copy in storage.md):
 CREATE TABLE doc_members (
   doc_id                       BLOB NOT NULL REFERENCES docs(id),
   account_id                   BLOB NOT NULL REFERENCES accounts(id),
@@ -148,7 +153,7 @@ CREATE INDEX doc_invites_doc_id_idx ON doc_invites (doc_id);
 --   device_doc_frontiers (device_id, doc_id, last_acked_seq).
 
 -- accounts.wrapped_dek + recovery_wrapped_dek + nonces are removed
--- (moved to doc_members).
+-- (moved to doc_members). Done 2026-10-17.
 ```
 
 ### Wire protocol changes
@@ -161,18 +166,18 @@ WS connection stays `(account, device)`-bound at upgrade. Per-doc seq is dense, 
 
 Remaining for sharing:
 
-- `can_open` becomes a `doc_members(doc_id, account_id)` lookup (active membership) instead of "is the primary doc".
+- ~~`can_open` becomes a `doc_members(doc_id, account_id)` lookup.~~ Done 2026-10-17.
 - A connection holds **one** open doc today (`WSSession.open: Option<OpenDoc>`); multiplexing lifts it to a map keyed by `doc_id`, with the broadcast `select!` arm polling every open subscription.
-- Horizon (`queries::doc_horizon`) takes the owning `account_id` to find the device set; under memberships it spans the devices of every active member and the parameter goes away.
+- ~~Horizon spans the devices of every active member.~~ Done 2026-10-17 (`queries::doc_horizon` lost its `account_id` parameter).
 - Removal / leave severs the open doc on live connections (a `DocClosed { doc_id, reason }` frame is the obvious shape; not yet defined).
 
-### Auth flows (memberships shape)
+### Auth flows (memberships shape) — built 2026-10-17
 
-Login / recover / password-change responses carry a `memberships: [{ doc_id, wrapped_dek, wrapped_dek_nonce, ... }]` array. For v1 with bare-minimum denormalisation, the array always has length 1 (just the primary doc). Sharing makes the array length variable.
+Login returns `memberships: [{ doc_id, role, wrapped_dek, wrapped_dek_nonce }]`; recover returns `doc_keys: [{ doc_id, wrapped_dek, wrapped_dek_nonce }]` (recovery-KEK wraps); password change and reset take `new_doc_keys` in the same shape. The array has length 1 today (just the primary doc); the server test suite seeds a second membership directly to prove no path special-cases that.
 
-Signup: server creates `docs` row, `accounts` row, `doc_members` row in one tx (see `spec/storage.md` for insertion order).
+Signup: server creates `docs` row, `accounts` row, `doc_members` row, `devices` row in one tx (see `spec/storage.md` for insertion order).
 
-Recovery: returns recovery wraps for **every** doc the account is a member of. One recovery code, N unwraps. Same for password change: client re-wraps every DEK with the new KEK and uploads the batch.
+Recovery: returns recovery wraps for **every** doc the account is a member of. One recovery code, N unwraps. Same for password change: client re-wraps every DEK with the new KEK and uploads the batch; the server set-checks it against active memberships.
 
 ---
 
@@ -192,21 +197,21 @@ Premise at the time of writing: rip-and-replace (no v1 transition window) — pr
 Files: protocol crate, `server/migrations/001_init.sql`.
 
 - ~~Add `doc_id` to every payload-carrying frame.~~ Done 2026-10-13 (with `OpenDoc` / `DocOpened` / `DocRejected`), no version bump needed pre-release.
-- Edit `migrations/001_init.sql` in place: add `doc_members`, `doc_invites`; move the DEK wraps off `accounts`. (Ops, snapshots, sequences and frontiers are already doc-keyed.)
+- ~~Edit `migrations/001_init.sql` in place: add `doc_members`; move the DEK wraps off `accounts`.~~ Done 2026-10-17. `doc_invites` remains.
 
 Compile breaks downstream — fix in Phase 2.
 
 ### Phase 2 — Server
 
-**2a — Queries.** `server/src/sync/queries.rs`. Already doc-keyed, frontiers already in `device_doc_frontiers`. New helper `is_member(doc_id, account_id) -> bool`. `doc_horizon` drops its `account_id` parameter and becomes `min(last_acked_seq)` over the devices of `active_members(doc_id)`.
+**2a — Queries.** ~~`is_member`, membership-wide `doc_horizon`.~~ Done 2026-10-17 (`auth::queries::is_member`, `list_memberships`; `sync::queries::doc_horizon`).
 
-**2b — Session + WS routing.** `server/src/sync/ws.rs`. `can_open` → membership check. `WSSession.open: Option<OpenDoc>` → `HashMap<DocId, OpenDoc>`; the broadcast `select!` arm polls every open subscription. Per-frame doc routing and the broadcast registry (`HashMap<DocId, Vec<Subscriber>>`) already exist.
+**2b — Session + WS routing.** `server/src/sync/ws.rs`. ~~`can_open` → membership check.~~ Done. `WSSession.open: Option<OpenDoc>` → `HashMap<DocId, OpenDoc>`; the broadcast `select!` arm polls every open subscription. Per-frame doc routing and the broadcast registry (`HashMap<DocId, Vec<Subscriber>>`) already exist.
 
 **2c — Snapshot coordinator.** Already keyed by doc; nothing to do.
 
-**2d — HTTP endpoints.** `server/src/account/*`. Signup: insert docs + accounts + doc_members in one tx. Login response: `{ primary_doc_id, memberships: [...], recovery_present, device_token? }`. Recovery / password-reset / password-change: accept and return memberships arrays.
+**2d — HTTP endpoints.** ~~Signup / login / recover / reset / change in memberships shape.~~ Done 2026-10-17. Still to add: `POST /api/docs`, invites, members.
 
-**2e — Tests.** Update fixture builders. Add a "two docs on one account" test (seed second `doc_members` row directly) — proves the WS routing and broadcast registry actually work multi-doc even before doc-creation endpoints exist.
+**2e — Tests.** ~~Fixture builders; "two docs on one account" via a directly seeded `doc_members` row.~~ Done 2026-10-17 (`server/tests/auth.rs` password-change coverage, `server/tests/sync.rs` open + push on the seeded doc, removed membership rejected).
 
 ### Phase 3 — Core (minimal)
 
@@ -217,17 +222,17 @@ Compile breaks downstream — fix in Phase 2.
 ### Phase 4 — CLI
 
 - **Local storage** (`cli/migrations/001_init.sql`, `cli/src/db.rs`): replace `doc_snapshot` single-row table with a `docs` table keyed by `doc_id` (snapshot blob, last_acked_seq, DEK).
-- **Secrets / config** (`cli/src/config.rs`): `Secrets.dek_hex` → `Secrets.docs: HashMap<DocId, DocSecrets>`. One entry in v1, schema-versioned.
+- ~~**Secrets / config** (`cli/src/config.rs`): `Secrets.dek_hex` → `Secrets.docs`.~~ Done 2026-10-17 (`BTreeMap<String, DocSecrets>` keyed by doc uuid).
 - **Sync integration** (`cli/src/sync.rs`): introduce a `DocRouter` that owns the WS and a `HashMap<DocId, SyncEngine>`. Inbound demuxed by `doc_id`; outbound stamped before send. v1 = always one engine in the map.
-- **Auth flows**: signup generates primary-doc DEK locally, wraps with KEK, posts in wrap fields. Login receives memberships array, unwraps each, stores in `Secrets.docs`. Recovery / password change loops over memberships.
+- ~~**Auth flows**: login unwraps every membership into `Secrets.docs`; recovery / password change loop over memberships.~~ Done 2026-10-17.
 - **Tests**: update integration tests to seed new schema.
 
 ### Phase 5 — Web
 
 - **IndexedDB schema** (`js/core/src/storage/web-db.ts`): bump IDB version. `onupgradeneeded` drops old stores, creates new with composite keyPaths: `ops[account_id, doc_id, oplog_seq]`, `snapshot_meta[account_id, doc_id]`. Wrap-key store: one entry per `doc_id` (non-extractable WebCrypto AES-GCM wrap).
 - **SyncBridge → DocRouter** (`js/core/src/sync-bridge.ts`): bridge owns WS + reconnect; new `DocRouter` holds `Map<DocId, SyncEngine>`; routes inbound/outbound. v1 = primary doc engine only.
-- **App boot** (`js/web/src/App.tsx`): on login, unwrap each membership DEK with KEK, persist to IndexedDB. Boot the primary doc (`primary_doc_id`).
-- **Auth flows**: memberships-shaped bodies on relevant endpoints.
+- **App boot** (`js/web/src/App.tsx`): on login, unwrap each membership DEK with KEK, persist to IndexedDB. Boot the primary doc (`primary_doc_id`). Today (2026-10-17) `Login.tsx` reads the memberships array but unwraps and vaults only the primary doc's key.
+- ~~**Auth flows**: memberships-shaped bodies on relevant endpoints.~~ Done for login (the web has no recovery / password-change UI yet).
 - **Verification**: signup → add items → reload → still works. Two devices on same account → real-time sync.
 
 ### Phase 6 — Cleanup & docs
@@ -256,10 +261,10 @@ Or split into 5 small PRs if needed: protocol → server → core+CLI → web �
 
 | Phase | Days |
 |---|---|
-| 1 — protocol + schema | 0.5 (protocol half done) |
-| 2 — server | 2 (routing substrate done; memberships, keys, multi-open remain) |
+| 1 — protocol + schema | 0.5 (done except `doc_invites`) |
+| 2 — server | 1.5 (memberships + keys done; multi-open, invites, member endpoints remain) |
 | 3 — core | 0.5 (done) |
-| 4 — CLI | 1 |
+| 4 — CLI | 0.5 (key storage done; `DocRouter` remains) |
 | 5 — web | 1.5 |
 | 6 — cleanup + verification | 0.5 |
 | **Total** | **~6 days** |

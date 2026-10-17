@@ -40,7 +40,7 @@ Note: the per-list order-container CRDT schema (`spec/data-model.md` "Schema ver
 
 **Status:** Implemented.
 
-A connection is bound to `(account, device)` at upgrade; docs are bound per frame. After the version handshake the client sends `OpenDoc { doc_id }` for the doc it wants to sync. The server checks the device's account may access the doc (today: it is the account's primary doc; the check lives in one place, `can_open`, and becomes the membership lookup when sharing lands), subscribes the connection to the doc's broadcasts, and replies `DocOpened { doc_id, epoch }`. `epoch` is the doc's current history epoch (`storage.md` §Epochs); informational until trimmed snapshots land, and a mid-session advance is not yet signalled.
+A connection is bound to `(account, device)` at upgrade; docs are bound per frame. After the version handshake the client sends `OpenDoc { doc_id }` for the doc it wants to sync. The server checks the device's account has an active `doc_members` row for the doc (the check lives in one place, `can_open`), subscribes the connection to the doc's broadcasts, and replies `DocOpened { doc_id, epoch }`. `epoch` is the doc's current history epoch (`storage.md` §Epochs); informational until trimmed snapshots land, and a mid-session advance is not yet signalled.
 
 Rules:
 

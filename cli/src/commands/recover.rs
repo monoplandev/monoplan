@@ -1,13 +1,14 @@
 use clap::Parser;
 use dialoguer::Input;
-use monoplan_core::{Doc, WrappedDek, derive_recovery_master, parse_recovery_code, random_bytes};
+use monoplan_core::{Dek, Doc, DocId, derive_recovery_master, parse_recovery_code, random_bytes};
 use monoplan_protocol::{
-    KdfParams, PasswordResetRequest, PasswordResetResponse, PreloginRequest, PreloginResponse,
-    RecoverRequest, RecoverResponse,
+    DocKey, KdfParams, PasswordResetRequest, PasswordResetResponse, PreloginRequest,
+    PreloginResponse, RecoverRequest, RecoverResponse,
 };
 
+use super::login::{parse_doc_id, unwrap_doc_key};
 use crate::config::{Config, Profile, Secrets};
-use crate::keystore::{dek_to_hex, derive_master};
+use crate::keystore::derive_master;
 use crate::net::Client;
 use crate::storage::Account;
 use crate::sync::Session;
@@ -76,15 +77,23 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
         )
         .await?;
 
-    let r_nonce: [u8; monoplan_core::AEAD_NONCE_LEN] = recovered
-        .recovery_wrapped_dek_nonce
-        .as_slice()
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("server returned recovery wrap nonce of wrong length"))?;
-    let dek = r_kek.unwrap(&WrappedDek {
-        ciphertext: recovered.recovery_wrapped_dek,
-        nonce: r_nonce,
-    })?;
+    // One recovery wrap per membership the code can open.
+    let doc_keys: Vec<(DocId, Dek)> = recovered
+        .doc_keys
+        .iter()
+        .map(|k| {
+            Ok((
+                parse_doc_id(&k.doc_id)?,
+                unwrap_doc_key(&r_kek, &k.wrapped_dek, &k.wrapped_dek_nonce)?,
+            ))
+        })
+        .collect::<anyhow::Result<_>>()?;
+    let doc_id = parse_doc_id(&recovered.primary_doc_id)?;
+    let dek = doc_keys
+        .iter()
+        .find(|(id, _)| *id == doc_id)
+        .map(|(_, dek)| dek.clone())
+        .ok_or_else(|| anyhow::anyhow!("recovery response has no key for the primary doc"))?;
 
     println!("Re-keying with new password…");
     let new_master_salt: [u8; 16] = random_bytes();
@@ -95,7 +104,19 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
     };
     let new_kek = new_master.kek()?;
     let new_auth = new_master.auth_secret()?;
-    let new_wrapped = new_kek.wrap(&dek)?;
+    // Every recovered doc re-wrapped under the new password KEK; the
+    // server refuses a partial set.
+    let new_doc_keys = doc_keys
+        .iter()
+        .map(|(id, dek)| {
+            let w = new_kek.wrap(dek)?;
+            Ok(DocKey {
+                doc_id: id.0.to_string(),
+                wrapped_dek: w.ciphertext,
+                wrapped_dek_nonce: w.nonce.to_vec(),
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
 
     let reset: PasswordResetResponse = client
         .post(
@@ -105,17 +126,16 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                 new_master_salt: new_master_salt.to_vec(),
                 new_kdf_params: KdfParams::DEFAULT,
                 new_auth_secret: new_auth.as_bytes().to_vec(),
-                new_wrapped_dek: new_wrapped.ciphertext,
-                new_wrapped_dek_nonce: new_wrapped.nonce.to_vec(),
+                new_doc_keys,
                 device_name,
             },
         )
         .await?;
 
     let profile = Profile::create()?;
-    let primary_doc_uuid = uuid::Uuid::parse_str(&reset.primary_doc_id)
-        .map_err(|e| anyhow::anyhow!("server returned malformed primary_doc_id: {e}"))?;
-    let doc_id = monoplan_core::DocId(primary_doc_uuid);
+    if parse_doc_id(&reset.primary_doc_id)? != doc_id {
+        anyhow::bail!("server changed primary_doc_id between recover and reset");
+    }
     let storage = crate::storage::open_storage(&profile)?;
     crate::storage::seed_snapshot(&storage, &dek, doc_id, &Doc::empty())?;
     storage.write_account(&Account {
@@ -127,10 +147,10 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
     profile.write_config(&Config {
         server_url: args.server,
     })?;
-    profile.write_secrets(&Secrets {
-        device_token: reset.device_token,
-        dek_hex: dek_to_hex(&dek),
-    })?;
+    profile.write_secrets(&Secrets::new(
+        reset.device_token,
+        doc_keys.iter().map(|(id, dek)| (*id, dek)),
+    ))?;
 
     println!("Syncing…");
     let session = Session::open(true).await?;

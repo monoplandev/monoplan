@@ -100,7 +100,7 @@ Single account per install. One dir under XDG paths (`~/.local/share/monoplan/` 
 
 - `monoplan.sqlite` — doc cache (append-only `ops` + per-doc `snapshots`), the per-doc sync cursor (`docs.last_acked_server_seq` / `last_sync_at`), and the singleton `account` row (account/device/primary-doc ids + email). `primary_doc_id` is the server-assigned id of the account's Home doc, used to key local snapshot storage. See `spec/storage.md`.
 - `config.toml` — `{ server_url }`. Bootstrap input (needed before the db exists); operator-editable.
-- `secrets.toml` — `{ device_token, dek_hex }` in cleartext. Also the "logged in" marker: its presence is what `monoplan status`/commands gate on.
+- `secrets.toml` — `device_token` plus one `[docs."<doc_id>"] dek_hex = "…"` table per doc the account is a member of, in cleartext. The DEK is a doc key (`encryption.md`): login/recover store one entry per membership, `monoplan password` re-wraps every entry. Also the "logged in" marker: its presence is what `monoplan status`/commands gate on.
 
 Secrets in OS keychain (`security` on macOS, `libsecret` on linux):
 - `monoplan:<account_id>:token` — device auth token

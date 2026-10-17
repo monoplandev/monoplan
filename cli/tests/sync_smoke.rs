@@ -15,7 +15,6 @@ use std::time::Duration;
 use monoplan_cli::commands::agenda::{build_agenda, unscheduled_events};
 use monoplan_cli::commands::export::write_export;
 use monoplan_cli::config::{Config, Profile, Secrets};
-use monoplan_cli::keystore::dek_to_hex;
 use monoplan_cli::storage::Account;
 use monoplan_cli::sync::Session;
 use monoplan_core::{Dek, Doc, LIST_EVENTS, LIST_INBOX, NotesDeltaOp};
@@ -231,10 +230,7 @@ async fn default_open_skips_connect() {
         })
         .unwrap();
     profile
-        .write_secrets(&Secrets {
-            device_token: "deadbeef".repeat(8),
-            dek_hex: dek_to_hex(&dek),
-        })
+        .write_secrets(&Secrets::new("deadbeef".repeat(8), [(doc_id, &dek)]))
         .unwrap();
 
     // Without --sync the open call is fast — no 2s timeout penalty.
@@ -311,10 +307,10 @@ async fn second_device_observes_first_devices_items_via_pull() {
         })
         .unwrap();
     profile_b
-        .write_secrets(&Secrets {
-            device_token: device_b.device_token.clone(),
-            dek_hex: dek_to_hex(&dek),
-        })
+        .write_secrets(&Secrets::new(
+            device_b.device_token.clone(),
+            [(doc_id_b, &dek)],
+        ))
         .unwrap();
     monoplan_cli::storage::seed_snapshot(&storage_b, &dek, doc_id_b, &Doc::empty()).unwrap();
 

@@ -29,14 +29,23 @@ export interface DeviceCredential {
   device_token: string;
 }
 
+/** One doc the account can open, with the doc's DEK wrapped under the
+ *  account's password KEK. The DEK is a doc key, not an account key:
+ *  login returns one of these per membership. */
+export interface Membership {
+  doc_id: string;
+  role: "owner" | "member";
+  wrapped_dek: Uint8Array;
+  wrapped_dek_nonce: Uint8Array;
+}
+
 export interface LoginResponse {
   account_id: string;
   /** Server-assigned id of the account's primary (Home) doc. Used to key
    *  local storage so ops/snapshots live under the real doc id rather
-   *  than a per-account placeholder. */
+   *  than a per-account placeholder. Always present in `memberships`. */
   primary_doc_id: string;
-  wrapped_dek: Uint8Array;
-  wrapped_dek_nonce: Uint8Array;
+  memberships: Membership[];
   recovery_present: boolean;
   device?: DeviceCredential;
 }
@@ -94,6 +103,8 @@ export const api = {
     master_salt: Uint8Array;
     kdf_params: KdfParams;
     auth_secret: Uint8Array;
+    /** The new primary doc's DEK under the password KEK; the server
+     *  stores it on the account's owner membership of that doc. */
     wrapped_dek: Uint8Array;
     wrapped_dek_nonce: Uint8Array;
     device_name: string;

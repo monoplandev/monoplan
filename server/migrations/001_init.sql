@@ -9,6 +9,11 @@ CREATE TABLE docs (
   created_at   INTEGER NOT NULL
 );
 
+-- Password material only. Key wraps live on `doc_members`: the DEK is
+-- a per-doc key, not an account key, so the account row never holds
+-- one. `recovery_salt` / `recovery_auth_hash` stay here because the
+-- recovery *code* is an account credential; the wraps it opens are
+-- per-membership.
 CREATE TABLE accounts (
   id                          BLOB PRIMARY KEY,                -- uuid v7 bytes
   email                       TEXT UNIQUE NOT NULL,
@@ -18,14 +23,32 @@ CREATE TABLE accounts (
   kdf_t                       INTEGER NOT NULL,                -- argon2 iterations
   kdf_p                       INTEGER NOT NULL,                -- argon2 parallelism
   primary_doc_id              BLOB NOT NULL REFERENCES docs(id), -- the account's Home doc
-  wrapped_dek                 BLOB NOT NULL,
-  wrapped_dek_nonce           BLOB NOT NULL,
   recovery_salt               BLOB,                            -- present iff recovery code opted in
   recovery_auth_hash          BLOB,                            -- SHA-256(client recovery_auth_secret)
-  recovery_wrapped_dek        BLOB,
-  recovery_wrapped_dek_nonce  BLOB,
   created_at                  INTEGER NOT NULL                 -- unix millis
 );
+
+-- Membership = access to a doc + this member's copy of the doc's DEK,
+-- wrapped under their own password KEK (and recovery KEK iff they
+-- enrolled a recovery code). Every account has exactly one `owner`
+-- row for its primary doc, inserted at signup; sharing adds rows per
+-- invitee without touching `accounts`. Password change / reset re-wrap
+-- every active membership in one transaction. `removed_at` is a
+-- forward-only revocation marker (sharing-plan.md): the server stops
+-- serving the doc, but the member keeps whatever they already pulled.
+CREATE TABLE doc_members (
+  doc_id                       BLOB NOT NULL REFERENCES docs(id),
+  account_id                   BLOB NOT NULL REFERENCES accounts(id),
+  role                         TEXT NOT NULL,                  -- 'owner' | 'member'
+  wrapped_dek                  BLOB NOT NULL,
+  wrapped_dek_nonce            BLOB NOT NULL,
+  recovery_wrapped_dek         BLOB,
+  recovery_wrapped_dek_nonce   BLOB,
+  added_at                     INTEGER NOT NULL,               -- unix millis
+  removed_at                   INTEGER,                        -- NULL = active
+  PRIMARY KEY (doc_id, account_id)
+);
+CREATE INDEX doc_members_account_id_idx ON doc_members (account_id) WHERE removed_at IS NULL;
 
 CREATE TABLE recovery_sessions (
   token_hash      BLOB PRIMARY KEY,                            -- SHA-256(token)
@@ -50,8 +73,8 @@ CREATE INDEX devices_token_hash_idx ON devices (auth_token_hash);
 -- Per-(device, doc) contiguous-prefix frontier: the highest seq the
 -- device has acked on that doc. Rows appear on first `Ack`; a device
 -- with no row is at 0. The horizon for a doc is the minimum over the
--- devices of every account that can access it (today: the owning
--- account), which gates op-blob compaction. Revoking a device drops
+-- devices of every account with an active `doc_members` row on it,
+-- which gates op-blob compaction. Revoking a device drops
 -- its rows (cascade) and so drops it from the horizon.
 CREATE TABLE device_doc_frontiers (
   device_id        BLOB NOT NULL REFERENCES devices(id) ON DELETE CASCADE,

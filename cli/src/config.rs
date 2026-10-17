@@ -1,14 +1,17 @@
 //! Per-account on-disk config + secrets.
 //!
 //! `config.toml` holds operator-facing config (currently just
-//! `server_url`). `secrets.toml` holds the device token and DEK in
-//! cleartext, and doubles as the "logged in" marker. Account identity
+//! `server_url`). `secrets.toml` holds the device token and one DEK per
+//! doc this account can open, in cleartext, and doubles as the "logged
+//! in" marker. Account identity
 //! (account/device/doc ids, email) and the sync cursor live in the
 //! sqlite db (`crate::storage`), not here. When keychain-backed storage
 //! lands, `secrets.toml` becomes a fallback for non-keychain hosts.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use monoplan_core::{Dek, DocId};
 use serde::{Deserialize, Serialize};
 
 const ROOT_DIR: &str = "monoplan";
@@ -38,12 +41,48 @@ pub struct Config {
     pub server_url: String,
 }
 
+/// Per-doc key material. One table per doc under `[docs."<uuid>"]`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocSecrets {
+    /// Hex-encoded DEK for this doc. Plain-file storage is the current
+    /// stopgap; see module docs.
+    pub dek_hex: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Secrets {
     pub device_token: String,
-    /// Hex-encoded DEK. Plain-file storage is the current stopgap; see
-    /// module docs.
-    pub dek_hex: String,
+    /// The DEK of every doc this account is a member of, keyed by doc
+    /// id (uuid hex). The DEK is a doc key, not an account key: login
+    /// hands back one wrap per membership and each lands here. Exactly
+    /// one entry (the primary doc) until sharing exists, but nothing
+    /// in the CLI may assume that.
+    pub docs: BTreeMap<String, DocSecrets>,
+}
+
+impl Secrets {
+    /// Build from the device token plus `(doc, dek)` pairs.
+    pub fn new<'a>(device_token: String, docs: impl IntoIterator<Item = (DocId, &'a Dek)>) -> Self {
+        Self {
+            device_token,
+            docs: docs
+                .into_iter()
+                .map(|(doc_id, dek)| {
+                    (
+                        doc_id.0.to_string(),
+                        DocSecrets {
+                            dek_hex: hex::encode(dek.as_bytes()),
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    /// The stored DEK hex for `doc_id`, if this account holds one.
+    pub fn doc(&self, doc_id: DocId) -> Option<&DocSecrets> {
+        self.docs.get(&doc_id.0.to_string())
+    }
 }
 
 /// Top-level on-disk handle. Path layout under the root dir (system

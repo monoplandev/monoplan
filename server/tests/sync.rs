@@ -1300,6 +1300,119 @@ async fn open_doc_for_foreign_doc_is_rejected_and_closes() {
     );
 }
 
+/// Seed a second doc and an active `doc_members` row for `acc` directly
+/// — the invite flow does not exist yet, but access is already decided
+/// by membership rather than by "is the primary doc".
+async fn seed_membership(acc: &Account, role: &str) -> Uuid {
+    let doc_id = Uuid::now_v7();
+    let account_id = acc.account_id;
+    let role = role.to_string();
+    acc.server
+        .state
+        .db
+        .call(move |c| {
+            let tx = c.transaction()?;
+            tx.execute(
+                "INSERT INTO docs (id, created_at) VALUES (?, 1)",
+                [doc_id.as_bytes().as_slice()],
+            )?;
+            tx.execute(
+                "INSERT INTO doc_members (
+                    doc_id, account_id, role, wrapped_dek, wrapped_dek_nonce, added_at
+                 ) VALUES (?, ?, ?, ?, ?, 2)",
+                rusqlite::params![
+                    doc_id.as_bytes().as_slice(),
+                    account_id.as_bytes().as_slice(),
+                    role,
+                    vec![9u8; 48],
+                    vec![8u8; 24],
+                ],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    doc_id
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn open_doc_for_seeded_membership_succeeds_and_seqs_stay_per_doc() {
+    let acc = signup_account().await;
+    let second = seed_membership(&acc, "member").await;
+
+    // Primary doc gets one op first, so a per-doc seq space is visible.
+    let mut ws_primary = connect_ws(&acc.server, &acc.device_token).await;
+    handshake(&mut ws_primary, acc.primary_doc_id).await;
+    send_msgpack(
+        &mut ws_primary,
+        &ClientFrame::PushOps {
+            doc_id: acc.primary_doc_id,
+            ops: vec![fake_push(1)],
+        },
+    )
+    .await;
+    let _ack: ServerFrame = recv_msgpack(&mut ws_primary).await;
+
+    // A second connection (one doc per connection) opens the seeded doc.
+    let mut ws_second = connect_ws(&acc.server, &acc.device_token).await;
+    let epoch = handshake(&mut ws_second, second).await;
+    assert_eq!(epoch, 0);
+    send_msgpack(
+        &mut ws_second,
+        &ClientFrame::PushOps {
+            doc_id: second,
+            ops: vec![fake_push(2)],
+        },
+    )
+    .await;
+    match recv_msgpack::<ServerFrame>(&mut ws_second).await {
+        ServerFrame::OpsAck { doc_id, .. } => assert_eq!(doc_id, second),
+        other => panic!("expected OpsAck, got {other:?}"),
+    }
+    let batch = queries::fetch_ops_batch(&acc.server.state.db, second, 0)
+        .await
+        .unwrap();
+    assert_eq!(batch.ops.len(), 1);
+    assert_eq!(batch.ops[0].seq, 1, "second doc has its own seq counter");
+
+    // The horizon for the seeded doc is pinned by this account's device
+    // via its membership, not via primary-doc ownership.
+    let horizon = queries::doc_horizon(&acc.server.state.db, second, Uuid::nil(), 0)
+        .await
+        .unwrap();
+    assert_eq!(horizon, 0, "device has acked nothing on the second doc");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn removed_membership_cannot_open_doc() {
+    let acc = signup_account().await;
+    let second = seed_membership(&acc, "member").await;
+    let account_id = acc.account_id;
+    acc.server
+        .state
+        .db
+        .call(move |c| {
+            c.execute(
+                "UPDATE doc_members SET removed_at = 3 WHERE doc_id = ? AND account_id = ?",
+                rusqlite::params![
+                    second.as_bytes().as_slice(),
+                    account_id.as_bytes().as_slice()
+                ],
+            )
+        })
+        .await
+        .unwrap();
+    let mut ws = connect_ws(&acc.server, &acc.device_token).await;
+    hello(&mut ws).await;
+    send_msgpack(&mut ws, &ClientFrame::OpenDoc { doc_id: second }).await;
+    match recv_msgpack::<ServerFrame>(&mut ws).await {
+        ServerFrame::DocRejected { doc_id, .. } => assert_eq!(doc_id, second),
+        other => panic!("expected DocRejected, got {other:?}"),
+    }
+    expect_closed(&mut ws).await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn payload_frame_before_open_doc_closes_session() {
     let acc = signup_account().await;
@@ -1400,7 +1513,7 @@ async fn horizon_spans_device_doc_frontiers_and_drops_revoked_devices() {
     assert_eq!(wait_for_acked(&acc, 3).await, 3);
 
     // B has never acked: no frontier row, counts as 0, pins the horizon.
-    let horizon = queries::doc_horizon(db, doc, acc.account_id, acc.device_id, 3)
+    let horizon = queries::doc_horizon(db, doc, acc.device_id, 3)
         .await
         .unwrap();
     assert_eq!(horizon, 0);
@@ -1417,7 +1530,7 @@ async fn horizon_spans_device_doc_frontiers_and_drops_revoked_devices() {
     .await;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     loop {
-        let h = queries::doc_horizon(db, doc, acc.account_id, acc.device_id, 3)
+        let h = queries::doc_horizon(db, doc, acc.device_id, 3)
             .await
             .unwrap();
         if h == 2 {
@@ -1439,7 +1552,7 @@ async fn horizon_spans_device_doc_frontiers_and_drops_revoked_devices() {
         .await
         .unwrap();
     assert!(resp.status().is_success(), "revoke: {}", resp.status());
-    let horizon = queries::doc_horizon(db, doc, acc.account_id, acc.device_id, 3)
+    let horizon = queries::doc_horizon(db, doc, acc.device_id, 3)
         .await
         .unwrap();
     assert_eq!(horizon, 3);

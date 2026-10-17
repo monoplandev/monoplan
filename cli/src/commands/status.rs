@@ -4,7 +4,7 @@ use clap::Parser;
 use serde::Serialize;
 
 use crate::config::Profile;
-use crate::keystore::dek_from_hex;
+use crate::keystore::dek_for_doc;
 
 use super::items::print_json;
 
@@ -38,7 +38,7 @@ pub async fn run(args: StatusArgs) -> anyhow::Result<()> {
     let account = storage.read_account()?;
     let cursor = storage.read_sync_cursor(account.primary_doc_id)?;
     let secrets = profile.read_secrets()?;
-    let dek = dek_from_hex(&secrets.dek_hex)?;
+    let dek = dek_for_doc(&secrets, account.primary_doc_id)?;
     let pending = crate::storage::has_unsynced_ops(&storage, &dek, account.primary_doc_id)
         .map_err(|e| anyhow::anyhow!("read pending state: {e}"))?;
 

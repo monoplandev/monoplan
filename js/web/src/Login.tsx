@@ -244,7 +244,14 @@ async function doLogin(
   if (!resp.device) {
     throw new Error(missingDeviceCredentialMessage());
   }
-  const dek = unwrapDek(derived.kek, resp.wrapped_dek, resp.wrapped_dek_nonce);
+  // The web client runs one doc — the primary — so it unwraps that
+  // membership's key. Other memberships (none exist yet) are ignored
+  // until the client can open more than one doc.
+  const primary = resp.memberships.find((m) => m.doc_id === resp.primary_doc_id);
+  if (!primary) {
+    throw new Error("login response has no membership for the primary doc");
+  }
+  const dek = unwrapDek(derived.kek, primary.wrapped_dek, primary.wrapped_dek_nonce);
   const session: Session = {
     anonymous: false,
     email,

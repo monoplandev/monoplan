@@ -100,14 +100,22 @@ async fn seed_account_and_devices(state: &AppState, device_count: usize) {
             transaction.execute(
                 "INSERT INTO accounts (
                     id, email, password_hash, password_salt,
-                    kdf_m_kib, kdf_t, kdf_p, primary_doc_id,
-                    wrapped_dek, wrapped_dek_nonce, created_at
-                 ) VALUES (?, 'admin-test@example.com', ?, ?, 8, 1, 1, ?, ?, ?, 1)",
+                    kdf_m_kib, kdf_t, kdf_p, primary_doc_id, created_at
+                 ) VALUES (?, 'admin-test@example.com', ?, ?, 8, 1, 1, ?, 1)",
                 params![
                     account_id.as_bytes().as_slice(),
                     vec![1u8; 32],
                     vec![2u8; 16],
                     doc_id.as_bytes().as_slice(),
+                ],
+            )?;
+            transaction.execute(
+                "INSERT INTO doc_members (
+                    doc_id, account_id, role, wrapped_dek, wrapped_dek_nonce, added_at
+                 ) VALUES (?, ?, 'owner', ?, ?, 1)",
+                params![
+                    doc_id.as_bytes().as_slice(),
+                    account_id.as_bytes().as_slice(),
                     vec![3u8; 48],
                     vec![4u8; 24],
                 ],

@@ -4,16 +4,19 @@ use anyhow::Context;
 use axum::extract::State;
 use axum::http::{HeaderMap, header};
 use monoplan_protocol::{
-    DeviceCredential, LoginRequest, LoginResponse, PasswordChangeRequest, PasswordResetRequest,
-    PasswordResetResponse, PreloginRequest, PreloginResponse, RecoverRequest, RecoverResponse,
-    SignupRequest, SignupResponse,
+    DeviceCredential, DocKey, LoginRequest, LoginResponse, Membership, PasswordChangeRequest,
+    PasswordResetRequest, PasswordResetResponse, PreloginRequest, PreloginResponse, RecoverRequest,
+    RecoverResponse, SignupRequest, SignupResponse,
 };
+use uuid::Uuid;
 
 use crate::auth::DeviceAuth;
 use crate::auth::cookie;
 use crate::auth::queries::{
-    self, NewAccount, PasswordUpdate, create_account, create_device, create_recovery_session,
-    find_account_by_email, find_account_by_id, revoke_device, update_password,
+    DocKeyUpdate, NewAccount, PasswordResetOutcome, PasswordUpdate, PasswordUpdateOutcome,
+    create_account, create_device, create_recovery_session, find_account_by_email,
+    find_account_by_id, list_memberships, reset_password_with_recovery_session, revoke_device,
+    update_password,
 };
 use crate::auth::tokens::{encode_token, generate_token, sha256};
 use crate::error::{ApiError, ApiResult};
@@ -109,6 +112,16 @@ pub async fn login(
         None
     };
     let recovery_present = account.recovery_present();
+    let memberships = list_memberships(&state.db, account.id)
+        .await?
+        .into_iter()
+        .map(|m| Membership {
+            doc_id: m.doc_id.to_string(),
+            role: m.role,
+            wrapped_dek: m.wrapped_dek,
+            wrapped_dek_nonce: m.wrapped_dek_nonce,
+        })
+        .collect();
     // Cookie only when this call also registered a device for the
     // caller — otherwise no token was minted for them and there's
     // nothing to set.
@@ -121,8 +134,7 @@ pub async fn login(
         Msgpack(LoginResponse {
             account_id: account.id.to_string(),
             primary_doc_id: account.primary_doc_id.to_string(),
-            wrapped_dek: account.wrapped_dek,
-            wrapped_dek_nonce: account.wrapped_dek_nonce,
+            memberships,
             recovery_present,
             device,
         }),
@@ -137,17 +149,26 @@ pub async fn recover(
         .await?
         .ok_or(ApiError::InvalidCredentials)?;
     // Only accounts that opted into a recovery code can use this path.
-    let (Some(recovery_auth_hash), Some(recovery_wrapped_dek), Some(recovery_wrapped_dek_nonce)) = (
-        account.recovery_auth_hash.as_deref(),
-        account.recovery_wrapped_dek.clone(),
-        account.recovery_wrapped_dek_nonce.clone(),
-    ) else {
+    let Some(recovery_auth_hash) = account.recovery_auth_hash.as_deref() else {
         return Err(ApiError::RecoveryNotEnrolled);
     };
     let presented = sha256(&req.recovery_auth_secret);
     if !constant_time_eq(presented.as_slice(), recovery_auth_hash) {
         return Err(ApiError::InvalidCredentials);
     }
+    // Every membership the recovery code can open. A membership with
+    // no recovery wrap is skipped here and closed by `/password/reset`.
+    let doc_keys: Vec<DocKey> = list_memberships(&state.db, account.id)
+        .await?
+        .into_iter()
+        .filter_map(|m| {
+            Some(DocKey {
+                doc_id: m.doc_id.to_string(),
+                wrapped_dek: m.recovery_wrapped_dek?,
+                wrapped_dek_nonce: m.recovery_wrapped_dek_nonce?,
+            })
+        })
+        .collect();
     let session_token = generate_token();
     create_recovery_session(
         &state.db,
@@ -158,8 +179,8 @@ pub async fn recover(
     .await?;
     Ok(Msgpack(RecoverResponse {
         account_id: account.id.to_string(),
-        recovery_wrapped_dek,
-        recovery_wrapped_dek_nonce,
+        primary_doc_id: account.primary_doc_id.to_string(),
+        doc_keys,
         recovery_session_token: encode_token(&session_token),
     }))
 }
@@ -176,19 +197,18 @@ pub async fn password_change(
     if !constant_time_eq(presented.as_slice(), &account.password_hash) {
         return Err(ApiError::InvalidCredentials);
     }
-    update_password(
-        &state.db,
-        PasswordUpdate {
-            account_id: account.id,
-            new_password_hash: sha256(&req.new_auth_secret).to_vec(),
-            new_password_salt: req.new_master_salt,
-            new_kdf_params: req.new_kdf_params,
-            new_wrapped_dek: req.new_wrapped_dek,
-            new_wrapped_dek_nonce: req.new_wrapped_dek_nonce,
-        },
-    )
-    .await?;
-    Ok(())
+    let update = PasswordUpdate {
+        new_password_hash: sha256(&req.new_auth_secret).to_vec(),
+        new_password_salt: req.new_master_salt,
+        new_kdf_params: req.new_kdf_params,
+        new_doc_keys: parse_doc_keys(req.new_doc_keys)?,
+    };
+    match update_password(&state.db, account.id, update).await? {
+        PasswordUpdateOutcome::Updated => Ok(()),
+        PasswordUpdateOutcome::DocKeysMismatch { expected, got } => {
+            Err(doc_keys_mismatch(&expected, &got))
+        }
+    }
 }
 
 pub async fn password_reset(
@@ -200,27 +220,30 @@ pub async fn password_reset(
     }
     let token = crate::auth::tokens::decode_token(&req.recovery_session_token)
         .ok_or(ApiError::RecoverySessionInvalid)?;
-    let consumed = queries::consume_recovery_session(&state.db, sha256(&token).to_vec())
-        .await?
-        .ok_or(ApiError::RecoverySessionInvalid)?;
-
-    update_password(
-        &state.db,
-        PasswordUpdate {
-            account_id: consumed.account_id,
-            new_password_hash: sha256(&req.new_auth_secret).to_vec(),
-            new_password_salt: req.new_master_salt,
-            new_kdf_params: req.new_kdf_params,
-            new_wrapped_dek: req.new_wrapped_dek,
-            new_wrapped_dek_nonce: req.new_wrapped_dek_nonce,
-        },
-    )
-    .await?;
+    let update = PasswordUpdate {
+        new_password_hash: sha256(&req.new_auth_secret).to_vec(),
+        new_password_salt: req.new_master_salt,
+        new_kdf_params: req.new_kdf_params,
+        new_doc_keys: parse_doc_keys(req.new_doc_keys)?,
+    };
+    // Session validation + consumption and the password/wrap update
+    // share one transaction, so a rejected update leaves the session
+    // usable for a corrected retry inside its TTL.
+    let account_id =
+        match reset_password_with_recovery_session(&state.db, sha256(&token).to_vec(), update)
+            .await?
+        {
+            PasswordResetOutcome::Updated { account_id } => account_id,
+            PasswordResetOutcome::SessionInvalid => return Err(ApiError::RecoverySessionInvalid),
+            PasswordResetOutcome::DocKeysMismatch { expected, got } => {
+                return Err(doc_keys_mismatch(&expected, &got));
+            }
+        };
 
     let device_token = generate_token();
     let device_id = create_device(
         &state.db,
-        consumed.account_id,
+        account_id,
         req.device_name,
         sha256(&device_token).to_vec(),
     )
@@ -228,7 +251,7 @@ pub async fn password_reset(
     // Look up primary_doc_id so the resetting device can key its local
     // storage without an extra round trip. Account must exist — we just
     // updated it above — so a missing row is internal.
-    let primary_doc_id = find_account_by_id(&state.db, consumed.account_id)
+    let primary_doc_id = find_account_by_id(&state.db, account_id)
         .await?
         .map(|a| a.primary_doc_id)
         .ok_or_else(|| {
@@ -259,6 +282,37 @@ pub async fn logout(State(state): State<AppState>, auth: DeviceAuth) -> ApiResul
     Ok((
         cookie_headers(cookie::clear_cookie(state.secure_cookies)),
         (),
+    ))
+}
+
+/// Wire `DocKey`s → query-layer updates. A malformed doc id is a client
+/// bug, surfaced as 400 before anything touches the db.
+fn parse_doc_keys(keys: Vec<DocKey>) -> ApiResult<Vec<DocKeyUpdate>> {
+    keys.into_iter()
+        .map(|k| {
+            let doc_id = Uuid::parse_str(&k.doc_id).map_err(|_| {
+                ApiError::BadRequest(format!("new_doc_keys: malformed doc_id {:?}", k.doc_id))
+            })?;
+            Ok(DocKeyUpdate {
+                doc_id,
+                wrapped_dek: k.wrapped_dek,
+                wrapped_dek_nonce: k.wrapped_dek_nonce,
+            })
+        })
+        .collect()
+}
+
+fn doc_keys_mismatch(expected: &[Uuid], got: &[Uuid]) -> ApiError {
+    let fmt = |ids: &[Uuid]| {
+        ids.iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    ApiError::BadRequest(format!(
+        "new_doc_keys must cover exactly the account's memberships: expected [{}], got [{}]",
+        fmt(expected),
+        fmt(got)
     ))
 }
 

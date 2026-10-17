@@ -38,7 +38,9 @@ impl Default for KdfParams {
     }
 }
 
-/// Recovery-code material posted at signup or carried through `/recover`.
+/// Recovery-code material posted at signup. The wrap inside is the
+/// *primary doc's* DEK under the recovery KEK; it lands on the signup
+/// membership row, not on the account.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoveryMaterial {
     #[serde(with = "serde_bytes")]
@@ -51,6 +53,57 @@ pub struct RecoveryMaterial {
     pub recovery_wrapped_dek_nonce: Vec<u8>,
 }
 
+/// A doc's DEK wrapped under one key the recipient holds. Which key
+/// depends on the carrying message: the password KEK on `/login` and in
+/// `new_doc_keys` uploads, the recovery KEK on `/recover`. `doc_id` is
+/// the uuid hex string.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocKey {
+    pub doc_id: String,
+    #[serde(with = "serde_bytes")]
+    pub wrapped_dek: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub wrapped_dek_nonce: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum MemberRole {
+    Owner,
+    Member,
+}
+
+impl MemberRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MemberRole::Owner => "owner",
+            MemberRole::Member => "member",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "owner" => Some(MemberRole::Owner),
+            "member" => Some(MemberRole::Member),
+            _ => None,
+        }
+    }
+}
+
+/// One active doc membership of the logging-in account: the doc, the
+/// account's role on it, and the doc's DEK wrapped under the account's
+/// password KEK. Today every account has exactly one (its primary doc,
+/// role `owner`); clients must handle any length.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Membership {
+    pub doc_id: String,
+    pub role: MemberRole,
+    #[serde(with = "serde_bytes")]
+    pub wrapped_dek: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub wrapped_dek_nonce: Vec<u8>,
+}
+
 // ---------- /api/account/signup ----------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,6 +114,9 @@ pub struct SignupRequest {
     pub kdf_params: KdfParams,
     #[serde(with = "serde_bytes")]
     pub auth_secret: Vec<u8>,
+    /// The primary doc's DEK, generated client-side, wrapped under the
+    /// password KEK. The server mints the doc id and stores this wrap on
+    /// the account's `owner` membership of that doc.
     #[serde(with = "serde_bytes")]
     pub wrapped_dek: Vec<u8>,
     #[serde(with = "serde_bytes")]
@@ -115,11 +171,11 @@ pub struct LoginResponse {
     pub account_id: String,
     /// The account's primary (Home) doc. New devices use it to key
     /// local storage; existing devices already hold the same value.
+    /// Always appears in `memberships`.
     pub primary_doc_id: String,
-    #[serde(with = "serde_bytes")]
-    pub wrapped_dek: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    pub wrapped_dek_nonce: Vec<u8>,
+    /// Every active membership with its password-KEK wrap. The client
+    /// unwraps each with the KEK it just derived.
+    pub memberships: Vec<Membership>,
     pub recovery_present: bool,
     /// Present iff `register_device` was set on the request.
     pub device: Option<DeviceCredential>,
@@ -137,10 +193,12 @@ pub struct RecoverRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoverResponse {
     pub account_id: String,
-    #[serde(with = "serde_bytes")]
-    pub recovery_wrapped_dek: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    pub recovery_wrapped_dek_nonce: Vec<u8>,
+    pub primary_doc_id: String,
+    /// Recovery-KEK wraps, one per active membership that holds one.
+    /// Released only after the recovery auth proof. The client unwraps
+    /// each, then re-wraps each under its new password KEK for
+    /// `/password/reset`.
+    pub doc_keys: Vec<DocKey>,
     /// Single-use, 15-min TTL. Required for `/password/reset`.
     pub recovery_session_token: String,
 }
@@ -158,10 +216,11 @@ pub struct PasswordChangeRequest {
     pub new_kdf_params: KdfParams,
     #[serde(with = "serde_bytes")]
     pub new_auth_secret: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    pub new_wrapped_dek: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    pub new_wrapped_dek_nonce: Vec<u8>,
+    /// Every active membership's DEK re-wrapped under the new KEK. The
+    /// server rejects the change (400) unless the set of doc ids equals
+    /// the account's active memberships — a partial re-wrap would
+    /// strand the missing docs behind a KEK that no longer exists.
+    pub new_doc_keys: Vec<DocKey>,
 }
 
 // ---------- /api/account/password/reset ----------
@@ -174,10 +233,13 @@ pub struct PasswordResetRequest {
     pub new_kdf_params: KdfParams,
     #[serde(with = "serde_bytes")]
     pub new_auth_secret: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    pub new_wrapped_dek: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    pub new_wrapped_dek_nonce: Vec<u8>,
+    /// One entry per doc key `/recover` released, checked as a set
+    /// (400 on mismatch). A membership with no recovery wrap cannot be
+    /// re-wrapped — the client never had its DEK — so the server closes
+    /// it (`removed_at`) in the same transaction rather than leave a
+    /// wrap behind that no surviving KEK opens. See `encryption.md`
+    /// §Recovery.
+    pub new_doc_keys: Vec<DocKey>,
     pub device_name: String,
 }
 

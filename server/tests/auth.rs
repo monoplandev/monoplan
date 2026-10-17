@@ -10,15 +10,17 @@ use monoplan_core::{
     random_bytes,
 };
 use monoplan_protocol::{
-    DeviceRenameRequest, DevicesListResponse, KdfParams, LoginRequest, LoginResponse,
-    PasswordResetRequest, PreloginRequest, PreloginResponse, RecoverRequest, RecoverResponse,
-    RecoveryMaterial, SignupRequest, SignupResponse,
+    DeviceRenameRequest, DevicesListResponse, DocKey, KdfParams, LoginRequest, LoginResponse,
+    MemberRole, PasswordChangeRequest, PasswordResetRequest, PreloginRequest, PreloginResponse,
+    RecoverRequest, RecoverResponse, RecoveryMaterial, SignupRequest, SignupResponse,
 };
 use monoplan_server::{AppState, router};
 use reqwest::header::CONTENT_TYPE;
+use rusqlite::params;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::sync::OnceLock;
+use uuid::Uuid;
 
 const MSGPACK: &str = "application/msgpack";
 
@@ -32,13 +34,14 @@ fn weak_params() -> KdfParams {
 
 struct TestServer {
     base: String,
+    state: AppState,
     handle: tokio::task::JoinHandle<()>,
 }
 
 impl TestServer {
     async fn start() -> Self {
         let state = AppState::open_in_memory().await.unwrap();
-        let app = router(state);
+        let app = router(state.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let base = format!("http://{}", addr);
@@ -50,7 +53,11 @@ impl TestServer {
             .await
             .unwrap();
         });
-        Self { base, handle }
+        Self {
+            base,
+            state,
+            handle,
+        }
     }
 }
 
@@ -169,6 +176,7 @@ struct Account {
     server: TestServer,
     email: String,
     account_id: String,
+    primary_doc_id: String,
     device_id: String,
     device_token: String,
     dek: Dek,
@@ -233,6 +241,7 @@ async fn signup(with_recovery: bool) -> Account {
         server,
         email,
         account_id: resp.account_id,
+        primary_doc_id: resp.primary_doc_id,
         device_id: resp.device_id,
         device_token: resp.device_token,
         dek,
@@ -379,17 +388,15 @@ async fn recovery_session_token_cannot_be_reused() {
         None,
     )
     .await;
-    let nonce: [u8; AEAD_NONCE_LEN] = recovered
-        .recovery_wrapped_dek_nonce
-        .as_slice()
-        .try_into()
-        .unwrap();
-    let dek = r_kek
-        .unwrap(&monoplan_core::WrappedDek {
-            ciphertext: recovered.recovery_wrapped_dek,
-            nonce,
-        })
-        .unwrap();
+    assert_eq!(recovered.primary_doc_id, acc.primary_doc_id);
+    assert_eq!(
+        recovered.doc_keys.len(),
+        1,
+        "one membership, one recovery wrap"
+    );
+    assert_eq!(recovered.doc_keys[0].doc_id, acc.primary_doc_id);
+    let dek = unwrap_doc_key(&r_kek, &recovered.doc_keys[0]);
+    assert_eq!(dek.as_bytes(), acc.dek.as_bytes());
 
     // New password + reset.
     let new_password = "freshly chosen pass";
@@ -399,7 +406,22 @@ async fn recovery_session_token_cannot_be_reused() {
         derive_password_master(new_password.as_bytes(), &new_salt, new_params).unwrap();
     let new_kek = new_master.kek().unwrap();
     let new_auth = new_master.auth_secret().unwrap();
-    let new_wrapped = new_kek.wrap(&dek).unwrap();
+
+    // A reset that leaves a recovered membership un-rewrapped is a 400
+    // and must *not* burn the session.
+    let status = post_msgpack_status(
+        &format!("{}/api/account/password/reset", acc.server.base),
+        &PasswordResetRequest {
+            recovery_session_token: recovered.recovery_session_token.clone(),
+            new_master_salt: new_salt.to_vec(),
+            new_kdf_params: new_params,
+            new_auth_secret: new_auth.as_bytes().to_vec(),
+            new_doc_keys: vec![],
+            device_name: "incomplete".into(),
+        },
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
 
     let reset: monoplan_protocol::PasswordResetResponse = post_msgpack(
         &format!("{}/api/account/password/reset", acc.server.base),
@@ -408,8 +430,7 @@ async fn recovery_session_token_cannot_be_reused() {
             new_master_salt: new_salt.to_vec(),
             new_kdf_params: new_params,
             new_auth_secret: new_auth.as_bytes().to_vec(),
-            new_wrapped_dek: new_wrapped.ciphertext,
-            new_wrapped_dek_nonce: new_wrapped.nonce.to_vec(),
+            new_doc_keys: vec![wrap_doc_key(&new_kek, &acc.primary_doc_id, &dek)],
             device_name: "post-recover".into(),
         },
         None,
@@ -418,7 +439,6 @@ async fn recovery_session_token_cannot_be_reused() {
     assert!(!reset.device_token.is_empty());
 
     // Recovery session token cannot be reused.
-    let new_wrapped_2 = new_kek.wrap(&dek).unwrap();
     let status = post_msgpack_status(
         &format!("{}/api/account/password/reset", acc.server.base),
         &PasswordResetRequest {
@@ -426,13 +446,240 @@ async fn recovery_session_token_cannot_be_reused() {
             new_master_salt: new_salt.to_vec(),
             new_kdf_params: new_params,
             new_auth_secret: new_auth.as_bytes().to_vec(),
-            new_wrapped_dek: new_wrapped_2.ciphertext,
-            new_wrapped_dek_nonce: new_wrapped_2.nonce.to_vec(),
+            new_doc_keys: vec![wrap_doc_key(&new_kek, &acc.primary_doc_id, &dek)],
             device_name: "should-fail".into(),
         },
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::FORBIDDEN);
+
+    // The new password opens the same DEK via the re-wrapped membership.
+    let login = login_with(&acc, new_password).await;
+    assert_eq!(login.memberships.len(), 1);
+    let kek = derive_password_master(new_password.as_bytes(), &new_salt, new_params)
+        .unwrap()
+        .kek()
+        .unwrap();
+    let m = &login.memberships[0];
+    let reopened = kek
+        .unwrap(&monoplan_core::WrappedDek {
+            ciphertext: m.wrapped_dek.clone(),
+            nonce: m.wrapped_dek_nonce.as_slice().try_into().unwrap(),
+        })
+        .unwrap();
+    assert_eq!(reopened.as_bytes(), acc.dek.as_bytes());
+}
+
+fn wrap_doc_key(kek: &monoplan_core::Kek, doc_id: &str, dek: &Dek) -> DocKey {
+    let w = kek.wrap(dek).unwrap();
+    DocKey {
+        doc_id: doc_id.to_string(),
+        wrapped_dek: w.ciphertext,
+        wrapped_dek_nonce: w.nonce.to_vec(),
+    }
+}
+
+fn unwrap_doc_key(kek: &monoplan_core::Kek, key: &DocKey) -> Dek {
+    let nonce: [u8; AEAD_NONCE_LEN] = key.wrapped_dek_nonce.as_slice().try_into().unwrap();
+    kek.unwrap(&monoplan_core::WrappedDek {
+        ciphertext: key.wrapped_dek.clone(),
+        nonce,
+    })
+    .unwrap()
+}
+
+/// Prelogin + login (no device registration) with `password`.
+async fn login_with(acc: &Account, password: &str) -> LoginResponse {
+    let pre: PreloginResponse = post_msgpack(
+        &format!("{}/api/account/prelogin", acc.server.base),
+        &PreloginRequest {
+            email: acc.email.clone(),
+        },
+        None,
+    )
+    .await;
+    let master =
+        derive_password_master(password.as_bytes(), &pre.master_salt, pre.kdf_params).unwrap();
+    post_msgpack(
+        &format!("{}/api/account/login", acc.server.base),
+        &LoginRequest {
+            email: acc.email.clone(),
+            auth_secret: master.auth_secret().unwrap().as_bytes().to_vec(),
+            register_device: None,
+        },
+        None,
+    )
+    .await
+}
+
+/// Give `acc` a second, directly-seeded membership (a fresh doc, role
+/// `member`, DEK wrapped under `kek`). Stands in for the invite flow
+/// that does not exist yet; proves the membership paths never
+/// special-case length 1.
+async fn seed_extra_membership(acc: &Account, kek: &monoplan_core::Kek) -> (String, Dek) {
+    let doc_id = Uuid::now_v7();
+    let dek = Dek::generate();
+    let w = kek.wrap(&dek).unwrap();
+    let account_id = Uuid::parse_str(&acc.account_id).unwrap();
+    acc.server
+        .state
+        .db
+        .call(move |c| {
+            let tx = c.transaction()?;
+            tx.execute(
+                "INSERT INTO docs (id, created_at) VALUES (?, 1)",
+                [doc_id.as_bytes().as_slice()],
+            )?;
+            tx.execute(
+                "INSERT INTO doc_members (
+                    doc_id, account_id, role, wrapped_dek, wrapped_dek_nonce, added_at
+                 ) VALUES (?, ?, 'member', ?, ?, ?)",
+                params![
+                    doc_id.as_bytes().as_slice(),
+                    account_id.as_bytes().as_slice(),
+                    w.ciphertext,
+                    w.nonce.to_vec(),
+                    // Later than signup's wall-clock `added_at` so the
+                    // primary stays first in `ORDER BY added_at`.
+                    i64::MAX / 2,
+                ],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    (doc_id.to_string(), dek)
+}
+
+#[tokio::test]
+async fn login_returns_primary_membership_whose_wrap_opens_the_signup_dek() {
+    let acc = signup(false).await;
+    let password = "correct horse battery staple";
+    let login = login_with(&acc, password).await;
+    assert_eq!(login.primary_doc_id, acc.primary_doc_id);
+    assert_eq!(login.memberships.len(), 1);
+    let m = &login.memberships[0];
+    assert_eq!(m.doc_id, acc.primary_doc_id);
+    assert_eq!(m.role, MemberRole::Owner);
+    let kek = derive_password_master(password.as_bytes(), &acc.master_salt, acc.kdf_params)
+        .unwrap()
+        .kek()
+        .unwrap();
+    let dek = kek
+        .unwrap(&monoplan_core::WrappedDek {
+            ciphertext: m.wrapped_dek.clone(),
+            nonce: m.wrapped_dek_nonce.as_slice().try_into().unwrap(),
+        })
+        .unwrap();
+    assert_eq!(dek.as_bytes(), acc.dek.as_bytes());
+}
+
+#[tokio::test]
+async fn password_change_must_rewrap_every_membership() {
+    let acc = signup(false).await;
+    let password = "correct horse battery staple";
+    let master =
+        derive_password_master(password.as_bytes(), &acc.master_salt, acc.kdf_params).unwrap();
+    let kek = master.kek().unwrap();
+    let current_auth = master.auth_secret().unwrap();
+    let (second_doc_id, second_dek) = seed_extra_membership(&acc, &kek).await;
+
+    // Login now reports both memberships, primary first.
+    let login = login_with(&acc, password).await;
+    let ids: Vec<&str> = login
+        .memberships
+        .iter()
+        .map(|m| m.doc_id.as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![acc.primary_doc_id.as_str(), second_doc_id.as_str()]
+    );
+    assert_eq!(login.memberships[1].role, MemberRole::Member);
+
+    let new_password = "another long password";
+    let new_salt: [u8; 16] = random_bytes();
+    let new_params = weak_params();
+    let new_master =
+        derive_password_master(new_password.as_bytes(), &new_salt, new_params).unwrap();
+    let new_kek = new_master.kek().unwrap();
+    let new_auth = new_master.auth_secret().unwrap();
+    let url = format!("{}/api/account/password/change", acc.server.base);
+    let req = |keys: Vec<DocKey>| PasswordChangeRequest {
+        current_auth_secret: current_auth.as_bytes().to_vec(),
+        new_master_salt: new_salt.to_vec(),
+        new_kdf_params: new_params,
+        new_auth_secret: new_auth.as_bytes().to_vec(),
+        new_doc_keys: keys,
+    };
+
+    // Only the primary re-wrapped → rejected, nothing changes.
+    let status = post_msgpack_status_authed(
+        &url,
+        &req(vec![wrap_doc_key(&new_kek, &acc.primary_doc_id, &acc.dek)]),
+        &acc.device_token,
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
+    // A key for a doc the account is not a member of → rejected too.
+    let status = post_msgpack_status_authed(
+        &url,
+        &req(vec![
+            wrap_doc_key(&new_kek, &acc.primary_doc_id, &acc.dek),
+            wrap_doc_key(&new_kek, &second_doc_id, &second_dek),
+            wrap_doc_key(&new_kek, &Uuid::now_v7().to_string(), &second_dek),
+        ]),
+        &acc.device_token,
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
+    // Old password still works after the rejected attempts.
+    assert_eq!(login_with(&acc, password).await.memberships.len(), 2);
+
+    // Both re-wrapped → accepted.
+    post_msgpack_no_response(
+        &url,
+        &req(vec![
+            wrap_doc_key(&new_kek, &acc.primary_doc_id, &acc.dek),
+            wrap_doc_key(&new_kek, &second_doc_id, &second_dek),
+        ]),
+        Some(&acc.device_token),
+    )
+    .await;
+    let login = login_with(&acc, new_password).await;
+    assert_eq!(login.memberships.len(), 2);
+    for m in &login.memberships {
+        let expected = if m.doc_id == acc.primary_doc_id {
+            &acc.dek
+        } else {
+            &second_dek
+        };
+        let dek = new_kek
+            .unwrap(&monoplan_core::WrappedDek {
+                ciphertext: m.wrapped_dek.clone(),
+                nonce: m.wrapped_dek_nonce.as_slice().try_into().unwrap(),
+            })
+            .unwrap();
+        assert_eq!(dek.as_bytes(), expected.as_bytes(), "doc {}", m.doc_id);
+    }
+}
+
+async fn post_msgpack_status_authed<Req: Serialize>(
+    url: &str,
+    body: &Req,
+    token: &str,
+) -> reqwest::StatusCode {
+    let bytes = rmp_serde::to_vec_named(body).unwrap();
+    http()
+        .post(url)
+        .header(CONTENT_TYPE, MSGPACK)
+        .bearer_auth(token)
+        .body(bytes)
+        .send()
+        .await
+        .unwrap()
+        .status()
 }
 
 #[tokio::test]

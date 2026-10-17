@@ -515,32 +515,31 @@ pub async fn get_last_acked_seq(db: &Db, device_id: Uuid, doc_id: Uuid) -> anyho
 /// A device with no `device_doc_frontiers` row for the doc counts as
 /// 0 — it has acked nothing, so nothing below it is safe to compact.
 ///
-/// The set of devices is "every device of `account_id`" because an
-/// account's devices are the only ones that can open its doc today.
-/// When memberships land (`spec/sharing-plan.md`) the device set
-/// becomes the devices of every active member, and `account_id`
-/// goes away.
+/// The device set is every device of every account with an active
+/// `doc_members` row on the doc — the same set `can_open` admits, so
+/// nobody who may pull the ops is left out of the floor.
 ///
-/// Returns 0 when the account has no devices — caller treats that
-/// as "no compaction possible" via the trigger's horizon guard.
+/// Returns 0 when no member has a device — caller treats that as "no
+/// compaction possible" via the trigger's horizon guard.
 pub async fn doc_horizon(
     db: &Db,
     doc_id: Uuid,
-    account_id: Uuid,
     override_device_id: Uuid,
     override_value: u64,
 ) -> anyhow::Result<u64> {
     let doc_bytes = doc_id.as_bytes().to_vec();
-    let acc_bytes = account_id.as_bytes().to_vec();
     let dev_bytes = override_device_id.as_bytes().to_vec();
     db.call(move |c| {
+        // Every device of every account with an active membership on
+        // the doc pins the horizon; a device with no frontier row is 0.
         let v: Option<i64> = c.query_row(
             "SELECT MIN(CASE WHEN d.id = ? THEN ? ELSE COALESCE(f.last_acked_seq, 0) END)
-             FROM devices d
+             FROM doc_members m
+             JOIN devices d ON d.account_id = m.account_id
              LEFT JOIN device_doc_frontiers f
-               ON f.device_id = d.id AND f.doc_id = ?
-             WHERE d.account_id = ?",
-            params![dev_bytes, override_value as i64, doc_bytes, acc_bytes],
+               ON f.device_id = d.id AND f.doc_id = m.doc_id
+             WHERE m.doc_id = ? AND m.removed_at IS NULL",
+            params![dev_bytes, override_value as i64, doc_bytes],
             |r| r.get::<_, Option<i64>>(0),
         )?;
         Ok(v.unwrap_or(0) as u64)

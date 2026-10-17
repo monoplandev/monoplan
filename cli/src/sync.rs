@@ -25,7 +25,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use crate::config::{ConfigError, Profile};
-use crate::keystore::{KeystoreError, dek_from_hex};
+use crate::keystore::{KeystoreError, dek_for_doc};
 use crate::storage::SqliteStorage;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -103,13 +103,13 @@ impl Session {
     pub async fn open_with_profile(profile: Profile, sync: bool) -> Result<Self, SyncError> {
         let config = profile.read_config()?;
         let secrets = profile.read_secrets()?;
-        let dek = dek_from_hex(&secrets.dek_hex)?;
         // Boot the doc from the op log + snapshot. A fresh profile (no
         // snapshot yet) reconstructs an empty doc — the same healing
         // behaviour the old file-based `read_doc` NotFound branch had.
         let storage = crate::storage::open_storage(&profile)?;
         let account = storage.read_account()?;
         let doc_id = account.primary_doc_id;
+        let dek = dek_for_doc(&secrets, doc_id)?;
         // Claim the device's peer id before the doc exists, so every
         // local commit this process makes carries the leased peer
         // (spec/peer-id-plan.md).

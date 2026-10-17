@@ -1,12 +1,12 @@
 use clap::Parser;
 use dialoguer::{Input, Password};
-use monoplan_core::{Doc, WrappedDek};
+use monoplan_core::{Dek, Doc, DocId, Kek, WrappedDek};
 use monoplan_protocol::{
     DeviceRegistration, LoginRequest, LoginResponse, PreloginRequest, PreloginResponse,
 };
 
 use crate::config::{Config, Profile, Secrets};
-use crate::keystore::{dek_to_hex, derive_master};
+use crate::keystore::derive_master;
 use crate::net::Client;
 use crate::storage::Account;
 use crate::sync::Session;
@@ -69,24 +69,30 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
         )
         .await?;
 
-    let nonce: [u8; monoplan_core::AEAD_NONCE_LEN] =
-        resp.wrapped_dek_nonce
-            .as_slice()
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("server returned wrapped_dek_nonce of wrong length"))?;
-    let dek = kek.unwrap(&WrappedDek {
-        ciphertext: resp.wrapped_dek,
-        nonce,
-    })?;
+    // One wrap per membership, each under the KEK just derived. The
+    // primary doc must be among them — it is the doc this CLI runs.
+    let doc_keys: Vec<(DocId, Dek)> = resp
+        .memberships
+        .iter()
+        .map(|m| {
+            Ok((
+                parse_doc_id(&m.doc_id)?,
+                unwrap_doc_key(&kek, &m.wrapped_dek, &m.wrapped_dek_nonce)?,
+            ))
+        })
+        .collect::<anyhow::Result<_>>()?;
 
     let device = resp.device.ok_or_else(|| {
         anyhow::anyhow!("server did not return a device credential despite register_device")
     })?;
 
     let profile = Profile::create()?;
-    let primary_doc_uuid = uuid::Uuid::parse_str(&resp.primary_doc_id)
-        .map_err(|e| anyhow::anyhow!("server returned malformed primary_doc_id: {e}"))?;
-    let doc_id = monoplan_core::DocId(primary_doc_uuid);
+    let doc_id = parse_doc_id(&resp.primary_doc_id)?;
+    let dek = doc_keys
+        .iter()
+        .find(|(id, _)| *id == doc_id)
+        .map(|(_, dek)| dek.clone())
+        .ok_or_else(|| anyhow::anyhow!("login response has no membership for the primary doc"))?;
     // Empty doc baseline; the initial sync below pulls from seq 0,
     // applies device-1's seed + history, and we converge. secrets.toml
     // is written last — it's the "logged in" marker.
@@ -101,10 +107,10 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
     profile.write_config(&Config {
         server_url: args.server,
     })?;
-    profile.write_secrets(&Secrets {
-        device_token: device.device_token,
-        dek_hex: dek_to_hex(&dek),
-    })?;
+    profile.write_secrets(&Secrets::new(
+        device.device_token,
+        doc_keys.iter().map(|(id, dek)| (*id, dek)),
+    ))?;
 
     println!("Syncing…");
     let session = Session::open(true).await?;
@@ -115,4 +121,21 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
         println!("(no recovery code is enrolled — losing your password loses your data)");
     }
     Ok(())
+}
+
+pub(crate) fn parse_doc_id(hex: &str) -> anyhow::Result<DocId> {
+    uuid::Uuid::parse_str(hex)
+        .map(DocId)
+        .map_err(|e| anyhow::anyhow!("server returned malformed doc id {hex:?}: {e}"))
+}
+
+/// Open one server-held wrap with `kek` (password or recovery KEK).
+pub(crate) fn unwrap_doc_key(kek: &Kek, wrapped_dek: &[u8], nonce: &[u8]) -> anyhow::Result<Dek> {
+    let nonce: [u8; monoplan_core::AEAD_NONCE_LEN] = nonce
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("server returned wrapped_dek_nonce of wrong length"))?;
+    Ok(kek.unwrap(&WrappedDek {
+        ciphertext: wrapped_dek.to_vec(),
+        nonce,
+    })?)
 }

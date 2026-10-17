@@ -1,15 +1,15 @@
 use std::sync::OnceLock;
 
 use monoplan_cli::config::{Config, Profile, Secrets};
-use monoplan_cli::keystore::{dek_to_hex, derive_master};
+use monoplan_cli::keystore::derive_master;
 use monoplan_cli::net::Client;
 use monoplan_cli::storage::Account;
 use monoplan_core::{
-    AEAD_NONCE_LEN, Dek, Doc, WrappedDek, derive_password_master, derive_recovery_master,
-    generate_recovery_code, random_bytes,
+    AEAD_NONCE_LEN, Dek, Doc, DocId, Kek, WrappedDek, derive_password_master,
+    derive_recovery_master, generate_recovery_code, random_bytes,
 };
 use monoplan_protocol::{
-    DeviceCredential, DeviceRegistration, KdfParams, LoginRequest, LoginResponse,
+    DeviceCredential, DeviceRegistration, DocKey, KdfParams, LoginRequest, LoginResponse,
     PasswordChangeRequest, PasswordResetRequest, PasswordResetResponse, PreloginRequest,
     PreloginResponse, RecoverRequest, RecoverResponse, RecoveryMaterial, SignupRequest,
     SignupResponse,
@@ -240,15 +240,14 @@ pub async fn login_device(
     let device = resp
         .device
         .ok_or_else(|| anyhow::anyhow!("login did not mint a device credential"))?;
-    let nonce: [u8; AEAD_NONCE_LEN] = resp
-        .wrapped_dek_nonce
-        .as_slice()
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("server returned wrapped_dek_nonce of wrong length"))?;
-    let dek = kek.unwrap(&WrappedDek {
-        ciphertext: resp.wrapped_dek,
-        nonce,
-    })?;
+    // Mirror `monoplan login`: the primary doc's key comes from the
+    // membership whose doc id matches `primary_doc_id`.
+    let primary = resp
+        .memberships
+        .iter()
+        .find(|m| m.doc_id == resp.primary_doc_id)
+        .ok_or_else(|| anyhow::anyhow!("login response lacks the primary membership"))?;
+    let dek = unwrap_wrap(&kek, &primary.wrapped_dek, &primary.wrapped_dek_nonce)?;
 
     Ok(LoggedInDevice {
         account_id: resp.account_id,
@@ -260,11 +259,13 @@ pub async fn login_device(
     })
 }
 
+/// Change password, re-wrapping `doc_keys` (every `(doc_id, dek)` the
+/// account holds — the server rejects a partial set).
 pub async fn change_password(
     server_url: &str,
     email: &str,
     device_token: &str,
-    dek: &Dek,
+    doc_keys: &[(&str, &Dek)],
     current_password: &str,
     new_password: &str,
 ) -> anyhow::Result<()> {
@@ -285,7 +286,10 @@ pub async fn change_password(
     let new_master = derive_master(new_password, &new_master_salt, new_kdf_params)?;
     let new_kek = new_master.kek()?;
     let new_auth = new_master.auth_secret()?;
-    let new_wrapped = new_kek.wrap(dek)?;
+    let new_doc_keys = doc_keys
+        .iter()
+        .map(|(doc_id, dek)| wrap_doc_key(&new_kek, doc_id, dek))
+        .collect::<anyhow::Result<Vec<_>>>()?;
 
     client
         .post_authed_no_response(
@@ -296,12 +300,30 @@ pub async fn change_password(
                 new_master_salt: new_master_salt.to_vec(),
                 new_kdf_params,
                 new_auth_secret: new_auth.as_bytes().to_vec(),
-                new_wrapped_dek: new_wrapped.ciphertext,
-                new_wrapped_dek_nonce: new_wrapped.nonce.to_vec(),
+                new_doc_keys,
             },
         )
         .await?;
     Ok(())
+}
+
+fn wrap_doc_key(kek: &Kek, doc_id: &str, dek: &Dek) -> anyhow::Result<DocKey> {
+    let w = kek.wrap(dek)?;
+    Ok(DocKey {
+        doc_id: doc_id.to_string(),
+        wrapped_dek: w.ciphertext,
+        wrapped_dek_nonce: w.nonce.to_vec(),
+    })
+}
+
+fn unwrap_wrap(kek: &Kek, wrapped_dek: &[u8], nonce: &[u8]) -> anyhow::Result<Dek> {
+    let nonce: [u8; AEAD_NONCE_LEN] = nonce
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("server returned a wrap nonce of wrong length"))?;
+    Ok(kek.unwrap(&WrappedDek {
+        ciphertext: wrapped_dek.to_vec(),
+        nonce,
+    })?)
 }
 
 pub async fn recover_device(
@@ -336,22 +358,33 @@ pub async fn recover_device(
             },
         )
         .await?;
-    let recovery_nonce: [u8; AEAD_NONCE_LEN] = recovered
-        .recovery_wrapped_dek_nonce
-        .as_slice()
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("server returned recovery wrap nonce of wrong length"))?;
-    let dek = recovery_kek.unwrap(&WrappedDek {
-        ciphertext: recovered.recovery_wrapped_dek,
-        nonce: recovery_nonce,
-    })?;
+    // Mirror `monoplan recover`: unwrap every recovered doc key, keep
+    // the primary's as `dek`, re-wrap all of them for the reset.
+    let doc_keys = recovered
+        .doc_keys
+        .iter()
+        .map(|k| {
+            Ok((
+                k.doc_id.clone(),
+                unwrap_wrap(&recovery_kek, &k.wrapped_dek, &k.wrapped_dek_nonce)?,
+            ))
+        })
+        .collect::<anyhow::Result<Vec<(String, Dek)>>>()?;
+    let dek = doc_keys
+        .iter()
+        .find(|(id, _)| *id == recovered.primary_doc_id)
+        .map(|(_, dek)| dek.clone())
+        .ok_or_else(|| anyhow::anyhow!("recovery response lacks the primary doc key"))?;
 
     let new_master_salt: [u8; 16] = random_bytes();
     let new_kdf_params = weak_params();
     let new_master = derive_master(new_password, &new_master_salt, new_kdf_params)?;
     let new_kek = new_master.kek()?;
     let new_auth = new_master.auth_secret()?;
-    let new_wrapped = new_kek.wrap(&dek)?;
+    let new_doc_keys = doc_keys
+        .iter()
+        .map(|(id, dek)| wrap_doc_key(&new_kek, id, dek))
+        .collect::<anyhow::Result<Vec<_>>>()?;
 
     let reset: PasswordResetResponse = client
         .post(
@@ -361,8 +394,7 @@ pub async fn recover_device(
                 new_master_salt: new_master_salt.to_vec(),
                 new_kdf_params,
                 new_auth_secret: new_auth.as_bytes().to_vec(),
-                new_wrapped_dek: new_wrapped.ciphertext,
-                new_wrapped_dek_nonce: new_wrapped.nonce.to_vec(),
+                new_doc_keys,
                 device_name: device_name.into(),
             },
         )
@@ -421,7 +453,7 @@ pub async fn materialize_profile(
         Doc::empty()
     };
     let doc_uuid = Uuid::parse_str(primary_doc_id).expect("test passed malformed primary_doc_id");
-    let doc_id = monoplan_core::DocId(doc_uuid);
+    let doc_id = DocId(doc_uuid);
     let storage = monoplan_cli::storage::open_storage(&profile).unwrap();
     monoplan_cli::storage::seed_snapshot(&storage, dek, doc_id, &doc).unwrap();
     storage
@@ -438,10 +470,7 @@ pub async fn materialize_profile(
         })
         .unwrap();
     profile
-        .write_secrets(&Secrets {
-            device_token: device_token.into(),
-            dek_hex: dek_to_hex(dek),
-        })
+        .write_secrets(&Secrets::new(device_token.into(), [(doc_id, dek)]))
         .unwrap();
     profile
 }

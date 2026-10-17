@@ -4,8 +4,10 @@
 //! integration drops into one place rather than threading through every
 //! command.
 
-use monoplan_core::{Dek, Kek, PasswordMaster};
+use monoplan_core::{Dek, DocId, Kek, PasswordMaster};
 use monoplan_protocol::KdfParams;
+
+use crate::config::Secrets;
 
 #[derive(Debug, thiserror::Error)]
 pub enum KeystoreError {
@@ -13,6 +15,18 @@ pub enum KeystoreError {
     Crypto(#[from] monoplan_core::CryptoError),
     #[error("invalid hex: {0}")]
     Hex(#[from] hex::FromHexError),
+    #[error("no key stored for doc {0}; log in again to refresh doc keys")]
+    MissingDocKey(uuid::Uuid),
+}
+
+/// The DEK for `doc_id` from the profile's secrets. Every doc-reading
+/// path goes through here so a missing entry is one typed error rather
+/// than a hex-decode failure three layers down.
+pub fn dek_for_doc(secrets: &Secrets, doc_id: DocId) -> Result<Dek, KeystoreError> {
+    let entry = secrets
+        .doc(doc_id)
+        .ok_or(KeystoreError::MissingDocKey(doc_id.0))?;
+    dek_from_hex(&entry.dek_hex)
 }
 
 pub fn derive_master(

@@ -1,8 +1,11 @@
-//! All sqlite reads/writes touching accounts / devices / recovery sessions.
+//! All sqlite reads/writes touching accounts / memberships / devices /
+//! recovery sessions.
+
+use std::collections::BTreeSet;
 
 use anyhow::Context;
-use monoplan_protocol::KdfParams;
-use rusqlite::{OptionalExtension, params};
+use monoplan_protocol::{KdfParams, MemberRole};
+use rusqlite::{OptionalExtension, Transaction, params};
 use uuid::Uuid;
 
 use crate::db::{Db, now_millis};
@@ -15,12 +18,8 @@ pub struct AccountRow {
     pub password_salt: Vec<u8>,
     pub kdf_params: KdfParams,
     pub primary_doc_id: Uuid,
-    pub wrapped_dek: Vec<u8>,
-    pub wrapped_dek_nonce: Vec<u8>,
     pub recovery_salt: Option<Vec<u8>>,
     pub recovery_auth_hash: Option<Vec<u8>>,
-    pub recovery_wrapped_dek: Option<Vec<u8>>,
-    pub recovery_wrapped_dek_nonce: Option<Vec<u8>>,
 }
 
 impl AccountRow {
@@ -43,16 +42,31 @@ pub struct DeviceRow {
     pub last_acked_seq: i64,
 }
 
+/// One row of `doc_members` as seen from an account: the doc, the role,
+/// and this account's wraps of the doc's DEK.
+#[derive(Debug, Clone)]
+pub struct MembershipRow {
+    pub doc_id: Uuid,
+    pub role: MemberRole,
+    pub wrapped_dek: Vec<u8>,
+    pub wrapped_dek_nonce: Vec<u8>,
+    pub recovery_wrapped_dek: Option<Vec<u8>>,
+    pub recovery_wrapped_dek_nonce: Option<Vec<u8>>,
+}
+
 #[derive(Debug, Clone)]
 pub struct NewAccount {
     pub email: String,
     pub password_hash: Vec<u8>,
     pub password_salt: Vec<u8>,
     pub kdf_params: KdfParams,
+    /// Primary doc's DEK under the password KEK — goes on the signup
+    /// `owner` membership row, not the account.
     pub wrapped_dek: Vec<u8>,
     pub wrapped_dek_nonce: Vec<u8>,
     pub recovery_salt: Option<Vec<u8>>,
     pub recovery_auth_hash: Option<Vec<u8>>,
+    /// Primary doc's DEK under the recovery KEK; same membership row.
     pub recovery_wrapped_dek: Option<Vec<u8>>,
     pub recovery_wrapped_dek_nonce: Option<Vec<u8>>,
     /// Initial device created in the same transaction as the account.
@@ -89,16 +103,12 @@ pub async fn create_account(db: &Db, new: NewAccount) -> anyhow::Result<CreatedA
                    id, email, password_hash, password_salt,
                    kdf_m_kib, kdf_t, kdf_p,
                    primary_doc_id,
-                   wrapped_dek, wrapped_dek_nonce,
                    recovery_salt, recovery_auth_hash,
-                   recovery_wrapped_dek, recovery_wrapped_dek_nonce,
                    created_at
                  ) VALUES (
                    ?, ?, ?, ?,
                    ?, ?, ?,
                    ?,
-                   ?, ?,
-                   ?, ?,
                    ?, ?,
                    ?
                  )",
@@ -111,10 +121,26 @@ pub async fn create_account(db: &Db, new: NewAccount) -> anyhow::Result<CreatedA
                     new.kdf_params.t as i64,
                     new.kdf_params.p as i64,
                     doc_bytes,
-                    new.wrapped_dek,
-                    new.wrapped_dek_nonce,
                     new.recovery_salt,
                     new.recovery_auth_hash,
+                    now,
+                ],
+            )?;
+            // The account's one guaranteed membership: owner of its
+            // primary doc, carrying the wraps the client posted.
+            tx.execute(
+                "INSERT INTO doc_members (
+                   doc_id, account_id, role,
+                   wrapped_dek, wrapped_dek_nonce,
+                   recovery_wrapped_dek, recovery_wrapped_dek_nonce,
+                   added_at
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    doc_bytes,
+                    acc_bytes,
+                    MemberRole::Owner.as_str(),
+                    new.wrapped_dek,
+                    new.wrapped_dek_nonce,
                     new.recovery_wrapped_dek,
                     new.recovery_wrapped_dek_nonce,
                     now,
@@ -158,9 +184,7 @@ pub async fn find_account_by_email(db: &Db, email: String) -> anyhow::Result<Opt
             "SELECT id, email, password_hash, password_salt,
                     kdf_m_kib, kdf_t, kdf_p,
                     primary_doc_id,
-                    wrapped_dek, wrapped_dek_nonce,
-                    recovery_salt, recovery_auth_hash,
-                    recovery_wrapped_dek, recovery_wrapped_dek_nonce
+                    recovery_salt, recovery_auth_hash
              FROM accounts WHERE email = ?",
             [email],
             row_to_account,
@@ -177,9 +201,7 @@ pub async fn find_account_by_id(db: &Db, account_id: Uuid) -> anyhow::Result<Opt
             "SELECT id, email, password_hash, password_salt,
                     kdf_m_kib, kdf_t, kdf_p,
                     primary_doc_id,
-                    wrapped_dek, wrapped_dek_nonce,
-                    recovery_salt, recovery_auth_hash,
-                    recovery_wrapped_dek, recovery_wrapped_dek_nonce
+                    recovery_salt, recovery_auth_hash
              FROM accounts WHERE id = ?",
             [id_bytes],
             row_to_account,
@@ -189,39 +211,241 @@ pub async fn find_account_by_id(db: &Db, account_id: Uuid) -> anyhow::Result<Opt
     .await
 }
 
+/// Active memberships of `account_id`, oldest first.
+pub async fn list_memberships(db: &Db, account_id: Uuid) -> anyhow::Result<Vec<MembershipRow>> {
+    let acc_bytes = account_id.as_bytes().to_vec();
+    db.call(move |c| {
+        let mut stmt = c.prepare(
+            "SELECT doc_id, role, wrapped_dek, wrapped_dek_nonce,
+                    recovery_wrapped_dek, recovery_wrapped_dek_nonce
+             FROM doc_members
+             WHERE account_id = ? AND removed_at IS NULL
+             ORDER BY added_at, doc_id",
+        )?;
+        let rows = stmt
+            .query_map([acc_bytes], row_to_membership)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    })
+    .await
+}
+
+/// Does `account_id` hold an active membership on `doc_id`? The single
+/// access decision behind `OpenDoc` (`sync/ws.rs::can_open`).
+pub async fn is_member(db: &Db, doc_id: Uuid, account_id: Uuid) -> anyhow::Result<bool> {
+    let doc_bytes = doc_id.as_bytes().to_vec();
+    let acc_bytes = account_id.as_bytes().to_vec();
+    db.call(move |c| {
+        let n: i64 = c.query_row(
+            "SELECT COUNT(*) FROM doc_members
+             WHERE doc_id = ? AND account_id = ? AND removed_at IS NULL",
+            params![doc_bytes, acc_bytes],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    })
+    .await
+}
+
+/// A doc's DEK re-wrapped under the account's *new* password KEK.
+#[derive(Debug, Clone)]
+pub struct DocKeyUpdate {
+    pub doc_id: Uuid,
+    pub wrapped_dek: Vec<u8>,
+    pub wrapped_dek_nonce: Vec<u8>,
+}
+
+/// New password material plus the re-wrap of every doc the account can
+/// open. The KEK is changing, so a membership left out of `new_doc_keys`
+/// would be stranded behind a key nobody holds any more; the update is
+/// rejected unless the set of doc ids matches what the server expects
+/// (see [`PasswordUpdateOutcome::DocKeysMismatch`]).
 #[derive(Debug, Clone)]
 pub struct PasswordUpdate {
-    pub account_id: Uuid,
     pub new_password_hash: Vec<u8>,
     pub new_password_salt: Vec<u8>,
     pub new_kdf_params: KdfParams,
-    pub new_wrapped_dek: Vec<u8>,
-    pub new_wrapped_dek_nonce: Vec<u8>,
+    pub new_doc_keys: Vec<DocKeyUpdate>,
 }
 
-pub async fn update_password(db: &Db, u: PasswordUpdate) -> anyhow::Result<()> {
-    let id_bytes = u.account_id.as_bytes().to_vec();
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PasswordUpdateOutcome {
+    Updated,
+    /// `new_doc_keys` did not name exactly the memberships the server
+    /// expected. Nothing was written.
+    DocKeysMismatch {
+        expected: Vec<Uuid>,
+        got: Vec<Uuid>,
+    },
+}
+
+/// Which memberships a password update must re-wrap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RewrapScope {
+    /// Logged-in password change: the client holds every DEK.
+    AllActive,
+    /// Recovery reset: only memberships the recovery code opened. Any
+    /// active membership *without* a recovery wrap is closed in the
+    /// same transaction — the client never had its DEK, and leaving a
+    /// password wrap under the abandoned KEK would make the next login
+    /// hand back a membership nobody can unwrap.
+    RecoverableOnly,
+}
+
+/// Logged-in password change. One transaction: password material on
+/// `accounts`, then every active membership's `wrapped_dek`.
+pub async fn update_password(
+    db: &Db,
+    account_id: Uuid,
+    u: PasswordUpdate,
+) -> anyhow::Result<PasswordUpdateOutcome> {
     db.call(move |c| {
-        c.execute(
-            "UPDATE accounts
-             SET password_hash = ?, password_salt = ?,
-                 kdf_m_kib = ?, kdf_t = ?, kdf_p = ?,
-                 wrapped_dek = ?, wrapped_dek_nonce = ?
-             WHERE id = ?",
-            params![
-                u.new_password_hash,
-                u.new_password_salt,
-                u.new_kdf_params.m_kib as i64,
-                u.new_kdf_params.t as i64,
-                u.new_kdf_params.p as i64,
-                u.new_wrapped_dek,
-                u.new_wrapped_dek_nonce,
-                id_bytes,
-            ],
-        )
+        let tx = c.transaction()?;
+        let outcome = apply_password_update(&tx, account_id, &u, RewrapScope::AllActive)?;
+        if outcome == PasswordUpdateOutcome::Updated {
+            tx.commit()?;
+        }
+        Ok(outcome)
     })
-    .await?;
-    Ok(())
+    .await
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PasswordResetOutcome {
+    Updated {
+        account_id: Uuid,
+    },
+    /// No such session, already consumed, or expired. Nothing written.
+    SessionInvalid,
+    /// Session was valid but `new_doc_keys` did not match; nothing
+    /// written — the session is *not* consumed, so the client can retry
+    /// with a corrected set inside the TTL.
+    DocKeysMismatch {
+        expected: Vec<Uuid>,
+        got: Vec<Uuid>,
+    },
+}
+
+/// Recovery-path password reset: validate + consume the recovery
+/// session and apply the password update in one transaction, so a
+/// rejected update never burns the session.
+pub async fn reset_password_with_recovery_session(
+    db: &Db,
+    token_hash: Vec<u8>,
+    u: PasswordUpdate,
+) -> anyhow::Result<PasswordResetOutcome> {
+    let now = now_millis();
+    db.call(move |c| {
+        let tx = c.transaction()?;
+        let row: Option<(Vec<u8>, i64, Option<i64>)> = tx
+            .query_row(
+                "SELECT account_id, expires_at, consumed_at
+                 FROM recovery_sessions WHERE token_hash = ?",
+                [&token_hash],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        let Some((acc_blob, expires_at, consumed_at)) = row else {
+            return Ok(PasswordResetOutcome::SessionInvalid);
+        };
+        if consumed_at.is_some() || expires_at < now {
+            return Ok(PasswordResetOutcome::SessionInvalid);
+        }
+        let account_id = uuid_from_blob(acc_blob)?;
+        match apply_password_update(&tx, account_id, &u, RewrapScope::RecoverableOnly)? {
+            PasswordUpdateOutcome::DocKeysMismatch { expected, got } => {
+                Ok(PasswordResetOutcome::DocKeysMismatch { expected, got })
+            }
+            PasswordUpdateOutcome::Updated => {
+                tx.execute(
+                    "UPDATE recovery_sessions SET consumed_at = ? WHERE token_hash = ?",
+                    params![now, token_hash],
+                )?;
+                tx.commit()?;
+                Ok(PasswordResetOutcome::Updated { account_id })
+            }
+        }
+    })
+    .await
+}
+
+/// Shared body of change + reset. Checks `new_doc_keys` against the
+/// memberships `scope` says must be re-wrapped, then writes password
+/// material and every wrap. Returns without writing on a mismatch; the
+/// caller decides whether to commit.
+fn apply_password_update(
+    tx: &Transaction<'_>,
+    account_id: Uuid,
+    u: &PasswordUpdate,
+    scope: RewrapScope,
+) -> rusqlite::Result<PasswordUpdateOutcome> {
+    let acc_bytes = account_id.as_bytes().to_vec();
+    let active: Vec<(Uuid, bool)> = {
+        let mut stmt = tx.prepare(
+            "SELECT doc_id, recovery_wrapped_dek IS NOT NULL
+             FROM doc_members WHERE account_id = ? AND removed_at IS NULL",
+        )?;
+        stmt.query_map([&acc_bytes], |r| {
+            Ok((
+                uuid_from_blob(r.get::<_, Vec<u8>>(0)?)?,
+                r.get::<_, bool>(1)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let (must_rewrap, to_close): (Vec<Uuid>, Vec<Uuid>) = match scope {
+        RewrapScope::AllActive => (active.into_iter().map(|(d, _)| d).collect(), Vec::new()),
+        RewrapScope::RecoverableOnly => {
+            let (yes, no): (Vec<_>, Vec<_>) = active.into_iter().partition(|(_, r)| *r);
+            (
+                yes.into_iter().map(|(d, _)| d).collect(),
+                no.into_iter().map(|(d, _)| d).collect(),
+            )
+        }
+    };
+    let expected: BTreeSet<Uuid> = must_rewrap.iter().copied().collect();
+    let got: BTreeSet<Uuid> = u.new_doc_keys.iter().map(|k| k.doc_id).collect();
+    if expected != got || got.len() != u.new_doc_keys.len() {
+        return Ok(PasswordUpdateOutcome::DocKeysMismatch {
+            expected: expected.into_iter().collect(),
+            got: u.new_doc_keys.iter().map(|k| k.doc_id).collect(),
+        });
+    }
+    tx.execute(
+        "UPDATE accounts
+         SET password_hash = ?, password_salt = ?,
+             kdf_m_kib = ?, kdf_t = ?, kdf_p = ?
+         WHERE id = ?",
+        params![
+            u.new_password_hash,
+            u.new_password_salt,
+            u.new_kdf_params.m_kib as i64,
+            u.new_kdf_params.t as i64,
+            u.new_kdf_params.p as i64,
+            acc_bytes,
+        ],
+    )?;
+    for k in &u.new_doc_keys {
+        tx.execute(
+            "UPDATE doc_members SET wrapped_dek = ?, wrapped_dek_nonce = ?
+             WHERE doc_id = ? AND account_id = ? AND removed_at IS NULL",
+            params![
+                k.wrapped_dek,
+                k.wrapped_dek_nonce,
+                k.doc_id.as_bytes().to_vec(),
+                acc_bytes,
+            ],
+        )?;
+    }
+    let now = now_millis();
+    for doc_id in &to_close {
+        tx.execute(
+            "UPDATE doc_members SET removed_at = ?
+             WHERE doc_id = ? AND account_id = ? AND removed_at IS NULL",
+            params![now, doc_id.as_bytes().to_vec(), acc_bytes],
+        )?;
+    }
+    Ok(PasswordUpdateOutcome::Updated)
 }
 
 pub async fn create_device(
@@ -379,46 +603,6 @@ pub async fn create_recovery_session(
     Ok(())
 }
 
-#[derive(Debug, Clone)]
-pub struct ConsumedRecoverySession {
-    pub account_id: Uuid,
-}
-
-/// Atomically validate + consume a recovery session token. Returns
-/// `Some(account_id)` only if the session existed, was not previously
-/// consumed, and has not expired. Sets `consumed_at` on success.
-pub async fn consume_recovery_session(
-    db: &Db,
-    token_hash: Vec<u8>,
-) -> anyhow::Result<Option<ConsumedRecoverySession>> {
-    let now = now_millis();
-    db.call(move |c| {
-        let tx = c.transaction()?;
-        let row: Option<(Vec<u8>, i64, Option<i64>)> = tx
-            .query_row(
-                "SELECT account_id, expires_at, consumed_at
-                 FROM recovery_sessions WHERE token_hash = ?",
-                [&token_hash],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
-            .optional()?;
-        let Some((acc_blob, expires_at, consumed_at)) = row else {
-            return Ok(None);
-        };
-        if consumed_at.is_some() || expires_at < now {
-            return Ok(None);
-        }
-        tx.execute(
-            "UPDATE recovery_sessions SET consumed_at = ? WHERE token_hash = ?",
-            params![now, token_hash],
-        )?;
-        tx.commit()?;
-        let account_id = uuid_from_blob(acc_blob)?;
-        Ok(Some(ConsumedRecoverySession { account_id }))
-    })
-    .await
-}
-
 fn row_to_account(r: &rusqlite::Row<'_>) -> rusqlite::Result<AccountRow> {
     Ok(AccountRow {
         id: uuid_from_blob(r.get::<_, Vec<u8>>(0)?)?,
@@ -431,12 +615,29 @@ fn row_to_account(r: &rusqlite::Row<'_>) -> rusqlite::Result<AccountRow> {
             p: r.get::<_, i64>(6)? as u32,
         },
         primary_doc_id: uuid_from_blob(r.get::<_, Vec<u8>>(7)?)?,
-        wrapped_dek: r.get(8)?,
-        wrapped_dek_nonce: r.get(9)?,
-        recovery_salt: r.get(10)?,
-        recovery_auth_hash: r.get(11)?,
-        recovery_wrapped_dek: r.get(12)?,
-        recovery_wrapped_dek_nonce: r.get(13)?,
+        recovery_salt: r.get(8)?,
+        recovery_auth_hash: r.get(9)?,
+    })
+}
+
+fn row_to_membership(r: &rusqlite::Row<'_>) -> rusqlite::Result<MembershipRow> {
+    let role_text: String = r.get(1)?;
+    let role = MemberRole::parse(&role_text).ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(
+            1,
+            rusqlite::types::Type::Text,
+            Box::<dyn std::error::Error + Send + Sync + 'static>::from(format!(
+                "unknown doc_members.role {role_text:?}"
+            )),
+        )
+    })?;
+    Ok(MembershipRow {
+        doc_id: uuid_from_blob(r.get::<_, Vec<u8>>(0)?)?,
+        role,
+        wrapped_dek: r.get(2)?,
+        wrapped_dek_nonce: r.get(3)?,
+        recovery_wrapped_dek: r.get(4)?,
+        recovery_wrapped_dek_nonce: r.get(5)?,
     })
 }
 

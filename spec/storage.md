@@ -2,7 +2,7 @@
 
 Sqlite for now. One database file per server instance. Single-tenant (one account per server) is *not* assumed — the schema is multi-account from day one because the SaaS Postgres path will reuse the same shape.
 
-Every account owns exactly one `docs` row — its **primary doc** (the Home). Today that's the only doc an account ever has; the `docs` entity and `accounts.primary_doc_id` pointer exist to make the eventual multi-doc/sharing migration incremental rather than a flag day. See `sharing-plan.md` for what's planned but not built.
+Every account owns exactly one `docs` row — its **primary doc** (the Home) — and holds an `owner` row for it in `doc_members`. Access to a doc *is* an active `doc_members` row, and the doc's DEK is wrapped per membership (`encryption.md`): the key model is already multi-doc even though today no account has a second membership. See `sharing-plan.md` for what remains (invites, multi-open connections, member management).
 
 ## Schema (`migrations/001_init.sql`)
 
@@ -20,17 +20,33 @@ CREATE TABLE accounts (
   email                       TEXT UNIQUE NOT NULL,
   password_hash               BLOB NOT NULL,               -- SHA-256(client auth_secret)
   password_salt               BLOB NOT NULL,               -- master_salt for client KDF
+  kdf_m_kib, kdf_t, kdf_p     INTEGER NOT NULL,            -- argon2 params (three columns)
   primary_doc_id              BLOB NOT NULL REFERENCES docs(id),  -- the account's Home doc
-  wrapped_dek                 BLOB NOT NULL,
-  wrapped_dek_nonce           BLOB NOT NULL,
   recovery_salt               BLOB,                        -- present iff recovery code opted in
   recovery_auth_hash          BLOB,                        -- SHA-256(client recovery_auth_secret)
-  recovery_wrapped_dek        BLOB,
-  recovery_wrapped_dek_nonce  BLOB,
   created_at                  INTEGER NOT NULL             -- unix millis
 );
--- wrapped_dek here is the primary doc's DEK (1:1 with accounts today). When
--- sharing lands it moves to per-membership wraps; see sharing-plan.md.
+-- Password material only. No key wraps: the DEK is a doc key, held per
+-- membership below. The recovery *code* is an account credential (salt +
+-- auth hash live here); the wraps it opens are per-membership.
+
+CREATE TABLE doc_members (
+  doc_id                       BLOB NOT NULL REFERENCES docs(id),
+  account_id                   BLOB NOT NULL REFERENCES accounts(id),
+  role                         TEXT NOT NULL,              -- 'owner' | 'member'
+  wrapped_dek                  BLOB NOT NULL,              -- this doc's DEK under this member's password KEK
+  wrapped_dek_nonce            BLOB NOT NULL,
+  recovery_wrapped_dek         BLOB,                       -- same DEK under the member's recovery KEK, iff enrolled
+  recovery_wrapped_dek_nonce   BLOB,
+  added_at                     INTEGER NOT NULL,
+  removed_at                   INTEGER,                    -- NULL = active; set = forward-only revocation
+  PRIMARY KEY (doc_id, account_id)
+);
+CREATE INDEX doc_members_account_id_idx ON doc_members (account_id) WHERE removed_at IS NULL;
+-- One `owner` row per account for its primary doc, written at signup. An
+-- active row is the access decision for `OpenDoc` and the device set for
+-- the compaction horizon. Password change / reset rewrite `wrapped_dek` on
+-- every active row in one transaction (encryption.md).
 
 CREATE TABLE recovery_sessions (
   token_hash      BLOB PRIMARY KEY,                        -- SHA-256(token)
@@ -119,10 +135,11 @@ Device frontiers are per-(device, doc) in `device_doc_frontiers`, keyed to match
 `docs` has no FK back to `accounts`, but `accounts.primary_doc_id` references `docs(id)`. The signup transaction is therefore:
 
 1. `INSERT INTO docs(id, created_at) …` — mint the primary doc id.
-2. `INSERT INTO accounts(…, primary_doc_id = <doc id from step 1>, wrapped_dek, …)`.
-3. `INSERT INTO devices(…)` for the signup device.
+2. `INSERT INTO accounts(…, primary_doc_id = <doc id from step 1>)`.
+3. `INSERT INTO doc_members(doc_id, account_id, role = 'owner', wrapped_dek, …, recovery_wrapped_dek, …)` — the wraps the client posted.
+4. `INSERT INTO devices(…)` for the signup device.
 
-All in one tx with `BEGIN IMMEDIATE`. The invariant "`accounts.primary_doc_id` always points to a real `docs` row" is enforced by the FK; the inverse "every doc belongs to some account" is held by application code today (will relax under sharing).
+All in one tx with `BEGIN IMMEDIATE`. The invariant "`accounts.primary_doc_id` always points to a real `docs` row" is enforced by the FK; "every doc has at least one owner membership" is held by application code.
 
 ## Compaction
 
@@ -130,7 +147,7 @@ After a snapshot lands, a background job may, per doc:
 1. Delete `ops` rows where `doc_id = X AND seq ≤ snapshot.compaction_floor_seq`. (`compaction_floor_seq` is set to `max(horizon, prev snapshot's compaction_floor_seq)` at snapshot creation time by the orchestrator — see `sync-protocol.md` §"Snapshot orchestration" — so it's safe by construction.)
 2. Snapshot rows are never deleted. The chain is one full head plus every delta since; superseding it is the trimmed snapshot's job (§Epochs, not built), and the pruning rule will be written with it.
 
-Horizon is `min(last_acked_seq)` over the doc's `device_doc_frontiers` rows across the devices of every account that can open it — today the owning account's devices, joined so that a device with no row counts as 0.
+Horizon is `min(last_acked_seq)` over the doc's `device_doc_frontiers` rows across the devices of every account with an active `doc_members` row on it (the same set `can_open` admits), joined so that a device with no row counts as 0.
 
 Run on a timer, not synchronous with snapshot upload. The `doc_sequences.next_seq` counter is **not** rewound by compaction — `next_seq` keeps climbing even when the rows below the snapshot floor are pruned.
 

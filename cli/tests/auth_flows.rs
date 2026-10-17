@@ -92,7 +92,7 @@ async fn password_change_preserves_dek_and_existing_items_for_new_login() {
         &server.base,
         &signup.email,
         &signup.device_token,
-        &signup.dek,
+        &[(signup.primary_doc_id.as_str(), &signup.dek)],
         TEST_PASSWORD,
         NEW_PASSWORD,
     )

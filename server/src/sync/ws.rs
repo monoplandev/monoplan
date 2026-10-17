@@ -31,7 +31,9 @@ use uuid::Uuid;
 use crate::auth::DeviceAuth;
 use crate::auth::client_ip::{client_ip, peer_ip};
 use crate::auth::cookie;
-use crate::auth::queries::{find_device_by_token_hash, touch_device_last_seen};
+use crate::auth::queries::{
+    self as queries_auth, find_device_by_token_hash, touch_device_last_seen,
+};
 use crate::auth::tokens::{decode_token, sha256};
 use crate::error::ApiError;
 use crate::http::request_id::RequestId;
@@ -82,12 +84,11 @@ impl WSSession {
     }
 }
 
-/// May this device open `doc_id`? Today an account can reach exactly
-/// one doc — its primary — so this is an equality check. It becomes
-/// the membership lookup when sharing lands; keep every access
-/// decision behind it.
-fn can_open(auth: &DeviceAuth, doc_id: Uuid) -> bool {
-    doc_id == auth.primary_doc_id
+/// May this device open `doc_id`? An active `doc_members` row for the
+/// device's account is the one and only access decision; keep every
+/// such check behind this function.
+async fn can_open(state: &AppState, auth: &DeviceAuth, doc_id: Uuid) -> anyhow::Result<bool> {
+    queries_auth::is_member(&state.db, doc_id, auth.account_id).await
 }
 
 pub async fn ws_handler(
@@ -325,7 +326,7 @@ async fn open_doc(
 ) -> Result<(), SessionError> {
     let span = tracing::info_span!("ws.open_doc", doc_id = %doc_id);
     async {
-        let refusal = if !can_open(&ws_session.auth, doc_id) {
+        let refusal = if !can_open(state, &ws_session.auth, doc_id).await? {
             Some("not a member of this doc")
         } else if ws_session.open.as_ref().is_some_and(|o| o.doc_id != doc_id) {
             // One doc per connection until multiplexing lands; make
@@ -395,7 +396,6 @@ async fn evaluate_snapshot_decision(
     let horizon = queries::doc_horizon(
         &state.db,
         doc_id,
-        ws_session.auth.account_id,
         ws_session.auth.device_id,
         device_last_acked_seq,
     )

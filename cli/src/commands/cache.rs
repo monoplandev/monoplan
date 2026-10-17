@@ -83,7 +83,7 @@ async fn clear(force: bool) -> anyhow::Result<()> {
     // Local operations the server has no proof of would be lost by a
     // cache wipe.
     let secrets = profile.read_secrets()?;
-    let dek = crate::keystore::dek_from_hex(&secrets.dek_hex)?;
+    let dek = crate::keystore::dek_for_doc(&secrets, doc_id)?;
     let pending = crate::storage::has_unsynced_ops(&storage, &dek, doc_id)
         .map_err(|e| anyhow::anyhow!("read pending state: {e}"))?;
 

@@ -4,7 +4,7 @@ use monoplan_core::{Dek, Doc, NotesDeltaOp, generate_recovery_code, random_bytes
 use monoplan_protocol::{KdfParams, RecoveryMaterial, SignupRequest, SignupResponse};
 
 use crate::config::{Config, Profile, Secrets};
-use crate::keystore::{dek_to_hex, derive_master};
+use crate::keystore::derive_master;
 use crate::net::Client;
 use crate::storage::Account;
 
@@ -155,10 +155,7 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
     profile.write_config(&Config {
         server_url: args.server,
     })?;
-    profile.write_secrets(&Secrets {
-        device_token: resp.device_token,
-        dek_hex: dek_to_hex(&dek),
-    })?;
+    profile.write_secrets(&Secrets::new(resp.device_token, [(doc_id, &dek)]))?;
 
     println!("Account created: {email} ({})", resp.account_id);
     if let Some(code) = recovery_code_to_show {

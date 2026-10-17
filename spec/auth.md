@@ -74,8 +74,8 @@ Client cannot derive `auth_secret` without the salt. Standard pattern:
 
 1. `POST /api/account/prelogin { email }` → server returns `{ password_salt, kdf_params }`, or **404 if email unknown**. We accept that this leaks account existence: signup (duplicate-email rejection) and recovery already leak the same bit, so faking a deterministic dummy salt here would be theatre while costing every typo'd-email attempt a full client-side Argon2id pass. Defence is rate-limiting (per-IP + per-email backoff), not response shaping. Revisit only if Monoplan ever holds data where "is X a user" is itself sensitive.
 2. Client computes `master`, `kek`, `auth_secret` from the password and salt.
-3. `POST /api/account/login { email, auth_secret }` → server verifies, returns `{ wrapped_dek, wrapped_dek_nonce, recovery_present, device_token? }` (device_token only if registering this client as a device in the same call; otherwise client follows up with `POST /api/devices`).
-4. Client unwraps DEK with `kek`.
+3. `POST /api/account/login { email, auth_secret }` → server verifies, returns `{ account_id, primary_doc_id, memberships: [{ doc_id, role, wrapped_dek, wrapped_dek_nonce }], recovery_present, device? }` (`device` only if registering this client as a device in the same call; otherwise client follows up with `POST /api/devices`). One membership per doc the account can open; the DEK is per doc (`encryption.md`).
+4. Client unwraps each membership's DEK with `kek`.
 
 ## Device pairing
 
@@ -86,18 +86,18 @@ Client cannot derive `auth_secret` without the salt. Standard pattern:
 ### Device 2 (existing account)
 1. POST `/api/account/prelogin { email }` → returns `password_salt`.
 2. Client derives `master` → `kek`, `auth_secret` from password + salt.
-3. POST `/api/account/login { email, auth_secret }` → returns `wrapped_dek`.
-4. Client unwraps DEK with `kek`.
+3. POST `/api/account/login { email, auth_secret }` → returns `memberships` (one wrap per doc).
+4. Client unwraps each DEK with `kek`.
 5. POST `/api/devices` → returns new `device_token`.
 6. WS connect, `PullSnapshot` if present, then `PullOps`.
 
 ### Recovery (lost password / fresh device)
 1. POST `/api/account/prelogin { email }` → `{ master_salt, recovery_salt }`.
 2. Client computes `recovery_master = Argon2id(recovery_code, recovery_salt)` → `recovery_kek`, `recovery_auth_secret`.
-3. POST `/api/account/recover { email, recovery_auth_secret }` → server verifies `SHA-256(recovery_auth_secret) == recovery_auth_hash`, returns `{ recovery_wrapped_dek, recovery_wrapped_dek_nonce, recovery_session_token }`. **Wrap is never released without this proof.** `recovery_session_token` is single-use and TTL 15 min — long enough to type a strong new password without rushing, short enough that an abandoned tab doesn't leave the reset window open.
-4. Client unwraps DEK locally with `recovery_kek`.
-5. Client picks new password, derives new `master_salt`, `master`, `kek`, `auth_secret`; re-wraps DEK.
-6. POST `/api/account/password/reset { recovery_session_token, new_master_salt, new_auth_secret, new_wrapped_dek, new_wrapped_dek_nonce, device_name }` → atomically updates password material + creates device row + invalidates session token, returns `{ device_id, device_token }`.
+3. POST `/api/account/recover { email, recovery_auth_secret }` → server verifies `SHA-256(recovery_auth_secret) == recovery_auth_hash`, returns `{ account_id, primary_doc_id, doc_keys: [{ doc_id, wrapped_dek, wrapped_dek_nonce }], recovery_session_token }` — recovery-KEK wraps for every membership that has one. **Wraps are never released without this proof.** `recovery_session_token` is single-use and TTL 15 min — long enough to type a strong new password without rushing, short enough that an abandoned tab doesn't leave the reset window open.
+4. Client unwraps each DEK locally with `recovery_kek`.
+5. Client picks new password, derives new `master_salt`, `master`, `kek`, `auth_secret`; re-wraps every DEK.
+6. POST `/api/account/password/reset { recovery_session_token, new_master_salt, new_auth_secret, new_doc_keys, device_name }` → in one transaction validates + consumes the session token, updates password material, rewrites every membership wrap, creates the device row; returns `{ device_id, device_token, primary_doc_id }`. `new_doc_keys` must match the set from step 3 (400 otherwise; the session survives for a retry).
 7. WS connect, `PullSnapshot` if present, then `PullOps`.
 
 ## Rate limiting
