@@ -14,9 +14,6 @@ import { type Session } from "../Login.tsx";
 import { createSyncedApp, type DocApp } from "./store.ts";
 import { createSyncBridge, SyncBridge } from "./sync.ts";
 
-const CLIENT_NAME = "monoplan-web";
-const CLIENT_VERSION = "0.1.0";
-
 // Onboarding items for a brand-new account's "Welcome" list — learn by
 // doing: the item text names the gesture, and completing it (ticking the
 // box) is itself the lesson. The first item's descriptive line lives in
@@ -96,8 +93,6 @@ export function createWorkspaceRuntime(props: {
     props.session.primaryDocId,
     props.session.dek.clone(),
     props.boot.lastAcked,
-    CLIENT_NAME,
-    CLIENT_VERSION,
     storage,
   );
   // Seed the engine's persisted cursors from what the store loaded:
@@ -243,7 +238,9 @@ export function createWorkspaceRuntime(props: {
   // commits still persist through `capture()` above.
   if (!props.session.anonymous) {
     bridge = createSyncBridge({
-      engine,
+      // One doc per session today; the bridge multiplexes N engines
+      // over the socket once the web client loads every membership.
+      engines: [engine],
       onChange: (kind) => {
         if (kind === "online") {
           props.setOnline(true);

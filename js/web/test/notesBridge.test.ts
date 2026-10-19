@@ -19,8 +19,6 @@ test("typed notes deltas are captured to the WAL on the idle timer", async () =>
     DOC_ID,
     dek.clone(),
     0n,
-    "test",
-    "0",
     storage as unknown as EngineStorage,
   );
   const app = createSyncedApp(engine);
@@ -68,8 +66,6 @@ test("a notes editing session is one workspace undo step after blur", () => {
     DOC_ID,
     Dek.generate(),
     0n,
-    "test",
-    "0",
     new MemEngineStorage() as unknown as EngineStorage,
   );
   const app = createSyncedApp(engine);
@@ -118,8 +114,6 @@ test("an unchanged notes session records no undo step", () => {
     DOC_ID,
     Dek.generate(),
     0n,
-    "test",
-    "0",
     new MemEngineStorage() as unknown as EngineStorage,
   );
   const app = createSyncedApp(engine);
@@ -156,8 +150,6 @@ test("notes written inside an action batch ride the batch's undo step", () => {
     DOC_ID,
     Dek.generate(),
     0n,
-    "test",
-    "0",
     new MemEngineStorage() as unknown as EngineStorage,
   );
   const app = createSyncedApp(engine);
@@ -195,8 +187,6 @@ test("a full capture is one undo step and redo restores its fields", () => {
     DOC_ID,
     Dek.generate(),
     0n,
-    "test",
-    "0",
     new MemEngineStorage() as unknown as EngineStorage,
   );
   const app = createSyncedApp(engine);

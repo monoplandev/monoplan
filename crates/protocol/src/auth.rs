@@ -252,6 +252,41 @@ pub struct PasswordResetResponse {
     pub primary_doc_id: String,
 }
 
+// ---------- /api/docs ----------
+
+/// `POST /api/docs`: create a doc the calling account owns. The client
+/// generates the doc's DEK, wraps it under its password KEK (and under
+/// its recovery KEK iff the account enrolled a recovery code: the
+/// server rejects a missing recovery wrap on an enrolled account,
+/// since a password reset would otherwise close the membership and
+/// strand the doc). The server mints the doc id and inserts the
+/// `owner` membership carrying these wraps.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateDocRequest {
+    #[serde(with = "serde_bytes")]
+    pub wrapped_dek: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub wrapped_dek_nonce: Vec<u8>,
+    #[serde(default, with = "serde_bytes_opt")]
+    pub recovery_wrapped_dek: Option<Vec<u8>>,
+    #[serde(default, with = "serde_bytes_opt")]
+    pub recovery_wrapped_dek_nonce: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateDocResponse {
+    pub doc_id: String,
+}
+
+/// `GET /api/docs`: the calling account's active memberships, in the
+/// same shape `/login` returns them, for a device that wants to learn
+/// about docs created since it logged in.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocsListResponse {
+    pub primary_doc_id: String,
+    pub memberships: Vec<Membership>,
+}
+
 // ---------- /api/devices ----------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

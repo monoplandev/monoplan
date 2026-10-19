@@ -26,8 +26,6 @@ function engineFrom(doc: Doc): SyncEngine {
     DOC_ID,
     Dek.generate(),
     0n,
-    "test",
-    "0",
     new MemEngineStorage() as unknown as EngineStorage,
   );
 }

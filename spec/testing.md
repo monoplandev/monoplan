@@ -43,6 +43,21 @@ E2E is the load-bearing surface. Required matrix:
 
 Avoid duplicate happy-path coverage across `server/tests/` and `cli/tests/` unless the server-side test is proving a narrower wire-contract detail that the CLI-system test does not cover.
 
+## Known coverage gaps (multi-doc transport)
+
+The multiplexed connection (`sync-protocol.md` §Doc binding) is proven end to end against the real server: `server/tests/sync.rs` (two docs on one connection, per-doc broadcast isolation across three connections, per-doc lease release on disconnect) and `js/core/test/sync-e2e.test.ts` (two private docs, one socket per device, bootstrap and live broadcast without bleed). Three router behaviours are **not** exercised, because the real server never produces the condition and we chose not to add a scripted WebSocket server to fake it:
+
+1. **One doc stalls, the others proceed.** Doc A stuck in `Pulling` (server never sends `complete: true`) must not block doc B's open, pull, push, or acks on the same socket. The engines are independent state machines by construction, so this holds by inspection, but nothing asserts it.
+2. **Rejected handshake reconnects with backoff.** `HelloRejected` (or a version mismatch) must surface through `onError`, close the socket, and schedule a retry rather than bring any engine online. The real server only rejects an unknown protocol version, which the bridge never sends.
+3. **Handshake timeout.** No `HelloAck` within `handshakeTimeoutMs` closes the socket and reconnects.
+
+Ways to cover these without a fake server, in order of preference:
+
+- **Make the real server produce the condition.** A test-only server config (environment variable, like `MONOPLAN_SNAPSHOT_THRESHOLD_BLOBS` today) that delays or withholds the terminal `OpsBatch` for a named doc, or that delays `HelloAck`, would cover 1 and 3 with the real wire. Case 2 can be reached today by letting the test override the protocol version the bridge advertises (a `codec` whose `helloFrame` encodes `supported_protocol_versions: [9999]`), which needs no server change at all.
+- **Drive the bridge with a hand-held socket pair.** Bun's `WebSocketPair` is not available, but a bridge whose `socketFactory` returns an object implementing the four handlers the bridge touches (`onopen` / `onmessage` / `onclose` / `send`) is a dozen lines and tests only the router, with no server at all. This is a stub, not a server, and stays inside the test file.
+
+If one of these cases ever bites, add the override first; do not introduce a standalone fake server.
+
 ## Helpers
 
 - `TestServer` — RAII handle, starts a server on a random port with a temp sqlite, exposes URL, kills on drop.

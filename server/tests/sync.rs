@@ -9,9 +9,9 @@ use futures_util::{SinkExt, StreamExt};
 use http::header::AUTHORIZATION;
 use monoplan_core::{Dek, derive_password_master, random_bytes};
 use monoplan_protocol::{
-    ClientFrame, DeviceCredential, DeviceRegistration, EncryptedBlob, Hello, HelloAck,
-    HelloRejected, KdfParams, PROTOCOL_VERSION, PushBlob, ServerFrame, SignupRequest,
-    SignupResponse, SnapshotBase, StoredBlob,
+    ClientFrame, CreateDocRequest, CreateDocResponse, DeviceCredential, DeviceRegistration,
+    EncryptedBlob, Hello, HelloAck, HelloRejected, KdfParams, PROTOCOL_VERSION, PushBlob,
+    ServerFrame, SignupRequest, SignupResponse, SnapshotBase, StoredBlob,
 };
 use monoplan_server::sync::{SnapshotCoordinator, queries};
 use monoplan_server::{AppState, router};
@@ -141,6 +141,47 @@ async fn register_second_device(acc: &Account, name: &str) -> ExtraDevice {
     ExtraDevice {
         device_token: resp.device_token,
         device_id: Uuid::parse_str(&resp.device_id).unwrap(),
+    }
+}
+
+/// Create a second doc the account owns through the real endpoint.
+/// Wraps are fake bytes: the server stores them opaquely and these
+/// tests never unwrap.
+async fn create_doc(acc: &Account) -> Uuid {
+    let resp: CreateDocResponse = post_msgpack_authed(
+        &format!("{}/api/docs", acc.server.base),
+        &CreateDocRequest {
+            wrapped_dek: vec![7u8; 48],
+            wrapped_dek_nonce: vec![6u8; 24],
+            recovery_wrapped_dek: None,
+            recovery_wrapped_dek_nonce: None,
+        },
+        Some(&acc.device_token),
+    )
+    .await;
+    Uuid::parse_str(&resp.doc_id).unwrap()
+}
+
+/// `OpenDoc` on an already-handshaken connection; returns the epoch.
+async fn open_doc(ws: &mut WsStream, doc_id: Uuid) -> u64 {
+    send_msgpack(ws, &ClientFrame::OpenDoc { doc_id }).await;
+    match recv_msgpack::<ServerFrame>(ws).await {
+        ServerFrame::DocOpened {
+            doc_id: opened,
+            epoch,
+        } => {
+            assert_eq!(opened, doc_id);
+            epoch
+        }
+        other => panic!("expected DocOpened, got {other:?}"),
+    }
+}
+
+/// Fail if any frame at all arrives within `window`.
+async fn assert_no_frame(ws: &mut WsStream, window: std::time::Duration) {
+    match tokio::time::timeout(window, recv_msgpack::<ServerFrame>(ws)).await {
+        Ok(frame) => panic!("unexpected frame: {frame:?}"),
+        Err(_) => {}
     }
 }
 
@@ -1247,12 +1288,15 @@ async fn wait_for_subscribers(acc: &Account, target: usize) {
 /// then return whatever the row holds. Avoids racing the WS task's
 /// commit point.
 async fn wait_for_acked(acc: &Account, target: u64) -> u64 {
+    wait_for_acked_on(acc, acc.primary_doc_id, target).await
+}
+
+async fn wait_for_acked_on(acc: &Account, doc_id: Uuid, target: u64) -> u64 {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     loop {
-        let stored =
-            queries::get_last_acked_seq(&acc.server.state.db, acc.device_id, acc.primary_doc_id)
-                .await
-                .unwrap();
+        let stored = queries::get_last_acked_seq(&acc.server.state.db, acc.device_id, doc_id)
+            .await
+            .unwrap();
         if stored >= target {
             return stored;
         }
@@ -1341,32 +1385,31 @@ async fn open_doc_for_seeded_membership_succeeds_and_seqs_stay_per_doc() {
     let acc = signup_account().await;
     let second = seed_membership(&acc, "member").await;
 
-    // Primary doc gets one op first, so a per-doc seq space is visible.
-    let mut ws_primary = connect_ws(&acc.server, &acc.device_token).await;
-    handshake(&mut ws_primary, acc.primary_doc_id).await;
+    // Both docs on one connection: the primary gets one op first, so
+    // a per-doc seq space is visible when the seeded doc starts at 1.
+    let mut ws = connect_ws(&acc.server, &acc.device_token).await;
+    handshake(&mut ws, acc.primary_doc_id).await;
     send_msgpack(
-        &mut ws_primary,
+        &mut ws,
         &ClientFrame::PushOps {
             doc_id: acc.primary_doc_id,
             ops: vec![fake_push(1)],
         },
     )
     .await;
-    let _ack: ServerFrame = recv_msgpack(&mut ws_primary).await;
+    let _ack: ServerFrame = recv_msgpack(&mut ws).await;
 
-    // A second connection (one doc per connection) opens the seeded doc.
-    let mut ws_second = connect_ws(&acc.server, &acc.device_token).await;
-    let epoch = handshake(&mut ws_second, second).await;
+    let epoch = open_doc(&mut ws, second).await;
     assert_eq!(epoch, 0);
     send_msgpack(
-        &mut ws_second,
+        &mut ws,
         &ClientFrame::PushOps {
             doc_id: second,
             ops: vec![fake_push(2)],
         },
     )
     .await;
-    match recv_msgpack::<ServerFrame>(&mut ws_second).await {
+    match recv_msgpack::<ServerFrame>(&mut ws).await {
         ServerFrame::OpsAck { doc_id, .. } => assert_eq!(doc_id, second),
         other => panic!("expected OpsAck, got {other:?}"),
     }
@@ -1382,6 +1425,233 @@ async fn open_doc_for_seeded_membership_succeeds_and_seqs_stay_per_doc() {
         .await
         .unwrap();
     assert_eq!(horizon, 0, "device has acked nothing on the second doc");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn two_docs_open_on_one_connection_interleave_with_independent_seqs() {
+    let acc = signup_account().await;
+    let doc_a = acc.primary_doc_id;
+    let doc_b = create_doc(&acc).await;
+
+    let mut ws = connect_ws(&acc.server, &acc.device_token).await;
+    handshake(&mut ws, doc_a).await;
+    open_doc(&mut ws, doc_b).await;
+    assert_eq!(acc.server.state.sync_sessions.subscriber_count(doc_a), 1);
+    assert_eq!(acc.server.state.sync_sessions.subscriber_count(doc_b), 1);
+
+    // A, B, A: every ack names its doc and each doc counts on its own.
+    for (doc, seed, expected_seq) in [(doc_a, 1u8, 1u64), (doc_b, 2, 1), (doc_a, 3, 2)] {
+        send_msgpack(
+            &mut ws,
+            &ClientFrame::PushOps {
+                doc_id: doc,
+                ops: vec![fake_push(seed)],
+            },
+        )
+        .await;
+        match recv_msgpack::<ServerFrame>(&mut ws).await {
+            ServerFrame::OpsAck { doc_id, acks } => {
+                assert_eq!(doc_id, doc);
+                assert_eq!(acks.len(), 1);
+                assert_eq!(acks[0].seq, expected_seq, "doc {doc}");
+            }
+            other => panic!("expected OpsAck, got {other:?}"),
+        }
+    }
+
+    // Pull on the second-opened doc is served on the same connection.
+    send_msgpack(
+        &mut ws,
+        &ClientFrame::PullOps {
+            doc_id: doc_b,
+            since_seq: 0,
+        },
+    )
+    .await;
+    match recv_msgpack::<ServerFrame>(&mut ws).await {
+        ServerFrame::OpsBatch {
+            doc_id,
+            ops,
+            complete,
+        } => {
+            assert_eq!(doc_id, doc_b);
+            assert_eq!(ops.iter().map(|o| o.seq).collect::<Vec<_>>(), vec![1]);
+            assert!(complete);
+        }
+        other => panic!("expected OpsBatch, got {other:?}"),
+    }
+
+    // Acks are per (device, doc).
+    send_msgpack(
+        &mut ws,
+        &ClientFrame::Ack {
+            doc_id: doc_b,
+            last_acked_seq: 1,
+        },
+    )
+    .await;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let h_b = queries::doc_horizon(&acc.server.state.db, doc_b, Uuid::nil(), 0)
+            .await
+            .unwrap();
+        if h_b == 1 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "doc_b horizon stuck at {h_b}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let h_a = queries::doc_horizon(&acc.server.state.db, doc_a, Uuid::nil(), 0)
+        .await
+        .unwrap();
+    assert_eq!(h_a, 0, "an ack on doc_b must not move doc_a's frontier");
+
+    // Closing the connection drops both subscriptions.
+    drop(ws);
+    wait_for_subscribers(&acc, 0).await;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while acc.server.state.sync_sessions.subscriber_count(doc_b) != 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "doc_b subscriber lingered"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn broadcasts_route_per_doc_on_a_multiplexed_connection() {
+    // Connection 1 (device a) has A and B open. Connection 2 (device b)
+    // has only A; connection 3 (device c) has only B. A push from 2
+    // must reach 1 and not 3; a push from 3 must reach 1 and not 2 —
+    // and 1 must see both, tagged with the right doc.
+    let acc = signup_account().await;
+    let doc_a = acc.primary_doc_id;
+    let doc_b = create_doc(&acc).await;
+    let device_b = register_second_device(&acc, "device-b").await;
+    let device_c = register_second_device(&acc, "device-c").await;
+
+    let mut ws1 = connect_ws(&acc.server, &acc.device_token).await;
+    handshake(&mut ws1, doc_a).await;
+    open_doc(&mut ws1, doc_b).await;
+    let mut ws2 = connect_ws(&acc.server, &device_b.device_token).await;
+    handshake(&mut ws2, doc_a).await;
+    let mut ws3 = connect_ws(&acc.server, &device_c.device_token).await;
+    handshake(&mut ws3, doc_b).await;
+    assert_eq!(acc.server.state.sync_sessions.subscriber_count(doc_a), 2);
+    assert_eq!(acc.server.state.sync_sessions.subscriber_count(doc_b), 2);
+
+    send_msgpack(
+        &mut ws2,
+        &ClientFrame::PushOps {
+            doc_id: doc_a,
+            ops: vec![fake_push(0xA1)],
+        },
+    )
+    .await;
+    assert_eq!(ack_seqs(recv_msgpack(&mut ws2).await), vec![1]);
+    match recv_msgpack::<ServerFrame>(&mut ws1).await {
+        ServerFrame::OpsBroadcast { doc_id, ops } => {
+            assert_eq!(doc_id, doc_a);
+            assert_eq!(ops[0].blob, fake_blob(0xA1));
+        }
+        other => panic!("expected OpsBroadcast on doc_a, got {other:?}"),
+    }
+    assert_no_frame(&mut ws3, std::time::Duration::from_millis(200)).await;
+
+    send_msgpack(
+        &mut ws3,
+        &ClientFrame::PushOps {
+            doc_id: doc_b,
+            ops: vec![fake_push(0xB1)],
+        },
+    )
+    .await;
+    assert_eq!(ack_seqs(recv_msgpack(&mut ws3).await), vec![1]);
+    match recv_msgpack::<ServerFrame>(&mut ws1).await {
+        ServerFrame::OpsBroadcast { doc_id, ops } => {
+            assert_eq!(doc_id, doc_b);
+            assert_eq!(ops[0].blob, fake_blob(0xB1));
+        }
+        other => panic!("expected OpsBroadcast on doc_b, got {other:?}"),
+    }
+    assert_no_frame(&mut ws2, std::time::Duration::from_millis(200)).await;
+
+    // The multiplexed connection's own push on B is excluded from
+    // itself and reaches only the B subscriber.
+    send_msgpack(
+        &mut ws1,
+        &ClientFrame::PushOps {
+            doc_id: doc_b,
+            ops: vec![fake_push(0xB2)],
+        },
+    )
+    .await;
+    assert_eq!(ack_seqs(recv_msgpack(&mut ws1).await), vec![2]);
+    match recv_msgpack::<ServerFrame>(&mut ws3).await {
+        ServerFrame::OpsBroadcast { doc_id, ops } => {
+            assert_eq!(doc_id, doc_b);
+            assert_eq!(ops[0].seq, 2);
+        }
+        other => panic!("expected OpsBroadcast on doc_b, got {other:?}"),
+    }
+    assert_no_frame(&mut ws2, std::time::Duration::from_millis(200)).await;
+    assert_no_frame(&mut ws1, std::time::Duration::from_millis(200)).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn snapshot_lease_on_any_open_doc_is_released_when_the_connection_drops() {
+    // Long lease timeout, so only an explicit release can free it.
+    // Connection 1 holds A and B open and earns a lease on B. When it
+    // drops, device b acking on B must be issued a fresh request at
+    // once — proof the lease was handed back for *every* open doc, not
+    // just one of them.
+    let acc = signup_account_with_snapshot_config(5, std::time::Duration::from_secs(30)).await;
+    let doc_a = acc.primary_doc_id;
+    let doc_b = create_doc(&acc).await;
+    let device_b = register_second_device(&acc, "device-b").await;
+
+    let mut ws1 = connect_ws(&acc.server, &acc.device_token).await;
+    handshake(&mut ws1, doc_a).await;
+    open_doc(&mut ws1, doc_b).await;
+    send_msgpack(
+        &mut ws1,
+        &ClientFrame::PushOps {
+            doc_id: doc_b,
+            ops: fake_pushes(0..5),
+        },
+    )
+    .await;
+    let (up_to_seq, _, _) = expect_snapshot_request(&mut ws1).await;
+    assert_eq!(up_to_seq, 5);
+    send_msgpack(
+        &mut ws1,
+        &ClientFrame::Ack {
+            doc_id: doc_b,
+            last_acked_seq: 5,
+        },
+    )
+    .await;
+    assert_eq!(wait_for_acked_on(&acc, doc_b, 5).await, 5);
+
+    drop(ws1);
+    wait_for_subscribers(&acc, 0).await;
+
+    let mut ws2 = connect_ws(&acc.server, &device_b.device_token).await;
+    handshake(&mut ws2, doc_b).await;
+    send_msgpack(
+        &mut ws2,
+        &ClientFrame::Ack {
+            doc_id: doc_b,
+            last_acked_seq: 5,
+        },
+    )
+    .await;
+    let (b_up_to, _, _) = expect_snapshot_request(&mut ws2).await;
+    assert_eq!(b_up_to, 5);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

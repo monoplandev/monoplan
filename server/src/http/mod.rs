@@ -4,6 +4,7 @@ pub mod request_id;
 mod admin_routes;
 mod auth_routes;
 mod device_routes;
+mod doc_routes;
 #[cfg(feature = "bundled-web")]
 mod web;
 
@@ -61,6 +62,7 @@ pub fn router(state: AppState) -> Router {
             "/api/devices/{device_id}",
             patch(device_routes::rename).delete(device_routes::revoke),
         )
+        .route("/api/docs", get(doc_routes::list).post(doc_routes::create))
         .route("/api/sync", any(ws_handler));
 
     if state.admin_enabled() {

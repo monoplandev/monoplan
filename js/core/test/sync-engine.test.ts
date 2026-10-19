@@ -8,16 +8,34 @@
 // trip reconstructs an engine without losing state.
 //
 // "Stub WebSocket" here is the test itself: it pushes connect, drains
-// the outbox, and asserts what the engine produced. A full protocol
-// round trip would need a JS-side msgpack encoder we don't need yet.
+// the outbox, and asserts what the engine produced. The real protocol
+// round trip is `sync-e2e.test.ts`.
 
 import { describe, expect, test } from "bun:test";
+import { decode, encode } from "@msgpack/msgpack";
 
-import { Dek, Doc, SyncEngine } from "../wasm/monoplan_core_web.js";
+import {
+  Dek,
+  Doc,
+  helloFrame,
+  parseHelloResponse,
+  serverFrameDocId,
+  SyncEngine,
+} from "../wasm/monoplan_core_web.js";
 import type { EngineStorage } from "../wasm/monoplan_core_web.js";
 import { MemEngineStorage } from "./mem-engine-storage.ts";
 
 const LIST_MAIN = "inbox";
+const DOC_ID = "00000000-0000-0000-0000-000000000000";
+const OTHER_DOC_ID = "11111111-2222-7333-8444-555555555555";
+
+/** uuid string → the 16 raw bytes rmp_serde expects for a `Uuid`. */
+function uuidBytes(id: string): Uint8Array {
+  const hexStr = id.replace(/-/g, "");
+  const out = new Uint8Array(16);
+  for (let i = 0; i < 16; i++) out[i] = parseInt(hexStr.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
 
 function memStorage(): EngineStorage {
   return new MemEngineStorage() as unknown as EngineStorage;
@@ -49,15 +67,7 @@ function newEngine(): SyncEngine {
   // Doc.create() builds a fresh doc with no commits (no seeded user
   // lists). Mutations through the engine are what put it in a
   // pending state.
-  return new SyncEngine(
-    Doc.create(),
-    "00000000-0000-0000-0000-000000000000",
-    Dek.generate(),
-    0n,
-    "test",
-    "0.0.0",
-    memStorage(),
-  );
+  return new SyncEngine(Doc.create(), DOC_ID, Dek.generate(), 0n, memStorage());
 }
 
 describe("SyncEngine construction", () => {
@@ -66,11 +76,60 @@ describe("SyncEngine construction", () => {
     expect(eng.isOnline()).toBe(false);
     expect(eng.isIdle()).toBe(false);
     expect(eng.lastContiguousSeq()).toBe(0n);
+    expect(eng.docId()).toBe(DOC_ID);
+  });
+});
+
+describe("connection-level handshake helpers", () => {
+  test("helloFrame advertises the client and protocol version 1", () => {
+    const hello = decode(helloFrame("monoplan-test", "9.9.9")) as {
+      client: string;
+      client_version: string;
+      supported_protocol_versions: number[];
+    };
+    expect(hello.client).toBe("monoplan-test");
+    expect(hello.client_version).toBe("9.9.9");
+    expect(hello.supported_protocol_versions).toEqual([1]);
+  });
+
+  test("parseHelloResponse accepts a matching HelloAck only", () => {
+    const ok = parseHelloResponse(
+      encode({ server_version: "s", protocol_version: 1 }),
+    );
+    expect(ok.ok).toBe(true);
+    expect(ok.serverVersion).toBe("s");
+    expect(ok.error).toBeUndefined();
+
+    const mismatch = parseHelloResponse(
+      encode({ server_version: "s", protocol_version: 2 }),
+    );
+    expect(mismatch.ok).toBe(false);
+    expect(mismatch.error).toContain("protocol 2");
+
+    const rejected = parseHelloResponse(encode({ reason: "no overlap" }));
+    expect(rejected.ok).toBe(false);
+    expect(rejected.error).toContain("rejected: no overlap");
+
+    const garbage = parseHelloResponse(new Uint8Array([0x00, 0x01]));
+    expect(garbage.ok).toBe(false);
+  });
+
+  test("serverFrameDocId reads the routing key off payload frames only", () => {
+    const frame = encode({
+      type: "OpsAck",
+      doc_id: uuidBytes(OTHER_DOC_ID),
+      acks: [],
+    });
+    expect(serverFrameDocId(frame)).toBe(OTHER_DOC_ID);
+    expect(
+      serverFrameDocId(encode({ server_version: "s", protocol_version: 1 })),
+    ).toBeUndefined();
+    expect(serverFrameDocId(new Uint8Array([0x00]))).toBeUndefined();
   });
 });
 
 describe("transport callbacks", () => {
-  test("handleConnected queues Hello and emits online event", () => {
+  test("handleConnected queues OpenDoc for its doc and emits online event", () => {
     const eng = newEngine();
     eng.handleConnected();
 
@@ -78,7 +137,9 @@ describe("transport callbacks", () => {
 
     const frame = eng.popOutbox();
     expect(frame).toBeInstanceOf(Uint8Array);
-    expect(frame!.length).toBeGreaterThan(0);
+    const open = decode(frame!) as { type: string; doc_id: Uint8Array };
+    expect(open.type).toBe("OpenDoc");
+    expect(open.doc_id).toEqual(uuidBytes(DOC_ID));
     // Outbox is single-pop — second drain is empty.
     expect(eng.popOutbox()).toBeUndefined();
 
@@ -91,10 +152,27 @@ describe("transport callbacks", () => {
     expect(eng.popEvent()).toBeUndefined();
   });
 
-  test("handleDisconnected from Hello clears outbox and emits offline", () => {
+  test("a frame for another doc is reported, not applied", () => {
     const eng = newEngine();
     eng.handleConnected();
-    eng.popOutbox(); // discard Hello
+    eng.popOutbox(); // discard OpenDoc
+    eng.popEvent(); // discard online event
+
+    eng.handleServerBytes(
+      encode({ type: "DocOpened", doc_id: uuidBytes(OTHER_DOC_ID), epoch: 0 }),
+    );
+    const evt = eng.popEvent();
+    expect(evt!.kind).toBe("error");
+    expect(evt!.message).toContain(OTHER_DOC_ID);
+    // Still waiting on its own DocOpened: no PullOps went out.
+    expect(eng.popOutbox()).toBeUndefined();
+    expect(eng.isIdle()).toBe(false);
+  });
+
+  test("handleDisconnected from Opening clears outbox and emits offline", () => {
+    const eng = newEngine();
+    eng.handleConnected();
+    eng.popOutbox(); // discard OpenDoc
     eng.popEvent(); // discard online event
 
     eng.handleDisconnected();
@@ -115,7 +193,7 @@ describe("transport callbacks", () => {
     expect(evt!.message!.length).toBeGreaterThan(0);
   });
 
-  test("handleTimeout in Hello produces a handshake error", () => {
+  test("handleTimeout in Opening produces a handshake error", () => {
     const eng = newEngine();
     eng.handleConnected();
     eng.popOutbox();
@@ -233,15 +311,7 @@ describe("save / load round trip", () => {
     // Same DEK so the reconstructed engine could in principle decrypt
     // remote ops; not exercised here, just locking down the API.
     const dek = Dek.generate();
-    const restored = new SyncEngine(
-      Doc.load(snapshot),
-      "00000000-0000-0000-0000-000000000000",
-      dek,
-      0n,
-      "test",
-      "0.0.0",
-      memStorage(),
-    );
+    const restored = new SyncEngine(Doc.load(snapshot), DOC_ID, dek, 0n, memStorage());
     const fingerprintAfter = restored.fingerprint();
 
     expect(fingerprintAfter).toEqual(fingerprintBefore);

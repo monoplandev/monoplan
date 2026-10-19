@@ -230,6 +230,53 @@ pub async fn list_memberships(db: &Db, account_id: Uuid) -> anyhow::Result<Vec<M
     .await
 }
 
+/// Wraps for a doc created by an existing account (`POST /api/docs`).
+#[derive(Debug, Clone)]
+pub struct NewDoc {
+    pub wrapped_dek: Vec<u8>,
+    pub wrapped_dek_nonce: Vec<u8>,
+    pub recovery_wrapped_dek: Option<Vec<u8>>,
+    pub recovery_wrapped_dek_nonce: Option<Vec<u8>>,
+}
+
+/// Mint a doc and its `owner` membership for `account_id` in one
+/// transaction. Returns the new doc id.
+pub async fn create_doc(db: &Db, account_id: Uuid, new: NewDoc) -> anyhow::Result<Uuid> {
+    let doc_id = Uuid::now_v7();
+    let now = now_millis();
+    let acc_bytes = account_id.as_bytes().to_vec();
+    let doc_bytes = doc_id.as_bytes().to_vec();
+    db.call(move |c| {
+        let tx = c.transaction()?;
+        tx.execute(
+            "INSERT INTO docs (id, created_at) VALUES (?, ?)",
+            params![doc_bytes, now],
+        )?;
+        tx.execute(
+            "INSERT INTO doc_members (
+               doc_id, account_id, role,
+               wrapped_dek, wrapped_dek_nonce,
+               recovery_wrapped_dek, recovery_wrapped_dek_nonce,
+               added_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                doc_bytes,
+                acc_bytes,
+                MemberRole::Owner.as_str(),
+                new.wrapped_dek,
+                new.wrapped_dek_nonce,
+                new.recovery_wrapped_dek,
+                new.recovery_wrapped_dek_nonce,
+                now,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    })
+    .await?;
+    Ok(doc_id)
+}
+
 /// Does `account_id` hold an active membership on `doc_id`? The single
 /// access decision behind `OpenDoc` (`sync/ws.rs::can_open`).
 pub async fn is_member(db: &Db, doc_id: Uuid, account_id: Uuid) -> anyhow::Result<bool> {

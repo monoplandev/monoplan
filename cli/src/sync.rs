@@ -18,7 +18,9 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use http::header::AUTHORIZATION;
-use monoplan_core::{Doc, DocId, EngineOptions, Event, SyncEngine};
+use monoplan_core::{
+    Doc, DocId, EngineOptions, Event, SyncEngine, hello_frame, parse_hello_response,
+};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -126,10 +128,6 @@ impl Session {
             doc_id,
             dek,
             boot_meta.last_acked_server_seq.0,
-            EngineOptions {
-                client_name: "monoplan-cli".into(),
-                client_version: env!("CARGO_PKG_VERSION").into(),
-            },
             Box::new(storage),
         );
         engine.seed_boot(&boot_meta);
@@ -206,6 +204,16 @@ impl Session {
         let mut ws = tokio::time::timeout(CONNECT_TIMEOUT, self.connect())
             .await
             .map_err(|_| SyncError::Ws(format!("connect timed out after {CONNECT_TIMEOUT:?}")))??;
+        // The version handshake is per socket, not per doc: run it
+        // once here, then bring the doc's engine online.
+        ws.send(Message::Binary(hello_frame(&engine_options())))
+            .await?;
+        let first = tokio::time::timeout(CONNECT_TIMEOUT, recv_bytes(&mut ws))
+            .await
+            .map_err(|_| {
+                SyncError::Ws(format!("handshake timed out after {CONNECT_TIMEOUT:?}"))
+            })??;
+        parse_hello_response(&first).map_err(|e| SyncError::Engine(e.to_string()))?;
         self.engine.handle_connected();
         drive_until_idle(&mut ws, &mut self.engine).await?;
         self.ws = Some(ws);
@@ -258,6 +266,13 @@ impl Session {
     fn mark_synced(&mut self) -> Result<(), SyncError> {
         self.store.write_last_sync_at(self.doc_id, now_millis())?;
         Ok(())
+    }
+}
+
+fn engine_options() -> EngineOptions {
+    EngineOptions {
+        client_name: "monoplan-cli".into(),
+        client_version: env!("CARGO_PKG_VERSION").into(),
     }
 }
 

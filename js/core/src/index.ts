@@ -21,6 +21,7 @@ export {
 export {
   SyncBridge,
   type ConnectionEvent,
+  type HandshakeCodec,
   type ReconnectBackoff,
   type SyncBridgeOpts,
 } from "./sync-bridge.ts";

@@ -32,21 +32,23 @@
 //!        │                 │               ▼
 //!   handle_connected       │           Pushing ─── on OpsAck ──┐
 //!        ▼                 │             │  ▲                   │
-//!       Hello              │       mutated │  │ ack arrived,    │
+//!     Opening              │       mutated │  │ ack arrived,    │
 //!        │                 │       mid-push│  │ ack arrived &   │
-//!     HelloAck             │               ▼  │ nothing more    │
+//!     DocOpened            │               ▼  │ nothing more    │
 //!        ▼                 │       PushingDirty                 │
-//!     Opening              │                                    │
-//!        │                 │                                    │
-//!     DocOpened            │                                    │
-//!        ▼                 │                                    │
 //!     Pulling ── complete ─▶ Idle ◀──────────────────────────── ┘
 //! ```
 //!
-//! Every payload frame in both directions names the doc it is about
-//! (`doc_id`); the engine stamps its own on the way out and drops any
-//! inbound frame for another doc. A host that multiplexes several
-//! docs over one socket routes by that field.
+//! The engine is **doc-scoped**; the connection is not its concern.
+//! One socket serves every doc a device has open, and the
+//! `Hello` / `HelloAck` version handshake happens once per socket,
+//! before any engine goes online. The host owns that step with
+//! [`hello_frame`] and [`parse_hello_response`], then calls
+//! `handle_connected` on each engine, which binds its doc with
+//! `OpenDoc`. Every payload frame in both directions names the doc it
+//! is about (`doc_id`); the engine stamps its own on the way out and
+//! drops any inbound frame for another doc. The host routes inbound
+//! frames to engines with [`server_frame_doc_id`].
 
 use std::collections::VecDeque;
 
@@ -98,18 +100,91 @@ pub enum Event {
     Error(String),
 }
 
-/// Identity advertised in the `Hello` frame. Set once at construction.
+/// Client identity advertised in the `Hello` frame: per connection,
+/// not per engine (see [`hello_frame`]).
 #[derive(Debug, Clone)]
 pub struct EngineOptions {
     pub client_name: String,
     pub client_version: String,
 }
 
+// ---------- connection-level handshake ----------
+//
+// `Hello` / `HelloAck` is per socket, not per doc, so it lives beside
+// the engine rather than inside it: a host opens the socket, runs this
+// exchange once, and only then brings each doc's engine online.
+
+/// The encoded `Hello` frame to send first on a fresh socket.
+pub fn hello_frame(opts: &EngineOptions) -> Vec<u8> {
+    let hello = Hello {
+        client: opts.client_name.clone(),
+        client_version: opts.client_version.clone(),
+        supported_protocol_versions: vec![PROTOCOL_VERSION],
+    };
+    rmp_serde::to_vec_named(&hello).expect("Hello is always encodable")
+}
+
+/// Why the server's first frame did not establish a session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HelloError {
+    /// `HelloRejected`: the server closes after this.
+    Rejected(String),
+    /// `HelloAck` named a protocol version this client does not speak.
+    VersionMismatch(u32),
+    /// Neither `HelloAck` nor `HelloRejected`.
+    Malformed,
+}
+
+impl std::fmt::Display for HelloError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HelloError::Rejected(reason) => write!(f, "handshake rejected: {reason}"),
+            HelloError::VersionMismatch(v) => write!(
+                f,
+                "server picked protocol {v} but client speaks {PROTOCOL_VERSION}"
+            ),
+            HelloError::Malformed => {
+                write!(
+                    f,
+                    "first server frame was neither HelloAck nor HelloRejected"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for HelloError {}
+
+/// Interpret the first frame the server sends after `Hello`.
+/// `Hello{Ack,Rejected}` are bare types, not `ServerFrame` variants,
+/// so both decoders are tried against the same buffer.
+pub fn parse_hello_response(bytes: &[u8]) -> Result<HelloAck, HelloError> {
+    if let Ok(ack) = rmp_serde::from_slice::<HelloAck>(bytes) {
+        if ack.protocol_version != PROTOCOL_VERSION {
+            return Err(HelloError::VersionMismatch(ack.protocol_version));
+        }
+        return Ok(ack);
+    }
+    if let Ok(rej) = rmp_serde::from_slice::<HelloRejected>(bytes) {
+        return Err(HelloError::Rejected(rej.reason));
+    }
+    Err(HelloError::Malformed)
+}
+
+/// The doc a post-handshake server frame is about, for a host that
+/// routes one socket's frames to several engines. `None` when the
+/// bytes are not a `ServerFrame`; the host should then hand them to
+/// any engine, which will report the decode error as an event.
+pub fn server_frame_doc_id(bytes: &[u8]) -> Option<uuid::Uuid> {
+    rmp_serde::from_slice::<ServerFrame>(bytes)
+        .ok()
+        .map(|f| f.doc_id())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ConnState {
     Disconnected,
-    Hello,
-    /// `HelloAck` received; `OpenDoc` sent, awaiting `DocOpened`.
+    /// `OpenDoc` sent, awaiting `DocOpened`.
     Opening,
     Pulling,
     /// Snapshot bootstrap path: we've received `SnapshotRequired`,
@@ -167,7 +242,6 @@ pub struct SyncEngine {
     /// nonce, matching `BootState::wal_bytes`.
     wal_rows: u64,
     wal_bytes: u64,
-    opts: EngineOptions,
     state: ConnState,
     /// Contiguous-prefix seq we've applied in memory. Advances
     /// synchronously inside `apply_remote_ops` / `OpsAck` / `Snapshot`.
@@ -231,7 +305,6 @@ impl SyncEngine {
         doc_id: DocId,
         dek: Dek,
         last_acked_seq: u64,
-        opts: EngineOptions,
         storage: DynStorage,
     ) -> Self {
         Self {
@@ -244,7 +317,6 @@ impl SyncEngine {
             last_local_seq: LocalSeq(0),
             wal_rows: 0,
             wal_bytes: 0,
-            opts,
             state: ConnState::Disconnected,
             last_contiguous_seq: last_acked_seq,
             server_epoch: None,
@@ -257,6 +329,12 @@ impl SyncEngine {
 
     pub fn doc(&self) -> &Doc {
         &self.doc
+    }
+
+    /// The doc this engine syncs: the routing key a multiplexing host
+    /// matches [`server_frame_doc_id`] against.
+    pub fn doc_id(&self) -> DocId {
+        self.doc_id
     }
 
     pub fn doc_mut(&mut self) -> &mut Doc {
@@ -528,8 +606,10 @@ impl SyncEngine {
         self.doc.pop_event()
     }
 
-    /// Caller has a usable socket. Engine sends `Hello`, transitions to
-    /// `Hello` state, awaits the server's response.
+    /// Caller has a socket whose version handshake succeeded (see
+    /// [`hello_frame`] / [`parse_hello_response`]). Engine binds its
+    /// doc with `OpenDoc`, transitions to `Opening`, and awaits
+    /// `DocOpened`, which also carries the epoch and starts the pull.
     pub fn handle_connected(&mut self) {
         if !matches!(self.state, ConnState::Disconnected) {
             self.events.push_back(Event::Error(
@@ -537,17 +617,15 @@ impl SyncEngine {
             ));
             return;
         }
-        self.state = ConnState::Hello;
+        self.state = ConnState::Opening;
         self.events
             .push_back(Event::ConnStateChanged { online: true });
-        let hello = Hello {
-            client: self.opts.client_name.clone(),
-            client_version: self.opts.client_version.clone(),
-            supported_protocol_versions: vec![PROTOCOL_VERSION],
+        let frame = ClientFrame::OpenDoc {
+            doc_id: self.doc_id.0,
         };
-        if let Err(e) = self.encode_into_outbox(&hello) {
+        if let Err(e) = self.encode_into_outbox(&frame) {
             self.events
-                .push_back(Event::Error(format!("encode Hello: {e}")));
+                .push_back(Event::Error(format!("encode OpenDoc: {e}")));
             self.go_disconnected();
         }
     }
@@ -562,12 +640,11 @@ impl SyncEngine {
         self.go_disconnected();
     }
 
-    /// Caller's tick. Escalates the `Hello` handshake timeout
-    /// (idempotent in non-Hello states); a no-op otherwise. Hosts call
-    /// this periodically (e.g., every ~1s via setInterval /
-    /// tokio::time::interval).
+    /// Caller's tick. Escalates the `OpenDoc` timeout (idempotent in
+    /// other states); a no-op otherwise. Hosts call this periodically
+    /// (e.g., every ~1s via setInterval / tokio::time::interval).
     pub fn handle_timeout(&mut self) {
-        if matches!(self.state, ConnState::Hello | ConnState::Opening) {
+        if matches!(self.state, ConnState::Opening) {
             self.events
                 .push_back(Event::Error("handshake timed out".into()));
         }
@@ -581,7 +658,6 @@ impl SyncEngine {
                     "received server bytes while disconnected".into(),
                 ));
             }
-            ConnState::Hello => self.handle_hello_response(bytes),
             ConnState::Opening
             | ConnState::Pulling
             | ConnState::Bootstrapping
@@ -604,7 +680,6 @@ impl SyncEngine {
             | ConnState::Pulling
             | ConnState::Bootstrapping
             | ConnState::Opening
-            | ConnState::Hello
             | ConnState::Disconnected => {
                 // Nothing to send right now — the next Idle transition
                 // re-derives the delta from `server_known_vv`.
@@ -613,44 +688,6 @@ impl SyncEngine {
     }
 
     // ---------- internals ----------
-
-    fn handle_hello_response(&mut self, bytes: &[u8]) {
-        // Hello{Ack,Rejected} aren't part of the `ServerFrame` tagged
-        // enum — the spec sends them as bare types pre-handshake. Try
-        // both decoders against the same buffer.
-        if let Ok(ack) = rmp_serde::from_slice::<HelloAck>(bytes) {
-            if ack.protocol_version != PROTOCOL_VERSION {
-                self.events.push_back(Event::Error(format!(
-                    "server picked protocol {} but client speaks {PROTOCOL_VERSION}",
-                    ack.protocol_version,
-                )));
-                self.go_disconnected();
-                return;
-            }
-            // Version agreed; now bind our doc to the connection. The
-            // pull waits for `DocOpened`, which also carries the epoch.
-            self.state = ConnState::Opening;
-            let frame = ClientFrame::OpenDoc {
-                doc_id: self.doc_id.0,
-            };
-            if let Err(e) = self.encode_into_outbox(&frame) {
-                self.events
-                    .push_back(Event::Error(format!("encode OpenDoc: {e}")));
-                self.go_disconnected();
-            }
-            return;
-        }
-        if let Ok(rej) = rmp_serde::from_slice::<HelloRejected>(bytes) {
-            self.events
-                .push_back(Event::Error(format!("handshake rejected: {}", rej.reason)));
-            self.go_disconnected();
-            return;
-        }
-        self.events.push_back(Event::Error(
-            "first server frame was neither HelloAck nor HelloRejected".into(),
-        ));
-        self.go_disconnected();
-    }
 
     fn handle_server_frame(&mut self, bytes: &[u8]) {
         let frame = match rmp_serde::from_slice::<ServerFrame>(bytes) {
@@ -1228,15 +1265,11 @@ mod tests {
         DocId(DOC)
     }
 
-    /// Drive a freshly connected engine from `Hello` to `Pulling`:
-    /// accept the version, consume the `OpenDoc` that provokes, and
-    /// open the doc. Leaves the engine's `PullOps` in the outbox.
+    /// Drive a freshly connected engine from `Opening` to `Pulling`:
+    /// consume the `OpenDoc` that `handle_connected` queued and open
+    /// the doc. Leaves the engine's `PullOps` in the outbox.
     fn open_doc(eng: &mut SyncEngine) {
-        eng.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: PROTOCOL_VERSION,
-        }));
-        let open: ClientFrame = dec(&eng.pop_outbox().expect("OpenDoc after HelloAck"));
+        let open: ClientFrame = dec(&eng.pop_outbox().expect("OpenDoc after handle_connected"));
         assert!(
             matches!(open, ClientFrame::OpenDoc { doc_id } if doc_id == DOC),
             "expected OpenDoc for the engine's doc, got {open:?}"
@@ -1256,7 +1289,6 @@ mod tests {
             fake_doc_id(),
             Dek::generate(),
             0,
-            opts(),
             mem(),
         )
     }
@@ -1269,7 +1301,7 @@ mod tests {
         let mut doc = Doc::new().unwrap();
         doc.mark_persisted();
         let vv = doc.oplog_vv();
-        let mut eng = SyncEngine::new(doc, fake_doc_id(), Dek::generate(), 0, opts(), mem());
+        let mut eng = SyncEngine::new(doc, fake_doc_id(), Dek::generate(), 0, mem());
         eng.server_known_vv = vv;
         eng
     }
@@ -1321,13 +1353,10 @@ mod tests {
     /// with an empty initial pull.
     fn drive_to_idle(eng: &mut SyncEngine) {
         eng.handle_connected();
-        let _hello = eng
-            .pop_outbox()
-            .expect("Hello should be queued after handle_connected()");
         open_doc(eng);
         let _pull = eng
             .pop_outbox()
-            .expect("PullOps should be queued after successful HelloAck()");
+            .expect("PullOps should be queued after DocOpened");
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
             doc_id: DOC,
             ops: vec![],
@@ -1352,12 +1381,70 @@ mod tests {
     }
 
     #[test]
-    fn happy_path_handshake_and_empty_pull() {
-        let mut eng = fresh_engine_clean();
-        eng.handle_connected();
-        let hello: Hello = dec(&eng.pop_outbox().unwrap());
+    fn hello_frame_advertises_client_and_protocol_version() {
+        let hello: Hello = dec(&hello_frame(&opts()));
         assert_eq!(hello.supported_protocol_versions, vec![PROTOCOL_VERSION]);
         assert_eq!(hello.client, "test");
+        assert_eq!(hello.client_version, "0.0.0");
+    }
+
+    #[test]
+    fn parse_hello_response_accepts_matching_version_only() {
+        let ack = parse_hello_response(&enc(&HelloAck {
+            server_version: "s".into(),
+            protocol_version: PROTOCOL_VERSION,
+        }))
+        .unwrap();
+        assert_eq!(ack.server_version, "s");
+        assert_eq!(
+            parse_hello_response(&enc(&HelloAck {
+                server_version: "s".into(),
+                protocol_version: 9999,
+            }))
+            .unwrap_err(),
+            HelloError::VersionMismatch(9999)
+        );
+        assert_eq!(
+            parse_hello_response(&enc(&HelloRejected {
+                reason: "no overlap".into(),
+            }))
+            .unwrap_err(),
+            HelloError::Rejected("no overlap".into())
+        );
+        assert_eq!(
+            parse_hello_response(&enc(&ServerFrame::DocOpened {
+                doc_id: DOC,
+                epoch: 0
+            }))
+            .unwrap_err(),
+            HelloError::Malformed
+        );
+    }
+
+    #[test]
+    fn server_frame_doc_id_routes_payload_frames_and_rejects_handshake_frames() {
+        let other = uuid::Uuid::from_u128(0xBEEF);
+        assert_eq!(
+            server_frame_doc_id(&enc(&ServerFrame::OpsAck {
+                doc_id: other,
+                acks: vec![]
+            })),
+            Some(other)
+        );
+        assert_eq!(
+            server_frame_doc_id(&enc(&HelloAck {
+                server_version: "s".into(),
+                protocol_version: PROTOCOL_VERSION,
+            })),
+            None
+        );
+        assert_eq!(server_frame_doc_id(b"\x00\x01"), None);
+    }
+
+    #[test]
+    fn happy_path_open_and_empty_pull() {
+        let mut eng = fresh_engine_clean();
+        eng.handle_connected();
         assert!(matches!(
             drain_events(&mut eng).as_slice(),
             [Event::ConnStateChanged { online: true }]
@@ -1387,7 +1474,6 @@ mod tests {
         // empty initial pull completes without queuing a follow-up push.
         let mut eng = fresh_engine();
         eng.handle_connected();
-        let _hello = eng.pop_outbox().unwrap();
         open_doc(&mut eng);
         let _pull = eng.pop_outbox().unwrap();
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
@@ -1403,40 +1489,7 @@ mod tests {
     }
 
     #[test]
-    fn hello_rejected_disconnects_with_error() {
-        let mut eng = fresh_engine_clean();
-        eng.handle_connected();
-        let _hello = eng.pop_outbox().unwrap();
-        let _ = drain_events(&mut eng);
-        eng.handle_server_bytes(&enc(&HelloRejected {
-            reason: "no overlap".into(),
-        }));
-        assert!(!eng.is_online());
-        let events = drain_events(&mut eng);
-        assert!(matches!(events[0], Event::Error(ref s) if s.contains("rejected")));
-        assert!(matches!(
-            events.last(),
-            Some(Event::ConnStateChanged { online: false })
-        ));
-    }
-
-    #[test]
-    fn unknown_protocol_version_disconnects_with_error() {
-        let mut eng = fresh_engine_clean();
-        eng.handle_connected();
-        let _ = eng.pop_outbox().unwrap();
-        let _ = drain_events(&mut eng);
-        eng.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: 9999,
-        }));
-        assert!(!eng.is_online());
-        let events = drain_events(&mut eng);
-        assert!(matches!(events[0], Event::Error(ref s) if s.contains("9999")));
-    }
-
-    #[test]
-    fn handle_timeout_in_hello_emits_error_only() {
+    fn handle_timeout_while_opening_emits_error_only() {
         let mut eng = fresh_engine_clean();
         eng.handle_timeout();
         assert!(
@@ -1512,7 +1565,6 @@ mod tests {
             fake_doc_id(),
             Dek::generate(),
             0,
-            opts(),
             Box::new(storage.clone()),
         );
         eng.server_known_vv = vv;
@@ -1577,7 +1629,6 @@ mod tests {
             fake_doc_id(),
             dek.clone(),
             0,
-            opts(),
             Box::new(storage.clone()),
         );
         eng.server_known_vv = vv;
@@ -1592,7 +1643,6 @@ mod tests {
         // auto-starts the push, so the engine lands in Pushing, not
         // Idle.)
         eng.handle_connected();
-        let _hello = eng.pop_outbox().unwrap();
         open_doc(&mut eng);
         let _pull = eng.pop_outbox().unwrap();
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
@@ -1696,7 +1746,6 @@ mod tests {
     fn flush_during_pull_pushes_when_pull_completes() {
         let mut eng = fresh_engine_clean();
         eng.handle_connected();
-        let _ = eng.pop_outbox().unwrap();
         open_doc(&mut eng);
         let _ = eng.pop_outbox().unwrap(); // PullOps
 
@@ -1873,7 +1922,6 @@ mod tests {
         let mut eng = fresh_engine_clean();
         let dek = eng.dek.clone();
         eng.handle_connected();
-        let _ = eng.pop_outbox().unwrap();
         open_doc(&mut eng);
         let _ = eng.pop_outbox().unwrap();
 
@@ -1923,7 +1971,6 @@ mod tests {
             fake_doc_id(),
             Dek::generate(),
             0,
-            opts(),
             Box::new(storage.clone()),
         );
         eng.server_known_vv = vv;
@@ -1945,7 +1992,6 @@ mod tests {
 
         // Re-connect, run an empty pull; the retry ships the same id.
         eng.handle_connected();
-        let _ = eng.pop_outbox().unwrap();
         open_doc(&mut eng);
         let _ = eng.pop_outbox().unwrap();
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
@@ -1986,13 +2032,12 @@ mod tests {
             in_flight_push: Some(push.clone()),
             ..Default::default()
         };
-        let mut eng = SyncEngine::new(doc, fake_doc_id(), dek, 0, opts(), mem());
+        let mut eng = SyncEngine::new(doc, fake_doc_id(), dek, 0, mem());
         eng.seed_boot(&meta);
 
         // Pull-complete auto-starts the retry, so the engine ends in
         // Pushing rather than Idle.
         eng.handle_connected();
-        let _hello = eng.pop_outbox().unwrap();
         open_doc(&mut eng);
         let _pull = eng.pop_outbox().unwrap();
         eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
@@ -2071,7 +2116,6 @@ mod tests {
             fake_doc_id(),
             dek.clone(),
             0,
-            opts(),
             Box::new(storage.clone()),
         );
         eng.server_known_vv = vv.clone();
@@ -2148,9 +2192,8 @@ mod tests {
     fn since_seq_carries_persisted_frontier() {
         let mut doc = Doc::new().unwrap();
         doc.mark_persisted();
-        let mut eng = SyncEngine::new(doc, fake_doc_id(), Dek::generate(), 42, opts(), mem());
+        let mut eng = SyncEngine::new(doc, fake_doc_id(), Dek::generate(), 42, mem());
         eng.handle_connected();
-        let _hello = eng.pop_outbox().unwrap();
         open_doc(&mut eng);
         let pull: ClientFrame = dec(&eng.pop_outbox().unwrap());
         assert!(matches!(pull, ClientFrame::PullOps { since_seq: 42, .. }));
@@ -2375,11 +2418,9 @@ mod tests {
             fake_doc_id(),
             dek.clone(),
             0,
-            opts(),
             Box::new(storage.clone()),
         );
         eng.handle_connected();
-        let _ = eng.pop_outbox().unwrap();
         open_doc(&mut eng);
         let _ = eng.pop_outbox().unwrap(); // PullOps
 
@@ -2479,7 +2520,6 @@ mod tests {
             fake_doc_id(),
             dek.clone(),
             0,
-            opts(),
             Box::new(storage.clone()),
         );
         // Capture the pending work into the WAL (as a real session
@@ -2488,7 +2528,6 @@ mod tests {
         assert_eq!(storage.wal_len(), 1);
 
         eng.handle_connected();
-        let _ = eng.pop_outbox().unwrap();
         open_doc(&mut eng);
         let _ = eng.pop_outbox().unwrap(); // PullOps
         eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequired {
@@ -2543,9 +2582,8 @@ mod tests {
     #[test]
     fn opsbroadcast_during_bootstrap_is_dropped() {
         let dek = Dek::generate();
-        let mut eng = SyncEngine::new(Doc::empty(), fake_doc_id(), dek.clone(), 0, opts(), mem());
+        let mut eng = SyncEngine::new(Doc::empty(), fake_doc_id(), dek.clone(), 0, mem());
         eng.handle_connected();
-        let _ = eng.pop_outbox().unwrap();
         open_doc(&mut eng);
         let _ = eng.pop_outbox().unwrap(); // PullOps
         eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequired {
@@ -2585,18 +2623,11 @@ mod tests {
         //   B applies, pulls past-the-snapshot ops, reaches Idle.
         //   Fingerprints converge.
         let dek = Dek::generate();
-        let mut a = SyncEngine::new(
-            Doc::new().unwrap(),
-            fake_doc_id(),
-            dek.clone(),
-            0,
-            opts(),
-            mem(),
-        );
+        let mut a = SyncEngine::new(Doc::new().unwrap(), fake_doc_id(), dek.clone(), 0, mem());
         let mut b = {
             let mut doc = Doc::empty();
             doc.mark_persisted();
-            SyncEngine::new(doc, fake_doc_id(), dek.clone(), 0, opts(), mem())
+            SyncEngine::new(doc, fake_doc_id(), dek.clone(), 0, mem())
         };
 
         // Fake server state.
@@ -2605,7 +2636,6 @@ mod tests {
 
         // -- A connects; the pull-complete triggers its seed push --
         a.handle_connected();
-        let _ = a.pop_outbox().unwrap();
         open_doc(&mut a);
         let _ = a.pop_outbox().unwrap();
         a.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
@@ -2770,7 +2800,6 @@ mod tests {
 
         // -- B connects fresh, since=0 < snapshot floor --
         b.handle_connected();
-        let _ = b.pop_outbox().unwrap();
         open_doc(&mut b);
         let pull: ClientFrame = dec(&b.pop_outbox().unwrap());
         assert!(matches!(pull, ClientFrame::PullOps { since_seq: 0, .. }));
@@ -2939,18 +2968,11 @@ mod tests {
     #[test]
     fn end_to_end_two_engines_converge_via_engine_loop() {
         let dek = Dek::generate();
-        let mut a = SyncEngine::new(
-            Doc::new().unwrap(),
-            fake_doc_id(),
-            dek.clone(),
-            0,
-            opts(),
-            mem(),
-        );
+        let mut a = SyncEngine::new(Doc::new().unwrap(), fake_doc_id(), dek.clone(), 0, mem());
         let mut b = {
             let mut doc = Doc::empty();
             doc.mark_persisted();
-            SyncEngine::new(doc, fake_doc_id(), dek.clone(), 0, opts(), mem())
+            SyncEngine::new(doc, fake_doc_id(), dek.clone(), 0, mem())
         };
 
         let mut next_seq: u64 = 0;
@@ -2958,7 +2980,6 @@ mod tests {
 
         // -- A connects; pull-complete pushes its seed --
         a.handle_connected();
-        let _ = a.pop_outbox().unwrap();
         open_doc(&mut a);
         let _ = a.pop_outbox().unwrap();
         a.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
@@ -3013,7 +3034,6 @@ mod tests {
 
         // -- B connects, pulls everything from the log --
         b.handle_connected();
-        let _ = b.pop_outbox().unwrap();
         open_doc(&mut b);
         let _ = b.pop_outbox().unwrap();
         b.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
@@ -3090,7 +3110,6 @@ mod tests {
             fake_doc_id(),
             Dek::generate(),
             0,
-            opts(),
             Box::new(std::sync::Arc::clone(&mem)),
         );
         eng.server_known_vv = vv;
@@ -3187,13 +3206,8 @@ mod tests {
     fn doc_rejected_disconnects_with_error() {
         let mut eng = fresh_engine_clean();
         eng.handle_connected();
-        let _hello = eng.pop_outbox().unwrap();
         let _ = drain_events(&mut eng);
-        eng.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: PROTOCOL_VERSION,
-        }));
-        let open: ClientFrame = dec(&eng.pop_outbox().expect("OpenDoc after HelloAck"));
+        let open: ClientFrame = dec(&eng.pop_outbox().expect("OpenDoc after handle_connected"));
         assert!(matches!(open, ClientFrame::OpenDoc { doc_id } if doc_id == DOC));
         assert!(eng.pop_outbox().is_none(), "no PullOps before DocOpened");
 
@@ -3214,11 +3228,6 @@ mod tests {
     fn handle_timeout_while_opening_emits_error() {
         let mut eng = fresh_engine_clean();
         eng.handle_connected();
-        let _hello = eng.pop_outbox().unwrap();
-        eng.handle_server_bytes(&enc(&HelloAck {
-            server_version: "s".into(),
-            protocol_version: PROTOCOL_VERSION,
-        }));
         let _open = eng.pop_outbox().unwrap();
         let _ = drain_events(&mut eng);
         eng.handle_timeout();

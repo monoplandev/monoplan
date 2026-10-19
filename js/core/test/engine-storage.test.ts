@@ -24,19 +24,21 @@ import { Dek, Doc, EncryptedBlob, SyncEngine } from "../wasm/monoplan_core_web.j
 import type { EngineStorage } from "../wasm/monoplan_core_web.js";
 import { MemEngineStorage, unhex } from "./mem-engine-storage.ts";
 
-const PROTOCOL_VERSION = 1;
 const LIST_MAIN = "inbox";
 const DOC_ID = "00000000-0000-0000-0000-000000000000";
+/** `DOC_ID` as the 16 raw bytes rmp_serde expects for a `Uuid`. */
+const DOC_ID_BYTES = new Uint8Array(16);
 
-function helloAckBytes(): Uint8Array {
-  return encode({ server_version: "test", protocol_version: PROTOCOL_VERSION });
+function docOpenedBytes(): Uint8Array {
+  return encode({ type: "DocOpened", doc_id: DOC_ID_BYTES, epoch: 0 });
 }
 function emptyBatchCompleteBytes(): Uint8Array {
-  return encode({ type: "OpsBatch", ops: [], complete: true });
+  return encode({ type: "OpsBatch", doc_id: DOC_ID_BYTES, ops: [], complete: true });
 }
 function broadcastBytes(seq: number, blob: EncryptedBlob): Uint8Array {
   return encode({
     type: "OpsBroadcast",
+    doc_id: DOC_ID_BYTES,
     ops: [{ seq, blob: { nonce: blob.nonce, ciphertext: blob.ciphertext } }],
   });
 }
@@ -50,15 +52,17 @@ function ackBytesFor(pushFrame: Uint8Array, seq: number): Uint8Array {
   if (decoded.ops.length !== 1) throw new Error("engine ships one blob per push");
   return encode({
     type: "OpsAck",
+    doc_id: DOC_ID_BYTES,
     acks: [{ push_id: decoded.ops[0]!.push_id, seq }],
   });
 }
 
-/** Hello → HelloAck → PullOps → empty OpsBatch → Idle. */
+/** OpenDoc → DocOpened → PullOps → empty OpsBatch → Idle. (The
+ *  `Hello` handshake is the host's, per socket — not the engine's.) */
 function driveToIdle(eng: SyncEngine): void {
   eng.handleConnected();
-  eng.popOutbox(); // Hello
-  eng.handleServerBytes(helloAckBytes());
+  eng.popOutbox(); // OpenDoc
+  eng.handleServerBytes(docOpenedBytes());
   eng.popOutbox(); // PullOps
   eng.handleServerBytes(emptyBatchCompleteBytes());
 }
@@ -73,8 +77,6 @@ describe("engine ↔ EngineStorage (VV-derived web push path)", () => {
       DOC_ID,
       dek.clone(),
       0n,
-      "test",
-      "0.0.0",
       storage as unknown as EngineStorage,
     );
     engine.setLastLocalSeq(0);
@@ -137,8 +139,6 @@ describe("engine ↔ EngineStorage (VV-derived web push path)", () => {
       DOC_ID,
       dek.clone(),
       0n,
-      "test",
-      "0.0.0",
       storage as unknown as EngineStorage,
     );
     engine.setLastLocalSeq(0);
@@ -176,8 +176,6 @@ describe("engine ↔ EngineStorage (VV-derived web push path)", () => {
       DOC_ID,
       dek.clone(),
       0n,
-      "test",
-      "0.0.0",
       storage as unknown as EngineStorage,
     );
     engine.setLastLocalSeq(0);

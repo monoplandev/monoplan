@@ -1,21 +1,36 @@
 // Browser-specific construction of the shared `SyncBridge`. The
 // pump + reconnect + auth-probe lifecycle lives in `@monoplan/core`;
-// this module only contributes the two things that depend on the
-// browser environment: the `WebSocket` factory (cookie auth via
-// same-origin, URL derived from `window.location`) and the auth
-// probe (the `/api/devices` endpoint via our msgpack HTTP client).
+// this module only contributes the things that depend on the browser
+// environment: the `WebSocket` factory (cookie auth via same-origin,
+// URL derived from `window.location`), the auth probe (the
+// `/api/devices` endpoint via our msgpack HTTP client), the bundler
+// wasm build's handshake helpers, and the client identity.
 
 import {
   SyncBridge,
   type SyncBridgeOpts,
 } from "@monoplan/core/sync-bridge";
+import {
+  helloFrame,
+  parseHelloResponse,
+  serverFrameDocId,
+} from "@monoplan/core/wasm";
 import { api, ApiError } from "../api.ts";
 
-type WebOpts = Omit<SyncBridgeOpts, "socketFactory" | "probeAuth">;
+const CLIENT_NAME = "monoplan-web";
+const CLIENT_VERSION = "0.1.0";
+
+type WebOpts = Omit<
+  SyncBridgeOpts,
+  "socketFactory" | "probeAuth" | "codec" | "clientName" | "clientVersion"
+>;
 
 export function createSyncBridge(opts: WebOpts): SyncBridge {
   return new SyncBridge({
     ...opts,
+    codec: { helloFrame, parseHelloResponse, serverFrameDocId },
+    clientName: CLIENT_NAME,
+    clientVersion: CLIENT_VERSION,
     socketFactory: () => new WebSocket(wsUrl()),
     probeAuth: async () => {
       try {

@@ -8,8 +8,8 @@
 //! and duplicate remote delivery (6, storage half).
 
 use monoplan_core::{
-    BootMeta, Dek, Doc, DocId, EngineOptions, InFlightPush, LocalSeq, LocalStorage, PushId,
-    RemoteWalRow, ServerSeq, SyncEngine, boot_doc,
+    BootMeta, Dek, Doc, DocId, InFlightPush, LocalSeq, LocalStorage, PushId, RemoteWalRow,
+    ServerSeq, SyncEngine, boot_doc,
 };
 use monoplan_protocol::EncryptedBlob;
 use monoplan_storage_sqlite::SqliteStorage;
@@ -17,13 +17,6 @@ use uuid::Uuid;
 
 fn doc_id() -> DocId {
     DocId(Uuid::from_u128(0xA1D0))
-}
-
-fn opts() -> EngineOptions {
-    EngineOptions {
-        client_name: "wal-test".into(),
-        client_version: "0.0.0".into(),
-    }
 }
 
 fn blob(byte: u8) -> EncryptedBlob {
@@ -39,7 +32,6 @@ fn engine_over(storage: SqliteStorage, dek: Dek, doc: Doc, meta: &BootMeta) -> S
         doc_id(),
         dek,
         meta.last_acked_server_seq.0,
-        opts(),
         Box::new(storage),
     );
     eng.seed_boot(meta);

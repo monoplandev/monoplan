@@ -6,7 +6,9 @@ This document preserves the multi-doc / sharing design discussed during early pl
 
 Substrate in place as of 2026-10-13: the `docs` entity and `accounts.primary_doc_id`; ops, snapshots, seq counter, snapshot coordinator and broadcast registry keyed by doc; `device_doc_frontiers` for per-(device, doc) acks; and the wire protocol carrying `doc_id` on every payload frame behind an `OpenDoc` / `DocOpened` binding step (`sync-protocol.md` §Doc binding).
 
-Key model done as of 2026-10-17: **the DEK is a doc key.** `doc_members` holds per-membership wraps (password + recovery), `accounts` holds password material only, login returns a `memberships` array, recovery returns per-doc `doc_keys`, and password change / reset take `new_doc_keys` covering every membership (set-checked, one transaction). `can_open` is the `doc_members` lookup and the compaction horizon spans the devices of every active member. The CLI stores one DEK per doc in `secrets.toml`; the web client unwraps the primary membership only (it opens one doc). What is *not* built: any way to create a second membership (invites, `POST /api/docs`), multi-doc connections, member management.
+Key model done as of 2026-10-17: **the DEK is a doc key.** `doc_members` holds per-membership wraps (password + recovery), `accounts` holds password material only, login returns a `memberships` array, recovery returns per-doc `doc_keys`, and password change / reset take `new_doc_keys` covering every membership (set-checked, one transaction). `can_open` is the `doc_members` lookup and the compaction horizon spans the devices of every active member. The CLI stores one DEK per doc in `secrets.toml`; the web client unwraps the primary membership only (it opens one doc).
+
+Multi-doc transport done as of 2026-10-19 (headless; no UI): a connection multiplexes **any number** of open docs (`WSSession.open` is a map; per-doc subscription and lease slot; the session loop polls every subscription); `POST /api/docs` / `GET /api/docs` create and list an account's own docs; the `Hello` handshake moved out of the engine to the connection owner (core `hello_frame` / `parse_hello_response` / `server_frame_doc_id`); the js `SyncBridge` is the router (N engines, one socket, frames routed by `doc_id`). Proven by `server/tests/sync.rs` and the two-doc `js/core/test/sync-e2e.test.ts`. What is *not* built: invites and any second *account* on a doc, member management, live revocation (`DocClosed`), a CLI router (the CLI still runs one engine on its primary doc), and every client surface (the web client still boots one doc; loading every membership at boot is the decided default, see "Decisions").
 
 Read this when:
 - Considering enabling sharing as a product direction.
@@ -167,9 +169,9 @@ WS connection stays `(account, device)`-bound at upgrade. Per-doc seq is dense, 
 Remaining for sharing:
 
 - ~~`can_open` becomes a `doc_members(doc_id, account_id)` lookup.~~ Done 2026-10-17.
-- A connection holds **one** open doc today (`WSSession.open: Option<OpenDoc>`); multiplexing lifts it to a map keyed by `doc_id`, with the broadcast `select!` arm polling every open subscription.
+- ~~A connection holds one open doc; multiplexing lifts it to a map keyed by `doc_id`.~~ Done 2026-10-19 (`WSSession.open: HashMap<Uuid, OpenDoc>`, the broadcast arm is a `poll_fn` over every open subscription, leases released per doc on disconnect).
 - ~~Horizon spans the devices of every active member.~~ Done 2026-10-17 (`queries::doc_horizon` lost its `account_id` parameter).
-- Removal / leave severs the open doc on live connections (a `DocClosed { doc_id, reason }` frame is the obvious shape; not yet defined).
+- Removal / leave severs the open doc on live connections (a `DocClosed { doc_id, reason }` frame is the obvious shape; not yet defined). Membership is checked at `OpenDoc` only today.
 
 ### Auth flows (memberships shape) — built 2026-10-17
 
@@ -205,17 +207,17 @@ Compile breaks downstream — fix in Phase 2.
 
 **2a — Queries.** ~~`is_member`, membership-wide `doc_horizon`.~~ Done 2026-10-17 (`auth::queries::is_member`, `list_memberships`; `sync::queries::doc_horizon`).
 
-**2b — Session + WS routing.** `server/src/sync/ws.rs`. ~~`can_open` → membership check.~~ Done. `WSSession.open: Option<OpenDoc>` → `HashMap<DocId, OpenDoc>`; the broadcast `select!` arm polls every open subscription. Per-frame doc routing and the broadcast registry (`HashMap<DocId, Vec<Subscriber>>`) already exist.
+**2b — Session + WS routing.** ~~`can_open` → membership check; `WSSession.open` → map; broadcast arm polls every open subscription.~~ Done 2026-10-19.
 
 **2c — Snapshot coordinator.** Already keyed by doc; nothing to do.
 
-**2d — HTTP endpoints.** ~~Signup / login / recover / reset / change in memberships shape.~~ Done 2026-10-17. Still to add: `POST /api/docs`, invites, members.
+**2d — HTTP endpoints.** ~~Signup / login / recover / reset / change in memberships shape.~~ Done 2026-10-17. ~~`POST /api/docs`, `GET /api/docs`.~~ Done 2026-10-19 (`server/src/http/doc_routes.rs`). Still to add: invites, members.
 
-**2e — Tests.** ~~Fixture builders; "two docs on one account" via a directly seeded `doc_members` row.~~ Done 2026-10-17 (`server/tests/auth.rs` password-change coverage, `server/tests/sync.rs` open + push on the seeded doc, removed membership rejected).
+**2e — Tests.** ~~Fixture builders; "two docs on one account".~~ Done 2026-10-17 / 2026-10-19 (`server/tests/sync.rs`: two docs interleaved on one connection, broadcast isolation across three connections, per-doc lease release; `server/tests/auth.rs`: created doc covered by list / login / password change / recovery, recovery wrap required on enrolled accounts).
 
 ### Phase 3 — Core (minimal)
 
-- `core/src/sync.rs`: ~~engine signatures gain `doc_id` (stamped on outbound frames).~~ Done: the engine stamps `doc_id` on every outbound frame, opens its doc after `HelloAck`, and drops inbound frames for any other doc. Nothing further; hosts run one engine per doc.
+- `core/src/sync.rs`: ~~engine signatures gain `doc_id` (stamped on outbound frames).~~ Done. ~~The `Hello` handshake moves out of the engine~~ Done 2026-10-19: the engine starts at `OpenDoc`; the host runs `Hello` once per socket with `hello_frame` / `parse_hello_response` and routes inbound frames with `server_frame_doc_id`. `EngineOptions` (client identity) now belongs to the connection, not the engine constructor.
 - `core/src/crypto/`: no changes. DEK is still 32 bytes; wrap/unwrap unchanged.
 - HTTP body construction (if any in core): memberships shape.
 
@@ -223,14 +225,14 @@ Compile breaks downstream — fix in Phase 2.
 
 - **Local storage** (`cli/migrations/001_init.sql`, `cli/src/db.rs`): replace `doc_snapshot` single-row table with a `docs` table keyed by `doc_id` (snapshot blob, last_acked_seq, DEK).
 - ~~**Secrets / config** (`cli/src/config.rs`): `Secrets.dek_hex` → `Secrets.docs`.~~ Done 2026-10-17 (`BTreeMap<String, DocSecrets>` keyed by doc uuid).
-- **Sync integration** (`cli/src/sync.rs`): introduce a `DocRouter` that owns the WS and a `HashMap<DocId, SyncEngine>`. Inbound demuxed by `doc_id`; outbound stamped before send. v1 = always one engine in the map.
+- **Sync integration** (`cli/src/sync.rs`): introduce a `DocRouter` that owns the WS and a `HashMap<DocId, SyncEngine>`. Inbound demuxed by `doc_id`; outbound stamped before send. The handshake step is already the session's (2026-10-19); the router is the remaining piece, plus a doc selector on commands.
 - ~~**Auth flows**: login unwraps every membership into `Secrets.docs`; recovery / password change loop over memberships.~~ Done 2026-10-17.
 - **Tests**: update integration tests to seed new schema.
 
 ### Phase 5 — Web
 
 - **IndexedDB schema** (`js/core/src/storage/web-db.ts`): bump IDB version. `onupgradeneeded` drops old stores, creates new with composite keyPaths: `ops[account_id, doc_id, oplog_seq]`, `snapshot_meta[account_id, doc_id]`. Wrap-key store: one entry per `doc_id` (non-extractable WebCrypto AES-GCM wrap).
-- **SyncBridge → DocRouter** (`js/core/src/sync-bridge.ts`): bridge owns WS + reconnect; new `DocRouter` holds `Map<DocId, SyncEngine>`; routes inbound/outbound. v1 = primary doc engine only.
+- ~~**SyncBridge → DocRouter** (`js/core/src/sync-bridge.ts`).~~ Done 2026-10-19: the bridge takes `engines: SyncEngine[]`, runs the handshake, routes by `doc_id`, reports unroutable frames and handshake failures via `onError`. The web client passes one engine today.
 - **App boot** (`js/web/src/App.tsx`): on login, unwrap each membership DEK with KEK, persist to IndexedDB. Boot the primary doc (`primary_doc_id`). Today (2026-10-17) `Login.tsx` reads the memberships array but unwraps and vaults only the primary doc's key.
 - ~~**Auth flows**: memberships-shaped bodies on relevant endpoints.~~ Done for login (the web has no recovery / password-change UI yet).
 - **Verification**: signup → add items → reload → still works. Two devices on same account → real-time sync.
@@ -245,7 +247,7 @@ Compile breaks downstream — fix in Phase 2.
 ### Test-coverage emphasis (write before sharing UI ships)
 
 - **Server: two-doc multiplexing.** Seed second `doc_members` row directly via DB. Open one WS, push to doc A, push to doc B, verify both get correct per-doc seqs and a third connection sees broadcasts only for its subscribed doc.
-- **Core: per-engine gap handling independence.** Two engines on same connection; gap on engine A's doc must not block engine B's ack progress.
+- **Core: per-engine gap handling independence.** Two engines on same connection; a stalled pull on engine A's doc must not block engine B's progress. Not covered (see `testing.md` §Known coverage gaps for why and how to add it).
 - **HTTP: memberships array round-trip.** Login returns 1-element array; same code paths handle N. Never special-case length 1.
 
 ### Recommended PR cadence
@@ -262,10 +264,10 @@ Or split into 5 small PRs if needed: protocol → server → core+CLI → web �
 | Phase | Days |
 |---|---|
 | 1 — protocol + schema | 0.5 (done except `doc_invites`) |
-| 2 — server | 1.5 (memberships + keys done; multi-open, invites, member endpoints remain) |
+| 2 — server | 1.5 (memberships, keys, multi-open, `POST /api/docs` done; invites, member endpoints, `DocClosed` remain) |
 | 3 — core | 0.5 (done) |
-| 4 — CLI | 0.5 (key storage done; `DocRouter` remains) |
-| 5 — web | 1.5 |
+| 4 — CLI | 0.5 (key storage + handshake done; `DocRouter` + doc selector remain) |
+| 5 — web | 1.5 (router done; per-doc vault, boot every membership, doc switcher remain) |
 | 6 — cleanup + verification | 0.5 |
 | **Total** | **~6 days** |
 
@@ -339,3 +341,4 @@ The editor layers are separable and should be decided separately:
 - **Primary doc is privileged** in UI: non-deletable, non-leavable. The account's Home.
 - **Member-removal rotation deferred** — forward-only revocation accepted as a v1 limitation.
 - **Recovery-code-after-signup deferred** — recovery stays a signup-only opt-in.
+- **Clients load every membership at boot** (decided 2026-10-19). A client opens a live `Doc` + engine for each doc the account is a member of, not just the one in view. Reasons: item URLs carry no doc id and are resolved by searching every loaded doc (`urls.md`), and cross-doc Focus refs need the foreign doc resident. A client-side policy to open a subset lazily is a possible later refinement; the server and router must not assume the full set is open on every connection.

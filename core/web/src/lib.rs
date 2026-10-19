@@ -14,7 +14,9 @@ use monoplan_core::{
     LocalStorage as CoreLocalStorage, NotesDeltaOp, PushId as CorePushId,
     RemoteWalRow as CoreRemoteWalRow, ServerSeq as CoreServerSeq, StorageError as CoreStorageError,
     SyncEngine as CoreSyncEngine, WrappedDek as CoreWrappedDek, derive_password_master,
-    derive_recovery_master, generate_recovery_code, kek_from_master, parse_recovery_code,
+    derive_recovery_master, generate_recovery_code, hello_frame as core_hello_frame,
+    kek_from_master, parse_hello_response as core_parse_hello_response, parse_recovery_code,
+    server_frame_doc_id as core_server_frame_doc_id,
 };
 use monoplan_protocol::{EncryptedBlob as CoreEncryptedBlob, KdfParams as CoreKdfParams};
 
@@ -1187,6 +1189,75 @@ impl CoreLocalStorage for WebStorage {
     }
 }
 
+// ---------- connection-level handshake ----------
+//
+// `Hello` / `HelloAck` is per socket, not per doc. The JS host
+// (`SyncBridge`) sends `helloFrame` first on every socket, feeds the
+// first reply to `parseHelloResponse`, and only then calls
+// `handleConnected` on each doc's engine. Later frames are routed to
+// the right engine by `serverFrameDocId`.
+
+/// The `Hello` frame to send first on a fresh socket.
+#[wasm_bindgen(js_name = helloFrame)]
+pub fn hello_frame(client_name: String, client_version: String) -> Vec<u8> {
+    core_hello_frame(&CoreEngineOptions {
+        client_name,
+        client_version,
+    })
+}
+
+/// Outcome of the server's first frame. `ok` is true on `HelloAck`
+/// with a protocol version this client speaks; otherwise `error`
+/// says why (rejected, version mismatch, malformed).
+#[wasm_bindgen]
+pub struct HelloOutcome {
+    ok: bool,
+    server_version: Option<String>,
+    error: Option<String>,
+}
+
+#[wasm_bindgen]
+impl HelloOutcome {
+    #[wasm_bindgen(getter)]
+    pub fn ok(&self) -> bool {
+        self.ok
+    }
+
+    #[wasm_bindgen(getter, js_name = serverVersion)]
+    pub fn server_version(&self) -> Option<String> {
+        self.server_version.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn error(&self) -> Option<String> {
+        self.error.clone()
+    }
+}
+
+/// Interpret the first frame the server sends after `Hello`.
+#[wasm_bindgen(js_name = parseHelloResponse)]
+pub fn parse_hello_response(bytes: &[u8]) -> HelloOutcome {
+    match core_parse_hello_response(bytes) {
+        Ok(ack) => HelloOutcome {
+            ok: true,
+            server_version: Some(ack.server_version),
+            error: None,
+        },
+        Err(e) => HelloOutcome {
+            ok: false,
+            server_version: None,
+            error: Some(e.to_string()),
+        },
+    }
+}
+
+/// The doc id (uuid string) a post-handshake server frame names, or
+/// `undefined` when the bytes are not a `ServerFrame`.
+#[wasm_bindgen(js_name = serverFrameDocId)]
+pub fn server_frame_doc_id(bytes: &[u8]) -> Option<String> {
+    core_server_frame_doc_id(bytes).map(|id| id.to_string())
+}
+
 // ---------- SyncEngine ----------
 
 #[wasm_bindgen]
@@ -1198,18 +1269,16 @@ pub struct SyncEngine {
 impl SyncEngine {
     /// Build a new engine. Consumes `doc` and `dek` — the JS handles
     /// must not be reused after this call. `doc_id` is the server-
-    /// assigned UUID for this doc (the value JS already has in
-    /// `session.primaryDocId`). `last_acked_seq` is the contiguous-
-    /// prefix seq persisted from the previous session (or 0 for a
-    /// fresh device).
+    /// assigned UUID for this doc (one of the session's memberships).
+    /// `last_acked_seq` is the contiguous-prefix seq persisted from
+    /// the previous session (or 0 for a fresh device). Client identity
+    /// is a connection concern: see `helloFrame`.
     #[wasm_bindgen(constructor)]
     pub fn new(
         doc: Doc,
         doc_id: String,
         dek: Dek,
         last_acked_seq: u64,
-        client_name: String,
-        client_version: String,
         storage: EngineStorage,
     ) -> Result<SyncEngine, JsError> {
         let parsed = uuid::Uuid::parse_str(&doc_id)
@@ -1223,10 +1292,6 @@ impl SyncEngine {
                 CoreDocId(parsed),
                 dek.inner,
                 last_acked_seq,
-                CoreEngineOptions {
-                    client_name,
-                    client_version,
-                },
                 dyn_storage,
             ),
         })
@@ -1316,9 +1381,17 @@ impl SyncEngine {
         Ok(())
     }
 
+    /// The doc this engine syncs (uuid string) — the routing key the
+    /// host matches `serverFrameDocId` against.
+    #[wasm_bindgen(js_name = docId)]
+    pub fn doc_id(&self) -> String {
+        self.inner.doc_id().0.to_string()
+    }
+
     // -- transport callbacks --
 
-    /// Caller's WebSocket has opened. Engine queues the `Hello` frame.
+    /// Caller's WebSocket is open and its `Hello` handshake succeeded.
+    /// Engine queues `OpenDoc` for its doc.
     #[wasm_bindgen(js_name = handleConnected)]
     pub fn handle_connected(&mut self) {
         self.inner.handle_connected();
@@ -1331,9 +1404,9 @@ impl SyncEngine {
         self.inner.handle_disconnected();
     }
 
-    /// Caller-driven tick: escalates the `Hello` handshake watchdog
-    /// (no-op outside Hello). Hosts call this periodically (e.g.,
-    /// every ~1s via `setInterval`).
+    /// Caller-driven tick: escalates the `OpenDoc` watchdog (no-op
+    /// outside Opening). Hosts call this periodically (e.g., every ~1s
+    /// via `setInterval`).
     #[wasm_bindgen(js_name = handleTimeout)]
     pub fn handle_timeout(&mut self) {
         self.inner.handle_timeout();

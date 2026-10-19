@@ -10,9 +10,10 @@ use monoplan_core::{
     random_bytes,
 };
 use monoplan_protocol::{
-    DeviceRenameRequest, DevicesListResponse, DocKey, KdfParams, LoginRequest, LoginResponse,
-    MemberRole, PasswordChangeRequest, PasswordResetRequest, PreloginRequest, PreloginResponse,
-    RecoverRequest, RecoverResponse, RecoveryMaterial, SignupRequest, SignupResponse,
+    CreateDocRequest, CreateDocResponse, DeviceRenameRequest, DevicesListResponse, DocKey,
+    DocsListResponse, KdfParams, LoginRequest, LoginResponse, MemberRole, PasswordChangeRequest,
+    PasswordResetRequest, PreloginRequest, PreloginResponse, RecoverRequest, RecoverResponse,
+    RecoveryMaterial, SignupRequest, SignupResponse,
 };
 use monoplan_server::{AppState, router};
 use reqwest::header::CONTENT_TYPE;
@@ -704,6 +705,170 @@ async fn password_change_must_rewrap_every_membership() {
             .unwrap();
         assert_eq!(dek.as_bytes(), expected.as_bytes(), "doc {}", m.doc_id);
     }
+}
+
+async fn get_msgpack_authed<Resp: DeserializeOwned>(url: &str, token: &str) -> Resp {
+    let resp = http().get(url).bearer_auth(token).send().await.unwrap();
+    assert!(
+        resp.status().is_success(),
+        "expected 2xx, got {}: {}",
+        resp.status(),
+        resp.text().await.unwrap_or_default()
+    );
+    rmp_serde::from_slice(&resp.bytes().await.unwrap()).unwrap()
+}
+
+/// `POST /api/docs` with a fresh DEK wrapped under `kek` (and under
+/// `recovery_kek` when given). Returns the doc id and its DEK.
+async fn create_doc(
+    acc: &Account,
+    kek: &monoplan_core::Kek,
+    recovery_kek: Option<&monoplan_core::Kek>,
+) -> (String, Dek) {
+    let dek = Dek::generate();
+    let w = kek.wrap(&dek).unwrap();
+    let r = recovery_kek.map(|k| k.wrap(&dek).unwrap());
+    let resp: CreateDocResponse = post_msgpack(
+        &format!("{}/api/docs", acc.server.base),
+        &CreateDocRequest {
+            wrapped_dek: w.ciphertext,
+            wrapped_dek_nonce: w.nonce.to_vec(),
+            recovery_wrapped_dek: r.as_ref().map(|r| r.ciphertext.clone()),
+            recovery_wrapped_dek_nonce: r.as_ref().map(|r| r.nonce.to_vec()),
+        },
+        Some(&acc.device_token),
+    )
+    .await;
+    (resp.doc_id, dek)
+}
+
+#[tokio::test]
+async fn created_doc_is_an_owner_membership_that_every_key_path_covers() {
+    let acc = signup(false).await;
+    let password = "correct horse battery staple";
+    let master =
+        derive_password_master(password.as_bytes(), &acc.master_salt, acc.kdf_params).unwrap();
+    let kek = master.kek().unwrap();
+    let (doc_id, dek) = create_doc(&acc, &kek, None).await;
+    assert_ne!(doc_id, acc.primary_doc_id);
+
+    // Listed with the primary first, owner role, wrap opens the DEK.
+    let docs: DocsListResponse =
+        get_msgpack_authed(&format!("{}/api/docs", acc.server.base), &acc.device_token).await;
+    assert_eq!(docs.primary_doc_id, acc.primary_doc_id);
+    let ids: Vec<&str> = docs.memberships.iter().map(|m| m.doc_id.as_str()).collect();
+    assert_eq!(ids, vec![acc.primary_doc_id.as_str(), doc_id.as_str()]);
+    assert_eq!(docs.memberships[1].role, MemberRole::Owner);
+    let reopened = unwrap_doc_key(
+        &kek,
+        &DocKey {
+            doc_id: doc_id.clone(),
+            wrapped_dek: docs.memberships[1].wrapped_dek.clone(),
+            wrapped_dek_nonce: docs.memberships[1].wrapped_dek_nonce.clone(),
+        },
+    );
+    assert_eq!(reopened.as_bytes(), dek.as_bytes());
+
+    // Login reports it too.
+    assert_eq!(login_with(&acc, password).await.memberships.len(), 2);
+
+    // Password change must now cover both docs.
+    let new_password = "another long password";
+    let new_salt: [u8; 16] = random_bytes();
+    let new_master =
+        derive_password_master(new_password.as_bytes(), &new_salt, acc.kdf_params).unwrap();
+    let new_kek = new_master.kek().unwrap();
+    let url = format!("{}/api/account/password/change", acc.server.base);
+    let req = |keys: Vec<DocKey>| PasswordChangeRequest {
+        current_auth_secret: master.auth_secret().unwrap().as_bytes().to_vec(),
+        new_master_salt: new_salt.to_vec(),
+        new_kdf_params: acc.kdf_params,
+        new_auth_secret: new_master.auth_secret().unwrap().as_bytes().to_vec(),
+        new_doc_keys: keys,
+    };
+    let status = post_msgpack_status_authed(
+        &url,
+        &req(vec![wrap_doc_key(&new_kek, &acc.primary_doc_id, &acc.dek)]),
+        &acc.device_token,
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
+    post_msgpack_no_response(
+        &url,
+        &req(vec![
+            wrap_doc_key(&new_kek, &acc.primary_doc_id, &acc.dek),
+            wrap_doc_key(&new_kek, &doc_id, &dek),
+        ]),
+        Some(&acc.device_token),
+    )
+    .await;
+    let login = login_with(&acc, new_password).await;
+    let created = login
+        .memberships
+        .iter()
+        .find(|m| m.doc_id == doc_id)
+        .expect("created doc survives the password change");
+    let reopened = unwrap_doc_key(
+        &new_kek,
+        &DocKey {
+            doc_id: doc_id.clone(),
+            wrapped_dek: created.wrapped_dek.clone(),
+            wrapped_dek_nonce: created.wrapped_dek_nonce.clone(),
+        },
+    );
+    assert_eq!(reopened.as_bytes(), dek.as_bytes());
+}
+
+#[tokio::test]
+async fn create_doc_on_a_recovery_enrolled_account_requires_the_recovery_wrap() {
+    let acc = signup(true).await;
+    let password = "correct horse battery staple";
+    let kek = derive_password_master(password.as_bytes(), &acc.master_salt, acc.kdf_params)
+        .unwrap()
+        .kek()
+        .unwrap();
+    let recovery_code = acc.recovery_code.clone().expect("opted in");
+    let recovery_salt = acc.recovery_salt.clone().expect("opted in");
+    let r_master = derive_recovery_master(&recovery_code, &recovery_salt, acc.kdf_params).unwrap();
+    let r_kek = r_master.kek().unwrap();
+
+    // Without the recovery wrap: refused, nothing created.
+    let dek = Dek::generate();
+    let w = kek.wrap(&dek).unwrap();
+    let status = post_msgpack_status_authed(
+        &format!("{}/api/docs", acc.server.base),
+        &CreateDocRequest {
+            wrapped_dek: w.ciphertext,
+            wrapped_dek_nonce: w.nonce.to_vec(),
+            recovery_wrapped_dek: None,
+            recovery_wrapped_dek_nonce: None,
+        },
+        &acc.device_token,
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
+    let docs: DocsListResponse =
+        get_msgpack_authed(&format!("{}/api/docs", acc.server.base), &acc.device_token).await;
+    assert_eq!(docs.memberships.len(), 1);
+
+    // With it: created, and the recovery path releases both wraps.
+    let (doc_id, dek) = create_doc(&acc, &kek, Some(&r_kek)).await;
+    let recovered: RecoverResponse = post_msgpack(
+        &format!("{}/api/account/recover", acc.server.base),
+        &RecoverRequest {
+            email: acc.email.clone(),
+            recovery_auth_secret: r_master.auth_secret().unwrap().as_bytes().to_vec(),
+        },
+        None,
+    )
+    .await;
+    assert_eq!(recovered.doc_keys.len(), 2);
+    let key = recovered
+        .doc_keys
+        .iter()
+        .find(|k| k.doc_id == doc_id)
+        .expect("recovery wrap for the created doc");
+    assert_eq!(unwrap_doc_key(&r_kek, key).as_bytes(), dek.as_bytes());
 }
 
 async fn post_msgpack_status_authed<Req: Serialize>(

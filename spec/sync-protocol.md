@@ -34,6 +34,8 @@ First frame on every WS connection, before any payload exchange:
 
 All subsequent frames are interpreted under the agreed `protocol_version`. Belt-and-braces against breaking changes; MessagePack handles additive evolution within a version on its own. `HelloAck` is connection-scoped: anything about a particular doc arrives on `DocOpened`.
 
+The handshake is the **host's**, not the engine's: a socket serves every doc the device has open, so the host (CLI `sync::Session`, web `SyncBridge`) sends `Hello` once per socket and reads the reply with core's `hello_frame` / `parse_hello_response`, then brings each doc's `SyncEngine` online. An engine never sees `Hello` / `HelloAck`; its first frame out is `OpenDoc`.
+
 Note: the per-list order-container CRDT schema (`spec/data-model.md` "Schema versioning & compatibility") shipped without a wire bump — the frames are identical and op blobs are opaque to the protocol. The doc layouts are mutually incompatible, but pre-release with a single user the cutover is handled operationally (export JSON → wipe → import), not fenced at the handshake. If a schema break ever needs to coexist with live old clients, bump this version then.
 
 ## Doc binding
@@ -48,7 +50,10 @@ Rules:
 - A payload frame for a doc that is not open on the connection is a protocol violation: the server closes the connection. Same for a doc the account may not access.
 - `OpenDoc` for a doc the account may not access is answered with `DocRejected { doc_id, reason }` and the connection closes.
 - The server subscribes **before** replying `DocOpened`, so once a client sees `DocOpened` there is no window in which a peer's push could slip past unregistered.
-- Re-opening the already-open doc is idempotent (another `DocOpened`, no second subscription). A connection holds one open doc today; opening a second, different doc is refused with `DocRejected`. Lifting that to N open docs per connection is the multiplexing step in `spec/sharing-plan.md`; the frame shapes do not change for it.
+- Re-opening an already-open doc is idempotent (another `DocOpened`, no second subscription).
+- A connection holds **any number** of open docs (multiplexing, `spec/sharing-plan.md`): one broadcast subscription and one snapshot-lease slot per open doc, the session loop polling every subscription. Which docs a connection opens is the client's choice; the server never assumes the full membership set is open. A closed broadcast channel on any one open doc (slow consumer) ends the whole session, and the client re-pulls every doc from its cursor on reconnect. On disconnect every open doc's subscription is dropped and any held snapshot lease is released.
+- Clients route inbound frames to the right engine by `doc_id` (core's `server_frame_doc_id`); a frame for a doc the client has no engine for is dropped and reported, never applied.
+- Membership is checked at `OpenDoc` only. A membership removed mid-session keeps serving until the connection drops; a `DocClosed` frame for live revocation is sharing work and not yet defined.
 
 ## Client → Server
 

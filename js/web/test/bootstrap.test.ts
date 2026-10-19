@@ -25,8 +25,6 @@ test("bulk bootstrap crosses the app boundary as one full resync", () => {
     DOC_ID,
     dek.clone(),
     0n,
-    "test",
-    "0",
     new MemEngineStorage() as unknown as EngineStorage,
   );
   const first = targetEngine.popAppEvent();
@@ -41,8 +39,6 @@ test("bulk bootstrap crosses the app boundary as one full resync", () => {
     DOC_ID,
     dek.clone(),
     0n,
-    "test",
-    "0",
     new MemEngineStorage() as unknown as EngineStorage,
   );
   const app = createSyncedApp(engine);
@@ -63,8 +59,6 @@ test("a saved default view survives materializing a fresh store", () => {
       DOC_ID,
       Dek.generate(),
       0n,
-      "test",
-      "0",
       new MemEngineStorage() as unknown as EngineStorage,
     );
 
@@ -81,8 +75,6 @@ test("a saved default view survives materializing a fresh store", () => {
     DOC_ID,
     Dek.generate(),
     0n,
-    "test",
-    "0",
     new MemEngineStorage() as unknown as EngineStorage,
   );
   const app = createSyncedApp(reloaded);

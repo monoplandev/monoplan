@@ -23,4 +23,7 @@ pub use storage::{
     PushId, RemoteWalRow, ServerSeq, SnapshotRow, StorageError, WalRow, boot_doc, has_unsynced_ops,
     load_doc, seed_snapshot,
 };
-pub use sync::{EngineOptions, Event, SyncEngine};
+pub use sync::{
+    EngineOptions, Event, HelloError, SyncEngine, hello_frame, parse_hello_response,
+    server_frame_doc_id,
+};

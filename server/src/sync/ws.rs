@@ -7,12 +7,14 @@
 //!
 //! The connection is `(account, device)`-bound; docs are bound per
 //! frame. After the version handshake the client sends `OpenDoc` for
-//! the doc it wants to sync, the server checks access and subscribes
+//! each doc it wants to sync, the server checks access and subscribes
 //! the connection to that doc's broadcasts, and every payload frame
-//! after that names the doc it is about. One doc per connection
-//! today (an account has exactly one); the per-frame `doc_id` and the
-//! open step are the seams multi-doc multiplexing slots into
-//! (`spec/sharing-plan.md`).
+//! after that names the doc it is about. A connection multiplexes any
+//! number of open docs: one subscription per open doc, one snapshot
+//! lease slot per open doc, and the session loop polls every
+//! subscription for broadcasts (`spec/sharing-plan.md`).
+use std::collections::HashMap;
+use std::task::Poll;
 use std::time::Instant;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -56,31 +58,40 @@ pub struct WsAuthQuery {
     token: Option<String>,
 }
 
-/// A doc bound to this connection by `OpenDoc`.
+/// A doc bound to this connection by `OpenDoc`. Keyed by doc id in
+/// `WSSession::open`.
 struct OpenDoc {
-    doc_id: Uuid,
     sub: Subscription,
     snapshot_lease: Option<u64>,
 }
 
 struct WSSession {
     auth: DeviceAuth,
-    /// The doc this connection has opened, if any. Payload frames are
-    /// refused until one is open, and must name this doc.
-    open: Option<OpenDoc>,
+    /// The docs this connection has opened, keyed by doc id. A payload
+    /// frame must name one of them; anything else ends the session.
+    open: HashMap<Uuid, OpenDoc>,
 }
 
 impl WSSession {
     /// The open doc a payload frame for `doc_id` may act on.
     fn open_doc(&mut self, doc_id: Uuid) -> Result<&mut OpenDoc, SessionError> {
-        match self.open.as_mut() {
-            Some(open) if open.doc_id == doc_id => Ok(open),
-            Some(open) => Err(SessionError::DocNotOpen {
-                doc_id,
-                open: Some(open.doc_id),
-            }),
-            None => Err(SessionError::DocNotOpen { doc_id, open: None }),
+        let open: Vec<Uuid> = self.open.keys().copied().collect();
+        self.open
+            .get_mut(&doc_id)
+            .ok_or(SessionError::DocNotOpen { doc_id, open })
+    }
+
+    /// Poll every open doc's broadcast subscription. Resolves with the
+    /// first doc that has a frame ready (or whose channel closed);
+    /// pends forever while no doc is open, so the session loop's
+    /// broadcast arm parks until an `OpenDoc` lands.
+    fn poll_broadcast(&mut self, cx: &mut std::task::Context<'_>) -> Poll<(Uuid, Option<Vec<u8>>)> {
+        for (doc_id, open) in self.open.iter_mut() {
+            if let Poll::Ready(msg) = open.sub.rx.poll_recv(cx) {
+                return Poll::Ready((*doc_id, msg));
+            }
         }
+        Poll::Pending
     }
 }
 
@@ -164,10 +175,10 @@ enum SessionError {
     Handshake(String),
     #[error("open doc {doc_id} refused: {reason}")]
     OpenRefused { doc_id: Uuid, reason: String },
-    #[error("payload frame for doc {doc_id} but open doc is {open:?}")]
-    DocNotOpen { doc_id: Uuid, open: Option<Uuid> },
-    #[error("broadcast channel dropped — slow client")]
-    BroadcastLagged,
+    #[error("payload frame for doc {doc_id} but open docs are {open:?}")]
+    DocNotOpen { doc_id: Uuid, open: Vec<Uuid> },
+    #[error("broadcast channel for doc {0} dropped — slow client")]
+    BroadcastLagged(Uuid),
 }
 
 async fn run_session(
@@ -215,7 +226,10 @@ async fn run_session(
     .instrument(handshake_span)
     .await?;
 
-    let mut ws_session = WSSession { auth, open: None };
+    let mut ws_session = WSSession {
+        auth,
+        open: HashMap::new(),
+    };
 
     let result = loop {
         tokio::select! {
@@ -226,18 +240,15 @@ async fn run_session(
                     Err(e) => break Err(e),
                 }
             }
-            // No broadcasts flow until a doc is open: the branch
-            // parks on a never-ready future rather than polling a
-            // subscription that doesn't exist yet.
-            broadcast = async {
-                match ws_session.open.as_mut() {
-                    Some(open) => open.sub.rx.recv().await,
-                    None => std::future::pending().await,
-                }
-            } => {
-                let bytes = broadcast.ok_or(SessionError::BroadcastLagged)?;
+            // Every open doc's subscription is polled; with none open
+            // the arm parks until an `OpenDoc` lands. A closed channel
+            // on any one doc ends the whole session: the client
+            // reconnects and re-pulls every doc from its cursor.
+            (doc_id, broadcast) = std::future::poll_fn(|cx| ws_session.poll_broadcast(cx)) => {
+                let bytes = broadcast.ok_or(SessionError::BroadcastLagged(doc_id))?;
                 let broadcast_span = tracing::info_span!(
                     "ws.broadcast_send",
+                    doc_id = %doc_id,
                     message_bytes = bytes.len()
                 );
                 socket.send(Message::Binary(bytes.into())).await?;
@@ -245,12 +256,13 @@ async fn run_session(
             }
         }
     };
-    // Dropping the open doc's subscription deregisters the subscriber;
-    // an unfinished snapshot lease goes back to the coordinator.
-    if let Some(open) = ws_session.open.take()
-        && let Some(lease_id) = open.snapshot_lease
-    {
-        state.snapshot_coordinator.release(open.doc_id, lease_id);
+    // Dropping each open doc's subscription deregisters the
+    // subscriber; any unfinished snapshot lease goes back to the
+    // coordinator so another producer can be picked.
+    for (doc_id, open) in ws_session.open.drain() {
+        if let Some(lease_id) = open.snapshot_lease {
+            state.snapshot_coordinator.release(doc_id, lease_id);
+        }
     }
     result
 }
@@ -315,9 +327,11 @@ async fn handle_frame(
 }
 
 /// Bind `doc_id` to the connection: access check, broadcast
-/// subscription, `DocOpened`. A refusal sends `DocRejected` and then
-/// ends the session — there is nothing else a client can usefully do
-/// on this connection, and a loud close beats a silent ignore.
+/// subscription, `DocOpened`. Any number of docs may be open at once;
+/// re-opening one already open is idempotent. A refusal sends
+/// `DocRejected` and then ends the session — a client that asked for
+/// a doc it cannot have is confused about its memberships, and a loud
+/// close beats a silent ignore.
 async fn open_doc(
     socket: &mut WebSocket,
     state: &AppState,
@@ -328,10 +342,6 @@ async fn open_doc(
     async {
         let refusal = if !can_open(state, &ws_session.auth, doc_id).await? {
             Some("not a member of this doc")
-        } else if ws_session.open.as_ref().is_some_and(|o| o.doc_id != doc_id) {
-            // One doc per connection until multiplexing lands; make
-            // the limit explicit rather than silently swapping docs.
-            Some("connection already has a different doc open")
         } else {
             None
         };
@@ -351,7 +361,7 @@ async fn open_doc(
             });
         }
         let epoch = queries::doc_epoch(&state.db, doc_id).await?;
-        if ws_session.open.is_none() {
+        if !ws_session.open.contains_key(&doc_id) {
             // Subscribe *before* replying: once the client sees
             // `DocOpened` it may rely on broadcasts for everything
             // after its pull, so there must be no window in which a
@@ -359,11 +369,13 @@ async fn open_doc(
             let sub = state
                 .sync_sessions
                 .subscribe(doc_id, ws_session.auth.device_id);
-            ws_session.open = Some(OpenDoc {
+            ws_session.open.insert(
                 doc_id,
-                sub,
-                snapshot_lease: None,
-            });
+                OpenDoc {
+                    sub,
+                    snapshot_lease: None,
+                },
+            );
         }
         send_msgpack(socket, &ServerFrame::DocOpened { doc_id, epoch }).await?;
         tracing::info!(epoch, "ws doc opened");

@@ -14,7 +14,11 @@ GET    /api/devices                    (list current account's devices: name, la
 POST   /api/devices                    (register a new device)
 PATCH  /api/devices/:device_id         (rename a device)
 DELETE /api/devices/:device_id
+GET    /api/docs                       (authed; `{ primary_doc_id, memberships }` in the login shape)
+POST   /api/docs                       (authed; create a doc the account owns: `{ wrapped_dek, wrapped_dek_nonce, recovery_wrapped_dek?, recovery_wrapped_dek_nonce? }` → `{ doc_id }`)
 ```
+
+`POST /api/docs` is pure key management: the client generates the doc's DEK, wraps it under its password KEK, and the server mints the doc id plus an `owner` row in `doc_members` carrying the wrap. An account that enrolled a recovery code must also post the recovery-KEK wrap (400 otherwise), because `/password/reset` closes any membership it cannot re-wrap and the doc would be lost. The doc's history begins with the first `PushOps` after `OpenDoc`.
 
 WebSocket upgrade: `GET /api/sync` with `Authorization: Bearer <device_token>` (CLI) or the `monoplan_device` cookie (web). Server validates on upgrade; the connection is bound to `(account_id, device_id)` for its lifetime. No per-message auth. (Frame encoding + version handshake: see `sync-protocol.md`.)
 
