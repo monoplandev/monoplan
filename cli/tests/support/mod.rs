@@ -1,18 +1,20 @@
 use std::sync::OnceLock;
 
 use monoplan_cli::config::{Config, Profile, Secrets};
-use monoplan_cli::keystore::derive_master;
+use monoplan_cli::keystore::{
+    derive_master, parse_doc_id, unwrap_doc_key, unwrap_home, unwrap_memberships,
+};
 use monoplan_cli::net::Client;
 use monoplan_cli::storage::Account;
 use monoplan_core::{
-    AEAD_NONCE_LEN, Dek, Doc, DocId, Kek, WrappedDek, derive_password_master,
-    derive_recovery_master, generate_recovery_code, random_bytes,
+    Dek, Doc, DocId, Kek, derive_password_master, derive_recovery_master, generate_recovery_code,
+    random_bytes,
 };
 use monoplan_protocol::{
-    DeviceCredential, DeviceRegistration, DocKey, KdfParams, LoginRequest, LoginResponse,
-    PasswordChangeRequest, PasswordResetRequest, PasswordResetResponse, PreloginRequest,
-    PreloginResponse, RecoverRequest, RecoverResponse, RecoveryMaterial, SignupRequest,
-    SignupResponse,
+    CreateDocRequest, CreateDocResponse, DeviceCredential, DeviceRegistration, DocKey,
+    DocsListResponse, KdfParams, LoginRequest, LoginResponse, PasswordChangeRequest,
+    PasswordResetRequest, PasswordResetResponse, PreloginRequest, PreloginResponse, RecoverRequest,
+    RecoverResponse, RecoveryMaterial, SignupRequest, SignupResponse,
 };
 use monoplan_server::{AppState, router};
 use reqwest::header::CONTENT_TYPE;
@@ -39,7 +41,11 @@ pub struct LoggedInDevice {
     pub primary_doc_id: String,
     pub device_id: String,
     pub device_token: String,
+    /// The Home DEK (primary doc).
     pub dek: Dek,
+    /// Every membership's key, server order, primary first — what
+    /// `monoplan login` writes to `secrets.toml`.
+    pub doc_keys: Vec<(DocId, Dek)>,
     pub recovery_present: bool,
 }
 
@@ -48,7 +54,10 @@ pub struct RecoveredDevice {
     pub primary_doc_id: String,
     pub device_id: String,
     pub device_token: String,
+    /// The Home DEK (primary doc).
     pub dek: Dek,
+    /// Every membership's key, from `GET /api/docs` after the reset.
+    pub doc_keys: Vec<(DocId, Dek)>,
 }
 
 pub fn weak_params() -> KdfParams {
@@ -240,14 +249,11 @@ pub async fn login_device(
     let device = resp
         .device
         .ok_or_else(|| anyhow::anyhow!("login did not mint a device credential"))?;
-    // Mirror `monoplan login`: the primary doc's key comes from the
-    // membership whose doc id matches `primary_doc_id`.
-    let primary = resp
-        .memberships
-        .iter()
-        .find(|m| m.doc_id == resp.primary_doc_id)
-        .ok_or_else(|| anyhow::anyhow!("login response lacks the primary membership"))?;
-    let dek = unwrap_wrap(&kek, &primary.wrapped_dek, &primary.wrapped_dek_nonce)?;
+    // Mirror `monoplan login`: the primary membership opens with the
+    // KEK (Home DEK), every other membership opens with the Home DEK.
+    let primary_doc_id = parse_doc_id(&resp.primary_doc_id)?;
+    let dek = unwrap_home(&kek, primary_doc_id, &resp.memberships)?;
+    let doc_keys = unwrap_memberships(&dek, primary_doc_id, &resp.memberships)?;
 
     Ok(LoggedInDevice {
         account_id: resp.account_id,
@@ -255,17 +261,20 @@ pub async fn login_device(
         device_id: device.device_id,
         device_token: device.device_token,
         dek,
+        doc_keys,
         recovery_present: resp.recovery_present,
     })
 }
 
-/// Change password, re-wrapping `doc_keys` (every `(doc_id, dek)` the
-/// account holds — the server rejects a partial set).
+/// Change password, re-wrapping the Home DEK (`primary_doc_id`, `home`)
+/// — the only key the password KEK wraps. The server rejects any other
+/// set.
 pub async fn change_password(
     server_url: &str,
     email: &str,
     device_token: &str,
-    doc_keys: &[(&str, &Dek)],
+    primary_doc_id: &str,
+    home: &Dek,
     current_password: &str,
     new_password: &str,
 ) -> anyhow::Result<()> {
@@ -286,10 +295,7 @@ pub async fn change_password(
     let new_master = derive_master(new_password, &new_master_salt, new_kdf_params)?;
     let new_kek = new_master.kek()?;
     let new_auth = new_master.auth_secret()?;
-    let new_doc_keys = doc_keys
-        .iter()
-        .map(|(doc_id, dek)| wrap_doc_key(&new_kek, doc_id, dek))
-        .collect::<anyhow::Result<Vec<_>>>()?;
+    let new_doc_keys = vec![wrap_doc_key(&new_kek, primary_doc_id, home)?];
 
     client
         .post_authed_no_response(
@@ -316,14 +322,26 @@ fn wrap_doc_key(kek: &Kek, doc_id: &str, dek: &Dek) -> anyhow::Result<DocKey> {
     })
 }
 
-fn unwrap_wrap(kek: &Kek, wrapped_dek: &[u8], nonce: &[u8]) -> anyhow::Result<Dek> {
-    let nonce: [u8; AEAD_NONCE_LEN] = nonce
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("server returned a wrap nonce of wrong length"))?;
-    Ok(kek.unwrap(&WrappedDek {
-        ciphertext: wrapped_dek.to_vec(),
-        nonce,
-    })?)
+/// `POST /api/docs`: a second doc the account owns, its DEK wrapped
+/// under `home` the way `monoplan` clients will. Returns `(doc_id, dek)`.
+pub async fn create_doc(
+    server_url: &str,
+    device_token: &str,
+    home: &Dek,
+) -> anyhow::Result<(String, Dek)> {
+    let dek = Dek::generate();
+    let w = home.wrap_dek(&dek)?;
+    let resp: CreateDocResponse = Client::new(server_url)
+        .post_authed(
+            "/api/docs",
+            device_token,
+            &CreateDocRequest {
+                wrapped_dek: w.ciphertext,
+                wrapped_dek_nonce: w.nonce.to_vec(),
+            },
+        )
+        .await?;
+    Ok((resp.doc_id, dek))
 }
 
 pub async fn recover_device(
@@ -358,33 +376,22 @@ pub async fn recover_device(
             },
         )
         .await?;
-    // Mirror `monoplan recover`: unwrap every recovered doc key, keep
-    // the primary's as `dek`, re-wrap all of them for the reset.
-    let doc_keys = recovered
+    // Mirror `monoplan recover`: the one recovered key is the Home DEK;
+    // re-wrap it alone for the reset, then learn the other docs from
+    // `GET /api/docs` and open them with the Home DEK.
+    let dek = recovered
         .doc_keys
         .iter()
-        .map(|k| {
-            Ok((
-                k.doc_id.clone(),
-                unwrap_wrap(&recovery_kek, &k.wrapped_dek, &k.wrapped_dek_nonce)?,
-            ))
-        })
-        .collect::<anyhow::Result<Vec<(String, Dek)>>>()?;
-    let dek = doc_keys
-        .iter()
-        .find(|(id, _)| *id == recovered.primary_doc_id)
-        .map(|(_, dek)| dek.clone())
-        .ok_or_else(|| anyhow::anyhow!("recovery response lacks the primary doc key"))?;
+        .find(|k| k.doc_id == recovered.primary_doc_id)
+        .map(|k| unwrap_doc_key(&recovery_kek, &k.wrapped_dek, &k.wrapped_dek_nonce))
+        .ok_or_else(|| anyhow::anyhow!("recovery response lacks the primary doc key"))??;
 
     let new_master_salt: [u8; 16] = random_bytes();
     let new_kdf_params = weak_params();
     let new_master = derive_master(new_password, &new_master_salt, new_kdf_params)?;
     let new_kek = new_master.kek()?;
     let new_auth = new_master.auth_secret()?;
-    let new_doc_keys = doc_keys
-        .iter()
-        .map(|(id, dek)| wrap_doc_key(&new_kek, id, dek))
-        .collect::<anyhow::Result<Vec<_>>>()?;
+    let new_doc_keys = vec![wrap_doc_key(&new_kek, &recovered.primary_doc_id, &dek)?];
 
     let reset: PasswordResetResponse = client
         .post(
@@ -400,12 +407,20 @@ pub async fn recover_device(
         )
         .await?;
 
+    let docs: DocsListResponse = client.get_authed("/api/docs", &reset.device_token).await?;
+    let doc_keys = unwrap_memberships(
+        &dek,
+        parse_doc_id(&reset.primary_doc_id)?,
+        &docs.memberships,
+    )?;
+
     Ok(RecoveredDevice {
         account_id: recovered.account_id,
         primary_doc_id: reset.primary_doc_id,
         device_id: reset.device_id,
         device_token: reset.device_token,
         dek,
+        doc_keys,
     })
 }
 

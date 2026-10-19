@@ -60,6 +60,9 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
 
     let kek = master.kek()?;
     let auth_secret = master.auth_secret()?;
+    // The primary doc's DEK is the Home DEK: the one key the password
+    // KEK (and, below, the recovery KEK) ever wraps. Docs created later
+    // are wrapped under it, not under the KEK (spec/encryption.md).
     let dek = Dek::generate();
     let wrapped = kek.wrap(&dek)?;
 

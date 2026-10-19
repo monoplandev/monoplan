@@ -159,11 +159,13 @@ pub async fn recover(
     if !constant_time_eq(presented.as_slice(), recovery_auth_hash) {
         return Err(ApiError::InvalidCredentials);
     }
-    // Every membership the recovery code can open. A membership with
-    // no recovery wrap is skipped here and closed by `/password/reset`.
+    // The recovery code opens one wrap: the primary membership's copy
+    // of the Home DEK. Every other membership is wrapped under the Home
+    // DEK and is the client's to open after the reset (`GET /api/docs`).
     let doc_keys: Vec<DocKey> = list_memberships(&state.db, account.id)
         .await?
         .into_iter()
+        .filter(|m| m.doc_id == account.primary_doc_id)
         .filter_map(|m| {
             Some(DocKey {
                 doc_id: m.doc_id.to_string(),
@@ -172,6 +174,14 @@ pub async fn recover(
             })
         })
         .collect();
+    if doc_keys.is_empty() {
+        // Enrolled (hash matched) but the primary row has no recovery
+        // wrap: signup writes both together, so this is a broken
+        // invariant rather than a client error.
+        return Err(ApiError::Internal(anyhow::anyhow!(
+            "recovery enrolled but the primary membership carries no recovery wrap"
+        )));
+    }
     let session_token = generate_token();
     create_recovery_session(
         &state.db,
@@ -289,7 +299,8 @@ pub async fn logout(State(state): State<AppState>, auth: DeviceAuth) -> ApiResul
 }
 
 /// Wire `DocKey`s → query-layer updates. A malformed doc id is a client
-/// bug, surfaced as 400 before anything touches the db.
+/// bug, surfaced as 400 before anything touches the db. The set check
+/// (exactly the primary doc) happens inside the transaction.
 fn parse_doc_keys(keys: Vec<DocKey>) -> ApiResult<Vec<DocKeyUpdate>> {
     keys.into_iter()
         .map(|k| {
@@ -313,7 +324,7 @@ fn doc_keys_mismatch(expected: &[Uuid], got: &[Uuid]) -> ApiError {
             .join(", ")
     };
     ApiError::BadRequest(format!(
-        "new_doc_keys must cover exactly the account's memberships: expected [{}], got [{}]",
+        "new_doc_keys must name exactly the account's primary doc: expected [{}], got [{}]",
         fmt(expected),
         fmt(got)
     ))

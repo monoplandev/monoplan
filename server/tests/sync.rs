@@ -145,16 +145,14 @@ async fn register_second_device(acc: &Account, name: &str) -> ExtraDevice {
 }
 
 /// Create a second doc the account owns through the real endpoint.
-/// Wraps are fake bytes: the server stores them opaquely and these
-/// tests never unwrap.
+/// The wrap (nominally the doc's DEK under the Home DEK) is fake bytes:
+/// the server stores it opaquely and these tests never unwrap.
 async fn create_doc(acc: &Account) -> Uuid {
     let resp: CreateDocResponse = post_msgpack_authed(
         &format!("{}/api/docs", acc.server.base),
         &CreateDocRequest {
             wrapped_dek: vec![7u8; 48],
             wrapped_dek_nonce: vec![6u8; 24],
-            recovery_wrapped_dek: None,
-            recovery_wrapped_dek_nonce: None,
         },
         Some(&acc.device_token),
     )

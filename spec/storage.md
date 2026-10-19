@@ -2,7 +2,7 @@
 
 Sqlite for now. One database file per server instance. Single-tenant (one account per server) is *not* assumed — the schema is multi-account from day one because the SaaS Postgres path will reuse the same shape.
 
-Every account owns exactly one `docs` row — its **primary doc** (the Home) — and holds an `owner` row for it in `doc_members`. Access to a doc *is* an active `doc_members` row, and the doc's DEK is wrapped per membership (`encryption.md`): the key model is already multi-doc even though today no account has a second membership. See `sharing-plan.md` for what remains (invites, multi-open connections, member management).
+Every account owns exactly one `docs` row — its **primary doc** (the Home) — and holds an `owner` row for it in `doc_members`. Access to a doc *is* an active `doc_members` row, and the doc's DEK is wrapped per membership (`encryption.md`). The primary membership's wrap is under the password KEK (the Home DEK is the account key); every other membership's wrap is under the Home DEK. See `sharing-plan.md` for what remains (invites, member management).
 
 ## Schema (`migrations/001_init.sql`)
 
@@ -28,15 +28,15 @@ CREATE TABLE accounts (
 );
 -- Password material only. No key wraps: the DEK is a doc key, held per
 -- membership below. The recovery *code* is an account credential (salt +
--- auth hash live here); the wraps it opens are per-membership.
+-- auth hash live here); the wrap it opens is on the primary membership.
 
 CREATE TABLE doc_members (
   doc_id                       BLOB NOT NULL REFERENCES docs(id),
   account_id                   BLOB NOT NULL REFERENCES accounts(id),
   role                         TEXT NOT NULL,              -- 'owner' | 'member'
-  wrapped_dek                  BLOB NOT NULL,              -- this doc's DEK under this member's password KEK
+  wrapped_dek                  BLOB NOT NULL,              -- primary membership: Home DEK under the password KEK; any other: this doc's DEK under the Home DEK
   wrapped_dek_nonce            BLOB NOT NULL,
-  recovery_wrapped_dek         BLOB,                       -- same DEK under the member's recovery KEK, iff enrolled
+  recovery_wrapped_dek         BLOB,                       -- primary membership only, iff enrolled: Home DEK under the recovery KEK; NULL elsewhere
   recovery_wrapped_dek_nonce   BLOB,
   added_at                     INTEGER NOT NULL,
   removed_at                   INTEGER,                    -- NULL = active; set = forward-only revocation
@@ -45,8 +45,11 @@ CREATE TABLE doc_members (
 CREATE INDEX doc_members_account_id_idx ON doc_members (account_id) WHERE removed_at IS NULL;
 -- One `owner` row per account for its primary doc, written at signup. An
 -- active row is the access decision for `OpenDoc` and the device set for
--- the compaction horizon. Password change / reset rewrite `wrapped_dek` on
--- every active row in one transaction (encryption.md).
+-- the compaction horizon. The row whose doc_id = accounts.primary_doc_id
+-- is the *primary membership*: the only row password change / reset
+-- rewrite, and the only row recovery reads. The server cannot tell which
+-- key a wrap is under; the primary-doc id is the client's cue
+-- (encryption.md §Wrap-states).
 
 CREATE TABLE recovery_sessions (
   token_hash      BLOB PRIMARY KEY,                        -- SHA-256(token)
@@ -136,7 +139,7 @@ Device frontiers are per-(device, doc) in `device_doc_frontiers`, keyed to match
 
 1. `INSERT INTO docs(id, created_at) …` — mint the primary doc id.
 2. `INSERT INTO accounts(…, primary_doc_id = <doc id from step 1>)`.
-3. `INSERT INTO doc_members(doc_id, account_id, role = 'owner', wrapped_dek, …, recovery_wrapped_dek, …)` — the wraps the client posted.
+3. `INSERT INTO doc_members(doc_id, account_id, role = 'owner', wrapped_dek, …, recovery_wrapped_dek, …)` — the wraps the client posted (both of the Home DEK).
 4. `INSERT INTO devices(…)` for the signup device.
 
 All in one tx with `BEGIN IMMEDIATE`. The invariant "`accounts.primary_doc_id` always points to a real `docs` row" is enforced by the FK; "every doc has at least one owner membership" is held by application code.

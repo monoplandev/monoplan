@@ -10,9 +10,10 @@ import {
   Dek,
   deriveLogin,
   unwrapDek,
+  unwrapDekWithDek,
   wrapDek,
 } from "@monoplan/core/wasm";
-import { api, ApiError, type LoginResponse } from "./api.ts";
+import { api, ApiError, type LoginResponse, type Membership } from "./api.ts";
 import { dekVault } from "./sync/dekVault.ts";
 import { useAppI18n } from "./i18n.tsx";
 import { closeToItems, trackOverlay } from "./overlay.ts";
@@ -35,7 +36,15 @@ export interface Session {
   email: string | null;
   /** Null on anonymous sessions. */
   deviceId: string | null;
+  /** The Home DEK: the primary doc's key, which is also the account key
+   *  every other membership's wrap is under (spec/encryption.md). */
   dek: Dek;
+  /** Every doc the account can open, keyed by doc id, primary included
+   *  (its entry is `dek`). Populated from the memberships array at
+   *  login/signup. Only the Home DEK is vaulted today, so a session
+   *  restored on reload or minted anonymously holds the primary alone;
+   *  the runtime still boots one doc (sharing-plan.md Phase 5). */
+  docKeys: Map<string, Dek>;
   /** True iff this session was created via signup (we're device 1
    *  and need to seed the doc with built-in lists), or for a freshly
    *  minted anonymous session. False for login sessions and for
@@ -244,14 +253,12 @@ async function doLogin(
   if (!resp.device) {
     throw new Error(missingDeviceCredentialMessage());
   }
-  // The web client runs one doc — the primary — so it unwraps that
-  // membership's key. Other memberships (none exist yet) are ignored
-  // until the client can open more than one doc.
-  const primary = resp.memberships.find((m) => m.doc_id === resp.primary_doc_id);
-  if (!primary) {
-    throw new Error("login response has no membership for the primary doc");
-  }
-  const dek = unwrapDek(derived.kek, primary.wrapped_dek, primary.wrapped_dek_nonce);
+  const docKeys = unwrapMemberships(
+    derived.kek,
+    resp.primary_doc_id,
+    resp.memberships,
+  );
+  const dek = docKeys.get(resp.primary_doc_id)!;
   const session: Session = {
     anonymous: false,
     email,
@@ -259,10 +266,40 @@ async function doLogin(
     primaryDocId: resp.primary_doc_id,
     deviceId: resp.device.device_id,
     dek,
+    docKeys,
     freshSignup: false,
   };
   await persistVault(session);
   return session;
+}
+
+/** Turn a memberships array into DEKs. The primary membership's wrap is
+ *  under the password KEK and yields the Home DEK; every other wrap is
+ *  under the Home DEK. Same contract as the CLI's
+ *  `keystore::unwrap_memberships`; also the shape a `GET /api/docs`
+ *  refresh will use once the client boots every membership. Throws if
+ *  the primary is missing or any wrap fails to open (wrong password, or
+ *  a server handing back a wrap under a key we do not hold). */
+export function unwrapMemberships(
+  kek: Uint8Array,
+  primaryDocId: string,
+  memberships: Membership[],
+): Map<string, Dek> {
+  const primary = memberships.find((m) => m.doc_id === primaryDocId);
+  if (!primary) {
+    throw new Error("login response has no membership for the primary doc");
+  }
+  const home = unwrapDek(kek, primary.wrapped_dek, primary.wrapped_dek_nonce);
+  const out = new Map<string, Dek>();
+  for (const m of memberships) {
+    out.set(
+      m.doc_id,
+      m.doc_id === primaryDocId
+        ? home
+        : unwrapDekWithDek(home, m.wrapped_dek, m.wrapped_dek_nonce),
+    );
+  }
+  return out;
 }
 
 function missingDeviceCredentialMessage(): string {
@@ -285,7 +322,9 @@ async function doSignup(
     kdfParams.t,
     kdfParams.p,
   );
-  // Generate fresh DEK, wrap with KEK locally before shipping.
+  // Generate the Home DEK and wrap it with the KEK locally before
+  // shipping. It is the only key the KEK ever wraps; docs created later
+  // are wrapped under it (`wrapDekWithDek`, `api.createDoc`).
   const dek = Dek.generate();
   const wrapped = wrapDek(derived.kek, dek);
   const resp = await api.signup({
@@ -304,6 +343,7 @@ async function doSignup(
     primaryDocId: resp.primary_doc_id,
     deviceId: resp.device_id,
     dek,
+    docKeys: new Map([[resp.primary_doc_id, dek]]),
     freshSignup: true,
   };
   await persistVault(session);

@@ -6,7 +6,7 @@ This document preserves the multi-doc / sharing design discussed during early pl
 
 Substrate in place as of 2026-10-13: the `docs` entity and `accounts.primary_doc_id`; ops, snapshots, seq counter, snapshot coordinator and broadcast registry keyed by doc; `device_doc_frontiers` for per-(device, doc) acks; and the wire protocol carrying `doc_id` on every payload frame behind an `OpenDoc` / `DocOpened` binding step (`sync-protocol.md` §Doc binding).
 
-Key model done as of 2026-10-17: **the DEK is a doc key.** `doc_members` holds per-membership wraps (password + recovery), `accounts` holds password material only, login returns a `memberships` array, recovery returns per-doc `doc_keys`, and password change / reset take `new_doc_keys` covering every membership (set-checked, one transaction). `can_open` is the `doc_members` lookup and the compaction horizon spans the devices of every active member. The CLI stores one DEK per doc in `secrets.toml`; the web client unwraps the primary membership only (it opens one doc).
+Key model done as of 2026-10-17, revised 2026-10-19: **the DEK is a doc key, and the Home DEK is the account key.** `doc_members` holds one wrap per membership and `accounts` holds password material only. The primary membership's wrap is under the password KEK (plus the recovery KEK iff enrolled); every other membership's wrap is under the Home DEK. Login returns a `memberships` array (the client opens the primary with the KEK and the rest with the Home DEK); recovery releases only the primary's recovery wrap; password change / reset take `new_doc_keys` naming exactly the primary doc (set-checked, one transaction, no other row touched). `POST /api/docs` takes just a Home-DEK wrap. `can_open` is the `doc_members` lookup and the compaction horizon spans the devices of every active member. The CLI stores one DEK per doc in `secrets.toml` (every membership unwrapped at login / recovery); the web client unwraps every membership at login but vaults and boots the primary only. Trade-offs are recorded in `encryption.md` §Trade-offs.
 
 Multi-doc transport done as of 2026-10-19 (headless; no UI): a connection multiplexes **any number** of open docs (`WSSession.open` is a map; per-doc subscription and lease slot; the session loop polls every subscription); `POST /api/docs` / `GET /api/docs` create and list an account's own docs; the `Hello` handshake moved out of the engine to the connection owner (core `hello_frame` / `parse_hello_response` / `server_frame_doc_id`); the js `SyncBridge` is the router (N engines, one socket, frames routed by `doc_id`). Proven by `server/tests/sync.rs` and the two-doc `js/core/test/sync-e2e.test.ts`. What is *not* built: invites and any second *account* on a doc, member management, live revocation (`DocClosed`), a CLI router (the CLI still runs one engine on its primary doc), and every client surface (the web client still boots one doc; loading every membership at boot is the decided default, see "Decisions").
 
@@ -38,13 +38,13 @@ A doc is a first-class entity (`docs` table). Access is granted by inserting a r
 doc_members(
   doc_id, account_id,
   role,                              -- 'owner' | 'member'
-  wrapped_dek, wrapped_dek_nonce,    -- the doc's DEK, wrapped with this member's KEK
-  recovery_wrapped_dek, …,           -- iff member opted into recovery
+  wrapped_dek, wrapped_dek_nonce,    -- primary membership: Home DEK under the member's KEK; any other: the doc's DEK under the member's Home DEK
+  recovery_wrapped_dek, …,           -- primary membership only, iff member opted into recovery
   added_at, removed_at
 )
 ```
 
-Every account has exactly one membership where `role='owner'` and `doc_id = accounts.primary_doc_id`. Shared docs add additional memberships per inviter and invitee. The wrap is **per-membership**, so each member's KEK protects their own copy of the doc's DEK — no symmetric key derivation, no per-member secret leaves the inviter's machine.
+Every account has exactly one membership where `role='owner'` and `doc_id = accounts.primary_doc_id`. Shared docs add additional memberships per inviter and invitee. The wrap is **per-membership**, so each member's own key protects their own copy of the doc's DEK — no symmetric key derivation, no per-member secret leaves the inviter's machine. Since 2026-10-19 that key is the member's **Home DEK**, not their password KEK: an invitee who accepts wraps the shared doc's DEK under their Home DEK, exactly as `POST /api/docs` does for a doc they create. Their password KEK and recovery KEK only ever wrap the Home DEK (`encryption.md` §Wrap-states).
 
 Constraints:
 
@@ -59,9 +59,9 @@ local-only. When sharing lands, a shared item can be pulled into a member's Focu
 by emitting the cross-doc form — no migration, no schema change to the focus
 container.
 
-### Per-doc DEK (built 2026-10-17)
+### Per-doc DEK (built 2026-10-17; Home DEK as account key 2026-10-19)
 
-DEK is generated **at doc creation** (32 bytes random). Encrypts every op + snapshot blob for that doc. Different docs have independent, unrelated DEKs. The DEK wrap is per-membership, on `doc_members`, not on `accounts`. The account row holds password material only. See `encryption.md` for the flows.
+DEK is generated **at doc creation** (32 bytes random). Encrypts every op + snapshot blob for that doc. Different docs have independent, unrelated DEKs. The DEK wrap is per-membership, on `doc_members`, not on `accounts`. The account row holds password material only. The primary doc's DEK (the Home DEK) is the one key the password and recovery KEKs wrap; every other membership's wrap is under the Home DEK, so password change / reset / recovery touch one row and never need to know about other docs. See `encryption.md` for the flows and trade-offs.
 
 Server is blind to which DEK encrypted any given blob; `doc_id` on the wire is solely a routing key.
 
@@ -85,12 +85,12 @@ Two candidates, decision deferred until sharing is built:
    - Opens URL; client extracts `token` and `unlock_key` from fragment.
    - `GET /api/invites/:token` → returns `{ doc_id, wrapped_dek, wrapped_dek_nonce, issued_by: { email_hint } }`. Unauthenticated; bearer is the token + fragment.
    - Decrypts wrap with unlock key → has the doc's DEK.
-   - If not logged in: sign up or log in. Client now has invitee's `kek`.
-   - Re-wraps DEK with `kek`.
+   - If not logged in: sign up or log in. Client now holds the invitee's Home DEK.
+   - Re-wraps DEK with the **Home DEK** (not the password KEK — the password and recovery KEKs only ever wrap the Home DEK, so an invite accepted today still opens after any later password change or recovery with no re-wrap).
    - `POST /api/invites/:token/accept { wrapped_dek, wrapped_dek_nonce }` → server inserts `doc_members` row, consumes invite, returns `{ doc_id }`.
    - Client opens (or reuses) WS connection, begins subscribing to the new doc.
 
-Server never sees DEK plaintext, never sees unlock key, never sees either party's KEK.
+Server never sees DEK plaintext, never sees unlock key, never sees either party's KEK or Home DEK.
 
 ### Ownership transfer
 
@@ -113,7 +113,7 @@ DELETE /api/docs/:doc_id                                  -- delete a doc; owner
 POST   /api/docs/:doc_id/invites                          -- issue invite
 DELETE /api/docs/:doc_id/invites/:invite_id               -- revoke invite
 GET    /api/invites/:token                                -- fetch invite payload (unauth)
-POST   /api/invites/:token/accept                         -- authed; body: { wrapped_dek, wrapped_dek_nonce }
+POST   /api/invites/:token/accept                         -- authed; body: { wrapped_dek, wrapped_dek_nonce } (a Home-DEK wrap)
 
 POST   /api/docs/:doc_id/transfer-ownership               -- owner only
 DELETE /api/docs/:doc_id/members/:account_id              -- remove or leave
@@ -173,13 +173,13 @@ Remaining for sharing:
 - ~~Horizon spans the devices of every active member.~~ Done 2026-10-17 (`queries::doc_horizon` lost its `account_id` parameter).
 - Removal / leave severs the open doc on live connections (a `DocClosed { doc_id, reason }` frame is the obvious shape; not yet defined). Membership is checked at `OpenDoc` only today.
 
-### Auth flows (memberships shape) — built 2026-10-17
+### Auth flows (memberships shape) — built 2026-10-17, narrowed 2026-10-19
 
-Login returns `memberships: [{ doc_id, role, wrapped_dek, wrapped_dek_nonce }]`; recover returns `doc_keys: [{ doc_id, wrapped_dek, wrapped_dek_nonce }]` (recovery-KEK wraps); password change and reset take `new_doc_keys` in the same shape. The array has length 1 today (just the primary doc); the server test suite seeds a second membership directly to prove no path special-cases that.
+Login returns `memberships: [{ doc_id, role, wrapped_dek, wrapped_dek_nonce }]`; the client opens the entry whose `doc_id` is `primary_doc_id` with the password KEK (the Home DEK) and every other entry with the Home DEK. Recover returns `doc_keys: [{ doc_id, wrapped_dek, wrapped_dek_nonce }]` holding exactly the primary's recovery wrap; password change and reset take `new_doc_keys` in the same shape, set-checked against exactly the primary doc id. The server test suite creates a second doc through `POST /api/docs` (and seeds a `member`-role row directly) to prove no path special-cases the memberships length.
 
 Signup: server creates `docs` row, `accounts` row, `doc_members` row, `devices` row in one tx (see `spec/storage.md` for insertion order).
 
-Recovery: returns recovery wraps for **every** doc the account is a member of. One recovery code, N unwraps. Same for password change: client re-wraps every DEK with the new KEK and uploads the batch; the server set-checks it against active memberships.
+Recovery: one recovery code, one unwrap (the Home DEK), then N Home-DEK unwraps from `GET /api/docs`. Password change: the client re-wraps the Home DEK only; a doc created on another device since this device's last login is unaffected.
 
 ---
 
@@ -233,7 +233,9 @@ Compile breaks downstream — fix in Phase 2.
 
 - **IndexedDB schema** (`js/core/src/storage/web-db.ts`): bump IDB version. `onupgradeneeded` drops old stores, creates new with composite keyPaths: `ops[account_id, doc_id, oplog_seq]`, `snapshot_meta[account_id, doc_id]`. Wrap-key store: one entry per `doc_id` (non-extractable WebCrypto AES-GCM wrap).
 - ~~**SyncBridge → DocRouter** (`js/core/src/sync-bridge.ts`).~~ Done 2026-10-19: the bridge takes `engines: SyncEngine[]`, runs the handshake, routes by `doc_id`, reports unroutable frames and handshake failures via `onError`. The web client passes one engine today.
-- **App boot** (`js/web/src/App.tsx`): on login, unwrap each membership DEK with KEK, persist to IndexedDB. Boot the primary doc (`primary_doc_id`). Today (2026-10-17) `Login.tsx` reads the memberships array but unwraps and vaults only the primary doc's key.
+- **App boot** (`js/web/src/App.tsx`): on login, unwrap each membership DEK (Home via KEK, rest via Home DEK) and boot a `Doc` + engine for every one (see "Decisions": clients load every membership). As of 2026-10-19 `Login.tsx` unwraps every membership into `Session.docKeys` and `api.ts` has `createDoc` / `listDocs`, but the session still vaults and boots only the primary doc. Still to do here:
+  - **Per-doc vault.** `dek-vault.ts` stores one DEK. Two options: store one entry per doc id, or store the Home DEK alone and re-derive the rest from `GET /api/docs` on boot (every non-primary wrap is a Home-DEK wrap, so the vault never *needs* more than the Home DEK; the trade-off is a network round trip before the other docs open offline). Decide when the doc switcher is built.
+  - **Boot every membership.** `runtime.ts` builds one engine; it should build one per entry in `docKeys` (plus whatever the vault / list endpoint yields on reload) and hand them all to `createSyncBridge`.
 - ~~**Auth flows**: memberships-shaped bodies on relevant endpoints.~~ Done for login (the web has no recovery / password-change UI yet).
 - **Verification**: signup → add items → reload → still works. Two devices on same account → real-time sync.
 
@@ -267,7 +269,7 @@ Or split into 5 small PRs if needed: protocol → server → core+CLI → web �
 | 2 — server | 1.5 (memberships, keys, multi-open, `POST /api/docs` done; invites, member endpoints, `DocClosed` remain) |
 | 3 — core | 0.5 (done) |
 | 4 — CLI | 0.5 (key storage + handshake done; `DocRouter` + doc selector remain) |
-| 5 — web | 1.5 (router done; per-doc vault, boot every membership, doc switcher remain) |
+| 5 — web | 1.5 (router done, login unwraps every membership; per-doc vault, boot every membership, doc switcher remain) |
 | 6 — cleanup + verification | 0.5 |
 | **Total** | **~6 days** |
 
@@ -319,7 +321,7 @@ The editor layers are separable and should be decided separately:
 
 - **Invite tokens are bearer credentials.** Anyone with URL (token + fragment) can accept up to expiry. Mitigation: out-of-band channel hygiene + revocation endpoint.
 
-- **Recovery model.** Recovery returns wraps for every membership; a recovered account regains access to every doc it was a member of.
+- **Recovery model.** Recovery releases the Home DEK, from which every other membership's wrap opens; a recovered account regains access to every doc it was a member of. Conversely, anyone holding an account's Home DEK holds every doc it can open (`encryption.md` §Trade-offs).
 
 ---
 
@@ -337,6 +339,7 @@ The editor layers are separable and should be decided separately:
 - **Rip-and-replace** chosen over v1/v2 transition window because pre-release. Revisit if production data exists when this lands.
 - **Multiplexing** chosen over connection-per-doc. Reason: scales better with N docs, single reconnect/backoff to manage.
 - **Per-doc DEK** chosen over per-member-derived keys. Reason: per-member derivation requires sharing master secrets, which breaks E2EE.
+- **Home DEK as account key** (decided 2026-10-19) over one password/recovery wrap pair per membership. Reason: password change, reset and recovery become single-row operations that never need the client's full key set, a doc created on one device is immediately openable on another after any later password change, and a recovery code enrolled at signup covers every future doc. Accepted costs (recorded in `encryption.md` §Trade-offs): Home DEK compromise exposes every doc; rotating the Home DEK would mean re-wrapping every other membership (no rotation exists today); the primary doc stays non-leavable and non-deletable.
 - **Invite codes** chosen as leading-candidate sharing primitive (over X25519 public keys) for simpler UX and no new key material on accounts. Not locked in; reconsider when actually building.
 - **Primary doc is privileged** in UI: non-deletable, non-leavable. The account's Home.
 - **Member-removal rotation deferred** — forward-only revocation accepted as a v1 limitation.

@@ -6,7 +6,7 @@ use monoplan_protocol::{
 
 use super::prompt_new_password;
 use crate::config::Profile;
-use crate::keystore::{dek_from_hex, derive_master};
+use crate::keystore::{dek_for_doc, derive_master};
 use crate::net::Client;
 
 pub async fn run() -> anyhow::Result<()> {
@@ -48,22 +48,19 @@ pub async fn run() -> anyhow::Result<()> {
     let new_kek = new_master.kek()?;
     let new_auth = new_master.auth_secret()?;
 
-    // Re-wrap every doc key we hold. The server checks the set against
-    // the account's memberships, so a stale secrets file (a membership
-    // added since the last login) is refused rather than stranded.
-    let new_doc_keys = secrets
-        .docs
-        .iter()
-        .map(|(doc_id, entry)| {
-            let dek = dek_from_hex(&entry.dek_hex)?;
-            let w = new_kek.wrap(&dek)?;
-            Ok(DocKey {
-                doc_id: doc_id.clone(),
-                wrapped_dek: w.ciphertext,
-                wrapped_dek_nonce: w.nonce.to_vec(),
-            })
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
+    // Re-wrap the Home DEK only. Every other doc's server-side wrap is
+    // under the Home DEK, not the password KEK, so a doc created on
+    // another device since this one last logged in is unaffected. The
+    // server refuses any set other than exactly the primary doc.
+    let home = dek_for_doc(&secrets, account.primary_doc_id)?;
+    let new_doc_keys = {
+        let w = new_kek.wrap(&home)?;
+        vec![DocKey {
+            doc_id: account.primary_doc_id.0.to_string(),
+            wrapped_dek: w.ciphertext,
+            wrapped_dek_nonce: w.nonce.to_vec(),
+        }]
+    };
 
     client
         .post_authed_no_response(
@@ -79,8 +76,8 @@ pub async fn run() -> anyhow::Result<()> {
         )
         .await?;
 
-    // No DEK changed — only their server-side wraps. The local secrets
-    // file already holds the correct DEKs + device token.
+    // No DEK changed — only the Home DEK's server-side wrap. The local
+    // secrets file already holds the correct DEKs + device token.
 
     println!("Password changed.");
     Ok(())

@@ -209,15 +209,13 @@ async function registerDevice(
   return decoded.device_token;
 }
 
-/** `POST /api/docs`: a second doc the account owns. The wraps are
- *  opaque to the server, so random bytes do for a test that keeps the
- *  DEK in memory. */
+/** `POST /api/docs`: a second doc the account owns. The wrap (nominally
+ *  the doc's DEK under the Home DEK) is opaque to the server, so random
+ *  bytes do for a test that keeps the DEK in memory. */
 async function createDoc(s: ServerHandle, token: string): Promise<string> {
   const body = encode({
     wrapped_dek: crypto.getRandomValues(new Uint8Array(48)),
     wrapped_dek_nonce: crypto.getRandomValues(new Uint8Array(24)),
-    recovery_wrapped_dek: null,
-    recovery_wrapped_dek_nonce: null,
   });
   const resp = await fetch(`${s.baseUrl}/api/docs`, {
     method: "POST",

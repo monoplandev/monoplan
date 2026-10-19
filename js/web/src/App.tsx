@@ -65,6 +65,10 @@ export function App(props: {
           primaryDocId: v.primaryDocId,
           deviceId: v.deviceId,
           dek: v.dek,
+          // The vault holds the Home DEK only; other memberships are
+          // re-derivable from it + `GET /api/docs` once the client boots
+          // every doc (sharing-plan.md Phase 5).
+          docKeys: new Map([[v.primaryDocId, v.dek]]),
           freshSignup: false,
         });
         return;
@@ -159,6 +163,7 @@ async function createAnonymousSession(): Promise<Session> {
     email: null,
     deviceId: null,
     dek,
+    docKeys: new Map([[primaryDocId, dek]]),
     // Seed the doc on first run via Doc.create(). On reload we read
     // the IndexedDB op log instead.
     freshSignup: true,

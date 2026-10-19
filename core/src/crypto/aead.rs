@@ -1,8 +1,10 @@
 //! XChaCha20-Poly1305 AEAD wrap/unwrap.
 //!
-//! Used for two purposes:
-//! - Wrap the DEK with the KEK (one wrap per (account, password) and
+//! Used for three purposes (`spec/encryption.md`):
+//! - Wrap the Home DEK with a KEK (one wrap per (account, password) and
 //!   one per (account, recovery code)).
+//! - Wrap any other doc's DEK with the Home DEK (one wrap per
+//!   non-primary membership).
 //! - Encrypt every op + snapshot blob with the DEK (per-blob fresh nonce).
 
 use chacha20poly1305::{
@@ -76,6 +78,23 @@ impl Dek {
             .decrypt(XNonce::from_slice(nonce), ciphertext)
             .map_err(|_| CryptoError::Aead)
     }
+
+    /// Wrap another doc's DEK under this one. `self` is the Home DEK
+    /// (the account key); the result goes on the other doc's
+    /// `doc_members` row as `wrapped_dek` / `wrapped_dek_nonce`. Same
+    /// AEAD and nonce discipline as `seal`, over the 32 key bytes.
+    pub fn wrap_dek(&self, other: &Dek) -> Result<WrappedDek> {
+        let (ciphertext, nonce) = self.seal(other.as_bytes())?;
+        Ok(WrappedDek { ciphertext, nonce })
+    }
+
+    /// Inverse of `wrap_dek`: open a non-primary membership's wrap with
+    /// the Home DEK. Wrong key or a KEK wrap handed in by mistake →
+    /// `CryptoError::Aead`.
+    pub fn unwrap_dek(&self, w: &WrappedDek) -> Result<Dek> {
+        let plaintext = self.open(&w.ciphertext, &w.nonce)?;
+        Dek::from_bytes(&plaintext)
+    }
 }
 
 #[cfg(test)]
@@ -106,5 +125,30 @@ mod tests {
         let payload = b"hello world".to_vec();
         let (ct, nonce) = dek.seal(&payload).unwrap();
         assert_eq!(dek.open(&ct, &nonce).unwrap(), payload);
+    }
+
+    #[test]
+    fn dek_wraps_another_dek_and_only_the_same_dek_opens_it() {
+        let home = Dek::generate();
+        let other = Dek::generate();
+        let wrapped = home.wrap_dek(&other).unwrap();
+        assert_eq!(wrapped.nonce.len(), AEAD_NONCE_LEN);
+        let back = home.unwrap_dek(&wrapped).unwrap();
+        assert_eq!(back.as_bytes(), other.as_bytes());
+
+        let stranger = Dek::generate();
+        assert!(matches!(
+            stranger.unwrap_dek(&wrapped),
+            Err(CryptoError::Aead)
+        ));
+        // A KEK wrap is not a Home-DEK wrap even when the raw bytes
+        // match: the two key types never share material by accident.
+        let kek = Kek::from_bytes(home.as_bytes()).unwrap();
+        let kek_wrapped = kek.wrap(&other).unwrap();
+        assert_eq!(
+            home.unwrap_dek(&kek_wrapped).unwrap().as_bytes(),
+            other.as_bytes(),
+            "same bytes, same AEAD: the type split is a client-side discipline, not a crypto boundary"
+        );
     }
 }

@@ -29,14 +29,24 @@ export interface DeviceCredential {
   device_token: string;
 }
 
-/** One doc the account can open, with the doc's DEK wrapped under the
- *  account's password KEK. The DEK is a doc key, not an account key:
- *  login returns one of these per membership. */
+/** One doc the account can open, with the doc's DEK wrapped under a key
+ *  the account holds. Which key depends on the doc: for the primary doc
+ *  (`doc_id === primary_doc_id`) the wrap is the Home DEK under the
+ *  password KEK (`unwrapDek`); for every other doc it is that doc's DEK
+ *  under the Home DEK (`unwrapDekWithDek`). See spec/encryption.md
+ *  §Wrap-states. Login and `GET /api/docs` return one per membership. */
 export interface Membership {
   doc_id: string;
   role: "owner" | "member";
   wrapped_dek: Uint8Array;
   wrapped_dek_nonce: Uint8Array;
+}
+
+/** `GET /api/docs`: the same shape as the membership part of login, for a
+ *  device that wants to learn about docs created since it logged in. */
+export interface DocsListResponse {
+  primary_doc_id: string;
+  memberships: Membership[];
 }
 
 export interface LoginResponse {
@@ -134,6 +144,24 @@ export const api = {
 
   async listDevices(): Promise<DevicesListResponse> {
     return get("/api/devices");
+  },
+
+  async listDocs(): Promise<DocsListResponse> {
+    return get("/api/docs");
+  },
+
+  /** Create a doc the account owns. `wrapped_dek` is the new doc's DEK
+   *  under the **Home DEK** (`wrapDekWithDek`), never under the password
+   *  KEK: password change / reset / recovery only ever re-wrap the Home
+   *  DEK, so this wrap needs no maintenance. */
+  async createDoc(args: {
+    wrapped_dek: Uint8Array;
+    wrapped_dek_nonce: Uint8Array;
+  }): Promise<{ doc_id: string }> {
+    return post("/api/docs", {
+      wrapped_dek: args.wrapped_dek,
+      wrapped_dek_nonce: args.wrapped_dek_nonce,
+    });
   },
 
   async renameDevice(deviceId: string, name: string): Promise<void> {

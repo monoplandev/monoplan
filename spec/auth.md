@@ -8,17 +8,17 @@ POST   /api/account/prelogin           (returns salt(s) for an email)
 POST   /api/account/login              (password path)
 POST   /api/account/recover            (recovery-code path; gated by recovery_auth_secret)
 POST   /api/account/logout             (authed; revokes calling device + clears cookie)
-POST   /api/account/password/change    (change password, authed by device token + current_auth_secret)
+POST   /api/account/password/change    (change password, authed by device token + current_auth_secret; `new_doc_keys` names exactly the primary doc)
 POST   /api/account/password/reset     (set new password, authed by recovery_session_token)
 GET    /api/devices                    (list current account's devices: name, last_seen_at, last_seen_ip, last_acked_seq on the primary doc)
 POST   /api/devices                    (register a new device)
 PATCH  /api/devices/:device_id         (rename a device)
 DELETE /api/devices/:device_id
 GET    /api/docs                       (authed; `{ primary_doc_id, memberships }` in the login shape)
-POST   /api/docs                       (authed; create a doc the account owns: `{ wrapped_dek, wrapped_dek_nonce, recovery_wrapped_dek?, recovery_wrapped_dek_nonce? }` → `{ doc_id }`)
+POST   /api/docs                       (authed; create a doc the account owns: `{ wrapped_dek, wrapped_dek_nonce }` → `{ doc_id }`)
 ```
 
-`POST /api/docs` is pure key management: the client generates the doc's DEK, wraps it under its password KEK, and the server mints the doc id plus an `owner` row in `doc_members` carrying the wrap. An account that enrolled a recovery code must also post the recovery-KEK wrap (400 otherwise), because `/password/reset` closes any membership it cannot re-wrap and the doc would be lost. The doc's history begins with the first `PushOps` after `OpenDoc`.
+`POST /api/docs` is pure key management: the client generates the doc's DEK, wraps it under its **Home DEK** (the primary doc's DEK, which is the account key — `encryption.md`), and the server mints the doc id plus an `owner` row in `doc_members` carrying that wrap. No password or recovery wrap is involved: password change, reset and recovery only ever re-wrap the Home DEK, and a client that holds the Home DEK opens this wrap itself. The doc's history begins with the first `PushOps` after `OpenDoc`.
 
 WebSocket upgrade: `GET /api/sync` with `Authorization: Bearer <device_token>` (CLI) or the `monoplan_device` cookie (web). Server validates on upgrade; the connection is bound to `(account_id, device_id)` for its lifetime. No per-message auth. (Frame encoding + version handshake: see `sync-protocol.md`.)
 
@@ -79,7 +79,7 @@ Client cannot derive `auth_secret` without the salt. Standard pattern:
 1. `POST /api/account/prelogin { email }` → server returns `{ password_salt, kdf_params }`, or **404 if email unknown**. We accept that this leaks account existence: signup (duplicate-email rejection) and recovery already leak the same bit, so faking a deterministic dummy salt here would be theatre while costing every typo'd-email attempt a full client-side Argon2id pass. Defence is rate-limiting (per-IP + per-email backoff), not response shaping. Revisit only if Monoplan ever holds data where "is X a user" is itself sensitive.
 2. Client computes `master`, `kek`, `auth_secret` from the password and salt.
 3. `POST /api/account/login { email, auth_secret }` → server verifies, returns `{ account_id, primary_doc_id, memberships: [{ doc_id, role, wrapped_dek, wrapped_dek_nonce }], recovery_present, device? }` (`device` only if registering this client as a device in the same call; otherwise client follows up with `POST /api/devices`). One membership per doc the account can open; the DEK is per doc (`encryption.md`).
-4. Client unwraps each membership's DEK with `kek`.
+4. Client unwraps the primary membership (`doc_id == primary_doc_id`) with `kek` to get the Home DEK, then unwraps every other membership's `wrapped_dek` with the Home DEK.
 
 ## Device pairing
 
@@ -91,18 +91,19 @@ Client cannot derive `auth_secret` without the salt. Standard pattern:
 1. POST `/api/account/prelogin { email }` → returns `password_salt`.
 2. Client derives `master` → `kek`, `auth_secret` from password + salt.
 3. POST `/api/account/login { email, auth_secret }` → returns `memberships` (one wrap per doc).
-4. Client unwraps each DEK with `kek`.
+4. Client unwraps the primary membership with `kek` (Home DEK), then the rest with the Home DEK.
 5. POST `/api/devices` → returns new `device_token`.
 6. WS connect, `PullSnapshot` if present, then `PullOps`.
 
 ### Recovery (lost password / fresh device)
 1. POST `/api/account/prelogin { email }` → `{ master_salt, recovery_salt }`.
 2. Client computes `recovery_master = Argon2id(recovery_code, recovery_salt)` → `recovery_kek`, `recovery_auth_secret`.
-3. POST `/api/account/recover { email, recovery_auth_secret }` → server verifies `SHA-256(recovery_auth_secret) == recovery_auth_hash`, returns `{ account_id, primary_doc_id, doc_keys: [{ doc_id, wrapped_dek, wrapped_dek_nonce }], recovery_session_token }` — recovery-KEK wraps for every membership that has one. **Wraps are never released without this proof.** `recovery_session_token` is single-use and TTL 15 min — long enough to type a strong new password without rushing, short enough that an abandoned tab doesn't leave the reset window open.
-4. Client unwraps each DEK locally with `recovery_kek`.
-5. Client picks new password, derives new `master_salt`, `master`, `kek`, `auth_secret`; re-wraps every DEK.
-6. POST `/api/account/password/reset { recovery_session_token, new_master_salt, new_auth_secret, new_doc_keys, device_name }` → in one transaction validates + consumes the session token, updates password material, rewrites every membership wrap, creates the device row; returns `{ device_id, device_token, primary_doc_id }`. `new_doc_keys` must match the set from step 3 (400 otherwise; the session survives for a retry).
-7. WS connect, `PullSnapshot` if present, then `PullOps`.
+3. POST `/api/account/recover { email, recovery_auth_secret }` → server verifies `SHA-256(recovery_auth_secret) == recovery_auth_hash`, returns `{ account_id, primary_doc_id, doc_keys: [{ doc_id, wrapped_dek, wrapped_dek_nonce }], recovery_session_token }` — `doc_keys` is exactly one entry: the primary membership's recovery-KEK wrap of the Home DEK. **The wrap is never released without this proof.** `recovery_session_token` is single-use and TTL 15 min — long enough to type a strong new password without rushing, short enough that an abandoned tab doesn't leave the reset window open.
+4. Client unwraps the Home DEK locally with `recovery_kek`.
+5. Client picks new password, derives new `master_salt`, `master`, `kek`, `auth_secret`; re-wraps the Home DEK.
+6. POST `/api/account/password/reset { recovery_session_token, new_master_salt, new_auth_secret, new_doc_keys, device_name }` → in one transaction validates + consumes the session token, updates password material, rewrites the primary membership's wrap, creates the device row; returns `{ device_id, device_token, primary_doc_id }`. `new_doc_keys` must name exactly the primary doc (400 otherwise; the session survives for a retry). Other memberships are untouched.
+7. GET `/api/docs` with the new device token; unwrap every non-primary membership with the Home DEK.
+8. WS connect, `PullSnapshot` if present, then `PullOps`.
 
 ## Rate limiting
 

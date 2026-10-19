@@ -43,7 +43,12 @@ pub struct DeviceRow {
 }
 
 /// One row of `doc_members` as seen from an account: the doc, the role,
-/// and this account's wraps of the doc's DEK.
+/// and this account's wraps of the doc's DEK. On the account's primary
+/// membership `wrapped_dek` is the Home DEK under the password KEK and
+/// `recovery_wrapped_dek` (iff enrolled) the Home DEK under the recovery
+/// KEK; on every other row `wrapped_dek` is that doc's DEK under the
+/// Home DEK and the recovery columns are NULL. The server stores both
+/// kinds opaquely (`spec/encryption.md` §Wrap-states).
 #[derive(Debug, Clone)]
 pub struct MembershipRow {
     pub doc_id: Uuid,
@@ -60,13 +65,13 @@ pub struct NewAccount {
     pub password_hash: Vec<u8>,
     pub password_salt: Vec<u8>,
     pub kdf_params: KdfParams,
-    /// Primary doc's DEK under the password KEK — goes on the signup
-    /// `owner` membership row, not the account.
+    /// The Home DEK (primary doc's DEK) under the password KEK — goes
+    /// on the signup `owner` membership row, not the account.
     pub wrapped_dek: Vec<u8>,
     pub wrapped_dek_nonce: Vec<u8>,
     pub recovery_salt: Option<Vec<u8>>,
     pub recovery_auth_hash: Option<Vec<u8>>,
-    /// Primary doc's DEK under the recovery KEK; same membership row.
+    /// The Home DEK under the recovery KEK; same membership row.
     pub recovery_wrapped_dek: Option<Vec<u8>>,
     pub recovery_wrapped_dek_nonce: Option<Vec<u8>>,
     /// Initial device created in the same transaction as the account.
@@ -230,13 +235,13 @@ pub async fn list_memberships(db: &Db, account_id: Uuid) -> anyhow::Result<Vec<M
     .await
 }
 
-/// Wraps for a doc created by an existing account (`POST /api/docs`).
+/// The wrap for a doc created by an existing account (`POST /api/docs`):
+/// the new doc's DEK under the creator's Home DEK. Non-primary rows
+/// never carry a recovery wrap.
 #[derive(Debug, Clone)]
 pub struct NewDoc {
     pub wrapped_dek: Vec<u8>,
     pub wrapped_dek_nonce: Vec<u8>,
-    pub recovery_wrapped_dek: Option<Vec<u8>>,
-    pub recovery_wrapped_dek_nonce: Option<Vec<u8>>,
 }
 
 /// Mint a doc and its `owner` membership for `account_id` in one
@@ -256,17 +261,14 @@ pub async fn create_doc(db: &Db, account_id: Uuid, new: NewDoc) -> anyhow::Resul
             "INSERT INTO doc_members (
                doc_id, account_id, role,
                wrapped_dek, wrapped_dek_nonce,
-               recovery_wrapped_dek, recovery_wrapped_dek_nonce,
                added_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+             ) VALUES (?, ?, ?, ?, ?, ?)",
             params![
                 doc_bytes,
                 acc_bytes,
                 MemberRole::Owner.as_str(),
                 new.wrapped_dek,
                 new.wrapped_dek_nonce,
-                new.recovery_wrapped_dek,
-                new.recovery_wrapped_dek_nonce,
                 now,
             ],
         )?;
@@ -294,7 +296,8 @@ pub async fn is_member(db: &Db, doc_id: Uuid, account_id: Uuid) -> anyhow::Resul
     .await
 }
 
-/// A doc's DEK re-wrapped under the account's *new* password KEK.
+/// The Home DEK re-wrapped under the account's *new* password KEK,
+/// tagged with the doc it belongs to (the primary doc).
 #[derive(Debug, Clone)]
 pub struct DocKeyUpdate {
     pub doc_id: Uuid,
@@ -302,11 +305,11 @@ pub struct DocKeyUpdate {
     pub wrapped_dek_nonce: Vec<u8>,
 }
 
-/// New password material plus the re-wrap of every doc the account can
-/// open. The KEK is changing, so a membership left out of `new_doc_keys`
-/// would be stranded behind a key nobody holds any more; the update is
-/// rejected unless the set of doc ids matches what the server expects
-/// (see [`PasswordUpdateOutcome::DocKeysMismatch`]).
+/// New password material plus the re-wrap of the Home DEK. The KEK is
+/// changing, and the Home DEK is the only key it wraps, so the update
+/// is rejected unless `new_doc_keys` names exactly the account's
+/// primary doc (see [`PasswordUpdateOutcome::DocKeysMismatch`]). Every
+/// other membership is wrapped under the Home DEK and is left alone.
 #[derive(Debug, Clone)]
 pub struct PasswordUpdate {
     pub new_password_hash: Vec<u8>,
@@ -318,29 +321,16 @@ pub struct PasswordUpdate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PasswordUpdateOutcome {
     Updated,
-    /// `new_doc_keys` did not name exactly the memberships the server
-    /// expected. Nothing was written.
+    /// `new_doc_keys` did not name exactly the primary doc. Nothing was
+    /// written.
     DocKeysMismatch {
         expected: Vec<Uuid>,
         got: Vec<Uuid>,
     },
 }
 
-/// Which memberships a password update must re-wrap.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RewrapScope {
-    /// Logged-in password change: the client holds every DEK.
-    AllActive,
-    /// Recovery reset: only memberships the recovery code opened. Any
-    /// active membership *without* a recovery wrap is closed in the
-    /// same transaction — the client never had its DEK, and leaving a
-    /// password wrap under the abandoned KEK would make the next login
-    /// hand back a membership nobody can unwrap.
-    RecoverableOnly,
-}
-
 /// Logged-in password change. One transaction: password material on
-/// `accounts`, then every active membership's `wrapped_dek`.
+/// `accounts`, then the primary membership's `wrapped_dek`.
 pub async fn update_password(
     db: &Db,
     account_id: Uuid,
@@ -348,7 +338,7 @@ pub async fn update_password(
 ) -> anyhow::Result<PasswordUpdateOutcome> {
     db.call(move |c| {
         let tx = c.transaction()?;
-        let outcome = apply_password_update(&tx, account_id, &u, RewrapScope::AllActive)?;
+        let outcome = apply_password_update(&tx, account_id, &u)?;
         if outcome == PasswordUpdateOutcome::Updated {
             tx.commit()?;
         }
@@ -399,7 +389,7 @@ pub async fn reset_password_with_recovery_session(
             return Ok(PasswordResetOutcome::SessionInvalid);
         }
         let account_id = uuid_from_blob(acc_blob)?;
-        match apply_password_update(&tx, account_id, &u, RewrapScope::RecoverableOnly)? {
+        match apply_password_update(&tx, account_id, &u)? {
             PasswordUpdateOutcome::DocKeysMismatch { expected, got } => {
                 Ok(PasswordResetOutcome::DocKeysMismatch { expected, got })
             }
@@ -416,41 +406,28 @@ pub async fn reset_password_with_recovery_session(
     .await
 }
 
-/// Shared body of change + reset. Checks `new_doc_keys` against the
-/// memberships `scope` says must be re-wrapped, then writes password
-/// material and every wrap. Returns without writing on a mismatch; the
-/// caller decides whether to commit.
+/// Shared body of change + reset. Checks that `new_doc_keys` names
+/// exactly the account's primary doc, then writes password material
+/// and the primary membership's wrap. Returns without writing on a
+/// mismatch; the caller decides whether to commit.
+///
+/// Only the primary row is touched: it is the one row whose wrap is
+/// under the password KEK. A non-primary membership's wrap is under the
+/// Home DEK, which a password change does not alter, so re-wrapping it
+/// here would be wrong (the client would have to upload a Home-DEK
+/// wrap under a `new_doc_keys` name that promises a KEK wrap).
 fn apply_password_update(
     tx: &Transaction<'_>,
     account_id: Uuid,
     u: &PasswordUpdate,
-    scope: RewrapScope,
 ) -> rusqlite::Result<PasswordUpdateOutcome> {
     let acc_bytes = account_id.as_bytes().to_vec();
-    let active: Vec<(Uuid, bool)> = {
-        let mut stmt = tx.prepare(
-            "SELECT doc_id, recovery_wrapped_dek IS NOT NULL
-             FROM doc_members WHERE account_id = ? AND removed_at IS NULL",
-        )?;
-        stmt.query_map([&acc_bytes], |r| {
-            Ok((
-                uuid_from_blob(r.get::<_, Vec<u8>>(0)?)?,
-                r.get::<_, bool>(1)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    let (must_rewrap, to_close): (Vec<Uuid>, Vec<Uuid>) = match scope {
-        RewrapScope::AllActive => (active.into_iter().map(|(d, _)| d).collect(), Vec::new()),
-        RewrapScope::RecoverableOnly => {
-            let (yes, no): (Vec<_>, Vec<_>) = active.into_iter().partition(|(_, r)| *r);
-            (
-                yes.into_iter().map(|(d, _)| d).collect(),
-                no.into_iter().map(|(d, _)| d).collect(),
-            )
-        }
-    };
-    let expected: BTreeSet<Uuid> = must_rewrap.iter().copied().collect();
+    let primary_doc_id = tx.query_row(
+        "SELECT primary_doc_id FROM accounts WHERE id = ?",
+        [&acc_bytes],
+        |r| uuid_from_blob(r.get::<_, Vec<u8>>(0)?),
+    )?;
+    let expected: BTreeSet<Uuid> = [primary_doc_id].into_iter().collect();
     let got: BTreeSet<Uuid> = u.new_doc_keys.iter().map(|k| k.doc_id).collect();
     if expected != got || got.len() != u.new_doc_keys.len() {
         return Ok(PasswordUpdateOutcome::DocKeysMismatch {
@@ -472,8 +449,9 @@ fn apply_password_update(
             acc_bytes,
         ],
     )?;
+    // Exactly one key after the set check above.
     for k in &u.new_doc_keys {
-        tx.execute(
+        let n = tx.execute(
             "UPDATE doc_members SET wrapped_dek = ?, wrapped_dek_nonce = ?
              WHERE doc_id = ? AND account_id = ? AND removed_at IS NULL",
             params![
@@ -483,14 +461,11 @@ fn apply_password_update(
                 acc_bytes,
             ],
         )?;
-    }
-    let now = now_millis();
-    for doc_id in &to_close {
-        tx.execute(
-            "UPDATE doc_members SET removed_at = ?
-             WHERE doc_id = ? AND account_id = ? AND removed_at IS NULL",
-            params![now, doc_id.as_bytes().to_vec(), acc_bytes],
-        )?;
+        // The primary membership is non-leavable, so an active row must
+        // exist; anything else is a broken invariant, not a client error.
+        if n != 1 {
+            return Err(rusqlite::Error::StatementChangedRows(n));
+        }
     }
     Ok(PasswordUpdateOutcome::Updated)
 }

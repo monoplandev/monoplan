@@ -10,10 +10,9 @@ CREATE TABLE docs (
 );
 
 -- Password material only. Key wraps live on `doc_members`: the DEK is
--- a per-doc key, not an account key, so the account row never holds
--- one. `recovery_salt` / `recovery_auth_hash` stay here because the
--- recovery *code* is an account credential; the wraps it opens are
--- per-membership.
+-- a per-doc key, so the account row never holds one. `recovery_salt` /
+-- `recovery_auth_hash` stay here because the recovery *code* is an
+-- account credential; the wrap it opens sits on the primary membership.
 CREATE TABLE accounts (
   id                          BLOB PRIMARY KEY,                -- uuid v7 bytes
   email                       TEXT UNIQUE NOT NULL
@@ -29,21 +28,27 @@ CREATE TABLE accounts (
   created_at                  INTEGER NOT NULL                 -- unix millis
 );
 
--- Membership = access to a doc + this member's copy of the doc's DEK,
--- wrapped under their own password KEK (and recovery KEK iff they
--- enrolled a recovery code). Every account has exactly one `owner`
--- row for its primary doc, inserted at signup; sharing adds rows per
--- invitee without touching `accounts`. Password change / reset re-wrap
--- every active membership in one transaction. `removed_at` is a
--- forward-only revocation marker (sharing-plan.md): the server stops
--- serving the doc, but the member keeps whatever they already pulled.
+-- Membership = access to a doc + this member's copy of the doc's DEK.
+-- The row whose doc_id = accounts.primary_doc_id is the member's
+-- *primary membership*: its `wrapped_dek` is the Home DEK under the
+-- password KEK and `recovery_wrapped_dek` (iff enrolled) the Home DEK
+-- under the recovery KEK. On every other row `wrapped_dek` is that
+-- doc's DEK under the member's Home DEK and the recovery columns are
+-- NULL (spec/encryption.md §Wrap-states). Every account has exactly
+-- one `owner` row for its primary doc, inserted at signup; `POST
+-- /api/docs` and (later) sharing add rows without touching `accounts`.
+-- Password change / reset rewrite the primary membership only; the
+-- server cannot tell which key a wrap is under and does not try.
+-- `removed_at` is a forward-only revocation marker (sharing-plan.md):
+-- the server stops serving the doc, but the member keeps whatever they
+-- already pulled.
 CREATE TABLE doc_members (
   doc_id                       BLOB NOT NULL REFERENCES docs(id),
   account_id                   BLOB NOT NULL REFERENCES accounts(id),
   role                         TEXT NOT NULL,                  -- 'owner' | 'member'
-  wrapped_dek                  BLOB NOT NULL,
+  wrapped_dek                  BLOB NOT NULL,                  -- primary: Home DEK under password KEK; else: doc DEK under Home DEK
   wrapped_dek_nonce            BLOB NOT NULL,
-  recovery_wrapped_dek         BLOB,
+  recovery_wrapped_dek         BLOB,                           -- primary membership only, iff recovery enrolled
   recovery_wrapped_dek_nonce   BLOB,
   added_at                     INTEGER NOT NULL,               -- unix millis
   removed_at                   INTEGER,                        -- NULL = active

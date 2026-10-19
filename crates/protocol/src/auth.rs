@@ -39,8 +39,9 @@ impl Default for KdfParams {
 }
 
 /// Recovery-code material posted at signup. The wrap inside is the
-/// *primary doc's* DEK under the recovery KEK; it lands on the signup
-/// membership row, not on the account.
+/// *primary doc's* DEK (the Home DEK, the account key) under the
+/// recovery KEK; it lands on the signup membership row, not on the
+/// account. No other membership ever carries a recovery wrap.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoveryMaterial {
     #[serde(with = "serde_bytes")]
@@ -53,10 +54,10 @@ pub struct RecoveryMaterial {
     pub recovery_wrapped_dek_nonce: Vec<u8>,
 }
 
-/// A doc's DEK wrapped under one key the recipient holds. Which key
-/// depends on the carrying message: the password KEK on `/login` and in
-/// `new_doc_keys` uploads, the recovery KEK on `/recover`. `doc_id` is
-/// the uuid hex string.
+/// A doc's DEK wrapped under one key the recipient holds. Today this
+/// only ever carries the *primary* doc's DEK (the Home DEK): under the
+/// recovery KEK on `/recover`, under the new password KEK in
+/// `new_doc_keys` uploads. `doc_id` is the uuid hex string.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocKey {
     pub doc_id: String,
@@ -91,9 +92,12 @@ impl MemberRole {
 }
 
 /// One active doc membership of the logging-in account: the doc, the
-/// account's role on it, and the doc's DEK wrapped under the account's
-/// password KEK. Today every account has exactly one (its primary doc,
-/// role `owner`); clients must handle any length.
+/// account's role on it, and the doc's DEK wrapped under a key the
+/// account holds. **Which key depends on the doc**: for the primary
+/// doc (`doc_id == primary_doc_id`) `wrapped_dek` is the Home DEK under
+/// the password KEK; for every other doc it is that doc's DEK under the
+/// Home DEK (`spec/encryption.md` §Wrap-states). Clients open the
+/// primary first and must handle any number of memberships.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Membership {
     pub doc_id: String,
@@ -194,10 +198,11 @@ pub struct RecoverRequest {
 pub struct RecoverResponse {
     pub account_id: String,
     pub primary_doc_id: String,
-    /// Recovery-KEK wraps, one per active membership that holds one.
-    /// Released only after the recovery auth proof. The client unwraps
-    /// each, then re-wraps each under its new password KEK for
-    /// `/password/reset`.
+    /// Exactly one entry: the primary membership's recovery-KEK wrap
+    /// of the Home DEK. Released only after the recovery auth proof.
+    /// The client unwraps it, re-wraps it under its new password KEK
+    /// for `/password/reset`, and opens every other membership's wrap
+    /// (from `GET /api/docs` after the reset) with the Home DEK.
     pub doc_keys: Vec<DocKey>,
     /// Single-use, 15-min TTL. Required for `/password/reset`.
     pub recovery_session_token: String,
@@ -216,10 +221,10 @@ pub struct PasswordChangeRequest {
     pub new_kdf_params: KdfParams,
     #[serde(with = "serde_bytes")]
     pub new_auth_secret: Vec<u8>,
-    /// Every active membership's DEK re-wrapped under the new KEK. The
-    /// server rejects the change (400) unless the set of doc ids equals
-    /// the account's active memberships — a partial re-wrap would
-    /// strand the missing docs behind a KEK that no longer exists.
+    /// The Home DEK re-wrapped under the new KEK, as a one-element
+    /// set naming the primary doc. The server rejects the change (400)
+    /// unless the set of doc ids is exactly `{ primary_doc_id }`. Other
+    /// memberships are wrapped under the Home DEK and are not touched.
     pub new_doc_keys: Vec<DocKey>,
 }
 
@@ -233,12 +238,10 @@ pub struct PasswordResetRequest {
     pub new_kdf_params: KdfParams,
     #[serde(with = "serde_bytes")]
     pub new_auth_secret: Vec<u8>,
-    /// One entry per doc key `/recover` released, checked as a set
-    /// (400 on mismatch). A membership with no recovery wrap cannot be
-    /// re-wrapped — the client never had its DEK — so the server closes
-    /// it (`removed_at`) in the same transaction rather than leave a
-    /// wrap behind that no surviving KEK opens. See `encryption.md`
-    /// §Recovery.
+    /// The recovered Home DEK re-wrapped under the new KEK, as a
+    /// one-element set naming the primary doc (400 on mismatch; the
+    /// session is not consumed). Other memberships are wrapped under
+    /// the Home DEK and are not touched. See `encryption.md` §Recovery.
     pub new_doc_keys: Vec<DocKey>,
     pub device_name: String,
 }
@@ -255,22 +258,16 @@ pub struct PasswordResetResponse {
 // ---------- /api/docs ----------
 
 /// `POST /api/docs`: create a doc the calling account owns. The client
-/// generates the doc's DEK, wraps it under its password KEK (and under
-/// its recovery KEK iff the account enrolled a recovery code: the
-/// server rejects a missing recovery wrap on an enrolled account,
-/// since a password reset would otherwise close the membership and
-/// strand the doc). The server mints the doc id and inserts the
-/// `owner` membership carrying these wraps.
+/// generates the doc's DEK and wraps it under its **Home DEK** (never
+/// the password or recovery KEK: those wrap the Home DEK only). The
+/// server mints the doc id and inserts the `owner` membership carrying
+/// this wrap; password change, reset and recovery leave it alone.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateDocRequest {
     #[serde(with = "serde_bytes")]
     pub wrapped_dek: Vec<u8>,
     #[serde(with = "serde_bytes")]
     pub wrapped_dek_nonce: Vec<u8>,
-    #[serde(default, with = "serde_bytes_opt")]
-    pub recovery_wrapped_dek: Option<Vec<u8>>,
-    #[serde(default, with = "serde_bytes_opt")]
-    pub recovery_wrapped_dek_nonce: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

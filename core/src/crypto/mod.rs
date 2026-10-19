@@ -9,7 +9,8 @@
 //!   recovery code ──Argon2id──▶ RecoveryMaster ──HKDF──▶ Kek
 //!                                                ──HKDF──▶ AuthSecret
 //!
-//!   Dek (random) ──XChaCha20Poly1305(Kek)──▶ WrappedDek
+//!   Dek (random) ──XChaCha20Poly1305(Kek)──▶ WrappedDek          (the primary doc's DEK, i.e. the Home DEK)
+//!   Dek (random) ──XChaCha20Poly1305(Home Dek)──▶ WrappedDek     (every other doc's DEK)
 //! ```
 
 mod aead;

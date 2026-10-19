@@ -860,8 +860,10 @@ pub fn wrap_dek(kek_bytes: &[u8], dek: &Dek) -> Result<WrappedDekJs, JsError> {
     })
 }
 
-/// Decrypt the DEK shipped from `/api/account/login` using the local
-/// `kek` from `deriveLogin`. Wrong password → throws.
+/// Decrypt the *primary* membership's wrap shipped from
+/// `/api/account/login` using the local `kek` from `deriveLogin`,
+/// yielding the Home DEK. Wrong password → throws. Other memberships
+/// are Home-DEK wraps: see `unwrapDekWithDek`.
 #[wasm_bindgen(js_name = unwrapDek)]
 pub fn unwrap_dek(
     kek_bytes: &[u8],
@@ -882,6 +884,45 @@ pub fn unwrap_dek(
         nonce,
     };
     let dek = kek.unwrap(&wrapped).map_err(js_err)?;
+    Ok(Dek { inner: dek })
+}
+
+/// Wrap a doc's DEK under the Home DEK (the primary doc's DEK, which
+/// is the account key). Used for `POST /api/docs` and, later, for
+/// accepting an invite: the result is the new membership's
+/// `wrapped_dek` / `wrapped_dek_nonce`. Never used for the primary doc
+/// itself, whose wrap is under the password KEK (`wrapDek`).
+#[wasm_bindgen(js_name = wrapDekWithDek)]
+pub fn wrap_dek_with_dek(home: &Dek, dek: &Dek) -> Result<WrappedDekJs, JsError> {
+    let w = home.inner.wrap_dek(&dek.inner).map_err(js_err)?;
+    Ok(WrappedDekJs {
+        ciphertext: w.ciphertext,
+        nonce: w.nonce.to_vec(),
+    })
+}
+
+/// Open a non-primary membership's wrap (from `/api/account/login` or
+/// `GET /api/docs`) with the Home DEK. Throws on the wrong key, which
+/// includes handing it the primary membership's KEK wrap by mistake.
+#[wasm_bindgen(js_name = unwrapDekWithDek)]
+pub fn unwrap_dek_with_dek(
+    home: &Dek,
+    wrapped_ciphertext: &[u8],
+    wrapped_nonce: &[u8],
+) -> Result<Dek, JsError> {
+    if wrapped_nonce.len() != AEAD_NONCE_LEN {
+        return Err(JsError::new(&format!(
+            "wrapped_dek_nonce: expected {AEAD_NONCE_LEN} bytes, got {}",
+            wrapped_nonce.len()
+        )));
+    }
+    let mut nonce = [0u8; AEAD_NONCE_LEN];
+    nonce.copy_from_slice(wrapped_nonce);
+    let wrapped = CoreWrappedDek {
+        ciphertext: wrapped_ciphertext.to_vec(),
+        nonce,
+    };
+    let dek = home.inner.unwrap_dek(&wrapped).map_err(js_err)?;
     Ok(Dek { inner: dek })
 }
 

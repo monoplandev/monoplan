@@ -1,14 +1,13 @@
 use clap::Parser;
 use dialoguer::Input;
-use monoplan_core::{Dek, Doc, DocId, derive_recovery_master, parse_recovery_code, random_bytes};
+use monoplan_core::{Doc, derive_recovery_master, parse_recovery_code, random_bytes};
 use monoplan_protocol::{
-    DocKey, KdfParams, PasswordResetRequest, PasswordResetResponse, PreloginRequest,
-    PreloginResponse, RecoverRequest, RecoverResponse,
+    DocKey, DocsListResponse, KdfParams, PasswordResetRequest, PasswordResetResponse,
+    PreloginRequest, PreloginResponse, RecoverRequest, RecoverResponse,
 };
 
-use super::login::{parse_doc_id, unwrap_doc_key};
 use crate::config::{Config, Profile, Secrets};
-use crate::keystore::derive_master;
+use crate::keystore::{derive_master, parse_doc_id, unwrap_doc_key, unwrap_memberships};
 use crate::net::Client;
 use crate::storage::Account;
 use crate::sync::Session;
@@ -77,23 +76,15 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
         )
         .await?;
 
-    // One recovery wrap per membership the code can open.
-    let doc_keys: Vec<(DocId, Dek)> = recovered
+    // The code opens one wrap: the primary membership's copy of the
+    // Home DEK. Every other doc's key follows from it after the reset.
+    let doc_id = parse_doc_id(&recovered.primary_doc_id)?;
+    let dek = recovered
         .doc_keys
         .iter()
-        .map(|k| {
-            Ok((
-                parse_doc_id(&k.doc_id)?,
-                unwrap_doc_key(&r_kek, &k.wrapped_dek, &k.wrapped_dek_nonce)?,
-            ))
-        })
-        .collect::<anyhow::Result<_>>()?;
-    let doc_id = parse_doc_id(&recovered.primary_doc_id)?;
-    let dek = doc_keys
-        .iter()
-        .find(|(id, _)| *id == doc_id)
-        .map(|(_, dek)| dek.clone())
-        .ok_or_else(|| anyhow::anyhow!("recovery response has no key for the primary doc"))?;
+        .find(|k| k.doc_id == recovered.primary_doc_id)
+        .map(|k| unwrap_doc_key(&r_kek, &k.wrapped_dek, &k.wrapped_dek_nonce))
+        .ok_or_else(|| anyhow::anyhow!("recovery response has no key for the primary doc"))??;
 
     println!("Re-keying with new password…");
     let new_master_salt: [u8; 16] = random_bytes();
@@ -104,19 +95,16 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
     };
     let new_kek = new_master.kek()?;
     let new_auth = new_master.auth_secret()?;
-    // Every recovered doc re-wrapped under the new password KEK; the
-    // server refuses a partial set.
-    let new_doc_keys = doc_keys
-        .iter()
-        .map(|(id, dek)| {
-            let w = new_kek.wrap(dek)?;
-            Ok(DocKey {
-                doc_id: id.0.to_string(),
-                wrapped_dek: w.ciphertext,
-                wrapped_dek_nonce: w.nonce.to_vec(),
-            })
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
+    // The Home DEK re-wrapped under the new password KEK. The server
+    // refuses anything but exactly the primary doc here.
+    let new_doc_keys = {
+        let w = new_kek.wrap(&dek)?;
+        vec![DocKey {
+            doc_id: recovered.primary_doc_id.clone(),
+            wrapped_dek: w.ciphertext,
+            wrapped_dek_nonce: w.nonce.to_vec(),
+        }]
+    };
 
     let reset: PasswordResetResponse = client
         .post(
@@ -132,10 +120,15 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
         )
         .await?;
 
-    let profile = Profile::create()?;
     if parse_doc_id(&reset.primary_doc_id)? != doc_id {
         anyhow::bail!("server changed primary_doc_id between recover and reset");
     }
+    // Now a device: learn the rest of the memberships and open each
+    // with the Home DEK, exactly as login does.
+    let docs: DocsListResponse = client.get_authed("/api/docs", &reset.device_token).await?;
+    let doc_keys = unwrap_memberships(&dek, doc_id, &docs.memberships)?;
+
+    let profile = Profile::create()?;
     let storage = crate::storage::open_storage(&profile)?;
     crate::storage::seed_snapshot(&storage, &dek, doc_id, &Doc::empty())?;
     storage.write_account(&Account {

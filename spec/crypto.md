@@ -27,7 +27,8 @@ Reference inventory of every cryptographic primitive in use, what it does, and w
 
 Used for two distinct purposes:
 
-- **DEK wrap:** `Kek::wrap(&dek)` — encrypt the DEK under the password-derived KEK at signup / password change. One wrap per `(account, password)`. Optional second wrap per `(account, recovery_code)`.
+- **Home DEK wrap:** `Kek::wrap(&dek)` — encrypt the primary doc's DEK (the Home DEK, which is the account key) under the password-derived KEK at signup / password change. One wrap per `(account, password)`. Optional second wrap per `(account, recovery_code)`.
+- **Doc DEK wrap:** `Dek::wrap_dek(&other)` / `Dek::unwrap_dek(&wrapped)` — encrypt any other doc's DEK under the Home DEK (same AEAD, fresh nonce; byte-for-byte `Dek::seal` over the 32 key bytes). One wrap per non-primary membership (`encryption.md` §Wrap-states).
 - **Op + snapshot encryption:** `Dek::seal(&plaintext)` — encrypt every CRDT op and snapshot blob before it goes to the server. Fresh random 24-byte nonce per call. Server stores ciphertext + nonce as opaque blobs.
 
 **Why this AEAD:** Software-fast (no AES-NI hardware needed — important for wasm and mobile). 24-byte nonces let us use random nonces safely (collision probability ~2⁻⁹⁶ even after a billion uses). Simple API surface — easy to use right.
@@ -103,7 +104,8 @@ recovery code ──Argon2id(salt,params)──▶ RecoveryMaster ──HKDF─�
                                                                 │ recovery AuthSecret  │──SHA-256──▶ recovery_auth_hash
                                                                 └─────────────────────┘
 
-random ──▶ DEK (32 bytes)
+random ──▶ DEK (32 bytes, one per doc; the primary doc's is the Home DEK)
+Home DEK ──XChaCha20-Poly1305(fresh nonce)──▶ wrap(other doc's DEK) ─▶ server (opaque, on that doc's membership row)
 DEK ──XChaCha20-Poly1305(fresh nonce per blob)──▶ ciphertext for each op + snapshot ─▶ server (opaque)
 ```
 
@@ -120,5 +122,5 @@ Layered roles:
 - **AES-GCM** — would work, but XChaCha20-Poly1305 is faster in pure software and tolerates random nonces better at scale. We pick one and stick with it.
 - **bcrypt / scrypt / PBKDF2** — superseded by Argon2id for password-based KDFs.
 - **RSA / ECDSA / Ed25519 / Curve25519** — no asymmetric crypto currently. No public-key encryption, signatures, or key exchange. Auth is symmetric (`auth_secret` over TLS). If we add device-to-device handshakes or signed ops in the future, those would land here.
-- **Ratchets (Double Ratchet, Signal-style)** — no per-message key rotation. Single long-lived DEK per account. CRDT semantics don't benefit from ratcheting and the protocol complexity isn't worth it right now.
+- **Ratchets (Double Ratchet, Signal-style)** — no per-message key rotation. Single long-lived DEK per doc. CRDT semantics don't benefit from ratcheting and the protocol complexity isn't worth it right now.
 - **Argon2 server-side** — see SHA-256 reasoning above.
