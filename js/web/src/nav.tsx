@@ -3,6 +3,7 @@ import {
   createMemo,
   createSignal,
   For,
+  on,
   onCleanup,
   onMount,
   Show,
@@ -675,6 +676,29 @@ function DocSection(props: {
   };
 
   const navSelection = new DndSelection();
+  // Opening any view — by click, keyboard, URL, or the other doc's nav —
+  // collapses this group's multi-selection so a highlighted set of lists
+  // never lingers beside a view it no longer relates to. When the opened
+  // view is one of this group's own lists the selection collapses onto
+  // it rather than emptying, so it stays the anchor and a following
+  // shift-click ranges from the open list. Deferred past mount.
+  createEffect(
+    on(
+      () => [
+        props.view.kind,
+        props.view.kind === "list" ? props.view.id : null,
+        props.view.kind === "list" ? props.view.docId : null,
+      ],
+      () => {
+        const v = props.view;
+        const own =
+          v.kind === "list" && isActive(v.id) && lists().some((l) => l.id === v.id);
+        if (own) navSelection.selectOnly(v.id);
+        else navSelection.clear();
+      },
+      { defer: true },
+    ),
+  );
   const onNavItemClick = (e: MouseEvent, id: string) => {
     const modKey = /Mac|iPhone|iPad|iPod/.test(navigator.platform)
       ? e.metaKey
