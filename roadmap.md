@@ -103,3 +103,4 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - Consider 2-liner by default if task area is small
 - see how long an item has been sitting in focus?
 - display options for showing completed items in calendar view, or not
+- consider better visibility over undo/redo

@@ -141,20 +141,42 @@ describe("docs layer", () => {
     dispose();
   });
 
-  test("undo goes to the doc that acted last; redo to the one undone last", () => {
+  test("undo and redo interleave the docs' histories chronologically", () => {
     const { home, other, layer, dispose } = setup();
-    const a = home.addItem("inbox", "a");
+    // History: Home, Other, Home.
+    const a1 = home.addItem("inbox", "a1");
     const b = other.addItem("inbox", "b");
+    const a2 = home.addItem("inbox", "a2");
     expect(layer.canUndo()).toBe(true);
     expect(layer.undo()).toBe(true);
+    expect(home.getItem(a2)).toBeUndefined();
+    expect(other.getItem(b)).toBeDefined();
+    // The second undo is Other's step, not Home's older one.
+    expect(layer.undo()).toBe(true);
     expect(other.getItem(b)).toBeUndefined();
-    expect(home.getItem(a)).toBeDefined();
+    expect(home.getItem(a1)).toBeDefined();
+    expect(layer.undo()).toBe(true);
+    expect(home.getItem(a1)).toBeUndefined();
+    expect(layer.canUndo()).toBe(false);
+    expect(layer.undo()).toBe(false);
+    // Redo replays in the original order: Home, Other, Home.
+    expect(layer.redo()).toBe(true);
+    expect(home.getItem(a1)).toBeDefined();
+    expect(other.getItem(b)).toBeUndefined();
     expect(layer.redo()).toBe(true);
     expect(other.getItem(b)).toBeDefined();
+    expect(layer.redo()).toBe(true);
+    expect(home.getItem(a2)).toBeDefined();
+    expect(layer.canRedo()).toBe(false);
+    // A new action after a partial undo drops only that doc's redo
+    // stack; the other doc's stays redoable.
     layer.undo();
     layer.undo();
-    expect(home.getItem(a)).toBeUndefined();
-    expect(layer.canUndo()).toBe(false);
+    other.addItem("inbox", "c");
+    expect(other.canRedo()).toBe(false);
+    expect(home.canRedo()).toBe(true);
+    expect(layer.redo()).toBe(true);
+    expect(home.getItem(a2)).toBeDefined();
     dispose();
   });
 

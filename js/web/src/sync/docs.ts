@@ -30,9 +30,11 @@
 // live in the Home doc's `settings` map, which syncs across the
 // account's devices and is never shared.
 //
-// Undo stays per doc. `undo()` goes to the doc that recorded a local
-// action most recently; `redo()` to the one undone most recently. A
-// routed call that spans docs therefore undoes one doc at a time.
+// Undo stays per doc, interleaved chronologically: every entry on a
+// doc's undo / redo stack carries a process-wide stamp, and `undo()`
+// goes to the doc whose top entry is newest, `redo()` to the doc whose
+// top redo entry is newest. Across docs that reads as one history; a
+// routed call that spans docs is still undone one doc at a time.
 //
 // The merged reads are plain functions over the docs' Solid stores, not
 // memos: a caller's own memo tracks exactly the store paths they touch,
@@ -434,7 +436,7 @@ export function createDocsLayer(home: DocApp, initial: readonly DocApp[]): DocsL
     return n;
   };
 
-  // Undo goes to the doc that acted last; redo to the one undone last.
+  // Undo goes to the doc whose next step is newest; redo likewise.
   const latest = (
     stamp: (app: DocApp) => number,
     can: (app: DocApp) => boolean,
@@ -452,9 +454,9 @@ export function createDocsLayer(home: DocApp, initial: readonly DocApp[]): DocsL
     return best;
   };
   const undo = (): boolean =>
-    latest((a) => a.lastActionAt(), (a) => a.canUndo())?.undo() ?? false;
+    latest((a) => a.topUndoStamp(), (a) => a.canUndo())?.undo() ?? false;
   const redo = (): boolean =>
-    latest((a) => a.lastUndoAt(), (a) => a.canRedo())?.redo() ?? false;
+    latest((a) => a.topRedoStamp(), (a) => a.canRedo())?.redo() ?? false;
   const canUndo = (): boolean => docs().some((d) => d.app.canUndo());
   const canRedo = (): boolean => docs().some((d) => d.app.canRedo());
   // Undo / redo listeners span every doc, including ones added later

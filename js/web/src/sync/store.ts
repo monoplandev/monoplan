@@ -526,14 +526,16 @@ export interface DocApp extends ItemActions {
   redo(): boolean;
   canUndo(): boolean;
   canRedo(): boolean;
-  /** Stamp (a process-wide monotonic counter, not wall-clock, so two
-   *  docs never tie) of the last workspace undo entry recorded here (a
-   *  local mutation), or 0. The cross-doc layer undoes the doc that
-   *  acted most recently (undo stays per doc, `spec/sharing-plan.md`). */
-  lastActionAt(): number;
-  /** Stamp of the last undo step applied here, or 0 — the doc a redo
-   *  should go to. */
-  lastUndoAt(): number;
+  /** Stamp of the entry on top of the undo stack, or 0 when empty. A
+   *  process-wide monotonic counter (not wall-clock, so two docs never
+   *  tie), written when the entry is recorded or redone. The cross-doc
+   *  layer undoes the doc whose top entry is newest, which interleaves
+   *  every doc's history chronologically while undo itself stays per
+   *  doc (`spec/sharing-plan.md`). */
+  topUndoStamp(): number;
+  /** Stamp of the entry on top of the redo stack (written when it was
+   *  undone), or 0 — the layer redoes the doc whose top is newest. */
+  topRedoStamp(): number;
   /** Subscribe to applied undo / redo steps. The outcome names the items
    *  and lists whose events the step produced, in event order, so the
    *  view can land the user on what just changed. An id may no longer
@@ -559,9 +561,9 @@ export interface ImportSummary {
   focusAdded: number;
 }
 
-/** Process-wide stamp for `lastActionAt` / `lastUndoAt`: strictly
- *  increasing across every `DocApp`, so the cross-doc layer can order
- *  actions between docs without wall-clock ties. */
+/** Process-wide stamp for undo / redo entries: strictly increasing
+ *  across every `DocApp`, so the cross-doc layer can order entries
+ *  between docs without wall-clock ties. */
 let actionClock = 0;
 const nextActionStamp = (): number => ++actionClock;
 
@@ -686,11 +688,12 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
   // Undo reverts the notes first, then the core steps (an item's notes
   // go before the item does); redo mirrors that.
   type NotesStep = { id: string; before: string; after: string };
-  type UndoEntry = { steps: number; notes: NotesStep[] };
+  // `at` is the entry's stamp: when it was recorded (undo stack) or
+  // when it was undone (redo stack), so the top of each stack says how
+  // recent this doc's next undo / redo is relative to the other docs'.
+  type UndoEntry = { steps: number; notes: NotesStep[]; at: number };
   const undoStack: UndoEntry[] = [];
   const redoStack: UndoEntry[] = [];
-  let lastActionAt = 0;
-  let lastUndoAt = 0;
   // Notes writes made inside the open action batch, folded into its entry.
   let pendingBatchNotes: NotesStep[] = [];
   // While an undo / redo step is being applied, every drained event's
@@ -1128,9 +1131,8 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
 
   const recordAction = (steps: number, notes: NotesStep[] = []): void => {
     if (steps <= 0 && notes.length === 0) return;
-    undoStack.push({ steps, notes });
+    undoStack.push({ steps, notes, at: nextActionStamp() });
     redoStack.length = 0;
-    lastActionAt = nextActionStamp();
   };
 
   // Close the open notes session as one undo step (nothing if the text
@@ -1237,8 +1239,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
         continue;
       }
       flush();
-      redoStack.push({ steps: applied, notes });
-      lastUndoAt = nextActionStamp();
+      redoStack.push({ steps: applied, notes, at: nextActionStamp() });
       return true;
     }
   };
@@ -1261,8 +1262,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
         continue;
       }
       flush();
-      undoStack.push({ steps: applied, notes });
-      lastActionAt = nextActionStamp();
+      undoStack.push({ steps: applied, notes, at: nextActionStamp() });
       return true;
     }
   };
@@ -1508,11 +1508,11 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     canRedo() {
       return redoStack.length > 0;
     },
-    lastActionAt() {
-      return lastActionAt;
+    topUndoStamp() {
+      return undoStack[undoStack.length - 1]?.at ?? 0;
     },
-    lastUndoAt() {
-      return lastUndoAt;
+    topRedoStamp() {
+      return redoStack[redoStack.length - 1]?.at ?? 0;
     },
     onUndoRedo(cb) {
       undoListeners.add(cb);
