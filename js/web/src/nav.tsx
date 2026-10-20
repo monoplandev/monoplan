@@ -1056,9 +1056,9 @@ export function NavFindButton(props: { onClick: () => void }) {
   );
 }
 
-/** The app-menu dropdown (undo/redo, new workspace, settings, auth)
- *  plus the auth dialog the Sign in / Sign up items open. Import /
- *  export live on each workspace heading's "..." menu. Lives in the
+/** The app-menu dropdown (undo/redo | new workspace, settings | website,
+ *  shortcuts, auth) plus the auth dialog the Sign in / Sign up items
+ *  open. Import / export live on each workspace heading's "..." menu. Lives in the
  *  sidebar footer (see `Nav`'s `footer` prop). */
 export function NavMenu(props: {
   /** Undo / redo go through the layer (the doc that acted last). */
@@ -1152,17 +1152,11 @@ export function NavMenu(props: {
             </Show>
             <DropdownMenu.Item
               class="dropdown-menu-item"
-              onSelect={() => props.onOpenShortcuts()}
-            >
-              <span>{m().shortcuts.title}</span>
-              <kbd class="menu-shortcut">?</kbd>
-            </DropdownMenu.Item>
-            <DropdownMenu.Item
-              class="dropdown-menu-item"
               onSelect={() => props.onOpenSettings()}
             >
               {m().nav.settings}
             </DropdownMenu.Item>
+            <DropdownMenu.Separator class="dropdown-menu-separator" />
             <DropdownMenu.Item
               class="dropdown-menu-item"
               as="a"
@@ -1173,8 +1167,14 @@ export function NavMenu(props: {
               {m().nav.website}
               <span innerHTML={externalLinkSvg} />
             </DropdownMenu.Item>
+            <DropdownMenu.Item
+              class="dropdown-menu-item"
+              onSelect={() => props.onOpenShortcuts()}
+            >
+              <span>{m().shortcuts.title}</span>
+              <kbd class="menu-shortcut">?</kbd>
+            </DropdownMenu.Item>
             <Show when={props.session.anonymous}>
-              <DropdownMenu.Separator class="dropdown-menu-separator" />
               <DropdownMenu.Item
                 class="dropdown-menu-item"
                 onSelect={() => openAuth("login")}
