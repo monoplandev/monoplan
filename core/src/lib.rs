@@ -11,8 +11,8 @@ pub mod sync;
 pub use crypto::*;
 pub use doc::{
     DefaultView, Doc, DocError, EVENTS_NAME, ExportItem, ExportLifecycle, ExportList,
-    ExportSettings, INBOX_NAME, ImportSummary, ItemLifecycle, ItemView, JsonExport, LIST_EVENTS,
-    LIST_INBOX, LaneSet, ListView, MAX_DURATION_MINUTES, MAX_PLACE_DETAIL_CHARS,
+    ExportSettings, FocusRef, INBOX_NAME, ImportSummary, ItemLifecycle, ItemView, JsonExport,
+    LIST_EVENTS, LIST_INBOX, LaneSet, ListView, MAX_DURATION_MINUTES, MAX_PLACE_DETAIL_CHARS,
     MAX_PLACE_LABEL_CHARS, NOTES_ORIGIN_PREFIX, NotesDeltaOp, Place, SettingsView, WorkflowState,
 };
 pub use events::AppEvent;

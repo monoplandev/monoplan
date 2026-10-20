@@ -897,21 +897,33 @@ fn order_root_name(list_id: &str) -> String {
 /// One element of the reserved `focus` container (`spec/focus.md`).
 /// Encoded as a scalar string: bare `"<item_id>"` for a local-doc ref
 /// (the only form the emitter writes today), or `"<doc_id>:<item_id>"`
-/// for a future cross-doc ref. Split on the **first** `:`; uuid-hex
-/// components mean `:` never collides. A colon-less string is a local
-/// ref — that is the forward-compat hook for sharing.
+/// for a cross-doc ref. Split on the **first** `:`; uuid-hex components
+/// mean `:` never collides. A colon-less string is a local ref.
+///
+/// A foreign ref names an item in another doc the account can open
+/// (`spec/sharing-plan.md`). This doc cannot resolve it: the host layer
+/// that holds every open doc does, and it alone decides when a foreign
+/// ref is dead (item closed, binned, missing, or the doc left) and
+/// prunes it through [`Doc::remove_from_focus_many`]. Core therefore
+/// **keeps** well-formed foreign refs through every sweep and surfaces
+/// them in order via [`Doc::focus_entries`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct FocusRef {
-    /// `None` ≡ local doc. `Some(doc_id)` is a foreign ref, unresolvable
-    /// today — projection skips it (later: renders a placeholder).
-    doc_id: Option<String>,
-    item_id: String,
+pub struct FocusRef {
+    /// `None` ≡ this doc. `Some(doc_id)` is a foreign ref.
+    pub doc_id: Option<String>,
+    pub item_id: String,
 }
 
 impl FocusRef {
     fn local(item_id: &str) -> FocusRef {
         FocusRef {
             doc_id: None,
+            item_id: item_id.to_string(),
+        }
+    }
+    fn foreign(doc_id: &str, item_id: &str) -> FocusRef {
+        FocusRef {
+            doc_id: Some(doc_id.to_string()),
             item_id: item_id.to_string(),
         }
     }
@@ -947,16 +959,38 @@ impl FocusRef {
 }
 
 /// Classification of the current `focus` container against the item
-/// index: which raw slots project to a visible Open item, and which are
-/// dead garbage (unparseable, foreign-doc, missing, non-open, or a
-/// later duplicate of an already-visible item) to be swept.
+/// index: which raw slots are live entries (a local ref to an Open
+/// item, or any well-formed foreign ref — the first for each item id),
+/// and which are dead garbage (unparseable, local-but-missing,
+/// local-but-non-open, or a later duplicate of an item already listed)
+/// to be swept.
 struct FocusScan {
     /// Raw encoded elements in container order.
     raw: Vec<String>,
-    /// Visible item ids in container order, deduped (first wins).
-    visible_item_ids: Vec<String>,
+    /// Live entries in container order, deduped by item id (first wins).
+    /// After a sweep the container holds exactly these, in this order,
+    /// so an index into `entries` is a raw index.
+    entries: Vec<FocusRef>,
     /// Raw indices that are dead garbage, ascending.
     dead_idx: Vec<usize>,
+}
+
+impl FocusScan {
+    /// Item ids of the local entries — the Focus lens this doc can
+    /// render on its own.
+    fn visible_item_ids(&self) -> Vec<String> {
+        self.entries
+            .iter()
+            .filter(|r| r.is_local())
+            .map(|r| r.item_id.clone())
+            .collect()
+    }
+    fn position(&self, item_id: &str) -> Option<usize> {
+        self.entries.iter().position(|r| r.item_id == item_id)
+    }
+    fn contains(&self, item_id: &str) -> bool {
+        self.position(item_id).is_some()
+    }
 }
 
 // ---------- disposable projection index ----------
@@ -2590,21 +2624,58 @@ impl Doc {
             }
         };
         let scan = self.scan_focus();
-        if scan.visible_item_ids.iter().any(|id| id == item_id) {
+        if scan.contains(item_id) {
             return Ok(());
         }
         if !open {
             return Ok(());
         }
+        self.insert_focus_entry(scan, FocusRef::local(item_id), index)
+    }
+
+    /// Add a **foreign** FocusRef — `doc_id:item_id`, an item in another
+    /// doc the account can open — at entry position `index`, one commit.
+    /// This doc cannot check the item exists or is Open; the host layer
+    /// that resolved it is responsible for that, and for pruning the ref
+    /// (via [`remove_from_focus`](Self::remove_from_focus)) when the item
+    /// closes or the doc is left. No-op if `item_id` is already focused
+    /// in either form. `doc_id` must be non-empty and colon-free.
+    pub fn add_foreign_to_focus(
+        &self,
+        doc_id: &str,
+        item_id: &str,
+        index: usize,
+    ) -> Result<(), DocError> {
+        if doc_id.is_empty() || doc_id.contains(':') {
+            return Err(DocError::Invalid(format!("focus doc id `{doc_id}`")));
+        }
+        if item_id.is_empty() || item_id.contains(':') {
+            return Err(DocError::Invalid(format!("focus item id `{item_id}`")));
+        }
+        let scan = self.scan_focus();
+        if scan.contains(item_id) {
+            return Ok(());
+        }
+        self.insert_focus_entry(scan, FocusRef::foreign(doc_id, item_id), index)
+    }
+
+    /// Sweep `scan.dead_idx`, then insert `r` at entry position `index`
+    /// (past-end appends), commit, emit `FocusChanged`.
+    fn insert_focus_entry(
+        &self,
+        scan: FocusScan,
+        r: FocusRef,
+        index: usize,
+    ) -> Result<(), DocError> {
         let focus = self.focus_list();
         for &i in scan.dead_idx.iter().rev() {
             focus.delete(i, 1)?;
         }
-        // After the sweep the container holds exactly the visible refs, so
-        // raw position == visible position.
-        let new_len = scan.visible_item_ids.len();
+        // After the sweep the container holds exactly the entries, so
+        // raw position == entry position.
+        let new_len = scan.entries.len();
         let at = index.min(new_len);
-        let encoded = FocusRef::local(item_id).encode();
+        let encoded = r.encode();
         if at >= new_len {
             focus.push(encoded.as_str())?;
         } else {
@@ -2632,7 +2703,7 @@ impl Doc {
         // Seed the "already present" set with the currently-visible refs so
         // the filter dedups against Focus *and* against repeats within
         // `item_ids` (first occurrence wins) in one pass.
-        let mut present: HashSet<String> = scan.visible_item_ids.iter().cloned().collect();
+        let mut present: HashSet<String> = scan.entries.iter().map(|r| r.item_id.clone()).collect();
         let to_add: Vec<&str> = {
             let guard = self.item_index.lock().expect("item index mutex poisoned");
             item_ids
@@ -2651,7 +2722,7 @@ impl Doc {
         for &i in scan.dead_idx.iter().rev() {
             focus.delete(i, 1)?;
         }
-        // After the sweep the container holds exactly the visible refs, so
+        // After the sweep the container holds exactly the entries, so
         // inserting from index 0 upward prepends the batch to the top while
         // preserving `item_ids` order (to_add[0] ends up first).
         for (offset, id) in to_add.iter().enumerate() {
@@ -2704,19 +2775,19 @@ impl Doc {
         for &i in scan.dead_idx.iter().rev() {
             focus.delete(i, 1)?;
         }
-        // After the sweep, positions align with `visible_item_ids`.
+        // After the sweep, positions align with `entries`.
         let swept = !scan.dead_idx.is_empty();
         let commit_sweep = |doc: &Self| {
             doc.inner.commit();
             doc.push_event(AppEvent::FocusChanged);
         };
-        let Some(from) = scan.visible_item_ids.iter().position(|id| id == item_id) else {
+        let Some(from) = scan.position(item_id) else {
             if swept {
                 commit_sweep(self);
             }
             return Ok(());
         };
-        let to = index.min(scan.visible_item_ids.len().saturating_sub(1));
+        let to = index.min(scan.entries.len().saturating_sub(1));
         if from == to {
             if swept {
                 commit_sweep(self);
@@ -2731,9 +2802,19 @@ impl Doc {
 
     // ---------- reads: focus ----------
 
-    /// Visible Focus item ids in curated order (Open, local, deduped).
+    /// Visible **local** Focus item ids in curated order (Open, deduped).
+    /// Foreign entries are skipped; see [`focus_entries`](Self::focus_entries)
+    /// for the full lens.
     pub fn focus_refs(&self) -> Vec<String> {
-        self.scan_focus().visible_item_ids
+        self.scan_focus().visible_item_ids()
+    }
+
+    /// Every live Focus entry in curated order: local refs to Open items
+    /// and every well-formed foreign ref (`doc_id` set), deduped by item
+    /// id. This is the order `add_to_focus` / `move_in_focus` indices
+    /// address. The host resolves and filters the foreign entries.
+    pub fn focus_entries(&self) -> Vec<FocusRef> {
+        self.scan_focus().entries
     }
 
     /// The Focus lens as an ordered `Vec<ItemView>` — the projection in
@@ -3247,8 +3328,9 @@ impl Doc {
                 }
             }
         }
-        // Focus backstop: prune dead refs (missing / closed / binned /
-        // foreign / duplicate) from the focus container. Idempotent; the
+        // Focus backstop: prune dead refs (unparseable / missing / closed /
+        // binned / duplicate; foreign refs are the host's to judge and are
+        // kept) from the focus container. Idempotent; the
         // primary compaction paths are auto-remove-on-Done and the sweep
         // folded into each focus mutation (`spec/focus.md`).
         let focus_dead = self.scan_focus().dead_idx;
@@ -3416,7 +3498,7 @@ impl Doc {
             items,
             // Visible refs only, in Focus order — dead garbage (foreign,
             // missing, non-open, duplicate) never rides an export.
-            focus: self.scan_focus().visible_item_ids,
+            focus: self.scan_focus().visible_item_ids(),
         }
     }
 
@@ -4932,47 +5014,44 @@ impl Doc {
     }
 
     /// Classify the focus container against the item index. Locks the
-    /// index once; a ref is *visible* iff it parses, is local, names an
-    /// item the index knows to be Open, and is the first ref for that
-    /// item. Everything else is dead garbage to sweep.
+    /// index once; a ref is a live *entry* iff it parses, is the first
+    /// ref for its item id, and is either local to an item the index
+    /// knows to be Open or foreign (which this doc cannot judge, so it
+    /// is kept for the host). Everything else is dead garbage to sweep.
     fn scan_focus(&self) -> FocusScan {
         let raw = self.focus_raw();
         let guard = self.item_index.lock().expect("item index mutex poisoned");
         let mut seen: HashSet<String> = HashSet::new();
-        let mut visible_item_ids = Vec::new();
+        let mut entries = Vec::new();
         let mut dead_idx = Vec::new();
         for (i, s) in raw.iter().enumerate() {
-            let item_id = match FocusRef::parse(s) {
-                Some(r)
-                    if r.is_local()
-                        && guard.meta.get(&r.item_id).is_some_and(|m| m.open)
-                        && seen.insert(r.item_id.clone()) =>
-                {
-                    Some(r.item_id)
-                }
-                _ => None,
-            };
-            match item_id {
-                Some(id) => visible_item_ids.push(id),
+            let live = FocusRef::parse(s).filter(|r| {
+                let resolvable =
+                    !r.is_local() || guard.meta.get(&r.item_id).is_some_and(|m| m.open);
+                resolvable && seen.insert(r.item_id.clone())
+            });
+            match live {
+                Some(r) => entries.push(r),
                 None => dead_idx.push(i),
             }
         }
         FocusScan {
             raw,
-            visible_item_ids,
+            entries,
             dead_idx,
         }
     }
 
     /// Delete, in one uncommitted batch, every focus ref whose item id is
-    /// in `remove_items` **plus** all dead refs (the folded sweep).
-    /// Returns the number of slots removed; the caller commits.
+    /// in `remove_items` — local or foreign form alike (item ids are
+    /// globally unique, so the host prunes a closed foreign item by its
+    /// id) — **plus** all dead refs (the folded sweep). Returns the
+    /// number of slots removed; the caller commits.
     fn prune_focus_refs(&self, remove_items: &HashSet<String>) -> usize {
         let scan = self.scan_focus();
         let mut to_delete: Vec<usize> = scan.dead_idx.clone();
         for (i, s) in scan.raw.iter().enumerate() {
             if let Some(r) = FocusRef::parse(s)
-                && r.is_local()
                 && remove_items.contains(&r.item_id)
             {
                 to_delete.push(i);
@@ -10774,6 +10853,125 @@ mod tests {
 
         doc.remove_from_focus(&b).unwrap();
         assert_eq!(doc.focus_refs(), vec![a, c]);
+    }
+
+    #[test]
+    fn focus_foreign_refs_survive_sweeps_and_surface_as_entries() {
+        let doc = Doc::new().unwrap();
+        let a = doc.add_item(LIST_INBOX, "a").unwrap();
+        let b = doc.add_item(LIST_INBOX, "b").unwrap();
+        doc.add_to_focus(&a, usize::MAX).unwrap();
+        doc.add_foreign_to_focus("doc2", "f1", usize::MAX).unwrap();
+        doc.add_to_focus(&b, usize::MAX).unwrap();
+
+        // Local view skips the foreign entry; the full lens keeps order.
+        assert_eq!(doc.focus_refs(), vec![a.clone(), b.clone()]);
+        assert_eq!(
+            doc.focus_entries(),
+            vec![
+                FocusRef::local(&a),
+                FocusRef::foreign("doc2", "f1"),
+                FocusRef::local(&b)
+            ]
+        );
+
+        // Every sweep path keeps it: a focus mutation, a close, reconcile.
+        doc.move_in_focus(&b, 0).unwrap();
+        doc.set_items_done(&[a.as_str()], true).unwrap();
+        doc.reconcile().unwrap();
+        assert_eq!(
+            doc.focus_entries(),
+            vec![FocusRef::local(&b), FocusRef::foreign("doc2", "f1")]
+        );
+        // Raw container matches the entries exactly after the sweeps.
+        assert_eq!(doc.focus_raw(), vec![b.clone(), "doc2:f1".to_string()]);
+    }
+
+    #[test]
+    fn focus_entry_indices_span_foreign_entries() {
+        let doc = Doc::new().unwrap();
+        let a = doc.add_item(LIST_INBOX, "a").unwrap();
+        let b = doc.add_item(LIST_INBOX, "b").unwrap();
+        doc.add_foreign_to_focus("doc2", "f1", 0).unwrap();
+        doc.add_foreign_to_focus("doc2", "f2", usize::MAX).unwrap();
+        // Index 1 lands between the two foreign entries.
+        doc.add_to_focus(&a, 1).unwrap();
+        assert_eq!(
+            doc.focus_entries(),
+            vec![
+                FocusRef::foreign("doc2", "f1"),
+                FocusRef::local(&a),
+                FocusRef::foreign("doc2", "f2")
+            ]
+        );
+        // Moving a foreign entry by its item id addresses entry positions.
+        doc.move_in_focus("f2", 0).unwrap();
+        assert_eq!(
+            doc.focus_entries()
+                .iter()
+                .map(|r| r.item_id.clone())
+                .collect::<Vec<_>>(),
+            vec!["f2".to_string(), "f1".to_string(), a.clone()]
+        );
+        // Batch add prepends above everything, foreign included.
+        doc.add_to_focus_many(&[b.as_str()]).unwrap();
+        assert_eq!(doc.focus_entries()[0], FocusRef::local(&b));
+    }
+
+    #[test]
+    fn focus_foreign_removed_by_item_id_in_either_form() {
+        let doc = Doc::new().unwrap();
+        doc.add_foreign_to_focus("doc2", "f1", usize::MAX).unwrap();
+        doc.add_foreign_to_focus("doc2", "f2", usize::MAX).unwrap();
+        doc.add_foreign_to_focus("doc3", "f3", usize::MAX).unwrap();
+        doc.remove_from_focus("f1").unwrap();
+        doc.remove_from_focus_many(&["f3", "missing"]).unwrap();
+        assert_eq!(doc.focus_entries(), vec![FocusRef::foreign("doc2", "f2")]);
+        // A ref to a doc that is no longer open is pruned the same way.
+        doc.remove_from_focus("f2").unwrap();
+        assert!(doc.focus_entries().is_empty());
+    }
+
+    #[test]
+    fn focus_dedups_by_item_id_across_forms_and_rejects_bad_ids() {
+        let doc = Doc::new().unwrap();
+        let a = doc.add_item(LIST_INBOX, "a").unwrap();
+        doc.add_to_focus(&a, usize::MAX).unwrap();
+        // Same item id in foreign form: no-op, nothing committed.
+        let before = doc.focus_raw();
+        doc.add_foreign_to_focus("doc2", &a, 0).unwrap();
+        assert_eq!(doc.focus_raw(), before);
+        // And the reverse: foreign first, local add is a no-op.
+        doc.add_foreign_to_focus("doc2", "f1", usize::MAX).unwrap();
+        doc.add_foreign_to_focus("doc9", "f1", 0).unwrap();
+        assert_eq!(
+            doc.focus_entries(),
+            vec![FocusRef::local(&a), FocusRef::foreign("doc2", "f1")]
+        );
+        // A raw duplicate (concurrent adds merged) sweeps to one, first wins.
+        doc.focus_list().push("doc9:f1").unwrap();
+        doc.inner.commit();
+        doc.move_in_focus(&a, 0).unwrap();
+        assert_eq!(doc.focus_raw(), vec![a.clone(), "doc2:f1".to_string()]);
+
+        assert!(matches!(
+            doc.add_foreign_to_focus("", "f1", 0),
+            Err(DocError::Invalid(_))
+        ));
+        assert!(matches!(
+            doc.add_foreign_to_focus("a:b", "f1", 0),
+            Err(DocError::Invalid(_))
+        ));
+        assert!(matches!(
+            doc.add_foreign_to_focus("doc2", "", 0),
+            Err(DocError::Invalid(_))
+        ));
+        // Malformed slots are still garbage.
+        doc.focus_list().push(":x").unwrap();
+        doc.inner.commit();
+        assert_eq!(doc.focus_entries().len(), 2);
+        doc.reconcile().unwrap();
+        assert_eq!(doc.focus_raw().len(), 2);
     }
 
     #[test]

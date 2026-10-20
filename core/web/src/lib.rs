@@ -496,10 +496,42 @@ impl Doc {
         self.inner.move_in_focus(item_id, index).map_err(js_err)
     }
 
-    /// Visible Focus item ids in curated order (Open, local, deduped).
+    /// Visible **local** Focus item ids in curated order (Open, deduped).
+    /// Foreign entries are skipped; `focusEntriesJson` has the full lens.
     #[wasm_bindgen(js_name = focusRefIds)]
     pub fn focus_ref_ids(&self) -> Vec<String> {
         self.inner.focus_refs()
+    }
+
+    /// Every live Focus entry in curated order as a JSON array of
+    /// `{docId: string | null, itemId}` — `docId` null means this doc.
+    /// Foreign entries are kept verbatim for the host to resolve; this is
+    /// the order `addToFocus` / `moveInFocus` indices address.
+    #[wasm_bindgen(js_name = focusEntriesJson)]
+    pub fn focus_entries_json(&self) -> String {
+        let rows: Vec<serde_json::Value> = self
+            .inner
+            .focus_entries()
+            .into_iter()
+            .map(|r| serde_json::json!({ "docId": r.doc_id, "itemId": r.item_id }))
+            .collect();
+        serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Add a foreign FocusRef (`docId:itemId`, an item in another open
+    /// doc) at entry position `index`, one commit. No Open check — the
+    /// host resolved the item and prunes the ref when it closes. No-op if
+    /// the item is already focused.
+    #[wasm_bindgen(js_name = addForeignToFocus)]
+    pub fn add_foreign_to_focus(
+        &self,
+        doc_id: &str,
+        item_id: &str,
+        index: usize,
+    ) -> Result<(), JsError> {
+        self.inner
+            .add_foreign_to_focus(doc_id, item_id, index)
+            .map_err(js_err)
     }
 
     /// Ranked search over items and lists (`spec/search.md`) as a JSON

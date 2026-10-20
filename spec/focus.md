@@ -66,17 +66,36 @@ One reserved singleton container, analogous to `order/inbox`:
 ## FocusRef grammar (forward-compatible for cross-doc)
 
 ```
-FocusRef = "<item_id>"              # now: local doc, bare uuid-v7 hex
-         = "<doc_id>:<item_id>"     # future: cross-doc (sharing)
+FocusRef = "<item_id>"              # this doc: bare uuid-v7 hex
+         = "<doc_id>:<item_id>"     # cross-doc: an item in another open doc
 ```
 
 Same `:`-on-first-colon convention as `Location`/`OrderEntry`; uuid-hex
-components (`[0-9a-f]{32}`) mean `:` never collides. **The parser accepts both
-forms now** (no colon ⇒ local doc); **the emitter writes only the bare form**
-until sharing lands. This is the whole point of designing it now — cross-doc refs
-(`spec/sharing-plan.md`) slot in with zero migration. A ref whose `doc_id` is not
-the local doc is *unresolvable today*; projection skips it (later: renders a
-placeholder).
+components (`[0-9a-f]{32}`) mean `:` never collides. No colon ⇒ this doc, so
+the bare form is the only one a single-doc client ever writes; the prefix is
+optional and is never written for the doc's own items.
+
+**Foreign refs (since 2026-10-20).** Focus is personal: it lives in the
+account's Home doc and may reference items in any doc the account can open
+(`spec/sharing-plan.md`). The Home doc's core cannot resolve a foreign ref —
+it does not hold the other doc — so the division of labour is:
+
+- Core **keeps** every well-formed foreign ref through every sweep (focus
+  mutations, close-on-Done, `reconcile()`), dedups by item id across both forms
+  (first wins; item ids are globally unique), and surfaces the full lens in
+  order via `focus_entries()` (wasm `focusEntriesJson`: `{docId | null, itemId}`).
+  `focus_refs()` / `focusRefIds` stay local-only.
+- Core writes a foreign ref only on request: `add_foreign_to_focus(doc_id,
+  item_id, index)` (wasm `addForeignToFocus`), with no existence or Open check.
+- The **host** (the layer holding every open doc) resolves foreign entries
+  against the other docs, filters non-Open ones from display, and prunes a
+  foreign ref — by item id, through `remove_from_focus(_many)` — when it observes
+  the item close, get binned or vanish in its doc, or when the account leaves
+  that doc. Core never judges a foreign ref dead, because a client that has not
+  (or not yet) loaded the other doc must not destroy the ref.
+- Entry **indices** (`add_to_focus`, `move_in_focus`) address the full entry
+  list, foreign entries included, which is what a merged Focus view shows.
+- Foreign refs are not exported by `export_json` and are dropped on import.
 
 ## Projection & visibility
 
@@ -87,11 +106,13 @@ visible(ref in focus) :=
      ref resolves to the local doc
   && items[ref.item_id] exists
   && items[ref.item_id] is Open           # state <= Review && binned_at == null
-  && no earlier visible ref has the same item_id     # dedup, first wins
+  && no earlier entry has the same item_id           # dedup, first wins
 ```
 
-Refs to missing / done / binned / foreign-doc items are **harmless garbage** —
-filtered out by projection. This mirrors the existing "stale order entries are
+Refs to missing / done / binned items are **harmless garbage** — filtered out
+by projection. Foreign refs are *entries* but not *visible* here: `focus_view()`
+skips them and the host renders them from the other doc (see the grammar
+section). This mirrors the existing "stale order entries are
 harmless" invariant. **Reads never mutate** (no self-repair on projection).
 
 The Focus order is logical state (it fixes the curated order), exactly as each
@@ -133,7 +154,7 @@ it compacts eagerly instead.
 ### Sweep on focus interaction
 
 `add_to_focus` / `remove_from_focus` / `move_in_focus` each prune dead refs
-(missing / binned / foreign / duplicate) from the focus container as part of
+(unparseable / missing / binned / duplicate; never a foreign ref) from the focus container as part of
 their single commit. Because these already write the focus container, the sweep
 is a same-container, free ride — no extra commit, no coupling to unrelated
 mutations. This keeps Focus bounded through ordinary use without depending on the
@@ -181,8 +202,8 @@ Maintenance & integrity:
 
 - `set_item_lifecycle` → Done or Cancelled removes the item's focus ref(s) in
   the same commit (see Lifecycle interplay).
-- `reconcile()` prunes focus refs that are missing / closed / binned / foreign,
-  and dedups. Idempotent; no-op when clean.
+- `reconcile()` prunes focus refs that are unparseable / missing / closed /
+  binned, and dedups; foreign refs are kept. Idempotent; no-op when clean.
 - `doc_fingerprint` hashes the focus order.
 
 Constant: `FOCUS_CONTAINER = "focus"`, alongside the existing container-name

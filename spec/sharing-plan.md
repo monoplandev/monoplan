@@ -52,12 +52,12 @@ Constraints:
 - **A member can leave any doc except their primary.** The primary doc is non-leavable, non-deletable; it's the account's Home.
 - **Member removal is forward-only** (see "Known limitations").
 
-**Forward hook already in place:** the Focus lens (`spec/focus.md`) encodes
-references as `FocusRef = "<doc_id>:<item_id>"`, with the bare `"<item_id>"` form
-meaning the local doc. The parser accepts both forms today; only the emitter is
-local-only. When sharing lands, a shared item can be pulled into a member's Focus
-by emitting the cross-doc form — no migration, no schema change to the focus
-container.
+**Forward hook in place (core side done 2026-10-20):** the Focus lens
+(`spec/focus.md`) encodes references as `FocusRef = "<doc_id>:<item_id>"`, with
+the bare `"<item_id>"` form meaning the local doc. Core keeps foreign refs,
+surfaces them as entries and adds them on request; the host resolves and prunes
+them. A shared item is pulled into a member's Focus by writing the cross-doc form
+into their Home doc — no migration, no schema change to the focus container.
 
 ### Per-doc DEK (built 2026-10-17; Home DEK as account key 2026-10-19)
 
@@ -236,6 +236,7 @@ Compile breaks downstream — fix in Phase 2.
 - **App boot** (`js/web/src/App.tsx`): on login, unwrap each membership DEK (Home via KEK, rest via Home DEK) and boot a `Doc` + engine for every one (see "Decisions": clients load every membership). As of 2026-10-19 `Login.tsx` unwraps every membership into `Session.docKeys` and `api.ts` has `createDoc` / `listDocs`, but the session still vaults and boots only the primary doc. Still to do here:
   - ~~**Per-doc vault.**~~ Done 2026-10-20: the vault record holds one AES-GCM entry per doc id under its single non-extractable wrapping key (`sealSession` / `openRecord` in `dek-vault.ts`, tested in `js/core/test/dek-vault.test.ts`); `DekVault.putDocKey` adds a doc that appears after login. Chosen over vaulting the Home DEK alone and re-deriving from `GET /api/docs`, so every membership opens offline on a cold reload. A reload now restores the full `Session.docKeys`.
   - ~~**`docId` on `ItemView`.**~~ Done 2026-10-20: the web store stamps every projected `ItemView` with its engine's doc id (snapshot and `itemAdded` paths; drafts take the current app's). Never on the wire. The cross-doc lenses merge by it and route mutations back to the owning `DocApp` by it.
+  - ~~**Core keeps foreign Focus refs.**~~ Done 2026-10-20 (`spec/focus.md` §FocusRef grammar): the Home doc's core keeps `<doc_id>:<item_id>` refs through every sweep, surfaces them via `focus_entries()` / `focusEntriesJson`, writes one on `add_foreign_to_focus`, and leaves judging them dead to the host, which prunes by item id. No "resident docs" declaration was needed: a client that has not loaded the other doc simply never prunes.
   - **Boot every membership.** `runtime.ts` builds one engine; it should build one per entry in `docKeys` (plus whatever the vault / list endpoint yields on reload) and hand them all to `createSyncBridge`.
 - ~~**Auth flows**: memberships-shaped bodies on relevant endpoints.~~ Done for login (the web has no recovery / password-change UI yet).
 - **Verification**: signup → add items → reload → still works. Two devices on same account → real-time sync.
