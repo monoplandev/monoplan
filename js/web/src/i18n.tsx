@@ -165,8 +165,8 @@ export type Messages = {
      *  state (the menu twin of the task dialog's status badge). */
     status: string;
     /** Placeholder / accessible name for the filter box in the move-to-list
-     *  picker's popover. */
-    searchLists: string;
+     *  picker's popover, naming the workspace whose lists it filters. */
+    searchLists: (workspace: string) => string;
     /** Placeholder for the standalone move-to-list palette's filter box. */
     moveItem: string;
     moveItems: string;
@@ -540,7 +540,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       moveToList: "Mover a la lista",
       changeStatus: "Cambiar estado",
       status: "Estado",
-      searchLists: "Buscar listas",
+      searchLists: (workspace) =>
+        workspace ? `Buscar listas en ${workspace}` : "Buscar listas",
       moveItem: "Mover elemento",
       moveItems: "Mover elementos",
       noMatchingLists: "No hay listas coincidentes",
@@ -819,7 +820,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       moveToList: "Move to list",
       changeStatus: "Change status",
       status: "Status",
-      searchLists: "Search lists",
+      searchLists: (workspace) =>
+        workspace ? `Search lists in ${workspace}` : "Search lists",
       moveItem: "Move item",
       moveItems: "Move items",
       noMatchingLists: "No matching lists",

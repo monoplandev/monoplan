@@ -298,8 +298,8 @@ export function ListPicker(props: {
                 aria-activedescendant={
                   items().length ? optionId(selectedIndex()) : undefined
                 }
-                placeholder={m().workspace.searchLists}
-                aria-label={m().workspace.searchLists}
+                placeholder={m().workspace.searchLists(props.workspace?.() ?? "")}
+                aria-label={m().workspace.searchLists(props.workspace?.() ?? "")}
                 value={query()}
                 onInput={(e) => {
                   setQuery(e.currentTarget.value);
