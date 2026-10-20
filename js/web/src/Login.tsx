@@ -42,8 +42,8 @@ export interface Session {
   /** Every doc the account can open, keyed by doc id, primary included
    *  (its entry is `dek`). Populated from the memberships array at
    *  login/signup and vaulted one entry per doc id, so a session restored
-   *  on reload holds every membership; the runtime still boots the
-   *  primary alone (sharing-plan.md Phase 5). */
+   *  on reload holds every membership. `BootGate` boots a doc + engine
+   *  for each entry; the UI renders the primary (sharing-plan.md Phase 5). */
   docKeys: Map<string, Dek>;
   /** True iff this session was created via signup (we're device 1
    *  and need to seed the doc with built-in lists), or for a freshly

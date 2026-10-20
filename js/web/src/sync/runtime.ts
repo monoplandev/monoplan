@@ -1,13 +1,14 @@
-// The imperative runtime behind the workspace: it owns the `SyncEngine`,
-// the synced store, op-log persistence, device-row writes, and the
-// WebSocket sync bridge for one booted session. `MainApp` calls this
+// The imperative runtime behind the workspace: it owns one `SyncEngine`
+// + synced store + op-log persistence per booted doc, the device-row
+// writes, and the single WebSocket sync bridge that multiplexes every
+// doc's engine for one booted session. `MainApp` calls this
 // once during setup and renders the returned `app` / `view` — all the
 // lifecycle (effects, `onCleanup`, the visibility handler) registers
 // against the calling component's reactive owner, so this must be
 // invoked synchronously from a component body, not an async callback.
 
 import { createEffect, createSignal, on, onCleanup } from "solid-js";
-import { Doc, SyncEngine } from "@monoplan/core/wasm";
+import { Dek, Doc, SyncEngine } from "@monoplan/core/wasm";
 import { IdbStorage, type InFlightPushJs, putDevice } from "@monoplan/core";
 import { savePrefs, type Prefs, type ViewKey } from "../prefs.ts";
 import { type Session } from "../Login.tsx";
@@ -42,9 +43,13 @@ function seedWelcome(app: DocApp): string {
   return welcomeId;
 }
 
-/** Everything `BootGate` rebuilds from the op log before the runtime can
- *  start: the doc, the durable cursors, and the opened store. */
-export type BootInfo = {
+/** One doc rebuilt from its op log by `BootGate`: the doc, the durable
+ *  cursors, and the opened store. */
+export type DocBoot = {
+  docId: string;
+  /** The doc's DEK as held by the session (not consumed; the engine
+   *  gets a clone). */
+  dek: Dek;
   doc: Doc;
   lastAcked: bigint;
   /** Engine op-log store (the engine stores of IndexedDB `monoplan-web`).
@@ -68,31 +73,57 @@ export type BootInfo = {
   /** True when the doc was freshly created (`Doc.create()`) and its
    *  seeded built-ins still need an initial `captureLocalOps`. */
   seeded: boolean;
+};
+
+/** Everything `BootGate` rebuilds before the runtime can start: every
+ *  doc the session can open (Home first) and the account's prefs. */
+export type BootInfo = {
+  docs: DocBoot[];
   /** Whatever was in the `prefs` store for this account at boot. Null
    *  if the row was missing (first run for this account on this
    *  device). */
   prefs: Prefs | null;
 };
 
-export function createWorkspaceRuntime(props: {
-  session: Session;
-  boot: BootInfo;
-  setOnline: (b: boolean) => void;
-  setLastSyncAt: (ts: number | null) => void;
-  logout: () => void;
-}) {
-  const storage = props.boot.storage;
+/** The per-doc half of the runtime: one engine, one synced store, and
+ *  the op-log persistence rhythm around them. Every doc gets one; the
+ *  bridge multiplexes their engines over a single socket. */
+type DocRuntime = {
+  app: DocApp;
+  engine: SyncEngine;
+  /** Write the just-committed mutation as a durable op row. Must run
+   *  before `engine.flush()`. */
+  capture: () => void;
+  /** The "we just round-tripped with the server for this doc" pulse:
+   *  drain events, fold if the WAL crossed the threshold, re-arm the
+   *  idle fold, ratchet the durable cursor. */
+  onServerFrame: () => void;
+  /** The after-local-flush pulse (everything but the drain). */
+  onLocalFlush: () => void;
+  scheduleDurable: () => void;
+  foldNow: () => void;
+};
+
+/** Build one doc's engine + store + persistence rhythm. `pumpOutbox`
+ *  is resolved lazily because the bridge that owns it is constructed
+ *  after every doc runtime exists. Registers `onCleanup` against the
+ *  calling owner. */
+function createDocRuntime(
+  boot: DocBoot,
+  pumpOutbox: () => void,
+): DocRuntime {
+  const storage = boot.storage;
   // `SyncEngine` consumes its Dek argument, and the session-level Dek
   // must stay valid across MainApp remounts (anonymous → authed swap
   // remounts this whole tree on the Session key). So clone for the
-  // engine; the original on `props.session.dek` is untouched. The
-  // `IdbStorage` mirror is handed in as the engine's `EngineStorage` —
-  // capture / ack / remote-apply now flow through it.
+  // engine; the original on the session is untouched. The `IdbStorage`
+  // mirror is handed in as the engine's `EngineStorage` — capture / ack
+  // / remote-apply now flow through it.
   const engine = new SyncEngine(
-    props.boot.doc,
-    props.session.primaryDocId,
-    props.session.dek.clone(),
-    props.boot.lastAcked,
+    boot.doc,
+    boot.docId,
+    boot.dek.clone(),
+    boot.lastAcked,
     storage,
   );
   // Seed the engine's persisted cursors from what the store loaded:
@@ -100,10 +131,10 @@ export function createWorkspaceRuntime(props: {
   // VV (the outbound-delta base), and any in-flight push a previous
   // session left durable (re-sent with the same pushId after the
   // initial pull; the server deduplicates).
-  engine.setLastLocalSeq(props.boot.lastLocalSeq);
-  engine.seedWalStats(props.boot.walRows, props.boot.walBytes);
-  engine.seedServerKnownVv(props.boot.serverKnownVv);
-  const inFlight = props.boot.inFlightPush;
+  engine.setLastLocalSeq(boot.lastLocalSeq);
+  engine.seedWalStats(boot.walRows, boot.walBytes);
+  engine.seedServerKnownVv(boot.serverKnownVv);
+  const inFlight = boot.inFlightPush;
   if (inFlight) {
     engine.seedInFlightPush(
       inFlight.pushId,
@@ -114,28 +145,6 @@ export function createWorkspaceRuntime(props: {
     );
   }
   const app = createSyncedApp(engine);
-
-  if (import.meta.env.DEV) {
-    (window as unknown as { __app: typeof app }).__app = app;
-    onCleanup(() => {
-      delete (window as unknown as { __app?: typeof app }).__app;
-    });
-  }
-
-  // Workspace view lives at this level so the prefs-save effect
-  // below can persist it independently of the device-frontier write.
-  // Seed from the prefs row; a `kind:"list"` pointing at a
-  // since-deleted list falls back to Inbox silently. `focus`/`done`/`bin`
-  // are global views and always resolvable.
-  const initialView: ViewKey = (() => {
-    const v = props.boot.prefs?.currentView;
-    if (!v) return { kind: "list", id: "inbox" };
-    if (v.kind === "list" && !app.state.listsById[v.id]) {
-      return { kind: "list", id: "inbox" };
-    }
-    return v;
-  })();
-  const [view, setView] = createSignal<ViewKey>(initialView);
 
   // ---------- Engine op-log persistence (IdbStorage) ----------
   //
@@ -195,6 +204,91 @@ export function createWorkspaceRuntime(props: {
   };
   onCleanup(() => clearTimeout(compactIdleTimer));
 
+  // Sample the contiguous seq now, wait for queued IDB writes to land,
+  // then mark durable + ship the resulting Ack. Sampling synchronously
+  // binds the notify to bytes that were actually being persisted.
+  const scheduleDurable = (): void => {
+    const seq = engine.lastContiguousSeq();
+    storage
+      .whenFlushed()
+      .then(() => {
+        engine.notifyOplogDurable(seq);
+        pumpOutbox();
+      })
+      .catch((e) => {
+        console.error("durable flush failed:", e);
+      });
+  };
+
+  // Capture local commits before the push reads the outbox — both
+  // anonymous and authed need durable op rows.
+  app.setBeforeFlush(capture);
+
+  const onLocalFlush = (): void => {
+    compactIfWalExceeds();
+    scheduleIdleCompact();
+    scheduleDurable();
+  };
+  const onServerFrame = (): void => {
+    app.drainEvents();
+    // The engine already mirrored remote ops into the WAL inside
+    // `handleServerBytes`. Fold if the WAL crossed the threshold
+    // (this pulse fires one RTT after every mutation), then
+    // ratchet the durable cursor once the writes land.
+    onLocalFlush();
+  };
+
+  return { app, engine, capture, onServerFrame, onLocalFlush, scheduleDurable, foldNow };
+}
+
+export function createWorkspaceRuntime(props: {
+  session: Session;
+  boot: BootInfo;
+  setOnline: (b: boolean) => void;
+  setLastSyncAt: (ts: number | null) => void;
+  logout: () => void;
+}) {
+  let bridge: SyncBridge | null = null;
+  const pumpOutbox = (): void => bridge?.pumpOutbox();
+  // One runtime per booted doc, keyed by doc id. The Home doc's `app`
+  // is what the workspace renders today; the others sync headlessly
+  // until the cross-doc lenses land (`spec/sharing-plan.md` Phase 5).
+  const runtimes = new Map<string, DocRuntime>();
+  for (const b of props.boot.docs) {
+    runtimes.set(b.docId, createDocRuntime(b, pumpOutbox));
+  }
+  const home = runtimes.get(props.session.primaryDocId);
+  if (!home) throw new Error("boot has no Home doc");
+  const app = home.app;
+  const docApps = new Map<string, DocApp>(
+    [...runtimes].map(([id, r]) => [id, r.app]),
+  );
+
+  if (import.meta.env.DEV) {
+    const w = window as unknown as { __app?: DocApp; __apps?: Map<string, DocApp> };
+    w.__app = app;
+    w.__apps = docApps;
+    onCleanup(() => {
+      delete w.__app;
+      delete w.__apps;
+    });
+  }
+
+  // Workspace view lives at this level so the prefs-save effect
+  // below can persist it independently of the device-frontier write.
+  // Seed from the prefs row; a `kind:"list"` pointing at a
+  // since-deleted list falls back to Inbox silently. `focus`/`done`/`bin`
+  // are global views and always resolvable.
+  const initialView: ViewKey = (() => {
+    const v = props.boot.prefs?.currentView;
+    if (!v) return { kind: "list", id: "inbox" };
+    if (v.kind === "list" && !app.state.listsById[v.id]) {
+      return { kind: "list", id: "inbox" };
+    }
+    return v;
+  })();
+  const [view, setView] = createSignal<ViewKey>(initialView);
+
   // Persist the device row — identity + the "last synced" stamp
   // (observability only). The resume cursor is no longer stored here:
   // the engine owns it and persists it itself via
@@ -212,35 +306,14 @@ export function createWorkspaceRuntime(props: {
     });
   };
 
-  let bridge: SyncBridge | null = null;
-  // Sample the contiguous seq now, wait for queued IDB writes to land,
-  // then mark durable + ship the resulting Ack. Sampling synchronously
-  // binds the notify to bytes that were actually being persisted.
-  const scheduleDurable = (): void => {
-    const seq = engine.lastContiguousSeq();
-    storage
-      .whenFlushed()
-      .then(() => {
-        engine.notifyOplogDurable(seq);
-        bridge?.pumpOutbox();
-      })
-      .catch((e) => {
-        console.error("durable flush failed:", e);
-      });
-  };
-
-  // Capture local commits before the push reads the outbox — both
-  // anonymous and authed need durable op rows.
-  app.setBeforeFlush(capture);
-
   // Anonymous sessions are local-only by definition — no account on the
   // server to authenticate to. Skip the WebSocket pump entirely; local
-  // commits still persist through `capture()` above.
+  // commits still persist through each runtime's `capture()`.
   if (!props.session.anonymous) {
     bridge = createSyncBridge({
-      // One doc per session today; the bridge multiplexes N engines
-      // over the socket once the web client loads every membership.
-      engines: [engine],
+      // Every booted doc's engine; the bridge routes inbound frames by
+      // `doc_id` and stamps outbound ones.
+      engines: [...runtimes.values()].map((r) => r.engine),
       onChange: (kind) => {
         if (kind === "online") {
           props.setOnline(true);
@@ -252,36 +325,28 @@ export function createWorkspaceRuntime(props: {
         // with the server" — even when no app events were produced.
         if (kind === "drain") props.setLastSyncAt(Date.now());
       },
-      onServerFrame: () => {
-        app.drainEvents();
-        // The engine already mirrored remote ops into the WAL inside
-        // `handleServerBytes`. Fold if the WAL crossed the threshold
-        // (this pulse fires one RTT after every mutation), then
-        // ratchet the durable cursor once the writes land.
-        compactIfWalExceeds();
-        scheduleIdleCompact();
-        scheduleDurable();
+      onServerFrame: (docId) => {
+        runtimes.get(docId)?.onServerFrame();
         saveDeviceSoon();
       },
       onAuthFailed: () => void props.logout(),
     });
     const b = bridge;
-    app.setOnFlush(() => {
-      b.pumpOutbox();
-      compactIfWalExceeds();
-      scheduleIdleCompact();
-      scheduleDurable();
-    });
+    for (const r of runtimes.values()) {
+      r.app.setOnFlush(() => {
+        b.pumpOutbox();
+        r.onLocalFlush();
+      });
+    }
     bridge.start();
     onCleanup(() => b.stop());
   } else {
     // Anonymous sessions have no server round-trips to pulse off, but
     // the WAL still needs bounding — fold on the same thresholds after
     // every local flush.
-    app.setOnFlush(() => {
-      compactIfWalExceeds();
-      scheduleIdleCompact();
-    });
+    for (const r of runtimes.values()) {
+      r.app.setOnFlush(() => r.onLocalFlush());
+    }
   }
 
   // ---------- Device config: light writes on each frontier change ----------
@@ -300,10 +365,12 @@ export function createWorkspaceRuntime(props: {
       });
     }, 500);
   };
-  createEffect(() => {
-    app.version();
-    saveDeviceSoon();
-  });
+  for (const r of runtimes.values()) {
+    createEffect(() => {
+      r.app.version();
+      saveDeviceSoon();
+    });
+  }
 
   // ---------- Prefs: separate store, write-through ----------
   //
@@ -339,8 +406,10 @@ export function createWorkspaceRuntime(props: {
   // Genesis in the core stays a clean empty baseline (see App.tsx boot);
   // the account-creating client is the single seeder, so no duplicate
   // arises. Guard on emptiness so a re-entrant boot can't double-seed.
-  if (props.boot.seeded) {
-    if (Object.keys(app.state.listsById).length === 0) {
+  for (const b of props.boot.docs) {
+    if (!b.seeded) continue;
+    const r = runtimes.get(b.docId)!;
+    if (r === home && Object.keys(app.state.listsById).length === 0) {
       const welcomeId = seedWelcome(app);
       // Open the Welcome list on the very first launch so the onboarding
       // items are what a new user sees (Inbox stays the pure capture
@@ -350,8 +419,8 @@ export function createWorkspaceRuntime(props: {
         setView({ kind: "list", id: welcomeId });
       }
     }
-    capture();
-    scheduleDurable();
+    r.capture();
+    r.scheduleDurable();
   }
 
   const onVisibility = () => {
@@ -360,9 +429,11 @@ export function createWorkspaceRuntime(props: {
       // Persist any uncommitted local op, then fold the whole WAL so
       // the next boot has a fresh base — safe regardless of sync state
       // (unsent ops survive folding; the push derives them from
-      // `serverKnownVv`). Best-effort.
-      capture();
-      foldNow();
+      // `serverKnownVv`). Best-effort, every doc.
+      for (const r of runtimes.values()) {
+        r.capture();
+        r.foldNow();
+      }
       void persistDeviceNow().catch(() => {});
     }
   };
@@ -372,5 +443,5 @@ export function createWorkspaceRuntime(props: {
     if (deviceTimer) clearTimeout(deviceTimer);
   });
 
-  return { app, view, setView };
+  return { app, docApps, view, setView };
 }

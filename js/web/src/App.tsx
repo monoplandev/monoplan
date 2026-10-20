@@ -17,7 +17,7 @@ import { dekVault } from "./sync/dekVault.ts";
 import { useAppI18n } from "./i18n.tsx";
 import { type Session } from "./Login.tsx";
 import { Workspace } from "./Workspace.tsx";
-import { createWorkspaceRuntime, type BootInfo } from "./sync/runtime.ts";
+import { createWorkspaceRuntime, type BootInfo, type DocBoot } from "./sync/runtime.ts";
 import { SessionProvider, useSession } from "./SessionContext.tsx";
 import { clearAuthPromptDismissed } from "./nav.tsx";
 
@@ -191,15 +191,18 @@ function BootGate(props: {
   setBootError: (m: string | null) => void;
 }) {
   const { m } = useAppI18n();
-  // Rebuild the doc from the engine WAL (`spec/local-storage.md`
-  // §"Web boot"), mirroring the CLI's `boot_doc`: load the snapshot (a bare
-  // Loro snapshot) and replay every WAL row after it via the deferred replay
-  // API, finalize indexes once, then `markPersisted()` so the WAL capture
-  // cursor covers the replayed ops (what still needs *uploading* is
-  // derived separately from the persisted `serverKnownVv`). Fresh
-  // signups — and brand-new anonymous docs with an empty store — start
-  // from `Doc.create()` so the seeded built-ins land; authed devices
-  // with an empty store start empty and let sync deliver a snapshot.
+  // Rebuild every doc the session can open from its engine WAL
+  // (`spec/local-storage.md` §"Web boot"), mirroring the CLI's `boot_doc`:
+  // load the snapshot (a bare Loro snapshot) and replay every WAL row after
+  // it via the deferred replay API, finalize indexes once, then
+  // `markPersisted()` so the WAL capture cursor covers the replayed ops
+  // (what still needs *uploading* is derived separately from the persisted
+  // `serverKnownVv`). Fresh signups — and brand-new anonymous docs with an
+  // empty store — start from `Doc.create()` so the seeded built-ins land;
+  // authed devices with an empty store (and every non-Home doc first seen
+  // on this device) start empty and let sync deliver a snapshot. Clients
+  // load every membership at boot (`spec/sharing-plan.md` "Decisions"), one
+  // `Doc` + store each; the UI binds to the Home doc.
   onMount(async () => {
     try {
       // Prefs are independent of the op-log replay — fire in parallel so
@@ -207,17 +210,13 @@ function BootGate(props: {
       // run for this account on this device) resolves null and `MainApp`
       // falls back to defaults.
       const prefsPromise = loadPrefs(props.session.accountId).catch(() => null);
-      const dek = props.session.dek;
       // The slot-0 peer claim rides the storage open — holding the
       // single-tab Web Lock (checked by `BrowserTabGate` before this
       // mounts) IS the claim, so all that's left is reading the minted
       // peer id. No lock → random peer, so a gate-disabled second tab
-      // can never share a peer with the holder.
-      const [storage, peerId] = await Promise.all([
-        IdbStorage.open(props.session.primaryDocId),
-        props.singleTabLockHeld ? readOrMintPeerSlot(0) : Promise.resolve(null),
-      ]);
-      const rows = storage.bootRows();
+      // can never share a peer with the holder. One peer serves every
+      // doc: op ids are per doc, so independent docs never collide.
+      const peerId = props.singleTabLockHeld ? await readOrMintPeerSlot(0) : null;
 
       // The peer must be bound at construction — before `Doc.create`'s
       // builtin seed commits and before the replay import (Loro resumes
@@ -227,46 +226,64 @@ function BootGate(props: {
       const empty = () =>
         peerId !== null ? Doc.emptyWithPeer(peerId) : Doc.empty();
 
-      let doc: Doc;
-      let seeded = false;
-      if (props.session.freshSignup) {
-        doc = create();
-        seeded = true;
-      } else if (rows.snapshot || rows.replay.length > 0) {
-        doc = empty();
-        if (rows.snapshot) {
-          doc.replayOplogUpdate(
-            dek.open(new EncryptedBlob(rows.snapshot.nonce, rows.snapshot.ciphertext)),
-          );
+      const bootDoc = async (docId: string, dek: Dek): Promise<DocBoot> => {
+        const isHome = docId === props.session.primaryDocId;
+        const storage = await IdbStorage.open(docId);
+        const rows = storage.bootRows();
+        let doc: Doc;
+        let seeded = false;
+        if (isHome && props.session.freshSignup) {
+          doc = create();
+          seeded = true;
+        } else if (rows.snapshot || rows.replay.length > 0) {
+          doc = empty();
+          if (rows.snapshot) {
+            doc.replayOplogUpdate(
+              dek.open(new EncryptedBlob(rows.snapshot.nonce, rows.snapshot.ciphertext)),
+            );
+          }
+          for (const r of rows.replay) {
+            doc.replayOplogUpdate(dek.open(new EncryptedBlob(r.nonce, r.ciphertext)));
+          }
+          doc.finishOplogReplay();
+          doc.markPersisted();
+        } else if (isHome && props.session.anonymous) {
+          // Brand-new (or wiped) local-only doc — seed the built-ins.
+          doc = create();
+          seeded = true;
+        } else {
+          // Authed device, empty local store — sync will send a snapshot.
+          doc = empty();
         }
-        for (const r of rows.replay) {
-          doc.replayOplogUpdate(dek.open(new EncryptedBlob(r.nonce, r.ciphertext)));
-        }
-        doc.finishOplogReplay();
-        doc.markPersisted();
-      } else if (props.session.anonymous) {
-        // Brand-new (or wiped) local-only doc — seed the built-ins.
-        doc = create();
-        seeded = true;
-      } else {
-        // Authed device, empty local store — sync will send a snapshot.
-        doc = empty();
+        return {
+          docId,
+          dek,
+          doc,
+          // Resume cursor comes from the engine's own persisted state
+          // (`IdbStorage`/`writeAckedSeq`), not the device row.
+          lastAcked: BigInt(rows.lastAckedSeq),
+          storage,
+          lastLocalSeq: rows.lastLocalSeq,
+          serverKnownVv: rows.serverKnownVv,
+          inFlightPush: rows.inFlightPush,
+          walRows: rows.replay.length,
+          walBytes: rows.walBytes,
+          seeded,
+        };
+      };
+
+      // Home first, so a failure there is the one reported; replay is
+      // main-thread wasm work either way, so there is nothing to gain
+      // from interleaving the docs.
+      const docs: DocBoot[] = [
+        await bootDoc(props.session.primaryDocId, props.session.dek),
+      ];
+      for (const [docId, dek] of props.session.docKeys) {
+        if (docId === props.session.primaryDocId) continue;
+        docs.push(await bootDoc(docId, dek));
       }
 
-      props.setBoot({
-        doc,
-        // Resume cursor comes from the engine's own persisted state
-        // (`IdbStorage`/`writeAckedSeq`), not the device row.
-        lastAcked: BigInt(rows.lastAckedSeq),
-        storage,
-        lastLocalSeq: rows.lastLocalSeq,
-        serverKnownVv: rows.serverKnownVv,
-        inFlightPush: rows.inFlightPush,
-        walRows: rows.replay.length,
-        walBytes: rows.walBytes,
-        seeded,
-        prefs: await prefsPromise,
-      });
+      props.setBoot({ docs, prefs: await prefsPromise });
     } catch (e) {
       // Hard fail & surfaces idb boot errors
       console.error("[boot] FAILED:", e);
