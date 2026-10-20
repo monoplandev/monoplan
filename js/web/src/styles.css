@@ -637,9 +637,9 @@ body {
 }
 
 /* Clickable workspace heading: collapses the group beneath it. Spans the
-   full nav width, the label filling the leading space and the caret +
-   new-list button grouped at the trailing edge, both hover-revealed so
-   the heading reads as a plain label at rest. */
+   full nav width, the label filling the leading space and the caret,
+   new-list and workspace-menu glyphs grouped at the trailing edge, all
+   hover-revealed so the heading reads as a plain label at rest. */
 .nav-section-toggle {
   display: flex;
   align-items: center;
@@ -672,64 +672,63 @@ body {
   background: var(--bg-hover);
 }
 
-/* Caret is a hover-only affordance: hidden at rest so the heading reads
-   as a plain label, revealed when the row is hovered or focused. */
-.nav-section-caret {
-  display: inline-flex;
-  align-items: center;
+/* Caret, new-list and workspace-menu buttons: hover-only affordances,
+   hidden at rest so the heading reads as a plain label and revealed
+   when any part of the row is hovered, when one holds keyboard focus,
+   or while the menu is open (so the trigger doesn't vanish under its
+   own dropdown). All three share the `.icon-button` box and hover
+   state, sized down to match the heading. Stay visible on coarse
+   pointers, where there is no hover to reveal them. */
+.nav-section-caret,
+.nav-section-add,
+.nav-section-menu {
+  width: 20px;
+  height: 20px;
+  color: var(--text-faint);
   opacity: 0;
   transition: transform 120ms ease, opacity 120ms ease;
 }
 
-.nav-section-toggle:hover .nav-section-caret,
-.nav-section-toggle:focus-visible .nav-section-caret {
-  opacity: 1;
-}
-
-.nav-section-caret svg {
+.nav-section-caret svg,
+.nav-section-add svg,
+.nav-section-menu svg {
   width: 12px;
   height: 12px;
+}
+
+.nav-section-toggle:hover .nav-section-caret,
+.nav-section-toggle:hover .nav-section-add,
+.nav-section-toggle:hover .nav-section-menu,
+.nav-section-toggle:focus-visible .nav-section-caret,
+.nav-section-add:focus-visible,
+.nav-section-menu:focus-visible,
+.nav-section-menu[data-expanded] {
+  opacity: 1;
 }
 
 .nav-section-caret[data-collapsed] {
   transform: rotate(-90deg);
 }
 
-/* New-list button: hover-only like the caret, revealed when any part of
-   the heading row is hovered, or when it holds keyboard focus. Sized to
-   match the caret so the two glyphs read as a pair. Stays visible on
-   coarse pointers, where there is no hover to reveal it. */
-.nav-section-add {
-  width: 20px;
-  height: 20px;
-  color: var(--text-faint);
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-
-.nav-section-add svg {
-  width: 12px;
-  height: 12px;
-}
-
-.nav-section-toggle:hover .nav-section-add,
-.nav-section-add:focus-visible {
-  opacity: 1;
-}
-
 @media (pointer: coarse) {
-  .nav-section-add {
+  .nav-section-caret,
+  .nav-section-add,
+  .nav-section-menu {
     opacity: 1;
   }
 }
 
 @media (max-width: 768px) and (pointer: coarse) {
-  .nav-section-add {
+  .nav-section-caret,
+  .nav-section-add,
+  .nav-section-menu {
     width: 40px;
     height: 40px;
   }
 
-  .nav-section-add svg {
+  .nav-section-caret svg,
+  .nav-section-add svg,
+  .nav-section-menu svg {
     width: 16px;
     height: 16px;
   }

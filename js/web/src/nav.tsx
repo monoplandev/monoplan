@@ -23,6 +23,7 @@ import checkSvg from "./icons/check.svg?raw";
 import cloudSvg from "./icons/cloud.svg?raw";
 import cloudOffSvg from "./icons/cloud-off.svg?raw";
 import crumpledPaperSvg from "./icons/crumpled-paper.svg?raw";
+import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import dotsVerticalSvg from "./icons/dots-vertical.svg?raw";
 import starSvg from "./icons/star.svg?raw";
 import externalLinkSvg from "./icons/external-link.svg?raw";
@@ -529,6 +530,52 @@ export function Nav(props: {
   );
 }
 
+/** Trigger a browser download for an in-memory blob. Anchor + revoke
+ *  is the only cross-browser path; FileSystem Access API isn't on
+ *  Safari yet. */
+function triggerDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** "Export JSON" (each workspace heading's "..." menu): pretty-printed
+ *  semantic dump (lists + items) of one doc, saved as `<slug>-<date>.json`. Readable in any editor and
+ *  round-trips through Import JSON, but lossy: CRDT history, ordering
+ *  metadata, and undo-stack info aren't here. (A lossless
+ *  plaintext-snapshot export exists in the core — `exportSnapshot` —
+ *  but stays unexposed until a matching import lands.) Returns false
+ *  on failure so the caller can surface its own alert. */
+function exportDocJson(app: DocApp, slug: string): boolean {
+  try {
+    const json = app.engine.exportJson();
+    const blob = new Blob([json], { type: "application/json" });
+    const stamp = new Date().toISOString().slice(0, 10);
+    triggerDownload(blob, `${slug}-${stamp}.json`);
+    return true;
+  } catch (err) {
+    console.error("export json failed:", err);
+    return false;
+  }
+}
+
+/** File-name slug for a workspace export: the heading label lowercased,
+ *  non-alphanumerics collapsed to hyphens, falling back to "monoplan". */
+function exportSlug(label: string): string {
+  const slug = label
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  return slug || "monoplan";
+}
+
 /** One doc's nav section: a collapsible heading (the doc's name, or
  *  "Personal" for Home), its reserved Inbox, its active lists (one
  *  `Dnd` per section, so a drag never crosses docs), and the new-list
@@ -663,6 +710,27 @@ function DocSection(props: {
   // from the heading's context menu, as list rows are.
   let startRename: (() => void) | undefined;
 
+  // Hidden file input the "..." menu's Import JSON item triggers via
+  // .click(). Imports land in this doc. Resetting `value` between picks
+  // is what lets the user choose the same file twice in a row — without
+  // it the change event never fires the second time.
+  let importFileInput: HTMLInputElement | undefined;
+  const onImportFilePicked = async (
+    e: Event & { currentTarget: HTMLInputElement },
+  ): Promise<void> => {
+    const file = e.currentTarget.files?.[0];
+    e.currentTarget.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const summary = app.importJson(text);
+      alert(m().nav.importSucceeded(summary.itemsAdded, summary.listsAdded));
+    } catch (err) {
+      console.error("import json failed:", err);
+      alert(m().nav.importFailed);
+    }
+  };
+
   const heading = () => (
     <div
       class="nav-section nav-section-toggle"
@@ -681,8 +749,11 @@ function DocSection(props: {
           registerStart={(fn) => (startRename = fn)}
         />
       </Show>
+      {/* Caret shares the icon-button box and hover state with the "+"
+          and "..." buttons beside it; it has no handler of its own since
+          the whole heading is the toggle. */}
       <span
-        class="nav-section-caret"
+        class="icon-button nav-section-caret"
         data-collapsed={collapsed() ? "" : undefined}
         innerHTML={caretDownSvg}
       />
@@ -705,11 +776,68 @@ function DocSection(props: {
           startAdding();
         }}
       />
+      {/* Workspace menu: a third hover-revealed glyph after "+", opening a
+          dropdown with the heading's actions (Rename on non-Home docs,
+          Export / Import JSON on every doc). Pointer-down and click both stop
+          here so opening the menu neither toggles the group nor starts
+          a heading drag; Kobalte opens the menu on pointerdown. */}
+      <DropdownMenu placement="bottom-end" gutter={4}>
+        <DropdownMenu.Trigger
+          class="icon-button nav-section-menu"
+          tabIndex={-1}
+          aria-label={m().nav.docMenu}
+          title={m().nav.docMenu}
+          innerHTML={dotsHorizontalSvg}
+          onPointerDown={(e: PointerEvent) => e.stopPropagation()}
+          onClick={(e: MouseEvent) => e.stopPropagation()}
+        />
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content class="dropdown-menu-content">
+            <Show when={!props.entry.home}>
+              <DropdownMenu.Item
+                class="dropdown-menu-item"
+                onSelect={() => {
+                  requestAnimationFrame(() => startRename?.());
+                }}
+              >
+                {m().nav.renameDoc}
+              </DropdownMenu.Item>
+            </Show>
+            <DropdownMenu.Item
+              class="dropdown-menu-item"
+              onSelect={() => {
+                if (!exportDocJson(app, exportSlug(label()))) alert(m().nav.exportFailed);
+              }}
+            >
+              {m().nav.exportJson}
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              class="dropdown-menu-item"
+              onSelect={() => {
+                // Defer past the menu close + focus-restore so the
+                // native file picker isn't fighting Kobalte for focus.
+                requestAnimationFrame(() => importFileInput?.click());
+              }}
+            >
+              {m().nav.importJson}
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu>
     </div>
   );
 
   return (
     <div class="nav-group" onKeyDown={onNavKeyDown}>
+      {/* Outside the heading so the synthetic click from `.click()`
+          can't bubble into its collapse toggle. */}
+      <input
+        ref={importFileInput}
+        type="file"
+        accept="application/json,.json"
+        style={{ display: "none" }}
+        onChange={onImportFilePicked}
+      />
       <Show when={!props.entry.home} fallback={heading()}>
         <ContextMenu>
           <ContextMenu.Trigger as="div">{heading()}</ContextMenu.Trigger>
@@ -892,13 +1020,12 @@ export function NavFindButton(props: { onClick: () => void }) {
   );
 }
 
-/** The app-menu dropdown (undo/redo, view toggles, import/export,
- *  settings, auth) plus its auxiliary chrome — the hidden import file
- *  input and the auth dialog the Sign in / Sign up items open. Lives in
- *  the sidebar footer (see `Nav`'s `footer` prop). */
+/** The app-menu dropdown (undo/redo, new workspace, settings, auth)
+ *  plus the auth dialog the Sign in / Sign up items open. Import /
+ *  export live on each workspace heading's "..." menu. Lives in the
+ *  sidebar footer (see `Nav`'s `footer` prop). */
 export function NavMenu(props: {
-  /** Undo / redo go through the layer (the doc that acted last); export
-   *  and import act on the Home doc. */
+  /** Undo / redo go through the layer (the doc that acted last). */
   docs: DocsLayer;
   session: Session;
   logout: () => void;
@@ -936,67 +1063,8 @@ export function NavMenu(props: {
     return props.docs.canRedo();
   };
 
-  // Trigger a browser download for an in-memory blob. Anchor + revoke
-  // is the only cross-browser path; FileSystem Access API isn't on
-  // Safari yet.
-  const triggerDownload = (blob: Blob, filename: string): void => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  };
-
-  // "Export JSON": pretty-printed semantic dump (lists + items).
-  // Readable in any editor and round-trips through Import JSON, but
-  // lossy: CRDT history, ordering metadata, and undo-stack info aren't
-  // here. (A lossless plaintext-snapshot export exists in the core —
-  // `exportSnapshot` — but stays unexposed until a matching import lands.)
-  const downloadJson = (): void => {
-    try {
-      const json = props.docs.home.engine.exportJson();
-      const blob = new Blob([json], { type: "application/json" });
-      const stamp = new Date().toISOString().slice(0, 10);
-      triggerDownload(blob, `monoplan-${stamp}.json`);
-    } catch (err) {
-      console.error("export json failed:", err);
-      alert(m().nav.exportFailed);
-    }
-  };
-
-  // Hidden file input the "Import JSON" menu item triggers via .click().
-  // Resetting `value` between picks is what lets the user choose the same
-  // file twice in a row — without it the change event never fires the
-  // second time.
-  let importFileInput: HTMLInputElement | undefined;
-  const onImportFilePicked = async (
-    e: Event & { currentTarget: HTMLInputElement },
-  ): Promise<void> => {
-    const file = e.currentTarget.files?.[0];
-    e.currentTarget.value = "";
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const summary = props.docs.home.importJson(text);
-      alert(m().nav.importSucceeded(summary.itemsAdded, summary.listsAdded));
-    } catch (err) {
-      console.error("import json failed:", err);
-      alert(m().nav.importFailed);
-    }
-  };
-
   return (
     <>
-      <input
-        ref={importFileInput}
-        type="file"
-        accept="application/json,.json"
-        style={{ display: "none" }}
-        onChange={onImportFilePicked}
-      />
       <DropdownMenu placement="top-start" gutter={6}>
         <Tooltip openDelay={200} closeDelay={0} placement="top">
           <Tooltip.Trigger
@@ -1046,22 +1114,6 @@ export function NavMenu(props: {
                 </DropdownMenu.Item>
               )}
             </Show>
-            <DropdownMenu.Item
-              class="dropdown-menu-item"
-              onSelect={() => downloadJson()}
-            >
-              {m().nav.exportJson}
-            </DropdownMenu.Item>
-            <DropdownMenu.Item
-              class="dropdown-menu-item"
-              onSelect={() => {
-                // Defer past the menu close + focus-restore so the
-                // native file picker isn't fighting Kobalte for focus.
-                requestAnimationFrame(() => importFileInput?.click());
-              }}
-            >
-              {m().nav.importJson}
-            </DropdownMenu.Item>
             <DropdownMenu.Item
               class="dropdown-menu-item"
               onSelect={() => props.onOpenShortcuts()}

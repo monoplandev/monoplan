@@ -99,6 +99,8 @@ export type Messages = {
     createDoc: string;
     /** Context-menu rename on a non-Home doc heading. */
     renameDoc: string;
+    /** Label of the "..." button on a workspace heading. */
+    docMenu: string;
     createDocFailed: string;
     connected: string;
     disconnected: string;
@@ -481,6 +483,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       newDocName: "Nombre del espacio",
       createDoc: "Crear",
       renameDoc: "Renombrar espacio",
+      docMenu: "Menú del espacio",
       createDocFailed: "No se pudo crear el espacio",
       connected: "Conectado",
       disconnected: "Desconectado",
@@ -754,6 +757,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       newDocName: "Workspace name",
       createDoc: "Create",
       renameDoc: "Rename workspace",
+      docMenu: "Workspace menu",
       createDocFailed: "Could not create workspace",
       connected: "Connected",
       disconnected: "Disconnected",
