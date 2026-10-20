@@ -914,6 +914,26 @@ body {
   margin-left: 2px;
 }
 
+/* Workspace name ahead of a list title ("Personal › Groceries"): muted
+   so the list name leads, with a faint right caret between. */
+.title-doc-prefix {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.title-doc-sep {
+  display: inline-flex;
+  margin: 0 0.15em;
+  color: var(--text-faint);
+}
+
+.title-doc-sep svg {
+  width: 1em;
+  height: 1em;
+}
+
 .editable-title {
   outline: none;
 }

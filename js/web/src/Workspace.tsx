@@ -25,6 +25,7 @@ import { Tooltip } from "@kobalte/core/tooltip";
 import archiveSvg from "./icons/archive.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
 import cardStackSvg from "./icons/card-stack.svg?raw";
+import caretRightSvg from "./icons/caret-right.svg?raw";
 import checkSvg from "./icons/check.svg?raw";
 import crumpledPaperSvg from "./icons/crumpled-paper.svg?raw";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
@@ -2746,11 +2747,25 @@ export function Workspace(props: {
               fallback={viewTitle(view(), allLists(), m())}
             >
               {(listId) => (
-                <EditableNavLabel
-                  class="editable-title"
-                  name={allLists().find((l) => l.id === listId)?.name ?? listId}
-                  onSave={(name) => viewApp().renameList(listId, name)}
-                />
+                <>
+                  {/* A list lives in one workspace; prefix its name with
+                      the workspace's so the title reads "Personal › Groceries"
+                      and the same list name across two docs stays
+                      distinguishable. Muted so the list name leads. */}
+                  <span class="title-doc-prefix">
+                    {docLabel(viewDocId())}
+                    <span
+                      class="title-doc-sep"
+                      aria-hidden="true"
+                      innerHTML={caretRightSvg}
+                    />
+                  </span>
+                  <EditableNavLabel
+                    class="editable-title"
+                    name={allLists().find((l) => l.id === listId)?.name ?? listId}
+                    onSave={(name) => viewApp().renameList(listId, name)}
+                  />
+                </>
               )}
             </Show>
           </h1>
