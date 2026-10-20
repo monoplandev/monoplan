@@ -637,9 +637,9 @@ body {
 }
 
 /* Clickable workspace heading: collapses the group beneath it. Spans the
-   full nav width, the label filling the leading space and the caret,
-   new-list and workspace-menu glyphs grouped at the trailing edge, all
-   hover-revealed so the heading reads as a plain label at rest. */
+   full nav width, the label filling the leading space and the
+   workspace-menu, new-list and caret glyphs grouped at the trailing edge,
+   all hover-revealed so the heading reads as a plain label at rest. */
 .nav-section-toggle {
   display: flex;
   align-items: center;
@@ -706,8 +706,11 @@ body {
   opacity: 1;
 }
 
+/* A collapsed group keeps its caret showing at rest so the fold is
+   visible without hovering; the "+" and "..." stay hover-only. */
 .nav-section-caret[data-collapsed] {
   transform: rotate(-90deg);
+  opacity: 1;
 }
 
 @media (pointer: coarse) {

@@ -769,34 +769,7 @@ function DocSection(props: {
           registerStart={(fn) => (startRename = fn)}
         />
       </Show>
-      {/* Caret shares the icon-button box and hover state with the "+"
-          and "..." buttons beside it; it has no handler of its own since
-          the whole heading is the toggle. */}
-      <span
-        class="icon-button nav-section-caret"
-        data-collapsed={collapsed() ? "" : undefined}
-        innerHTML={caretDownSvg}
-      />
-      {/* New-list affordance sits inside the heading, after the caret,
-          rather than as a trailing "+ Add list" row: hover-only like
-          the caret, so the group reads as a plain label at rest. The
-          heading is a div (not a button) so this real button can nest
-          inside it; stopPropagation keeps the click from also toggling
-          the group. Opening the form expands a collapsed group, since
-          the input renders inside it. */}
-      <button
-        type="button"
-        class="icon-button nav-section-add"
-        tabIndex={-1}
-        aria-label={m().nav.newList}
-        title={m().nav.newList}
-        innerHTML={plusSvg}
-        onClick={(e) => {
-          e.stopPropagation();
-          startAdding();
-        }}
-      />
-      {/* Workspace menu: a third hover-revealed glyph after "+", opening a
+      {/* Workspace menu: the first of the three trailing glyphs, opening a
           dropdown with the heading's actions (Rename on non-Home docs,
           Export / Import JSON on every doc). Pointer-down and click both stop
           here so opening the menu neither toggles the group nor starts
@@ -853,6 +826,35 @@ function DocSection(props: {
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu>
+      {/* New-list affordance sits inside the heading, between the menu
+          and the caret, rather than as a trailing "+ Add list" row:
+          hover-only, so the group reads as a plain label at rest. The
+          heading is a div (not a button) so this real button can nest
+          inside it; stopPropagation keeps the click from also toggling
+          the group. Opening the form expands a collapsed group, since
+          the input renders inside it. */}
+      <button
+        type="button"
+        class="icon-button nav-section-add"
+        tabIndex={-1}
+        aria-label={m().nav.newList}
+        title={m().nav.newList}
+        innerHTML={plusSvg}
+        onClick={(e) => {
+          e.stopPropagation();
+          startAdding();
+        }}
+      />
+      {/* Caret sits last, at the trailing edge; it shares the icon-button
+          box and hover state with the "..." and "+" buttons before it and
+          has no handler of its own since the whole heading is the toggle.
+          Unlike the other two it stays visible while the group is
+          collapsed, so a folded workspace still reads as expandable. */}
+      <span
+        class="icon-button nav-section-caret"
+        data-collapsed={collapsed() ? "" : undefined}
+        innerHTML={caretDownSvg}
+      />
     </div>
   );
 
