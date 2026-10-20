@@ -2741,31 +2741,32 @@ export function Workspace(props: {
               {(svg) => <span class="list-icon-static" innerHTML={svg} />}
             </Show>
             <h1>
+            {/* A list (Inbox included) lives in one workspace; prefix its
+                name with the workspace's so the title reads
+                "Personal › Groceries" and the same list name across two
+                docs stays distinguishable. Muted so the list name leads.
+                The lenses span docs, so they carry no prefix. */}
+            <Show when={view().kind === "list"}>
+              <span class="title-doc-prefix">
+                {docLabel(viewDocId())}
+                <span
+                  class="title-doc-sep"
+                  aria-hidden="true"
+                  innerHTML={caretRightSvg}
+                />
+              </span>
+            </Show>
             <Show
               keyed
               when={editableListId()}
               fallback={viewTitle(view(), allLists(), m())}
             >
               {(listId) => (
-                <>
-                  {/* A list lives in one workspace; prefix its name with
-                      the workspace's so the title reads "Personal › Groceries"
-                      and the same list name across two docs stays
-                      distinguishable. Muted so the list name leads. */}
-                  <span class="title-doc-prefix">
-                    {docLabel(viewDocId())}
-                    <span
-                      class="title-doc-sep"
-                      aria-hidden="true"
-                      innerHTML={caretRightSvg}
-                    />
-                  </span>
-                  <EditableNavLabel
-                    class="editable-title"
-                    name={allLists().find((l) => l.id === listId)?.name ?? listId}
-                    onSave={(name) => viewApp().renameList(listId, name)}
-                  />
-                </>
+                <EditableNavLabel
+                  class="editable-title"
+                  name={allLists().find((l) => l.id === listId)?.name ?? listId}
+                  onSave={(name) => viewApp().renameList(listId, name)}
+                />
               )}
             </Show>
           </h1>
