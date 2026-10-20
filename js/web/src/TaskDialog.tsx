@@ -117,6 +117,9 @@ export function TaskDialog(props: {
   app: DocApp;
   /** Active (non-archived) user lists — the move/capture destinations. */
   lists: () => ListView[];
+  /** Display name of `app`'s workspace, shown after the list name in
+   *  the move-to-list trigger. */
+  docLabel?: () => string;
   /** True when the user has entered the shown item (Enter on a row, a
    *  row's open control, a Find pick, a link, a click into the pane):
    *  the non-modal shells land the caret. False while the side pane is
@@ -1301,6 +1304,7 @@ export function TaskDialog(props: {
             <ListPicker
               options={listOptions}
               value={vListId}
+              workspace={props.docLabel}
               onChange={onListChange}
             />
             {/* "+" menu with the register the item does not carry yet

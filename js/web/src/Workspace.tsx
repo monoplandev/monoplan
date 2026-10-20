@@ -2682,6 +2682,7 @@ export function Workspace(props: {
         }
         app={tApp}
         lists={() => activeListsOf(tApp.docId)}
+        docLabel={() => docLabel(tApp.docId)}
         entered={() => openItemId() !== null}
         whenOpen={itemWhenOpen}
         setWhenOpen={setItemWhenOpen}

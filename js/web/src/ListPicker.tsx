@@ -53,6 +53,10 @@ export function ListPicker(props: {
   options: () => ListOption[];
   /** Currently filed-under list id, or null while a new capture has none. */
   value: () => string | null;
+  /** The workspace the options belong to, shown muted after the list
+   *  name in the trigger ("Groceries  Personal"). Trigger-only: every
+   *  option is in the same workspace, so the rows don't repeat it. */
+  workspace?: () => string;
   onChange: (id: string) => void;
 }) {
   const { m } = useAppI18n();
@@ -262,6 +266,9 @@ export function ListPicker(props: {
           )}
         </Show>
         <span class="task-dialog-list-value">{selected()?.name}</span>
+        <Show when={selected() && props.workspace?.()}>
+          {(ws) => <span class="task-dialog-list-workspace">{ws()}</span>}
+        </Show>
         <span
           class="task-dialog-list-caret"
           aria-hidden="true"

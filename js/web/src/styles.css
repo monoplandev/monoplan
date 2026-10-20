@@ -2628,10 +2628,18 @@ input.task-check:hover {
   width: fit-content;
   /* Room between the list glyph and the name at the dialog's text size. */
   gap: 8px;
-  /* Widened from 8em when the list glyph joined the trigger, so the name
-     keeps roughly the same room before it ellipsizes. */
-  max-width: 10em;
+  /* Widened from 8em when the list glyph joined the trigger and again
+     when the workspace prefix did, so the name keeps roughly the same
+     room before it ellipsizes. */
+  max-width: 16em;
   cursor: pointer;
+}
+
+/* Workspace name after the list name in the trigger: muted so the list
+   name leads, with no separator — the colour shift is the boundary. */
+.task-dialog-list-workspace {
+  flex-shrink: 0;
+  color: var(--text-muted);
 }
 
 .task-dialog-list:hover,
