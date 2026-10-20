@@ -697,6 +697,17 @@ function DocSection(props: {
   // Rename on a non-Home heading: the label is an EditableNavLabel driven
   // from the heading's context menu, as list rows are.
   let startRename: (() => void) | undefined;
+  // Set by a Rename menu item; consumed in the menu's `onCloseAutoFocus`
+  // so rename mode starts *instead of* Kobalte restoring focus to the
+  // trigger. Starting from `onSelect` (even via rAF) raced that restore:
+  // the label focused, then the trigger took focus back and blurred it.
+  let renamePending = false;
+  const closeAutoFocus = (e: Event) => {
+    if (!renamePending) return;
+    renamePending = false;
+    e.preventDefault();
+    startRename?.();
+  };
 
   // Hidden file input the "..." menu's Import JSON item triggers via
   // .click(). Imports land in this doc. Resetting `value` between picks
@@ -760,12 +771,15 @@ function DocSection(props: {
           onClick={(e: MouseEvent) => e.stopPropagation()}
         />
         <DropdownMenu.Portal>
-          <DropdownMenu.Content class="dropdown-menu-content">
+          <DropdownMenu.Content
+            class="dropdown-menu-content"
+            onCloseAutoFocus={closeAutoFocus}
+          >
             <Show when={!props.entry.home}>
               <DropdownMenu.Item
                 class="dropdown-menu-item"
                 onSelect={() => {
-                  requestAnimationFrame(() => startRename?.());
+                  renamePending = true;
                 }}
               >
                 {m().nav.renameDoc}
@@ -872,11 +886,14 @@ function DocSection(props: {
         <ContextMenu>
           <ContextMenu.Trigger as="div">{heading()}</ContextMenu.Trigger>
           <ContextMenu.Portal>
-            <ContextMenu.Content class="context-menu-content">
+            <ContextMenu.Content
+              class="context-menu-content"
+              onCloseAutoFocus={closeAutoFocus}
+            >
               <ContextMenu.Item
                 class="context-menu-item"
                 onSelect={() => {
-                  requestAnimationFrame(() => startRename?.());
+                  renamePending = true;
                 }}
               >
                 {m().nav.renameDoc}
