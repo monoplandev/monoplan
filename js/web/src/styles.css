@@ -2084,26 +2084,42 @@ input.task-check:hover {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 20px;
+  padding: 0;
   width: 340px;
   max-width: 100%;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.2);
   outline: none;
+  overflow: hidden;
 }
 
 [data-theme="dark"] .confirm-dialog {
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
 }
 
+/* Header / body / actions: each section carries its own 12px padding and
+   a divider above all but the first, instead of one padded box. */
+.confirm-dialog-section {
+  padding: 12px;
+}
+
+.confirm-dialog-section + .confirm-dialog-section {
+  border-top: 1px solid var(--border);
+}
+
 .confirm-dialog-title {
-  margin: 0 0 8px;
+  margin: 0;
   font-size: 16px;
   font-weight: 600;
 }
 
+.confirm-dialog-title + .confirm-dialog-message {
+  margin-top: 4px;
+}
+
 .confirm-dialog-message {
   margin: 0;
-  color: var(--text);
+  color: var(--text-muted);
+  font-size: 13px;
   line-height: 1.4;
 }
 
@@ -2111,7 +2127,6 @@ input.task-check:hover {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 20px;
 }
 
 .confirm-dialog-btn {
@@ -2128,29 +2143,24 @@ input.task-check:hover {
   background: var(--bg-hover);
 }
 
-.confirm-dialog-confirm.destructive {
-  border-color: transparent;
-  background: var(--error-bg);
-  color: var(--error-text);
-  font-weight: 500;
-}
-
-.confirm-dialog-confirm.destructive:hover {
-  filter: brightness(0.96);
-}
-
-.confirm-dialog-confirm.primary {
+/* The primary action inverts the surface: white on black in light,
+   black on white in dark. Red is reserved for inline errors. */
+.confirm-dialog-confirm {
   border-color: transparent;
   background: var(--text);
   color: var(--bg-elevated);
   font-weight: 500;
 }
 
-.confirm-dialog-confirm.primary:hover:not(:disabled) {
+.confirm-dialog-confirm:hover:not(:disabled) {
   filter: brightness(0.9);
 }
 
-.confirm-dialog-confirm.primary:disabled {
+[data-theme="dark"] .confirm-dialog-confirm:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.confirm-dialog-confirm:disabled {
   opacity: 0.5;
   cursor: default;
 }

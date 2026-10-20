@@ -64,25 +64,29 @@ export function NewDocDialog(props: {
             }}
           >
             <form onSubmit={submit}>
-              <Dialog.Title class="confirm-dialog-title">
-                {m().nav.newDoc}
-              </Dialog.Title>
-              <input
-                ref={inputRef}
-                class="name-dialog-input"
-                type="text"
-                placeholder={m().nav.newDocName}
-                aria-label={m().nav.newDocName}
-                value={name()}
-                disabled={pending()}
-                onInput={(e) => setName(e.currentTarget.value)}
-              />
-              <Show when={failed()}>
-                <p class="name-dialog-error" role="alert">
-                  {m().nav.createDocFailed}
-                </p>
-              </Show>
-              <div class="confirm-dialog-actions">
+              <section class="confirm-dialog-section confirm-dialog-header">
+                <Dialog.Title class="confirm-dialog-title">
+                  {m().nav.newDoc}
+                </Dialog.Title>
+              </section>
+              <section class="confirm-dialog-section confirm-dialog-body">
+                <input
+                  ref={inputRef}
+                  class="name-dialog-input"
+                  type="text"
+                  placeholder={m().nav.newDocName}
+                  aria-label={m().nav.newDocName}
+                  value={name()}
+                  disabled={pending()}
+                  onInput={(e) => setName(e.currentTarget.value)}
+                />
+                <Show when={failed()}>
+                  <p class="name-dialog-error" role="alert">
+                    {m().nav.createDocFailed}
+                  </p>
+                </Show>
+              </section>
+              <section class="confirm-dialog-section confirm-dialog-actions">
                 <button
                   type="button"
                   class="confirm-dialog-btn confirm-dialog-cancel"
@@ -92,12 +96,12 @@ export function NewDocDialog(props: {
                 </button>
                 <button
                   type="submit"
-                  class="confirm-dialog-btn confirm-dialog-confirm primary"
+                  class="confirm-dialog-btn confirm-dialog-confirm"
                   disabled={!name().trim() || pending()}
                 >
                   {m().nav.createDoc}
                 </button>
-              </div>
+              </section>
             </form>
           </Dialog.Content>
         </div>

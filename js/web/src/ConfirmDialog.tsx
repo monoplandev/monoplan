@@ -1,5 +1,5 @@
 import { Dialog } from "@kobalte/core/dialog";
-import { Show } from "solid-js";
+import { Show, type JSX } from "solid-js";
 import { useAppI18n } from "./i18n";
 import { closeToItems, trackOverlay } from "./overlay.ts";
 
@@ -7,7 +7,12 @@ import { closeToItems, trackOverlay } from "./overlay.ts";
  *  in the same portal/overlay/positioner shape as `AuthDialog`. The owner
  *  holds the open signal; ESC and overlay-click both cancel. Confirming
  *  fires `onConfirm` and closes; the button order (cancel left, confirm
- *  right) matches the platform convention. */
+ *  right) matches the platform convention.
+ *
+ *  Layout is three stacked sections — header (title + muted description),
+ *  optional body (`children`), and the confirmation row — each with its
+ *  own 12px padding and a divider between. `NewDocDialog` shares the same
+ *  classes. */
 export function ConfirmDialog(props: {
   open: boolean;
   onOpenChange: (b: boolean) => void;
@@ -15,9 +20,8 @@ export function ConfirmDialog(props: {
   title?: string;
   confirmLabel?: string;
   cancelLabel?: string;
-  /** Colour the confirm button as a destructive action (default true —
-   *  every current caller is destructive). */
-  destructive?: boolean;
+  /** Optional body section rendered between the header and the buttons. */
+  children?: JSX.Element;
   onConfirm: () => void;
 }) {
   const { m } = useAppI18n();
@@ -38,15 +42,22 @@ export function ConfirmDialog(props: {
               requestAnimationFrame(() => confirmRef?.focus());
             }}
           >
-            <Show when={props.title}>
-              <Dialog.Title class="confirm-dialog-title">
-                {props.title}
-              </Dialog.Title>
+            <section class="confirm-dialog-section confirm-dialog-header">
+              <Show when={props.title}>
+                <Dialog.Title class="confirm-dialog-title">
+                  {props.title}
+                </Dialog.Title>
+              </Show>
+              <Dialog.Description class="confirm-dialog-message">
+                {props.message}
+              </Dialog.Description>
+            </section>
+            <Show when={props.children}>
+              <section class="confirm-dialog-section confirm-dialog-body">
+                {props.children}
+              </section>
             </Show>
-            <Dialog.Description class="confirm-dialog-message">
-              {props.message}
-            </Dialog.Description>
-            <div class="confirm-dialog-actions">
+            <section class="confirm-dialog-section confirm-dialog-actions">
               <button
                 type="button"
                 class="confirm-dialog-btn confirm-dialog-cancel"
@@ -58,7 +69,6 @@ export function ConfirmDialog(props: {
                 ref={confirmRef}
                 type="button"
                 class="confirm-dialog-btn confirm-dialog-confirm"
-                classList={{ destructive: props.destructive !== false }}
                 onClick={() => {
                   props.onConfirm();
                   props.onOpenChange(false);
@@ -66,7 +76,7 @@ export function ConfirmDialog(props: {
               >
                 {props.confirmLabel ?? m().common.confirm}
               </button>
-            </div>
+            </section>
           </Dialog.Content>
         </div>
       </Dialog.Portal>
