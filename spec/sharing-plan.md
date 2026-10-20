@@ -192,7 +192,7 @@ Premise at the time of writing: rip-and-replace (no v1 transition window) — pr
 - Confirm no production deployments need data preserved.
 - Tag current `main` so a known-good pre-sharing commit is easy to reference.
 - Skim CLI and web local storage to confirm migration paths drop-and-recreate cleanly.
-- Convert item `notes` from a plain-string register to a `LoroText` container (see "Text fields must be mergeable before sharing" below; `text` stays a register, per `notes-plan.md`). This is a doc-layout change and is far cheaper before any doc is shared.
+- Item `notes` are already a mergeable `LoroText` child container (`notes-plan.md` Phase 1, done 2026-09-08; `text` stays a register on purpose), so concurrent edits merge character-wise and no doc-layout change is needed before a doc is shared. Rich / structured text is `notes-plan.md` Phases 3-4 and is not a sharing prerequisite.
 
 ### Phase 1 — Protocol types + server schema (foundation)
 
@@ -280,38 +280,6 @@ Server's broadcast registry + snapshot coordinator rewrite is the largest single
 Plus: sharing UI (invite flow, member management, doc switcher) is **separate from the above** and not estimated here. The above is just the *protocol/storage substrate*. The product on top — invite UX, board view, member list, removal confirmation, etc. — is its own scope.
 
 ---
-
-## Text fields must be mergeable before sharing
-
-**Status: not done. Blocking for sharing; strongly recommended before that for multi-device. Superseded for the storage question by `notes-plan.md` (Phase 1), which also decides that `text` stays a register.**
-
-Today an item's `text` and `notes` are plain string values in the item `LoroMap` (`map.insert(KEY_NOTES, notes)` in `core/src/doc.rs`). A map value is a last-writer-wins register over the *whole string*: two concurrent edits to the same item's notes merge by discarding one of them entirely. This already applies to a single user's phone and laptop editing offline; with sharing it becomes two people losing each other's work, which is the one CRDT failure users actually notice.
-
-### Change
-
-| Field | Today | Target |
-|---|---|---|
-| `text` | string register | string register (unchanged; see `notes-plan.md`, "Why `text` stays a register") |
-| `notes` | string register | mergeable `LoroText` child container |
-
-- Character-level merges come for free from Loro; no new crate, no new protocol surface, op blobs stay opaque to the server.
-- Pre-release, so rip-and-replace per the premise above: no in-doc migration, no dual-read. The `001_init.sql` rule applies in spirit to the doc layout too. Do it before any doc has more than one member, or a notes migration has to run inside every shared doc.
-- `data-model.md` item table gets the `notes` type change. `edit_item_notes` in core kept its signature (takes a full string) and diffed it into the container with `LoroText::update`, so CLI and existing callers were untouched (since removed: `apply_notes_delta` is the only notes write, see `notes-plan.md`). `edit_item_text` is unchanged: a title is a short phrase rewritten whole, and a character merge of two concurrent rewrites interleaves them, so LWW is the better outcome there.
-- Diff translation (`id` kept inside the map so a container handle resolves to its item, see data-model.md) already anticipates child containers under an item; text containers slot into the same path.
-
-### What this does not commit to
-
-The editor layers are separable and should be decided separately:
-
-1. **Merge-correct storage** (this section). Editors stay as they are: load `text.to_string()`, write back the full string on change. The web task dialog's plain-text contenteditable and the row quick-entry editor need no changes beyond the store API.
-2. **Live co-editing** (remote deltas applied under a live caret, presence cursors). Only needed once two people can edit one item at the same moment. The web editors already preserve caret by character offset across re-renders (`locateOffsetInLinkified`), so applying a remote delta and restoring the caret is feasible on the current contenteditable substrate. Presence is sharing-UI work, not storage work.
-3. **Rich text.** A product decision, not a sharing prerequisite. If it ever lands, that is the point to adopt a real editor (ProseMirror/Tiptap or CodeMirror, both have Loro bindings). A `<textarea>` would not get there and does not help merges, so it is not a stepping stone; contenteditable is the right substrate to keep.
-
-### Test emphasis
-
-- Two clients edit different parts of the same item's notes offline, sync, both edits present.
-- Two clients edit the same region; result is a character-level merge, not a dropped edit.
-- CLI `edit` of notes and web dialog edits interleave on the same item without loss (the CLI ↔ web multi-device proof already exists; extend it to text).
 
 ## Known limitations (accepted for first sharing release)
 

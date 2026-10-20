@@ -2,9 +2,8 @@
 
 **Status: Phases 0, 1 and 2 done 2026-09-08, Phases 3-4 not built.** Moves `item.notes` from a whole-string LWW
 register to a mergeable `LoroText` child container, and lays out the path
-from there to rich text with images. Companion to `sharing-plan.md` ("Text
-fields must be mergeable before sharing"), which this plan supersedes for the
-storage question.
+from there to rich text with images. `sharing-plan.md` treats the storage
+question as settled by this plan (its Pre-flight list points here).
 
 Research date: 2026-09-04, amended 2026-09-08 after a source read of
 `loro` / `loro-internal` 1.13.9. Loro versions at that date: Rust crate
