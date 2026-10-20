@@ -20,6 +20,12 @@ pub enum ApiError {
     #[error("not found")]
     NotFound,
 
+    #[error("forbidden: {0}")]
+    Forbidden(String),
+
+    #[error("conflict: {0}")]
+    Conflict(String),
+
     #[error("recovery not enrolled")]
     RecoveryNotEnrolled,
 
@@ -41,6 +47,8 @@ impl ApiError {
             InvalidCredentials => (StatusCode::UNAUTHORIZED, "invalid_credentials"),
             AccountExists => (StatusCode::CONFLICT, "account_exists"),
             NotFound => (StatusCode::NOT_FOUND, "not_found"),
+            Forbidden(_) => (StatusCode::FORBIDDEN, "forbidden"),
+            Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             RecoveryNotEnrolled => (StatusCode::FORBIDDEN, "recovery_not_enrolled"),
             RecoverySessionInvalid => (StatusCode::FORBIDDEN, "recovery_session_invalid"),
             Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),

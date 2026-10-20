@@ -546,6 +546,17 @@ describe("e2e snapshot + second-device bootstrap", () => {
     );
     expect(itemTexts(newB)).toEqual(["fresh 0"]);
 
+    // The delete-doc flow's bridge half: the doc leaves the routing
+    // table and its engine goes offline; Home keeps syncing.
+    expect(bridgeA.removeEngine(newDocId)).toBe(true);
+    expect(bridgeA.removeEngine(newDocId)).toBe(false);
+    expect(bridgeA.docIds()).toEqual([account.primaryDocId]);
+    homeA.addItem(LIST_MAIN, "home still live");
+    homeA.captureLocalOps();
+    homeA.flush();
+    bridgeA.pumpOutbox();
+    await waitFor(() => homeA.lastContiguousSeq() >= 1n, "home push acked after removal");
+
     bridgeA.stop();
     bridgeB.stop();
   }, 30_000);

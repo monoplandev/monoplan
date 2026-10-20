@@ -108,7 +108,7 @@ Local client of the removed/leaving account should drop the local copy (snapshot
 ```
 GET    /api/docs                                          -- list memberships + wraps
 POST   /api/docs                                          -- create a doc; body: { wrapped_dek, wrapped_dek_nonce }
-DELETE /api/docs/:doc_id                                  -- delete a doc; owner only
+DELETE /api/docs/:doc_id                                  -- delete a doc; owner only, never the primary (403), refused while another member is active (409) — built 2026-10-20
 
 POST   /api/docs/:doc_id/invites                          -- issue invite
 DELETE /api/docs/:doc_id/invites/:invite_id               -- revoke invite
@@ -298,7 +298,7 @@ Plus: sharing UI (invite flow, member management, per-doc nav sections) is **sep
 ## Open questions
 
 - **Invite codes vs X25519 public keys** — decision deferred to when sharing is built.
-- **Doc deletion semantics** when doc has multiple members: unilateral owner delete, member-by-member opt-in, or "leave for everyone else, doc keeps existing for the leaver"? TBD.
+- **Doc deletion semantics** when doc has multiple members: unilateral owner delete, member-by-member opt-in, or "leave for everyone else, doc keeps existing for the leaver"? TBD. Until decided, `DELETE /api/docs/:doc_id` (built 2026-10-20) requires the caller to be the sole active member and answers 409 otherwise; the primary doc is refused with 403 before any lookup (`accounts.primary_doc_id` on the server, `DocEntry.home` / `Session.primaryDocId` on the client). The web client offers Delete only on non-Home headings (the "..." menu, confirmed), then drops the engine from the bridge (`SyncBridge.removeEngine`), the doc from the layer (`DocsLayer.removeDoc`, which also drops its foreign Focus pins), the key from the session and vault (`DekVault.removeDocKey`) and the local op log (`IdbStorage.wipe`). Other devices drop a vaulted doc the server no longer lists at their next boot (`refreshDocKeys` in `App.tsx`), since its `OpenDoc` would be refused and a refusal ends the session; a device with the doc open *right now* is not told — that is the `DocClosed` frame.
 - **Discovery / UI** for shared docs: flat list with primary doc privileged at top, or folder-like hierarchy? Product question, out of scope.
 - **Connection-per-doc vs multiplexing.** Decided: multiplexing (one WS per device, `doc_id` on every frame). Connection-per-doc was the alternative; rejected because it scales worse with many docs.
 

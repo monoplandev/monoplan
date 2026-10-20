@@ -747,6 +747,188 @@ async fn create_doc(acc: &Account, home: &Dek) -> (String, Dek) {
     (resp.doc_id, dek)
 }
 
+/// A second account on an *existing* test server (`signup` starts a
+/// server per account). Only what the cross-account tests need.
+struct SecondAccount {
+    account_id: String,
+    device_token: String,
+    dek: Dek,
+}
+
+async fn signup_on(base: &str) -> SecondAccount {
+    let kdf_params = weak_params();
+    let master_salt: [u8; 16] = random_bytes();
+    let master =
+        derive_password_master(b"another password entirely", &master_salt, kdf_params).unwrap();
+    let kek = master.kek().unwrap();
+    let dek = Dek::generate();
+    let wrapped = kek.wrap(&dek).unwrap();
+    let resp: SignupResponse = post_msgpack(
+        &format!("{}/api/account/signup", base),
+        &SignupRequest {
+            email: format!("second-{}@example.com", uuid::Uuid::now_v7()),
+            master_salt: master_salt.to_vec(),
+            kdf_params,
+            auth_secret: master.auth_secret().unwrap().as_bytes().to_vec(),
+            wrapped_dek: wrapped.ciphertext,
+            wrapped_dek_nonce: wrapped.nonce.to_vec(),
+            recovery: None,
+            device_name: "second-device".into(),
+        },
+        None,
+    )
+    .await;
+    SecondAccount {
+        account_id: resp.account_id,
+        device_token: resp.device_token,
+        dek,
+    }
+}
+
+async fn delete_status(url: &str, token: &str) -> reqwest::StatusCode {
+    http()
+        .delete(url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .unwrap()
+        .status()
+}
+
+/// `DELETE /api/docs/:id`: an owner deletes a doc they created and it
+/// is gone from the list with every row under it; the primary doc is
+/// refused outright (403) and a doc that is not the caller's to delete
+/// reads as absent (404).
+#[tokio::test]
+async fn owner_deletes_created_doc_but_never_the_primary() {
+    let acc = signup(false).await;
+    let (doc_id, _dek) = create_doc(&acc, &acc.dek).await;
+    let docs_url = format!("{}/api/docs", acc.server.base);
+
+    // Seed a row under the doc so the cascade has something to clear.
+    let did = Uuid::parse_str(&doc_id).unwrap();
+    acc.server
+        .state
+        .db
+        .call(move |c| {
+            c.execute(
+                "INSERT INTO doc_sequences (doc_id, next_seq, epoch) VALUES (?, 5, 0)",
+                [did.as_bytes().as_slice()],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    // The primary is non-deletable, before any ownership lookup.
+    assert_eq!(
+        delete_status(
+            &format!("{}/{}", docs_url, acc.primary_doc_id),
+            &acc.device_token
+        )
+        .await,
+        reqwest::StatusCode::FORBIDDEN
+    );
+    // Garbage id.
+    assert_eq!(
+        delete_status(&format!("{}/not-a-uuid", docs_url), &acc.device_token).await,
+        reqwest::StatusCode::BAD_REQUEST
+    );
+    // Someone else's account cannot see it, let alone delete it.
+    let other = signup_on(&acc.server.base).await;
+    assert_eq!(
+        delete_status(&format!("{}/{}", docs_url, doc_id), &other.device_token).await,
+        reqwest::StatusCode::NOT_FOUND
+    );
+
+    // The owner deletes it.
+    assert_eq!(
+        delete_status(&format!("{}/{}", docs_url, doc_id), &acc.device_token).await,
+        reqwest::StatusCode::OK
+    );
+    let docs: DocsListResponse = get_msgpack_authed(&docs_url, &acc.device_token).await;
+    let ids: Vec<&str> = docs.memberships.iter().map(|m| m.doc_id.as_str()).collect();
+    assert_eq!(ids, vec![acc.primary_doc_id.as_str()]);
+    // Every row under it is gone.
+    let counts: (i64, i64, i64) = acc
+        .server
+        .state
+        .db
+        .call(move |c| {
+            let d = did.as_bytes().to_vec();
+            let docs: i64 =
+                c.query_row("SELECT COUNT(*) FROM docs WHERE id = ?", [&d], |r| r.get(0))?;
+            let members: i64 = c.query_row(
+                "SELECT COUNT(*) FROM doc_members WHERE doc_id = ?",
+                [&d],
+                |r| r.get(0),
+            )?;
+            let seqs: i64 = c.query_row(
+                "SELECT COUNT(*) FROM doc_sequences WHERE doc_id = ?",
+                [&d],
+                |r| r.get(0),
+            )?;
+            Ok((docs, members, seqs))
+        })
+        .await
+        .unwrap();
+    assert_eq!(counts, (0, 0, 0));
+    // Deleting again: nothing to own.
+    assert_eq!(
+        delete_status(&format!("{}/{}", docs_url, doc_id), &acc.device_token).await,
+        reqwest::StatusCode::NOT_FOUND
+    );
+    // The primary still opens for the account.
+    assert_eq!(
+        login_with(&acc, "correct horse battery staple")
+            .await
+            .memberships
+            .len(),
+        1
+    );
+}
+
+/// A doc with a second active member is not deletable by its owner
+/// until multi-member semantics are settled (sharing-plan.md): 409.
+#[tokio::test]
+async fn delete_is_refused_while_another_member_is_active() {
+    let acc = signup(false).await;
+    let other = signup_on(&acc.server.base).await;
+    let (doc_id, dek) = create_doc(&acc, &acc.dek).await;
+    let did = Uuid::parse_str(&doc_id).unwrap();
+    let other_id = Uuid::parse_str(&other.account_id).unwrap();
+    let w = other.dek.wrap_dek(&dek).unwrap();
+    acc.server
+        .state
+        .db
+        .call(move |c| {
+            c.execute(
+                "INSERT INTO doc_members (
+                    doc_id, account_id, role, wrapped_dek, wrapped_dek_nonce, added_at
+                 ) VALUES (?, ?, 'member', ?, ?, 2)",
+                params![
+                    did.as_bytes().as_slice(),
+                    other_id.as_bytes().as_slice(),
+                    w.ciphertext,
+                    w.nonce.to_vec(),
+                ],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let url = format!("{}/api/docs/{}", acc.server.base, doc_id);
+    assert_eq!(
+        delete_status(&url, &acc.device_token).await,
+        reqwest::StatusCode::CONFLICT
+    );
+    // A plain member is not the owner.
+    assert_eq!(
+        delete_status(&url, &other.device_token).await,
+        reqwest::StatusCode::NOT_FOUND
+    );
+}
+
 /// The point of the Home-DEK-as-account-key model: a doc created on an
 /// enrolled account survives a password change *and* a recovery reset
 /// without anyone re-wrapping it, because its only wrap is under the

@@ -151,16 +151,21 @@ export function App(props: {
  *  vaulted docs alone. A doc learned after this is picked up next boot. */
 const DOC_REFRESH_TIMEOUT_MS = 5000;
 
+/** What `GET /api/docs` taught us at boot: memberships this device
+ *  lacked, now unwrapped and vaulted, and vaulted docs the server no
+ *  longer lists (deleted on another device; later, left or revoked). */
+type DocRefresh = { fresh: Map<string, Dek>; stale: string[] };
+
 /** Learn about docs the account joined since this device last logged in:
  *  `GET /api/docs`, unwrap each membership the session lacks under the
  *  Home DEK, vault it (`putDocKey`), and add it to `session.docKeys` so
- *  it boots with the rest. Returns the new entries. Best-effort: offline,
- *  a server error, or the timeout leaves the vaulted set as it is.
- *  Memberships the vault holds but the server no longer lists (left or
- *  revoked) are not dropped here; that is the `DocClosed` work in
- *  `spec/sharing-plan.md`. */
-async function refreshDocKeys(session: Session): Promise<Map<string, Dek>> {
-  const none = new Map<string, Dek>();
+ *  it boots with the rest. Also names the vaulted non-primary docs the
+ *  server no longer lists, which the caller drops before boot (their
+ *  `OpenDoc` would be refused, and a refusal ends the whole session).
+ *  Best-effort: offline, a server error, or the timeout leaves the
+ *  vaulted set as it is. */
+async function refreshDocKeys(session: Session): Promise<DocRefresh> {
+  const none: DocRefresh = { fresh: new Map<string, Dek>(), stale: [] };
   if (session.anonymous) return none;
   const timeout = new Promise<null>((resolve) =>
     setTimeout(() => resolve(null), DOC_REFRESH_TIMEOUT_MS),
@@ -190,7 +195,28 @@ async function refreshDocKeys(session: Session): Promise<Map<string, Dek>> {
       console.warn("docs refresh: vaulting new doc failed:", e);
     }
   }
-  return fresh;
+  const listed = new Set(resp.memberships.map((m) => m.doc_id));
+  const stale = [...session.docKeys.keys()].filter(
+    (id) => id !== session.primaryDocId && !listed.has(id),
+  );
+  return { fresh, stale };
+}
+
+/** Forget a doc the server no longer lists for this account: its key
+ *  (session + vault) and its local op log. Best-effort; a failure leaves
+ *  the doc to be dropped again next boot. */
+async function forgetDoc(session: Session, docId: string): Promise<void> {
+  session.docKeys.delete(docId);
+  try {
+    await dekVault.removeDocKey(docId);
+  } catch (e) {
+    console.warn("docs refresh: removing a stale vault entry failed:", e);
+  }
+  try {
+    await IdbStorage.wipe(docId);
+  } catch (e) {
+    console.warn("docs refresh: wiping a stale doc failed:", e);
+  }
 }
 
 async function createAnonymousSession(): Promise<Session> {
@@ -328,15 +354,23 @@ function BootGate(props: {
       // Home first, so a failure there is the one reported; replay is
       // main-thread wasm work either way, so there is nothing to gain
       // from interleaving the docs.
-      const docs: DocBoot[] = [
+      let docs: DocBoot[] = [
         await bootDoc(props.session.primaryDocId, props.session.dek),
       ];
       for (const [docId, dek] of props.session.docKeys) {
         if (docId === props.session.primaryDocId) continue;
         docs.push(await bootDoc(docId, dek));
       }
-      for (const [docId, dek] of await refresh) {
+      const { fresh, stale } = await refresh;
+      for (const [docId, dek] of fresh) {
         docs.push(await bootDoc(docId, dek));
+      }
+      // A vaulted doc the server no longer lists was deleted elsewhere:
+      // drop it rather than boot it (its replay above was wasted work on
+      // a rare path, which beats delaying the common path on the fetch).
+      if (stale.length > 0) {
+        docs = docs.filter((d) => !stale.includes(d.docId));
+        for (const docId of stale) await forgetDoc(props.session, docId);
       }
 
       props.setBoot({ docs, peerId, prefs: await prefsPromise });
@@ -361,7 +395,7 @@ function BootGate(props: {
 
 function MainApp(props: { session: Session; boot: BootInfo }) {
   const { setOnline, setLastSyncAt, logout } = useSession();
-  const { docs, view, setView, createDoc } = createWorkspaceRuntime({
+  const { docs, view, setView, createDoc, deleteDoc } = createWorkspaceRuntime({
     session: props.session,
     boot: props.boot,
     setOnline,
@@ -369,5 +403,13 @@ function MainApp(props: { session: Session; boot: BootInfo }) {
     logout,
   });
 
-  return <Workspace docs={docs} view={view} setView={setView} createDoc={createDoc} />;
+  return (
+    <Workspace
+      docs={docs}
+      view={view}
+      setView={setView}
+      createDoc={createDoc}
+      deleteDoc={deleteDoc}
+    />
+  );
 }

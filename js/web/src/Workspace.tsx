@@ -266,6 +266,9 @@ export function Workspace(props: {
   setView: (v: ViewKey) => void;
   /** Create a doc the account owns and open it (`runtime.createDoc`). */
   createDoc: (name: string) => Promise<string>;
+  /** Delete a non-Home doc the account owns and forget it here
+   *  (`runtime.deleteDoc`); rejects on Home or anonymous sessions. */
+  deleteDoc: (docId: string) => Promise<void>;
 }) {
   const { m, locale } = useAppI18n();
   const session = useSession();
@@ -2557,6 +2560,7 @@ export function Workspace(props: {
         showListCounts={home.state.settings.showListCounts}
         view={view()}
         setView={navigateTo}
+        onDeleteDoc={session.session().anonymous ? null : props.deleteDoc}
         footer={
           <>
             <NavMenu

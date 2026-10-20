@@ -138,6 +138,30 @@ export class IdbStorage {
     return storage;
   }
 
+  /** Drop every row of `docId` from the data plane: the `docs` row,
+   *  its WAL, snapshot and in-flight push. For a doc deleted on the
+   *  server (or no longer listed for this account). Any live
+   *  `IdbStorage` for the doc must be abandoned first; this does not
+   *  touch the vault or prefs. */
+  static async wipe(docId: string): Promise<void> {
+    const db = await openMonoplanDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(
+        [STORE_DOCS, STORE_OPS, STORE_SNAPSHOTS, STORE_INFLIGHT],
+        "readwrite",
+      );
+      tx.objectStore(STORE_DOCS).delete(docId);
+      tx.objectStore(STORE_OPS).delete(
+        IDBKeyRange.bound([docId, 0], [docId, Number.MAX_SAFE_INTEGER]),
+      );
+      tx.objectStore(STORE_SNAPSHOTS).delete(docId);
+      tx.objectStore(STORE_INFLIGHT).delete(docId);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  }
+
   private load(): Promise<void> {
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction(

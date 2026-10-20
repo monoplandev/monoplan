@@ -133,6 +133,22 @@ export class DekVault {
     });
   }
 
+  /** Drop one doc's entry from the stored record (a doc deleted, or no
+   *  longer listed for the account). Same read → merge shape as
+   *  `putDocKey`; a missing record or entry is a no-op. The primary
+   *  doc's entry is never removed. */
+  async removeDocKey(docId: string): Promise<void> {
+    const db = await openMonoplanDb();
+    await idbUpdate<VaultRecord>(db, STORE_VAULT, KEY, (current) => {
+      if (!current || current.primaryDocId === docId || !(docId in current.docKeys)) {
+        return undefined;
+      }
+      const docKeys = { ...current.docKeys };
+      delete docKeys[docId];
+      return { ...current, docKeys };
+    });
+  }
+
   async clear(): Promise<void> {
     try {
       const db = await openMonoplanDb();

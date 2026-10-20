@@ -11,7 +11,7 @@ mod web;
 use axum::Router;
 use axum::http::{Method, header};
 use axum::middleware;
-use axum::routing::{any, get, patch, post};
+use axum::routing::{any, delete, get, patch, post};
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::state::AppState;
@@ -63,6 +63,7 @@ pub fn router(state: AppState) -> Router {
             patch(device_routes::rename).delete(device_routes::revoke),
         )
         .route("/api/docs", get(doc_routes::list).post(doc_routes::create))
+        .route("/api/docs/{doc_id}", delete(doc_routes::delete))
         .route("/api/sync", any(ws_handler));
 
     if state.admin_enabled() {

@@ -178,6 +178,20 @@ export class SyncBridge {
     this.opts.onServerFrame?.(id);
   }
 
+  /** Stop routing a doc over this connection: a doc deleted (or, later,
+   *  left) while the session is live. Nothing more is sent for it and
+   *  any late server frame for it is dropped as unrouted. The server
+   *  side of the open stays until the socket cycles; there is no
+   *  `CloseDoc` frame (`spec/sharing-plan.md`). Returns whether the
+   *  doc was routed. */
+  removeEngine(docId: string): boolean {
+    const engine = this.engines.get(docId);
+    if (!engine) return false;
+    this.engines.delete(docId);
+    engine.handleDisconnected();
+    return true;
+  }
+
   start(): void {
     this.connect();
     if (!this.tickTimer) {

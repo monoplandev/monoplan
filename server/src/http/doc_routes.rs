@@ -1,4 +1,4 @@
-//! Doc list / create handlers. Both require bearer auth.
+//! Doc list / create / delete handlers. All require bearer auth.
 //!
 //! A doc is access + a per-membership wrap of its DEK
 //! (`spec/encryption.md`); creating one is purely a key-management
@@ -7,15 +7,21 @@
 //! password change / reset / recovery need not know the doc exists.
 //! The doc's history starts with the first `PushOps` the creator sends
 //! after opening it.
+//!
+//! Deleting is owner-only and never allowed on the account's primary
+//! doc (`accounts.primary_doc_id`, the Home: non-deletable and
+//! non-leavable per `spec/sharing-plan.md`). The server drops the doc
+//! and every row under it; the client drops its local copy and key.
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use monoplan_protocol::{CreateDocRequest, CreateDocResponse, DocsListResponse, Membership};
 
 use crate::auth::DeviceAuth;
-use crate::auth::queries::{NewDoc, create_doc, list_memberships};
+use crate::auth::queries::{DeleteDocOutcome, NewDoc, create_doc, delete_doc, list_memberships};
 use crate::error::{ApiError, ApiResult};
 use crate::http::msgpack::Msgpack;
 use crate::state::AppState;
+use uuid::Uuid;
 
 pub async fn list(
     State(state): State<AppState>,
@@ -57,4 +63,25 @@ pub async fn create(
     Ok(Msgpack(CreateDocResponse {
         doc_id: doc_id.to_string(),
     }))
+}
+
+pub async fn delete(
+    State(state): State<AppState>,
+    auth: DeviceAuth,
+    Path(doc_id): Path<String>,
+) -> ApiResult<()> {
+    let doc_id =
+        Uuid::parse_str(&doc_id).map_err(|_| ApiError::BadRequest("invalid doc id".into()))?;
+    if doc_id == auth.primary_doc_id {
+        return Err(ApiError::Forbidden(
+            "the primary doc cannot be deleted".into(),
+        ));
+    }
+    match delete_doc(&state.db, auth.account_id, doc_id).await? {
+        DeleteDocOutcome::Deleted => Ok(()),
+        DeleteDocOutcome::NotOwner => Err(ApiError::NotFound),
+        DeleteDocOutcome::HasOtherMembers => {
+            Err(ApiError::Conflict("doc has other members".into()))
+        }
+    }
 }

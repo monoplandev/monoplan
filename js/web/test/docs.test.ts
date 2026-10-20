@@ -36,6 +36,29 @@ function setup(): { home: DocApp; other: DocApp; layer: DocsLayer; dispose: () =
 }
 
 describe("docs layer", () => {
+  test("removeDoc forgets a non-Home doc and drops its Focus pins; Home stays", () => {
+    const { home, other, layer, dispose } = setup();
+    const mine = home.addItem("inbox", "mine");
+    const theirs = other.addItem("inbox", "theirs");
+    layer.routed.addToFocus(mine);
+    layer.routed.addToFocus(theirs);
+    expect(layer.focusItems().map((i) => i.id)).toEqual([theirs, mine]);
+
+    layer.removeDoc(OTHER);
+    expect(layer.docs().map((d) => d.docId)).toEqual([HOME]);
+    expect(layer.appOf(OTHER)).toBeUndefined();
+    expect(layer.docIdOf(theirs)).toBeUndefined();
+    // The foreign pin is gone for good, the local one untouched.
+    expect(home.state.focusEntries.map((e) => e.itemId)).toEqual([mine]);
+    // A view scoped to the gone doc falls back to Home.
+    expect(layer.viewDocId({ kind: "list", id: "x", docId: OTHER })).toBe(HOME);
+    // Home is never removed; a second removal is a no-op.
+    layer.removeDoc(HOME);
+    layer.removeDoc(OTHER);
+    expect(layer.docs().map((d) => d.docId)).toEqual([HOME]);
+    dispose();
+  });
+
   test("doc map is Home first; the reverse index finds an item's doc", () => {
     const { home, other, layer, dispose } = setup();
     expect(layer.docs().map((d) => d.docId)).toEqual([HOME, OTHER]);

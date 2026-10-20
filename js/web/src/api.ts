@@ -164,6 +164,14 @@ export const api = {
     });
   },
 
+  /** Delete a doc the account owns (`DELETE /api/docs/:id`). The server
+   *  refuses the primary doc (403), a doc the caller does not own (404)
+   *  and one with other active members (409); every row under it goes
+   *  with it. The caller drops its local copy and key afterwards. */
+  async deleteDoc(docId: string): Promise<void> {
+    await del<unknown>(`/api/docs/${encodeURIComponent(docId)}`);
+  },
+
   async renameDevice(deviceId: string, name: string): Promise<void> {
     await patch<unknown>(`/api/devices/${encodeURIComponent(deviceId)}`, { name });
   },

@@ -279,6 +279,72 @@ pub async fn create_doc(db: &Db, account_id: Uuid, new: NewDoc) -> anyhow::Resul
     Ok(doc_id)
 }
 
+/// Result of [`delete_doc`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeleteDocOutcome {
+    Deleted,
+    /// No active `owner` membership for this account on this doc (the
+    /// doc does not exist, or the caller is not its owner). Reported as
+    /// not-found so a non-member learns nothing.
+    NotOwner,
+    /// Another account holds an active membership. Multi-member
+    /// deletion semantics are unresolved (`spec/sharing-plan.md` §Open
+    /// questions); until then an owner must be the sole member.
+    HasOtherMembers,
+}
+
+/// Delete a doc the caller owns, with every row that hangs off it: ops,
+/// snapshots, per-device frontiers, the sequence counter and the
+/// memberships. One transaction. The caller is responsible for
+/// refusing the account's primary doc *before* calling (a request-level
+/// decision, and the `accounts.primary_doc_id` FK would reject the
+/// delete anyway). Devices with the doc open on a live connection are
+/// not told; their next frame for it fails and `OpenDoc` on reconnect
+/// is refused (sharing-plan.md: `DocClosed` is future work).
+pub async fn delete_doc(
+    db: &Db,
+    account_id: Uuid,
+    doc_id: Uuid,
+) -> anyhow::Result<DeleteDocOutcome> {
+    let acc_bytes = account_id.as_bytes().to_vec();
+    let doc_bytes = doc_id.as_bytes().to_vec();
+    db.call(move |c| {
+        let tx = c.transaction()?;
+        let owner: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM doc_members
+             WHERE doc_id = ? AND account_id = ? AND role = ? AND removed_at IS NULL",
+            params![doc_bytes, acc_bytes, MemberRole::Owner.as_str()],
+            |r| r.get(0),
+        )?;
+        if owner == 0 {
+            return Ok(DeleteDocOutcome::NotOwner);
+        }
+        let others: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM doc_members
+             WHERE doc_id = ? AND account_id != ? AND removed_at IS NULL",
+            params![doc_bytes, acc_bytes],
+            |r| r.get(0),
+        )?;
+        if others > 0 {
+            return Ok(DeleteDocOutcome::HasOtherMembers);
+        }
+        for sql in [
+            "DELETE FROM ops WHERE doc_id = ?",
+            "DELETE FROM snapshots WHERE doc_id = ?",
+            "DELETE FROM device_doc_frontiers WHERE doc_id = ?",
+            "DELETE FROM doc_sequences WHERE doc_id = ?",
+            "DELETE FROM doc_members WHERE doc_id = ?",
+            "DELETE FROM docs WHERE id = ?",
+        ] {
+            tx.execute(sql, params![doc_bytes])?;
+        }
+        tx.commit()?;
+        Ok(DeleteDocOutcome::Deleted)
+    })
+    .await
+    .context("auth.queries delete_doc")
+}
+
 /// Does `account_id` hold an active membership on `doc_id`? The single
 /// access decision behind `OpenDoc` (`sync/ws.rs::can_open`).
 pub async fn is_member(db: &Db, doc_id: Uuid, account_id: Uuid) -> anyhow::Result<bool> {

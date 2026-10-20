@@ -71,6 +71,10 @@ export interface DocsLayer {
   docs: Accessor<DocEntry[]>;
   /** Register a doc opened after boot (`createDoc` in the runtime). */
   addDoc(app: DocApp): void;
+  /** Forget a non-Home doc (`deleteDoc` in the runtime): it leaves the
+   *  map and its Focus pins are dropped from Home. Home is never
+   *  removed. */
+  removeDoc(docId: string): void;
   appOf(docId: string): DocApp | undefined;
   /** The doc holding `itemId`, or undefined when no open doc has it. */
   docIdOf(itemId: string): string | undefined;
@@ -145,6 +149,19 @@ export function createDocsLayer(home: DocApp, initial: readonly DocApp[]): DocsL
     const entry: DocEntry = { docId: app.docId, app, home: false };
     setDocs((prev) => [...prev, entry]);
     subscribeDoc(entry);
+  };
+  const removeDoc = (docId: string): void => {
+    if (docId === homeDocId || !byId.has(docId)) return;
+    // Its items are gone everywhere, so its foreign Focus pins are dead
+    // for good; the prune effect would never see them resolve again.
+    const pinned = home.state.focusEntries
+      .filter((e) => e.docId === docId)
+      .map((e) => e.itemId);
+    if (pinned.length > 0) home.removeFromFocusMany(pinned);
+    docOffs.get(docId)?.();
+    docOffs.delete(docId);
+    byId.delete(docId);
+    setDocs((prev) => prev.filter((d) => d.docId !== docId));
   };
   const appOf = (docId: string): DocApp | undefined => byId.get(docId);
 
@@ -462,9 +479,10 @@ export function createDocsLayer(home: DocApp, initial: readonly DocApp[]): DocsL
   // Undo / redo listeners span every doc, including ones added later
   // (`addDoc` subscribes them as they arrive).
   const undoListeners = new Set<(outcome: UndoOutcome, docId: string) => void>();
-  const docOffs: (() => void)[] = [];
+  const docOffs = new Map<string, () => void>();
   const subscribeDoc = (d: DocEntry): void => {
-    docOffs.push(
+    docOffs.set(
+      d.docId,
       d.app.onUndoRedo((outcome) => {
         for (const cb of undoListeners) cb(outcome, d.docId);
       }),
@@ -483,6 +501,7 @@ export function createDocsLayer(home: DocApp, initial: readonly DocApp[]): DocsL
     home,
     docs,
     addDoc,
+    removeDoc,
     appOf,
     docIdOf,
     appForItem,

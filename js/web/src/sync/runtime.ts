@@ -116,6 +116,11 @@ type DocRuntime = {
   onLocalFlush: () => void;
   scheduleDurable: () => void;
   foldNow: () => void;
+  /** Resolves once queued IDB writes for this doc have landed. */
+  flushed: () => Promise<void>;
+  /** Stop the persistence rhythm (the idle fold timer). Also runs on the
+   *  owner's cleanup; called early when a doc is removed mid-session. */
+  dispose: () => void;
 };
 
 /** Build one doc's engine + store + persistence rhythm. `pumpOutbox`
@@ -216,7 +221,8 @@ function createDocRuntime(
     clearTimeout(compactIdleTimer);
     compactIdleTimer = setTimeout(foldNow, COMPACT_IDLE_MS);
   };
-  onCleanup(() => clearTimeout(compactIdleTimer));
+  const dispose = (): void => clearTimeout(compactIdleTimer);
+  onCleanup(dispose);
 
   // Sample the contiguous seq now, wait for queued IDB writes to land,
   // then mark durable + ship the resulting Ack. Sampling synchronously
@@ -252,7 +258,17 @@ function createDocRuntime(
     onLocalFlush();
   };
 
-  return { app, engine, capture, onServerFrame, onLocalFlush, scheduleDurable, foldNow };
+  return {
+    app,
+    engine,
+    capture,
+    onServerFrame,
+    onLocalFlush,
+    scheduleDurable,
+    foldNow,
+    flushed: () => storage.whenFlushed(),
+    dispose,
+  };
 }
 
 /** Hook a doc runtime's after-flush pulse: push the outbox over the
@@ -473,6 +489,47 @@ export function createWorkspaceRuntime(props: {
     return docId;
   };
 
+  // Delete a doc the account owns and forget it on this device. The
+  // server goes first (owner-only; it refuses the primary doc, as does
+  // the guard here — Home is non-deletable, `spec/sharing-plan.md`); a
+  // refusal leaves everything in place. Then, in an order where a
+  // failure part-way leaves nothing half-alive: the view leaves the doc,
+  // the engine stops routing, the layer and runtime maps forget it, and
+  // the key (session + vault) and the local op log go last. Other
+  // devices learn on their next boot (`refreshDocKeys` in App.tsx); a
+  // device with the doc open right now is not told — `DocClosed` is
+  // future work.
+  const deleteDoc = async (docId: string): Promise<void> => {
+    if (props.session.anonymous) {
+      throw new Error("sign in to delete a workspace");
+    }
+    if (docId === props.session.primaryDocId) {
+      throw new Error("the Home workspace cannot be deleted");
+    }
+    const r = runtimes.get(docId);
+    if (!r) throw new Error(`deleteDoc: no open doc ${docId}`);
+    await api.deleteDoc(docId);
+    if (docs.viewDocId(view()) === docId) setView({ kind: "list", id: "inbox" });
+    bridge?.removeEngine(docId);
+    docs.removeDoc(docId);
+    runtimes.delete(docId);
+    docApps.delete(docId);
+    r.dispose();
+    props.session.docKeys.delete(docId);
+    try {
+      await dekVault.removeDocKey(docId);
+    } catch (e) {
+      // Next boot's `GET /api/docs` refresh drops it from the vault.
+      console.warn("deleteDoc: removing the vault entry failed:", e);
+    }
+    try {
+      await r.flushed();
+      await IdbStorage.wipe(docId);
+    } catch (e) {
+      console.warn("deleteDoc: wiping the local op log failed:", e);
+    }
+  };
+
   // ---------- Prefs: separate store, write-through ----------
   //
   // View state ("which list / Done / Bin am I on?") lives in its own
@@ -544,5 +601,5 @@ export function createWorkspaceRuntime(props: {
     if (deviceTimer) clearTimeout(deviceTimer);
   });
 
-  return { app, docApps, docs, view, setView, createDoc };
+  return { app, docApps, docs, view, setView, createDoc, deleteDoc };
 }

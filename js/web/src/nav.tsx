@@ -371,6 +371,9 @@ export function Nav(props: {
   showListCounts: boolean;
   view: ViewKey;
   setView: (v: ViewKey) => void;
+  /** Delete a non-Home doc (`runtime.deleteDoc`), or null when this
+   *  session can't (anonymous). Drives the heading menu's Delete item. */
+  onDeleteDoc: ((docId: string) => Promise<void>) | null;
   /** Chrome pinned to the bottom of the sidebar (app menu + account/sync
    *  widget) — see `.nav-footer` in styles.css. */
   footer?: JSX.Element;
@@ -514,6 +517,7 @@ export function Nav(props: {
             showListCounts={props.showListCounts}
             mobile={navIsMobile()}
             onToggled={() => setSectionTick((n) => n + 1)}
+            onDeleteDoc={props.onDeleteDoc}
           />
         )}
       </For>
@@ -590,10 +594,26 @@ function DocSection(props: {
   showListCounts: boolean;
   mobile: boolean;
   onToggled: () => void;
+  onDeleteDoc: ((docId: string) => Promise<void>) | null;
 }) {
   const { m } = useAppI18n();
   const app = props.entry.app;
   const docId = props.entry.docId;
+  // Delete runs through a confirmation: it is server-side, cross-device
+  // and not undoable. Home never offers it (`spec/sharing-plan.md`: the
+  // primary doc is non-deletable), nor does an anonymous session.
+  const canDelete = (): boolean => !props.entry.home && props.onDeleteDoc !== null;
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = createSignal(false);
+  const deleteDoc = (): void => {
+    const run = props.onDeleteDoc;
+    if (!run || props.entry.home) return;
+    // The collapse flag is per doc id; nothing else will ever clear it.
+    saveSectionCollapsed(docId, false, false);
+    run(docId).catch((err) => {
+      console.error("delete workspace failed:", err);
+      alert(m().nav.deleteDocFailed);
+    });
+  };
   const [adding, setAdding] = createSignal(false);
   const [name, setName] = createSignal("");
   const [collapsed, setCollapsed] = createSignal(loadSectionCollapsed(docId, props.entry.home));
@@ -821,6 +841,15 @@ function DocSection(props: {
             >
               {m().nav.importJson}
             </DropdownMenu.Item>
+            <Show when={canDelete()}>
+              <DropdownMenu.Separator class="dropdown-menu-separator" />
+              <DropdownMenu.Item
+                class="dropdown-menu-item"
+                onSelect={() => setDeleteConfirmOpen(true)}
+              >
+                {m().nav.deleteDoc}
+              </DropdownMenu.Item>
+            </Show>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu>
@@ -838,6 +867,16 @@ function DocSection(props: {
         style={{ display: "none" }}
         onChange={onImportFilePicked}
       />
+      <Show when={canDelete()}>
+        <ConfirmDialog
+          open={deleteConfirmOpen()}
+          onOpenChange={setDeleteConfirmOpen}
+          title={m().nav.deleteDoc}
+          message={m().nav.deleteDocConfirm(label())}
+          confirmLabel={m().common.delete}
+          onConfirm={deleteDoc}
+        />
+      </Show>
       <Show when={!props.entry.home} fallback={heading()}>
         <ContextMenu>
           <ContextMenu.Trigger as="div">{heading()}</ContextMenu.Trigger>

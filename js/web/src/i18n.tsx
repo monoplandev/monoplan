@@ -101,6 +101,11 @@ export type Messages = {
     renameDoc: string;
     /** Label of the "..." button on a workspace heading. */
     docMenu: string;
+    /** "..." menu delete on a non-Home doc heading, its confirmation
+     *  (named for the doc) and the failure alert. */
+    deleteDoc: string;
+    deleteDocConfirm: (name: string) => string;
+    deleteDocFailed: string;
     createDocFailed: string;
     connected: string;
     disconnected: string;
@@ -484,6 +489,10 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       createDoc: "Crear",
       renameDoc: "Renombrar espacio",
       docMenu: "Menú del espacio",
+      deleteDoc: "Eliminar espacio",
+      deleteDocConfirm: (name) =>
+        `¿Eliminar «${name}»? Sus listas y elementos se eliminarán de todos los dispositivos. Esta acción no se puede deshacer.`,
+      deleteDocFailed: "No se pudo eliminar el espacio",
       createDocFailed: "No se pudo crear el espacio",
       connected: "Conectado",
       disconnected: "Desconectado",
@@ -758,6 +767,10 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       createDoc: "Create",
       renameDoc: "Rename workspace",
       docMenu: "Workspace menu",
+      deleteDoc: "Delete workspace",
+      deleteDocConfirm: (name) =>
+        `Delete “${name}”? Its lists and items are removed from every device. This cannot be undone.`,
+      deleteDocFailed: "Could not delete workspace",
       createDocFailed: "Could not create workspace",
       connected: "Connected",
       disconnected: "Disconnected",
