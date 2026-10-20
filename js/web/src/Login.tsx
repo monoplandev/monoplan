@@ -41,9 +41,9 @@ export interface Session {
   dek: Dek;
   /** Every doc the account can open, keyed by doc id, primary included
    *  (its entry is `dek`). Populated from the memberships array at
-   *  login/signup. Only the Home DEK is vaulted today, so a session
-   *  restored on reload or minted anonymously holds the primary alone;
-   *  the runtime still boots one doc (sharing-plan.md Phase 5). */
+   *  login/signup and vaulted one entry per doc id, so a session restored
+   *  on reload holds every membership; the runtime still boots the
+   *  primary alone (sharing-plan.md Phase 5). */
   docKeys: Map<string, Dek>;
   /** True iff this session was created via signup (we're device 1
    *  and need to seed the doc with built-in lists), or for a freshly
@@ -351,8 +351,8 @@ async function doSignup(
 }
 
 async function persistVault(session: Session): Promise<void> {
-  // Wrap the DEK and stash it in IndexedDB so a reload skips the
-  // password prompt. Failure is non-fatal — the in-memory session is
+  // Wrap every doc's DEK and stash them in IndexedDB so a reload skips
+  // the password prompt. Failure is non-fatal — the in-memory session is
   // still usable; the user just gets bounced back to login on reload.
   try {
     await dekVault.save({
@@ -361,7 +361,8 @@ async function persistVault(session: Session): Promise<void> {
       primaryDocId: session.primaryDocId,
       email: session.email,
       deviceId: session.deviceId,
-      dek: session.dek.clone(),
+      dek: session.dek,
+      docKeys: session.docKeys,
     });
   } catch (e) {
     console.warn("dekVault.save failed; session will not survive reload:", e);

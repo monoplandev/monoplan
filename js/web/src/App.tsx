@@ -65,10 +65,7 @@ export function App(props: {
           primaryDocId: v.primaryDocId,
           deviceId: v.deviceId,
           dek: v.dek,
-          // The vault holds the Home DEK only; other memberships are
-          // re-derivable from it + `GET /api/docs` once the client boots
-          // every doc (sharing-plan.md Phase 5).
-          docKeys: new Map([[v.primaryDocId, v.dek]]),
+          docKeys: v.docKeys,
           freshSignup: false,
         });
         return;
@@ -156,6 +153,7 @@ async function createAnonymousSession(): Promise<Session> {
   // shape authenticated sessions get from signup/login responses.
   const primaryDocId = crypto.randomUUID();
   const dek = Dek.generate();
+  const docKeys = new Map([[primaryDocId, dek]]);
   const session: Session = {
     anonymous: true,
     accountId,
@@ -163,7 +161,7 @@ async function createAnonymousSession(): Promise<Session> {
     email: null,
     deviceId: null,
     dek,
-    docKeys: new Map([[primaryDocId, dek]]),
+    docKeys,
     // Seed the doc on first run via Doc.create(). On reload we read
     // the IndexedDB op log instead.
     freshSignup: true,
@@ -175,7 +173,8 @@ async function createAnonymousSession(): Promise<Session> {
       primaryDocId,
       email: null,
       deviceId: null,
-      dek: dek.clone(),
+      dek,
+      docKeys,
     });
   } catch (e) {
     console.warn("dekVault.save failed for anonymous session:", e);
