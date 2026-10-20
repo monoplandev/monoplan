@@ -12,6 +12,7 @@ import type { ItemView } from "../src/sync/store.ts";
 
 const item = (over: Partial<ItemView>): ItemView => ({
   id: "i1",
+  docId: "doc-1",
   text: "Buy milk",
   notes: "",
   listId: "inbox",

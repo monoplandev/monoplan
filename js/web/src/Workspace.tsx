@@ -898,6 +898,7 @@ export function Workspace(props: {
     const now = Date.now();
     const draftItem: ItemView = {
       id,
+      docId: app.engine.docId(),
       listId,
       text: "",
       notes: "",

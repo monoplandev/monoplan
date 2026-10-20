@@ -90,6 +90,11 @@ export function parsePlaceJson(json: string | undefined | null): Place | undefin
 
 export interface ItemView {
   id: string;
+  /** The doc this item lives in — stamped by the owning `DocApp` at
+   *  projection, never carried on the wire. Every cross-doc lens
+   *  (calendar, Focus, Done) merges `ItemView`s from several apps and
+   *  routes a mutation back to the owner by this field. */
+  docId: string;
   text: string;
   notes: string;
   listId: string;
@@ -481,16 +486,17 @@ interface WorkspaceSnapshotPayload {
   /** `state` crosses the boundary as a wire string; normalize on read so
    *  a newer client's state degrades to `backlog` instead of breaking
    *  the lane partition. */
-  items: (Omit<ItemView, "state"> & { state?: string })[];
+  items: (Omit<ItemView, "state" | "docId"> & { state?: string })[];
 }
 
 function materializeEngineSnapshot(engine: SyncEngine): WorkspaceState {
   const payload = JSON.parse(engine.workspaceSnapshotJson()) as WorkspaceSnapshotPayload;
+  const docId = engine.docId();
   const itemsById: Record<string, ItemView> = {};
   const listOpen: Record<string, string[]> = {};
   let binCount = 0;
   for (const raw of payload.items) {
-    const item: ItemView = { ...raw, state: parseWorkflowState(raw.state) };
+    const item: ItemView = { ...raw, docId, state: parseWorkflowState(raw.state) };
     itemsById[item.id] = item;
     if (isOpen(item)) (listOpen[item.listId] ??= []).push(item.id);
     if (isBinned(item)) binCount++;
@@ -556,6 +562,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     [],
   );
   const search = createSearchEngine(engine);
+  const docId = engine.docId();
   let actionBatchDepth = 0;
   let flushDeferred = false;
   let actionBatchStartVersion = 0;
@@ -674,6 +681,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
         }
         const item: ItemView = {
           id: ev.id,
+          docId,
           listId: ev.listId ?? "",
           text: ev.text ?? "",
           notes: ev.notes ?? "",

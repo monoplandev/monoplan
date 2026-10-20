@@ -24,8 +24,6 @@ function newSearch(): { eng: SyncEngine; search: SearchEngine } {
     "00000000-0000-0000-0000-000000000000",
     Dek.generate(),
     0n,
-    "t",
-    "0",
     new MemEngineStorage() as unknown as EngineStorage,
   );
   return { eng, search: createSearchEngine(eng) };
