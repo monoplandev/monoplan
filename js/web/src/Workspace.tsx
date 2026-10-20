@@ -37,6 +37,7 @@ import plusSvg from "./icons/plus.svg?raw";
 import trashSvg from "./icons/trash.svg?raw";
 import { Board, type BoardImperative } from "./Board.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
+import { NewDocDialog } from "./NewDocDialog.tsx";
 import { FindPalette } from "./FindPalette.tsx";
 import { FindSheet } from "./FindSheet.tsx";
 import type { FindResult } from "./findResults.tsx";
@@ -287,6 +288,8 @@ export function Workspace(props: {
   const [dndItems, setDndItems] = createSignal<ItemView[]>([]);
   const [themePref, setThemePref] = createSignal<ThemePreference>(theme.get());
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  // The "New workspace" dialog; opened from the nav footer's app menu.
+  const [newDocOpen, setNewDocOpen] = createSignal(false);
   const [emptyBinConfirmOpen, setEmptyBinConfirmOpen] = createSignal(false);
   const [findOpen, setFindOpen] = createSignal(false);
   const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
@@ -2554,7 +2557,6 @@ export function Workspace(props: {
         showListCounts={home.state.settings.showListCounts}
         view={view()}
         setView={navigateTo}
-        createDoc={session.session().anonymous ? null : props.createDoc}
         footer={
           <>
             <NavMenu
@@ -2564,6 +2566,7 @@ export function Workspace(props: {
               onOpenSettings={() => setSettingsOpen(true)}
               onOpenShortcuts={() => setShortcutsOpen(true)}
               onSession={session.swapSession}
+              onNewDoc={session.session().anonymous ? null : () => setNewDocOpen(true)}
             />
             <StatusSlot
               app={home}
@@ -2647,6 +2650,12 @@ export function Workspace(props: {
         onShowListCountsChange={(show) => home.setShowListCounts(show)}
         session={session.session()}
         logout={session.logout}
+      />
+      <NewDocDialog
+        open={newDocOpen()}
+        onOpenChange={setNewDocOpen}
+        onCreate={props.createDoc}
+        onCreated={(docId) => navigateTo(docs.listView(docId, "inbox"))}
       />
       <ConfirmDialog
         open={emptyBinConfirmOpen()}

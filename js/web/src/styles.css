@@ -582,16 +582,6 @@ body {
   margin-bottom: 8px;
 }
 
-/* The create-doc row under the last doc section: a muted nav row that
-   opens the name form in place (`NewListForm`). */
-.nav-new-doc {
-  color: var(--text-faint);
-}
-
-.nav-new-doc:hover {
-  color: var(--text-muted);
-}
-
 /* The one square icon button on desktop: the nav footer menu, the list
    header's menu / display options / add, the list-icon picker and the
    task surface's menu / close. Marker
@@ -2148,6 +2138,41 @@ input.task-check:hover {
 
 .confirm-dialog-confirm.destructive:hover {
   filter: brightness(0.96);
+}
+
+.confirm-dialog-confirm.primary {
+  border-color: transparent;
+  background: var(--text);
+  color: var(--bg-elevated);
+  font-weight: 500;
+}
+
+.confirm-dialog-confirm.primary:hover:not(:disabled) {
+  filter: brightness(0.9);
+}
+
+.confirm-dialog-confirm.primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The name field in the "New workspace" dialog (`NewDocDialog`): same
+   shape as the auth form's inputs, full width under the title. */
+.name-dialog-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  font: inherit;
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+.name-dialog-error {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--error-text);
 }
 
 .auth-prerelease-notice {

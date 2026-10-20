@@ -370,17 +370,12 @@ export function Nav(props: {
   showListCounts: boolean;
   view: ViewKey;
   setView: (v: ViewKey) => void;
-  /** Create a doc the account owns and open it (`runtime.createDoc`), or
-   *  null when this session cannot (anonymous: no server to own it). */
-  createDoc: ((name: string) => Promise<string>) | null;
   /** Chrome pinned to the bottom of the sidebar (app menu + account/sync
    *  widget) — see `.nav-footer` in styles.css. */
   footer?: JSX.Element;
 }) {
   const { m } = useAppI18n();
   const [emptyBinConfirmOpen, setEmptyBinConfirmOpen] = createSignal(false);
-  const [addingDoc, setAddingDoc] = createSignal(false);
-  const [docName, setDocName] = createSignal("");
 
   // Match the items list's mobile bump so the drawer's tap targets feel
   // consistent with the main view.
@@ -425,21 +420,6 @@ export function Nav(props: {
     sectionTick();
     revealActiveNav();
   });
-
-  const submitDoc = (e: Event) => {
-    e.preventDefault();
-    const name = docName().trim();
-    const create = props.createDoc;
-    if (!name || !create) return;
-    setDocName("");
-    setAddingDoc(false);
-    void create(name)
-      .then((docId) => props.setView(props.docs.listView(docId, "inbox")))
-      .catch((err) => {
-        console.error("create doc failed:", err);
-        alert(m().nav.createDocFailed);
-      });
-  };
 
   return (
     <nav class="nav">
@@ -536,32 +516,6 @@ export function Nav(props: {
           />
         )}
       </For>
-      <Show when={props.createDoc !== null}>
-        <div class="nav-group nav-group-new-doc">
-          <Show
-            when={addingDoc()}
-            fallback={
-              <button
-                type="button"
-                class="nav-item nav-new-doc"
-                tabIndex={-1}
-                onClick={() => setAddingDoc(true)}
-              >
-                <span class="nav-item-icon" innerHTML={plusSvg} />
-                {m().nav.newDoc}
-              </button>
-            }
-          >
-            <NewListForm
-              name={docName()}
-              setName={setDocName}
-              placeholder={m().nav.newDoc}
-              onSubmit={submitDoc}
-              onDismiss={() => setAddingDoc(false)}
-            />
-          </Show>
-        </div>
-      </Show>
       </div>
       <div class="nav-footer">{props.footer}</div>
       <ConfirmDialog
@@ -951,6 +905,9 @@ export function NavMenu(props: {
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
   onSession: (s: Session) => void;
+  /** Open the "New workspace" dialog, or null when this session can't
+   *  create docs (anonymous) — the item is hidden then. */
+  onNewDoc: (() => void) | null;
 }) {
   const { m } = useAppI18n();
   // Auth dialog opened from the menu's Sign in / Sign up items
@@ -1079,6 +1036,16 @@ export function NavMenu(props: {
               <kbd class="menu-shortcut">⌘⇧Z</kbd>
             </DropdownMenu.Item>
             <DropdownMenu.Separator class="dropdown-menu-separator" />
+            <Show when={props.onNewDoc}>
+              {(onNewDoc) => (
+                <DropdownMenu.Item
+                  class="dropdown-menu-item"
+                  onSelect={() => onNewDoc()()}
+                >
+                  {m().nav.newDoc}
+                </DropdownMenu.Item>
+              )}
+            </Show>
             <DropdownMenu.Item
               class="dropdown-menu-item"
               onSelect={() => downloadJson()}
@@ -1161,8 +1128,6 @@ function NewListForm(props: {
   setName: (v: string) => void;
   onSubmit: (e: Event) => void;
   onDismiss: () => void;
-  /** Defaults to the new-list prompt; the new-doc form passes its own. */
-  placeholder?: string;
 }) {
   const { m } = useAppI18n();
   let inputRef!: HTMLInputElement;
@@ -1173,7 +1138,7 @@ function NewListForm(props: {
         ref={inputRef}
         class="nav-item nav-item-input"
         type="text"
-        placeholder={props.placeholder ?? m().nav.newList}
+        placeholder={m().nav.newList}
         value={props.name}
         onInput={(e) => props.setName(e.currentTarget.value)}
         onBlur={() => {

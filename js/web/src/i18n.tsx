@@ -91,8 +91,12 @@ export type Messages = {
     personal: string;
     /** Heading for a doc that has no name yet. */
     untitledDoc: string;
-    /** The nav's create-doc affordance and its name prompt. */
+    /** The app menu's create-doc item and the dialog it opens. */
     newDoc: string;
+    /** The dialog's name field placeholder. */
+    newDocName: string;
+    /** The dialog's submit button. */
+    createDoc: string;
     /** Context-menu rename on a non-Home doc heading. */
     renameDoc: string;
     createDocFailed: string;
@@ -474,6 +478,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       personal: "Personal",
       untitledDoc: "Espacio sin nombre",
       newDoc: "Nuevo espacio",
+      newDocName: "Nombre del espacio",
+      createDoc: "Crear",
       renameDoc: "Renombrar espacio",
       createDocFailed: "No se pudo crear el espacio",
       connected: "Conectado",
@@ -745,6 +751,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       personal: "Personal",
       untitledDoc: "Untitled workspace",
       newDoc: "New workspace",
+      newDocName: "Workspace name",
+      createDoc: "Create",
       renameDoc: "Rename workspace",
       createDocFailed: "Could not create workspace",
       connected: "Connected",
