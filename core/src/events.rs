@@ -231,5 +231,13 @@ pub enum AppEvent {
         /// default travels on the settings event rather than
         /// `ListDefaultViewChanged`.
         inbox_view: Option<DefaultView>,
+        /// The doc's name, or `None` when unnamed (`spec/sharing-plan.md`).
+        doc_name: Option<String>,
+        /// Doc ids hidden from the merged calendar lens — a personal
+        /// preference only meaningful on the account's Home doc.
+        calendar_hidden_docs: Vec<String>,
+        /// Whether the Done view spans every open doc — personal, Home
+        /// doc only. Default false.
+        done_amalgamate: bool,
     },
 }

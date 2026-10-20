@@ -67,6 +67,7 @@ import { ShortcutsDialog } from "./ShortcutsDialog.tsx";
 import { TaskDialog } from "./TaskDialog.tsx";
 import { Upcoming, type UpcomingImperative } from "./Upcoming.tsx";
 import { useSession } from "./SessionContext.tsx";
+import type { DocsLayer } from "./sync/docs.ts";
 import {
   isBinned,
   isCancelled,
@@ -251,19 +252,38 @@ function DisplayOptionsPopover(props: { children: JSX.Element }) {
 }
 
 export function Workspace(props: {
-  app: DocApp;
+  /** The personal layer over every open doc (`sync/docs.ts`): the doc
+   *  map, routed mutations and the merged lenses. A list view renders
+   *  from its own doc's `DocApp` (`viewApp` below); the cross-doc views
+   *  (Focus, calendar, Done, Bin) render from the layer's merged reads
+   *  and route each row's mutations by `ItemView.docId`. */
+  docs: DocsLayer;
   // View lives in `MainApp` so device writes can persist it alongside
   // the sync frontier in one debounced put. See `currentView` on
   // `DeviceConfig`.
   view: () => ViewKey;
   setView: (v: ViewKey) => void;
+  /** Create a doc the account owns and open it (`runtime.createDoc`). */
+  createDoc: (name: string) => Promise<string>;
 }) {
   const { m, locale } = useAppI18n();
   const session = useSession();
-  const app = props.app;
-  const state = app.state;
+  const docs = props.docs;
+  const home = docs.home;
+  const routed = docs.routed;
   const view = props.view;
   const setView = props.setView;
+  // The doc the current view is scoped to: a list view's own doc, Home
+  // for the lenses. Everything list-shaped (the board, the inline draft,
+  // list rename / icon / archive, the display options) acts on it.
+  const viewDocId = createMemo((): string => docs.viewDocId(view()));
+  const viewApp = createMemo((): DocApp => docs.appForView(view()));
+  // Display label for a doc: Home is "Personal"; others carry their
+  // name, or the untitled fallback.
+  const docLabel = (docId: string): string =>
+    docId === docs.homeDocId
+      ? m().nav.personal
+      : (docs.appOf(docId)?.state.settings.docName ?? m().nav.untitledDoc);
   const [dndItems, setDndItems] = createSignal<ItemView[]>([]);
   const [themePref, setThemePref] = createSignal<ThemePreference>(theme.get());
   const [settingsOpen, setSettingsOpen] = createSignal(false);
@@ -288,7 +308,8 @@ export function Workspace(props: {
   const [pendingItemId, setPendingItemId] = createSignal<string | null>(null);
   // Identity for a view, for equality checks (`ViewKey` objects are
   // recreated freely).
-  const viewKey = (v: ViewKey) => (v.kind === "list" ? `list:${v.id}` : v.kind);
+  const viewKey = (v: ViewKey) =>
+    v.kind === "list" ? `list:${docs.viewDocId(v)}:${v.id}` : v.kind;
   // The view the entered item was entered under. Navigating to another
   // view closes the item (the view-change effect below); a route that
   // reveals + enters in one batch has already switched the view by the
@@ -325,6 +346,8 @@ export function Workspace(props: {
   // null when not capturing. Mutually exclusive with `openItemId`.
   const [newItemTarget, setNewItemTarget] = createSignal<{
     listId: string;
+    /** The doc the target list lives in. */
+    docId: string;
     /** Which open board lane to capture into (`backlog` is also the list
      *  view's default). */
     state: WorkflowState;
@@ -368,21 +391,35 @@ export function Workspace(props: {
   const [viewOverrides, setViewOverrides] = createSignal<Record<string, string>>(
     loadViewPrefs(),
   );
+  // Override-map key: a user list id is unique across docs, but every
+  // doc has an `inbox`, so a non-Home Inbox is keyed by its doc too.
+  const listKey = (docId: string, listId: string): string =>
+    docId === docs.homeDocId ? listId : `${docId}/${listId}`;
   // The list's saved default view, or null when none is saved. Inbox has
   // no ListMeta row, so its default lives in the doc-level settings.
-  const savedView = (listId: string): ViewSpec | null =>
-    parseView(
-      listId === "inbox"
-        ? state.settings.inboxView
-        : state.listsById[listId]?.defaultView,
+  const savedViewIn = (docId: string, listId: string): ViewSpec | null => {
+    const st = docs.appOf(docId)?.state;
+    return parseView(
+      listId === "inbox" ? st?.settings.inboxView : st?.listsById[listId]?.defaultView,
     );
+  };
+  const savedView = (listId: string): ViewSpec | null => savedViewIn(viewDocId(), listId);
   // What this client actually renders: local override, else the synced
   // default, else the built-in flat list.
-  const listView = (listId: string): ViewSpec =>
-    parseView(viewOverrides()[listId]) ?? savedView(listId) ?? LIST_VIEW;
+  const listViewIn = (docId: string, listId: string): ViewSpec =>
+    parseView(viewOverrides()[listKey(docId, listId)]) ??
+    savedViewIn(docId, listId) ??
+    LIST_VIEW;
+  const listView = (listId: string): ViewSpec => listViewIn(viewDocId(), listId);
   const boardListId = createMemo((): string | null => {
     const v = view();
     return v.kind === "list" && listView(v.id).board ? v.id : null;
+  });
+  // Remount key for the board: a list id is unique across docs except
+  // the reserved `inbox`, so the doc is part of it.
+  const boardKey = createMemo((): string | null => {
+    const id = boardListId();
+    return id === null ? null : `${viewDocId()}/${id}`;
   });
   // The list currently on screen (board or flat), or null in Focus /
   // Done / Bin — the view-mode popover's subject.
@@ -409,8 +446,9 @@ export function Workspace(props: {
   // client keeps following the default if another device changes it.
   const setLocalView = (listId: string, next: ViewSpec) => {
     const map = { ...viewOverrides() };
-    if (viewsEqual(next, savedView(listId) ?? LIST_VIEW)) delete map[listId];
-    else map[listId] = encodeView(next);
+    const key = listKey(viewDocId(), listId);
+    if (viewsEqual(next, savedView(listId) ?? LIST_VIEW)) delete map[key];
+    else map[key] = encodeView(next);
     putViewOverrides(map);
   };
   const toggleBoard = (listId: string) => {
@@ -450,11 +488,12 @@ export function Workspace(props: {
     };
     const listId = boardListId();
     if (listId === null) return counts;
-    for (const id of state.listOpen[listId] ?? []) {
-      const it = state.itemsById[id];
+    const st = viewApp().state;
+    for (const id of st.listOpen[listId] ?? []) {
+      const it = st.itemsById[id];
       if (it) counts[it.state]++;
     }
-    for (const it of Object.values(state.itemsById)) {
+    for (const it of Object.values(st.itemsById)) {
       if (it.listId === listId && isClosed(it) && !isBinned(it)) counts.done++;
     }
     return counts;
@@ -468,9 +507,9 @@ export function Workspace(props: {
   // every device, and drop the local override so this client follows the
   // default it just set.
   const saveViewAsDefault = (listId: string) => {
-    app.setDefaultView(listId, encodeView(listView(listId)));
+    viewApp().setDefaultView(listId, encodeView(listView(listId)));
     const map = { ...viewOverrides() };
-    delete map[listId];
+    delete map[listKey(viewDocId(), listId)];
     putViewOverrides(map);
   };
   // Client-local per-list "show state" flag for the flat list view.
@@ -601,17 +640,21 @@ export function Workspace(props: {
     v.kind === "list"
       ? r.listId === v.id
       : v.kind === "focus" && r.focusIndex !== undefined;
+  // Captures for the view: the list's own doc, or Home for Focus (the
+  // only store that records a Focus slot; a foreign row ticked in Focus
+  // leaves without a linger).
+  const recentDoneFor = (v: ViewKey): readonly RecentDoneEntry[] =>
+    v.kind === "focus" ? home.recentDone() : viewApp().recentDone();
   const lingerChain = createMemo(
     (): { ids: Set<string>; expiry: number } => {
       const v = view();
       if (v.kind !== "list" && v.kind !== "focus") {
         return { ids: new Set(), expiry: -Infinity };
       }
-      const done = app
-        .recentDone()
+      const done = recentDoneFor(v)
         .filter((r) => {
           if (!lingerMatches(r, v)) return false;
-          const it = state.itemsById[r.id];
+          const it = docs.getItem(r.id);
           return it !== undefined && isClosed(it) && !isBinned(it);
         })
         .sort((a, b) => b.doneAt - a.doneAt);
@@ -655,10 +698,10 @@ export function Workspace(props: {
     const { ids: lingerIds, expiry } = lingerChain();
     if (Date.now() >= expiry) return;
     const captured: Array<{ index: number; value: ItemView }> = [];
-    for (const r of app
-      .recentDone()
-      .filter((r) => lingerMatches(r, v) && lingerIds.has(r.id))) {
-      const it = state.itemsById[r.id];
+    for (const r of recentDoneFor(v).filter(
+      (r) => lingerMatches(r, v) && lingerIds.has(r.id),
+    )) {
+      const it = docs.getItem(r.id);
       if (!it || !isClosed(it) || isBinned(it)) continue;
       captured.push({
         index: v.kind === "focus" ? (r.focusIndex ?? 0) : r.index,
@@ -673,7 +716,7 @@ export function Workspace(props: {
   // the survivor after a removal from that order.
   const upcomingGroups = createMemo((): DayGroup[] =>
     groupByDay(
-      Object.values(state.itemsById),
+      docs.calendarItems(),
       todayStamp(nowMs()),
       {
         overdue: m().deadline.overdue,
@@ -687,36 +730,32 @@ export function Workspace(props: {
   const items = createMemo((): ItemView[] => {
     const v = view();
     if (v.kind === "list") {
+      const st = viewApp().state;
       const out: ItemView[] = [];
-      for (const id of state.listOpen[v.id] ?? []) {
-        const it = state.itemsById[id];
+      for (const id of st.listOpen[v.id] ?? []) {
+        const it = st.itemsById[id];
         if (it) out.push(it);
       }
       overlayLinger(out, v);
       return out;
     }
     if (v.kind === "focus") {
-      // The Focus lens: visible refs in curated order (spec/focus.md).
-      // `focusOrder` is already Open-filtered + deduped by the engine; just
-      // resolve each id to its item. Done auto-removes the ref, so the
-      // linger overlay is the only thing keeping a just-completed row
-      // visible for the strike-through beat.
-      const out: ItemView[] = [];
-      for (const id of state.focusOrder) {
-        const it = state.itemsById[id];
-        if (it) out.push(it);
-      }
+      // The Focus lens: Home's entries in curated order, foreign refs
+      // resolved against their docs (spec/focus.md), Open-filtered and
+      // deduped by the layer. Done auto-removes the ref, so the linger
+      // overlay is the only thing keeping a just-completed row visible
+      // for the strike-through beat.
+      const out = [...docs.focusItems()];
       overlayLinger(out, v);
       return out;
     }
     if (v.kind === "done") {
       // Done view holds the closed items (done and cancelled) and
       // excludes binned ones: a closed-then-binned item lives in the Bin
-      // (see context menu — Bin owns the next transition). Sorted by the
+      // (see context menu — Bin owns the next transition). Home's own
+      // by default, every doc's when amalgamated; sorted by the
       // workflow register's transition time desc.
-      return Object.values(state.itemsById)
-        .filter((it) => isClosed(it) && !isBinned(it))
-        .sort((a, b) => b.lifecycleAt - a.lifecycleAt);
+      return docs.doneItems();
     }
     // Upcoming renders its own day-grouped surface (`Upcoming.tsx`), not
     // the flat listbox; its rows in agenda order are what the list
@@ -724,33 +763,38 @@ export function Workspace(props: {
     if (v.kind === "upcoming") {
       return upcomingGroups().flatMap((g) => g.rows.map((r) => r.item));
     }
-    return Object.values(state.itemsById)
-      .filter(isBinned)
-      .sort((a, b) => (b.binnedAt ?? 0) - (a.binnedAt ?? 0));
+    // The Bin spans every doc: a binned row must stay reachable.
+    return docs.binnedItems();
   });
 
   // Every user list in CRDT order — archived included. Use this for
   // name/title resolution, search provenance, and archived-list views;
   // the active/archived splits below feed the nav and destination
   // pickers (`spec/data-model.md` "Archived lists").
-  const allLists = createMemo((): ListView[] =>
-    state.listsOrder
-      .map((id) => state.listsById[id])
-      .filter((l): l is ListView => l !== undefined),
-  );
-  const activeLists = createMemo((): ListView[] =>
-    allLists().filter((l) => l.archivedAt == null),
-  );
+  const allListsOf = (docId: string): ListView[] => {
+    const st = docs.appOf(docId)?.state;
+    if (!st) return [];
+    return st.listsOrder
+      .map((id) => st.listsById[id])
+      .filter((l): l is ListView => l !== undefined);
+  };
+  const activeListsOf = (docId: string): ListView[] =>
+    allListsOf(docId).filter((l) => l.archivedAt == null);
+  // The current view's doc's lists (the header title, the task surface's
+  // move destinations for a capture here).
+  const allLists = createMemo((): ListView[] => allListsOf(viewDocId()));
 
-  // Per-list open-item counts (Backlog + Live) for the nav badge, read
-  // straight off the per-list projection arrays — no item scan. (The bin
-  // badge reads the store's maintained `state.binCount` directly.) Home's
-  // count always renders; non-Home lists are gated by the doc-level
-  // `showListCounts` flag.
+  // Per-list open-item counts (Backlog + Live) for the mobile Find sheet,
+  // read straight off every doc's per-list projection arrays — no item
+  // scan. User list ids are unique across docs; the reserved `inbox` is
+  // Home's (the sheet's Inbox row is Home's).
   const openCountsByList = createMemo((): Record<string, number> => {
     const counts: Record<string, number> = {};
-    for (const [listId, ids] of Object.entries(state.listOpen)) {
-      counts[listId] = ids.length;
+    for (const d of docs.docs()) {
+      for (const [listId, ids] of Object.entries(d.app.state.listOpen)) {
+        if (listId === "inbox" && !d.home) continue;
+        counts[listId] = ids.length;
+      }
     }
     return counts;
   });
@@ -760,12 +804,12 @@ export function Workspace(props: {
   // items, as the Upcoming view itself does; the shared `nowMs` tick rolls
   // it over at midnight.
   const upcomingBadge = createMemo(() =>
-    attentionBadge(Object.values(state.itemsById), todayStamp(nowMs())),
+    attentionBadge(docs.calendarItems(), todayStamp(nowMs())),
   );
 
   const dndRevision = createMemo(() => {
     const v = view();
-    return `${v.kind}:${v.kind === "list" ? v.id : "-"}`;
+    return `${v.kind}:${v.kind === "list" ? `${docs.viewDocId(v)}/${v.id}` : "-"}`;
   });
 
   // Id of the currently-viewed list iff it can be renamed. Only
@@ -782,25 +826,27 @@ export function Workspace(props: {
   const archivedViewListId = createMemo((): string | null => {
     const v = view();
     if (v.kind !== "list") return null;
-    return state.listsById[v.id]?.archivedAt != null ? v.id : null;
+    return viewApp().state.listsById[v.id]?.archivedAt != null ? v.id : null;
   });
 
   // Display label for any list id, matching the header/nav rules: the
   // reserved `inbox` and `events` carry localized built-in labels, others
-  // use the stored name. Used by Done-view rows to badge each item with
-  // its origin list.
-  const listLabel = (listId: string): string =>
+  // use the stored name, looked up in the item's doc (`docId`, else the
+  // view's). Used by Done-view rows to badge each item with its origin
+  // list.
+  const listLabel = (listId: string, docId?: string): string =>
     listId === "inbox"
       ? m().nav.inbox
       : listId === LIST_EVENTS
         ? m().nav.events
-        : (state.listsById[listId]?.name ?? listId);
+        : (docs.listOf(docId ?? viewDocId(), listId)?.name ?? listId);
 
-  // The list an item is filed under, for writes that need a real home: a
-  // reserved list or a ListMeta row that still exists, else the inbox.
-  const homeListId = (listId: string | undefined): string =>
+  // The list an item is filed under in its doc, for writes that need a
+  // real home: a reserved list or a ListMeta row that still exists, else
+  // that doc's inbox.
+  const homeListId = (docId: string, listId: string | undefined): string =>
     listId !== undefined &&
-    (listId === LIST_EVENTS || app.state.listsById[listId] !== undefined)
+    (listId === LIST_EVENTS || docs.listOf(docId, listId) !== undefined)
       ? listId
       : "inbox";
 
@@ -821,21 +867,25 @@ export function Workspace(props: {
     if (op.type !== "move") return;
     const v = view();
     if (v.kind === "focus") {
-      // Drag-to-reorder within the Focus lens maps to `moveInFocus`, which
-      // reorders the FocusRef in the curated (visible) order.
-      const ids = items().map((it) => it.id);
+      // Drag-to-reorder within the Focus lens maps to `moveInFocus`,
+      // whose indices address Home's full entry list (foreign and
+      // not-yet-pruned entries included, spec/focus.md) — so the plan is
+      // made over that list, not the visible rows; the dragged keys and
+      // the drop neighbour are entries too.
+      const ids = home.state.focusEntries.map((e) => e.itemId);
       const moves = planReorderMoves(
         ids,
         op.keys.map(String),
         op.beforeKey === null ? null : String(op.beforeKey),
       );
       if (moves.length === 0) return;
-      app.withActionBatch(() => {
-        for (const move of moves) app.moveInFocus(move.id, move.index);
+      home.withActionBatch(() => {
+        for (const move of moves) home.moveInFocus(move.id, move.index);
       });
       return;
     }
     if (v.kind !== "list") return;
+    const vApp = viewApp();
     const ids = items().map((it) => it.id);
     const moves = planReorderMoves(
       ids,
@@ -843,9 +893,9 @@ export function Workspace(props: {
       op.beforeKey === null ? null : String(op.beforeKey),
     );
     if (moves.length === 0) return;
-    app.withActionBatch(() => {
+    vApp.withActionBatch(() => {
       for (const move of moves) {
-        app.moveItem(move.id, v.id, move.index);
+        vApp.moveItem(move.id, v.id, move.index);
       }
     });
   };
@@ -854,21 +904,28 @@ export function Workspace(props: {
   // inbox (Focus owns no items of its own — it's a lens) and pinned with a
   // FocusRef at a contiguous run starting at visible slot `atIndex`, all in
   // one undo step. Returns the new item ids.
-  const captureToFocus = (texts: string[], atIndex: number): string[] =>
-    app.withActionBatch(() => {
-      // Append to the inbox (its open length is the append slot — a large
-      // sentinel would overflow the wasm `usize`); the item's inbox position
-      // is independent of its Focus position, fixed explicitly below.
-      const inboxLen = app.state.listOpen["inbox"]?.length ?? 0;
-      const ids = app.addItemsAt("inbox", texts, inboxLen);
-      ids.forEach((id, i) => app.addToFocus(id, atIndex + i));
+  const captureToFocus = (texts: string[], atIndex: number): string[] => {
+    // Focus slots are visible positions; the core addresses entries.
+    // Resolve once, before the batch (the entry list only updates on
+    // flush), and lay the run out from there.
+    const entryAt = docs.focusEntryIndex(atIndex);
+    return home.withActionBatch(() => {
+      // Append to Home's inbox (its open length is the append slot — a
+      // large sentinel would overflow the wasm `usize`); the item's inbox
+      // position is independent of its Focus position, fixed explicitly
+      // below.
+      const inboxLen = home.state.listOpen["inbox"]?.length ?? 0;
+      const ids = home.addItemsAt("inbox", texts, inboxLen);
+      ids.forEach((id, i) => home.addToFocus(id, entryAt + i));
       return ids;
     });
+  };
 
-  // The calendar's Add: a new event, all-day on today until the user
-  // picks otherwise.
+  // The calendar's Add: a new event in Home's events list, all-day on
+  // today until the user picks otherwise.
   const newEventTarget = () => ({
     listId: LIST_EVENTS,
+    docId: docs.homeDocId,
     state: "backlog" as const,
     when: todayStamp(nowMs()),
   });
@@ -898,7 +955,7 @@ export function Workspace(props: {
     const now = Date.now();
     const draftItem: ItemView = {
       id,
-      docId: app.engine.docId(),
+      docId: isFocus ? docs.homeDocId : viewDocId(),
       listId,
       text: "",
       notes: "",
@@ -939,7 +996,7 @@ export function Workspace(props: {
     }
     const newId = d.focus
       ? captureToFocus([text], d.insertIndex)[0]
-      : app.addItemAt(d.listId, text, d.insertIndex);
+      : viewApp().addItemAt(d.listId, text, d.insertIndex);
     // Notes are no longer captured inline — a new item starts noteless and
     // the user adds notes later by opening it in the detail dialog.
     // The store dispatch that adds the new item runs before this
@@ -983,20 +1040,25 @@ export function Workspace(props: {
     if (entries.length === 0) return;
     e.preventDefault();
     const texts = entries.map((c) => c.text);
+    // The doc the paste lands in: Home for a Focus capture, else the
+    // list's own.
+    const pasteApp = v.kind === "focus" ? home : viewApp();
 
     // Fill each fresh item in from its clip entry. Items are created as
     // Backlog; a copied open state is re-applied in the same undo step,
     // which keeps the just-assigned Open position (spec/board.md). A closed
     // state is never carried: a pasted item is a fresh open task, as with Cmd+D.
     // `lane` overrides the copied state wholesale (the board's anchor).
+    // Written through `target` directly: inside the batch the store has
+    // not seen the new ids yet, so the routed layer could not place them.
     const fillFromClip = (ids: string[], lane?: WorkflowState): void => {
       ids.forEach((id, i) => {
         const c = entries[i];
         if (!c) return;
-        copyItemDetails(id, c);
+        copyItemDetails(pasteApp, id, c);
         const st =
           lane ?? (structured && !isClosedState(c.state) ? c.state : "backlog");
-        if (st !== "backlog") app.setLifecycle(id, st);
+        if (st !== "backlog") pasteApp.setLifecycle(id, st);
       });
     };
 
@@ -1007,15 +1069,15 @@ export function Workspace(props: {
     // its copied lane (or Backlog for plain text).
     const boardId = boardListId();
     if (boardId !== null) {
-      const linear = state.listOpen[boardId] ?? [];
+      const linear = pasteApp.state.listOpen[boardId] ?? [];
       const selectedSlots = (actionSelection()?.getSelectedKeys() ?? [])
         .map((k) => linear.indexOf(String(k)))
         .filter((idx) => idx >= 0);
       const anchorIdx =
         selectedSlots.length === 0 ? -1 : Math.max(...selectedSlots);
-      const anchor = anchorIdx >= 0 ? app.getItem(linear[anchorIdx]) : undefined;
-      const boardIds = app.withActionBatch(() => {
-        const created = app.addItemsAt(
+      const anchor = anchorIdx >= 0 ? pasteApp.getItem(linear[anchorIdx]) : undefined;
+      const boardIds = pasteApp.withActionBatch(() => {
+        const created = pasteApp.addItemsAt(
           boardId,
           texts,
           anchorIdx >= 0 ? anchorIdx + 1 : linear.length,
@@ -1037,11 +1099,11 @@ export function Workspace(props: {
       .filter((idx) => idx >= 0);
     const insertAt =
       selectedHere.length === 0 ? visible.length : Math.max(...selectedHere) + 1;
-    const ids = app.withActionBatch(() => {
+    const ids = pasteApp.withActionBatch(() => {
       const created =
         v.kind === "focus"
           ? captureToFocus(texts, insertAt)
-          : app.addItemsAt(v.id, texts, insertAt);
+          : pasteApp.addItemsAt(v.id, texts, insertAt);
       fillFromClip(created);
       return created;
     });
@@ -1065,7 +1127,7 @@ export function Workspace(props: {
   const withBoardDone = (visibleSet: Set<string>): Set<string> => {
     const boardId = boardListId();
     if (boardId !== null) {
-      for (const it of Object.values(state.itemsById)) {
+      for (const it of Object.values(viewApp().state.itemsById)) {
         if (it.listId === boardId && isClosed(it) && !isBinned(it)) {
           visibleSet.add(it.id);
         }
@@ -1137,8 +1199,8 @@ export function Workspace(props: {
       items().map((it) => it.id),
       new Set(ids),
     );
-    if (v.kind === "bin") app.deleteBinnedMany(ids);
-    else app.setBinnedMany(ids, true);
+    if (v.kind === "bin") routed.deleteBinnedMany(ids);
+    else routed.setBinnedMany(ids, true);
     selectSurvivor(sel, nextId);
   };
 
@@ -1159,13 +1221,13 @@ export function Workspace(props: {
   const allClosedIds = (ids: string[]): boolean =>
     ids.length > 0 &&
     ids.every((id) => {
-      const it = app.getItem(id);
+      const it = docs.getItem(id);
       return it !== undefined && isClosed(it);
     });
   const allCancelledIds = (ids: string[]): boolean =>
     ids.length > 0 &&
     ids.every((id) => {
-      const it = app.getItem(id);
+      const it = docs.getItem(id);
       return it !== undefined && isCancelled(it);
     });
 
@@ -1176,8 +1238,8 @@ export function Workspace(props: {
   const toggleDoneIds = (ids: string[]) => {
     if (ids.length === 0) return;
     const allClosed = allClosedIds(ids);
-    if (allClosed && view().kind === "focus") app.undoneIntoFocus(ids);
-    else app.setDoneMany(ids, !allClosed);
+    if (allClosed && view().kind === "focus") routed.undoneIntoFocus(ids);
+    else routed.setDoneMany(ids, !allClosed);
   };
 
   // Toggle cancelled on `ids`: any not-cancelled → cancel all; only
@@ -1187,10 +1249,10 @@ export function Workspace(props: {
   const toggleCancelledIds = (ids: string[]) => {
     if (ids.length === 0) return;
     if (allCancelledIds(ids)) {
-      if (view().kind === "focus") app.undoneIntoFocus(ids);
-      else app.setDoneMany(ids, false);
+      if (view().kind === "focus") routed.undoneIntoFocus(ids);
+      else routed.setDoneMany(ids, false);
     } else {
-      app.setLifecycleMany(ids, "cancelled");
+      routed.setLifecycleMany(ids, "cancelled");
     }
   };
 
@@ -1222,11 +1284,8 @@ export function Workspace(props: {
   onGlobalKey(onToggleCancelKey);
 
   // Every id is in the Focus lens. False for an empty set.
-  const allFocusedIds = (ids: string[]): boolean => {
-    if (ids.length === 0) return false;
-    const focusedSet = new Set(app.state.focusOrder);
-    return ids.every((id) => focusedSet.has(id));
-  };
+  const allFocusedIds = (ids: string[]): boolean =>
+    ids.length > 0 && ids.every((id) => docs.isFocused(id));
 
   // Toggle Focus on `ids`. Direction follows the group like toggle-done:
   // any not-focused → add all (the core skips ids that are already
@@ -1234,8 +1293,8 @@ export function Workspace(props: {
   // Focus lens. Shared by `f` and the side panel's multi-select actions.
   const toggleFocusIds = (ids: string[]) => {
     if (ids.length === 0) return;
-    if (allFocusedIds(ids)) app.removeFromFocusMany(ids);
-    else app.addToFocusMany(ids);
+    if (allFocusedIds(ids)) routed.removeFromFocusMany(ids);
+    else routed.addToFocusMany(ids);
   };
 
   // f: toggle Focus on the current selection. Mirrors the row context
@@ -1268,21 +1327,29 @@ export function Workspace(props: {
     if (ids.length > 0) setMoveIds(ids);
   };
 
+  // The doc a move acts in: the doc of the rows being moved (a cross-doc
+  // move is not a thing yet, `spec/sharing-plan.md`; a mixed selection
+  // in a lens moves only the rows of the first row's doc), else the
+  // view's.
+  const moveDocId = (): string => {
+    const first = moveIds()?.[0];
+    return (first !== undefined ? docs.docIdOf(first) : undefined) ?? viewDocId();
+  };
   // The list the move palette annotates as "Current": only the list /
   // board views have one — in the cross-list views (Focus / Done / Bin)
   // the acted-on rows may come from anywhere.
   const moveCurrentId = () => {
     const v = view();
-    return v.kind === "list" ? v.id : null;
+    return v.kind === "list" && viewDocId() === moveDocId() ? v.id : null;
   };
 
-  // Move destinations: Inbox, Events (moving there makes an item an
-  // event, `spec/events-plan.md`), then every active user list — archived
-  // lists are not offered, matching the task dialog's picker.
+  // Move destinations in that doc: Inbox, Events (moving there makes an
+  // item an event, `spec/events-plan.md`), then every active user list —
+  // archived lists are not offered, matching the task dialog's picker.
   const moveListOptions = createMemo<ListOption[]>(() => [
     { id: "inbox", name: m().nav.inbox },
     { id: LIST_EVENTS, name: m().nav.events },
-    ...activeLists().map((l) => ({ id: l.id, name: l.name, icon: l.icon })),
+    ...activeListsOf(moveDocId()).map((l) => ({ id: l.id, name: l.name, icon: l.icon })),
   ]);
 
   // Commit a palette pick: mirrors the drag-into-nav drop above — un-bin
@@ -1291,19 +1358,24 @@ export function Workspace(props: {
   // items stay Done and land in the target's Done lane (`spec/board.md`).
   // Picking the view's own list is a no-op (not a reorder-to-top
   // surprise), matching the task dialog's picker.
-  const moveBlockToList = (ids: readonly string[], targetListId: string) => {
+  const moveBlockToList = (sourceIds: readonly string[], targetListId: string) => {
     const v = view();
-    if (v.kind === "list" && v.id === targetListId) return;
+    const mApp = docs.appOf(moveDocId());
+    if (!mApp) return;
+    if (v.kind === "list" && v.id === targetListId && viewDocId() === mApp.docId) return;
+    // Only the rows of the palette's doc move; the rest stay put.
+    const ids = sourceIds.filter((id) => mApp.getItem(id) !== undefined);
+    if (ids.length === 0) return;
     const toUnbin = ids.filter((id) => {
-      const it = app.getItem(id);
+      const it = mApp.getItem(id);
       return it !== undefined && isBinned(it);
     });
     const sel = actionSelection();
     const beforeIds = items().map((it) => it.id);
-    app.withActionBatch(() => {
-      if (toUnbin.length > 0) app.setBinnedMany(toUnbin, false);
+    mApp.withActionBatch(() => {
+      if (toUnbin.length > 0) mApp.setBinnedMany(toUnbin, false);
       for (const [i, id] of ids.entries()) {
-        app.moveItem(id, targetListId, i);
+        mApp.moveItem(id, targetListId, i);
       }
     });
     // Where the moved rows stay in view (Focus and Done are cross-list
@@ -1321,7 +1393,7 @@ export function Workspace(props: {
     // as Set date… does, rather than leave it in Unscheduled unasked. A
     // block just moves; its undated rows land in Unscheduled.
     if (targetListId === LIST_EVENTS && ids.length === 1) {
-      const it = app.getItem(ids[0]!);
+      const it = mApp.getItem(ids[0]!);
       if (it && isOpen(it) && !it.when) openItemWhen(it.id);
     }
   };
@@ -1346,7 +1418,10 @@ export function Workspace(props: {
   // A clone is a full copy, not just the title: carry the notes and both
   // dates across. Each is a no-op when the source lacks it, so the batch
   // stays a single undo step either way.
+  // Written through the creating doc's own app: inside a batch the store
+  // has not seen the new id yet, so the routed layer could not place it.
   const copyItemDetails = (
+    target: DocApp,
     id: string,
     src: {
       notes?: string;
@@ -1356,11 +1431,11 @@ export function Workspace(props: {
       place?: Place;
     },
   ): void => {
-    if (src.notes) app.setItemNotes(id, src.notes);
-    if (src.deadline) app.setItemDeadline(id, src.deadline);
-    if (src.when) app.setItemWhen(id, src.when);
-    if (src.when && src.duration) app.setItemDuration(id, src.duration);
-    if (src.place) app.setItemPlace(id, src.place);
+    if (src.notes) target.setItemNotes(id, src.notes);
+    if (src.deadline) target.setItemDeadline(id, src.deadline);
+    if (src.when) target.setItemWhen(id, src.when);
+    if (src.when && src.duration) target.setItemDuration(id, src.duration);
+    if (src.place) target.setItemPlace(id, src.place);
   };
 
   const duplicateBlock = (sourceIds: readonly string[]): void => {
@@ -1386,12 +1461,15 @@ export function Workspace(props: {
         place: Place | undefined;
         state: WorkflowState;
         listId: string;
+        /** The source's doc: the clone is created there. */
+        app: DocApp;
       }[] = [];
       visible.forEach((id, idx) => {
         if (!sourceSet.has(id)) return;
-        const it = app.getItem(id);
-        if (!it || !isOpen(it)) return;
-        const listId = homeListId(it.listId);
+        const it = docs.getItem(id);
+        const sApp = it ? docs.appOf(it.docId) : undefined;
+        if (!it || !sApp || !isOpen(it)) return;
+        const listId = homeListId(it.docId, it.listId);
         sources.push({
           id,
           idx,
@@ -1403,28 +1481,37 @@ export function Workspace(props: {
           place: it.place,
           state: it.state,
           listId,
+          app: sApp,
         });
       });
       if (sources.length === 0) return;
       const insertAt = sources[sources.length - 1].idx + 1;
+      // Focus slots are visible positions; the core addresses Home's
+      // entries. Resolve once before the batch (entries only update on
+      // flush) and lay the block out from there.
+      const entryAt = pinToFocus ? docs.focusEntryIndex(insertAt) : 0;
       // `state.listOpen` doesn't update until the batch flushes, so track
       // each touched list's Open order locally to keep the slots right when
-      // several sources share a list.
+      // several sources share a list (keyed by doc too: every doc has an
+      // `inbox`).
       const openOrder: Record<string, string[]> = {};
-      const newIds = app.withActionBatch(() => {
+      const newIds = routed.withActionBatch(() => {
         const created: string[] = [];
         sources.forEach((s, i) => {
-          const order = (openOrder[s.listId] ??= [
-            ...(app.state.listOpen[s.listId] ?? []),
+          const order = (openOrder[`${s.app.docId}/${s.listId}`] ??= [
+            ...(s.app.state.listOpen[s.listId] ?? []),
           ]);
           // Source missing from its own list's Open order (the inbox
           // fallback above, or a stale projection) — land the clone on top.
           const at = order.indexOf(s.id) + 1;
-          const id = app.addItemAt(s.listId, s.text, at);
+          const id = s.app.addItemAt(s.listId, s.text, at);
           order.splice(at, 0, id);
-          copyItemDetails(id, s);
-          if (s.state !== "backlog") app.setLifecycle(id, s.state);
-          if (pinToFocus) app.addToFocus(id, insertAt + i);
+          copyItemDetails(s.app, id, s);
+          if (s.state !== "backlog") s.app.setLifecycle(id, s.state);
+          if (pinToFocus) {
+            if (s.app === home) home.addToFocus(id, entryAt + i);
+            else home.addForeignToFocus(s.app.docId, id, entryAt + i);
+          }
           created.push(id);
         });
         return created;
@@ -1438,6 +1525,7 @@ export function Workspace(props: {
       return;
     }
     if (v.kind !== "list") return;
+    const vApp = viewApp();
     const visible = items().map((it) => it.id);
     const sourceSet = new Set(sourceIds);
     // Clones inherit the source's board lane: a dupe of an In Progress
@@ -1454,7 +1542,7 @@ export function Workspace(props: {
     }[] = [];
     visible.forEach((id, idx) => {
       if (!sourceSet.has(id)) return;
-      const it = app.getItem(id);
+      const it = vApp.getItem(id);
       if (!it || !isOpen(it)) return;
       sourcesInOrder.push({
         idx,
@@ -1473,13 +1561,13 @@ export function Workspace(props: {
     // Create the block (as Backlog), then flip each clone to its source's
     // lane in the same undo step. The state flip keeps the clone's
     // just-assigned Open position (spec/board.md).
-    const newIds = app.withActionBatch(() => {
-      const ids = app.addItemsAt(v.id, texts, insertAt);
+    const newIds = vApp.withActionBatch(() => {
+      const ids = vApp.addItemsAt(v.id, texts, insertAt);
       ids.forEach((id, i) => {
         const src = sourcesInOrder[i];
         if (!src) return;
-        copyItemDetails(id, src);
-        if (src.state !== "backlog") app.setLifecycle(id, src.state);
+        copyItemDetails(vApp, id, src);
+        if (src.state !== "backlog") vApp.setLifecycle(id, src.state);
       });
       return ids;
     });
@@ -1513,12 +1601,12 @@ export function Workspace(props: {
     const inOrder: ItemView[] = [];
     visible.forEach((id) => {
       if (!sourceSet.has(id)) return;
-      const it = app.getItem(id);
+      const it = docs.getItem(id);
       if (it) inOrder.push(it);
     });
     if (inOrder.length === 0) {
       for (const id of sourceIds) {
-        const it = app.getItem(id);
+        const it = docs.getItem(id);
         if (it) inOrder.push(it);
       }
     }
@@ -1638,7 +1726,7 @@ export function Workspace(props: {
     if (e.key !== "z" && e.key !== "Z") return;
     if (!(e.metaKey || e.ctrlKey)) return;
     if (e.altKey) return;
-    const did = e.shiftKey ? app.redo() : app.undo();
+    const did = e.shiftKey ? docs.redo() : docs.undo();
     if (did) e.preventDefault();
   };
   onGlobalKey(onUndoRedoKey);
@@ -1701,14 +1789,16 @@ export function Workspace(props: {
     const boardId = boardListId();
     if (boardId !== null) {
       e.preventDefault();
+      const vApp = viewApp();
       const top = actionSelection()?.getSelectionTop() ?? null;
-      const anchor = top !== null ? app.getItem(String(top)) : undefined;
+      const anchor = top !== null ? vApp.getItem(String(top)) : undefined;
       if (anchor && isOpen(anchor)) {
         // Below the selected card, in the selected card's lane.
-        const linear = app.state.listOpen[boardId] ?? [];
+        const linear = vApp.state.listOpen[boardId] ?? [];
         const at = linear.indexOf(anchor.id);
         setNewItemTarget({
           listId: boardId,
+          docId: vApp.docId,
           state: anchor.state,
           index: at >= 0 ? at + 1 : 0,
         });
@@ -1716,6 +1806,7 @@ export function Workspace(props: {
         // Nothing selected: top of the first visible open lane.
         setNewItemTarget({
           listId: boardId,
+          docId: vApp.docId,
           state: defaultCaptureLane(boardId),
           index: 0,
         });
@@ -1738,14 +1829,16 @@ export function Workspace(props: {
     if (e.key !== "[" && e.key !== "]") return;
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
     // Sidebar order: the fixed views (Bin only while it has a row), then
-    // Inbox at the head of the lists group, then the user lists.
+    // each doc's section (Home first): its Inbox, then its user lists.
     const seq: ViewKey[] = [
       { kind: "focus" },
       { kind: "upcoming" },
       { kind: "done" },
-      ...(state.binCount > 0 ? [{ kind: "bin" } as ViewKey] : []),
-      { kind: "list", id: "inbox" },
-      ...activeLists().map((l): ViewKey => ({ kind: "list", id: l.id })),
+      ...(docs.binCount() > 0 ? [{ kind: "bin" } as ViewKey] : []),
+      ...docs.docs().flatMap((d): ViewKey[] => [
+        docs.listView(d.docId, "inbox"),
+        ...activeListsOf(d.docId).map((l) => docs.listView(d.docId, l.id)),
+      ]),
     ];
     const idx = seq.findIndex((s) => viewKey(s) === viewKey(view()));
     const step = e.key === "]" ? 1 : -1;
@@ -1779,7 +1872,7 @@ export function Workspace(props: {
   // present on ItemView, absent on ListView). Bubbling + composed means a
   // single document-level listener catches both Dnd instances.
   type DropTarget =
-    | { kind: "list"; el: HTMLElement; listId: string }
+    | { kind: "list"; el: HTMLElement; listId: string; docId: string }
     | { kind: "bin"; el: HTMLElement }
     | { kind: "focus"; el: HTMLElement };
   const findDropTarget = (x: number, y: number): DropTarget | null => {
@@ -1790,7 +1883,12 @@ export function Workspace(props: {
       );
     if (!el) return null;
     if (el.dataset.dropListId !== undefined) {
-      return { kind: "list", el, listId: el.dataset.dropListId };
+      return {
+        kind: "list",
+        el,
+        listId: el.dataset.dropListId,
+        docId: el.dataset.dropDocId ?? docs.homeDocId,
+      };
     }
     if (el.dataset.dropFocus !== undefined) {
       return { kind: "focus", el };
@@ -1832,11 +1930,11 @@ export function Workspace(props: {
       .filter((id) => draggedKeys.has(id));
     if (target.kind === "bin") {
       const toBin = idsInOrder.filter((id) => {
-        const it = app.getItem(id);
+        const it = docs.getItem(id);
         return it !== undefined && !isBinned(it);
       });
       if (toBin.length === 0) return;
-      app.setBinnedMany(toBin, true);
+      routed.setBinnedMany(toBin, true);
       selection.clear();
       return;
     }
@@ -1844,21 +1942,27 @@ export function Workspace(props: {
       // Same behaviour as the row context menu's "Add to focus": the core
       // skips any id that is already focused or not Open, so a mixed drop
       // resolves cleanly. Items keep their list — nothing moves.
-      app.addToFocusMany(idsInOrder);
+      routed.addToFocusMany(idsInOrder);
       selection.clear();
       return;
     }
-    // Relocation only: binned rows are restored into the target (the Bin
-    // is outside the workspace, so "move while binned" has no meaning),
-    // but Done rows stay Done — reopening is the lane drag / un-done key.
-    const toUnbin = idsInOrder.filter((id) => {
-      const it = app.getItem(id);
+    // Relocation only, within the target's doc (a cross-doc move is not
+    // a thing yet, `spec/sharing-plan.md`; rows from another doc stay
+    // put): binned rows are restored into the target (the Bin is outside
+    // the workspace, so "move while binned" has no meaning), but Done
+    // rows stay Done — reopening is the lane drag / un-done key.
+    const tApp = docs.appOf(target.docId);
+    if (!tApp) return;
+    const movable = idsInOrder.filter((id) => tApp.getItem(id) !== undefined);
+    if (movable.length === 0) return;
+    const toUnbin = movable.filter((id) => {
+      const it = tApp.getItem(id);
       return it !== undefined && isBinned(it);
     });
-    app.withActionBatch(() => {
-      if (toUnbin.length > 0) app.setBinnedMany(toUnbin, false);
-      for (const [i, id] of idsInOrder.entries()) {
-        app.moveItem(id, target.listId, i);
+    tApp.withActionBatch(() => {
+      if (toUnbin.length > 0) tApp.setBinnedMany(toUnbin, false);
+      for (const [i, id] of movable.entries()) {
+        tApp.moveItem(id, target.listId, i);
       }
     });
     // When dragging out of the current list, the rows are no longer
@@ -1866,7 +1970,8 @@ export function Workspace(props: {
     // anchor lingers. Same-list drops keep selection so the user can
     // continue acting on the rows they just rearranged.
     const v = view();
-    const sameList = v.kind === "list" && v.id === target.listId;
+    const sameList =
+      v.kind === "list" && v.id === target.listId && viewDocId() === target.docId;
     if (!sameList) selection.clear();
   };
   document.addEventListener("primavera-dnd-dragmove", onDndDragMove);
@@ -1895,7 +2000,7 @@ export function Workspace(props: {
     // If the destination list renders as a board, the list-view Dnd isn't
     // mounted — hand the id to the Board's reveal path (select + scroll in
     // the resolved column) instead of the list-view scroll below.
-    if (target.kind === "list" && listView(target.id).board) {
+    if (target.kind === "list" && listViewIn(docs.viewDocId(target), target.id).board) {
       setBoardRevealIds([id]);
       return;
     }
@@ -1912,26 +2017,26 @@ export function Workspace(props: {
   // its home view (Bin / Done / list). Ids that no longer resolve (an
   // undone add) are ignored, so an item-less step does nothing beyond
   // landing on a list the step touched, if that list still exists.
-  const revealUndoOutcome = (outcome: UndoOutcome): void => {
-    const surviving = outcome.itemIds.filter((id) => state.itemsById[id]);
+  const revealUndoOutcome = (outcome: UndoOutcome, docId: string): void => {
+    const surviving = outcome.itemIds.filter((id) => docs.getItem(id));
     if (surviving.length === 0) {
-      const listId = outcome.listIds.find((id) => state.listsById[id]);
+      const listId = outcome.listIds.find((id) => docs.listOf(docId, id));
       if (listId === undefined) return;
-      const target: ViewKey = { kind: "list", id: listId };
+      const target = docs.listView(docId, listId);
       if (viewKey(target) !== viewKey(view())) setView(target);
       return;
     }
     const visible = withBoardDone(new Set(items().map((it) => it.id)));
     const inView = surviving.filter((id) => visible.has(id));
     if (inView.length === 0) {
-      revealItem(surviving[0], viewForItem(state.itemsById[surviving[0]]));
+      revealItem(surviving[0], viewForItem(docs.getItem(surviving[0])!));
       return;
     }
     if (boardListId() !== null) {
       // The board reveals one lane at a time: keep the ids sharing the
       // first one's lane (a done card's lane is Done, not its state).
       const laneOf = (id: string): string => {
-        const it = state.itemsById[id];
+        const it = docs.getItem(id)!;
         return isClosed(it) && !isBinned(it) ? "done" : it.state;
       };
       const lane = laneOf(inView[0]);
@@ -1945,7 +2050,7 @@ export function Workspace(props: {
       dndHandle?.scrollToKey(inView[0]);
     }, 0);
   };
-  onCleanup(app.onUndoRedo(revealUndoOutcome));
+  onCleanup(docs.onUndoRedo(revealUndoOutcome));
 
   // Selecting a palette result: jump to the view that contains it. Built-in
   // views (Focus / Upcoming / Done / Bin / Inbox) and lists go straight to
@@ -1958,12 +2063,12 @@ export function Workspace(props: {
       return;
     }
     if (r.kind === "list") {
-      setView({ kind: "list", id: r.id });
+      setView(docs.listView(r.docId ?? docs.homeDocId, r.id));
       return;
     }
     // An Open event's home is the calendar, which has no row to select
     // (and no day for a past one): open it there, as its link does.
-    const picked = state.itemsById[r.id];
+    const picked = docs.getItem(r.id);
     if (picked && isEvent(picked) && isOpen(picked)) {
       openItemFromUrl(r.id);
       return;
@@ -1974,7 +2079,7 @@ export function Workspace(props: {
         ? { kind: "bin" }
         : r.lifecycle === "done" || r.lifecycle === "cancelled"
           ? { kind: "done" }
-          : { kind: "list", id: r.listId || "inbox" },
+          : docs.listView(r.docId ?? docs.homeDocId, r.listId || "inbox"),
     );
   };
 
@@ -2007,7 +2112,7 @@ export function Workspace(props: {
       revealItem(id, { kind: "focus" });
       return;
     }
-    const it = app.state.itemsById[id];
+    const it = docs.getItem(id);
     // An event's home is the calendar: go there with the item open.
     if (it && isEvent(it)) {
       batch(() => {
@@ -2016,11 +2121,8 @@ export function Workspace(props: {
       });
       return;
     }
-    const listId = it?.listId;
-    revealItem(id, {
-      kind: "list",
-      id: listId && app.state.listsById[listId] ? listId : "inbox",
-    });
+    const docId = it?.docId ?? docs.homeDocId;
+    revealItem(id, docs.listView(docId, homeListId(docId, it?.listId)));
   };
 
   // ---------- Fragment URLs (`spec/urls.md`) ----------
@@ -2047,11 +2149,12 @@ export function Workspace(props: {
         ? { kind: "done" }
         : isEvent(it)
           ? { kind: "upcoming" }
-          : { kind: "list", id: state.listsById[it.listId] ? it.listId : "inbox" };
+          : docs.listView(it.docId, homeListId(it.docId, it.listId));
 
-  // Reveal + open an item by id. False when the store doesn't have it.
+  // Reveal + open an item by id, in whichever doc holds it. False when no
+  // open doc has it.
   const openItemFromUrl = (id: string): boolean => {
-    const it = state.itemsById[id];
+    const it = docs.getItem(id);
     if (!it) return false;
     batch(() => {
       revealItem(id, viewForItem(it));
@@ -2062,15 +2165,21 @@ export function Workspace(props: {
 
   const applyRoute = (route: Route): void => {
     if (route.kind === "view") {
-      // An unknown list (deleted, or from another account) is ignored.
-      // The reserved inbox has no ListMeta row, so it is exempt.
-      if (
-        route.view.kind === "list" &&
-        route.view.id !== "inbox" &&
-        !state.listsById[route.view.id]
-      )
-        return;
-      const sameView = viewKey(route.view) === viewKey(untrack(view));
+      // A list is looked up across every open doc (`spec/urls.md`): an
+      // unknown one (deleted, or from another account) is ignored. The
+      // reserved inbox has no ListMeta row; its URL names its doc when
+      // that isn't Home, and an unknown doc is ignored the same way.
+      let target = route.view;
+      if (target.kind === "list") {
+        if (target.id === "inbox") {
+          if (target.docId !== undefined && !docs.appOf(target.docId)) return;
+        } else {
+          const docId = docs.docIdOfList(target.id);
+          if (docId === undefined) return;
+          target = docs.listView(docId, target.id);
+        }
+      }
+      const sameView = viewKey(target) === viewKey(untrack(view));
       batch(() => {
         // Closing the entered item leaves the side pane on the selection
         // (`shownItemId`), so the pop the mirror effect issues for a
@@ -2083,7 +2192,7 @@ export function Workspace(props: {
         // effect (selection cleared, draft dropped), which is how
         // Enter-to-close in the list view used to lose the row's
         // selection. Board selections live inside Board and never saw it.
-        if (!sameView) setView(route.view);
+        if (!sameView) setView(target);
       });
       return;
     }
@@ -2103,8 +2212,8 @@ export function Workspace(props: {
   createEffect(() => {
     const id = pendingItemId();
     if (id === null) return;
-    app.version();
-    if (state.itemsById[id]) untrack(() => openItemFromUrl(id));
+    docs.version();
+    if (docs.getItem(id)) untrack(() => openItemFromUrl(id));
   });
 
   // State → address bar. History rules: a view change pushes; an open
@@ -2250,7 +2359,7 @@ export function Workspace(props: {
       return [
         {
           label: msgs.common.restore,
-          run: () => app.setBinnedMany(ids, false),
+          run: () => routed.setBinnedMany(ids, false),
         },
         { label: msgs.common.copy, shortcut: "⌘C", run: () => copyRows(ids) },
         {
@@ -2261,7 +2370,7 @@ export function Workspace(props: {
       ];
     }
     const openIds = ids.filter((id) => {
-      const it = app.getItem(id);
+      const it = docs.getItem(id);
       return it !== undefined && isOpen(it);
     });
     const out: SelectionAction[] = [
@@ -2289,7 +2398,7 @@ export function Workspace(props: {
       out.push({
         label: msgs.focus.remove,
         shortcut: "F",
-        run: () => app.removeFromFocusMany(ids),
+        run: () => routed.removeFromFocusMany(ids),
       });
     }
     // Deadlines only matter while an item is open (the row badge and menu
@@ -2333,7 +2442,7 @@ export function Workspace(props: {
     const top = sel.getSelectionTop();
     if (top === null) return null;
     const id = String(top);
-    return app.state.itemsById[id] ? id : null;
+    return docs.getItem(id) ? id : null;
   });
 
   // What the task surface shows: the entered item wherever it lives, else
@@ -2387,6 +2496,19 @@ export function Workspace(props: {
   };
   onGlobalKey(onEscapeKey);
 
+  // The task surface works on one doc's `DocApp` (its notes bridge, undo
+  // and list picker are per doc), so it is keyed on the doc of what it
+  // shows: a capture's target doc, else the shown item's, else Home.
+  // Crossing docs remounts it; the outgoing instance settles its buffers
+  // on cleanup.
+  const taskDocId = createMemo((): string => {
+    const nw = newItemTarget();
+    if (nw) return nw.docId;
+    const id = shownItemId();
+    return (id !== null ? docs.docIdOf(id) : undefined) ?? docs.homeDocId;
+  });
+  const taskApp = createMemo((): DocApp => docs.appOf(taskDocId()) ?? home);
+
   const navigateTo = (v: ViewKey) => {
       setView(v);
       // Move keyboard focus to the items listbox once Solid has
@@ -2425,19 +2547,18 @@ export function Workspace(props: {
     >
       <Show when={!isMobile()}>
       <Nav
-        app={app}
-        lists={activeLists()}
-        binCount={state.binCount}
-        focusCount={state.focusOrder.length}
+        docs={docs}
+        binCount={docs.binCount()}
+        focusCount={docs.focusItems().length}
         upcomingBadge={upcomingBadge()}
-        openCountsByList={openCountsByList()}
-        showListCounts={state.settings.showListCounts}
+        showListCounts={home.state.settings.showListCounts}
         view={view()}
         setView={navigateTo}
+        createDoc={session.session().anonymous ? null : props.createDoc}
         footer={
           <>
             <NavMenu
-              app={app}
+              docs={docs}
               session={session.session()}
               logout={session.logout}
               onOpenSettings={() => setSettingsOpen(true)}
@@ -2445,7 +2566,7 @@ export function Workspace(props: {
               onSession={session.swapSession}
             />
             <StatusSlot
-              app={app}
+              app={home}
               online={session.online()}
               lastSyncAt={session.lastSyncAt()}
               session={session.session()}
@@ -2460,7 +2581,7 @@ export function Workspace(props: {
         when={isMobile()}
         fallback={
           <FindPalette
-            app={app}
+            docs={docs}
             open={findOpen()}
             onOpenChange={onFindOpenChange}
             onSelect={onFindPick}
@@ -2468,7 +2589,7 @@ export function Workspace(props: {
         }
       >
         <FindSheet
-          app={app}
+          docs={docs}
           open={findOpen()}
           view={view()}
           onOpenChange={onFindOpenChange}
@@ -2481,7 +2602,7 @@ export function Workspace(props: {
                is owned by the FirstRunAuthPrompt beside MobileBars. */
             <StatusSlot
               class="find-sheet__status"
-              app={app}
+              app={home}
               online={session.online()}
               lastSyncAt={session.lastSyncAt()}
               session={session.session()}
@@ -2489,11 +2610,11 @@ export function Workspace(props: {
               autoPrompt={false}
             />
           }
-          focusCount={state.focusOrder.length}
+          focusCount={docs.focusItems().length}
           upcomingBadge={upcomingBadge()}
-          binCount={state.binCount}
+          binCount={docs.binCount()}
           openCountsByList={openCountsByList()}
-          showListCounts={state.settings.showListCounts}
+          showListCounts={home.state.settings.showListCounts}
         />
       </Show>
       <MovePalette
@@ -2522,8 +2643,8 @@ export function Workspace(props: {
           setThemePref(pref);
           theme.set(pref);
         }}
-        showListCounts={state.settings.showListCounts}
-        onShowListCountsChange={(show) => app.setShowListCounts(show)}
+        showListCounts={home.state.settings.showListCounts}
+        onShowListCountsChange={(show) => home.setShowListCounts(show)}
         session={session.session()}
         logout={session.logout}
       />
@@ -2532,15 +2653,21 @@ export function Workspace(props: {
         onOpenChange={setEmptyBinConfirmOpen}
         message={m().workspace.emptyBinConfirm}
         confirmLabel={m().workspace.emptyBin}
-        onConfirm={() => app.emptyBin()}
+        onConfirm={() => docs.emptyBin()}
       />
+      <Show keyed when={taskApp()}>
+        {(tApp) => (
       <TaskDialog
         itemId={shownItemId}
         setItemId={setOpenItemId}
         newItem={newItemTarget}
-        setNewItem={setNewItemTarget}
-        app={app}
-        lists={activeLists}
+        setNewItem={(v) =>
+          // A re-target keeps the capture in its doc: the surface's list
+          // picker only ever offers that doc's lists.
+          setNewItemTarget(v ? { ...v, docId: untrack(taskDocId) } : null)
+        }
+        app={tApp}
+        lists={() => activeListsOf(tApp.docId)}
         entered={() => openItemId() !== null}
         whenOpen={itemWhenOpen}
         setWhenOpen={setItemWhenOpen}
@@ -2570,6 +2697,8 @@ export function Workspace(props: {
         onReveal={revealItemIn}
         panelMount={() => (sidePanelShown() ? panelMount() : null)}
       />
+        )}
+      </Show>
       <ShortcutsDialog
         open={shortcutsOpen()}
         onOpenChange={setShortcutsOpen}
@@ -2586,9 +2715,9 @@ export function Workspace(props: {
                 so it can't store one — gated out. */}
             <Show when={editableListId() !== null}>
               <ListIconPicker
-                icon={state.listsById[editableListId() ?? ""]?.icon}
-                onPick={(icon) => app.setListIcon(editableListId() ?? "", icon)}
-                onClear={() => app.setListIcon(editableListId() ?? "", "")}
+                icon={viewApp().state.listsById[editableListId() ?? ""]?.icon}
+                onPick={(icon) => viewApp().setListIcon(editableListId() ?? "", icon)}
+                onClear={() => viewApp().setListIcon(editableListId() ?? "", "")}
               />
             </Show>
             {/* Reserved views (Focus, Home/Inbox, Done, Bin) can't store a
@@ -2607,7 +2736,7 @@ export function Workspace(props: {
                 <EditableNavLabel
                   class="editable-title"
                   name={allLists().find((l) => l.id === listId)?.name ?? listId}
-                  onSave={(name) => app.renameList(listId, name)}
+                  onSave={(name) => viewApp().renameList(listId, name)}
                 />
               )}
             </Show>
@@ -2655,7 +2784,7 @@ export function Workspace(props: {
                       <DropdownMenu.Item
                         class="dropdown-menu-item"
                         onSelect={() =>
-                          app.setListArchived(
+                          viewApp().setListArchived(
                             listId(),
                             archivedViewListId() === null,
                           )
@@ -2794,6 +2923,25 @@ export function Workspace(props: {
                     <Switch.Thumb class="done-switch-thumb" />
                   </Switch.Control>
                 </Switch>
+                {/* Personal by default (Home's closed items); the switch
+                    amalgamates every open doc. A synced personal pref on
+                    the Home doc (`spec/sharing-plan.md`), so every device
+                    agrees. Only offered once there is more than one doc. */}
+                <Show when={docs.docs().length > 1}>
+                  <Switch
+                    class="done-switch"
+                    checked={docs.doneAmalgamate()}
+                    onChange={(checked) => home.setDoneAmalgamate(checked)}
+                  >
+                    <Switch.Label class="done-switch-label">
+                      {m().workspace.allDocs}
+                    </Switch.Label>
+                    <Switch.Input class="done-switch-input" />
+                    <Switch.Control class="done-switch-control">
+                      <Switch.Thumb class="done-switch-thumb" />
+                    </Switch.Control>
+                  </Switch>
+                </Show>
               </DisplayOptionsPopover>
               <Tooltip openDelay={200} closeDelay={0} placement="bottom">
                 <Tooltip.Trigger
@@ -2805,6 +2953,7 @@ export function Workspace(props: {
                   onClick={() =>
                     setNewItemTarget({
                       listId: "inbox",
+                      docId: docs.homeDocId,
                       state: "backlog",
                       done: true,
                     })
@@ -2835,6 +2984,36 @@ export function Workspace(props: {
                     <Switch.Thumb class="done-switch-thumb" />
                   </Switch.Control>
                 </Switch>
+              </DisplayOptionsPopover>
+            </Show>
+            {/* The calendar merges every doc; each can be hidden here. A
+                synced personal pref on the Home doc
+                (`spec/sharing-plan.md`). Only offered once there is more
+                than one doc. */}
+            <Show when={view().kind === "upcoming" && docs.docs().length > 1}>
+              <DisplayOptionsPopover>
+                <div class="lane-row lane-row-heading">
+                  <span class="lane-row-name">{m().upcoming.docs}</span>
+                </div>
+                <For each={docs.docs()}>
+                  {(d) => (
+                    <Switch
+                      class="done-switch"
+                      checked={!docs.calendarHiddenDocs().includes(d.docId)}
+                      onChange={(checked) =>
+                        home.setCalendarDocHidden(d.docId, !checked)
+                      }
+                    >
+                      <Switch.Label class="done-switch-label">
+                        {docLabel(d.docId)}
+                      </Switch.Label>
+                      <Switch.Input class="done-switch-input" />
+                      <Switch.Control class="done-switch-control">
+                        <Switch.Thumb class="done-switch-thumb" />
+                      </Switch.Control>
+                    </Switch>
+                  )}
+                </For>
               </DisplayOptionsPopover>
             </Show>
             {/* Add on the list, focus and upcoming views. The calendar is
@@ -2874,6 +3053,7 @@ export function Workspace(props: {
                     // lane's own "+".
                     setNewItemTarget({
                       listId: boardId,
+                      docId: viewDocId(),
                       state: defaultCaptureLane(boardId),
                     });
                   } else {
@@ -2901,7 +3081,7 @@ export function Workspace(props: {
           fallback={
         <Show
           keyed
-          when={boardListId()}
+          when={boardKey()}
           fallback={
             <Show
               when={dndItems().length > 0}
@@ -2949,7 +3129,7 @@ export function Workspace(props: {
                       <Row
                         item={shownItem}
                         expanded={expanded}
-                        app={app}
+                        app={routed}
                         selection={selection}
                         viewKind={view().kind}
                         showList={() =>
@@ -2979,10 +3159,10 @@ export function Workspace(props: {
             </Show>
           }
         >
-          {(listId) => (
+          {(_key) => (
             <Board
-              app={app}
-              listId={listId}
+              app={viewApp()}
+              listId={boardListId()!}
               onOpen={(id) => setOpenItemId(id)}
               onSetDeadline={openItemDeadline}
               onSetWhen={openItemWhen}
@@ -2992,13 +3172,13 @@ export function Workspace(props: {
               duplicateBlock={duplicateBlock}
               copyBlock={copyRows}
               onAddItem={(listId, state, done) =>
-                setNewItemTarget({ listId, state, done })
+                setNewItemTarget({ listId, docId: viewDocId(), state, done })
               }
               revealIds={boardRevealIds}
               clearReveal={() => setBoardRevealIds(null)}
               onActiveSelectionChange={setBoardSelection}
-              showDoneColumn={() => showDoneColumn(listId)}
-              visibleOpenLanes={() => visibleOpenLanes(listId)}
+              showDoneColumn={() => showDoneColumn(boardListId()!)}
+              visibleOpenLanes={() => visibleOpenLanes(boardListId()!)}
               ref={(h) => (boardHandle = h)}
             />
           )}
@@ -3006,7 +3186,7 @@ export function Workspace(props: {
           }
         >
           <Upcoming
-            app={app}
+            app={routed}
             groups={upcomingGroups()}
             selection={selection}
             listLabel={listLabel}
@@ -3058,7 +3238,7 @@ export function Workspace(props: {
       <Show when={isMobile()}>
         <MobileBars
           view={view()}
-          inboxCount={openCountsByList()["inbox"] ?? 0}
+          inboxCount={home.state.listOpen["inbox"]?.length ?? 0}
           upcomingBadge={upcomingBadge()}
           setView={(v) => {
             // The pills stay live over an open item's page and over the

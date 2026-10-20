@@ -9,7 +9,9 @@ import { describe, expect, test } from "bun:test";
 import { Dek, Doc, SyncEngine } from "@monoplan/core/wasm";
 import type { EngineStorage } from "@monoplan/core/wasm";
 import { MemEngineStorage } from "../../core/test/mem-engine-storage.ts";
+import { createRoot } from "solid-js";
 import { createSyncedApp } from "../src/sync/store.ts";
+import { createDocsLayer } from "../src/sync/docs.ts";
 import { findResultArchived } from "../src/findResults.tsx";
 
 const DOC_ID = "00000000-0000-0000-0000-000000000000";
@@ -106,6 +108,9 @@ describe("store archived lists", () => {
     const inHome = doc.addItem(home, "ship it too");
     const inInbox = doc.addItem("inbox", "ship it three");
     const app = createSyncedApp(engineFrom(doc));
+    // The Find surfaces resolve lists through the cross-doc layer; one
+    // doc here, so it is just a view over `app`.
+    const layer = createRoot(() => createDocsLayer(app, []));
 
     const rowFor = (id: string) => {
       const r = app.search.query("ship").find((x) => x.id === id);
@@ -119,25 +124,25 @@ describe("store archived lists", () => {
     };
 
     // Nothing archived yet: no row carries the marker.
-    expect(findResultArchived(app, listRow(work))).toBe(false);
-    expect(findResultArchived(app, rowFor(inWork))).toBe(false);
+    expect(findResultArchived(layer, listRow(work))).toBe(false);
+    expect(findResultArchived(layer, rowFor(inWork))).toBe(false);
 
     app.setListArchived(work, true);
     // The list's own row and every item it owns are flagged; unrelated
     // lists, inbox items and built-in views are not.
-    expect(findResultArchived(app, listRow(work))).toBe(true);
-    expect(findResultArchived(app, rowFor(inWork))).toBe(true);
-    expect(findResultArchived(app, listRow(home))).toBe(false);
-    expect(findResultArchived(app, rowFor(inHome))).toBe(false);
-    expect(findResultArchived(app, rowFor(inInbox))).toBe(false);
+    expect(findResultArchived(layer, listRow(work))).toBe(true);
+    expect(findResultArchived(layer, rowFor(inWork))).toBe(true);
+    expect(findResultArchived(layer, listRow(home))).toBe(false);
+    expect(findResultArchived(layer, rowFor(inHome))).toBe(false);
+    expect(findResultArchived(layer, rowFor(inInbox))).toBe(false);
     expect(
-      findResultArchived(app, { kind: "view", id: "focus", title: "Focus" }),
+      findResultArchived(layer, { kind: "view", id: "focus", title: "Focus" }),
     ).toBe(false);
 
     // Unarchiving clears the marker again.
     app.setListArchived(work, false);
-    expect(findResultArchived(app, listRow(work))).toBe(false);
-    expect(findResultArchived(app, rowFor(inWork))).toBe(false);
+    expect(findResultArchived(layer, listRow(work))).toBe(false);
+    expect(findResultArchived(layer, rowFor(inWork))).toBe(false);
   });
 
   test("no user-facing list delete remains on the store API", () => {

@@ -339,7 +339,7 @@ function BootGate(props: {
         docs.push(await bootDoc(docId, dek));
       }
 
-      props.setBoot({ docs, prefs: await prefsPromise });
+      props.setBoot({ docs, peerId, prefs: await prefsPromise });
     } catch (e) {
       // Hard fail & surfaces idb boot errors
       console.error("[boot] FAILED:", e);
@@ -361,7 +361,7 @@ function BootGate(props: {
 
 function MainApp(props: { session: Session; boot: BootInfo }) {
   const { setOnline, setLastSyncAt, logout } = useSession();
-  const { app, view, setView } = createWorkspaceRuntime({
+  const { docs, view, setView, createDoc } = createWorkspaceRuntime({
     session: props.session,
     boot: props.boot,
     setOnline,
@@ -369,5 +369,5 @@ function MainApp(props: { session: Session; boot: BootInfo }) {
     logout,
   });
 
-  return <Workspace app={app} view={view} setView={setView} />;
+  return <Workspace docs={docs} view={view} setView={setView} createDoc={createDoc} />;
 }

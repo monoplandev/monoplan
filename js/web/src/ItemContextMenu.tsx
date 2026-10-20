@@ -32,7 +32,7 @@ import {
   EVENT_STATES,
   statusValue,
   WORKFLOW_STATES,
-  type DocApp,
+  type ItemActions,
   type ItemView,
   type WorkflowState,
 } from "./sync/store.ts";
@@ -51,7 +51,10 @@ export const canPinToFocusIn = (
 
 export function ItemContextMenu(props: {
   item: () => ItemView;
-  app: DocApp;
+  /** The item's doc, or the cross-doc layer's routed actions in a view
+   *  that mixes docs (`sync/docs.ts`); a multi-row target may then span
+   *  docs, and the layer commits once per doc. */
+  app: ItemActions;
   selection: DndSelection;
   viewKind: ViewKey["kind"];
   duplicateBlock: (sourceIds: readonly string[]) => void;
@@ -69,8 +72,9 @@ export function ItemContextMenu(props: {
   /** Open the workspace's move palette on the target set, the menu twin
    *  of the `m` shortcut. */
   onMoveToList?: (ids: readonly string[]) => void;
-  /** Resolves a list id to its display label (see Workspace `listLabel`). */
-  listLabel?: (listId: string) => string;
+  /** Resolves a list id (in the item's doc) to its display label (see
+   *  Workspace `listLabel`). */
+  listLabel?: (listId: string, docId?: string) => string;
   /** The host's `<ContextMenu.Trigger>`. */
   children: JSX.Element;
 }) {
@@ -80,12 +84,10 @@ export function ItemContextMenu(props: {
   const [menuOpen, setMenuOpen] = createSignal(false);
   trackOverlay(menuOpen);
 
-  // Whether this row currently has a visible Focus ref. `focusOrder` is a
-  // small (bounded) store array, so the membership scan is cheap and only
+  // Whether this row currently has a visible Focus ref. The Focus entry
+  // list is small (bounded), so the membership scan is cheap and only
   // re-runs when the Focus lens actually changes. See spec/focus.md.
-  const focused = createMemo(() =>
-    props.app.state.focusOrder.includes(props.item().id),
-  );
+  const focused = createMemo(() => props.app.isFocused(props.item().id));
   const canPinToFocus = (): boolean =>
     canPinToFocusIn(props.viewKind, props.item());
   const inFocusView = (): boolean =>
@@ -391,7 +393,8 @@ export function ItemContextMenu(props: {
             >
               <span>
                 {m().focus.showInList(
-                  props.listLabel?.(props.item().listId) ?? props.item().listId,
+                  props.listLabel?.(props.item().listId, props.item().docId) ??
+                    props.item().listId,
                 )}
               </span>
             </ContextMenu.Item>

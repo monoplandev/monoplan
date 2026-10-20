@@ -5,12 +5,16 @@
 // server route is needed. The grammar is a single self-describing
 // token, safe to paste into a shell or a chat:
 //
-//   "#item_" id | "#list_" id | "#inbox" | "#focus" | "#upcoming"
-//   | "#done" | "#bin"
-//   id = [0-9a-f]{32}
+//   "#item_" id | "#list_" id | "#inbox" | "#inbox_" doc | "#focus"
+//   | "#upcoming" | "#done" | "#bin"
+//   id  = [0-9a-f]{32}
+//   doc = [0-9a-f-]{32,36}      -- a server doc id (uuid, hyphenated)
 //
-// An item URL names only the item: the list and (future) doc are looked
-// up client-side, so a link keeps working after the item moves.
+// An item URL names only the item: the list and doc are looked up
+// client-side across every open doc, so a link keeps working after the
+// item moves. A user list's id is unique across docs too, so `#list_`
+// carries no doc either; only another doc's reserved Inbox needs one
+// (`#inbox_<doc>`), since every doc has an `inbox` (`spec/sharing-plan.md`).
 
 import type { ViewKey } from "./prefs.ts";
 
@@ -19,6 +23,7 @@ export type Route =
   | { kind: "item"; id: string };
 
 const ID_RE = /^[0-9a-f]{32}$/;
+const DOC_RE = /^[0-9a-f-]{32,36}$/;
 
 /** Parse a `location.hash` (with or without the leading `#`). Returns
  *  null for an empty or unrecognised hash; callers leave their state
@@ -48,13 +53,21 @@ export function parseHash(hash: string): Route | null {
     const id = token.slice("list_".length);
     return ID_RE.test(id) ? { kind: "view", view: { kind: "list", id } } : null;
   }
+  if (token.startsWith("inbox_")) {
+    const docId = token.slice("inbox_".length);
+    return DOC_RE.test(docId)
+      ? { kind: "view", view: { kind: "list", id: "inbox", docId } }
+      : null;
+  }
   return null;
 }
 
-/** Canonical hash (leading `#` included) for a view. */
+/** Canonical hash (leading `#` included) for a view. A list view with
+ *  no `docId` is a Home list; another doc's Inbox names its doc. */
 export function viewHash(view: ViewKey): string {
   if (view.kind !== "list") return `#${view.kind}`;
-  return view.id === "inbox" ? "#inbox" : `#list_${view.id}`;
+  if (view.id !== "inbox") return `#list_${view.id}`;
+  return view.docId === undefined ? "#inbox" : `#inbox_${view.docId}`;
 }
 
 /** Canonical hash for an item. */
@@ -78,8 +91,8 @@ export function itemUrl(id: string): string {
   return appBase() + itemHash(id);
 }
 
-export function listUrl(id: string): string {
-  return appBase() + viewHash({ kind: "list", id });
+export function listUrl(id: string, docId?: string): string {
+  return appBase() + viewHash(docId === undefined ? { kind: "list", id } : { kind: "list", id, docId });
 }
 
 /** If `href` is one of this app's own URLs (same origin and path) with a

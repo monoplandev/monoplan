@@ -156,6 +156,28 @@ export class SyncBridge {
     return [...this.engines.keys()];
   }
 
+  /** Route one more doc over this connection: a doc created or joined
+   *  while the session is live (`spec/sharing-plan.md` Phase 5). The
+   *  engine is registered for routing immediately; if the socket is
+   *  past the handshake it is brought online now (its `OpenDoc` goes
+   *  out and `onServerFrame` pulses once, as for the initial set),
+   *  otherwise it comes up with the others on the next `HelloAck`.
+   *  Throws if the doc is already routed. */
+  addEngine(engine: SyncEngine): void {
+    const id = engine.docId();
+    if (this.engines.has(id)) {
+      throw new Error(`SyncBridge: two engines for doc ${id}`);
+    }
+    this.engines.set(id, engine);
+    if (this.phase !== "open" || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    engine.handleConnected();
+    this.pumpOutbox();
+    this.drainEngineEvents();
+    this.opts.onServerFrame?.(id);
+  }
+
   start(): void {
     this.connect();
     if (!this.tickTimer) {

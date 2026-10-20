@@ -302,6 +302,23 @@ const KEY_SHOW_LIST_COUNTS: &str = "show_list_counts";
 /// ListMeta row, so its `KEY_VIEW` equivalent lives on the doc-level
 /// settings map — same encoding, same absent ≡ no-default semantics.
 const KEY_INBOX_VIEW: &str = "inbox_view";
+/// The doc's user-facing name (`spec/sharing-plan.md`). Lives on the
+/// doc-level settings map so it travels with the doc to every member;
+/// the server never sees it. Absent ≡ unnamed (clients fall back to a
+/// built-in label). The Home doc is never named: clients label it
+/// "Personal" regardless of this key.
+const KEY_DOC_NAME: &str = "doc_name";
+/// Doc ids hidden from the merged calendar lens, as a plain list of
+/// strings. A *personal* cross-doc preference: only ever read on the
+/// account's Home doc, which syncs across its devices and is never
+/// shared. Absent / empty ≡ every doc shown. Unknown ids (a doc the
+/// account left) are harmless and dropped on the next toggle.
+const KEY_CALENDAR_HIDDEN_DOCS: &str = "calendar_hidden_docs";
+/// Whether the Done view amalgamates every open doc's closed items
+/// rather than the Home doc's alone. Personal, Home-doc-only like
+/// `KEY_CALENDAR_HIDDEN_DOCS`. Absent ≡ false; the off path deletes the
+/// key so a never-toggled doc carries no trace.
+const KEY_DONE_AMALGAMATE: &str = "done_amalgamate";
 /// Batch lifecycle mutations at/above this many ids stop emitting
 /// surgical per-item events and fall back to one whole-doc rebuild +
 /// diff. Matches the web store's coarse-projection threshold so both
@@ -722,6 +739,15 @@ pub struct SettingsView {
     /// no ListMeta row, so its default lives here rather than on
     /// [`ListView::default_view`]. `None` ≡ no saved default.
     pub inbox_view: Option<DefaultView>,
+    /// The doc's name, trimmed, or `None` when unnamed. See
+    /// `KEY_DOC_NAME`.
+    pub doc_name: Option<String>,
+    /// Doc ids hidden from the merged calendar (personal, Home doc
+    /// only). Deduped, in insertion order. Empty ≡ every doc shown.
+    pub calendar_hidden_docs: Vec<String>,
+    /// Whether the Done view spans every open doc (personal, Home doc
+    /// only). Default false: Done is the Home doc's own.
+    pub done_amalgamate: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3010,11 +3036,77 @@ impl Doc {
             settings.insert(KEY_SHOW_LIST_COUNTS, false)?;
         }
         self.inner.commit();
-        let post = settings_view(&settings);
-        self.push_event(AppEvent::SettingsChanged {
-            show_list_counts: post.show_list_counts,
-            inbox_view: post.inbox_view,
-        });
+        self.push_event(settings_changed(&settings_view(&settings)));
+        Ok(())
+    }
+
+    /// Name (`Some`, trimmed, non-empty) or un-name (`None` / blank) the
+    /// doc. One commit; a no-op when unchanged. The name is doc content
+    /// (it rides the settings map, encrypted like everything else), so
+    /// every member sees it. See `KEY_DOC_NAME`.
+    pub fn set_doc_name(&self, name: Option<&str>) -> Result<(), DocError> {
+        let settings = self.settings_map();
+        let next = name.map(str::trim).filter(|n| !n.is_empty());
+        if read_string(&settings, KEY_DOC_NAME).as_deref() == next {
+            return Ok(());
+        }
+        match next {
+            Some(n) => settings.insert(KEY_DOC_NAME, n)?,
+            None => settings.delete(KEY_DOC_NAME)?,
+        }
+        self.inner.commit();
+        self.push_event(settings_changed(&settings_view(&settings)));
+        Ok(())
+    }
+
+    /// Hide (`true`) or show (`false`) `doc_id` on the merged calendar
+    /// lens. A personal preference stored on the Home doc
+    /// (`KEY_CALENDAR_HIDDEN_DOCS`); the list is deduped and the key is
+    /// deleted once empty. One commit; a no-op when already in the
+    /// requested state. `doc_id` is not validated: the core holds no doc
+    /// registry, and a stale id is harmless.
+    pub fn set_calendar_doc_hidden(&self, doc_id: &str, hidden: bool) -> Result<(), DocError> {
+        let doc_id = doc_id.trim();
+        if doc_id.is_empty() {
+            return Err(DocError::Invalid("empty doc id".into()));
+        }
+        let settings = self.settings_map();
+        let mut ids = read_string_list(&settings, KEY_CALENDAR_HIDDEN_DOCS);
+        let present = ids.iter().any(|d| d == doc_id);
+        if present == hidden {
+            return Ok(());
+        }
+        if hidden {
+            ids.push(doc_id.to_string());
+        } else {
+            ids.retain(|d| d != doc_id);
+        }
+        if ids.is_empty() {
+            settings.delete(KEY_CALENDAR_HIDDEN_DOCS)?;
+        } else {
+            settings.insert(KEY_CALENDAR_HIDDEN_DOCS, ids)?;
+        }
+        self.inner.commit();
+        self.push_event(settings_changed(&settings_view(&settings)));
+        Ok(())
+    }
+
+    /// Toggle whether the Done view amalgamates every open doc's closed
+    /// items (`KEY_DONE_AMALGAMATE`, personal, Home doc only). The off
+    /// path deletes the key. One commit; a no-op when unchanged.
+    pub fn set_done_amalgamate(&self, amalgamate: bool) -> Result<(), DocError> {
+        let settings = self.settings_map();
+        let current = read_bool(&settings, KEY_DONE_AMALGAMATE).unwrap_or(false);
+        if current == amalgamate {
+            return Ok(());
+        }
+        if amalgamate {
+            settings.insert(KEY_DONE_AMALGAMATE, true)?;
+        } else {
+            settings.delete(KEY_DONE_AMALGAMATE)?;
+        }
+        self.inner.commit();
+        self.push_event(settings_changed(&settings_view(&settings)));
         Ok(())
     }
 
@@ -3103,11 +3195,7 @@ impl Doc {
                 }
             }
             self.inner.commit();
-            let post = settings_view(&settings);
-            self.push_event(AppEvent::SettingsChanged {
-                show_list_counts: post.show_list_counts,
-                inbox_view: post.inbox_view,
-            });
+            self.push_event(settings_changed(&settings_view(&settings)));
             return Ok(());
         }
         let (_, map) = self.find_list(list_id)?;
@@ -4813,11 +4901,7 @@ impl Doc {
     /// code path.
     pub fn snapshot_events(&self) -> Vec<AppEvent> {
         let mut out = Vec::new();
-        let s = self.get_settings();
-        out.push(AppEvent::SettingsChanged {
-            show_list_counts: s.show_list_counts,
-            inbox_view: s.inbox_view,
-        });
+        out.push(settings_changed(&self.get_settings()));
         let lists = self.all_lists();
         for (idx, list) in lists.iter().enumerate() {
             out.push(AppEvent::ListAdded {
@@ -4926,6 +5010,12 @@ impl Doc {
         let settings = self.get_settings();
         hasher.update(b"S");
         hasher.update([settings.show_list_counts as u8]);
+        hash_str(&mut hasher, settings.doc_name.as_deref().unwrap_or(""));
+        hasher.update((settings.calendar_hidden_docs.len() as u32).to_be_bytes());
+        for d in &settings.calendar_hidden_docs {
+            hash_str(&mut hasher, d);
+        }
+        hasher.update([settings.done_amalgamate as u8]);
         // Lists: walk by stored order because ordering is part of the
         // logical state surfaced to users.
         let lists = self.all_lists();
@@ -5555,7 +5645,37 @@ fn settings_view(map: &LoroMap) -> SettingsView {
         // here; same encoding and same absent ≡ no-default reading as a
         // user list's `view` key.
         inbox_view: read_default_view(map, KEY_INBOX_VIEW),
+        doc_name: read_string(map, KEY_DOC_NAME)
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty()),
+        calendar_hidden_docs: read_string_list(map, KEY_CALENDAR_HIDDEN_DOCS),
+        done_amalgamate: read_bool(map, KEY_DONE_AMALGAMATE).unwrap_or(false),
     }
+}
+
+/// Read a plain list-of-strings value. Absent, the wrong shape, or
+/// non-string members all read as empty / skipped — the caller treats
+/// the result as a set (deduped here, first occurrence wins).
+fn read_string_list(map: &LoroMap, key: &str) -> Vec<String> {
+    let Some(v) = map.get(key) else {
+        return Vec::new();
+    };
+    let Some(value) = v.as_value() else {
+        return Vec::new();
+    };
+    let Ok(list) = value.clone().into_list() else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::with_capacity(list.len());
+    for member in list.iter() {
+        if let Ok(s) = member.clone().into_string() {
+            let s = s.to_string();
+            if !s.is_empty() && !out.contains(&s) {
+                out.push(s);
+            }
+        }
+    }
+    out
 }
 
 /// Location/lifecycle slice used by the projection index. Items with a
@@ -6078,10 +6198,19 @@ fn diff_lists(pre: &[ListView], post: &[ListView], out: &mut Vec<AppEvent>) {
 
 fn diff_settings(pre: &SettingsView, post: &SettingsView, out: &mut Vec<AppEvent>) {
     if pre != post {
-        out.push(AppEvent::SettingsChanged {
-            show_list_counts: post.show_list_counts,
-            inbox_view: post.inbox_view,
-        });
+        out.push(settings_changed(post));
+    }
+}
+
+/// The `SettingsChanged` event for the settings as they now stand — the
+/// one place the event's payload is assembled from a [`SettingsView`].
+fn settings_changed(s: &SettingsView) -> AppEvent {
+    AppEvent::SettingsChanged {
+        show_list_counts: s.show_list_counts,
+        inbox_view: s.inbox_view,
+        doc_name: s.doc_name.clone(),
+        calendar_hidden_docs: s.calendar_hidden_docs.clone(),
+        done_amalgamate: s.done_amalgamate,
     }
 }
 
@@ -7086,6 +7215,127 @@ mod tests {
             doc.delete_list(LIST_INBOX).unwrap_err(),
             DocError::CannotDeleteBuiltin(_)
         ));
+    }
+
+    #[test]
+    fn new_doc_has_personal_settings_at_defaults() {
+        let doc = Doc::new().unwrap();
+        let s = doc.get_settings();
+        assert_eq!(s.doc_name, None);
+        assert!(s.calendar_hidden_docs.is_empty());
+        assert!(!s.done_amalgamate);
+    }
+
+    #[test]
+    fn doc_name_round_trips_and_blank_clears() {
+        let doc = Doc::new().unwrap();
+        let _ = doc.drain_events();
+        doc.set_doc_name(Some("  Team  ")).unwrap();
+        assert_eq!(doc.get_settings().doc_name.as_deref(), Some("Team"));
+        assert!(matches!(
+            doc.drain_events().as_slice(),
+            [AppEvent::SettingsChanged { doc_name: Some(n), .. }] if n == "Team"
+        ));
+        // Same name again: no commit, no event.
+        doc.set_doc_name(Some("Team")).unwrap();
+        assert!(doc.drain_events().is_empty());
+        // Survives a snapshot round trip.
+        let restored = Doc::load(&doc.save().unwrap()).unwrap();
+        assert_eq!(restored.get_settings().doc_name.as_deref(), Some("Team"));
+        // Blank un-names; the key is gone.
+        doc.set_doc_name(Some("   ")).unwrap();
+        assert_eq!(doc.get_settings().doc_name, None);
+        assert!(doc.settings_map().get(KEY_DOC_NAME).is_none());
+        doc.set_doc_name(None).unwrap();
+        assert!(doc.drain_events().len() == 1);
+    }
+
+    #[test]
+    fn calendar_hidden_docs_is_a_set_and_empties_its_key() {
+        let doc = Doc::new().unwrap();
+        let _ = doc.drain_events();
+        doc.set_calendar_doc_hidden("doc-a", true).unwrap();
+        doc.set_calendar_doc_hidden("doc-b", true).unwrap();
+        // Re-hiding is a no-op: no duplicate, no event.
+        doc.set_calendar_doc_hidden("doc-a", true).unwrap();
+        assert_eq!(
+            doc.get_settings().calendar_hidden_docs,
+            vec!["doc-a".to_string(), "doc-b".to_string()]
+        );
+        let evs = doc.drain_events();
+        assert_eq!(evs.len(), 2, "one event per real change: {evs:?}");
+        assert!(matches!(
+            &evs[1],
+            AppEvent::SettingsChanged { calendar_hidden_docs, .. }
+                if calendar_hidden_docs.len() == 2
+        ));
+        // Showing an unhidden doc is a no-op too.
+        doc.set_calendar_doc_hidden("doc-c", false).unwrap();
+        assert!(doc.drain_events().is_empty());
+        assert!(doc.set_calendar_doc_hidden("  ", true).is_err());
+        doc.set_calendar_doc_hidden("doc-a", false).unwrap();
+        assert_eq!(
+            doc.get_settings().calendar_hidden_docs,
+            vec!["doc-b".to_string()]
+        );
+        doc.set_calendar_doc_hidden("doc-b", false).unwrap();
+        assert!(doc.get_settings().calendar_hidden_docs.is_empty());
+        assert!(doc.settings_map().get(KEY_CALENDAR_HIDDEN_DOCS).is_none());
+        // The list survives a snapshot round trip in order.
+        doc.set_calendar_doc_hidden("z", true).unwrap();
+        doc.set_calendar_doc_hidden("a", true).unwrap();
+        let restored = Doc::load(&doc.save().unwrap()).unwrap();
+        assert_eq!(
+            restored.get_settings().calendar_hidden_docs,
+            vec!["z".to_string(), "a".to_string()]
+        );
+    }
+
+    #[test]
+    fn done_amalgamate_round_trips_and_off_leaves_no_key() {
+        let doc = Doc::new().unwrap();
+        let _ = doc.drain_events();
+        doc.set_done_amalgamate(false).unwrap();
+        assert!(doc.drain_events().is_empty(), "default is off; no-op");
+        doc.set_done_amalgamate(true).unwrap();
+        assert!(doc.get_settings().done_amalgamate);
+        assert!(matches!(
+            doc.drain_events().as_slice(),
+            [AppEvent::SettingsChanged {
+                done_amalgamate: true,
+                ..
+            }]
+        ));
+        let restored = Doc::load(&doc.save().unwrap()).unwrap();
+        assert!(restored.get_settings().done_amalgamate);
+        doc.set_done_amalgamate(false).unwrap();
+        assert!(!doc.get_settings().done_amalgamate);
+        assert!(doc.settings_map().get(KEY_DONE_AMALGAMATE).is_none());
+    }
+
+    #[test]
+    fn personal_settings_sync_between_peers() {
+        let dek = Dek::generate();
+        let a = Doc::new().unwrap();
+        let mut b = Doc::new().unwrap();
+        let _ = b.drain_events();
+        a.set_doc_name(Some("Shared")).unwrap();
+        a.set_calendar_doc_hidden("other", true).unwrap();
+        a.set_done_amalgamate(true).unwrap();
+        let blob = a.pending_export(&dek).unwrap().unwrap();
+        b.apply_remote(&dek, &blob).unwrap();
+        let s = b.get_settings();
+        assert_eq!(s.doc_name.as_deref(), Some("Shared"));
+        assert_eq!(s.calendar_hidden_docs, vec!["other".to_string()]);
+        assert!(s.done_amalgamate);
+        assert!(b.drain_events().iter().any(|e| matches!(
+            e,
+            AppEvent::SettingsChanged {
+                done_amalgamate: true,
+                doc_name: Some(_),
+                ..
+            }
+        )));
     }
 
     #[test]

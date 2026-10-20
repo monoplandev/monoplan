@@ -10,9 +10,16 @@ The whole address lives in the URL fragment. One self-describing token:
 
 ```
 url    = <origin> <path> "#" token
-token  = "item_" id | "list_" id | "inbox" | "focus" | "upcoming" | "done" | "bin"
+token  = "item_" id | "list_" id | "inbox" | "inbox_" doc | "focus"
+       | "upcoming" | "done" | "bin"
 id     = [0-9a-f]{32}          -- uuid-v7 hex, same as ItemId / ListMeta.id
+doc    = [0-9a-f-]{32,36}      -- a server doc id (uuid, hyphenated)
 ```
+
+Every doc has an `inbox` (`sharing-plan.md`), so `#inbox` is the Home
+doc's and another doc's is `#inbox_<doc>`. A user list's id is unique
+across docs, so `#list_<id>` carries no doc: the client searches every
+open doc for it, as it does for items.
 
 `#list_inbox` is accepted as an alias and canonicalised to `#inbox`.
 Reserved, not yet parsed (`calendar-plan.md`): `calendar` for a month-grid

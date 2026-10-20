@@ -7,11 +7,21 @@
 // against the calling component's reactive owner, so this must be
 // invoked synchronously from a component body, not an async callback.
 
-import { createEffect, createSignal, on, onCleanup } from "solid-js";
-import { Dek, Doc, SyncEngine } from "@monoplan/core/wasm";
+import {
+  createEffect,
+  createSignal,
+  getOwner,
+  on,
+  onCleanup,
+  runWithOwner,
+} from "solid-js";
+import { Dek, Doc, SyncEngine, wrapDekWithDek } from "@monoplan/core/wasm";
 import { IdbStorage, type InFlightPushJs, putDevice } from "@monoplan/core";
+import { api } from "../api.ts";
 import { savePrefs, type Prefs, type ViewKey } from "../prefs.ts";
 import { type Session } from "../Login.tsx";
+import { dekVault } from "./dekVault.ts";
+import { createDocsLayer, type DocsLayer } from "./docs.ts";
 import { createSyncedApp, type DocApp } from "./store.ts";
 import { createSyncBridge, SyncBridge } from "./sync.ts";
 
@@ -79,6 +89,10 @@ export type DocBoot = {
  *  doc the session can open (Home first) and the account's prefs. */
 export type BootInfo = {
   docs: DocBoot[];
+  /** The Loro peer id every doc was bound to (slot 0 while this tab
+   *  holds the single-tab lock), or null for a random peer. A doc
+   *  created mid-session is bound to the same one. */
+  peerId: bigint | null;
   /** Whatever was in the `prefs` store for this account at boot. Null
    *  if the row was missing (first run for this account on this
    *  device). */
@@ -241,6 +255,15 @@ function createDocRuntime(
   return { app, engine, capture, onServerFrame, onLocalFlush, scheduleDurable, foldNow };
 }
 
+/** Hook a doc runtime's after-flush pulse: push the outbox over the
+ *  bridge (authed) and run the local persistence rhythm. */
+function wireFlush(r: DocRuntime, bridge: SyncBridge | null): void {
+  r.app.setOnFlush(() => {
+    bridge?.pumpOutbox();
+    r.onLocalFlush();
+  });
+}
+
 export function createWorkspaceRuntime(props: {
   session: Session;
   boot: BootInfo;
@@ -263,14 +286,29 @@ export function createWorkspaceRuntime(props: {
   const docApps = new Map<string, DocApp>(
     [...runtimes].map(([id, r]) => [id, r.app]),
   );
+  // The personal layer: doc map, reverse index, routed mutations and
+  // the merged lenses (`docs.ts`). The UI renders from this.
+  const docs: DocsLayer = createDocsLayer(
+    app,
+    [...runtimes.values()].map((r) => r.app),
+  );
+  // Reactive owner of this runtime, so a doc created later from an
+  // event handler can register its cleanups against the same lifetime.
+  const owner = getOwner();
 
   if (import.meta.env.DEV) {
-    const w = window as unknown as { __app?: DocApp; __apps?: Map<string, DocApp> };
+    const w = window as unknown as {
+      __app?: DocApp;
+      __apps?: Map<string, DocApp>;
+      __docs?: DocsLayer;
+    };
     w.__app = app;
     w.__apps = docApps;
+    w.__docs = docs;
     onCleanup(() => {
       delete w.__app;
       delete w.__apps;
+      delete w.__docs;
     });
   }
 
@@ -279,15 +317,27 @@ export function createWorkspaceRuntime(props: {
   // Seed from the prefs row; a `kind:"list"` pointing at a
   // since-deleted list falls back to Inbox silently. `focus`/`done`/`bin`
   // are global views and always resolvable.
+  // A list view names its doc (`ViewKey.docId`, absent ≡ Home); the
+  // canonical form drops a Home doc id so equality, prefs and URLs
+  // agree. Every write goes through `setView`, which normalises.
+  const normalizeView = (v: ViewKey): ViewKey =>
+    v.kind === "list" ? docs.listView(docs.viewDocId(v), v.id) : v;
   const initialView: ViewKey = (() => {
     const v = props.boot.prefs?.currentView;
     if (!v) return { kind: "list", id: "inbox" };
-    if (v.kind === "list" && !app.state.listsById[v.id]) {
-      return { kind: "list", id: "inbox" };
+    if (v.kind === "list") {
+      const target = docs.appForView(v);
+      if (v.id !== "inbox" && !target.state.listsById[v.id]) {
+        return { kind: "list", id: "inbox" };
+      }
+      return normalizeView(v);
     }
     return v;
   })();
-  const [view, setView] = createSignal<ViewKey>(initialView);
+  const [view, setViewRaw] = createSignal<ViewKey>(initialView);
+  const setView = (v: ViewKey): void => {
+    setViewRaw(normalizeView(v));
+  };
 
   // Persist the device row — identity + the "last synced" stamp
   // (observability only). The resume cursor is no longer stored here:
@@ -332,21 +382,14 @@ export function createWorkspaceRuntime(props: {
       onAuthFailed: () => void props.logout(),
     });
     const b = bridge;
-    for (const r of runtimes.values()) {
-      r.app.setOnFlush(() => {
-        b.pumpOutbox();
-        r.onLocalFlush();
-      });
-    }
+    for (const r of runtimes.values()) wireFlush(r, b);
     bridge.start();
     onCleanup(() => b.stop());
   } else {
     // Anonymous sessions have no server round-trips to pulse off, but
     // the WAL still needs bounding — fold on the same thresholds after
     // every local flush.
-    for (const r of runtimes.values()) {
-      r.app.setOnFlush(() => r.onLocalFlush());
-    }
+    for (const r of runtimes.values()) wireFlush(r, null);
   }
 
   // ---------- Device config: light writes on each frontier change ----------
@@ -365,12 +408,70 @@ export function createWorkspaceRuntime(props: {
       });
     }, 500);
   };
-  for (const r of runtimes.values()) {
+  const watchVersion = (r: DocRuntime): void => {
     createEffect(() => {
       r.app.version();
       saveDeviceSoon();
     });
-  }
+  };
+  for (const r of runtimes.values()) watchVersion(r);
+
+  // Create a doc the account owns and open it in this session
+  // (`spec/sharing-plan.md` Phase 5): a fresh DEK wrapped under the Home
+  // DEK is registered with the server, vaulted, and the doc is seeded
+  // like Home (`Doc.create`), booted into its own runtime, routed over
+  // the live bridge and named. Rejected on anonymous sessions, which
+  // have no server to own the doc. The returned promise resolves to the
+  // new doc id once it is in `docs`.
+  const createDoc = async (name: string): Promise<string> => {
+    if (props.session.anonymous) {
+      throw new Error("sign in to create a workspace");
+    }
+    const dek = Dek.generate();
+    const wrapped = wrapDekWithDek(props.session.dek, dek);
+    const { doc_id: docId } = await api.createDoc({
+      wrapped_dek: wrapped.ciphertext,
+      wrapped_dek_nonce: wrapped.nonce,
+    });
+    props.session.docKeys.set(docId, dek);
+    try {
+      await dekVault.putDocKey(docId, dek);
+    } catch (e) {
+      // The doc still opens this session; the next boot's `GET /api/docs`
+      // refresh re-learns it (`App.tsx` `refreshDocKeys`).
+      console.warn("createDoc: vaulting the new doc failed:", e);
+    }
+    const storage = await IdbStorage.open(docId);
+    const peerId = props.boot.peerId;
+    const doc = peerId !== null ? Doc.createWithPeer(peerId) : Doc.create();
+    const boot: DocBoot = {
+      docId,
+      dek,
+      doc,
+      lastAcked: 0n,
+      storage,
+      lastLocalSeq: 0,
+      serverKnownVv: new Uint8Array(),
+      inFlightPush: null,
+      walRows: 0,
+      walBytes: 0,
+      seeded: true,
+    };
+    const r = runWithOwner(owner, () => createDocRuntime(boot, pumpOutbox));
+    if (!r) throw new Error("runtime owner is gone");
+    runtimes.set(docId, r);
+    docApps.set(docId, r.app);
+    wireFlush(r, bridge);
+    runWithOwner(owner, () => watchVersion(r));
+    // Name first so the seed and the name travel as one WAL row / one
+    // push, then persist and route.
+    if (name.trim()) r.app.setDocName(name);
+    r.capture();
+    r.scheduleDurable();
+    bridge?.addEngine(r.engine);
+    docs.addDoc(r.app);
+    return docId;
+  };
 
   // ---------- Prefs: separate store, write-through ----------
   //
@@ -443,5 +544,5 @@ export function createWorkspaceRuntime(props: {
     if (deviceTimer) clearTimeout(deviceTimer);
   });
 
-  return { app, docApps, view, setView };
+  return { app, docApps, docs, view, setView, createDoc };
 }

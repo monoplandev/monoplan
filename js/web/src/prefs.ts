@@ -17,7 +17,15 @@ import { STORE_PREFS, openMonoplanDb } from "@monoplan/core/storage/web-db";
 /** Last view the user was on. Mirrors the in-memory shape used by
  *  `App.tsx`; persisted verbatim. */
 export type ViewKey =
-  | { kind: "list"; id: string }
+  | {
+      kind: "list";
+      id: string;
+      /** The doc the list lives in. Absent ≡ the account's Home doc, so
+       *  rows written before docs existed, and every URL for a Home
+       *  list, keep their shape; the runtime's `setView` normalises a
+       *  Home doc id away (`spec/sharing-plan.md` Phase 5). */
+      docId?: string;
+    }
   | { kind: "focus" }
   | { kind: "upcoming" }
   | { kind: "done" }

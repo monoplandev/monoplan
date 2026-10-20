@@ -8,7 +8,7 @@
 
 import { createEffect, createSignal, onCleanup, For, Show } from "solid-js";
 import { Portal } from "solid-js/web";
-import type { DocApp } from "./sync/store.ts";
+import type { DocsLayer } from "./sync/docs.ts";
 import { useAppI18n } from "./i18n.tsx";
 import { isOverlayOpen, trackOverlay } from "./overlay.ts";
 import { PaletteFooter } from "./PaletteFooter.tsx";
@@ -21,14 +21,14 @@ import {
 
 
 export function FindPalette(props: {
-  app: DocApp;
+  docs: DocsLayer;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSelect?: (result: FindResult) => void;
 }) {
   const { m } = useAppI18n();
   trackOverlay(() => props.open);
-  const find = createFindState(props.app);
+  const find = createFindState(props.docs);
   const [selectedIndex, setSelectedIndex] = createSignal(0);
   let inputRef: HTMLInputElement | undefined;
   let listRef: HTMLDivElement | undefined;
@@ -204,7 +204,7 @@ export function FindPalette(props: {
                   onMouseMove={(e) => onRowMouseMove(e, i())}
                   onClick={() => selectItem(item)}
                 >
-                  <FindResultBody app={props.app} item={item} />
+                  <FindResultBody docs={props.docs} item={item} />
                 </div>
               )}
             </For>

@@ -23,7 +23,7 @@ import {
   isCancelled,
   isClosed,
   isOpen,
-  type DocApp,
+  type ItemActions,
   type ItemView,
 } from "./sync/store.ts";
 
@@ -42,7 +42,9 @@ function lifecycleTimestamp(it: ItemView): number | undefined {
 export function Row(props: {
   item: () => ItemView;
   expanded: () => boolean;
-  app: DocApp;
+  /** The item's doc, or the cross-doc layer's routed actions in a view
+   *  that mixes docs (`sync/docs.ts`). */
+  app: ItemActions;
   selection: DndSelection;
   viewKind: ViewKey["kind"];
   duplicateBlock: (sourceIds: readonly string[]) => void;
@@ -66,8 +68,9 @@ export function Row(props: {
   /** Done / Focus views: when true, badge the row with its origin list name.
    *  Resolved via `listLabel` so `main` shows the Home label. */
   showList?: () => boolean;
-  /** Resolves a list id to its display label (see Workspace `listLabel`). */
-  listLabel?: (listId: string) => string;
+  /** Resolves a list id (in the item's doc) to its display label (see
+   *  Workspace `listLabel`). */
+  listLabel?: (listId: string, docId?: string) => string;
   /** Flat list view: when true, badge each open row with its lifecycle
    *  state (client-local per-list display option). The board shows state
    *  as the lane itself, so cards never take it. */
@@ -94,7 +97,7 @@ export function Row(props: {
   const originList = createMemo(() => {
     return (props.viewKind === "focus" || props.viewKind === "done") &&
       props.showList?.()
-      ? (props.listLabel?.(props.item().listId) || null)
+      ? (props.listLabel?.(props.item().listId, props.item().docId) || null)
       : null;
   });
   // Lifecycle-state badge text for the flat list view, when the list's
@@ -135,12 +138,10 @@ export function Row(props: {
     </span>
   );
 
-  // Whether this row currently has a visible Focus ref. `focusOrder` is a
-  // small (bounded) store array, so the membership scan is cheap and only
+  // Whether this row currently has a visible Focus ref. The Focus entry
+  // list is small (bounded), so the membership scan is cheap and only
   // re-runs when the Focus lens actually changes. See spec/focus.md.
-  const focused = createMemo(() =>
-    props.app.state.focusOrder.includes(props.item().id),
-  );
+  const focused = createMemo(() => props.app.isFocused(props.item().id));
   // The focus star shows where the context menu offers the toggle
   // (`ItemContextMenu.tsx`): open rows in a list / board lane.
   const canPinToFocus = (): boolean =>

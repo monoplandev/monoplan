@@ -236,6 +236,13 @@ export interface WorkspaceState {
    *  focus mutation *or* an item lifecycle change elsewhere can alter
    *  visibility. See spec/focus.md. */
   focusOrder: string[];
+  /** Every live Focus entry in curated order, foreign refs included
+   *  (`engine.focusEntriesJson()`; `spec/focus.md` §FocusRef grammar).
+   *  Only meaningful on the account's Home doc, which owns Focus: the
+   *  cross-doc layer resolves foreign entries against the other docs
+   *  and prunes the dead ones. This is the index space `addToFocus` /
+   *  `moveInFocus` address. Re-derived with `focusOrder`. */
+  focusEntries: FocusEntry[];
   listsOrder: string[];
   listsById: Record<string, ListView>;
   settings: SettingsView;
@@ -257,6 +264,13 @@ export interface RecentDoneEntry {
   doneAt: number;
 }
 
+/** One Focus entry as the core keeps it: `docId` null for this doc's
+ *  own items, a doc id for a foreign ref (`spec/focus.md`). */
+export interface FocusEntry {
+  docId: string | null;
+  itemId: string;
+}
+
 export interface SettingsView {
   /** When true, the nav renders the live-item count beside each
    *  non-Inbox list (subject to the count > 0 gate). Inbox's count is
@@ -268,10 +282,65 @@ export interface SettingsView {
    *  default lives in the doc-level settings map rather than on
    *  `ListView.defaultView`. */
   inboxView: string | null;
+  /** The doc's name, or `null` when unnamed. Doc content, so every
+   *  member sees it (`spec/sharing-plan.md`). The Home doc is labelled
+   *  "Personal" by clients regardless. */
+  docName: string | null;
+  /** Doc ids hidden from the merged calendar lens. A personal cross-doc
+   *  preference: only the Home doc's value is ever read. */
+  calendarHiddenDocs: string[];
+  /** Whether the Done view amalgamates every open doc's closed items.
+   *  Personal, Home doc only. Default false. */
+  doneAmalgamate: boolean;
 }
 
-export interface DocApp {
+/** The item-keyed half of a `DocApp`: what a row, a context menu, the
+ *  agenda or the task surface needs to act on the items it shows. Every
+ *  member takes item ids, so the cross-doc layer can implement it too,
+ *  routing each call to the doc that owns the item by `ItemView.docId`
+ *  (`spec/sharing-plan.md` "Decisions", 2026-10-20). Views that show
+ *  items from several docs (Focus, the calendar, an amalgamated Done)
+ *  hand their rows the routed implementation; a per-list view hands
+ *  them the list's own `DocApp`, which satisfies this directly. Batches
+ *  are per doc: a routed multi-id call that spans docs commits (and
+ *  undoes) once per doc. */
+export interface ItemActions {
+  getItem(id: string): ItemView | undefined;
+  /** Whether the item currently has a visible Focus ref. On a `DocApp`
+   *  this is the doc's own (local) lens; the routed layer answers for
+   *  the account's Focus, foreign refs included. */
+  isFocused(id: string): boolean;
+  editItemText(id: string, text: string): void;
+  setItemNotes(id: string, notes: string): void;
+  setItemDeadline(id: string, deadline: string | null): void;
+  setItemWhen(id: string, when: string | null): void;
+  setItemDuration(id: string, minutes: number | null): void;
+  setItemPlace(id: string, place: Place | null): void;
+  setDone(id: string, done: boolean): void;
+  setDoneMany(ids: string[], done: boolean): void;
+  undoneIntoFocus(ids: string[]): void;
+  setBinned(id: string, binned: boolean): void;
+  setBinnedMany(ids: string[], binned: boolean): void;
+  setLifecycle(id: string, lifecycle: Lifecycle): void;
+  setLifecycleMany(ids: string[], lifecycle: Lifecycle): void;
+  /** Move within the item's own doc. Cross-doc moves are not a thing
+   *  yet (`spec/sharing-plan.md` "Open: cross-doc move"); the routed
+   *  layer ignores a target list the item's doc does not hold. */
+  moveItem(id: string, listId: string, indexInList: number): void;
+  deleteBinned(id: string): void;
+  deleteBinnedMany(ids: string[]): void;
+  addToFocus(id: string, index?: number): void;
+  addToFocusMany(ids: string[]): void;
+  removeFromFocus(id: string): void;
+  removeFromFocusMany(ids: string[]): void;
+  moveInFocus(id: string, index: number): void;
+  withActionBatch<T>(fn: () => T): T;
+}
+
+export interface DocApp extends ItemActions {
   engine: SyncEngine;
+  /** The doc this app projects; what every `ItemView` it emits carries. */
+  docId: string;
   state: WorkspaceState;
   /** Query surface over the engine's search index (items + lists in the
    *  active account). The index lives in core and tracks the doc itself;
@@ -438,6 +507,17 @@ export interface DocApp {
   removeFromFocusMany(ids: string[]): void;
   /** Reorder an item within the Focus lens to visible position `index`. */
   moveInFocus(id: string, index: number): void;
+  /** Add a foreign FocusRef (`docId:itemId`, an item in another open
+   *  doc) at entry position `index`. Home doc only; no Open check — the
+   *  cross-doc layer resolved the item and prunes the ref when it
+   *  closes (`spec/focus.md`). No-op if the item is already focused. */
+  addForeignToFocus(docId: string, itemId: string, index: number): void;
+  /** Name the doc (`""` un-names it). Doc content: every member sees it. */
+  setDocName(name: string): void;
+  /** Hide / show a doc on the merged calendar. Personal: Home doc only. */
+  setCalendarDocHidden(docId: string, hidden: boolean): void;
+  /** Whether the Done view spans every open doc. Personal: Home doc only. */
+  setDoneAmalgamate(amalgamate: boolean): void;
   /** Per-session local undo. Returns whether a step was applied so the
    *  caller can decide whether to `preventDefault()` the keybinding.
    *  Remote-applied ops are excluded by origin tag — see
@@ -446,6 +526,14 @@ export interface DocApp {
   redo(): boolean;
   canUndo(): boolean;
   canRedo(): boolean;
+  /** Stamp (a process-wide monotonic counter, not wall-clock, so two
+   *  docs never tie) of the last workspace undo entry recorded here (a
+   *  local mutation), or 0. The cross-doc layer undoes the doc that
+   *  acted most recently (undo stays per doc, `spec/sharing-plan.md`). */
+  lastActionAt(): number;
+  /** Stamp of the last undo step applied here, or 0 — the doc a redo
+   *  should go to. */
+  lastUndoAt(): number;
   /** Subscribe to applied undo / redo steps. The outcome names the items
    *  and lists whose events the step produced, in event order, so the
    *  view can land the user on what just changed. An id may no longer
@@ -470,6 +558,12 @@ export interface ImportSummary {
   itemsSkipped: number;
   focusAdded: number;
 }
+
+/** Process-wide stamp for `lastActionAt` / `lastUndoAt`: strictly
+ *  increasing across every `DocApp`, so the cross-doc layer can order
+ *  actions between docs without wall-clock ties. */
+let actionClock = 0;
+const nextActionStamp = (): number => ++actionClock;
 
 const COARSE_BATCH_THRESHOLD = 64;
 const COARSE_EVENT_KINDS = new Set([
@@ -526,13 +620,27 @@ function materializeEngineSnapshot(engine: SyncEngine): WorkspaceState {
     // Covers the coarse / fullResync reconcile path too, since both
     // rematerialize through here.
     focusOrder: engine.focusRefIds(),
+    focusEntries: readFocusEntries(engine),
     listsOrder: payload.lists.map((list) => list.id),
     listsById,
     settings: {
       showListCounts: payload.settings.showListCounts ?? true,
       inboxView: payload.settings.inboxView ?? null,
+      docName: payload.settings.docName ?? null,
+      calendarHiddenDocs: payload.settings.calendarHiddenDocs ?? [],
+      doneAmalgamate: payload.settings.doneAmalgamate ?? false,
     },
   };
+}
+
+function readFocusEntries(engine: SyncEngine): FocusEntry[] {
+  try {
+    const rows = JSON.parse(engine.focusEntriesJson()) as FocusEntry[];
+    return rows.map((r) => ({ docId: r.docId ?? null, itemId: r.itemId }));
+  } catch (e) {
+    console.error("focusEntriesJson failed:", e);
+    return [];
+  }
 }
 
 function shouldUseCoarseProjection(events: readonly AppEventJs[]): boolean {
@@ -550,11 +658,15 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     listOpen: {},
     binCount: 0,
     focusOrder: [],
+    focusEntries: [],
     listsOrder: [],
     listsById: {},
     settings: {
       showListCounts: true,
       inboxView: null,
+      docName: null,
+      calendarHiddenDocs: [],
+      doneAmalgamate: false,
     },
   });
   const [version, setVersion] = createSignal(0);
@@ -577,6 +689,8 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
   type UndoEntry = { steps: number; notes: NotesStep[] };
   const undoStack: UndoEntry[] = [];
   const redoStack: UndoEntry[] = [];
+  let lastActionAt = 0;
+  let lastUndoAt = 0;
   // Notes writes made inside the open action batch, folded into its entry.
   let pendingBatchNotes: NotesStep[] = [];
   // While an undo / redo step is being applied, every drained event's
@@ -934,6 +1048,9 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
         setState("settings", {
           showListCounts: ev.showListCounts ?? true,
           inboxView: ev.inboxView ?? null,
+          docName: ev.docName ?? null,
+          calendarHiddenDocs: ev.calendarHiddenDocs ?? [],
+          doneAmalgamate: ev.doneAmalgamate ?? false,
         });
         break;
       }
@@ -973,6 +1090,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
         // the order is unchanged. See spec/focus.md B.8.
         if (events.length > 0) {
           setState("focusOrder", reconcile(engine.focusRefIds()));
+          setState("focusEntries", reconcile(readFocusEntries(engine)));
         }
       }
       if (events.length > 0) setVersion((v) => v + 1);
@@ -1012,6 +1130,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     if (steps <= 0 && notes.length === 0) return;
     undoStack.push({ steps, notes });
     redoStack.length = 0;
+    lastActionAt = nextActionStamp();
   };
 
   // Close the open notes session as one undo step (nothing if the text
@@ -1119,6 +1238,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       }
       flush();
       redoStack.push({ steps: applied, notes });
+      lastUndoAt = nextActionStamp();
       return true;
     }
   };
@@ -1142,12 +1262,14 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       }
       flush();
       undoStack.push({ steps: applied, notes });
+      lastActionAt = nextActionStamp();
       return true;
     }
   };
 
   return {
     engine,
+    docId,
     state,
     version,
     recentDone,
@@ -1164,6 +1286,9 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     },
     getItem(id) {
       return state.itemsById[id];
+    },
+    isFocused(id) {
+      return state.focusOrder.includes(id);
     },
     addItem(listId, text) {
       return mutate(() => engine.addItem(listId, text));
@@ -1356,6 +1481,18 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     moveInFocus(id, index) {
       mutate(() => engine.moveInFocus(id, index));
     },
+    addForeignToFocus(docId, itemId, index) {
+      mutate(() => engine.addForeignToFocus(docId, itemId, index));
+    },
+    setDocName(name) {
+      mutate(() => engine.setDocName(name));
+    },
+    setCalendarDocHidden(docId, hidden) {
+      mutate(() => engine.setCalendarDocHidden(docId, hidden));
+    },
+    setDoneAmalgamate(amalgamate) {
+      mutate(() => engine.setDoneAmalgamate(amalgamate));
+    },
     undo() {
       // An open session is settled first so Cmd+Z right after typing
       // (blur pending) reverts the typing, not an older step.
@@ -1370,6 +1507,12 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     },
     canRedo() {
       return redoStack.length > 0;
+    },
+    lastActionAt() {
+      return lastActionAt;
+    },
+    lastUndoAt() {
+      return lastUndoAt;
     },
     onUndoRedo(cb) {
       undoListeners.add(cb);

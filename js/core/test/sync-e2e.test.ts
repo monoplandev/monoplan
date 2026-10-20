@@ -493,4 +493,60 @@ describe("e2e snapshot + second-device bootstrap", () => {
     bridgeA.stop();
     bridgeB.stop();
   }, 30_000);
+
+  test("a doc created mid-session is routed by addEngine and reaches a second device", async () => {
+    const dekHome = Dek.generate();
+    const dekNew = Dek.generate();
+    const account = await signup(server, dekHome.clone());
+    const homeA = new SyncEngine(
+      Doc.create(),
+      account.primaryDocId,
+      dekHome.clone(),
+      0n,
+      new MemEngineStorage() as unknown as EngineStorage,
+    );
+    const bridgeA = await attachEngines(server, account.deviceToken, [homeA]);
+    await waitFor(() => homeA.isIdle(), "home open and pulled");
+
+    // The web client's create-doc flow: `POST /api/docs`, then a fresh
+    // seeded engine handed to the already-open bridge.
+    const newDocId = await createDoc(server, account.deviceToken);
+    const newA = new SyncEngine(
+      Doc.create(),
+      newDocId,
+      dekNew.clone(),
+      0n,
+      new MemEngineStorage() as unknown as EngineStorage,
+    );
+    bridgeA.addEngine(newA);
+    expect(bridgeA.docIds()).toEqual([account.primaryDocId, newDocId]);
+    expect(() => bridgeA.addEngine(newA)).toThrow();
+    await waitFor(() => newA.isIdle(), "new doc opened on the live socket");
+    newA.addItem(LIST_MAIN, "fresh 0");
+    newA.captureLocalOps();
+    newA.flush();
+    bridgeA.pumpOutbox();
+    await waitFor(() => newA.lastContiguousSeq() >= 1n, "fresh 0 acked");
+    // Home is untouched by the new doc's traffic.
+    expect(homeA.lastContiguousSeq()).toBe(0n);
+
+    const tokenB = await registerDevice(server, account.deviceToken, "device-b");
+    const newB = new SyncEngine(
+      Doc.empty(),
+      newDocId,
+      dekNew.clone(),
+      0n,
+      new MemEngineStorage() as unknown as EngineStorage,
+    );
+    const bridgeB = await attachEngines(server, tokenB, [newB]);
+    await waitFor(
+      () => hex(newA.fingerprint()) === hex(newB.fingerprint()),
+      "new doc converges on B",
+      10_000,
+    );
+    expect(itemTexts(newB)).toEqual(["fresh 0"]);
+
+    bridgeA.stop();
+    bridgeB.stop();
+  }, 30_000);
 });

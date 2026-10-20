@@ -18,6 +18,9 @@ export type SearchLifecycle = Lifecycle;
 export interface SearchResult {
   id: string;
   kind: SearchKind;
+  /** The doc the result came from. Stamped by the Find surfaces' fan-out
+   *  (`findResults.ts`), never by the engine, whose index is per doc. */
+  docId?: string;
   title: string;
   body?: string;
   listId?: string;

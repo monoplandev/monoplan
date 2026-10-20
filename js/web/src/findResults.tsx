@@ -7,7 +7,8 @@
 // so each surface is left holding only its own interaction model.
 
 import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js";
-import { LIST_EVENTS, type DocApp } from "./sync/store.ts";
+import type { DocsLayer } from "./sync/docs.ts";
+import { LIST_EVENTS } from "./sync/store.ts";
 import { matchesName, type SearchResult } from "./search.ts";
 import { useAppI18n } from "./i18n.tsx";
 import archiveSvg from "./icons/archive.svg?raw";
@@ -49,8 +50,10 @@ const VIEW_ICONS: Record<ViewResultId, string> = {
 
 /** Query state + result set for a Find surface. `setInput` feeds the
  *  debounced filter; `reset` clears both at once so a reopen never
- *  flashes the previous query's results. */
-export function createFindState(app: DocApp) {
+ *  flashes the previous query's results. Search fans out over every
+ *  open doc (each has its own index, `spec/search.md`) and merge-ranks
+ *  by score; every result is stamped with its doc. */
+export function createFindState(docs: DocsLayer) {
   const { m } = useAppI18n();
   const [input, setInput] = createSignal("");
   const [filter, setFilter] = createSignal("");
@@ -72,7 +75,7 @@ export function createFindState(app: DocApp) {
     { kind: "view", id: "focus", title: m().nav.focus },
     { kind: "view", id: "upcoming", title: m().nav.upcoming },
     { kind: "view", id: "done", title: m().nav.done },
-    ...(app.state.binCount > 0
+    ...(docs.binCount() > 0
       ? [{ kind: "view", id: "bin", title: m().nav.bin } as ViewResult]
       : []),
     { kind: "view", id: "inbox", title: m().nav.inbox },
@@ -82,16 +85,24 @@ export function createFindState(app: DocApp) {
   // while the surface is open updates the visible result set.
   const items = createMemo((): FindResult[] => {
     const q = filter();
-    app.version();
+    docs.version();
     if (!q) {
-      // Default menu: the built-in views then every active list, in nav
-      // order — the surface doubles as a jump-to-view switcher before the
-      // user types anything. Archived lists stay reachable by query only.
+      // Default menu: the built-in views then every active list of every
+      // doc, in nav order (Home first) — the surface doubles as a
+      // jump-to-view switcher before the user types anything. Archived
+      // lists stay reachable by query only. Another doc's Inbox is a
+      // list row here (the built-in Inbox entry is Home's).
       const lists: SearchResult[] = [];
-      for (const id of app.state.listsOrder) {
-        const l = app.state.listsById[id];
-        if (!l || l.archivedAt != null) continue;
-        lists.push({ id: l.id, kind: "list", title: l.name, score: 0 });
+      for (const d of docs.docs()) {
+        if (!d.home) {
+          lists.push({ id: "inbox", kind: "list", title: m().nav.inbox, docId: d.docId, score: 0 });
+        }
+        const st = d.app.state;
+        for (const id of st.listsOrder) {
+          const l = st.listsById[id];
+          if (!l || l.archivedAt != null) continue;
+          lists.push({ id: l.id, kind: "list", title: l.name, docId: d.docId, score: 0 });
+        }
       }
       return [...builtinViews(), ...lists];
     }
@@ -99,7 +110,15 @@ export function createFindState(app: DocApp) {
     // semantics via matchesName) and sit above everything — they're the
     // pinned nav entries.
     const views = builtinViews().filter((v) => matchesName(v.title, q));
-    const results = app.search.query(q, 50);
+    // Fan out: every doc's index, merged by score (stable, so ties keep
+    // doc order, Home first).
+    const results: SearchResult[] = [];
+    for (const d of docs.docs()) {
+      for (const r of d.app.search.query(q, 50)) {
+        results.push({ ...r, docId: d.docId });
+      }
+    }
+    results.sort((a, b) => b.score - a.score);
     // Float list results above items, preserving each group's relevance
     // order (Array.sort is stable). The surface owns this presentation
     // tweak — the engine's ranking is left untouched.
@@ -122,7 +141,7 @@ export function createFindState(app: DocApp) {
  *  rows — they always render the localized built-in labels. Lists
  *  themselves get no label. Returns "" when there's nothing to show. */
 export function findResultListLabel(
-  app: DocApp,
+  docs: DocsLayer,
   builtin: { inbox: string; events: string },
   item: FindResult,
 ): string {
@@ -131,7 +150,7 @@ export function findResultListLabel(
   if (!listId) return "";
   if (listId === "inbox") return builtin.inbox;
   if (listId === LIST_EVENTS) return builtin.events;
-  return app.state.listsById[listId]?.name ?? "";
+  return docs.listOf(item.docId ?? docs.homeDocId, listId)?.name ?? "";
 }
 
 /** Whether a result denotes, or lives in, an archived list
@@ -139,11 +158,11 @@ export function findResultListLabel(
  *  and keep labelling their items, so both surfaces flag the row: a
  *  list result that is itself archived, or an item whose owning list
  *  is. Built-in views and the reserved `inbox` can't be archived. */
-export function findResultArchived(app: DocApp, item: FindResult): boolean {
+export function findResultArchived(docs: DocsLayer, item: FindResult): boolean {
   if (item.kind === "view") return false;
   const listId = item.kind === "list" ? item.id : item.listId;
   if (!listId) return false;
-  return app.state.listsById[listId]?.archivedAt != null;
+  return docs.listOf(item.docId ?? docs.homeDocId, listId)?.archivedAt != null;
 }
 
 /** Lifecycle of an item result ("" for other kinds) — union-safe access
@@ -158,20 +177,30 @@ export function findResultLifecycle(item: FindResult): string {
  *  rendered so titles stay aligned across mixed result kinds: a checkbox
  *  mirror for items, the list's icon for lists, the fixed nav icon for
  *  built-in views. */
-export function FindResultBody(props: { app: DocApp; item: FindResult }) {
+export function FindResultBody(props: { docs: DocsLayer; item: FindResult }) {
   const { m } = useAppI18n();
   const lifecycle = () => findResultLifecycle(props.item);
   // Chosen icon for a list result (a literal emoji grapheme), or
   // undefined when unset — falls back to the default file glyph,
-  // mirroring the nav.
+  // mirroring the nav. Another doc's Inbox row carries the Inbox glyph.
   const listIcon = (): string | undefined =>
     props.item.kind === "list"
-      ? props.app.state.listsById[props.item.id]?.icon
+      ? props.docs.listOf(props.item.docId ?? props.docs.homeDocId, props.item.id)?.icon
       : undefined;
   const viewIcon = (): string | undefined =>
-    props.item.kind === "view" ? VIEW_ICONS[props.item.id] : undefined;
-  const listLabel = () => findResultListLabel(props.app, m().nav, props.item);
-  const archived = () => findResultArchived(props.app, props.item);
+    props.item.kind === "view"
+      ? VIEW_ICONS[props.item.id]
+      : props.item.kind === "list" && props.item.id === "inbox"
+        ? VIEW_ICONS.inbox
+        : undefined;
+  const listLabel = () => findResultListLabel(props.docs, m().nav, props.item);
+  // Which doc a non-Home result lives in, as a trailing column.
+  const docLabel = (): string => {
+    const docId = props.item.kind === "view" ? undefined : props.item.docId;
+    if (!docId || docId === props.docs.homeDocId) return "";
+    return props.docs.appOf(docId)?.state.settings.docName ?? m().nav.untitledDoc;
+  };
+  const archived = () => findResultArchived(props.docs, props.item);
   return (
     <>
       <Show
@@ -226,6 +255,9 @@ export function FindResultBody(props: { app: DocApp; item: FindResult }) {
       </Show>
       <Show when={listLabel()}>
         {(label) => <span class="palette__item-list">{label()}</span>}
+      </Show>
+      <Show when={docLabel()}>
+        {(label) => <span class="palette__item-list palette__item-doc">{label()}</span>}
       </Show>
     </>
   );

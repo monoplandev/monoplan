@@ -1,6 +1,8 @@
 import {
   createEffect,
+  createMemo,
   createSignal,
+  For,
   onCleanup,
   onMount,
   Show,
@@ -33,7 +35,8 @@ import { AuthDialog, type Session } from "./Login.tsx";
 import { pasteAsPlainText } from "./plainTextPaste.ts";
 import type { ViewKey } from "./prefs.ts";
 import { listUrl } from "./url.ts";
-import type { DocApp } from "./sync/store.ts";
+import type { DocEntry, DocsLayer } from "./sync/docs.ts";
+import type { DocApp, ListView } from "./sync/store.ts";
 
 // Whether the anonymous-session sign-in prompt has been dismissed. Auto-
 // opening the auth dialog on every load is nagging once the user has
@@ -65,22 +68,25 @@ function markAuthPromptDismissed(): void {
   }
 }
 
-// Whether the "Personal" workspace group (Inbox + lists) is collapsed in
-// the nav. Groundwork for shared workspaces: each workspace will get its
-// own collapsible heading, and the personal one is the first. Purely
-// local UI state, same localStorage rationale as the flag above.
+// Whether a doc's nav section (its Inbox + lists) is collapsed. One
+// collapsible heading per open doc, the Home ("Personal") one first;
+// Home keeps the key it had before other docs existed. Purely local UI
+// state, same localStorage rationale as the flag above.
 const PERSONAL_COLLAPSED_KEY = "monoplan:nav-personal-collapsed";
-function loadPersonalCollapsed(): boolean {
+const sectionCollapsedKey = (docId: string, home: boolean): string =>
+  home ? PERSONAL_COLLAPSED_KEY : `monoplan:nav-collapsed:${docId}`;
+function loadSectionCollapsed(docId: string, home: boolean): boolean {
   try {
-    return localStorage.getItem(PERSONAL_COLLAPSED_KEY) === "1";
+    return localStorage.getItem(sectionCollapsedKey(docId, home)) === "1";
   } catch {
     return false;
   }
 }
-function savePersonalCollapsed(collapsed: boolean): void {
+function saveSectionCollapsed(docId: string, home: boolean, collapsed: boolean): void {
   try {
-    if (collapsed) localStorage.setItem(PERSONAL_COLLAPSED_KEY, "1");
-    else localStorage.removeItem(PERSONAL_COLLAPSED_KEY);
+    const key = sectionCollapsedKey(docId, home);
+    if (collapsed) localStorage.setItem(key, "1");
+    else localStorage.removeItem(key);
   } catch {
     // Best-effort; failing to persist just means the group reopens next load.
   }
@@ -345,62 +351,36 @@ export function StatusSlot(props: {
 }
 
 export function Nav(props: {
-  app: DocApp;
-  /** Active (non-archived) lists — the draggable main section. Archived
-   *  lists render no nav section for now; they stay reachable through
-   *  search and restorable via the header's list menu (Unarchive). */
-  lists: { id: string; name: string; icon?: string }[];
+  /** The personal layer: every open doc, Home first (`sync/docs.ts`).
+   *  One collapsible section renders per doc; there is no "current
+   *  doc", the view names its own. */
+  docs: DocsLayer;
+  /** Merged across docs (the Bin always spans every doc). */
   binCount: number;
-  /** Number of visible Focus refs — the Focus nav entry's count badge, and
+  /** Number of visible Focus entries — the Focus nav entry's count badge, and
    *  what drives the soft "getting big" signal past the threshold. */
   focusCount: number;
   /** The Upcoming entry's badge: Open rows owed or on today. Only the
    *  count is shown here (the tone drives the Find sheet / mobile bar);
    *  hidden at zero. */
   upcomingBadge: AttentionBadge;
-  /** Open-item count (Backlog + Live) per list id. Inbox's row always
-   *  renders a badge (showing "-" when zero); non-Inbox rows render theirs
-   *  only when `showListCounts` is true, again with "-" for zero. */
-  openCountsByList: Record<string, number>;
-  /** Doc-level settings flag; when true, render the live-item count
-   *  badge beside each non-Inbox list in the nav (showing "-" when the
-   *  list is empty). Inbox's badge is always shown regardless. */
+  /** Home doc settings flag; when true, render the live-item count
+   *  badge beside each non-Inbox list in every section (showing "-" when
+   *  the list is empty). Inbox badges are always shown regardless. */
   showListCounts: boolean;
   view: ViewKey;
   setView: (v: ViewKey) => void;
+  /** Create a doc the account owns and open it (`runtime.createDoc`), or
+   *  null when this session cannot (anonymous: no server to own it). */
+  createDoc: ((name: string) => Promise<string>) | null;
   /** Chrome pinned to the bottom of the sidebar (app menu + account/sync
    *  widget) — see `.nav-footer` in styles.css. */
   footer?: JSX.Element;
 }) {
   const { m } = useAppI18n();
-  const [adding, setAdding] = createSignal(false);
   const [emptyBinConfirmOpen, setEmptyBinConfirmOpen] = createSignal(false);
-  // Archive is non-destructive (globally undoable, trivially reversible
-  // via Unarchive), so there is no confirmation dialog. Archiving the
-  // list currently on screen would leave a stale view; hop to Inbox
-  // before applying the mutation.
-  const archiveList = (id: string) => {
-    if (props.view.kind === "list" && props.view.id === id) {
-      props.setView({ kind: "list", id: "inbox" });
-    }
-    props.app.setListArchived(id, true);
-  };
-  const [name, setName] = createSignal("");
-  const submit = (e: Event) => {
-    e.preventDefault();
-    const t = name().trim();
-    if (!t) return;
-    const id = props.app.addList(t);
-    setName("");
-    setAdding(false);
-    props.setView({ kind: "list", id });
-  };
-  // `main` is a reserved id with no MovableList entry — clients
-  // render it as a static nav button, so the dnd source is just
-  // `props.lists` directly.
-  type NavList = { id: string; name: string; icon?: string };
-  const [dndLists, setDndLists] = createSignal<NavList[]>([]);
-  createEffect(() => setDndLists(props.lists));
+  const [addingDoc, setAddingDoc] = createSignal(false);
+  const [docName, setDocName] = createSignal("");
 
   // Match the items list's mobile bump so the drawer's tap targets feel
   // consistent with the main view.
@@ -412,61 +392,26 @@ export function Nav(props: {
   navMobileMq.addEventListener("change", onNavMqChange);
   onCleanup(() => navMobileMq.removeEventListener("change", onNavMqChange));
 
-  const navSelection = new DndSelection();
-  const onNavItemClick = (e: MouseEvent, id: string) => {
-    const modKey = /Mac|iPhone|iPad|iPod/.test(navigator.platform)
-      ? e.metaKey
-      : e.ctrlKey;
-    if (e.shiftKey || modKey) return;
-    props.setView({ kind: "list", id });
-  };
-  // Enter on a keyboard-focused user list opens it. The Dnd listbox owns
-  // arrow-key navigation and updates navSelection's top key as the user
-  // moves; we just translate that into a setView. stopPropagation keeps the
-  // document-level onOpenKey from also firing and opening whatever's
-  // selected in the main list.
-  const [personalCollapsed, setPersonalCollapsed] = createSignal(loadPersonalCollapsed());
-  const togglePersonal = () => {
-    const next = !personalCollapsed();
-    setPersonalCollapsed(next);
-    savePersonalCollapsed(next);
-  };
-  const startAdding = () => {
-    if (personalCollapsed()) {
-      setPersonalCollapsed(false);
-      savePersonalCollapsed(false);
-    }
-    setAdding(true);
-  };
-  const onNavKeyDown = (e: KeyboardEvent) => {
-    if (e.key !== "Enter") return;
-    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-    const target = e.target as Element | null;
-    if (target?.closest('input, textarea, [contenteditable="true"]')) return;
-    const top = navSelection.getSelectionTop();
-    if (top === null) return;
-    e.preventDefault();
-    e.stopPropagation();
-    props.setView({ kind: "list", id: String(top) });
-  };
-  const selectedNavIds = (id: string): string[] =>
-    navSelection.isSelected(id) ? navSelection.getSelectedKeys().map(String) : [id];
-
   // Keep the active view's nav row in view. The view can change from
   // anywhere (find palette, URL, keyboard, list creation, a click), so
   // react to the view itself rather than to any one entry point; a
   // clicked row is already visible and `block: "nearest"` makes that a
   // no-op. Every entry (Focus, Upcoming, lists, Done, Bin) marks itself
   // with `data-active`, so that's the lookup rather than a per-kind id.
-  // The Dnd here isn't a scroller (no fillHeight), so every list row is
+  // The Dnds here aren't scrollers (no fillHeight), so every list row is
   // mounted and `.nav-scroll` is the only scroll container. Deferred a
   // frame (with a couple of retries) so a list created and opened in the
-  // same tick has its row in the DOM before we look for it.
+  // same tick has its row in the DOM before we look for it. A section
+  // expanding bumps `sectionTick` so the row it reveals is scrolled to.
   let navScrollEl!: HTMLDivElement;
+  const [sectionTick, setSectionTick] = createSignal(0);
   const revealActiveNav = () => {
     // Read here so the effect below tracks the view.
     void props.view.kind;
-    if (props.view.kind === "list") void props.view.id;
+    if (props.view.kind === "list") {
+      void props.view.id;
+      void props.view.docId;
+    }
     let attempts = 0;
     const tryScroll = () => {
       if (!navScrollEl) return;
@@ -477,39 +422,27 @@ export function Nav(props: {
     requestAnimationFrame(tryScroll);
   };
   createEffect(() => {
-    // The list rows only exist while the group is expanded, so expanding
-    // it should also bring the active row into view.
-    personalCollapsed();
+    sectionTick();
     revealActiveNav();
   });
-  const onReorder = (op: DndOp<NavList>) => {
-    if (op.type !== "move") return;
-    const ids = props.lists.map((l) => l.id);
-    const movedIds = op.keys.map(String).filter((id) => ids.includes(id));
-    if (movedIds.length === 0) return;
-    const remaining = ids.filter((id) => !movedIds.includes(id));
-    const insertAt =
-      op.beforeKey === null
-        ? remaining.length
-        : (() => {
-            const idx = remaining.indexOf(String(op.beforeKey));
-            return idx >= 0 ? idx : remaining.length;
-          })();
-    const nextIds = [...remaining];
-    nextIds.splice(insertAt, 0, ...movedIds);
-    const currentIds = [...ids];
-    for (const [index, id] of nextIds.entries()) {
-      if (currentIds[index] !== id) {
-        const currentIndex = currentIds.indexOf(id);
-        if (currentIndex < 0) continue;
-        props.app.moveList(id, index);
-        currentIds.splice(currentIndex, 1);
-        currentIds.splice(index, 0, id);
-      }
-    }
+
+  const submitDoc = (e: Event) => {
+    e.preventDefault();
+    const name = docName().trim();
+    const create = props.createDoc;
+    if (!name || !create) return;
+    setDocName("");
+    setAddingDoc(false);
+    void create(name)
+      .then((docId) => props.setView(props.docs.listView(docId, "inbox")))
+      .catch((err) => {
+        console.error("create doc failed:", err);
+        alert(m().nav.createDocFailed);
+      });
   };
+
   return (
-    <nav class="nav" onKeyDown={onNavKeyDown}>
+    <nav class="nav">
       <div class="nav-scroll" tabIndex={-1} ref={navScrollEl}>
       <div class="nav-group">
         {/* Focus: a reserved lens (spec/focus.md), not a `ListMeta` row, so
@@ -587,184 +520,48 @@ export function Nav(props: {
           </ContextMenu>
         </Show>
       </div>
-      <div class="nav-group">
-        {/* Workspace heading. Today there is exactly one workspace
-            ("Personal"); shared workspaces will add sibling groups, each
-            with its own heading. Click collapses the group; the state is
-            local to this browser. */}
-        <div
-          class="nav-section nav-section-toggle"
-          role="button"
-          aria-expanded={!personalCollapsed()}
-          onClick={togglePersonal}
-        >
-          <span class="nav-section-label">{m().nav.personal}</span>
-          <span
-            class="nav-section-caret"
-            data-collapsed={personalCollapsed() ? "" : undefined}
-            innerHTML={caretDownSvg}
+      {/* One section per open doc, Home ("Personal") first, each with
+          its own heading, Inbox, lists and new-list form. Collapse state
+          is local to this browser, per doc. */}
+      <For each={props.docs.docs()}>
+        {(entry) => (
+          <DocSection
+            entry={entry}
+            docs={props.docs}
+            view={props.view}
+            setView={props.setView}
+            showListCounts={props.showListCounts}
+            mobile={navIsMobile()}
+            onToggled={() => setSectionTick((n) => n + 1)}
           />
-          {/* New-list affordance sits inside the heading, after the caret,
-              rather than as a trailing "+ Add list" row: hover-only like
-              the caret, so the group reads as a plain label at rest. The
-              heading is a div (not a button) so this real button can nest
-              inside it; stopPropagation keeps the click from also toggling
-              the group. Opening the form expands a collapsed group, since
-              the input renders inside it. */}
-          <button
-            type="button"
-            class="icon-button nav-section-add"
-            tabIndex={-1}
-            aria-label={m().nav.newList}
-            title={m().nav.newList}
-            innerHTML={plusSvg}
-            onClick={(e) => {
-              e.stopPropagation();
-              startAdding();
-            }}
-          />
-        </div>
-        <Show when={!personalCollapsed()}>
-        {/* Inbox is reserved: it has no `ListMeta` row and carries the
-            localized built-in label, so it's a static entry with no rename
-            affordance and no context menu. It sits at the head of the lists
-            group — visually one of the lists, but outside the Dnd so it can
-            never be reordered, multi-selected, or dragged. */}
-        <button
-          type="button"
-          class="nav-item"
-          data-active={
-            props.view.kind === "list" && props.view.id === "inbox"
-              ? ""
-              : undefined
-          }
-          data-drop-list-id="inbox"
-          tabIndex={-1}
-          onClick={() => props.setView({ kind: "list", id: "inbox" })}
-        >
-          <span class="nav-item-icon" innerHTML={archiveSvg} />
-          {m().nav.inbox}
-          <span class="nav-item-count">
-            {(props.openCountsByList["inbox"] ?? 0) > 0
-              ? props.openCountsByList["inbox"]
-              : "-"}
-          </span>
-        </button>
-        <Show when={props.lists.length > 0}>
-          <Dnd
-            items={dndLists()}
-            setItems={setDndLists}
-            getKey={(l) => l.id}
-            itemHeight={navIsMobile() ? 40 : 28}
-            multi
-            arrowNavigate={false}
-            clearOnClickOutside
-            selection={navSelection}
-            onReorder={onReorder}
+        )}
+      </For>
+      <Show when={props.createDoc !== null}>
+        <div class="nav-group nav-group-new-doc">
+          <Show
+            when={addingDoc()}
+            fallback={
+              <button
+                type="button"
+                class="nav-item nav-new-doc"
+                tabIndex={-1}
+                onClick={() => setAddingDoc(true)}
+              >
+                <span class="nav-item-icon" innerHTML={plusSvg} />
+                {m().nav.newDoc}
+              </button>
+            }
           >
-            {(l) => {
-              // Captured by the Rename ContextMenu.Item below. The
-              // EditableNavLabel hands us its startEdit on mount so the
-              // context menu can drive rename mode the same way a
-              // double-click does.
-              let startRename: (() => void) | undefined;
-              const selectedIds = (): string[] => selectedNavIds(l().id);
-              const isMultiMenu = (): boolean => selectedIds().length > 1;
-              return (
-                <ContextMenu
-                  onOpenChange={(open) => {
-                    if (open && !navSelection.isSelected(l().id)) {
-                      navSelection.selectOnly(l().id);
-                    }
-                  }}
-                >
-                  <ContextMenu.Trigger
-                    as="button"
-                    type="button"
-                    class="nav-item"
-                    data-active={
-                      props.view.kind === "list" && props.view.id === l().id
-                        ? ""
-                        : undefined
-                    }
-                    data-drop-list-id={l().id}
-                    tabIndex={-1}
-                    onClick={(e) => onNavItemClick(e, l().id)}
-                  >
-                    <Show
-                      when={l().icon}
-                      fallback={<span class="nav-item-icon" innerHTML={fileSvg} />}
-                    >
-                      {(icon) => (
-                        <span class="nav-item-icon nav-item-icon-emoji">{icon()}</span>
-                      )}
-                    </Show>
-                    <EditableNavLabel
-                      name={l().name}
-                      onSave={(name) => props.app.renameList(l().id, name)}
-                      registerStart={(fn) => (startRename = fn)}
-                    />
-                    <Show when={props.showListCounts}>
-                      <span class="nav-item-count">
-                        {(props.openCountsByList[l().id] ?? 0) > 0
-                          ? props.openCountsByList[l().id]
-                          : "-"}
-                      </span>
-                    </Show>
-                  </ContextMenu.Trigger>
-                  {/* Rename + Delete are single-list actions. Multi-select
-                      previously only hosted the show/hide-counts toggle,
-                      which now lives in Settings → General, so a
-                      multi-selection has no per-list menu: gate the whole
-                      Portal so right-clicking a multi-selection shows
-                      nothing rather than an empty menu. */}
-                  <Show when={!isMultiMenu()}>
-                    <ContextMenu.Portal>
-                      <ContextMenu.Content class="context-menu-content">
-                        <ContextMenu.Item
-                          class="context-menu-item"
-                          onSelect={() => {
-                            // Defer past the menu's close + focus-restore
-                            // (Kobalte returns focus to the trigger on
-                            // dismiss); rAF ensures our caret-placement
-                            // microtask wins the race.
-                            requestAnimationFrame(() => startRename?.());
-                          }}
-                        >
-                          {m().nav.renameList}
-                        </ContextMenu.Item>
-                        <ContextMenu.Item
-                          class="context-menu-item"
-                          onSelect={() => {
-                            void navigator.clipboard.writeText(listUrl(l().id));
-                          }}
-                        >
-                          {m().common.copyLink}
-                        </ContextMenu.Item>
-                        <ContextMenu.Item
-                          class="context-menu-item"
-                          onSelect={() => archiveList(l().id)}
-                        >
-                          {m().nav.archiveList}
-                        </ContextMenu.Item>
-                      </ContextMenu.Content>
-                    </ContextMenu.Portal>
-                  </Show>
-                </ContextMenu>
-              );
-            }}
-          </Dnd>
-        </Show>
-        <Show when={adding()}>
-          <NewListForm
-            name={name()}
-            setName={setName}
-            onSubmit={submit}
-            onDismiss={() => setAdding(false)}
-          />
-        </Show>
-        </Show>
-      </div>
+            <NewListForm
+              name={docName()}
+              setName={setDocName}
+              placeholder={m().nav.newDoc}
+              onSubmit={submitDoc}
+              onDismiss={() => setAddingDoc(false)}
+            />
+          </Show>
+        </div>
+      </Show>
       </div>
       <div class="nav-footer">{props.footer}</div>
       <ConfirmDialog
@@ -772,9 +569,345 @@ export function Nav(props: {
         onOpenChange={setEmptyBinConfirmOpen}
         message={m().workspace.emptyBinConfirm}
         confirmLabel={m().workspace.emptyBin}
-        onConfirm={() => props.app.emptyBin()}
+        onConfirm={() => props.docs.emptyBin()}
       />
     </nav>
+  );
+}
+
+/** One doc's nav section: a collapsible heading (the doc's name, or
+ *  "Personal" for Home), its reserved Inbox, its active lists (one
+ *  `Dnd` per section, so a drag never crosses docs), and the new-list
+ *  form. Every list row names its doc for the drop targets
+ *  (`data-drop-doc-id`) so the Workspace routes a drop to the right
+ *  `DocApp`. */
+function DocSection(props: {
+  entry: DocEntry;
+  docs: DocsLayer;
+  view: ViewKey;
+  setView: (v: ViewKey) => void;
+  showListCounts: boolean;
+  mobile: boolean;
+  onToggled: () => void;
+}) {
+  const { m } = useAppI18n();
+  const app = props.entry.app;
+  const docId = props.entry.docId;
+  const [adding, setAdding] = createSignal(false);
+  const [name, setName] = createSignal("");
+  const [collapsed, setCollapsed] = createSignal(loadSectionCollapsed(docId, props.entry.home));
+  const setCollapsedPersisted = (next: boolean) => {
+    setCollapsed(next);
+    saveSectionCollapsed(docId, props.entry.home, next);
+    props.onToggled();
+  };
+  const toggle = () => setCollapsedPersisted(!collapsed());
+  const startAdding = () => {
+    if (collapsed()) setCollapsedPersisted(false);
+    setAdding(true);
+  };
+  const label = (): string =>
+    props.entry.home
+      ? m().nav.personal
+      : (app.state.settings.docName ?? m().nav.untitledDoc);
+
+  // Active (non-archived) lists in CRDT order. Archived lists render no
+  // nav row; they stay reachable through search and restorable via the
+  // header's list menu (Unarchive).
+  type NavList = { id: string; name: string; icon?: string };
+  const lists = createMemo((): NavList[] =>
+    app.state.listsOrder
+      .map((id) => app.state.listsById[id])
+      .filter((l): l is ListView => l !== undefined && l.archivedAt == null)
+      .map((l) => ({ id: l.id, name: l.name, icon: l.icon })),
+  );
+  const [dndLists, setDndLists] = createSignal<NavList[]>([]);
+  createEffect(() => setDndLists(lists()));
+  // Open-item count per list, read straight off the projection arrays.
+  const openCount = (listId: string): number => app.state.listOpen[listId]?.length ?? 0;
+  const countLabel = (listId: string): string => {
+    const n = openCount(listId);
+    return n > 0 ? String(n) : "-";
+  };
+  const isActive = (listId: string): boolean =>
+    props.view.kind === "list" &&
+    props.view.id === listId &&
+    props.docs.viewDocId(props.view) === docId;
+  const open = (listId: string) => props.setView(props.docs.listView(docId, listId));
+
+  const submit = (e: Event) => {
+    e.preventDefault();
+    const t = name().trim();
+    if (!t) return;
+    const id = app.addList(t);
+    setName("");
+    setAdding(false);
+    open(id);
+  };
+  // Archive is non-destructive (globally undoable, trivially reversible
+  // via Unarchive), so there is no confirmation dialog. Archiving the
+  // list currently on screen would leave a stale view; hop to this doc's
+  // Inbox before applying the mutation.
+  const archiveList = (id: string) => {
+    if (isActive(id)) open("inbox");
+    app.setListArchived(id, true);
+  };
+
+  const navSelection = new DndSelection();
+  const onNavItemClick = (e: MouseEvent, id: string) => {
+    const modKey = /Mac|iPhone|iPad|iPod/.test(navigator.platform)
+      ? e.metaKey
+      : e.ctrlKey;
+    if (e.shiftKey || modKey) return;
+    open(id);
+  };
+  // Enter on a keyboard-focused user list opens it. The Dnd listbox owns
+  // arrow-key navigation and updates navSelection's top key as the user
+  // moves; we just translate that into a setView. stopPropagation keeps the
+  // document-level onOpenKey from also firing and opening whatever's
+  // selected in the main list.
+  const onNavKeyDown = (e: KeyboardEvent) => {
+    if (e.key !== "Enter") return;
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    const target = e.target as Element | null;
+    if (target?.closest('input, textarea, [contenteditable="true"]')) return;
+    const top = navSelection.getSelectionTop();
+    if (top === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    open(String(top));
+  };
+  const selectedNavIds = (id: string): string[] =>
+    navSelection.isSelected(id) ? navSelection.getSelectedKeys().map(String) : [id];
+  const onReorder = (op: DndOp<NavList>) => {
+    if (op.type !== "move") return;
+    const ids = lists().map((l) => l.id);
+    const movedIds = op.keys.map(String).filter((id) => ids.includes(id));
+    if (movedIds.length === 0) return;
+    const remaining = ids.filter((id) => !movedIds.includes(id));
+    const insertAt =
+      op.beforeKey === null
+        ? remaining.length
+        : (() => {
+            const idx = remaining.indexOf(String(op.beforeKey));
+            return idx >= 0 ? idx : remaining.length;
+          })();
+    const nextIds = [...remaining];
+    nextIds.splice(insertAt, 0, ...movedIds);
+    const currentIds = [...ids];
+    for (const [index, id] of nextIds.entries()) {
+      if (currentIds[index] !== id) {
+        const currentIndex = currentIds.indexOf(id);
+        if (currentIndex < 0) continue;
+        app.moveList(id, index);
+        currentIds.splice(currentIndex, 1);
+        currentIds.splice(index, 0, id);
+      }
+    }
+  };
+  // Rename on a non-Home heading: the label is an EditableNavLabel driven
+  // from the heading's context menu, as list rows are.
+  let startRename: (() => void) | undefined;
+
+  const heading = () => (
+    <div
+      class="nav-section nav-section-toggle"
+      role="button"
+      aria-expanded={!collapsed()}
+      onClick={toggle}
+    >
+      <Show
+        when={!props.entry.home}
+        fallback={<span class="nav-section-label">{label()}</span>}
+      >
+        <EditableNavLabel
+          class="nav-section-label"
+          name={label()}
+          onSave={(next) => app.setDocName(next)}
+          registerStart={(fn) => (startRename = fn)}
+        />
+      </Show>
+      <span
+        class="nav-section-caret"
+        data-collapsed={collapsed() ? "" : undefined}
+        innerHTML={caretDownSvg}
+      />
+      {/* New-list affordance sits inside the heading, after the caret,
+          rather than as a trailing "+ Add list" row: hover-only like
+          the caret, so the group reads as a plain label at rest. The
+          heading is a div (not a button) so this real button can nest
+          inside it; stopPropagation keeps the click from also toggling
+          the group. Opening the form expands a collapsed group, since
+          the input renders inside it. */}
+      <button
+        type="button"
+        class="icon-button nav-section-add"
+        tabIndex={-1}
+        aria-label={m().nav.newList}
+        title={m().nav.newList}
+        innerHTML={plusSvg}
+        onClick={(e) => {
+          e.stopPropagation();
+          startAdding();
+        }}
+      />
+    </div>
+  );
+
+  return (
+    <div class="nav-group" onKeyDown={onNavKeyDown}>
+      <Show when={!props.entry.home} fallback={heading()}>
+        <ContextMenu>
+          <ContextMenu.Trigger as="div">{heading()}</ContextMenu.Trigger>
+          <ContextMenu.Portal>
+            <ContextMenu.Content class="context-menu-content">
+              <ContextMenu.Item
+                class="context-menu-item"
+                onSelect={() => {
+                  requestAnimationFrame(() => startRename?.());
+                }}
+              >
+                {m().nav.renameDoc}
+              </ContextMenu.Item>
+              <ContextMenu.Item
+                class="context-menu-item"
+                onSelect={() => {
+                  void navigator.clipboard.writeText(listUrl("inbox", docId));
+                }}
+              >
+                {m().common.copyLink}
+              </ContextMenu.Item>
+            </ContextMenu.Content>
+          </ContextMenu.Portal>
+        </ContextMenu>
+      </Show>
+      <Show when={!collapsed()}>
+      {/* Inbox is reserved: it has no `ListMeta` row and carries the
+          localized built-in label, so it's a static entry with no rename
+          affordance and no context menu. It sits at the head of the lists
+          group — visually one of the lists, but outside the Dnd so it can
+          never be reordered, multi-selected, or dragged. */}
+      <button
+        type="button"
+        class="nav-item"
+        data-active={isActive("inbox") ? "" : undefined}
+        data-drop-list-id="inbox"
+        data-drop-doc-id={docId}
+        tabIndex={-1}
+        onClick={() => open("inbox")}
+      >
+        <span class="nav-item-icon" innerHTML={archiveSvg} />
+        {m().nav.inbox}
+        <span class="nav-item-count">{countLabel("inbox")}</span>
+      </button>
+      <Show when={lists().length > 0}>
+        <Dnd
+          items={dndLists()}
+          setItems={setDndLists}
+          getKey={(l) => l.id}
+          itemHeight={props.mobile ? 40 : 28}
+          multi
+          arrowNavigate={false}
+          clearOnClickOutside
+          selection={navSelection}
+          onReorder={onReorder}
+        >
+          {(l) => {
+            // Captured by the Rename ContextMenu.Item below. The
+            // EditableNavLabel hands us its startEdit on mount so the
+            // context menu can drive rename mode the same way a
+            // double-click does.
+            let startListRename: (() => void) | undefined;
+            const selectedIds = (): string[] => selectedNavIds(l().id);
+            const isMultiMenu = (): boolean => selectedIds().length > 1;
+            return (
+              <ContextMenu
+                onOpenChange={(isOpen) => {
+                  if (isOpen && !navSelection.isSelected(l().id)) {
+                    navSelection.selectOnly(l().id);
+                  }
+                }}
+              >
+                <ContextMenu.Trigger
+                  as="button"
+                  type="button"
+                  class="nav-item"
+                  data-active={isActive(l().id) ? "" : undefined}
+                  data-drop-list-id={l().id}
+                  data-drop-doc-id={docId}
+                  tabIndex={-1}
+                  onClick={(e) => onNavItemClick(e, l().id)}
+                >
+                  <Show
+                    when={l().icon}
+                    fallback={<span class="nav-item-icon" innerHTML={fileSvg} />}
+                  >
+                    {(icon) => (
+                      <span class="nav-item-icon nav-item-icon-emoji">{icon()}</span>
+                    )}
+                  </Show>
+                  <EditableNavLabel
+                    name={l().name}
+                    onSave={(next) => app.renameList(l().id, next)}
+                    registerStart={(fn) => (startListRename = fn)}
+                  />
+                  <Show when={props.showListCounts}>
+                    <span class="nav-item-count">{countLabel(l().id)}</span>
+                  </Show>
+                </ContextMenu.Trigger>
+                {/* Rename + Archive are single-list actions. Multi-select
+                    previously only hosted the show/hide-counts toggle,
+                    which now lives in Settings → General, so a
+                    multi-selection has no per-list menu: gate the whole
+                    Portal so right-clicking a multi-selection shows
+                    nothing rather than an empty menu. */}
+                <Show when={!isMultiMenu()}>
+                  <ContextMenu.Portal>
+                    <ContextMenu.Content class="context-menu-content">
+                      <ContextMenu.Item
+                        class="context-menu-item"
+                        onSelect={() => {
+                          // Defer past the menu's close + focus-restore
+                          // (Kobalte returns focus to the trigger on
+                          // dismiss); rAF ensures our caret-placement
+                          // microtask wins the race.
+                          requestAnimationFrame(() => startListRename?.());
+                        }}
+                      >
+                        {m().nav.renameList}
+                      </ContextMenu.Item>
+                      <ContextMenu.Item
+                        class="context-menu-item"
+                        onSelect={() => {
+                          void navigator.clipboard.writeText(listUrl(l().id));
+                        }}
+                      >
+                        {m().common.copyLink}
+                      </ContextMenu.Item>
+                      <ContextMenu.Item
+                        class="context-menu-item"
+                        onSelect={() => archiveList(l().id)}
+                      >
+                        {m().nav.archiveList}
+                      </ContextMenu.Item>
+                    </ContextMenu.Content>
+                  </ContextMenu.Portal>
+                </Show>
+              </ContextMenu>
+            );
+          }}
+        </Dnd>
+      </Show>
+      <Show when={adding()}>
+        <NewListForm
+          name={name()}
+          setName={setName}
+          onSubmit={submit}
+          onDismiss={() => setAdding(false)}
+        />
+      </Show>
+      </Show>
+    </div>
   );
 }
 
@@ -810,7 +943,9 @@ export function NavFindButton(props: { onClick: () => void }) {
  *  input and the auth dialog the Sign in / Sign up items open. Lives in
  *  the sidebar footer (see `Nav`'s `footer` prop). */
 export function NavMenu(props: {
-  app: DocApp;
+  /** Undo / redo go through the layer (the doc that acted last); export
+   *  and import act on the Home doc. */
+  docs: DocsLayer;
   session: Session;
   logout: () => void;
   onOpenSettings: () => void;
@@ -836,12 +971,12 @@ export function NavMenu(props: {
   // bumps on every dispatched event (local mutation, undo/redo, remote
   // import), which is exactly when undo availability can change.
   const canUndo = (): boolean => {
-    props.app.version();
-    return props.app.canUndo();
+    props.docs.version();
+    return props.docs.canUndo();
   };
   const canRedo = (): boolean => {
-    props.app.version();
-    return props.app.canRedo();
+    props.docs.version();
+    return props.docs.canRedo();
   };
 
   // Trigger a browser download for an in-memory blob. Anchor + revoke
@@ -865,7 +1000,7 @@ export function NavMenu(props: {
   // `exportSnapshot` — but stays unexposed until a matching import lands.)
   const downloadJson = (): void => {
     try {
-      const json = props.app.engine.exportJson();
+      const json = props.docs.home.engine.exportJson();
       const blob = new Blob([json], { type: "application/json" });
       const stamp = new Date().toISOString().slice(0, 10);
       triggerDownload(blob, `monoplan-${stamp}.json`);
@@ -888,7 +1023,7 @@ export function NavMenu(props: {
     if (!file) return;
     try {
       const text = await file.text();
-      const summary = props.app.importJson(text);
+      const summary = props.docs.home.importJson(text);
       alert(m().nav.importSucceeded(summary.itemsAdded, summary.listsAdded));
     } catch (err) {
       console.error("import json failed:", err);
@@ -927,7 +1062,7 @@ export function NavMenu(props: {
               class="dropdown-menu-item"
               disabled={!canUndo()}
               onSelect={() => {
-                props.app.undo();
+                props.docs.undo();
               }}
             >
               <span>{m().nav.undo}</span>
@@ -937,7 +1072,7 @@ export function NavMenu(props: {
               class="dropdown-menu-item"
               disabled={!canRedo()}
               onSelect={() => {
-                props.app.redo();
+                props.docs.redo();
               }}
             >
               <span>{m().nav.redo}</span>
@@ -1026,6 +1161,8 @@ function NewListForm(props: {
   setName: (v: string) => void;
   onSubmit: (e: Event) => void;
   onDismiss: () => void;
+  /** Defaults to the new-list prompt; the new-doc form passes its own. */
+  placeholder?: string;
 }) {
   const { m } = useAppI18n();
   let inputRef!: HTMLInputElement;
@@ -1036,7 +1173,7 @@ function NewListForm(props: {
         ref={inputRef}
         class="nav-item nav-item-input"
         type="text"
-        placeholder={m().nav.newList}
+        placeholder={props.placeholder ?? m().nav.newList}
         value={props.name}
         onInput={(e) => props.setName(e.currentTarget.value)}
         onBlur={() => {

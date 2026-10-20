@@ -582,6 +582,16 @@ body {
   margin-bottom: 8px;
 }
 
+/* The create-doc row under the last doc section: a muted nav row that
+   opens the name form in place (`NewListForm`). */
+.nav-new-doc {
+  color: var(--text-faint);
+}
+
+.nav-new-doc:hover {
+  color: var(--text-muted);
+}
+
 /* The one square icon button on desktop: the nav footer menu, the list
    header's menu / display options / add, the list-icon picker and the
    task surface's menu / close. Marker
@@ -1869,6 +1879,13 @@ input.task-check:hover {
   font-size: 12px;
   color: var(--text-muted);
   user-select: none;
+}
+
+/* A heading row over a group of toggles (the calendar's per-doc
+   switches): the lane-row type, no count, no control. */
+.lane-row-heading {
+  margin-top: 6px;
+  color: var(--text-faint);
   -webkit-user-select: none;
 }
 
@@ -4008,6 +4025,12 @@ input.task-check:hover {
   white-space: nowrap;
   font-size: 13px;
   color: var(--text-faint);
+}
+
+/* A non-Home result's doc, after its list column. */
+.palette__item-doc {
+  max-width: 25%;
+  opacity: 0.8;
 }
 
 /* Footer key hints: muted, read-only legend of the palette's bindings.

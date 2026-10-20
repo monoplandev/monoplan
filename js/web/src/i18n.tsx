@@ -86,9 +86,16 @@ export type Messages = {
     unarchiveList: string;
     renameList: string;
     newList: string;
-    /** Heading over the user's own workspace (Inbox + lists). Sibling
-     *  headings will appear once shared workspaces exist. */
+    /** Heading over the account's Home doc (Inbox + lists). Every other
+     *  open doc gets a sibling heading carrying its own name. */
     personal: string;
+    /** Heading for a doc that has no name yet. */
+    untitledDoc: string;
+    /** The nav's create-doc affordance and its name prompt. */
+    newDoc: string;
+    /** Context-menu rename on a non-Home doc heading. */
+    renameDoc: string;
+    createDocFailed: string;
     connected: string;
     disconnected: string;
     offline: string;
@@ -164,6 +171,8 @@ export type Messages = {
     /** Switch label (list display options) toggling the per-row lifecycle
      *  state badge on the flat list view. */
     showState: string;
+    /** Done view display option: span every open doc, not Home alone. */
+    allDocs: string;
     /** Done-view header button that opens the modal to record a completed
      *  item directly (defaults to Inbox). */
     log: string;
@@ -315,6 +324,8 @@ export type Messages = {
   upcoming: {
     /** Upcoming view's Today group when nothing is due today. */
     emptyToday: string;
+    /** Heading over the calendar's per-doc show / hide toggles. */
+    docs: string;
     /** Header of the group holding events with no date. */
     unscheduled: string;
     /** What an Open event's status reads: the one label its four open
@@ -461,6 +472,10 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       renameList: "Renombrar",
       newList: "Nueva lista",
       personal: "Personal",
+      untitledDoc: "Espacio sin nombre",
+      newDoc: "Nuevo espacio",
+      renameDoc: "Renombrar espacio",
+      createDocFailed: "No se pudo crear el espacio",
       connected: "Conectado",
       disconnected: "Desconectado",
       offline: "Sin conexión",
@@ -512,6 +527,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       displayOptions: "Opciones de visualización",
       showOriginList: "Mostrar lista",
       showState: "Mostrar estado",
+      allDocs: "Todos los espacios",
       log: "Registrar",
       logCompleted: "Registrar elemento completado",
       listIcon: "Icono de la lista",
@@ -597,6 +613,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     upcoming: {
       emptyToday: "Nada para hoy",
+      docs: "Espacios",
       unscheduled: "Sin fecha",
       event: "Evento",
       due: "Vence",
@@ -726,6 +743,10 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       renameList: "Rename",
       newList: "New list",
       personal: "Personal",
+      untitledDoc: "Untitled workspace",
+      newDoc: "New workspace",
+      renameDoc: "Rename workspace",
+      createDocFailed: "Could not create workspace",
       connected: "Connected",
       disconnected: "Disconnected",
       offline: "Offline",
@@ -777,6 +798,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       displayOptions: "Display options",
       showOriginList: "Show list",
       showState: "Show state",
+      allDocs: "All workspaces",
       log: "Log",
       logCompleted: "Log completed item",
       listIcon: "List icon",
@@ -862,6 +884,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     upcoming: {
       emptyToday: "Nothing due today",
+      docs: "Workspaces",
       unscheduled: "Unscheduled",
       event: "Event",
       due: "Due",

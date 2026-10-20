@@ -58,7 +58,7 @@ import {
   isCancelled,
   isClosed,
   isEvent,
-  type DocApp,
+  type ItemActions,
 } from "./sync/store.ts";
 
 /** The slice of `DndImperative` the Workspace drives on this view. */
@@ -75,12 +75,15 @@ const isMac =
   /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 
 export function Upcoming(props: {
-  app: DocApp;
+  /** The agenda merges every doc, so this is the cross-doc layer's
+   *  routed actions (`sync/docs.ts`). */
+  app: ItemActions;
   groups: DayGroup[];
   /** The Workspace's list selection, run here over the agenda's rows. */
   selection: DndSelection;
-  /** Display label for a list id (Inbox is localized, others by name). */
-  listLabel: (listId: string) => string;
+  /** Display label for a list id in the row's doc (Inbox is localized,
+   *  others by name). */
+  listLabel: (listId: string, docId?: string) => string;
   onOpen: (id: string) => void;
   /** Touch: a tap opens the row (there is no pane to follow a selection). */
   openOnTap?: () => boolean;
@@ -326,10 +329,10 @@ export function Upcoming(props: {
                       <Show when={!isEvent(r.item)}>
                         <span
                           class="badge row-list"
-                          title={props.listLabel(r.item.listId)}
+                          title={props.listLabel(r.item.listId, r.item.docId)}
                         >
                           <span class="row-list-name">
-                            {props.listLabel(r.item.listId)}
+                            {props.listLabel(r.item.listId, r.item.docId)}
                           </span>
                         </span>
                       </Show>

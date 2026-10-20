@@ -37,6 +37,19 @@ describe("hash routes", () => {
     expect(parseHash(`#item_${ID}:${OTHER}`)).toBeNull();
     expect(parseHash("#list_")).toBeNull();
     expect(parseHash("#list_main")).toBeNull();
+    expect(parseHash("#inbox_")).toBeNull();
+    expect(parseHash("#inbox_not-a-doc")).toBeNull();
+  });
+
+  test("another doc's inbox names its doc; a Home list never does", () => {
+    const doc = "01a15717-7622-7323-8997-af3e145454d2";
+    expect(parseHash(`#inbox_${doc}`)).toEqual({
+      kind: "view",
+      view: { kind: "list", id: "inbox", docId: doc },
+    });
+    expect(viewHash({ kind: "list", id: "inbox", docId: doc })).toBe(`#inbox_${doc}`);
+    // A user list's id is unique across docs, so its hash carries none.
+    expect(viewHash({ kind: "list", id: ID, docId: doc })).toBe(`#list_${ID}`);
   });
 
   test("round-trips canonical forms", () => {

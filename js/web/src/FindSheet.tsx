@@ -19,7 +19,7 @@
 import { createEffect, For, onCleanup, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import type { AttentionBadge } from "./dayGroups.ts";
-import type { DocApp } from "./sync/store.ts";
+import type { DocsLayer } from "./sync/docs.ts";
 import type { ViewKey } from "./prefs.ts";
 import { useAppI18n } from "./i18n.tsx";
 import { trackOverlay } from "./overlay.ts";
@@ -45,17 +45,25 @@ function onPill(item: FindResult): boolean {
 
 /** Whether a result row denotes the view currently on screen. Items are
  *  never "current" — they live inside a view rather than being one. */
-function isCurrent(item: FindResult, view: ViewKey): boolean {
+function isCurrent(item: FindResult, view: ViewKey, homeDocId: string): boolean {
   if (item.kind === "view") {
-    if (item.id === "inbox") return view.kind === "list" && view.id === "inbox";
+    if (item.id === "inbox") {
+      return view.kind === "list" && view.id === "inbox" && (view.docId ?? homeDocId) === homeDocId;
+    }
     return view.kind === item.id;
   }
-  if (item.kind === "list") return view.kind === "list" && view.id === item.id;
+  if (item.kind === "list") {
+    return (
+      view.kind === "list" &&
+      view.id === item.id &&
+      (view.docId ?? homeDocId) === (item.docId ?? homeDocId)
+    );
+  }
   return false;
 }
 
 export function FindSheet(props: {
-  app: DocApp;
+  docs: DocsLayer;
   open: boolean;
   view: ViewKey;
   onOpenChange: (open: boolean) => void;
@@ -76,7 +84,7 @@ export function FindSheet(props: {
 }) {
   const { m } = useAppI18n();
   trackOverlay(() => props.open);
-  const find = createFindState(props.app);
+  const find = createFindState(props.docs);
 
   // Trailing count for a row, or null for rows that carry none (Done, item
   // results, user lists with counts switched off).
@@ -141,10 +149,10 @@ export function FindSheet(props: {
       classList={{
         "palette__item--binned": findResultLifecycle(item) === "binned",
       }}
-      aria-current={isCurrent(item, props.view) ? "true" : undefined}
+      aria-current={isCurrent(item, props.view, props.docs.homeDocId) ? "true" : undefined}
       onClick={() => selectItem(item)}
     >
-      <FindResultBody app={props.app} item={item} />
+      <FindResultBody docs={props.docs} item={item} />
       <Show when={countLabel(item)}>
         {(count) => (
           <span class="find-sheet__count" data-tone={countTone(item)}>

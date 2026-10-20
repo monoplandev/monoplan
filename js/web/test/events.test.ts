@@ -7,7 +7,9 @@ import { describe, expect, test } from "bun:test";
 import { Dek, Doc, SyncEngine } from "@monoplan/core/wasm";
 import type { EngineStorage } from "@monoplan/core/wasm";
 import { MemEngineStorage } from "../../core/test/mem-engine-storage.ts";
+import { createRoot } from "solid-js";
 import { findResultListLabel } from "../src/findResults.tsx";
+import { createDocsLayer } from "../src/sync/docs.ts";
 import {
   createSyncedApp,
   EVENT_STATES,
@@ -91,9 +93,10 @@ describe("store events", () => {
     const app = createSyncedApp(engineFrom(Doc.create()));
     const id = app.addItem(LIST_EVENTS, "gig");
     const it: ItemView = app.getItem(id)!;
+    const layer = createRoot(() => createDocsLayer(app, []));
     expect(
       findResultListLabel(
-        app,
+        layer,
         { inbox: "Inbox", events: "Events" },
         { kind: "item", id, title: it.text, score: 0, listId: it.listId },
       ),
