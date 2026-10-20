@@ -14,6 +14,9 @@ import { DropdownMenu } from "@kobalte/core/dropdown-menu";
 import { Popover } from "@kobalte/core/popover";
 import { Tooltip } from "@kobalte/core/tooltip";
 import { createPopoverTooltipGuard } from "./popoverTooltip.ts";
+import { createSyncStatus } from "./syncFacts.tsx";
+import { DocAdvancedDialog } from "./DocAdvancedDialog.tsx";
+import { useSession } from "./SessionContext.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import type { AttentionBadge } from "./dayGroups.ts";
 import { Dnd, DndSelection, type DndOp } from "./dnd/solid";
@@ -96,7 +99,10 @@ function saveSectionCollapsed(docId: string, home: boolean, collapsed: boolean):
 
 function ConnectionStatusPopover(props: {
   class?: string;
-  app: DocApp;
+  /** Every open doc: the status is "syncing" while any of them has
+   *  unsynced ops, and the popover counts them. Per-doc facts (seq,
+   *  epoch, fingerprint) live in each heading's Advanced dialog. */
+  docs: DocsLayer;
   online: boolean;
   lastSyncAt: number | null;
 }) {
@@ -118,73 +124,15 @@ function ConnectionStatusPopover(props: {
     onCleanup(() => clearInterval(id));
   });
 
-  // Engine-derived state. `app.version()` bumps on every dispatched
-  // event, so reading it here re-runs these computations exactly when
-  // the underlying numbers can change. Cheap reads — engine just
-  // forwards into the doc.
-  const pending = (): boolean => {
-    props.app.version();
-    return props.app.engine.hasUnsyncedOps();
-  };
-  const seqLabel = (): string => {
-    props.app.version();
-    return String(props.app.engine.lastContiguousSeq());
-  };
-  // Epoch arrives on HelloAck, which dispatches no event of its own,
-  // so also key on the link state: it flips to online right after.
-  const epochLabel = (): string | null => {
-    props.app.version();
-    props.online;
-    const epoch = props.app.engine.serverEpoch();
-    return epoch === undefined ? null : String(epoch);
-  };
-  const fingerprintHex = (): string => {
-    props.app.version();
-    const buf = props.app.engine.fingerprint();
-    // Full 64-char hex; the popover row CSS-truncates with
-    // text-overflow so the visible width tracks the popover, while
-    // copy-paste yields the entire hash.
-    let s = "";
-    for (let i = 0; i < buf.length; i++) {
-      s += buf[i].toString(16).padStart(2, "0");
-    }
-    return s;
-  };
-  const itemsCount = (): number =>
-    Object.keys(props.app.state.itemsById).length;
-  const listsCount = (): number => props.app.state.listsOrder.length;
-
-  // Browser network reachability, distinct from `props.online` (the WS
-  // link). Lets us split "no network at all" (Offline) from "network is
-  // up but we're not connected to the server" (Disconnected).
-  const [navOnline, setNavOnline] = createSignal(navigator.onLine);
-  const onNet = () => setNavOnline(navigator.onLine);
-  window.addEventListener("online", onNet);
-  window.addEventListener("offline", onNet);
-  onCleanup(() => {
-    window.removeEventListener("online", onNet);
-    window.removeEventListener("offline", onNet);
-  });
-
-  // Single source of truth for the sync state, shared by the cloud
-  // indicator's inline label and the popover's first line.
-  const status = (): "offline" | "disconnected" | "syncing" | "synced" => {
-    if (!navOnline()) return "offline";
-    if (!props.online) return "disconnected";
-    return pending() ? "syncing" : "synced";
-  };
-  const statusLabel = (): string => {
-    switch (status()) {
-      case "offline":
-        return m().nav.offline;
-      case "disconnected":
-        return m().nav.disconnected;
-      case "syncing":
-        return m().nav.syncing;
-      default:
-        return m().nav.synced;
-    }
-  };
+  // Any doc with local ops the server hasn't acked. `version()` bumps
+  // on every dispatched event, so this re-runs exactly when it can change.
+  const pending = (): boolean =>
+    props.docs.docs().some((d) => {
+      d.app.version();
+      return d.app.engine.hasUnsyncedOps();
+    });
+  const { status, statusLabel } = createSyncStatus(pending, () => props.online);
+  const docsCount = (): number => props.docs.docs().length;
 
   const sinceLabel = (): string | null => {
     const ts = props.lastSyncAt;
@@ -237,18 +185,7 @@ function ConnectionStatusPopover(props: {
           <Show when={sinceLabel()}>
             {(label) => <div class="status-line status-muted">{label()}</div>}
           </Show>
-          <div class="status-line status-muted">{m().nav.seqLabel(seqLabel())}</div>
-          <Show when={epochLabel()}>
-            {(n) => (
-              <div class="status-line status-muted">{m().nav.epochLabel(n())}</div>
-            )}
-          </Show>
-          <div class="status-fingerprint status-muted status-mono">
-            {fingerprintHex()}
-          </div>
-          <div class="status-line status-muted">
-            {m().nav.itemsListsCount(itemsCount(), listsCount())}
-          </div>
+          <div class="status-line status-muted">{m().nav.docsCount(docsCount())}</div>
         </Popover.Content>
       </Popover.Portal>
     </Popover>
@@ -291,7 +228,7 @@ export function FirstRunAuthPrompt(props: {
 export function StatusSlot(props: {
   /** Extra class on the indicator button (mobile's glass chrome). */
   class?: string;
-  app: DocApp;
+  docs: DocsLayer;
   online: boolean;
   lastSyncAt: number | null;
   session: Session;
@@ -343,7 +280,7 @@ export function StatusSlot(props: {
       <Show when={!props.session.anonymous}>
         <ConnectionStatusPopover
           class={props.class}
-          app={props.app}
+          docs={props.docs}
           online={props.online}
           lastSyncAt={props.lastSyncAt}
         />
@@ -606,6 +543,10 @@ function DocSection(props: {
   // primary doc is non-deletable), nor does an anonymous session.
   const canDelete = (): boolean => !props.entry.home && props.onDeleteDoc !== null;
   const [deleteConfirmOpen, setDeleteConfirmOpen] = createSignal(false);
+  // Advanced: this doc's own sync facts (`DocAdvancedDialog`). Offered on
+  // every heading, Home included, since the footer popover covers Home only.
+  const session = useSession();
+  const [advancedOpen, setAdvancedOpen] = createSignal(false);
   const deleteDoc = (): void => {
     const run = props.onDeleteDoc;
     if (!run || props.entry.home) return;
@@ -781,7 +722,14 @@ function DocSection(props: {
       class="nav-section nav-section-toggle"
       role="button"
       aria-expanded={!collapsed()}
-      onClick={toggle}
+      onClick={(e) => {
+        // Solid's delegated events bubble through Portals along the
+        // component tree, so a click on an item of the "..." menu below
+        // (rendered under document.body) still arrives here. Only toggle
+        // for clicks that landed inside the heading's own DOM.
+        if (!e.currentTarget.contains(e.target as Node)) return;
+        toggle();
+      }}
     >
       <Show
         when={!props.entry.home}
@@ -838,6 +786,13 @@ function DocSection(props: {
               }}
             >
               {m().nav.importJson}
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator class="dropdown-menu-separator" />
+            <DropdownMenu.Item
+              class="dropdown-menu-item"
+              onSelect={() => setAdvancedOpen(true)}
+            >
+              {m().nav.advanced}
             </DropdownMenu.Item>
             <Show when={canDelete()}>
               <DropdownMenu.Separator class="dropdown-menu-separator" />
@@ -904,6 +859,13 @@ function DocSection(props: {
           onConfirm={deleteDoc}
         />
       </Show>
+      <DocAdvancedDialog
+        open={advancedOpen()}
+        onOpenChange={setAdvancedOpen}
+        app={app}
+        label={label()}
+        online={session.online()}
+      />
       <Show when={!props.entry.home} fallback={heading()}>
         <ContextMenu>
           <ContextMenu.Trigger as="div">{heading()}</ContextMenu.Trigger>
@@ -924,6 +886,13 @@ function DocSection(props: {
                 }}
               >
                 {m().common.copyLink}
+              </ContextMenu.Item>
+              <ContextMenu.Separator class="dropdown-menu-separator" />
+              <ContextMenu.Item
+                class="context-menu-item"
+                onSelect={() => setAdvancedOpen(true)}
+              >
+                {m().nav.advanced}
               </ContextMenu.Item>
             </ContextMenu.Content>
           </ContextMenu.Portal>

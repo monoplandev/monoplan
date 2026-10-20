@@ -2574,7 +2574,7 @@ export function Workspace(props: {
               onNewDoc={session.session().anonymous ? null : () => setNewDocOpen(true)}
             />
             <StatusSlot
-              app={home}
+              docs={docs}
               online={session.online()}
               lastSyncAt={session.lastSyncAt()}
               session={session.session()}
@@ -2610,7 +2610,7 @@ export function Workspace(props: {
                is owned by the FirstRunAuthPrompt beside MobileBars. */
             <StatusSlot
               class="find-sheet__status"
-              app={home}
+              docs={docs}
               online={session.online()}
               lastSyncAt={session.lastSyncAt()}
               session={session.session()}

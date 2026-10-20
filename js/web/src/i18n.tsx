@@ -107,6 +107,10 @@ export type Messages = {
     deleteDocConfirm: (name: string) => string;
     deleteDocFailed: string;
     createDocFailed: string;
+    /** Workspace menu item opening the per-doc Advanced dialog (sync
+     *  facts for that doc), and the dialog's id row label. */
+    advanced: string;
+    docId: string;
     connected: string;
     disconnected: string;
     offline: string;
@@ -116,6 +120,8 @@ export type Messages = {
     seqLabel: (n: string) => string;
     epochLabel: (n: string) => string;
     itemsListsCount: (items: number, lists: number) => string;
+    /** Footer popover: how many docs this session has open. */
+    docsCount: (n: number) => string;
     undo: string;
     redo: string;
     settings: string;
@@ -496,6 +502,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         `¿Eliminar «${name}»? Sus listas y elementos se eliminarán de todos los dispositivos. Esta acción no se puede deshacer.`,
       deleteDocFailed: "No se pudo eliminar el espacio",
       createDocFailed: "No se pudo crear el espacio",
+      advanced: "Avanzado",
+      docId: "ID del espacio",
       connected: "Conectado",
       disconnected: "Desconectado",
       offline: "Sin conexión",
@@ -506,6 +514,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       epochLabel: (n) => `epoch ${n}`,
       itemsListsCount: (items, lists) =>
         `${items} elemento${items === 1 ? "" : "s"}, ${lists} lista${lists === 1 ? "" : "s"}`,
+      docsCount: (n) => `${n} espacio${n === 1 ? "" : "s"}`,
       undo: "Deshacer",
       redo: "Rehacer",
       settings: "Ajustes",
@@ -776,6 +785,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         `Delete “${name}”? Its lists and items are removed from every device. This cannot be undone.`,
       deleteDocFailed: "Could not delete workspace",
       createDocFailed: "Could not create workspace",
+      advanced: "Advanced",
+      docId: "Workspace id",
       connected: "Connected",
       disconnected: "Disconnected",
       offline: "Offline",
@@ -786,6 +797,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       epochLabel: (n) => `epoch ${n}`,
       itemsListsCount: (items, lists) =>
         `${items} item${items === 1 ? "" : "s"}, ${lists} list${lists === 1 ? "" : "s"}`,
+      docsCount: (n) => `${n} workspace${n === 1 ? "" : "s"}`,
       undo: "Undo",
       redo: "Redo",
       settings: "Settings",

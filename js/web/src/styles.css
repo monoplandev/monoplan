@@ -1511,8 +1511,11 @@ input.task-check:hover {
   flex: 0 0 auto;
 }
 
+/* Synced is the quiet default: no dot, just the label. The dot only
+   appears when something needs attention (syncing / disconnected /
+   offline). */
 .status-dot[data-state="synced"] {
-  background: #22c55e;
+  display: none;
 }
 
 .status-dot[data-state="syncing"] {
@@ -2458,6 +2461,22 @@ input.task-check:hover {
   background: var(--border);
   margin: 4px 0;
   border: none;
+}
+
+/* Per-workspace Advanced dialog body: the footer popover's status rows
+   (status-line / status-dot / status-fingerprint) laid out at dialog
+   width. Read-only debug surface, so re-enable text selection for
+   copying the fingerprint / id like .status-popover does. */
+.doc-advanced-facts {
+  font-size: 13px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.doc-advanced-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dialog-overlay {
