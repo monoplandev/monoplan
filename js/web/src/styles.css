@@ -537,7 +537,9 @@ body {
 
 /* A ticked or crossed row stays on its day as the record of what
    happened, or was called off: muted, the box doing the talking.
-   (`data-done`: the context-menu trigger owns `data-closed`.) */
+   (`data-done`: the context-menu trigger owns `data-closed`.) The time
+   lane mutes with the title so the whole line reads as settled. */
+.upcoming-row[data-done] .upcoming-row-time,
 .upcoming-row[data-done] .upcoming-row-text {
   color: var(--text-muted);
 }
