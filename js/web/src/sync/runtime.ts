@@ -34,7 +34,7 @@ const WELCOME_ITEMS = [
   "Welcome to Monoplan",
   "Press 'space' to create a new item",
   "Tick the box (or press 'x') to complete an item",
-  "Press 'f' to add an item to Focus",
+  "Press 's' to star an item",
   "Press '?' to see all keyboard shortcuts",
 ] as const;
 const WELCOME_NOTE =

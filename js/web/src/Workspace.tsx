@@ -1297,17 +1297,17 @@ export function Workspace(props: {
   // Toggle Focus on `ids`. Direction follows the group like toggle-done:
   // any not-focused → add all (the core skips ids that are already
   // focused or not Open), only remove when every item is already in the
-  // Focus lens. Shared by `f` and the side panel's multi-select actions.
+  // Focus lens. Shared by `s` and the side panel's multi-select actions.
   const toggleFocusIds = (ids: string[]) => {
     if (ids.length === 0) return;
     if (allFocusedIds(ids)) routed.removeFromFocusMany(ids);
     else routed.addToFocusMany(ids);
   };
 
-  // f: toggle Focus on the current selection. Mirrors the row context
+  // s: toggle Focus (starred) on the current selection. Mirrors the row context
   // menu's Add to focus / Remove from focus.
   const onToggleFocusKey = (e: KeyboardEvent) => {
-    if (e.key !== "f" && e.key !== "F") return;
+    if (e.key !== "s" && e.key !== "S") return;
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
     const ids = selectedVisibleIds(false);
     if (ids.length === 0) return;
@@ -2398,13 +2398,13 @@ export function Workspace(props: {
     if (kind === "list" && openIds.length > 0) {
       out.push({
         label: allFocusedIds(openIds) ? msgs.focus.remove : msgs.focus.add,
-        shortcut: "F",
+        shortcut: "S",
         run: () => toggleFocusIds(openIds),
       });
     } else if (kind === "focus") {
       out.push({
         label: msgs.focus.remove,
-        shortcut: "F",
+        shortcut: "S",
         run: () => routed.removeFromFocusMany(ids),
       });
     }

@@ -1,5 +1,10 @@
 # Focus (curated lens)
 
+> **UI label (since 2026-10-20): "Starred"** ("Destacados" in Spanish), with
+> "Star" / "Unstar" as the verbs and the gold star glyph. "Focus" remains the
+> name of the concept, the `focus` container, `FocusRef`, and the CLI
+> `focus` subcommand; only user-facing strings changed.
+
 Focus is a reserved, single-tier, curated **list-by-reference**: it points at
 items that live in other lists rather than owning them. It is a *lens*, not a
 home — an item in Focus still lives in its source list, and removing it from

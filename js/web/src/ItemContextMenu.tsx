@@ -371,7 +371,7 @@ export function ItemContextMenu(props: {
               onSelect={onToggleFocusSelection}
             >
               {focused() ? m().focus.remove : m().focus.add}
-              <kbd class="menu-shortcut">F</kbd>
+              <kbd class="menu-shortcut">S</kbd>
             </ContextMenu.Item>
           </Show>
           <Show when={inFocusView()}>
@@ -380,7 +380,7 @@ export function ItemContextMenu(props: {
               onSelect={onRemoveFromFocusSelection}
             >
               {m().focus.remove}
-              <kbd class="menu-shortcut">F</kbd>
+              <kbd class="menu-shortcut">S</kbd>
             </ContextMenu.Item>
           </Show>
           {/* Cross-appearance jump. Only for items that exist on both
