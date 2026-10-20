@@ -104,3 +104,4 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - see how long an item has been sitting in focus?
 - display options for showing completed items in calendar view, or not
 - consider better visibility over undo/redo
+- adding signing keys and add membership as a signed log
