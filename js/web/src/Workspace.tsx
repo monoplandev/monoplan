@@ -2655,6 +2655,8 @@ export function Workspace(props: {
         onShowListCountsChange={(show) => home.setShowListCounts(show)}
         session={session.session()}
         logout={session.logout}
+        docs={docs}
+        online={session.online()}
       />
       <NewDocDialog
         open={newDocOpen()}

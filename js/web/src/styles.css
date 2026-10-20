@@ -1460,9 +1460,6 @@ input.task-check:hover {
   border-radius: 8px;
   padding: 10px 12px;
   min-width: 200px;
-  /* Caps the natural-width growth so .status-fingerprint's width:100%
-     has a finite container to truncate against. 90vw still applies as
-     a safety on tiny viewports. */
   max-width: min(260px, 90vw);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   outline: none;
@@ -1474,14 +1471,6 @@ input.task-check:hover {
      is the whole point. */
   user-select: text;
   -webkit-user-select: text;
-}
-
-.status-fingerprint {
-  width: 100%;
-  padding: 2px 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .status-line {
@@ -2461,22 +2450,6 @@ input.task-check:hover {
   background: var(--border);
   margin: 4px 0;
   border: none;
-}
-
-/* Per-workspace Advanced dialog body: the footer popover's status rows
-   (status-line / status-dot / status-fingerprint) laid out at dialog
-   width. Read-only debug surface, so re-enable text selection for
-   copying the fingerprint / id like .status-popover does. */
-.doc-advanced-facts {
-  font-size: 13px;
-  user-select: text;
-  -webkit-user-select: text;
-}
-
-.doc-advanced-id {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .dialog-overlay {
@@ -3876,6 +3849,37 @@ input.task-check:hover {
 
 .settings-row-value {
   color: var(--text-muted);
+}
+
+/* Advanced section: a titled group per open workspace. Read-only debug
+   surface, so re-enable text selection (the global #root rule kills it)
+   for copying fingerprints / ids. Long mono values (64-char fingerprint)
+   truncate against the row rather than widening the dialog. */
+.settings-advanced {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.settings-group-title {
+  margin: 0 0 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.settings-group + .settings-group-title {
+  margin-top: 20px;
+}
+
+.settings-row-mono {
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-logout {

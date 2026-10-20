@@ -11,6 +11,8 @@ import {
   untrack,
 } from "solid-js";
 import { api, type Device } from "./api.ts";
+import { createDocSyncFacts } from "./syncFacts.tsx";
+import type { DocEntry, DocsLayer } from "./sync/docs.ts";
 import dotsVerticalSvg from "./icons/dots-vertical.svg?raw";
 import type { Session } from "./Login.tsx";
 import { useAppI18n } from "./i18n.tsx";
@@ -22,7 +24,7 @@ import {
   type TimeFormatPreference,
 } from "./format.tsx";
 
-type Section = "general" | "account" | "devices";
+type Section = "general" | "account" | "devices" | "advanced";
 
 function DeviceNameEditor(props: {
   name: string;
@@ -94,6 +96,10 @@ export function Settings(props: {
   onShowListCountsChange: (show: boolean) => void;
   session: Session;
   logout: () => void;
+  /** Every open doc, for the Advanced section's per-workspace facts. */
+  docs: DocsLayer;
+  /** WebSocket link state, shared by every open doc. */
+  online: boolean;
 }) {
   const { m, language, setLanguage, locale } = useAppI18n();
   trackOverlay(() => props.open);
@@ -198,6 +204,14 @@ export function Settings(props: {
                 onClick={() => setSection("devices")}
               >
                 {m().settings.devices}
+              </button>
+              <button
+                type="button"
+                class="settings-nav-item"
+                data-active={section() === "advanced" ? "" : undefined}
+                onClick={() => setSection("advanced")}
+              >
+                {m().settings.advanced}
               </button>
             </aside>
             <section class="settings-content">
@@ -470,11 +484,73 @@ export function Settings(props: {
                   </Show>
                 </Show>
               </Show>
+              <Show when={section() === "advanced"}>
+                <h2 class="settings-section-title">{m().settings.advanced}</h2>
+                <div class="settings-advanced">
+                  <For each={props.docs.docs()}>
+                    {(entry) => <WorkspaceSyncGroup entry={entry} online={props.online} />}
+                  </For>
+                </div>
+              </Show>
             </section>
           </Dialog.Content>
         </div>
       </Dialog.Portal>
     </Dialog>
+  );
+}
+
+/** One workspace's sync facts as an inset group: status, seq, epoch,
+ *  fingerprint, contents, id. The link state is per connection, so
+ *  "Disconnected" / "Offline" read the same on every group while
+ *  "Syncing" / "Synced" are this doc's own. */
+function WorkspaceSyncGroup(props: { entry: DocEntry; online: boolean }) {
+  const { m } = useAppI18n();
+  const app = props.entry.app;
+  const facts = createDocSyncFacts(app, () => props.online);
+  const label = (): string =>
+    props.entry.home
+      ? m().nav.personal
+      : (app.state.settings.docName ?? m().nav.untitledDoc);
+  return (
+    <>
+      <h3 class="settings-group-title">{label()}</h3>
+      <div class="settings-group">
+        <div class="settings-row">
+          <div class="settings-row-label">{m().settings.syncStatus}</div>
+          <div class="settings-row-value status-line">
+            <span class="status-dot" data-state={facts.status()} aria-hidden="true" />
+            <span>{facts.statusLabel()}</span>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-label">{m().settings.seq}</div>
+          <div class="settings-row-value settings-row-mono">{facts.seqLabel()}</div>
+        </div>
+        <Show when={facts.epochLabel()}>
+          {(n) => (
+            <div class="settings-row">
+              <div class="settings-row-label">{m().settings.epoch}</div>
+              <div class="settings-row-value settings-row-mono">{n()}</div>
+            </div>
+          )}
+        </Show>
+        <div class="settings-row">
+          <div class="settings-row-label">{m().settings.fingerprint}</div>
+          <div class="settings-row-value settings-row-mono">{facts.fingerprintHex()}</div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-label">{m().settings.contents}</div>
+          <div class="settings-row-value">
+            {m().nav.itemsListsCount(facts.itemsCount(), facts.listsCount())}
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-label">{m().settings.workspaceId}</div>
+          <div class="settings-row-value settings-row-mono">{app.docId}</div>
+        </div>
+      </div>
+    </>
   );
 }
 

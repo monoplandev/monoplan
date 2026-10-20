@@ -107,10 +107,11 @@ export type Messages = {
     deleteDocConfirm: (name: string) => string;
     deleteDocFailed: string;
     createDocFailed: string;
-    /** Workspace menu item opening the per-doc Advanced dialog (sync
-     *  facts for that doc), and the dialog's id row label. */
-    advanced: string;
-    docId: string;
+    /** Non-Home workspace menu item and its placeholder dialog: sharing
+     *  (invites / members) is not built yet. */
+    sharing: string;
+    sharingTitle: (name: string) => string;
+    sharingSoon: string;
     connected: string;
     disconnected: string;
     offline: string;
@@ -411,6 +412,14 @@ export type Messages = {
     general: string;
     account: string;
     devices: string;
+    /** Advanced section: one group per open workspace with its sync facts. */
+    advanced: string;
+    syncStatus: string;
+    seq: string;
+    epoch: string;
+    fingerprint: string;
+    contents: string;
+    workspaceId: string;
     language: string;
     languageSpanish: string;
     languageEnglish: string;
@@ -502,8 +511,10 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         `¿Eliminar «${name}»? Sus listas y elementos se eliminarán de todos los dispositivos. Esta acción no se puede deshacer.`,
       deleteDocFailed: "No se pudo eliminar el espacio",
       createDocFailed: "No se pudo crear el espacio",
-      advanced: "Avanzado",
-      docId: "ID del espacio",
+      sharing: "Compartir…",
+      sharingTitle: (name) => `Compartir «${name}»`,
+      sharingSoon:
+        "Compartir espacios aún no está disponible. Pronto podrás invitar a otras personas a este espacio desde aquí.",
       connected: "Conectado",
       disconnected: "Desconectado",
       offline: "Sin conexión",
@@ -695,6 +706,13 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       general: "General",
       account: "Cuenta",
       devices: "Dispositivos",
+      advanced: "Avanzado",
+      syncStatus: "Estado",
+      seq: "Secuencia",
+      epoch: "Epoch",
+      fingerprint: "Huella",
+      contents: "Contenido",
+      workspaceId: "ID del espacio",
       language: "Idioma",
       languageSpanish: "Español",
       languageEnglish: "English",
@@ -785,8 +803,10 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         `Delete “${name}”? Its lists and items are removed from every device. This cannot be undone.`,
       deleteDocFailed: "Could not delete workspace",
       createDocFailed: "Could not create workspace",
-      advanced: "Advanced",
-      docId: "Workspace id",
+      sharing: "Sharing…",
+      sharingTitle: (name) => `Share “${name}”`,
+      sharingSoon:
+        "Sharing isn't available yet. You'll be able to invite people to this workspace from here.",
       connected: "Connected",
       disconnected: "Disconnected",
       offline: "Offline",
@@ -977,6 +997,13 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       general: "General",
       account: "Account",
       devices: "Devices",
+      advanced: "Advanced",
+      syncStatus: "Status",
+      seq: "Sequence",
+      epoch: "Epoch",
+      fingerprint: "Fingerprint",
+      contents: "Contents",
+      workspaceId: "Workspace id",
       language: "Language",
       languageSpanish: "Español",
       languageEnglish: "English",

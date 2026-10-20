@@ -15,9 +15,8 @@ import { Popover } from "@kobalte/core/popover";
 import { Tooltip } from "@kobalte/core/tooltip";
 import { createPopoverTooltipGuard } from "./popoverTooltip.ts";
 import { createSyncStatus } from "./syncFacts.tsx";
-import { DocAdvancedDialog } from "./DocAdvancedDialog.tsx";
-import { useSession } from "./SessionContext.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
+import { SharingDialog } from "./SharingDialog.tsx";
 import type { AttentionBadge } from "./dayGroups.ts";
 import { Dnd, DndSelection, type DndOp } from "./dnd/solid";
 import archiveSvg from "./icons/archive.svg?raw";
@@ -543,10 +542,9 @@ function DocSection(props: {
   // primary doc is non-deletable), nor does an anonymous session.
   const canDelete = (): boolean => !props.entry.home && props.onDeleteDoc !== null;
   const [deleteConfirmOpen, setDeleteConfirmOpen] = createSignal(false);
-  // Advanced: this doc's own sync facts (`DocAdvancedDialog`). Offered on
-  // every heading, Home included, since the footer popover covers Home only.
-  const session = useSession();
-  const [advancedOpen, setAdvancedOpen] = createSignal(false);
+  // Sharing is a placeholder entry point on non-Home docs only (Home is
+  // the account's private doc; `spec/sharing-plan.md`).
+  const [sharingOpen, setSharingOpen] = createSignal(false);
   const deleteDoc = (): void => {
     const run = props.onDeleteDoc;
     if (!run || props.entry.home) return;
@@ -768,6 +766,12 @@ function DocSection(props: {
               >
                 {m().nav.renameDoc}
               </DropdownMenu.Item>
+              <DropdownMenu.Item
+                class="dropdown-menu-item"
+                onSelect={() => setSharingOpen(true)}
+              >
+                {m().nav.sharing}
+              </DropdownMenu.Item>
             </Show>
             <DropdownMenu.Item
               class="dropdown-menu-item"
@@ -786,13 +790,6 @@ function DocSection(props: {
               }}
             >
               {m().nav.importJson}
-            </DropdownMenu.Item>
-            <DropdownMenu.Separator class="dropdown-menu-separator" />
-            <DropdownMenu.Item
-              class="dropdown-menu-item"
-              onSelect={() => setAdvancedOpen(true)}
-            >
-              {m().nav.advanced}
             </DropdownMenu.Item>
             <Show when={canDelete()}>
               <DropdownMenu.Separator class="dropdown-menu-separator" />
@@ -859,13 +856,13 @@ function DocSection(props: {
           onConfirm={deleteDoc}
         />
       </Show>
-      <DocAdvancedDialog
-        open={advancedOpen()}
-        onOpenChange={setAdvancedOpen}
-        app={app}
-        label={label()}
-        online={session.online()}
-      />
+      <Show when={!props.entry.home}>
+        <SharingDialog
+          open={sharingOpen()}
+          onOpenChange={setSharingOpen}
+          label={label()}
+        />
+      </Show>
       <Show when={!props.entry.home} fallback={heading()}>
         <ContextMenu>
           <ContextMenu.Trigger as="div">{heading()}</ContextMenu.Trigger>
@@ -881,18 +878,17 @@ function DocSection(props: {
               </ContextMenu.Item>
               <ContextMenu.Item
                 class="context-menu-item"
+                onSelect={() => setSharingOpen(true)}
+              >
+                {m().nav.sharing}
+              </ContextMenu.Item>
+              <ContextMenu.Item
+                class="context-menu-item"
                 onSelect={() => {
                   void navigator.clipboard.writeText(listUrl("inbox", docId));
                 }}
               >
                 {m().common.copyLink}
-              </ContextMenu.Item>
-              <ContextMenu.Separator class="dropdown-menu-separator" />
-              <ContextMenu.Item
-                class="context-menu-item"
-                onSelect={() => setAdvancedOpen(true)}
-              >
-                {m().nav.advanced}
               </ContextMenu.Item>
             </ContextMenu.Content>
           </ContextMenu.Portal>
