@@ -45,7 +45,7 @@ pub fn derive_recovery_master(
 }
 
 /// HKDF-SHA256 expansion of a 32-byte master into a 32-byte subkey.
-fn hkdf_expand(master: &[u8; 32], info: &[u8]) -> Result<[u8; 32]> {
+pub(super) fn hkdf_expand(master: &[u8; 32], info: &[u8]) -> Result<[u8; 32]> {
     let hk = Hkdf::<Sha256>::new(None, master);
     let mut out = [0u8; 32];
     hk.expand(info, &mut out).map_err(|_| CryptoError::Hkdf)?;

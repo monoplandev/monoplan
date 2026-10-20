@@ -1,6 +1,6 @@
 # Sharing — design + implementation plan
 
-**Status:** Planned, not implemented. v1 ships single-user only (one primary doc per account).
+**Status:** Substrate, multi-doc clients and **invites** built; member removal, ownership transfer and live revocation (`DocClosed`) are not. Invites (sharing links) landed 2026-10-21: see §Invites below.
 
 This document preserves the multi-doc / sharing design discussed during early planning. Pre-release, we made a deliberate scoping decision: lay the doc-keyed substrate now (so the eventual migration is incremental) but defer everything that needs a second doc to exist — membership tables, per-doc DEKs, multi-doc clients, sharing UX — until there is real conviction that shared lists are part of the product.
 
@@ -8,7 +8,7 @@ Substrate in place as of 2026-10-13: the `docs` entity and `accounts.primary_doc
 
 Key model done as of 2026-10-17, revised 2026-10-19: **the DEK is a doc key, and the Home DEK is the account key.** `doc_members` holds one wrap per membership and `accounts` holds password material only. The primary membership's wrap is under the password KEK (plus the recovery KEK iff enrolled); every other membership's wrap is under the Home DEK. Login returns a `memberships` array (the client opens the primary with the KEK and the rest with the Home DEK); recovery releases only the primary's recovery wrap; password change / reset take `new_doc_keys` naming exactly the primary doc (set-checked, one transaction, no other row touched). `POST /api/docs` takes just a Home-DEK wrap. `can_open` is the `doc_members` lookup and the compaction horizon spans the devices of every active member. The CLI stores one DEK per doc in `secrets.toml` (every membership unwrapped at login / recovery); the web client unwraps every membership at login, vaults one entry per doc id, and boots a doc + engine per membership on one multiplexed socket (2026-10-20); the UI still renders the primary only. Trade-offs are recorded in `encryption.md` §Trade-offs.
 
-Multi-doc transport done as of 2026-10-19 (headless; no UI): a connection multiplexes **any number** of open docs (`WSSession.open` is a map; per-doc subscription and lease slot; the session loop polls every subscription); `POST /api/docs` / `GET /api/docs` create and list an account's own docs; the `Hello` handshake moved out of the engine to the connection owner (core `hello_frame` / `parse_hello_response` / `server_frame_doc_id`); the js `SyncBridge` is the router (N engines, one socket, frames routed by `doc_id`). Proven by `server/tests/sync.rs` and the two-doc `js/core/test/sync-e2e.test.ts`. What is *not* built: invites and any second *account* on a doc, member management, live revocation (`DocClosed`), a CLI router (the CLI still runs one engine on its primary doc), and every client surface (the web client boots every membership headlessly as of 2026-10-20 but renders only the Home doc; see "Decisions").
+Multi-doc transport done as of 2026-10-19 (headless; no UI): a connection multiplexes **any number** of open docs (`WSSession.open` is a map; per-doc subscription and lease slot; the session loop polls every subscription); `POST /api/docs` / `GET /api/docs` create and list an account's own docs; the `Hello` handshake moved out of the engine to the connection owner (core `hello_frame` / `parse_hello_response` / `server_frame_doc_id`); the js `SyncBridge` is the router (N engines, one socket, frames routed by `doc_id`). Proven by `server/tests/sync.rs` and the two-doc `js/core/test/sync-e2e.test.ts`. What is *not* built as of 2026-10-21: member removal / leave / ownership transfer, live revocation (`DocClosed`), a CLI router (the CLI still runs one engine on its primary doc), and every client surface (the web client boots every membership headlessly as of 2026-10-20 but renders only the Home doc; see "Decisions").
 
 Read this when:
 - Considering enabling sharing as a product direction.
@@ -65,32 +65,30 @@ DEK is generated **at doc creation** (32 bytes random). Encrypts every op + snap
 
 Server is blind to which DEK encrypted any given blob; `doc_id` on the wire is solely a routing key.
 
-### Sharing flow (sketch — crypto choice deferred)
+### Invites (built 2026-10-21)
 
-Two candidates, decision deferred until sharing is built:
+A sharing link is the whole invite. It carries one 32-byte random **invite secret** in the URL fragment:
 
-**Invite codes (leading candidate).** Inviter generates a 32-byte unlock key locally, wraps the doc's DEK with it, posts the wrap to the server, shares a URL whose fragment carries the unlock key. Fragment never reaches the server, so the wrap on its own is useless. Invitee opens URL, fetches wrap, decrypts with fragment key, signs up or logs in, re-wraps with own KEK, accepts.
+```
+<app>/#invite_<secret>          secret = [0-9a-f]{64}
+```
 
-**Per-account X25519 public keys.** Each account publishes a public key. Inviter encrypts the doc DEK directly to the invitee's public key. More moving parts (new key material on every account, key rotation story, key directory) but the invite UX is fully one-shot.
+The client derives two HKDF-SHA256 subkeys from the secret (`core/src/crypto/invite.rs`, `InviteSecret`):
 
-#### Invite-code flow (illustrative)
+| Subkey | `info` | Who sees it | Purpose |
+|---|---|---|---|
+| invite id | `monoplan/invite_id/v1` | server (as `doc_invites.id`), every invite call | lookup key; one-way from the secret |
+| invite KEK | `monoplan/invite_kek/v1` | client only | the doc's DEK is wrapped under it (XChaCha20-Poly1305, fresh nonce) |
 
-1. **Inviter (existing member):**
-   - Generates a 32-byte unlock key locally.
-   - Wraps the doc's DEK with the unlock key (XChaCha20-Poly1305, fresh nonce).
-   - `POST /api/docs/:doc_id/invites { wrapped_dek, wrapped_dek_nonce, expires_in }` → returns `{ invite_token }`.
-   - Shares URL `https://monoplan.example/invite/{token}#unlock={base64_key}` out-of-band (Signal, email, paper).
+So the server stores an id it cannot invert and a wrap it cannot open; the link holder derives both. One secret in the URL instead of a path token plus a fragment key keeps the whole credential out of access logs and gives the server nothing to correlate. The fragment never leaves the browser (`urls.md`).
 
-2. **Invitee:**
-   - Opens URL; client extracts `token` and `unlock_key` from fragment.
-   - `GET /api/invites/:token` → returns `{ doc_id, wrapped_dek, wrapped_dek_nonce, issued_by: { email_hint } }`. Unauthenticated; bearer is the token + fragment.
-   - Decrypts wrap with unlock key → has the doc's DEK.
-   - If not logged in: sign up or log in. Client now holds the invitee's Home DEK.
-   - Re-wraps DEK with the **Home DEK** (not the password KEK — the password and recovery KEKs only ever wrap the Home DEK, so an invite accepted today still opens after any later password change or recovery with no re-wrap).
-   - `POST /api/invites/:token/accept { wrapped_dek, wrapped_dek_nonce }` → server inserts `doc_members` row, consumes invite, returns `{ doc_id }`.
-   - Client opens (or reuses) WS connection, begins subscribing to the new doc.
+**Issuing (owner only).** The web `SharingDialog` (heading menu of a non-Home workspace) or `monoplan share link <doc>` generates the secret, wraps the doc's DEK under the invite KEK and posts `{ invite_id, wrapped_dek, wrapped_dek_nonce, expires_in_secs? }` to `POST /api/docs/:doc_id/invites`. The server checks for an active `owner` row (404 otherwise, so a non-member learns nothing), refuses the account's **primary doc with 403** before any lookup (the Home DEK is the account key: sharing Home would hand over every doc the account can open, `encryption.md` §Trade-offs), clamps the lifetime to [60 s, 30 days] with a 7-day default, and inserts `doc_invites`. The link is shown once; the server cannot rebuild it. `GET /api/docs/:doc_id/invites` lists what was issued (owner only) and `DELETE /api/docs/:doc_id/invites/:invite_id` revokes by deleting the row.
 
-Server never sees DEK plaintext, never sees unlock key, never sees either party's KEK or Home DEK.
+**Accepting.** The invitee opens the link. The web client captures the secret at the very start of the page load (`js/web/src/invite.ts`, called from `index.tsx`), parks it in `sessionStorage` and strips the fragment before the router runs, so it is never mirrored into history. `GET /api/invites/:invite_id` is unauthenticated (holding the id is the credential) and returns `{ doc_id, wrapped_dek, wrapped_dek_nonce, expires_at, inviter_hint }`, the hint being the inviter's masked email (`d…@example.com`). The `InviteDialog` shows who invited them; an anonymous session is sent through the normal sign-in / sign-up dialog first and the parked secret survives the session swap. On Join the client opens the wrap with the invite KEK, re-wraps the DEK under its **Home DEK** (`wrapDekWithDek`, the same wrap `POST /api/docs` takes, so password change / reset / recovery never need to know about it) and posts it to `POST /api/invites/:invite_id/accept`. In one transaction the server validates the invite, inserts (or, for a previously removed member, reactivates) the `member` row with that wrap and stamps `consumed_at` / `consumed_by_account_id`, so two holders of the same link cannot both join: the second gets 410. The response names the doc; the client boots it like any non-Home doc first seen on a device (`runtime.joinDoc`: empty `Doc`, the server's snapshot fills it on `OpenDoc`), vaults the key and navigates to its Inbox. The CLI equivalent is `monoplan share accept <link>`, which stores the DEK in `secrets.toml`.
+
+**Status codes.** Unknown or revoked id: 404. Expired or already used: 410 (`gone`; the message says which). The caller is already an active member (the owner opening their own link): 409, and the invite is **not** consumed, so it still reaches the person it was meant for. Members of a doc can read `GET /api/docs/:doc_id/members` (`{ account_id, email, role, added_at }`); non-members get 404.
+
+**Why not X25519 public keys.** The alternative considered was per-account public keys with the inviter encrypting the DEK to the invitee directly. Rejected for now: it adds key material and a rotation story to every account and a key directory the server would have to serve honestly, for a UX that is only one-shot if the inviter already knows the invitee's account. The link needs none of that and works for someone with no account yet. Revisit if sharing between existing accounts becomes the common case.
 
 ### Ownership transfer
 
@@ -110,10 +108,12 @@ GET    /api/docs                                          -- list memberships + 
 POST   /api/docs                                          -- create a doc; body: { wrapped_dek, wrapped_dek_nonce }
 DELETE /api/docs/:doc_id                                  -- delete a doc; owner only, never the primary (403), refused while another member is active (409) — built 2026-10-20
 
-POST   /api/docs/:doc_id/invites                          -- issue invite
-DELETE /api/docs/:doc_id/invites/:invite_id               -- revoke invite
-GET    /api/invites/:token                                -- fetch invite payload (unauth)
-POST   /api/invites/:token/accept                         -- authed; body: { wrapped_dek, wrapped_dek_nonce } (a Home-DEK wrap)
+POST   /api/docs/:doc_id/invites                          -- issue a link (owner only; 403 on the primary doc) — built 2026-10-21
+GET    /api/docs/:doc_id/invites                          -- list issued links (owner only) — built 2026-10-21
+DELETE /api/docs/:doc_id/invites/:invite_id               -- revoke — built 2026-10-21
+GET    /api/invites/:invite_id                            -- fetch invite payload (unauth; 404 / 410) — built 2026-10-21
+POST   /api/invites/:invite_id/accept                     -- authed; body: { wrapped_dek, wrapped_dek_nonce } (a Home-DEK wrap); 409 if already a member — built 2026-10-21
+GET    /api/docs/:doc_id/members                          -- list active members (any member) — built 2026-10-21
 
 POST   /api/docs/:doc_id/transfer-ownership               -- owner only
 DELETE /api/docs/:doc_id/members/:account_id              -- remove or leave
@@ -121,7 +121,7 @@ DELETE /api/docs/:doc_id/members/:account_id              -- remove or leave
 
 ### Planned schema additions
 
-`doc_members` is built (see `storage.md`); `doc_invites` is not.
+`doc_members` and `doc_invites` are both built (authoritative copies in `storage.md`).
 
 ```sql
 -- Built 2026-10-17 (authoritative copy in storage.md):
@@ -139,14 +139,17 @@ CREATE TABLE doc_members (
 );
 CREATE INDEX doc_members_account_id_idx ON doc_members (account_id) WHERE removed_at IS NULL;
 
+-- Built 2026-10-21 (authoritative copy in storage.md):
 CREATE TABLE doc_invites (
-  token_hash                BLOB PRIMARY KEY,
+  id                        BLOB PRIMARY KEY,   -- HKDF(secret, "monoplan/invite_id/v1")
   doc_id                    BLOB NOT NULL REFERENCES docs(id),
   issued_by_account_id      BLOB NOT NULL REFERENCES accounts(id),
-  wrapped_dek               BLOB NOT NULL,
+  wrapped_dek               BLOB NOT NULL,      -- doc DEK under the invite KEK
   wrapped_dek_nonce         BLOB NOT NULL,
+  created_at                INTEGER NOT NULL,
   expires_at                INTEGER NOT NULL,
-  consumed_at               INTEGER
+  consumed_at               INTEGER,            -- NULL = open; single use
+  consumed_by_account_id    BLOB REFERENCES accounts(id)
 );
 CREATE INDEX doc_invites_doc_id_idx ON doc_invites (doc_id);
 
@@ -198,7 +201,7 @@ Premise at the time of writing: rip-and-replace (no v1 transition window) — pr
 Files: protocol crate, `server/migrations/001_init.sql`.
 
 - ~~Add `doc_id` to every payload-carrying frame.~~ Done 2026-10-13 (with `OpenDoc` / `DocOpened` / `DocRejected`), no version bump needed pre-release.
-- ~~Edit `migrations/001_init.sql` in place: add `doc_members`; move the DEK wraps off `accounts`.~~ Done 2026-10-17. `doc_invites` remains.
+- ~~Edit `migrations/001_init.sql` in place: add `doc_members`; move the DEK wraps off `accounts`.~~ Done 2026-10-17. ~~`doc_invites`.~~ Done 2026-10-21.
 
 Compile breaks downstream — fix in Phase 2.
 
@@ -210,7 +213,7 @@ Compile breaks downstream — fix in Phase 2.
 
 **2c — Snapshot coordinator.** Already keyed by doc; nothing to do.
 
-**2d — HTTP endpoints.** ~~Signup / login / recover / reset / change in memberships shape.~~ Done 2026-10-17. ~~`POST /api/docs`, `GET /api/docs`.~~ Done 2026-10-19 (`server/src/http/doc_routes.rs`). Still to add: invites, members.
+**2d — HTTP endpoints.** ~~Signup / login / recover / reset / change in memberships shape.~~ Done 2026-10-17. ~~`POST /api/docs`, `GET /api/docs`.~~ Done 2026-10-19 (`server/src/http/doc_routes.rs`). ~~Invites, member list.~~ Done 2026-10-21 (`server/src/http/invite_routes.rs`, `server/src/auth/invites.rs`; `server/tests/auth.rs` covers issue → anonymous fetch → accept → listed membership, single use, expiry, owner-only, 403 on Home, 409 for an existing member, revoke). Still to add: member removal / leave, ownership transfer.
 
 **2e — Tests.** ~~Fixture builders; "two docs on one account".~~ Done 2026-10-17 / 2026-10-19 (`server/tests/sync.rs`: two docs interleaved on one connection, broadcast isolation across three connections, per-doc lease release; `server/tests/auth.rs`: created doc covered by list / login / password change / recovery, recovery wrap required on enrolled accounts).
 
@@ -224,7 +227,7 @@ Compile breaks downstream — fix in Phase 2.
 
 - **Local storage** (`cli/migrations/001_init.sql`, `cli/src/db.rs`): replace `doc_snapshot` single-row table with a `docs` table keyed by `doc_id` (snapshot blob, last_acked_seq, DEK).
 - ~~**Secrets / config** (`cli/src/config.rs`): `Secrets.dek_hex` → `Secrets.docs`.~~ Done 2026-10-17 (`BTreeMap<String, DocSecrets>` keyed by doc uuid).
-- **Sync integration** (`cli/src/sync.rs`): introduce a `DocRouter` that owns the WS and a `HashMap<DocId, SyncEngine>`. Inbound demuxed by `doc_id`; outbound stamped before send. The handshake step is already the session's (2026-10-19); the router is the remaining piece, plus a doc selector on commands.
+- **Sync integration** (`cli/src/sync.rs`): introduce a `DocRouter` that owns the WS and a `HashMap<DocId, SyncEngine>`. Inbound demuxed by `doc_id`; outbound stamped before send. The handshake step is already the session's (2026-10-19); the router is the remaining piece, plus a doc selector on commands. `monoplan share` (link / pending / revoke / accept / members, 2026-10-21) manages links and stores a joined doc's DEK in `secrets.toml`, but the CLI still syncs the Home doc only.
 - ~~**Auth flows**: login unwraps every membership into `Secrets.docs`; recovery / password change loop over memberships.~~ Done 2026-10-17.
 - **Tests**: update integration tests to seed new schema.
 
@@ -268,16 +271,16 @@ Or split into 5 small PRs if needed: protocol → server → core+CLI → web �
 | Phase | Days |
 |---|---|
 | 1 — protocol + schema | 0.5 (done except `doc_invites`) |
-| 2 — server | 1.5 (memberships, keys, multi-open, `POST /api/docs` done; invites, member endpoints, `DocClosed` remain) |
+| 2 — server | 1.5 (memberships, keys, multi-open, `POST /api/docs`, invites, member list done; removal / transfer, `DocClosed` remain) |
 | 3 — core | 0.5 (done) |
-| 4 — CLI | 0.5 (key storage + handshake done; `DocRouter` + doc selector remain) |
-| 5 — web | 1.5 (done: router, per-doc vault, boot-every-membership, `listDocs` refresh, personal layer, create-doc UI, per-doc nav sections, merged lenses) |
+| 4 — CLI | 0.5 (key storage, handshake, `share` done; `DocRouter` + doc selector remain) |
+| 5 — web | 1.5 (done: router, per-doc vault, boot-every-membership, `listDocs` refresh, personal layer, create-doc UI, per-doc nav sections, merged lenses, sharing dialog + invite accept) |
 | 6 — cleanup + verification | 0.5 |
 | **Total** | **~6 days** |
 
 Server's broadcast registry + snapshot coordinator rewrite is the largest single risk. Multiplexing layer (server router + client `DocRouter`) is conceptually simple but a lot of small wiring.
 
-Plus: sharing UI (invite flow, member management, per-doc nav sections) is **separate from the above** and not estimated here. The above is just the *protocol/storage substrate*. The product on top — invite UX, board view, member list, removal confirmation, etc. — is its own scope.
+Plus: the rest of the sharing UI (member removal, presence, conflict UX) is **separate from the above** and not estimated here; the invite flow and member list shipped 2026-10-21. The above is just the *protocol/storage substrate*. The product on top — invite UX, board view, member list, removal confirmation, etc. — is its own scope.
 
 ---
 
@@ -289,7 +292,7 @@ Plus: sharing UI (invite flow, member management, per-doc nav sections) is **sep
 
 - **No per-doc role granularity beyond owner/member.** Read-only roles, time-bound access, etc. are future work.
 
-- **Invite tokens are bearer credentials.** Anyone with URL (token + fragment) can accept up to expiry. Mitigation: out-of-band channel hygiene + revocation endpoint.
+- **Invite links are bearer credentials.** Anyone holding the URL can join until it expires (7 days by default, 30 at most) or is used (single use) or revoked. Mitigation: out-of-band channel hygiene, the short default lifetime, single use, and the revoke endpoint. The web client strips the fragment before the router or history can see it.
 
 - **Recovery model.** Recovery releases the Home DEK, from which every other membership's wrap opens; a recovered account regains access to every doc it was a member of. Conversely, anyone holding an account's Home DEK holds every doc it can open (`encryption.md` §Trade-offs).
 
@@ -297,7 +300,6 @@ Plus: sharing UI (invite flow, member management, per-doc nav sections) is **sep
 
 ## Open questions
 
-- **Invite codes vs X25519 public keys** — decision deferred to when sharing is built.
 - **Doc deletion semantics** when doc has multiple members: unilateral owner delete, member-by-member opt-in, or "leave for everyone else, doc keeps existing for the leaver"? TBD. Until decided, `DELETE /api/docs/:doc_id` (built 2026-10-20) requires the caller to be the sole active member and answers 409 otherwise; the primary doc is refused with 403 before any lookup (`accounts.primary_doc_id` on the server, `DocEntry.home` / `Session.primaryDocId` on the client). The web client offers Delete only on non-Home headings (the "..." menu, confirmed), then drops the engine from the bridge (`SyncBridge.removeEngine`), the doc from the layer (`DocsLayer.removeDoc`, which also drops its foreign Focus pins), the key from the session and vault (`DekVault.removeDocKey`) and the local op log (`IdbStorage.wipe`). Other devices drop a vaulted doc the server no longer lists at their next boot (`refreshDocKeys` in `App.tsx`), since its `OpenDoc` would be refused and a refusal ends the session; a device with the doc open *right now* is not told — that is the `DocClosed` frame.
 - **Discovery / UI** for shared docs: flat list with primary doc privileged at top, or folder-like hierarchy? Product question, out of scope.
 - **Connection-per-doc vs multiplexing.** Decided: multiplexing (one WS per device, `doc_id` on every frame). Connection-per-doc was the alternative; rejected because it scales worse with many docs.
@@ -310,7 +312,7 @@ Plus: sharing UI (invite flow, member management, per-doc nav sections) is **sep
 - **Multiplexing** chosen over connection-per-doc. Reason: scales better with N docs, single reconnect/backoff to manage.
 - **Per-doc DEK** chosen over per-member-derived keys. Reason: per-member derivation requires sharing master secrets, which breaks E2EE.
 - **Home DEK as account key** (decided 2026-10-19) over one password/recovery wrap pair per membership. Reason: password change, reset and recovery become single-row operations that never need the client's full key set, a doc created on one device is immediately openable on another after any later password change, and a recovery code enrolled at signup covers every future doc. Accepted costs (recorded in `encryption.md` §Trade-offs): Home DEK compromise exposes every doc; rotating the Home DEK would mean re-wrapping every other membership (no rotation exists today); the primary doc stays non-leavable and non-deletable.
-- **Invite codes** chosen as leading-candidate sharing primitive (over X25519 public keys) for simpler UX and no new key material on accounts. Not locked in; reconsider when actually building.
+- **Sharing links** (decided and built 2026-10-21) over X25519 public keys: simpler UX, works for invitees without an account, no new key material on accounts. Refinement over the original sketch: one fragment secret with two HKDF subkeys (server lookup id, wrap key) instead of a path token plus a fragment key, so the credential never appears in a URL path or access log and the server stores only a one-way id. Single use and owner-only by default; never for the primary doc.
 - **Primary doc is privileged** in UI: non-deletable, non-leavable. The account's Home.
 - **Member-removal rotation deferred** — forward-only revocation accepted as a v1 limitation.
 - **Recovery-code-after-signup deferred** — recovery stays a signup-only opt-in.

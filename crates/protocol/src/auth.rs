@@ -284,6 +284,100 @@ pub struct DocsListResponse {
     pub memberships: Vec<Membership>,
 }
 
+// ---------- invites (sharing links) ----------
+//
+// A sharing link is a 32-byte secret in a URL fragment. The client
+// derives two HKDF subkeys from it (`monoplan-core` `InviteSecret`): the
+// **invite id**, sent to the server on every invite call, and the
+// **invite KEK**, under which the inviter wraps the doc's DEK. The server
+// stores the id and the wrap and can open neither. Ids are 64-char hex on
+// the wire like every other token.
+
+/// `POST /api/docs/:doc_id/invites` (owner only; never the primary doc).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateInviteRequest {
+    /// HKDF-derived lookup id, 64-char hex. The server never sees the
+    /// secret it came from.
+    pub invite_id: String,
+    /// The doc's DEK under the invite KEK.
+    #[serde(with = "serde_bytes")]
+    pub wrapped_dek: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub wrapped_dek_nonce: Vec<u8>,
+    /// Lifetime in seconds. Server default 7 days, clamped to
+    /// [60 s, 30 days].
+    pub expires_in_secs: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateInviteResponse {
+    pub invite_id: String,
+    /// Unix millis.
+    pub expires_at: i64,
+}
+
+/// One row of `GET /api/docs/:doc_id/invites` (owner only). The server
+/// holds no secret, so a listed invite cannot be turned back into a
+/// link; it can only be revoked.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Invite {
+    pub invite_id: String,
+    pub created_at: i64,
+    pub expires_at: i64,
+    /// Set once accepted (single use).
+    pub consumed_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvitesListResponse {
+    pub invites: Vec<Invite>,
+}
+
+/// `GET /api/invites/:invite_id` (unauthenticated: holding the id is the
+/// credential, and the wrap is useless without the fragment secret).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvitePayloadResponse {
+    pub doc_id: String,
+    #[serde(with = "serde_bytes")]
+    pub wrapped_dek: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub wrapped_dek_nonce: Vec<u8>,
+    pub expires_at: i64,
+    /// The inviter's email, masked (`d…@example.com`), so the invitee
+    /// can see who the link came from before signing in.
+    pub inviter_hint: String,
+}
+
+/// `POST /api/invites/:invite_id/accept` (authed). The body is the doc's
+/// DEK re-wrapped under the acceptor's **Home DEK**, exactly as
+/// `CreateDocRequest` carries it: it becomes the new membership's wrap.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcceptInviteRequest {
+    #[serde(with = "serde_bytes")]
+    pub wrapped_dek: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub wrapped_dek_nonce: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcceptInviteResponse {
+    pub doc_id: String,
+}
+
+/// One row of `GET /api/docs/:doc_id/members` (any active member).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Member {
+    pub account_id: String,
+    pub email: String,
+    pub role: MemberRole,
+    pub added_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MembersListResponse {
+    pub members: Vec<Member>,
+}
+
 // ---------- /api/devices ----------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

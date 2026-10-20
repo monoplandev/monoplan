@@ -107,11 +107,8 @@ export type Messages = {
     deleteDocConfirm: (name: string) => string;
     deleteDocFailed: string;
     createDocFailed: string;
-    /** Non-Home workspace menu item and its placeholder dialog: sharing
-     *  (invites / members) is not built yet. */
+    /** Non-Home workspace menu item opening `SharingDialog`. */
     sharing: string;
-    sharingTitle: (name: string) => string;
-    sharingSoon: string;
     connected: string;
     disconnected: string;
     offline: string;
@@ -447,6 +444,35 @@ export type Messages = {
     failedToRevokeDevice: string;
     failedToLoadDevices: string;
   };
+  /** `SharingDialog` (members, invite links) and `InviteDialog` (the
+   *  receiving end of a link); `spec/sharing-plan.md` §Invites. */
+  sharing: {
+    title: (name: string) => string;
+    description: string;
+    members: string;
+    you: string;
+    owner: string;
+    inviteLink: string;
+    linkHint: string;
+    createLink: string;
+    creating: string;
+    copied: string;
+    pendingLinks: string;
+    createdAgo: (rel: string) => string;
+    revoke: string;
+    ownerOnly: string;
+    loadFailed: string;
+    createFailed: string;
+    revokeFailed: string;
+    inviteTitle: string;
+    inviteFrom: (hint: string) => string;
+    inviteSignIn: string;
+    join: string;
+    joining: string;
+    signIn: string;
+    notNow: string;
+    inviteError: { invalid: string; gone: string; failed: string };
+  };
   relative: {
     justNow: string;
     secondsAgo: (n: number) => string;
@@ -512,9 +538,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       deleteDocFailed: "No se pudo eliminar el espacio",
       createDocFailed: "No se pudo crear el espacio",
       sharing: "Compartir…",
-      sharingTitle: (name) => `Compartir «${name}»`,
-      sharingSoon:
-        "Compartir espacios aún no está disponible. Pronto podrás invitar a otras personas a este espacio desde aquí.",
       connected: "Conectado",
       disconnected: "Desconectado",
       offline: "Sin conexión",
@@ -741,6 +764,39 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       failedToRevokeDevice: "No se pudo revocar el dispositivo",
       failedToLoadDevices: "No se pudieron cargar los dispositivos",
     },
+    sharing: {
+      title: (name) => `Compartir «${name}»`,
+      description:
+        "Quien se une ve todo este espacio, incluido su historial. El espacio «Personal» nunca se comparte.",
+      members: "Miembros",
+      you: "Tú",
+      owner: "Propietario",
+      inviteLink: "Enlace de invitación",
+      linkHint:
+        "De un solo uso y caduca en 7 días. La clave viaja dentro del enlace: el servidor no puede leer el espacio.",
+      createLink: "Crear enlace de invitación",
+      creating: "Creando…",
+      copied: "Copiado",
+      pendingLinks: "Enlaces sin usar",
+      createdAgo: (rel) => `Creado ${rel}`,
+      revoke: "Revocar",
+      ownerOnly: "Solo el propietario del espacio puede invitar.",
+      loadFailed: "No se pudieron cargar los detalles",
+      createFailed: "No se pudo crear el enlace",
+      revokeFailed: "No se pudo revocar el enlace",
+      inviteTitle: "Te han invitado",
+      inviteFrom: (hint) => `${hint} te invita a un espacio compartido.`,
+      inviteSignIn: "Inicia sesión o crea una cuenta para unirte.",
+      join: "Unirme",
+      joining: "Uniéndote…",
+      signIn: "Iniciar sesión",
+      notNow: "Ahora no",
+      inviteError: {
+        invalid: "Este enlace de invitación no es válido.",
+        gone: "Este enlace de invitación ha caducado o ya se ha usado.",
+        failed: "No se pudo unir al espacio.",
+      },
+    },
     relative: {
       justNow: "ahora mismo",
       secondsAgo: (n) => `hace ${n} s`,
@@ -804,9 +860,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       deleteDocFailed: "Could not delete workspace",
       createDocFailed: "Could not create workspace",
       sharing: "Sharing…",
-      sharingTitle: (name) => `Share “${name}”`,
-      sharingSoon:
-        "Sharing isn't available yet. You'll be able to invite people to this workspace from here.",
       connected: "Connected",
       disconnected: "Disconnected",
       offline: "Offline",
@@ -1031,6 +1084,39 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       failedToRenameDevice: "Failed to rename device",
       failedToRevokeDevice: "Failed to revoke device",
       failedToLoadDevices: "Failed to load devices",
+    },
+    sharing: {
+      title: (name) => `Share “${name}”`,
+      description:
+        "Anyone who joins can read everything in this workspace, including its history. Your Personal workspace is never shared.",
+      members: "Members",
+      you: "You",
+      owner: "Owner",
+      inviteLink: "Invite link",
+      linkHint:
+        "Single use, expires in 7 days. The key travels inside the link; the server cannot read the workspace.",
+      createLink: "Create invite link",
+      creating: "Creating…",
+      copied: "Copied",
+      pendingLinks: "Unused links",
+      createdAgo: (rel) => `Created ${rel}`,
+      revoke: "Revoke",
+      ownerOnly: "Only the workspace owner can invite people.",
+      loadFailed: "Could not load sharing details",
+      createFailed: "Could not create the link",
+      revokeFailed: "Could not revoke the link",
+      inviteTitle: "You're invited",
+      inviteFrom: (hint) => `${hint} has invited you to a shared workspace.`,
+      inviteSignIn: "Sign in or create an account to join.",
+      join: "Join",
+      joining: "Joining…",
+      signIn: "Sign in",
+      notNow: "Not now",
+      inviteError: {
+        invalid: "This invite link isn't valid.",
+        gone: "This invite link has expired or was already used.",
+        failed: "Could not join the workspace.",
+      },
     },
     relative: {
       justNow: "just now",

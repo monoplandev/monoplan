@@ -432,6 +432,64 @@ export function createWorkspaceRuntime(props: {
   };
   for (const r of runtimes.values()) watchVersion(r);
 
+  // Open a doc that did not exist in this session at boot: register
+  // its key on the session and in the vault, open its op-log store,
+  // build its runtime, route it over the live bridge and add it to the
+  // layer. Shared by `createDoc` (a seeded `Doc.create`, named) and
+  // `joinDoc` (an empty doc; the server's snapshot fills it on open).
+  const openNewDoc = async (
+    docId: string,
+    dek: Dek,
+    opts: { seeded: boolean; name: string | null },
+  ): Promise<string> => {
+    props.session.docKeys.set(docId, dek);
+    try {
+      await dekVault.putDocKey(docId, dek);
+    } catch (e) {
+      // The doc still opens this session; the next boot's `GET /api/docs`
+      // refresh re-learns it (`App.tsx` `refreshDocKeys`).
+      console.warn("openNewDoc: vaulting the doc failed:", e);
+    }
+    const storage = await IdbStorage.open(docId);
+    const peerId = props.boot.peerId;
+    const doc = opts.seeded
+      ? peerId !== null
+        ? Doc.createWithPeer(peerId)
+        : Doc.create()
+      : peerId !== null
+        ? Doc.emptyWithPeer(peerId)
+        : Doc.empty();
+    const boot: DocBoot = {
+      docId,
+      dek,
+      doc,
+      lastAcked: 0n,
+      storage,
+      lastLocalSeq: 0,
+      serverKnownVv: new Uint8Array(),
+      inFlightPush: null,
+      walRows: 0,
+      walBytes: 0,
+      seeded: opts.seeded,
+    };
+    const r = runWithOwner(owner, () => createDocRuntime(boot, pumpOutbox));
+    if (!r) throw new Error("runtime owner is gone");
+    runtimes.set(docId, r);
+    docApps.set(docId, r.app);
+    wireFlush(r, bridge);
+    runWithOwner(owner, () => watchVersion(r));
+    if (opts.seeded) {
+      // Name first so the seed and the name travel as one WAL row / one
+      // push, then persist and route.
+      if (opts.name?.trim()) r.app.setDocName(opts.name);
+      r.capture();
+      r.scheduleDurable();
+    }
+    bridge?.addEngine(r.engine);
+    docs.addDoc(r.app);
+    return docId;
+  };
+
   // Create a doc the account owns and open it in this session
   // (`spec/sharing-plan.md` Phase 5): a fresh DEK wrapped under the Home
   // DEK is registered with the server, vaulted, and the doc is seeded
@@ -449,44 +507,19 @@ export function createWorkspaceRuntime(props: {
       wrapped_dek: wrapped.ciphertext,
       wrapped_dek_nonce: wrapped.nonce,
     });
-    props.session.docKeys.set(docId, dek);
-    try {
-      await dekVault.putDocKey(docId, dek);
-    } catch (e) {
-      // The doc still opens this session; the next boot's `GET /api/docs`
-      // refresh re-learns it (`App.tsx` `refreshDocKeys`).
-      console.warn("createDoc: vaulting the new doc failed:", e);
-    }
-    const storage = await IdbStorage.open(docId);
-    const peerId = props.boot.peerId;
-    const doc = peerId !== null ? Doc.createWithPeer(peerId) : Doc.create();
-    const boot: DocBoot = {
-      docId,
-      dek,
-      doc,
-      lastAcked: 0n,
-      storage,
-      lastLocalSeq: 0,
-      serverKnownVv: new Uint8Array(),
-      inFlightPush: null,
-      walRows: 0,
-      walBytes: 0,
-      seeded: true,
-    };
-    const r = runWithOwner(owner, () => createDocRuntime(boot, pumpOutbox));
-    if (!r) throw new Error("runtime owner is gone");
-    runtimes.set(docId, r);
-    docApps.set(docId, r.app);
-    wireFlush(r, bridge);
-    runWithOwner(owner, () => watchVersion(r));
-    // Name first so the seed and the name travel as one WAL row / one
-    // push, then persist and route.
-    if (name.trim()) r.app.setDocName(name);
-    r.capture();
-    r.scheduleDurable();
-    bridge?.addEngine(r.engine);
-    docs.addDoc(r.app);
-    return docId;
+    return openNewDoc(docId, dek, { seeded: true, name });
+  };
+
+  // Open a doc this account just joined through a sharing link
+  // (`spec/sharing-plan.md` §Invites): the membership already exists on
+  // the server and `dek` came out of the link, so there is nothing to
+  // register. The doc starts empty here, exactly like a non-Home doc
+  // first seen on a device at boot, and the server's snapshot fills it
+  // once the bridge opens it. A doc already open (the link was the
+  // account's own, or a second accept) is left alone.
+  const joinDoc = async (docId: string, dek: Dek): Promise<string> => {
+    if (runtimes.has(docId)) return docId;
+    return openNewDoc(docId, dek, { seeded: false, name: null });
   };
 
   // Delete a doc the account owns and forget it on this device. The
@@ -601,5 +634,5 @@ export function createWorkspaceRuntime(props: {
     if (deviceTimer) clearTimeout(deviceTimer);
   });
 
-  return { app, docApps, docs, view, setView, createDoc, deleteDoc };
+  return { app, docApps, docs, view, setView, createDoc, joinDoc, deleteDoc };
 }

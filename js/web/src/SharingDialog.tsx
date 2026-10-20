@@ -1,37 +1,263 @@
 import { Dialog } from "@kobalte/core/dialog";
+import { For, Show, createEffect, createSignal, on } from "solid-js";
+import { InviteSecret } from "@monoplan/core/wasm";
+import { api, type Invite, type Member } from "./api.ts";
+import { formatRelative } from "./format.tsx";
 import { useAppI18n } from "./i18n.tsx";
 import { closeToItems, trackOverlay } from "./overlay.ts";
+import { useSession } from "./SessionContext.tsx";
+import { inviteUrl } from "./url.ts";
 
-/** Placeholder "Sharing" modal for a non-Home workspace, opened from its
- *  heading menu. Sharing itself (invites, members; `spec/sharing-plan.md`)
- *  is not built: the dialog reserves the entry point and says so. Same
+/** Sharing for a non-Home workspace, opened from its heading menu
+ *  (`spec/sharing-plan.md` §Invites). Lists the members, and for the
+ *  owner issues single-use links: a fresh secret is generated here, the
+ *  doc's DEK wrapped under the invite KEK, and only the HKDF id and the
+ *  wrap go to the server, so the link shown below is the only copy of
+ *  the secret that will ever exist. Unused links can be revoked. Same
  *  portal / overlay / positioner shape as `ConfirmDialog`. */
 export function SharingDialog(props: {
   open: boolean;
   onOpenChange: (b: boolean) => void;
   /** The workspace's display name. */
   label: string;
+  docId: string;
 }) {
-  const { m } = useAppI18n();
+  const { m, locale } = useAppI18n();
+  const session = useSession();
   trackOverlay(() => props.open);
+
+  const [members, setMembers] = createSignal<Member[] | null>(null);
+  const [invites, setInvites] = createSignal<Invite[] | null>(null);
+  const [loadError, setLoadError] = createSignal(false);
+  const [link, setLink] = createSignal<string | null>(null);
+  const [creating, setCreating] = createSignal(false);
+  const [createError, setCreateError] = createSignal(false);
+  const [copied, setCopied] = createSignal(false);
+  const [revoking, setRevoking] = createSignal<Set<string>>(new Set());
+
+  const me = (): string => session.session().accountId;
+  const isOwner = (): boolean =>
+    members()?.some((mb) => mb.account_id === me() && mb.role === "owner") ?? false;
+
+  const load = async (): Promise<void> => {
+    setLoadError(false);
+    try {
+      const { members: list } = await api.listMembers(props.docId);
+      setMembers(list);
+      if (list.some((mb) => mb.account_id === me() && mb.role === "owner")) {
+        const { invites: issued } = await api.listInvites(props.docId);
+        setInvites(issued);
+      } else {
+        setInvites(null);
+      }
+    } catch (e) {
+      console.warn("sharing: load failed:", e);
+      setLoadError(true);
+    }
+  };
+
+  // Fresh state every time the dialog opens; the link shown is this
+  // open's only copy, so it does not carry over.
+  createEffect(
+    on(
+      () => props.open,
+      (open) => {
+        if (!open) return;
+        setMembers(null);
+        setInvites(null);
+        setLink(null);
+        setCreateError(false);
+        setCopied(false);
+        void load();
+      },
+    ),
+  );
+
+  const createLink = async (): Promise<void> => {
+    const dek = session.session().docKeys.get(props.docId);
+    if (!dek || creating()) return;
+    setCreating(true);
+    setCreateError(false);
+    setCopied(false);
+    try {
+      const secret = InviteSecret.generate();
+      const wrapped = secret.wrap(dek);
+      await api.createInvite(props.docId, {
+        invite_id: secret.id(),
+        wrapped_dek: wrapped.ciphertext,
+        wrapped_dek_nonce: wrapped.nonce,
+      });
+      setLink(inviteUrl(secret.toHex()));
+      const { invites: issued } = await api.listInvites(props.docId);
+      setInvites(issued);
+    } catch (e) {
+      console.error("sharing: create link failed:", e);
+      setCreateError(true);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const copyLink = async (): Promise<void> => {
+    const url = link();
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+    } catch (e) {
+      console.warn("sharing: copy failed:", e);
+    }
+  };
+
+  const revoke = async (inviteId: string): Promise<void> => {
+    setRevoking((s) => new Set(s).add(inviteId));
+    try {
+      await api.revokeInvite(props.docId, inviteId);
+      setInvites((list) => list?.filter((i) => i.invite_id !== inviteId) ?? null);
+    } catch (e) {
+      console.error("sharing: revoke failed:", e);
+      alert(m().sharing.revokeFailed);
+    } finally {
+      setRevoking((s) => {
+        const next = new Set(s);
+        next.delete(inviteId);
+        return next;
+      });
+    }
+  };
+
+  const now = (): number => Date.now();
+  const openInvites = (): Invite[] =>
+    (invites() ?? []).filter((i) => i.consumed_at === null && i.expires_at > now());
+
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange} modal>
       <Dialog.Portal>
         <Dialog.Overlay class="dialog-overlay" />
         <div class="dialog-positioner">
-          <Dialog.Content class="confirm-dialog" onCloseAutoFocus={closeToItems}>
+          <Dialog.Content
+            class="confirm-dialog sharing-dialog"
+            onCloseAutoFocus={closeToItems}
+          >
             <section class="confirm-dialog-section confirm-dialog-header">
               <Dialog.Title class="confirm-dialog-title">
-                {m().nav.sharingTitle(props.label)}
+                {m().sharing.title(props.label)}
               </Dialog.Title>
               <Dialog.Description class="confirm-dialog-message">
-                {m().nav.sharingSoon}
+                {m().sharing.description}
               </Dialog.Description>
             </section>
+
+            <section class="confirm-dialog-section sharing-section">
+              <h3 class="sharing-heading">{m().sharing.members}</h3>
+              <Show
+                when={members()}
+                fallback={
+                  <p class="confirm-dialog-message">
+                    {loadError() ? m().sharing.loadFailed : m().common.loading}
+                  </p>
+                }
+              >
+                {(list) => (
+                  <ul class="sharing-list">
+                    <For each={list()}>
+                      {(mb) => (
+                        <li class="sharing-row">
+                          <span class="sharing-row-main">{mb.email}</span>
+                          <span class="sharing-tags">
+                            <Show when={mb.account_id === me()}>
+                              <span class="device-current-tag">{m().sharing.you}</span>
+                            </Show>
+                            <Show when={mb.role === "owner"}>
+                              <span class="device-current-tag">{m().sharing.owner}</span>
+                            </Show>
+                          </span>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                )}
+              </Show>
+            </section>
+
+            <Show when={members() && !loadError()}>
+              <section class="confirm-dialog-section sharing-section">
+                <h3 class="sharing-heading">{m().sharing.inviteLink}</h3>
+                <Show
+                  when={isOwner()}
+                  fallback={<p class="confirm-dialog-message">{m().sharing.ownerOnly}</p>}
+                >
+                  <p class="confirm-dialog-message">{m().sharing.linkHint}</p>
+                  <Show
+                    when={link()}
+                    fallback={
+                      <button
+                        type="button"
+                        class="confirm-dialog-btn confirm-dialog-confirm sharing-create"
+                        disabled={creating()}
+                        onClick={() => void createLink()}
+                      >
+                        {creating() ? m().sharing.creating : m().sharing.createLink}
+                      </button>
+                    }
+                  >
+                    {(url) => (
+                      <div class="sharing-link-row">
+                        <input
+                          class="name-dialog-input sharing-link-input"
+                          type="text"
+                          readOnly
+                          value={url()}
+                          aria-label={m().sharing.inviteLink}
+                          onFocus={(e) => e.currentTarget.select()}
+                        />
+                        <button
+                          type="button"
+                          class="confirm-dialog-btn confirm-dialog-confirm"
+                          onClick={() => void copyLink()}
+                        >
+                          {copied() ? m().sharing.copied : m().common.copy}
+                        </button>
+                      </div>
+                    )}
+                  </Show>
+                  <Show when={createError()}>
+                    <p class="name-dialog-error" role="alert">
+                      {m().sharing.createFailed}
+                    </p>
+                  </Show>
+                  <Show when={openInvites().length > 0}>
+                    <h4 class="sharing-subheading">{m().sharing.pendingLinks}</h4>
+                    <ul class="sharing-list">
+                      <For each={openInvites()}>
+                        {(inv) => (
+                          <li class="sharing-row">
+                            <span class="sharing-row-main sharing-row-muted">
+                              {m().sharing.createdAgo(
+                                formatRelative(inv.created_at, now(), locale()),
+                              )}
+                            </span>
+                            <button
+                              type="button"
+                              class="confirm-dialog-btn confirm-dialog-cancel sharing-revoke"
+                              disabled={revoking().has(inv.invite_id)}
+                              onClick={() => void revoke(inv.invite_id)}
+                            >
+                              {m().sharing.revoke}
+                            </button>
+                          </li>
+                        )}
+                      </For>
+                    </ul>
+                  </Show>
+                </Show>
+              </section>
+            </Show>
+
             <section class="confirm-dialog-section confirm-dialog-actions">
               <button
                 type="button"
-                class="confirm-dialog-btn confirm-dialog-confirm"
+                class="confirm-dialog-btn confirm-dialog-cancel"
                 onClick={() => props.onOpenChange(false)}
               >
                 {m().common.close}

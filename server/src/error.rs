@@ -26,6 +26,9 @@ pub enum ApiError {
     #[error("conflict: {0}")]
     Conflict(String),
 
+    #[error("gone: {0}")]
+    Gone(String),
+
     #[error("recovery not enrolled")]
     RecoveryNotEnrolled,
 
@@ -49,6 +52,7 @@ impl ApiError {
             NotFound => (StatusCode::NOT_FOUND, "not_found"),
             Forbidden(_) => (StatusCode::FORBIDDEN, "forbidden"),
             Conflict(_) => (StatusCode::CONFLICT, "conflict"),
+            Gone(_) => (StatusCode::GONE, "gone"),
             RecoveryNotEnrolled => (StatusCode::FORBIDDEN, "recovery_not_enrolled"),
             RecoverySessionInvalid => (StatusCode::FORBIDDEN, "recovery_session_invalid"),
             Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),

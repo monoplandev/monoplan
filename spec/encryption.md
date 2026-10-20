@@ -4,6 +4,7 @@
 
 - **DEK** (data encryption key) — 32-byte random, generated client-side **at doc creation** (the primary doc's at signup). Encrypts every op + snapshot blob of *that doc*. AEAD: XChaCha20-Poly1305. Different docs have independent DEKs, and an account holds one wrapped copy per doc it is a member of (`doc_members`, see below). The account row carries password material only.
 - **Home DEK** — the primary (Home) doc's DEK, which doubles as the **account key** (decided 2026-10-19). It is the only DEK the password KEK and recovery KEK ever wrap. Every other doc's DEK is wrapped under the Home DEK (XChaCha20-Poly1305, fresh nonce), so holding the Home DEK is holding every doc the account can open. See "Trade-offs" below.
+- **Invite secret** — 32 random bytes in a sharing link's URL fragment (`sharing-plan.md` §Invites). Two HKDF subkeys: `HKDF(secret, "monoplan/invite_id/v1")` is the server's lookup id and `HKDF(secret, "monoplan/invite_kek/v1")` the **invite KEK** the doc's DEK is wrapped under for the link. The server holds the id and the wrap and can open neither. Never issued for the primary doc.
 - **Master** — `Argon2id(password, master_salt)`. One expensive call per session.
 - **KEK** (key encryption key) — `HKDF(master, "monoplan/kek/v1")`. Wraps/unwraps the DEK. Client-only.
 - **Auth secret** — `HKDF(master, "monoplan/auth/v1")`. Sent to server as login credential. Server stores `SHA-256(auth_secret)`. HKDF is one-way — possessing `auth_secret` reveals neither `master` nor `kek`. See `auth.md` for the full password-handling invariant.
@@ -26,7 +27,7 @@ Consequences:
 
 - Changing the password re-wraps **only the Home DEK**. `new_doc_keys` on `/password/change` and `/password/reset` must name exactly the primary doc id (400 otherwise, nothing written). Non-primary wraps are under the Home DEK, which the password change does not touch.
 - Recovery releases only the primary membership's recovery wrap; once the client holds the Home DEK it opens every other membership's wrap itself.
-- A non-primary membership never needs a recovery wrap, so `POST /api/docs` (and, later, accepting an invite) takes just `{ wrapped_dek, wrapped_dek_nonce }`: the doc's DEK under the caller's Home DEK.
+- A non-primary membership never needs a recovery wrap, so `POST /api/docs` and `POST /api/invites/:id/accept` take just `{ wrapped_dek, wrapped_dek_nonce }`: the doc's DEK under the caller's Home DEK. An accepted invite therefore opens after any later password change or recovery with no re-wrap.
 - The server does not verify which key a wrap is under (it cannot); the rule is a client contract, and the primary-doc id is what tells a client which key to try.
 
 ## Recovery tiers

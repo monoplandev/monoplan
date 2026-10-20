@@ -74,6 +74,34 @@ export interface DevicesListResponse {
   server_last_seq: number;
 }
 
+/** One sharing link as the owner sees it (`GET /api/docs/:id/invites`).
+ *  The server holds no secret, so a listed link cannot be rebuilt, only
+ *  revoked. `consumed_at` is set once accepted (single use). */
+export interface Invite {
+  invite_id: string;
+  created_at: number;
+  expires_at: number;
+  consumed_at: number | null;
+}
+
+/** `GET /api/invites/:id`: what a link holder learns before signing in.
+ *  The wrap is the doc's DEK under the invite KEK (`InviteSecret.unwrap`). */
+export interface InvitePayload {
+  doc_id: string;
+  wrapped_dek: Uint8Array;
+  wrapped_dek_nonce: Uint8Array;
+  expires_at: number;
+  /** The inviter's email, masked server-side (`d…@example.com`). */
+  inviter_hint: string;
+}
+
+export interface Member {
+  account_id: string;
+  email: string;
+  role: "owner" | "member";
+  added_at: number;
+}
+
 export interface ApiErrorBody {
   code: string;
   message: string;
@@ -170,6 +198,65 @@ export const api = {
    *  with it. The caller drops its local copy and key afterwards. */
   async deleteDoc(docId: string): Promise<void> {
     await del<unknown>(`/api/docs/${encodeURIComponent(docId)}`);
+  },
+
+  // ---- sharing links (`spec/sharing-plan.md` §Invites) ----
+
+  /** Issue a link for a doc the account owns. `invite_id` is the HKDF id
+   *  of the fragment secret (`InviteSecret.id()`), `wrapped_dek` the doc's
+   *  DEK under the invite KEK (`InviteSecret.wrap`). The server refuses the
+   *  primary doc (403) and a doc the caller does not own (404). */
+  async createInvite(
+    docId: string,
+    args: {
+      invite_id: string;
+      wrapped_dek: Uint8Array;
+      wrapped_dek_nonce: Uint8Array;
+      expires_in_secs?: number;
+    },
+  ): Promise<{ invite_id: string; expires_at: number }> {
+    return post(`/api/docs/${encodeURIComponent(docId)}/invites`, {
+      invite_id: args.invite_id,
+      wrapped_dek: args.wrapped_dek,
+      wrapped_dek_nonce: args.wrapped_dek_nonce,
+      expires_in_secs: args.expires_in_secs ?? null,
+    });
+  },
+
+  /** Every link issued on a doc the account owns, newest first. */
+  async listInvites(docId: string): Promise<{ invites: Invite[] }> {
+    return get(`/api/docs/${encodeURIComponent(docId)}/invites`);
+  },
+
+  async revokeInvite(docId: string, inviteId: string): Promise<void> {
+    await del<unknown>(
+      `/api/docs/${encodeURIComponent(docId)}/invites/${encodeURIComponent(inviteId)}`,
+    );
+  },
+
+  /** Unauthenticated: the id is the credential. 404 for an unknown or
+   *  revoked link, 410 (`gone`) once expired or used. */
+  async fetchInvite(inviteId: string): Promise<InvitePayload> {
+    return get(`/api/invites/${encodeURIComponent(inviteId)}`);
+  },
+
+  /** Join the doc behind a link. `wrapped_dek` is the recovered DEK under
+   *  the acceptor's Home DEK (`wrapDekWithDek`), the new membership's wrap.
+   *  409 (`conflict`) when the caller is already a member; the link stays
+   *  open in that case. */
+  async acceptInvite(
+    inviteId: string,
+    args: { wrapped_dek: Uint8Array; wrapped_dek_nonce: Uint8Array },
+  ): Promise<{ doc_id: string }> {
+    return post(`/api/invites/${encodeURIComponent(inviteId)}/accept`, {
+      wrapped_dek: args.wrapped_dek,
+      wrapped_dek_nonce: args.wrapped_dek_nonce,
+    });
+  },
+
+  /** Active members of a doc the account is a member of, oldest first. */
+  async listMembers(docId: string): Promise<{ members: Member[] }> {
+    return get(`/api/docs/${encodeURIComponent(docId)}/members`);
   },
 
   async renameDevice(deviceId: string, name: string): Promise<void> {

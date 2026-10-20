@@ -11,14 +11,19 @@
 //!
 //!   Dek (random) ──XChaCha20Poly1305(Kek)──▶ WrappedDek          (the primary doc's DEK, i.e. the Home DEK)
 //!   Dek (random) ──XChaCha20Poly1305(Home Dek)──▶ WrappedDek     (every other doc's DEK)
+//!
+//!   InviteSecret (random, URL fragment) ──HKDF──▶ invite id   (server lookup key)
+//!                                       ──HKDF──▶ invite Kek  ──XChaCha20Poly1305──▶ WrappedDek (a sharing link)
 //! ```
 
 mod aead;
+mod invite;
 mod kdf;
 mod recovery;
 mod secrets;
 
 pub use aead::{AEAD_NONCE_LEN, WrappedDek};
+pub use invite::{INVITE_ID_INFO, INVITE_ID_LEN, INVITE_KEK_INFO, INVITE_SECRET_LEN, InviteSecret};
 pub use kdf::{
     AUTH_INFO, KEK_INFO, RECOVERY_AUTH_INFO, RECOVERY_KEK_INFO, derive_password_master,
     derive_recovery_master, kek_from_master, recovery_kek_from_master,

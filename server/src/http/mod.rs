@@ -5,6 +5,7 @@ mod admin_routes;
 mod auth_routes;
 mod device_routes;
 mod doc_routes;
+mod invite_routes;
 #[cfg(feature = "bundled-web")]
 mod web;
 
@@ -64,6 +65,20 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/docs", get(doc_routes::list).post(doc_routes::create))
         .route("/api/docs/{doc_id}", delete(doc_routes::delete))
+        .route(
+            "/api/docs/{doc_id}/invites",
+            get(invite_routes::list).post(invite_routes::create),
+        )
+        .route(
+            "/api/docs/{doc_id}/invites/{invite_id}",
+            delete(invite_routes::revoke),
+        )
+        .route("/api/docs/{doc_id}/members", get(invite_routes::members))
+        .route("/api/invites/{invite_id}", get(invite_routes::fetch))
+        .route(
+            "/api/invites/{invite_id}/accept",
+            post(invite_routes::accept),
+        )
         .route("/api/sync", any(ws_handler));
 
     if state.admin_enabled() {

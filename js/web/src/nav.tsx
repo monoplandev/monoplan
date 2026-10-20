@@ -17,6 +17,7 @@ import { createPopoverTooltipGuard } from "./popoverTooltip.ts";
 import { createSyncStatus } from "./syncFacts.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { SharingDialog } from "./SharingDialog.tsx";
+import { pendingInvite } from "./invite.ts";
 import type { AttentionBadge } from "./dayGroups.ts";
 import { Dnd, DndSelection, type DndOp } from "./dnd/solid";
 import archiveSvg from "./icons/archive.svg?raw";
@@ -204,7 +205,7 @@ export function FirstRunAuthPrompt(props: {
   onSession: (s: Session) => void;
 }) {
   const [authOpen, setAuthOpen] = createSignal(
-    props.session.anonymous && !loadAuthPromptDismissed(),
+    props.session.anonymous && !loadAuthPromptDismissed() && pendingInvite() === null,
   );
   const onOpenChange = (open: boolean) => {
     if (!open) markAuthPromptDismissed();
@@ -240,11 +241,14 @@ export function StatusSlot(props: {
   // Auto-prompt anonymous users on first mount unless they've dismissed the
   // prompt before (persisted in localStorage). Closing sets that flag so
   // reloads don't re-nag. The whole workspace remounts on session swap
-  // (App's keyed <Show>); logout clears the flag so it re-prompts.
+  // (App's keyed <Show>); logout clears the flag so it re-prompts. A
+  // page opened on a sharing link skips the prompt: `InviteDialog` owns
+  // sign-in there, and two modals opening at once would stack.
   const [authOpen, setAuthOpen] = createSignal(
     props.autoPrompt !== false &&
       props.session.anonymous &&
-      !loadAuthPromptDismissed(),
+      !loadAuthPromptDismissed() &&
+      pendingInvite() === null,
   );
   const onOpenChange = (open: boolean) => {
     if (!open) markAuthPromptDismissed();
@@ -542,8 +546,8 @@ function DocSection(props: {
   // primary doc is non-deletable), nor does an anonymous session.
   const canDelete = (): boolean => !props.entry.home && props.onDeleteDoc !== null;
   const [deleteConfirmOpen, setDeleteConfirmOpen] = createSignal(false);
-  // Sharing is a placeholder entry point on non-Home docs only (Home is
-  // the account's private doc; `spec/sharing-plan.md`).
+  // Sharing is offered on non-Home docs only (Home is the account's
+  // private doc and its DEK is the account key; `spec/sharing-plan.md`).
   const [sharingOpen, setSharingOpen] = createSignal(false);
   const deleteDoc = (): void => {
     const run = props.onDeleteDoc;
@@ -861,6 +865,7 @@ function DocSection(props: {
           open={sharingOpen()}
           onOpenChange={setSharingOpen}
           label={label()}
+          docId={docId}
         />
       </Show>
       <Show when={!props.entry.home} fallback={heading()}>

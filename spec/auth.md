@@ -16,7 +16,15 @@ PATCH  /api/devices/:device_id         (rename a device)
 DELETE /api/devices/:device_id
 GET    /api/docs                       (authed; `{ primary_doc_id, memberships }` in the login shape)
 POST   /api/docs                       (authed; create a doc the account owns: `{ wrapped_dek, wrapped_dek_nonce }` → `{ doc_id }`)
+POST   /api/docs/:doc_id/invites       (authed, owner only; issue a sharing link: `{ invite_id, wrapped_dek, wrapped_dek_nonce, expires_in_secs? }` → `{ invite_id, expires_at }`; 403 on the primary doc)
+GET    /api/docs/:doc_id/invites       (authed, owner only; issued links)
+DELETE /api/docs/:doc_id/invites/:id   (authed, owner only; revoke)
+GET    /api/docs/:doc_id/members       (authed, any member; `{ members: [{ account_id, email, role, added_at }] }`)
+GET    /api/invites/:invite_id         (unauthenticated; `{ doc_id, wrapped_dek, wrapped_dek_nonce, expires_at, inviter_hint }`; 404 unknown / revoked, 410 expired / used)
+POST   /api/invites/:invite_id/accept  (authed; `{ wrapped_dek, wrapped_dek_nonce }` (a Home-DEK wrap) → `{ doc_id }`; 410 spent, 409 already a member)
 ```
+
+Sharing links (`sharing-plan.md` §Invites): the link's fragment secret never reaches the server. `invite_id` is an HKDF subkey of it (the server's lookup key, one-way) and the wrap is under a second subkey, so the unauthenticated fetch hands out nothing a holder of the id could use without the secret. Accept consumes the invite and inserts the `doc_members` row in one transaction (single use).
 
 `POST /api/docs` is pure key management: the client generates the doc's DEK, wraps it under its **Home DEK** (the primary doc's DEK, which is the account key — `encryption.md`), and the server mints the doc id plus an `owner` row in `doc_members` carrying that wrap. No password or recovery wrap is involved: password change, reset and recovery only ever re-wrap the Home DEK, and a client that holds the Home DEK opens this wrap itself. The doc's history begins with the first `PushOps` after `OpenDoc`.
 

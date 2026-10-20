@@ -10,8 +10,8 @@ use monoplan_core::{
     AEAD_NONCE_LEN, AppEvent as CoreAppEvent, BootState as CoreBootState, Dek as CoreDek,
     Doc as CoreDoc, DocId as CoreDocId, EngineOptions as CoreEngineOptions, Event as CoreEvent,
     ImportSummary as CoreImportSummary, InFlightPush as CoreInFlightPush,
-    ItemLifecycle as CoreItemLifecycle, Kek as CoreKek, LocalSeq as CoreLocalSeq,
-    LocalStorage as CoreLocalStorage, NotesDeltaOp, PushId as CorePushId,
+    InviteSecret as CoreInviteSecret, ItemLifecycle as CoreItemLifecycle, Kek as CoreKek,
+    LocalSeq as CoreLocalSeq, LocalStorage as CoreLocalStorage, NotesDeltaOp, PushId as CorePushId,
     RemoteWalRow as CoreRemoteWalRow, ServerSeq as CoreServerSeq, StorageError as CoreStorageError,
     SyncEngine as CoreSyncEngine, WrappedDek as CoreWrappedDek, derive_password_master,
     derive_recovery_master, generate_recovery_code, hello_frame as core_hello_frame,
@@ -979,6 +979,73 @@ pub fn unwrap_dek_with_dek(
     };
     let dek = home.inner.unwrap_dek(&wrapped).map_err(js_err)?;
     Ok(Dek { inner: dek })
+}
+
+// ---------- Sharing links ----------
+
+/// The fragment secret of a sharing link (`spec/sharing-plan.md`
+/// §Invites). `id()` is what the client sends to the server; `wrap` /
+/// `unwrap` move the doc's DEK through the link. The secret itself never
+/// leaves the browser except inside the URL the inviter copies.
+#[wasm_bindgen]
+pub struct InviteSecret {
+    inner: CoreInviteSecret,
+}
+
+#[wasm_bindgen]
+impl InviteSecret {
+    pub fn generate() -> InviteSecret {
+        InviteSecret {
+            inner: CoreInviteSecret::generate(),
+        }
+    }
+
+    #[wasm_bindgen(js_name = fromHex)]
+    pub fn from_hex(hex: &str) -> Result<InviteSecret, JsError> {
+        let bytes = hex::decode(hex).map_err(js_err)?;
+        Ok(InviteSecret {
+            inner: CoreInviteSecret::from_bytes(&bytes).map_err(js_err)?,
+        })
+    }
+
+    #[wasm_bindgen(js_name = toHex)]
+    pub fn to_hex(&self) -> String {
+        hex::encode(self.inner.as_bytes())
+    }
+
+    /// The server lookup id, 64-char hex. One-way from the secret.
+    pub fn id(&self) -> Result<String, JsError> {
+        Ok(hex::encode(self.inner.id().map_err(js_err)?))
+    }
+
+    /// Inviter: the doc's DEK under the invite KEK, for
+    /// `POST /api/docs/:id/invites`.
+    pub fn wrap(&self, dek: &Dek) -> Result<WrappedDekJs, JsError> {
+        let w = self.inner.wrap(&dek.inner).map_err(js_err)?;
+        Ok(WrappedDekJs {
+            ciphertext: w.ciphertext,
+            nonce: w.nonce.to_vec(),
+        })
+    }
+
+    /// Invitee: open the wrap `GET /api/invites/:id` returned.
+    pub fn unwrap(&self, wrapped_ciphertext: &[u8], wrapped_nonce: &[u8]) -> Result<Dek, JsError> {
+        if wrapped_nonce.len() != AEAD_NONCE_LEN {
+            return Err(JsError::new(&format!(
+                "wrapped_dek_nonce: expected {AEAD_NONCE_LEN} bytes, got {}",
+                wrapped_nonce.len()
+            )));
+        }
+        let mut nonce = [0u8; AEAD_NONCE_LEN];
+        nonce.copy_from_slice(wrapped_nonce);
+        let wrapped = CoreWrappedDek {
+            ciphertext: wrapped_ciphertext.to_vec(),
+            nonce,
+        };
+        Ok(Dek {
+            inner: self.inner.unwrap(&wrapped).map_err(js_err)?,
+        })
+    }
 }
 
 // ---------- Recovery code ----------

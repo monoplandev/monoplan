@@ -43,7 +43,7 @@ Migrations: while pre-release, keep exactly one migration file per database (`00
 | [`spec/search.md`](spec/search.md) | Local search index + command palette query contract |
 | [`spec/urls.md`](spec/urls.md) | Fragment URLs for items / lists / views, history rules, internal links |
 | [`spec/cli.md`](spec/cli.md) | Commands, local key storage, device bootstrap UX |
-| [`spec/sharing-plan.md`](spec/sharing-plan.md) | Future (not built): multi-doc + sharing design + implementation plan |
+| [`spec/sharing-plan.md`](spec/sharing-plan.md) | Multi-doc substrate and invites (sharing links) built; member removal / transfer / `DocClosed` not built |
 | [`spec/pwa-plan.md`](spec/pwa-plan.md) | PWA conversion plan: manifest, service worker, `/api/session` probe |
 | [`spec/notes-plan.md`](spec/notes-plan.md) | Plan (not built): `notes` / `text` as mergeable `LoroText`, wasm delta bridge, flat rich text, images by reference |
 | [`spec/subtasks-plan.md`](spec/subtasks-plan.md) | Exploration (not built): subtasks as items located under a parent item, lifecycle cascade, "which part is next" rule |

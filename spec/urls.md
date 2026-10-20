@@ -21,6 +21,14 @@ doc's and another doc's is `#inbox_<doc>`. A user list's id is unique
 across docs, so `#list_<id>` carries no doc: the client searches every
 open doc for it, as it does for items.
 
+One further token is a credential, not a route: `#invite_<secret>`
+(`secret = [0-9a-f]{64}`) is a sharing link (`sharing-plan.md`
+§Invites). It is consumed at the very start of the page load (parked in
+`sessionStorage`, fragment stripped with `history.replaceState`) before
+the router runs, so it is never mirrored into the address bar or
+history and the secret never reaches the server. `parseHash` does not
+recognise it; `parseInviteHash` does.
+
 `#list_inbox` is accepted as an alias and canonicalised to `#inbox`.
 Reserved, not yet parsed (`calendar-plan.md`): `calendar` for a month-grid
 lens, and an underscore day anchor on the agenda and grid

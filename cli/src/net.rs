@@ -75,6 +75,15 @@ impl Client {
         Ok(())
     }
 
+    /// Unauthenticated GET (the invite payload: the id is the credential).
+    pub async fn get_unauthed<Resp>(&self, path: &str) -> Result<Resp, NetError>
+    where
+        Resp: DeserializeOwned,
+    {
+        self.send::<(), _>(Method::GET, path, None, None::<&str>)
+            .await
+    }
+
     #[allow(dead_code)]
     pub async fn get_authed<Resp>(&self, path: &str, token: &str) -> Result<Resp, NetError>
     where

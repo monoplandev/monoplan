@@ -51,6 +51,24 @@ CREATE INDEX doc_members_account_id_idx ON doc_members (account_id) WHERE remove
 -- key a wrap is under; the primary-doc id is the client's cue
 -- (encryption.md §Wrap-states).
 
+CREATE TABLE doc_invites (
+  id                        BLOB PRIMARY KEY,              -- HKDF(secret, "monoplan/invite_id/v1"), 32 bytes
+  doc_id                    BLOB NOT NULL REFERENCES docs(id),
+  issued_by_account_id      BLOB NOT NULL REFERENCES accounts(id),
+  wrapped_dek               BLOB NOT NULL,                 -- doc DEK under the invite KEK (sharing-plan.md §Invites)
+  wrapped_dek_nonce         BLOB NOT NULL,
+  created_at                INTEGER NOT NULL,              -- unix millis
+  expires_at                INTEGER NOT NULL,
+  consumed_at               INTEGER,                       -- NULL = open; set on accept (single use)
+  consumed_by_account_id    BLOB REFERENCES accounts(id)
+);
+CREATE INDEX doc_invites_doc_id_idx ON doc_invites (doc_id);
+-- A sharing link. The link's secret never reaches the server: `id` is a
+-- one-way HKDF subkey of it and `wrapped_dek` is under a second subkey, so
+-- the row opens nothing on its own. Accept inserts the `doc_members` row
+-- and stamps `consumed_at` in one transaction; revoke deletes the row.
+-- Never issued for an account's primary doc.
+
 CREATE TABLE recovery_sessions (
   token_hash      BLOB PRIMARY KEY,                        -- SHA-256(token)
   account_id      BLOB NOT NULL REFERENCES accounts(id),

@@ -14,6 +14,7 @@ mod login;
 mod logout;
 mod password;
 mod recover;
+mod share;
 mod signup;
 pub mod status;
 mod sync;
@@ -96,6 +97,8 @@ enum Cmd {
     Cache(cache::CacheArgs),
     /// Export the current account as semantic JSON.
     ExportJson(export::ExportArgs),
+    /// Share a workspace: invite links, members.
+    Share(share::ShareArgs),
     /// Show local sync state.
     Status(status::StatusArgs),
     /// Pull peer ops and push any pending local ops, then exit.
@@ -133,6 +136,7 @@ impl Cli {
             Cmd::Lists(a) => lists::run(a, sync).await,
             Cmd::Cache(a) => cache::run(a).await,
             Cmd::ExportJson(a) => export::run(a, sync).await,
+            Cmd::Share(a) => share::run(a).await,
             Cmd::Status(a) => status::run(a).await,
             Cmd::Sync => sync::run().await,
         }

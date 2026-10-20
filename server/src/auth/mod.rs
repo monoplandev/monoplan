@@ -1,6 +1,7 @@
 pub mod client_ip;
 pub mod cookie;
 pub mod email;
+pub mod invites;
 pub mod middleware;
 pub mod queries;
 pub mod tokens;

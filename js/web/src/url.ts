@@ -10,6 +10,12 @@
 //   id  = [0-9a-f]{32}
 //   doc = [0-9a-f-]{32,36}      -- a server doc id (uuid, hyphenated)
 //
+// One more token is not a route: "#invite_" secret (secret = [0-9a-f]{64})
+// is a sharing link (`spec/sharing-plan.md` §Invites). `parseHash` does
+// not return it; `parseInviteHash` does, and the app consumes and strips
+// it before the router ever runs (`invite.ts`), so the secret is never
+// mirrored back into the address bar or history.
+//
 // An item URL names only the item: the list and doc are looked up
 // client-side across every open doc, so a link keeps working after the
 // item moves. A user list's id is unique across docs too, so `#list_`
@@ -60,6 +66,27 @@ export function parseHash(hash: string): Route | null {
       : null;
   }
   return null;
+}
+
+const INVITE_SECRET_RE = /^[0-9a-f]{64}$/;
+
+/** The 64-char hex secret of a sharing link hash (`#invite_<secret>`),
+ *  or null for anything else. */
+export function parseInviteHash(hash: string): string | null {
+  const token = hash.startsWith("#") ? hash.slice(1) : hash;
+  if (!token.startsWith("invite_")) return null;
+  const secret = token.slice("invite_".length);
+  return INVITE_SECRET_RE.test(secret) ? secret : null;
+}
+
+export function inviteHash(secretHex: string): string {
+  return `#invite_${secretHex}`;
+}
+
+/** The sharing link to hand out: the app's base plus the secret in the
+ *  fragment, which the browser never sends to the server. */
+export function inviteUrl(secretHex: string, base: string = appBase()): string {
+  return base + inviteHash(secretHex);
 }
 
 /** Canonical hash (leading `#` included) for a view. A list view with

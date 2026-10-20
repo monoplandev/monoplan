@@ -56,6 +56,25 @@ CREATE TABLE doc_members (
 );
 CREATE INDEX doc_members_account_id_idx ON doc_members (account_id) WHERE removed_at IS NULL;
 
+-- A sharing link (sharing-plan.md §Invites). The link's 32-byte secret
+-- never reaches the server; `id` is an HKDF subkey of it (one-way), and
+-- `wrapped_dek` is the doc's DEK under a second, independent subkey, so
+-- this row on its own opens nothing. Single use: `consumed_at` is set in
+-- the same transaction that inserts the acceptor's `doc_members` row.
+-- Revoking deletes the row. Never issued for an account's primary doc.
+CREATE TABLE doc_invites (
+  id                        BLOB PRIMARY KEY,                -- HKDF(secret, "monoplan/invite_id/v1"), 32 bytes
+  doc_id                    BLOB NOT NULL REFERENCES docs(id),
+  issued_by_account_id      BLOB NOT NULL REFERENCES accounts(id),
+  wrapped_dek               BLOB NOT NULL,                   -- doc DEK under the invite KEK
+  wrapped_dek_nonce         BLOB NOT NULL,
+  created_at                INTEGER NOT NULL,                -- unix millis
+  expires_at                INTEGER NOT NULL,
+  consumed_at               INTEGER,                         -- NULL = open
+  consumed_by_account_id    BLOB REFERENCES accounts(id)
+);
+CREATE INDEX doc_invites_doc_id_idx ON doc_invites (doc_id);
+
 CREATE TABLE recovery_sessions (
   token_hash      BLOB PRIMARY KEY,                            -- SHA-256(token)
   account_id      BLOB NOT NULL REFERENCES accounts(id),

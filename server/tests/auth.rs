@@ -6,14 +6,16 @@
 //! tests.
 
 use monoplan_core::{
-    AEAD_NONCE_LEN, Dek, derive_password_master, derive_recovery_master, generate_recovery_code,
-    random_bytes,
+    AEAD_NONCE_LEN, Dek, InviteSecret, derive_password_master, derive_recovery_master,
+    generate_recovery_code, random_bytes,
 };
 use monoplan_protocol::{
-    CreateDocRequest, CreateDocResponse, DeviceRenameRequest, DevicesListResponse, DocKey,
-    DocsListResponse, KdfParams, LoginRequest, LoginResponse, MemberRole, PasswordChangeRequest,
-    PasswordResetRequest, PreloginRequest, PreloginResponse, RecoverRequest, RecoverResponse,
-    RecoveryMaterial, SignupRequest, SignupResponse,
+    AcceptInviteRequest, AcceptInviteResponse, CreateDocRequest, CreateDocResponse,
+    CreateInviteRequest, CreateInviteResponse, DeviceRenameRequest, DevicesListResponse, DocKey,
+    DocsListResponse, InvitePayloadResponse, InvitesListResponse, KdfParams, LoginRequest,
+    LoginResponse, MemberRole, MembersListResponse, PasswordChangeRequest, PasswordResetRequest,
+    PreloginRequest, PreloginResponse, RecoverRequest, RecoverResponse, RecoveryMaterial,
+    SignupRequest, SignupResponse,
 };
 use monoplan_server::{AppState, router};
 use reqwest::header::CONTENT_TYPE;
@@ -1302,4 +1304,377 @@ async fn recover_without_enrollment_is_forbidden() {
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::FORBIDDEN);
+}
+
+// ---------- sharing links ----------
+
+async fn get_status(url: &str, token: Option<&str>) -> reqwest::StatusCode {
+    let mut req = http().get(url);
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
+    req.send().await.unwrap().status()
+}
+
+/// Issue a link for `doc_id` as `acc`: a fresh secret, the doc's DEK
+/// wrapped under the invite KEK, the HKDF id posted to the server.
+async fn issue_invite(
+    acc: &Account,
+    doc_id: &str,
+    doc_dek: &Dek,
+    expires_in_secs: Option<u64>,
+) -> (InviteSecret, CreateInviteResponse) {
+    let secret = InviteSecret::generate();
+    let w = secret.wrap(doc_dek).unwrap();
+    let resp: CreateInviteResponse = post_msgpack(
+        &format!("{}/api/docs/{}/invites", acc.server.base, doc_id),
+        &CreateInviteRequest {
+            invite_id: hex::encode(secret.id().unwrap()),
+            wrapped_dek: w.ciphertext,
+            wrapped_dek_nonce: w.nonce.to_vec(),
+            expires_in_secs,
+        },
+        Some(&acc.device_token),
+    )
+    .await;
+    (secret, resp)
+}
+
+/// The invitee side: fetch the payload, open it with the secret, re-wrap
+/// under `home` and accept. Returns the doc id the server joined us to
+/// and the DEK we recovered from the link.
+async fn accept_invite(
+    base: &str,
+    secret: &InviteSecret,
+    token: &str,
+    home: &Dek,
+) -> (String, Dek) {
+    let id = hex::encode(secret.id().unwrap());
+    let payload: InvitePayloadResponse = post_free_get(&format!("{base}/api/invites/{id}")).await;
+    let dek = secret
+        .unwrap(&monoplan_core::WrappedDek {
+            ciphertext: payload.wrapped_dek.clone(),
+            nonce: payload.wrapped_dek_nonce.as_slice().try_into().unwrap(),
+        })
+        .unwrap();
+    let w = home.wrap_dek(&dek).unwrap();
+    let resp: AcceptInviteResponse = post_msgpack(
+        &format!("{base}/api/invites/{id}/accept"),
+        &AcceptInviteRequest {
+            wrapped_dek: w.ciphertext,
+            wrapped_dek_nonce: w.nonce.to_vec(),
+        },
+        Some(token),
+    )
+    .await;
+    assert_eq!(resp.doc_id, payload.doc_id);
+    (resp.doc_id, dek)
+}
+
+/// Unauthenticated GET of a msgpack body.
+async fn post_free_get<Resp: DeserializeOwned>(url: &str) -> Resp {
+    let resp = http().get(url).send().await.unwrap();
+    assert!(
+        resp.status().is_success(),
+        "expected 2xx, got {}: {}",
+        resp.status(),
+        resp.text().await.unwrap_or_default()
+    );
+    rmp_serde::from_slice(&resp.bytes().await.unwrap()).unwrap()
+}
+
+/// The whole link lifecycle: the owner issues a link for a doc they
+/// created, a second account fetches it anonymously, opens the wrap with
+/// the fragment secret alone, joins with a Home-DEK wrap, and from then
+/// on sees the doc in `GET /api/docs` with a wrap its own Home DEK
+/// opens to the very same DEK. The link is spent by the accept (410 on
+/// both fetch and a second accept), the inviter's list shows it
+/// consumed, and both members appear in the member list.
+#[tokio::test]
+async fn invite_link_joins_a_second_account_once() {
+    let acc = signup(false).await;
+    let base = acc.server.base.clone();
+    let (doc_id, doc_dek) = create_doc(&acc, &acc.dek).await;
+    let (secret, created) = issue_invite(&acc, &doc_id, &doc_dek, None).await;
+    let id = hex::encode(secret.id().unwrap());
+    assert_eq!(created.invite_id, id);
+
+    // The anonymous fetch names the doc and masks the inviter.
+    let payload: InvitePayloadResponse = post_free_get(&format!("{base}/api/invites/{id}")).await;
+    assert_eq!(payload.doc_id, doc_id);
+    assert_eq!(payload.expires_at, created.expires_at);
+    assert!(
+        payload.inviter_hint.starts_with("u…@"),
+        "{}",
+        payload.inviter_hint
+    );
+    // The server-held wrap is useless without the secret.
+    assert!(
+        InviteSecret::generate()
+            .unwrap(&monoplan_core::WrappedDek {
+                ciphertext: payload.wrapped_dek.clone(),
+                nonce: payload.wrapped_dek_nonce.as_slice().try_into().unwrap(),
+            })
+            .is_err()
+    );
+
+    let second = signup_on(&base).await;
+    let (joined, recovered) =
+        accept_invite(&base, &secret, &second.device_token, &second.dek).await;
+    assert_eq!(joined, doc_id);
+    assert_eq!(recovered.as_bytes(), doc_dek.as_bytes());
+
+    // Spent: fetch and a second accept both read as gone.
+    assert_eq!(
+        get_status(&format!("{base}/api/invites/{id}"), None).await,
+        reqwest::StatusCode::GONE
+    );
+    let third = signup_on(&base).await;
+    let w = third.dek.wrap_dek(&doc_dek).unwrap();
+    assert_eq!(
+        post_msgpack_status_authed(
+            &format!("{base}/api/invites/{id}/accept"),
+            &AcceptInviteRequest {
+                wrapped_dek: w.ciphertext,
+                wrapped_dek_nonce: w.nonce.to_vec(),
+            },
+            &third.device_token,
+        )
+        .await,
+        reqwest::StatusCode::GONE
+    );
+
+    // The new member's doc list carries the membership with a wrap its
+    // Home DEK opens to the same DEK; a later login would do the same.
+    let docs: DocsListResponse =
+        get_msgpack_authed(&format!("{base}/api/docs"), &second.device_token).await;
+    let m = docs
+        .memberships
+        .iter()
+        .find(|m| m.doc_id == doc_id)
+        .expect("joined doc listed");
+    assert_eq!(m.role, MemberRole::Member);
+    assert_eq!(
+        unwrap_with_home(&second.dek, &m.wrapped_dek, &m.wrapped_dek_nonce).as_bytes(),
+        doc_dek.as_bytes()
+    );
+
+    // The inviter's view: the link is listed as consumed; both members show.
+    let invites: InvitesListResponse = get_msgpack_authed(
+        &format!("{base}/api/docs/{doc_id}/invites"),
+        &acc.device_token,
+    )
+    .await;
+    assert_eq!(invites.invites.len(), 1);
+    assert_eq!(invites.invites[0].invite_id, id);
+    assert!(invites.invites[0].consumed_at.is_some());
+    let members: MembersListResponse = get_msgpack_authed(
+        &format!("{base}/api/docs/{doc_id}/members"),
+        &second.device_token,
+    )
+    .await;
+    let mut roles: Vec<(String, &str)> = members
+        .members
+        .iter()
+        .map(|m| (m.account_id.clone(), m.role.as_str()))
+        .collect();
+    roles.sort();
+    let mut expected = vec![
+        (acc.account_id.clone(), MemberRole::Owner.as_str()),
+        (second.account_id.clone(), MemberRole::Member.as_str()),
+    ];
+    expected.sort();
+    assert_eq!(roles, expected);
+    assert!(members.members.iter().any(|m| m.email == acc.email));
+
+    // Membership is what `OpenDoc` checks; a non-member cannot list members.
+    assert_eq!(
+        get_status(
+            &format!("{base}/api/docs/{doc_id}/members"),
+            Some(&third.device_token)
+        )
+        .await,
+        reqwest::StatusCode::NOT_FOUND
+    );
+}
+
+/// The three refusals around issuing: the primary doc is never shareable
+/// (403: the Home DEK is the account key), a non-owner cannot issue or
+/// list (404, learning nothing), and a revoked link is gone for good
+/// (404 on fetch, nothing to accept).
+#[tokio::test]
+async fn invite_issuance_is_owner_only_never_for_home_and_revocable() {
+    let acc = signup(false).await;
+    let base = acc.server.base.clone();
+    let secret = InviteSecret::generate();
+    let w = secret.wrap(&acc.dek).unwrap();
+    assert_eq!(
+        post_msgpack_status_authed(
+            &format!("{base}/api/docs/{}/invites", acc.primary_doc_id),
+            &CreateInviteRequest {
+                invite_id: hex::encode(secret.id().unwrap()),
+                wrapped_dek: w.ciphertext,
+                wrapped_dek_nonce: w.nonce.to_vec(),
+                expires_in_secs: None,
+            },
+            &acc.device_token,
+        )
+        .await,
+        reqwest::StatusCode::FORBIDDEN
+    );
+
+    let (doc_id, doc_dek) = create_doc(&acc, &acc.dek).await;
+    let stranger = signup_on(&base).await;
+    let w = secret.wrap(&doc_dek).unwrap();
+    assert_eq!(
+        post_msgpack_status_authed(
+            &format!("{base}/api/docs/{doc_id}/invites"),
+            &CreateInviteRequest {
+                invite_id: hex::encode(secret.id().unwrap()),
+                wrapped_dek: w.ciphertext,
+                wrapped_dek_nonce: w.nonce.to_vec(),
+                expires_in_secs: None,
+            },
+            &stranger.device_token,
+        )
+        .await,
+        reqwest::StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        get_status(
+            &format!("{base}/api/docs/{doc_id}/invites"),
+            Some(&stranger.device_token)
+        )
+        .await,
+        reqwest::StatusCode::NOT_FOUND
+    );
+
+    // A member who is not the owner cannot issue either.
+    let (member_secret, _) = issue_invite(&acc, &doc_id, &doc_dek, None).await;
+    let member = signup_on(&base).await;
+    accept_invite(&base, &member_secret, &member.device_token, &member.dek).await;
+    let s2 = InviteSecret::generate();
+    let w2 = s2.wrap(&doc_dek).unwrap();
+    assert_eq!(
+        post_msgpack_status_authed(
+            &format!("{base}/api/docs/{doc_id}/invites"),
+            &CreateInviteRequest {
+                invite_id: hex::encode(s2.id().unwrap()),
+                wrapped_dek: w2.ciphertext,
+                wrapped_dek_nonce: w2.nonce.to_vec(),
+                expires_in_secs: None,
+            },
+            &member.device_token,
+        )
+        .await,
+        reqwest::StatusCode::NOT_FOUND
+    );
+
+    // Revoke: the owner issues, deletes, and the link reads as absent.
+    let (secret, _) = issue_invite(&acc, &doc_id, &doc_dek, None).await;
+    let id = hex::encode(secret.id().unwrap());
+    assert_eq!(
+        delete_status(
+            &format!("{base}/api/docs/{doc_id}/invites/{id}"),
+            &stranger.device_token
+        )
+        .await,
+        reqwest::StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        delete_status(
+            &format!("{base}/api/docs/{doc_id}/invites/{id}"),
+            &acc.device_token
+        )
+        .await,
+        reqwest::StatusCode::OK
+    );
+    assert_eq!(
+        get_status(&format!("{base}/api/invites/{id}"), None).await,
+        reqwest::StatusCode::NOT_FOUND
+    );
+    let w = stranger.dek.wrap_dek(&doc_dek).unwrap();
+    assert_eq!(
+        post_msgpack_status_authed(
+            &format!("{base}/api/invites/{id}/accept"),
+            &AcceptInviteRequest {
+                wrapped_dek: w.ciphertext,
+                wrapped_dek_nonce: w.nonce.to_vec(),
+            },
+            &stranger.device_token,
+        )
+        .await,
+        reqwest::StatusCode::NOT_FOUND
+    );
+}
+
+/// Expiry and the inviter's own link: a link whose `expires_at` has
+/// passed is gone (410) on fetch and accept, and the owner opening their
+/// own link is told they are already a member (409) without spending it.
+#[tokio::test]
+async fn invite_expires_and_is_not_spent_by_an_existing_member() {
+    let acc = signup(false).await;
+    let base = acc.server.base.clone();
+    let (doc_id, doc_dek) = create_doc(&acc, &acc.dek).await;
+
+    // Expiry is clamped to >= 60 s, so age the row directly.
+    let (secret, created) = issue_invite(&acc, &doc_id, &doc_dek, Some(1)).await;
+    assert!(created.expires_at > 0);
+    let id = hex::encode(secret.id().unwrap());
+    let id_bytes = secret.id().unwrap().to_vec();
+    acc.server
+        .state
+        .db
+        .call(move |c| {
+            c.execute(
+                "UPDATE doc_invites SET expires_at = 1 WHERE id = ?",
+                [&id_bytes],
+            )
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        get_status(&format!("{base}/api/invites/{id}"), None).await,
+        reqwest::StatusCode::GONE
+    );
+    let second = signup_on(&base).await;
+    let w = second.dek.wrap_dek(&doc_dek).unwrap();
+    assert_eq!(
+        post_msgpack_status_authed(
+            &format!("{base}/api/invites/{id}/accept"),
+            &AcceptInviteRequest {
+                wrapped_dek: w.ciphertext,
+                wrapped_dek_nonce: w.nonce.to_vec(),
+            },
+            &second.device_token,
+        )
+        .await,
+        reqwest::StatusCode::GONE
+    );
+
+    // A fresh link, accepted by its own issuer: 409 and still open.
+    let (secret, _) = issue_invite(&acc, &doc_id, &doc_dek, None).await;
+    let id = hex::encode(secret.id().unwrap());
+    let w = acc.dek.wrap_dek(&doc_dek).unwrap();
+    assert_eq!(
+        post_msgpack_status_authed(
+            &format!("{base}/api/invites/{id}/accept"),
+            &AcceptInviteRequest {
+                wrapped_dek: w.ciphertext,
+                wrapped_dek_nonce: w.nonce.to_vec(),
+            },
+            &acc.device_token,
+        )
+        .await,
+        reqwest::StatusCode::CONFLICT
+    );
+    let (joined, _) = accept_invite(&base, &secret, &second.device_token, &second.dek).await;
+    assert_eq!(joined, doc_id);
+
+    // The joined member can no longer be deleted around: the owner's
+    // delete is refused while another member is active.
+    assert_eq!(
+        delete_status(&format!("{base}/api/docs/{doc_id}"), &acc.device_token).await,
+        reqwest::StatusCode::CONFLICT
+    );
 }

@@ -17,6 +17,13 @@ Single binary `monoplan`. Subcommands:
 - `monoplan devices` — list
 - `monoplan devices revoke <device_id>`
 
+### Sharing
+- `monoplan share link <doc_id> [--expires-days N]` — print a single-use invite link for a workspace you own (`<server>/#invite_<secret>`; shown once, the server cannot rebuild it). Refused for the Personal workspace.
+- `monoplan share pending <doc_id>` — unused links (id, created, expires)
+- `monoplan share revoke <doc_id> <invite_id>`
+- `monoplan share accept <link-or-secret>` — join the workspace behind a link; stores its DEK in `secrets.toml`. The CLI still syncs the Personal workspace only (`sharing-plan.md` Phase 4), so the joined workspace shows up in the web client first.
+- `monoplan share members <doc_id>`
+
 ### Items
 - `monoplan add <text> [--list <list>]` — `<text>` of `-` reads from stdin; one item per non-blank line. New items are created in **Backlog** (the workflow register is omitted).
 - `monoplan ls [--list <list>]` — `--list events` lists events (`spec/events-plan.md`). Rows carry a trailing ` @<when>` (with `+<len>` glued on when a timed `when` has a duration, e.g. `@2026-09-12T14:00+1h30m`, or an all-day one spans more than a day, in whole days: `@2026-09-12+3d`), ` !<deadline>` and ` at:<place label>` when set; `--json` adds `when` / `duration` (minutes) / `deadline` / `place` (`{label, lat?, lon?, address?, ref?}`) fields (omitted when unset)

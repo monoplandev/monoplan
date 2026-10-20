@@ -15,7 +15,7 @@ Reference inventory of every cryptographic primitive in use, what it does, and w
 
 **Location:** `core/src/crypto/kdf.rs` (`hkdf_expand`).
 **Purpose:** Split one master key into multiple purpose-specific subkeys without correlation between them.
-**Inputs:** master (32 bytes) + a domain-separation `info` string (`"monoplan/kek/v1"`, `"monoplan/auth/v1"`, etc.).
+**Inputs:** master (32 bytes) + a domain-separation `info` string (`"monoplan/kek/v1"`, `"monoplan/auth/v1"`, `"monoplan/recovery_kek/v1"`, `"monoplan/recovery_auth/v1"`, and for sharing links `"monoplan/invite_id/v1"` / `"monoplan/invite_kek/v1"`, `core/src/crypto/invite.rs`).
 **Output:** 32-byte subkey.
 
 **Why it matters:** Critical that `KEK` and `auth_secret` are different bytes — the server gets `auth_secret`, must not be able to derive `KEK`. HKDF guarantees subkeys are computationally independent (one-way: holding any subkey reveals nothing about the master or other subkeys). The versioned `info` string lets us rotate derivation later without breaking old accounts (bump the suffix, keep the old path for migration).
@@ -106,6 +106,10 @@ recovery code ──Argon2id(salt,params)──▶ RecoveryMaster ──HKDF─�
 
 random ──▶ DEK (32 bytes, one per doc; the primary doc's is the Home DEK)
 Home DEK ──XChaCha20-Poly1305(fresh nonce)──▶ wrap(other doc's DEK) ─▶ server (opaque, on that doc's membership row)
+
+random ──▶ InviteSecret (32 bytes, URL fragment only) ──HKDF─┤ invite id   │─▶ server (lookup key, one-way)
+                                                            │ invite KEK  │──XChaCha20-Poly1305──▶ wrap(doc DEK) ─▶ server (opaque, on doc_invites)
+                                                            └─────────────┘
 DEK ──XChaCha20-Poly1305(fresh nonce per blob)──▶ ciphertext for each op + snapshot ─▶ server (opaque)
 ```
 

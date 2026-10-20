@@ -39,6 +39,8 @@ import trashSvg from "./icons/trash.svg?raw";
 import { Board, type BoardImperative } from "./Board.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { NewDocDialog } from "./NewDocDialog.tsx";
+import { InviteDialog } from "./InviteDialog.tsx";
+import type { Dek } from "@monoplan/core/wasm";
 import { FindPalette } from "./FindPalette.tsx";
 import { FindSheet } from "./FindSheet.tsx";
 import type { FindResult } from "./findResults.tsx";
@@ -267,6 +269,9 @@ export function Workspace(props: {
   setView: (v: ViewKey) => void;
   /** Create a doc the account owns and open it (`runtime.createDoc`). */
   createDoc: (name: string) => Promise<string>;
+  /** Open a doc the account just joined through a sharing link
+   *  (`runtime.joinDoc`); the DEK came out of the link. */
+  joinDoc: (docId: string, dek: Dek) => Promise<string>;
   /** Delete a non-Home doc the account owns and forget it here
    *  (`runtime.deleteDoc`); rejects on Home or anonymous sessions. */
   deleteDoc: (docId: string) => Promise<void>;
@@ -2663,6 +2668,10 @@ export function Workspace(props: {
         onOpenChange={setNewDocOpen}
         onCreate={props.createDoc}
         onCreated={(docId) => navigateTo(docs.listView(docId, "inbox"))}
+      />
+      <InviteDialog
+        joinDoc={props.joinDoc}
+        onJoined={(docId) => navigateTo(docs.listView(docId, "inbox"))}
       />
       <ConfirmDialog
         open={emptyBinConfirmOpen()}
