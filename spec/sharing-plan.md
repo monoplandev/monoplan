@@ -190,7 +190,6 @@ Premise at the time of writing: rip-and-replace (no v1 transition window) — pr
 ### Pre-flight
 
 - Confirm no production deployments need data preserved.
-- Tag current `main` so a known-good pre-sharing commit is easy to reference.
 - Skim CLI and web local storage to confirm migration paths drop-and-recreate cleanly.
 - Item `notes` are already a mergeable `LoroText` child container (`notes-plan.md` Phase 1, done 2026-09-08; `text` stays a register on purpose), so concurrent edits merge character-wise and no doc-layout change is needed before a doc is shared. Rich / structured text is `notes-plan.md` Phases 3-4 and is not a sharing prerequisite.
 
