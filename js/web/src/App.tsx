@@ -14,6 +14,7 @@ import { loadPrefs } from "./prefs.ts";
 import { refreshLocationBias } from "./locationBias.ts";
 import { api } from "./api.ts";
 import { dekVault } from "./sync/dekVault.ts";
+import { unwrapNewMemberships } from "./sync/docKeys.ts";
 import { useAppI18n } from "./i18n.tsx";
 import { type Session } from "./Login.tsx";
 import { Workspace } from "./Workspace.tsx";
@@ -146,6 +147,52 @@ export function App(props: {
   );
 }
 
+/** How long boot waits on `GET /api/docs` before going ahead with the
+ *  vaulted docs alone. A doc learned after this is picked up next boot. */
+const DOC_REFRESH_TIMEOUT_MS = 5000;
+
+/** Learn about docs the account joined since this device last logged in:
+ *  `GET /api/docs`, unwrap each membership the session lacks under the
+ *  Home DEK, vault it (`putDocKey`), and add it to `session.docKeys` so
+ *  it boots with the rest. Returns the new entries. Best-effort: offline,
+ *  a server error, or the timeout leaves the vaulted set as it is.
+ *  Memberships the vault holds but the server no longer lists (left or
+ *  revoked) are not dropped here; that is the `DocClosed` work in
+ *  `spec/sharing-plan.md`. */
+async function refreshDocKeys(session: Session): Promise<Map<string, Dek>> {
+  const none = new Map<string, Dek>();
+  if (session.anonymous) return none;
+  const timeout = new Promise<null>((resolve) =>
+    setTimeout(() => resolve(null), DOC_REFRESH_TIMEOUT_MS),
+  );
+  let resp: Awaited<ReturnType<typeof api.listDocs>> | null;
+  try {
+    resp = await Promise.race([api.listDocs(), timeout]);
+  } catch (e) {
+    console.warn("docs refresh skipped:", e);
+    return none;
+  }
+  if (resp === null) {
+    console.warn("docs refresh timed out; booting vaulted docs only");
+    return none;
+  }
+  const fresh = unwrapNewMemberships(
+    session.dek,
+    session.primaryDocId,
+    resp.memberships,
+    session.docKeys,
+  );
+  for (const [docId, dek] of fresh) {
+    session.docKeys.set(docId, dek);
+    try {
+      await dekVault.putDocKey(docId, dek);
+    } catch (e) {
+      console.warn("docs refresh: vaulting new doc failed:", e);
+    }
+  }
+  return fresh;
+}
+
 async function createAnonymousSession(): Promise<Session> {
   const accountId = `anon-${crypto.randomUUID()}`;
   // Anonymous sessions never reach the server, so there's no
@@ -272,6 +319,12 @@ function BootGate(props: {
         };
       };
 
+      // Ask the server for memberships this device has not vaulted (a
+      // doc created or joined elsewhere since login). Fired now and
+      // awaited after the vaulted docs have replayed, so the common
+      // path pays no extra latency; see `refreshDocKeys`.
+      const refresh = refreshDocKeys(props.session);
+
       // Home first, so a failure there is the one reported; replay is
       // main-thread wasm work either way, so there is nothing to gain
       // from interleaving the docs.
@@ -280,6 +333,9 @@ function BootGate(props: {
       ];
       for (const [docId, dek] of props.session.docKeys) {
         if (docId === props.session.primaryDocId) continue;
+        docs.push(await bootDoc(docId, dek));
+      }
+      for (const [docId, dek] of await refresh) {
         docs.push(await bootDoc(docId, dek));
       }
 
