@@ -527,6 +527,7 @@ export function Nav(props: {
       <ConfirmDialog
         open={emptyBinConfirmOpen()}
         onOpenChange={setEmptyBinConfirmOpen}
+        title={m().workspace.emptyBinTitle}
         message={m().workspace.emptyBinConfirm}
         confirmLabel={m().workspace.emptyBin}
         onConfirm={() => props.docs.emptyBin()}

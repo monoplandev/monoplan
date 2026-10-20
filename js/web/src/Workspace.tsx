@@ -2665,6 +2665,7 @@ export function Workspace(props: {
       <ConfirmDialog
         open={emptyBinConfirmOpen()}
         onOpenChange={setEmptyBinConfirmOpen}
+        title={m().workspace.emptyBinTitle}
         message={m().workspace.emptyBinConfirm}
         confirmLabel={m().workspace.emptyBin}
         onConfirm={() => docs.emptyBin()}

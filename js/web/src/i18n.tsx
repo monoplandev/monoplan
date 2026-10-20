@@ -131,6 +131,8 @@ export type Messages = {
     /** Accessible name of the task dialog's "+" chip: the menu of
      *  registers (date, deadline, place) the item does not carry yet. */
     emptyBin: string;
+    /** Title of the empty-bin confirmation dialog. */
+    emptyBinTitle: string;
     emptyBinConfirm: string;
     createWithSpace: string;
     emptyState: string;
@@ -518,6 +520,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     workspace: {
       emptyBin: "Vaciar papelera",
+      emptyBinTitle: "Vaciar papelera",
       emptyBinConfirm: "¿Seguro que quieres borrar permanentemente los elementos de la papelera?",
       createWithSpace: "Pulsa Espacio para crear un elemento nuevo",
       emptyState: "Nada aquí.",
@@ -796,6 +799,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     workspace: {
       emptyBin: "Empty",
+      emptyBinTitle: "Empty bin",
       emptyBinConfirm: "Are you sure you want to permanently erase items in the bin?",
       createWithSpace: "Press Space to create a new item",
       emptyState: "Nothing here.",

@@ -17,7 +17,8 @@ export function ConfirmDialog(props: {
   open: boolean;
   onOpenChange: (b: boolean) => void;
   message: string;
-  title?: string;
+  /** Short heading above the message; every confirmation carries one. */
+  title: string;
   confirmLabel?: string;
   cancelLabel?: string;
   /** Optional body section rendered between the header and the buttons. */
@@ -43,11 +44,9 @@ export function ConfirmDialog(props: {
             }}
           >
             <section class="confirm-dialog-section confirm-dialog-header">
-              <Show when={props.title}>
-                <Dialog.Title class="confirm-dialog-title">
-                  {props.title}
-                </Dialog.Title>
-              </Show>
+              <Dialog.Title class="confirm-dialog-title">
+                {props.title}
+              </Dialog.Title>
               <Dialog.Description class="confirm-dialog-message">
                 {props.message}
               </Dialog.Description>
