@@ -91,7 +91,7 @@ CLI subcommands are one-shot and **offline by default**. Reads (`ls`, `status`, 
 
 To hit the network, pass `-s` / `--sync` on any command (or set `MONOPLAN_SYNC=1`): open WS → version handshake → `PullOps { since_seq: last_acked_seq }` → apply → run the command → `PushOps` if anything changed → `Ack` → close. The dedicated `monoplan sync` command is the same path with no doc mutation.
 
-A future TUI may hold the WS open while running and surface `OpsBroadcast` reactively in the same `monoplan` binary. The daemon question stays deferred until the TUI exists and proves it needs more than that.
+**Planned change (`spec/daemon-plan.md`):** the one-shot model above is being replaced by a resident `monoplan daemon` that owns the profile and serves a Unix socket; every other invocation becomes a thin client and `-s` goes away. Until that lands, this section describes what is built.
 
 ### Connect behaviour
 
