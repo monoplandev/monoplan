@@ -49,7 +49,7 @@ import type { DocApp, ListView } from "./sync/store.ts";
 // auto-open while it's set. Purely local UI state — same localStorage
 // rationale as the board prefs in Workspace.tsx. Cleared on logout (see
 // App.tsx) so signing out re-prompts. The user can still reopen the
-// dialog any time via the cloud-off indicator.
+// dialog any time via the footer's Sign in button.
 const AUTH_DISMISSED_KEY = "monoplan:auth-prompt-dismissed";
 export function loadAuthPromptDismissed(): boolean {
   try {
@@ -261,18 +261,15 @@ export function StatusSlot(props: {
   return (
     <>
       <Show when={props.session.anonymous}>
-        {/* Anonymous sessions show the same cloud-off indicator as an
-            offline authed session; clicking it opens the sign-in dialog
-            rather than a status popover. */}
+        {/* Anonymous sessions have no connection to report on, so the
+            slot is a plain "Sign in" button opening the auth dialog. */}
         <button
           type="button"
-          class={props.class ? `connection-indicator ${props.class}` : "connection-indicator"}
+          class={props.class ? `sign-in-button ${props.class}` : "sign-in-button"}
           tabIndex={-1}
-          aria-label={m().auth.signIn}
-          title={m().auth.signIn}
           onClick={() => setAuthOpen(true)}
         >
-          <span innerHTML={cloudOffSvg} />
+          {m().auth.signIn}
         </button>
         <AuthDialog
           open={authOpen()}

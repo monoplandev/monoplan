@@ -25,32 +25,13 @@ import { createDocsLayer, type DocsLayer } from "./docs.ts";
 import { createSyncedApp, type DocApp } from "./store.ts";
 import { createSyncBridge, SyncBridge } from "./sync.ts";
 
-// Onboarding items for a brand-new account's "Welcome" list — learn by
-// doing: the item text names the gesture, and completing it (ticking the
-// box) is itself the lesson. The first item's descriptive line lives in
-// its notes rather than as its own checkbox. Kept literal (user-list
-// content is user-authored plain text, not localized).
-const WELCOME_ITEMS = [
-  "Welcome to Monoplan",
-  "Press 'space' to create a new item",
-  "Tick the box (or press 'x') to complete an item",
-  "Press 's' to star an item",
-  "Press '?' to see all keyboard shortcuts",
-] as const;
-const WELCOME_NOTE =
-  "Monoplan helps you capture and organise your ideas, tasks, and projects.";
+// The single onboarding item a brand-new doc's Inbox opens with. Kept
+// literal (user-list content is user-authored plain text, not localized).
+const WELCOME_ITEM = "👋 Welcome to Monoplan";
 
-/** Seed a fresh account's starter list and onboarding items; returns the
- *  new list's id so the caller can open it. The list is freshly created
- *  (empty), so inserting the batch at index 0 keeps the authored order —
- *  and sidesteps the wasm32 `usize` (32-bit) overflow a "very large append
- *  index" would hit. */
-function seedWelcome(app: DocApp): string {
-  const welcomeId = app.addList("Welcome");
-  app.setListIcon(welcomeId, "👋");
-  const ids = app.addItemsAt(welcomeId, [...WELCOME_ITEMS], 0);
-  if (ids[0]) app.setItemNotes(ids[0], WELCOME_NOTE);
-  return welcomeId;
+/** Seed a fresh doc's Inbox with the onboarding item. */
+function seedWelcome(app: DocApp): void {
+  app.addItem("inbox", WELCOME_ITEM);
 }
 
 /** One doc rebuilt from its op log by `BootGate`: the doc, the durable
@@ -127,10 +108,7 @@ type DocRuntime = {
  *  is resolved lazily because the bridge that owns it is constructed
  *  after every doc runtime exists. Registers `onCleanup` against the
  *  calling owner. */
-function createDocRuntime(
-  boot: DocBoot,
-  pumpOutbox: () => void,
-): DocRuntime {
+function createDocRuntime(boot: DocBoot, pumpOutbox: () => void): DocRuntime {
   const storage = boot.storage;
   // `SyncEngine` consumes its Dek argument, and the session-level Dek
   // must stay valid across MainApp remounts (anonymous → authed swap
@@ -542,7 +520,8 @@ export function createWorkspaceRuntime(props: {
     const r = runtimes.get(docId);
     if (!r) throw new Error(`deleteDoc: no open doc ${docId}`);
     await api.deleteDoc(docId);
-    if (docs.viewDocId(view()) === docId) setView({ kind: "list", id: "inbox" });
+    if (docs.viewDocId(view()) === docId)
+      setView({ kind: "list", id: "inbox" });
     bridge?.removeEngine(docId);
     docs.removeDoc(docId);
     runtimes.delete(docId);
@@ -588,27 +567,19 @@ export function createWorkspaceRuntime(props: {
     ),
   );
 
-  // Freshly-created doc (signup, or a brand-new anonymous doc): seed a
-  // friendly starter list so the workspace opens with more than an empty
-  // Inbox, then persist as the first op row so a reload before any user
-  // mutation still has something to replay. Seeding goes through the
-  // normal mutation path, so it commits and (for authed sessions) pushes
-  // to the server via the outbox; other devices receive it through sync.
-  // Genesis in the core stays a clean empty baseline (see App.tsx boot);
-  // the account-creating client is the single seeder, so no duplicate
-  // arises. Guard on emptiness so a re-entrant boot can't double-seed.
+  // Freshly-created Home doc (signup, or a brand-new anonymous doc): drop
+  // a single welcome item into Inbox and persist as the first op row so a
+  // reload before any user mutation still has something to replay. Same
+  // for anonymous and signed-up sessions. Seeding goes through the normal
+  // mutation path, so it commits and (for authed sessions) pushes to the
+  // server via the outbox; Genesis in the core stays a clean empty
+  // baseline (see App.tsx boot). Guard on emptiness so a re-entrant boot
+  // can't double-seed.
   for (const b of props.boot.docs) {
     if (!b.seeded) continue;
     const r = runtimes.get(b.docId)!;
-    if (r === home && Object.keys(app.state.listsById).length === 0) {
-      const welcomeId = seedWelcome(app);
-      // Open the Welcome list on the very first launch so the onboarding
-      // items are what a new user sees (Inbox stays the pure capture
-      // surface). Only overrides the default Inbox landing — never a real
-      // saved view — and the deferred prefs-save persists it from here on.
-      if (!props.boot.prefs?.currentView) {
-        setView({ kind: "list", id: welcomeId });
-      }
+    if (r === home && Object.keys(app.state.itemsById).length === 0) {
+      seedWelcome(app);
     }
     r.capture();
     r.scheduleDurable();

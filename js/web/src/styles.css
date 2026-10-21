@@ -1425,6 +1425,27 @@ input.task-check:hover {
   line-height: 0;
 }
 
+/* Anonymous sessions: the sync slot is a compact bordered "Sign in"
+   button instead of a cloud icon. */
+.sign-in-button {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--border-input);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.sign-in-button:hover {
+  background: var(--bg-hover);
+}
+
 .connection-indicator:hover {
   background: var(--bg-hover);
   color: var(--text);
@@ -4795,6 +4816,14 @@ input.task-check:hover {
 .find-sheet__status svg {
   width: 20px;
   height: 20px;
+}
+
+/* The anonymous "Sign in" button in the same slot keeps the 40px row
+   height but sizes to its label. */
+.sign-in-button.find-sheet__status {
+  width: auto;
+  padding: 0 14px;
+  font-size: 14px;
 }
 
 /* The search field on its own line, inset to the cards' side margins,
