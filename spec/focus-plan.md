@@ -180,6 +180,9 @@ Focus renders as a single ordered flat list of Open items. You can still flip an
 Live/Done from within it, but there are **no lanes** (no Backlog/Live/Done split, no
 board lens). Keep it deliberately minimal — that's the product thesis.
 
+> **Dropped 2026-10-21:** no longer a settled decision. A board lens over
+> Focus is open for consideration (`spec/focus.md` no longer lists it).
+
 ### B.7 Core API surface (`core/src/doc.rs`)
 
 New mutations (each **one Loro commit**):

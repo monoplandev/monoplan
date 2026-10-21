@@ -24,9 +24,6 @@ on right now", drawn from across every list, in one hand-curated order.
   scope here.
 - **A lens, not a home.** Acting on an item in Focus (a lifecycle change, mark
   Done) mutates the item everywhere, because it *is* the same item.
-- **Flat, not a board.** Focus renders as one ordered flat list of Open items.
-  You can change an item's lifecycle from within it, but there are **no lanes**
-  (no per-state split, no board lens). Keeping it flat is the point.
 - **Feels finite.** Focus is kept small by construction — single-tier, flat, and
   auto-compacting on Done or Cancelled — not by a cap or a nag. Focus that grows without bound
   is Focus that has stopped meaning anything. (An earlier soft-threshold colour
