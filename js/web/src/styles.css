@@ -374,6 +374,10 @@ body {
   outline: none;
 }
 
+.upcoming-day {
+  margin-bottom: 0.5em;
+}
+
 .upcoming-day:last-child {
   margin-bottom: 0;
 }
