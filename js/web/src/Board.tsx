@@ -254,11 +254,43 @@ export function Board(props: {
   // column no-ops, a partly-clipped one slides just past its near edge
   // (plus `.board-col`'s scroll-margin gutter), and one wider than the
   // viewport aligns its near edge — the "if possible" case.
-  const ensureLaneVisible = (laneKey: WorkflowState): void => {
+  //
+  // Deferred while a pointer button is held: a card click selects on
+  // mousedown, and scrolling the column then would slide the card out from
+  // under the pointer before mouseup, so the browser never pairs the two
+  // into a `click` — a tap on a half-clipped card's checkbox would reveal
+  // the card but not toggle it. The scroll runs once the press is over.
+  let pointerHeld = false;
+  let pendingLaneReveal: WorkflowState | null = null;
+  const scrollLaneIntoView = (laneKey: WorkflowState): void => {
     boardRef
       ?.querySelector(`[data-drop-column-id="${laneKey}"]`)
       ?.scrollIntoView({ inline: "nearest", block: "nearest", behavior: "smooth" });
   };
+  const ensureLaneVisible = (laneKey: WorkflowState): void => {
+    if (pointerHeld) pendingLaneReveal = laneKey;
+    else scrollLaneIntoView(laneKey);
+  };
+  const onPointerHeldStart = (e: PointerEvent): void => {
+    if (e.button === 0) pointerHeld = true;
+  };
+  const onPointerHeldEnd = (): void => {
+    if (!pointerHeld) return;
+    pointerHeld = false;
+    const laneKey = pendingLaneReveal;
+    pendingLaneReveal = null;
+    // The `click` for this press dispatches right after pointerup; let it
+    // land before the column moves.
+    if (laneKey !== null) setTimeout(() => scrollLaneIntoView(laneKey), 0);
+  };
+  document.addEventListener("pointerdown", onPointerHeldStart, true);
+  document.addEventListener("pointerup", onPointerHeldEnd, true);
+  document.addEventListener("pointercancel", onPointerHeldEnd, true);
+  onCleanup(() => {
+    document.removeEventListener("pointerdown", onPointerHeldStart, true);
+    document.removeEventListener("pointerup", onPointerHeldEnd, true);
+    document.removeEventListener("pointercancel", onPointerHeldEnd, true);
+  });
   const selectionFor = (laneKey: WorkflowState): DndSelection => {
     let s = laneSelections.get(laneKey);
     if (!s) {
