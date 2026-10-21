@@ -73,39 +73,62 @@ remove a list from the workspace. The core's `delete_list` stays internal
 - `monoplan bin rm <item_id>`
 
 ### Status
-- `monoplan status` — server URL, account email, device id, last successful sync timestamp, `last_acked_seq`, pending-push op count. Read-only against local state; never opens a WS.
+- `monoplan status` — server URL, account email, device id, last successful sync timestamp, `last_acked_seq`, pending-push op count. Read-only against local state; never opens a WS and never starts the daemon.
 
 ### Cache
 - `monoplan cache status` — profile directory and `monoplan.sqlite` size. Read-only; never opens a WS.
-- `monoplan cache clear [--force]` — truncate the doc cache (`ops` + `snapshots`) and reset the per-doc sync cursor to 0, **keeping** account identity (so it does not log you out); the next `monoplan sync` rehydrates from the server. If there are unsynced local ops, prompts for confirmation (TTY) or refuses with an error (non-TTY) unless `--force` is passed.
+- `monoplan cache clear [--force]` — truncate the doc cache (`ops` + `snapshots`) and reset the per-doc sync cursor to 0, **keeping** account identity (so it does not log you out); the next command starts a daemon that rehydrates from the server. Refuses while a daemon is running. If there are unsynced local ops, prompts for confirmation (TTY) or refuses with an error (non-TTY) unless `--force` is passed.
 
 ### Export
 - `monoplan export-json [--out PATH]` — semantic account export: built-in/user lists plus items/lifecycle/timestamps as regular JSON. Defaults to stdout; `--out` writes a file. This is a portability dump, not a CRDT backup/restore format.
 
 ### Sync
-- `monoplan sync` — pull peer ops, push any pending local ops, then exit. Connect failure is a hard error.
+- `monoplan sync` — push any pending local ops now and report whether the server is reachable. The daemon pulls continuously while connected, so there is nothing separate to pull. Waits for an in-progress connection attempt (or starts one if the daemon is in backoff) rather than answering from stale state; an unreachable server exits non-zero.
 
-## Sync lifecycle
+### Daemon
+- `monoplan daemon` — run the resident process attached to the terminal (`spec/daemon-plan.md`). Refuses if one already holds the profile.
+- `monoplan daemon --detach` — what a client runs to start it: prints one readiness line on stdout (`ready` / `already-running` / `error: …`) and keeps running; stderr goes to `daemon.log` in the profile dir.
+- `monoplan daemon stop` — ask it to exit and wait until the profile is released.
+- `monoplan daemon status` — `not running`, or `running  pid N  build B` (noting when the build differs from this executable's).
+- `monoplan daemon install` / `uninstall` — not built: launchd agent / systemd user unit.
 
-CLI subcommands are one-shot and **offline by default**. Reads (`ls`, `status`, `lists ls`) and writes (`add`, `done`, `mv`, ...) operate against the local Loro doc only; mutations append to the `ops` table in `monoplan.sqlite` and ship on the next sync.
+## Process model
 
-To hit the network, pass `-s` / `--sync` on any command (or set `MONOPLAN_SYNC=1`): open WS → version handshake → `PullOps { since_seq: last_acked_seq }` → apply → run the command → `PushOps` if anything changed → `Ack` → close. The dedicated `monoplan sync` command is the same path with no doc mutation.
+One binary, two roles. `monoplan daemon` owns the profile for as long as it runs: the sqlite file, the Loro doc, the DEK, the server WebSocket, and a Unix socket in the profile dir. Every other doc command is a thin client: it connects to that socket, sends the parsed command, prints the reply, and exits. Clients never open sqlite and never hold a key.
 
-**Planned change (`spec/daemon-plan.md`):** the one-shot model above is being replaced by a resident `monoplan daemon` that owns the profile and serves a Unix socket; every other invocation becomes a thin client and `-s` goes away. Until that lands, this section describes what is built.
+Dispatch, at the top of `Cli::run`:
 
-### Connect behaviour
+- Doc commands (`add`, `ls`, workflow verbs, `mv`, `edit`, dates, `place`/`places`, `agenda`, `focus`, `lists`, `bin`, `export-json`) are forwarded as a `DocCmd` and their output comes back as text. `add -` reads stdin in the client; `export-json --out` writes the file in the client.
+- `status` and `cache status` are direct, read-only sqlite reads and never contact or start the daemon. `cache clear` refuses while a daemon is running.
+- `signup`, `login`, `recover`, `password` and `logout` work on the profile files, so each first stops a running daemon; `login` and `recover` then sync through a fresh one, which is what starts it.
+- `share` is HTTP against the server and runs in the client.
 
-- Default: no network attempt. Local doc is authoritative. Mutations queue in the `ops` table of `monoplan.sqlite`.
-- `-s` / `--sync` / `MONOPLAN_SYNC=1`: attempt WS connect with a ~2s timeout. On failure (no network, captive portal, server down), fall back to local-only and print a one-line stderr warning: `offline — sync deferred (<reason>)`. The command still runs against the local doc.
-- `monoplan sync`: same connect attempt, but failure exits non-zero — there's no local work to fall back to.
-- `monoplan login` and `monoplan recover` always attempt an initial sync after writing the profile; failure is a soft warning (they've already provisioned the account, the user can `monoplan sync` later).
-- Pending local ops live in the `ops` table of `monoplan.sqlite`; the next sync pushes them as part of `PushOps`.
+### Starting the daemon
+
+A client that finds no daemon starts one: it spawns `monoplan daemon --detach` from its own executable (`current_exe()`), in a new session (`setsid`), with the profile dir passed explicitly, and blocks on the child's first stdout line. Two clients racing to start it resolve through `daemon.lock`: the loser prints `already-running` and exits, and its parent connects normally. The first start prints one stderr line (`started monoplan daemon (pid N); …`).
+
+A client that finds `daemon.lock` held but the socket not answering is looking at a daemon that is still starting or is wedged; it retries for a few seconds, then fails with a pointer to `daemon stop`.
+
+`--no-spawn` (or `MONOPLAN_NO_SPAWN=1`) turns a missing daemon into an error, for scripts and CI.
+
+Every connection starts with a hello carrying a build id (package version plus the executable's mtime). A daemon from a different build is asked to shut down and restarted from the client's executable, so a rebuilt CLI never talks to a stale daemon.
+
+### Daemon behaviour
+
+- Holds the server WebSocket open; reconnects with capped exponential backoff (0.5 s to 30 s, jitter), pings every 30 s and treats a missed pong as a disconnect (laptop sleep). Connecting runs as its own task, so commands are served while it is in progress. Offline is a state: commands keep working against the local doc and ship when the socket returns.
+- Every reply carries whether the daemon is online and when it last completed an exchange. The CLI prints `offline; last synced 3m ago` (or `offline; never synced`) on stderr when a command was served without a server behind it, including under `--json`, whose stdout shapes are unchanged.
+- Persists on a 1 s tick and immediately after any command that mutated, so a change is on disk before the client hears back and on the wire right after. Folds the WAL at the usual thresholds, and fully on exit.
+- Exits on SIGINT/SIGTERM, on `daemon stop`, or when it notices the profile dir has been purged.
+- There is no idle timeout: background sync is the point.
+- Not built yet: the locked state (`Unlock` over the socket when the DEK is not readable non-interactively), `install`, wake notifications, and the subscription stream for live clients (`spec/daemon-plan.md`).
 
 ## Local state
 
 Single account per install. One dir under XDG paths (`~/.local/share/monoplan/` on linux, equivalents elsewhere) — `logout` wipes it, signup/login re-creates it. Two side-by-side test accounts in dev: point `MONOPLAN_DATA_DIR` at distinct roots.
 
 - `monoplan.sqlite` — doc cache (append-only `ops` + per-doc `snapshots`), the per-doc sync cursor (`docs.last_acked_server_seq` / `last_sync_at`), and the singleton `account` row (account/device/primary-doc ids + email). `primary_doc_id` is the server-assigned id of the account's Home doc, used to key local snapshot storage. See `spec/storage.md`.
+- `daemon.lock` — flock held by the running daemon (never unlinked; see `spec/peer-id-plan.md` for the rules). `peer-<n>.lock` — the peer-id slot leases.
+- `daemon.sock` — the daemon's Unix socket (mode 0600; falls back to a hash-named socket in the temp dir when the profile path is too long for `sun_path`). `daemon.log` — stderr of a detached daemon.
 - `config.toml` — `{ server_url }`. Bootstrap input (needed before the db exists); operator-editable.
 - `secrets.toml` — `device_token` plus one `[docs."<doc_id>"] dek_hex = "…"` table per doc the account is a member of, in cleartext. The DEK is a doc key (`encryption.md`): login/recover store one entry per membership (the primary's unwrapped with the password or recovery KEK, the rest with the primary's DEK — the Home DEK); `monoplan password` re-wraps only the primary entry, since every other server-side wrap is under the Home DEK. Also the "logged in" marker: its presence is what `monoplan status`/commands gate on.
 

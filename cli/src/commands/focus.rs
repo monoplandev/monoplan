@@ -10,14 +10,14 @@
 //! 0-based visible index here.
 
 use clap::{Parser, Subcommand};
-use monoplan_core::{ItemView, Place};
-use serde::Serialize;
+use std::io::Write;
 
-use crate::sync::Session;
+use monoplan_core::{Doc, ItemView, Place};
+use serde::{Deserialize, Serialize};
 
-use super::items::print_json;
+use super::items::write_json;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 pub struct FocusArgs {
     #[command(subcommand)]
     pub cmd: Option<FocusCmd>,
@@ -26,7 +26,7 @@ pub struct FocusArgs {
     pub json: bool,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone, Serialize, Deserialize)]
 pub enum FocusCmd {
     /// Add an item reference to Focus. Defaults to append; pass a 1-based
     /// position to insert. No-op if the item is already focused or is not
@@ -42,58 +42,48 @@ pub enum FocusCmd {
     Mv { item_id: String, pos: usize },
 }
 
-pub async fn run(args: FocusArgs, sync: bool) -> anyhow::Result<()> {
+pub fn run(doc: &Doc, args: FocusArgs, out: &mut dyn Write) -> anyhow::Result<()> {
     match args.cmd {
-        None => show(args.json, sync).await,
-        Some(FocusCmd::Add { item_id, pos }) => add(&item_id, pos, sync).await,
-        Some(FocusCmd::Rm { item_id }) => rm(&item_id, sync).await,
-        Some(FocusCmd::Mv { item_id, pos }) => mv(&item_id, pos, sync).await,
+        None => show(doc, args.json, out),
+        Some(FocusCmd::Add { item_id, pos }) => add(doc, &item_id, pos, out),
+        Some(FocusCmd::Rm { item_id }) => rm(doc, &item_id, out),
+        Some(FocusCmd::Mv { item_id, pos }) => mv(doc, &item_id, pos, out),
     }
 }
 
-async fn show(json: bool, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    let items = session.doc().focus_view();
+fn show(doc: &Doc, json: bool, out: &mut dyn Write) -> anyhow::Result<()> {
+    let items = doc.focus_view();
     if json {
         let rows: Vec<FocusItemJson> = items
             .iter()
             .enumerate()
             .map(|(i, item)| item_json(i + 1, item))
             .collect();
-        print_json(&rows)?;
+        write_json(out, &rows)?;
     } else {
-        print_items(&items);
+        print_items(out, &items)?;
     }
-    session.flush().await?;
     Ok(())
 }
 
-async fn add(item_id: &str, pos: Option<usize>, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
+fn add(doc: &Doc, item_id: &str, pos: Option<usize>, out: &mut dyn Write) -> anyhow::Result<()> {
     // Absent position appends; a 1-based position converts to the 0-based
     // visible index the doc layer expects.
     let index = pos.map(one_based_to_index).unwrap_or(usize::MAX);
-    session.doc().add_to_focus(item_id, index)?;
-    session.flush().await?;
-    println!("{item_id}");
+    doc.add_to_focus(item_id, index)?;
+    writeln!(out, "{item_id}")?;
     Ok(())
 }
 
-async fn rm(item_id: &str, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    session.doc().remove_from_focus(item_id)?;
-    session.flush().await?;
-    println!("{item_id}");
+fn rm(doc: &Doc, item_id: &str, out: &mut dyn Write) -> anyhow::Result<()> {
+    doc.remove_from_focus(item_id)?;
+    writeln!(out, "{item_id}")?;
     Ok(())
 }
 
-async fn mv(item_id: &str, pos: usize, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    session
-        .doc()
-        .move_in_focus(item_id, one_based_to_index(pos))?;
-    session.flush().await?;
-    println!("{item_id}");
+fn mv(doc: &Doc, item_id: &str, pos: usize, out: &mut dyn Write) -> anyhow::Result<()> {
+    doc.move_in_focus(item_id, one_based_to_index(pos))?;
+    writeln!(out, "{item_id}")?;
     Ok(())
 }
 
@@ -103,13 +93,14 @@ fn one_based_to_index(pos: usize) -> usize {
     pos.saturating_sub(1)
 }
 
-fn print_items(items: &[ItemView]) {
+fn print_items(out: &mut dyn Write, items: &[ItemView]) -> anyhow::Result<()> {
     for (i, item) in items.iter().enumerate() {
         // 1-based position matches the `mv` / `add` argument space. Focus
         // is Open-only, so the box carries the workflow state mark.
         let mark = super::items::state_mark(item.state);
-        println!("{:>3}  {}  [{mark}] {}", i + 1, item.id, item.text);
+        writeln!(out, "{:>3}  {}  [{mark}] {}", i + 1, item.id, item.text)?;
     }
+    Ok(())
 }
 
 #[derive(Serialize)]

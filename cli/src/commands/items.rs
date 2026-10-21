@@ -2,24 +2,21 @@
 //! bin (verb) / restore / mv / edit / when / duration / deadline / place /
 //! places.
 //!
-//! Every action goes through `Session` (open → mutate → flush). The
-//! session reads from and writes to the local Loro doc; it only talks
-//! to the server when `-s/--sync` is passed (or `monoplan sync` is run
-//! separately).
+//! Every action is a pure function of the doc and its args that writes
+//! its output to `out`: the daemon runs it against the resident doc
+//! and ships the buffer back to the client (`spec/daemon-plan.md`).
 
-use std::io::{BufRead, IsTerminal};
+use std::io::{BufRead, IsTerminal, Write};
 
 use clap::Parser;
 use monoplan_core::{
-    ItemLifecycle, ItemView, LIST_INBOX, Place, PlaceSuggestion, WorkflowState, fold_label,
+    Doc, ItemLifecycle, ItemView, LIST_INBOX, Place, PlaceSuggestion, WorkflowState, fold_label,
 };
-use serde::Serialize;
-
-use crate::sync::Session;
+use serde::{Deserialize, Serialize};
 
 // ---------- add ----------
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 pub struct AddArgs {
     /// Item text. Use `-` to read one item per non-blank line from stdin.
     pub text: String,
@@ -28,24 +25,25 @@ pub struct AddArgs {
     pub list: String,
 }
 
-pub async fn add(args: AddArgs, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    let texts = collect_texts(&args.text)?;
+/// Daemon side of `add`: `texts` were already expanded from the
+/// argument (or stdin) by the client via [`collect_texts`].
+pub fn add(doc: &Doc, list: &str, texts: &[String], out: &mut dyn Write) -> anyhow::Result<()> {
     if texts.is_empty() {
         anyhow::bail!("no item text provided");
     }
     let mut ids = Vec::with_capacity(texts.len());
-    for text in &texts {
-        ids.push(session.doc().add_item(&args.list, text)?);
+    for text in texts {
+        ids.push(doc.add_item(list, text)?);
     }
-    session.flush().await?;
     for id in ids {
-        println!("{id}");
+        writeln!(out, "{id}")?;
     }
     Ok(())
 }
 
-fn collect_texts(arg: &str) -> anyhow::Result<Vec<String>> {
+/// Client side of `add`: `-` reads one item per non-blank line from
+/// stdin, anything else is a single item.
+pub fn collect_texts(arg: &str) -> anyhow::Result<Vec<String>> {
     if arg == "-" {
         let stdin = std::io::stdin();
         if stdin.is_terminal() {
@@ -69,7 +67,7 @@ fn collect_texts(arg: &str) -> anyhow::Result<Vec<String>> {
 
 // ---------- ls ----------
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 pub struct LsArgs {
     /// List to show. Defaults to `inbox`.
     #[arg(long, default_value = LIST_INBOX)]
@@ -82,18 +80,16 @@ pub struct LsArgs {
     pub json: bool,
 }
 
-pub async fn ls(args: LsArgs, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    let mut items = session.doc().items_in_list(&args.list, false);
+pub fn ls(doc: &Doc, args: LsArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+    let mut items = doc.items_in_list(&args.list, false);
     if !args.done {
         items.retain(|i| !i.is_closed());
     }
     if args.json {
-        print_json(&items.iter().map(item_json).collect::<Vec<_>>())?;
+        write_json(out, &items.iter().map(item_json).collect::<Vec<_>>())?;
     } else {
-        print_items(&items);
+        print_items(out, &items)?;
     }
-    session.flush().await?;
     Ok(())
 }
 
@@ -196,7 +192,7 @@ pub fn row_box(item: &ItemView) -> String {
     }
 }
 
-fn print_items(items: &[ItemView]) {
+fn print_items(out: &mut dyn Write, items: &[ItemView]) -> anyhow::Result<()> {
     for item in items {
         // The preserved state shows as a trailing tag so a binned row
         // stays legible.
@@ -205,25 +201,33 @@ fn print_items(items: &[ItemView]) {
         } else {
             String::new()
         };
-        println!(
+        writeln!(
+            out,
             "{}  {} {}{}{suffix}",
             item.id,
             row_box(item),
             item.text,
             date_tags(item)
-        );
+        )?;
     }
+    Ok(())
 }
 
-pub fn print_json<T: Serialize>(value: &T) -> anyhow::Result<()> {
+pub fn write_json<T: Serialize>(out: &mut dyn Write, value: &T) -> anyhow::Result<()> {
     let s = serde_json::to_string_pretty(value)?;
-    println!("{s}");
+    writeln!(out, "{s}")?;
     Ok(())
+}
+
+/// `write_json` straight to this process's stdout, for the commands
+/// that stay local (`status`, `cache`).
+pub fn print_json<T: Serialize>(value: &T) -> anyhow::Result<()> {
+    write_json(&mut std::io::stdout().lock(), value)
 }
 
 // ---------- backlog / todo / start / review / done / cancel / bin / restore ----------
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 pub struct IdArg {
     pub item_id: String,
 }
@@ -231,88 +235,83 @@ pub struct IdArg {
 /// Shared workflow transition: write the `[state, now]` register (and
 /// clear any bin mask) per the transition table in `spec/data-model.md`.
 /// One commit.
-async fn transition(args: IdArg, sync: bool, lifecycle: ItemLifecycle) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    session.doc().set_item_lifecycle(&args.item_id, lifecycle)?;
-    session.flush().await?;
-    println!("{}", args.item_id);
+fn transition(
+    doc: &Doc,
+    args: IdArg,
+    lifecycle: ItemLifecycle,
+    out: &mut dyn Write,
+) -> anyhow::Result<()> {
+    doc.set_item_lifecycle(&args.item_id, lifecycle)?;
+    writeln!(out, "{}", args.item_id)?;
     Ok(())
 }
 
 /// Workflow → Backlog.
-pub async fn backlog(args: IdArg, sync: bool) -> anyhow::Result<()> {
-    transition(args, sync, ItemLifecycle::Backlog).await
+pub fn backlog(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
+    transition(doc, args, ItemLifecycle::Backlog, out)
 }
 
 /// Workflow → Todo.
-pub async fn todo(args: IdArg, sync: bool) -> anyhow::Result<()> {
-    transition(args, sync, ItemLifecycle::Todo).await
+pub fn todo(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
+    transition(doc, args, ItemLifecycle::Todo, out)
 }
 
 /// Workflow → In Progress (stamps `started_at` on first entry).
-pub async fn start(args: IdArg, sync: bool) -> anyhow::Result<()> {
-    transition(args, sync, ItemLifecycle::InProgress).await
+pub fn start(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
+    transition(doc, args, ItemLifecycle::InProgress, out)
 }
 
 /// Workflow → Review.
-pub async fn review(args: IdArg, sync: bool) -> anyhow::Result<()> {
-    transition(args, sync, ItemLifecycle::Review).await
+pub fn review(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
+    transition(doc, args, ItemLifecycle::Review, out)
 }
 
 /// Workflow → Done (stamps `done_at`).
-pub async fn done(args: IdArg, sync: bool) -> anyhow::Result<()> {
-    transition(args, sync, ItemLifecycle::Done).await
+pub fn done(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
+    transition(doc, args, ItemLifecycle::Done, out)
 }
 
 /// Workflow → Cancelled (closed, but stamps nothing: not a completion).
-pub async fn cancel(args: IdArg, sync: bool) -> anyhow::Result<()> {
-    transition(args, sync, ItemLifecycle::Cancelled).await
+pub fn cancel(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
+    transition(doc, args, ItemLifecycle::Cancelled, out)
 }
 
-pub async fn bin(args: IdArg, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    session.doc().set_item_binned(&args.item_id, true)?;
-    session.flush().await?;
-    println!("{}", args.item_id);
+pub fn bin(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
+    doc.set_item_binned(&args.item_id, true)?;
+    writeln!(out, "{}", args.item_id)?;
     Ok(())
 }
 
 /// Restore from the bin: clear the mask only, revealing the preserved
 /// workflow state — a done-then-binned item pops back into the Done
 /// view, an open one back into its list at its former position.
-pub async fn restore(args: IdArg, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    session.doc().set_item_binned(&args.item_id, false)?;
-    session.flush().await?;
-    println!("{}", args.item_id);
+pub fn restore(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
+    doc.set_item_binned(&args.item_id, false)?;
+    writeln!(out, "{}", args.item_id)?;
     Ok(())
 }
 
 // ---------- mv ----------
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 pub struct MvArgs {
     pub item_id: String,
     pub list: String,
 }
 
-pub async fn mv(args: MvArgs, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
+pub fn mv(doc: &Doc, args: MvArgs, out: &mut dyn Write) -> anyhow::Result<()> {
     // Append at the end of the target list (target_index = current
     // length). `move_item` clamps to the existing range, so passing a
     // huge index is safe — but the explicit count here is clearer.
-    let target_idx = session.doc().items_in_list(&args.list, true).len();
-    session
-        .doc()
-        .move_item(&args.item_id, &args.list, target_idx)?;
-    session.flush().await?;
-    println!("{}", args.item_id);
+    let target_idx = doc.items_in_list(&args.list, true).len();
+    doc.move_item(&args.item_id, &args.list, target_idx)?;
+    writeln!(out, "{}", args.item_id)?;
     Ok(())
 }
 
 // ---------- when / duration / deadline ----------
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 pub struct DateArg {
     pub item_id: String,
     /// The value to set, or `-` to clear.
@@ -381,38 +380,28 @@ pub fn parse_duration(raw: &str) -> anyhow::Result<u32> {
 
 /// Set or clear the planned date: `YYYY-MM-DD` (all-day) or
 /// `YYYY-MM-DDTHH:MM` (timed); `-` clears. Validation lives in the core.
-pub async fn when(args: DateArg, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    session
-        .doc()
-        .set_item_when(&args.item_id, clear_or(&args.value))?;
-    session.flush().await?;
-    println!("{}", args.item_id);
+pub fn when(doc: &Doc, args: DateArg, out: &mut dyn Write) -> anyhow::Result<()> {
+    doc.set_item_when(&args.item_id, clear_or(&args.value))?;
+    writeln!(out, "{}", args.item_id)?;
     Ok(())
 }
 
 /// Set or clear the duration: minutes or `1h30m`; `-` clears. Range
 /// validation lives in the core.
-pub async fn duration(args: DateArg, sync: bool) -> anyhow::Result<()> {
+pub fn duration(doc: &Doc, args: DateArg, out: &mut dyn Write) -> anyhow::Result<()> {
     let value = match clear_or(&args.value) {
         Some(v) => Some(parse_duration(v)?),
         None => None,
     };
-    let session = Session::open(sync).await?;
-    session.doc().set_item_duration(&args.item_id, value)?;
-    session.flush().await?;
-    println!("{}", args.item_id);
+    doc.set_item_duration(&args.item_id, value)?;
+    writeln!(out, "{}", args.item_id)?;
     Ok(())
 }
 
 /// Set or clear the date-only deadline (`YYYY-MM-DD`); `-` clears.
-pub async fn deadline(args: DateArg, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    session
-        .doc()
-        .set_item_deadline(&args.item_id, clear_or(&args.value))?;
-    session.flush().await?;
-    println!("{}", args.item_id);
+pub fn deadline(doc: &Doc, args: DateArg, out: &mut dyn Write) -> anyhow::Result<()> {
+    doc.set_item_deadline(&args.item_id, clear_or(&args.value))?;
+    writeln!(out, "{}", args.item_id)?;
     Ok(())
 }
 
@@ -422,7 +411,7 @@ fn clear_or(value: &str) -> Option<&str> {
 
 // ---------- place ----------
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 pub struct PlaceArgs {
     pub item_id: String,
     /// The place's label, or `-` to clear.
@@ -453,14 +442,13 @@ pub fn parse_coords(raw: &str) -> anyhow::Result<(f64, f64)> {
 /// that place whole, coordinates and address included, so `place <id>
 /// gym` finds the Gym the web client geocoded; `--at` / `--address` /
 /// `--new` write exactly what was given. Validation lives in the core.
-pub async fn place(args: PlaceArgs, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
+pub fn place(doc: &Doc, args: PlaceArgs, out: &mut dyn Write) -> anyhow::Result<()> {
     let value = match clear_or(&args.label) {
         None => None,
         Some(label) => {
             let coords = args.at.as_deref().map(parse_coords).transpose()?;
             let known = if coords.is_none() && args.address.is_none() && !args.new {
-                known_place(&session.doc().place_suggestions(label, 0), label)
+                known_place(&doc.place_suggestions(label, 0), label)
             } else {
                 None
             };
@@ -473,11 +461,8 @@ pub async fn place(args: PlaceArgs, sync: bool) -> anyhow::Result<()> {
             }))
         }
     };
-    session
-        .doc()
-        .set_item_place(&args.item_id, value.as_ref())?;
-    session.flush().await?;
-    println!("{}", args.item_id);
+    doc.set_item_place(&args.item_id, value.as_ref())?;
+    writeln!(out, "{}", args.item_id)?;
     Ok(())
 }
 
@@ -494,7 +479,7 @@ pub fn known_place(suggestions: &[PlaceSuggestion], label: &str) -> Option<Place
 
 // ---------- places ----------
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 pub struct PlacesArgs {
     /// Narrow to places whose label or address starts with these words.
     pub query: Option<String>,
@@ -508,19 +493,15 @@ pub struct PlacesArgs {
 /// The places already on items, newest use first (`spec/place-plan.md`
 /// "Reuse"): one row per distinct place, with its address and how many
 /// items carry it.
-pub async fn places(args: PlacesArgs, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    let rows = session
-        .doc()
-        .place_suggestions(args.query.as_deref().unwrap_or(""), args.limit);
+pub fn places(doc: &Doc, args: PlacesArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+    let rows = doc.place_suggestions(args.query.as_deref().unwrap_or(""), args.limit);
     if args.json {
-        print_json(&rows)?;
+        write_json(out, &rows)?;
     } else {
         for row in &rows {
-            println!("{}", format_place_row(row));
+            writeln!(out, "{}", format_place_row(row))?;
         }
     }
-    session.flush().await?;
     Ok(())
 }
 
@@ -548,17 +529,15 @@ pub fn format_place_row(row: &PlaceSuggestion) -> String {
 
 // ---------- edit ----------
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 pub struct EditArgs {
     pub item_id: String,
     pub text: String,
 }
 
-pub async fn edit(args: EditArgs, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    session.doc().edit_item_text(&args.item_id, &args.text)?;
-    session.flush().await?;
-    println!("{}", args.item_id);
+pub fn edit(doc: &Doc, args: EditArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+    doc.edit_item_text(&args.item_id, &args.text)?;
+    writeln!(out, "{}", args.item_id)?;
     Ok(())
 }
 

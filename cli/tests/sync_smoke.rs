@@ -13,7 +13,7 @@
 use std::time::Duration;
 
 use monoplan_cli::commands::agenda::{build_agenda, unscheduled_events};
-use monoplan_cli::commands::export::write_export;
+use monoplan_cli::commands::export::{deliver, render};
 use monoplan_cli::config::{Config, Profile, Secrets};
 use monoplan_cli::storage::Account;
 use monoplan_cli::sync::Session;
@@ -256,7 +256,7 @@ async fn export_json_writes_semantic_account_dump() {
     .unwrap();
 
     let out = tmp.path().join("export.json");
-    write_export(&doc.export_json(), Some(&out)).unwrap();
+    deliver(&render(&doc).unwrap(), Some(&out)).unwrap();
 
     let value: serde_json::Value = serde_json::from_slice(&std::fs::read(out).unwrap()).unwrap();
     assert_eq!(value["version"], 1);

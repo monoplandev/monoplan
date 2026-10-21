@@ -1,6 +1,6 @@
 # Daemon plan
 
-Status: plan, not built. Written 2026-10-21. Supersedes the deleted
+Status: phases 1 to 3 built 2026-10-21 (`cli/src/daemon.rs` host + socket server, `cli/src/ipc.rs`, `cli/src/client.rs`, every doc verb ported, `-s` removed, `daemon stop|status`; tests in `cli/tests/daemon.rs` and `cli/tests/cli_bin.rs`). Not built: `daemon install`, the locked state, wake notifications, subscriptions. Written 2026-10-21. The built behaviour is documented in `spec/cli.md` "Process model"; this file keeps the reasoning and the remaining plan. Supersedes the deleted
 `spec/tui-plan.md` (its "no daemon" conclusion rested on boot time,
 which is no longer the question) and answers the daemon question that
 `spec/cli.md` "Sync lifecycle" deferred.
@@ -44,13 +44,19 @@ What this is not about: speed. With WAL folding independent of sync
 state (`spec/vv-wal-separation.md`), a one-shot boot is single-digit
 milliseconds. The daemon buys liveness and ownership, not startup time.
 
-Future GUI hosts (menubar app, window, TUI) are clients of the same
-socket. On macOS the resident process may later be the menubar app
-embedding core via the Swift FFI (`spec/swift-ffi-plan.md`) and serving
-the same protocol; the slot-0 lease makes it and `monoplan daemon`
-mutually exclusive, and clients connect to whichever is listening.
-Design the protocol so any host can serve it; decide the macOS owner
-later.
+GUI processes (menubar app, window, TUI) are clients of the same
+socket, never hosts. Decided 2026-10-21: on desktop `monoplan daemon`
+is the only host. The macOS app bundles the `monoplan` binary and runs
+`daemon install` on first launch, the way the Syncthing and Tailscale
+desktop apps manage their daemons; it does not embed a second host
+loop. Reasons: a GUI that hosts takes the doc down when the user quits
+it, leaving the CLI with nothing to talk to; and two implementations of
+one host protocol is a permanent cross-check tax. A GUI with its own
+full stack is rejected for the same reason as mixed mode: on one
+profile it is a second owner of one doc, on two profiles it is two
+devices on one laptop, each pinning the horizon and seeing the other's
+edits only via the server. Mobile is the exception (see "Mobile hosts"):
+iOS cannot run a daemon, so the iOS app embeds core as a full host.
 
 ## Process topology
 
@@ -60,7 +66,8 @@ monoplan ls       ──UDS──┤
 monoplan tui      ──UDS──┼──>  monoplan daemon ──WS──> server
 (tray / window)   ──UDS──┘        │
                                   ├── <profile>/monoplan.sqlite
-                                  ├── <profile>/peer-0.lock   (held)
+                                  ├── <profile>/daemon.lock   (held: "a daemon owns this profile")
+                                  ├── <profile>/peer-<n>.lock (held: its Loro peer id)
                                   └── <profile>/daemon.sock
 ```
 
@@ -70,11 +77,15 @@ monoplan tui      ──UDS──┼──>  monoplan daemon ──WS──> ser
   profile path is too long (tempdirs in tests can be), fall back to
   `$TMPDIR/monoplan-<blake3(profile dir)[..16]>.sock` and record the
   path in `<profile>/daemon.sock.path` so clients find it.
-- The daemon claims **slot 0** of the peer lease and holds it for its
-  lifetime. Nothing else ever runs with slot 0 held: a client that finds
-  slot 0 taken but the socket not answering is looking at a daemon that
-  is still starting (or wedged), and waits with bounded retries. It does
-  not take slot 1 and proceed.
+- The daemon holds `daemon.lock` for its lifetime: the same kernel
+  flock mechanism and rules as the peer lease (`spec/peer-id-plan.md`),
+  released on any exit path, never unlinked. That lock, not a peer slot,
+  is the election and the "is a daemon running" probe: the peer slot
+  only identifies a Loro peer, and the daemon claims the lowest free one
+  like any process. A client that finds `daemon.lock` held but the
+  socket not answering is looking at a daemon that is still starting
+  (or wedged), and waits with bounded retries rather than proceeding
+  alone.
 - Windows is out of scope (named pipes later; nothing here precludes
   it).
 
@@ -86,11 +97,11 @@ Top of `Cli::run`:
 2. `status` and `cache status` stay direct, read-only sqlite reads (WAL
    mode allows a concurrent reader) and never spawn or contact the
    daemon, as `spec/cli.md` already requires. `cache clear` refuses
-   while slot 0 is held.
+   while `daemon.lock` is held.
 3. Account bootstrap (`signup`, `login`, `recover`, `logout`,
    `password`) runs in the client process as today, because it works
    on the profile files, not the doc. Each first sends `Shutdown` to a
-   running daemon and waits for slot 0 to release; the next command
+   running daemon and waits for `daemon.lock` to release; the next command
    respawns it. Pre-release this is simpler than teaching the daemon to
    hot-reload a profile. `login` and `recover` drop their "initial
    sync" step: the daemon syncs on start.
@@ -106,18 +117,19 @@ semantics when the server is unreachable.
 
 ### Auto-spawn
 
-The client spawns `current_exe() daemon --detach` as a child with stdio
-nulled, passing one inherited pipe fd (`--ready-fd N`). The child calls
-`setsid`, claims slot 0, binds the socket, then writes a single `0` byte
-to the pipe and closes it; on failure it writes the error text instead.
-The client blocks on the pipe, so startup is deterministic and a
+The client spawns `current_exe() daemon --detach` as a child with stdin
+nulled, stdout piped and stderr sent to `daemon.log`. The child's stdout
+*is* the readiness pipe: it `setsid`s (done by the parent's `pre_exec`),
+takes `daemon.lock`, binds the socket, opens the doc, then prints one
+line (`ready`, `already-running`, or `error: …`) and never uses stdout
+again. The client blocks on that line, so startup is deterministic and a
 failure carries a message. No `fork` in the client: it is multithreaded
 once tokio is up.
 
-Two clients may race and spawn two daemons. The loser fails the slot-0
-flock (or the bind) and exits 0 after writing a distinguishable
-"already running" byte; its parent connects normally. The lease is the
-election; nothing else is needed.
+Two clients may race and spawn two daemons. The loser fails the
+`daemon.lock` flock and exits 0 after printing `already-running`; its
+parent connects normally. The lease is the election; nothing else is
+needed.
 
 First spawn prints one stderr line:
 `started monoplan daemon (pid N); run 'monoplan daemon install' to start it at login`.
@@ -127,10 +139,10 @@ error (scripts, CI).
 
 ### Version skew
 
-The hello exchange carries a build id (`CARGO_PKG_VERSION` plus
-`git_hash`/build timestamp baked in by `build.rs`). On mismatch the
-client sends `Shutdown`, waits for slot 0, respawns from its own
-executable, and retries once. Pre-release there is no compatibility
+The hello exchange carries a build id: `CARGO_PKG_VERSION` plus the
+executable's own mtime, so any rebuild changes it without a `build.rs`.
+On mismatch the client sends `Shutdown`, waits for `daemon.lock`, and
+respawns from its own executable. Pre-release there is no compatibility
 window.
 
 ## IPC protocol
@@ -152,27 +164,75 @@ enum Request {
     SetWorkflow { id: String, state: WorkflowState },
     …
     Sync,                       // flush now; reply says online/offline
-    Subscribe,                  // this connection becomes a mirror
+    Subscribe,                  // this connection becomes a doc mirror
     Unlock { password: String },
     Shutdown,
 }
 
 enum Reply {
-    Hello { build_id: String, locked: bool },
-    Ok(Payload),                // typed payload per request
+    Hello { build_id: String, locked: bool, sync: SyncStatus },
+    Ok { payload: Payload, sync: SyncStatus },   // typed payload per request
     Err { code: ErrorCode, message: String },
+    Snapshot { doc: Vec<u8>, sync: SyncStatus },  // Subscribe reply: full Loro export
     Event(AppEvent),            // only on subscribed connections
 }
+
+struct SyncStatus {
+    online: bool,                // socket up and the doc open on it right now
+    last_synced_at: Option<i64>, // unix millis of the last completed exchange,
+                                 // persisted beside the sync cursor across runs
+}
+
+enum AppEvent {
+    Update(Vec<u8>),            // Loro update bytes since the last event
+    Sync(SyncStatus),           // online/offline transitions
+    FullResync,                 // epoch change or trim: re-Subscribe
+}
 ```
+
+**Staleness is in every reply** (built). A daemon that lost its
+WebSocket keeps serving the local doc, which is correct, but a one-shot
+`-s` used to fail loudly where the daemon now succeeds quietly.
+`SyncStatus` on `Hello`, `Output` and `Synced` is how a client tells the
+difference. The CLI prints one stderr line when `online` is false
+(`offline; last synced 3m ago`, or `offline; never synced`), for `--json`
+runs too, since stderr stays out of parsed output. Carrying the struct
+inside `--json` payloads is not done: every documented `--json` shape in
+`spec/cli.md` is a bare array, and wrapping them is a contract change to
+decide separately.
+
+**Live clients mirror the doc, not projections.** Decided 2026-10-21.
+`Subscribe` returns a full Loro export; every subsequent apply on the
+daemon (local intent or remote frame) fans out as `AppEvent::Update`
+with the update bytes. The subscribed process imports them into a
+read-only `Doc` of its own (via the Swift FFI, `spec/swift-ffi-plan.md`,
+or wasm in a webview) and runs core's own read functions locally:
+board, agenda, focus, search index, place suggestions. It never holds a
+peer id, the DEK, or sqlite, and mutations still go over the socket as
+command intents; the daemon applies them and the resulting `Update`
+converges the mirror. This keeps the protocol view-agnostic (the
+alternative, shipping typed projections plus per-view events, makes the
+protocol the view model and needs incremental-apply code in every GUI)
+and keeps exactly one implementation of every view, in core, shared by
+CLI, web, macOS and iOS. The iOS app must embed core as a full host
+anyway, so the mirror reuses that FFI surface minus sync and storage.
+Cost: a second in-memory `Doc` per live process, and a sub-millisecond
+round trip before a local edit renders. Revisit only when `LoroText`
+notes (`spec/notes-plan.md`) make typing latency matter; a mirror with
+its own peer id is the escape hatch, not the default.
+
+The one-shot CLI keeps using projections: a process that prints a list
+and exits should not import a doc to do it. Both shapes coexist (`Ls`
+returns a projection, `Subscribe` returns doc bytes).
 
 Types live in `cli/src/ipc.rs` for now; they move to a `crates/ipc`
 crate when the first non-CLI client (Swift, TUI) needs them.
 
 Chattiness is the only real IPC cost (a round trip is tens of
 microseconds). Rules: one request per CLI verb (never one per item);
-live clients `Subscribe` once, take a full projection on attach, then
-apply `AppEvent`s to a local mirror. `AppEvent::FullResync` means
-re-fetch.
+live clients `Subscribe` once, import the `Snapshot`, then apply
+`Update` events to their mirror. `FullResync` means drop the mirror and
+`Subscribe` again.
 
 ### Locked state
 
@@ -185,19 +245,27 @@ exists so the keychain move is not a protocol change.
 
 ## Daemon host
 
-`monoplan daemon [--foreground | --detach] [--ready-fd N]`, plus
-`daemon stop`, `daemon status`, `daemon install` / `daemon uninstall`
-(writes or removes the launchd agent plist on macOS, the systemd user
-unit on Linux; both run `monoplan daemon --foreground`).
+`monoplan daemon [--detach]` (attached to the terminal without the
+flag), plus `daemon stop`, `daemon status`, and (not built) `daemon
+install` / `daemon uninstall`, which write or remove the launchd agent
+plist on macOS or the systemd user unit on Linux; both run a plain
+`monoplan daemon`.
 
 The host is `Session` held open instead of torn down after one command
 (`cli/src/sync.rs`). Concretely:
 
 - `flush(self)` splits into `persist()` (the existing
   `persist_engine_state`, run on a tick) and `drain_outbox()`.
-- One `select!` over: accepted socket connections and their requests,
-  inbound WS frames, a ~1 s persist tick, a reconnect timer, and
-  shutdown signals (`SIGTERM`, `SIGINT`, `Shutdown` request).
+- One `select!` over: client requests (one task per connection feeds
+  them through a channel; the loop runs each inline against the doc),
+  the in-flight connect task, inbound WS frames, a ~1 s persist tick,
+  the ping tick, the reconnect timer, and shutdown signals (`SIGTERM`,
+  `SIGINT`, `Shutdown` request). Connecting is a spawned task, never
+  awaited inline, so a slow server cannot stall commands.
+- `Sync` answers immediately when idle online; otherwise it parks until
+  the current connect attempt resolves (initial pull done → online,
+  attempt failed → offline), kicking a connect if the host was in
+  backoff.
 - Persist cadence mirrors the web host: `capture_local_ops` on the tick
   and after every request that mutated, `snapshot_if_wal_exceeds` with
   the existing thresholds on the hot path, and a fold on clean exit.
@@ -208,7 +276,7 @@ The host is `Session` held open instead of torn down after one command
 - No idle timeout. Background sync is the point. `daemon stop` is the
   way out, and `install` makes the question moot.
 - On clean exit: persist, fold, close the WS, unlink the socket,
-  release slot 0 (drop the `File`).
+  release `daemon.lock` (drop the `File`).
 
 The daemon is headless. GUI run loops (NSApplication) belong to client
 processes.
@@ -256,10 +324,12 @@ host as "full refresh on next open".
 ## Testing
 
 `spec/testing.md` makes the CLI the end-to-end surface; that stays
-true with one change of mechanism. The harness gains
-`spawn_daemon(profile) -> DaemonHandle` that runs
-`monoplan daemon --foreground --ready-fd` on a scratch profile and
-kills it on drop. CLI tests then drive the real binary (or the client
+true with one change of mechanism. `daemon::spawn(profile)` runs the
+host as a task on the test's runtime and returns a `DaemonHandle` with
+a `watch` of `DaemonStatus` (online, last contiguous seq) and a clean
+`shutdown()`; tests wait on the status rather than sleeping. A
+binary-level `spawn_daemon` that execs `monoplan daemon --ready-fd`
+joins it in phase 2. CLI tests then drive the real binary (or the client
 code path in-process) against it. The two tests that use
 `Session::open` directly keep working: `Session` remains the library
 type the daemon host wraps.
@@ -270,22 +340,29 @@ about the product.
 
 ## Phases
 
-1. **Host loop.** `monoplan daemon --foreground` runs `Session` in the
-   select loop with WS reconnect and the persist tick. No socket yet.
-   Commands gain a guard: refuse with "daemon running" when slot 0 is
-   held, so the mixed-mode hazard cannot occur during the transition.
-2. **Socket and client.** `ipc.rs`, hello and build id, auto-spawn with
-   the readiness pipe, `--no-spawn`. Port the item verbs first (`add`,
-   `ls`, workflow transitions); delete their one-shot bodies as each
-   moves.
-3. **Port the rest.** Lists, focus, agenda, places, bin, share, export,
-   `sync`. Remove `-s` and `Session::open(sync)`'s sync flag. Account
-   commands gain the shutdown-first step.
-4. **Lifecycle.** `daemon stop|status|install|uninstall`, the locked
-   state and `Unlock`.
-5. **Subscriptions.** `Subscribe` and event fan-out. Land this with the
-   first live client (TUI or tray), not before: there is nothing to
-   test it against until then.
+1. **Host loop** (built). `monoplan daemon` runs `Session` in the
+   select loop with WS reconnect, liveness ping and the persist tick,
+   attached to the terminal. No socket yet. `Session::open` refuses
+   with `DaemonRunning` while `daemon.lock` is held, so the mixed-mode
+   hazard cannot occur during the transition. Wake notifications are
+   not hooked yet; the pong timeout covers sleep for now.
+2. **Socket and client** (built). `ipc.rs`, hello and build id,
+   auto-spawn with the readiness line, `--no-spawn`.
+3. **Port the verbs** (built). Every doc command is a pure function
+   over `(doc, args, out)` (`commands::run_doc`); `-s` and
+   `Session::open` are gone; account commands stop the daemon first;
+   `cache clear` refuses while it runs. Phases 2 and 3 had to land
+   together: once the daemon auto-starts and holds the lock, any
+   un-ported one-shot verb would simply be refused.
+4. **Lifecycle** (partly built). `daemon stop|status` exist. Not built:
+   `install|uninstall`, the locked state and `Unlock`, wake
+   notifications.
+5. **Subscriptions.** `Subscribe`, `Snapshot`, and `Update` fan-out
+   from the daemon's post-apply hook. Land this with the first live
+   client (TUI or tray), not before: there is nothing to test it
+   against until then. The first mirror test is a second `Doc` in the
+   test process importing the stream and asserting it converges with
+   the daemon's after a local intent and a remote frame.
 
 Update `spec/cli.md` ("Sync lifecycle", "Status", the `-s` flag) as
 each phase lands rather than in one rewrite.

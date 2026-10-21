@@ -5,21 +5,21 @@
 //! core's destructive `delete_list` stays internal.
 
 use clap::{Parser, Subcommand};
-use monoplan_core::ListView;
-use serde::Serialize;
+use std::io::Write;
 
-use crate::sync::Session;
+use monoplan_core::{Doc, ListView};
+use serde::{Deserialize, Serialize};
 
-use super::items::print_json;
+use super::items::write_json;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 #[command(subcommand_required = true, arg_required_else_help = true)]
 pub struct ListsArgs {
     #[command(subcommand)]
     pub cmd: ListsCmd,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone, Serialize, Deserialize)]
 pub enum ListsCmd {
     /// Show lists. Active lists by default; `--archived` shows only
     /// archived lists, `--all` shows both.
@@ -47,64 +47,66 @@ pub enum ListsCmd {
     Unarchive { list: String },
 }
 
-pub async fn run(args: ListsArgs, sync: bool) -> anyhow::Result<()> {
+pub fn run(doc: &Doc, args: ListsArgs, out: &mut dyn Write) -> anyhow::Result<()> {
     match args.cmd {
         ListsCmd::Ls {
             json,
             archived,
             all,
-        } => show(json, archived, all, sync).await,
-        ListsCmd::Add { name } => add(&name, sync).await,
-        ListsCmd::Rename { list, name } => rename(&list, &name, sync).await,
-        ListsCmd::Archive { list } => set_archived(&list, true, sync).await,
-        ListsCmd::Unarchive { list } => set_archived(&list, false, sync).await,
+        } => show(doc, json, archived, all, out),
+        ListsCmd::Add { name } => add(doc, &name, out),
+        ListsCmd::Rename { list, name } => rename(doc, &list, &name, out),
+        ListsCmd::Archive { list } => set_archived(doc, &list, true, out),
+        ListsCmd::Unarchive { list } => set_archived(doc, &list, false, out),
     }
 }
 
-async fn show(json: bool, archived_only: bool, all: bool, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    let lists: Vec<ListView> = session
-        .doc()
+fn show(
+    doc: &Doc,
+    json: bool,
+    archived_only: bool,
+    all: bool,
+    out: &mut dyn Write,
+) -> anyhow::Result<()> {
+    let lists: Vec<ListView> = doc
         .all_lists()
         .into_iter()
         .filter(|l| all || (l.archived_at.is_some() == archived_only))
         .collect();
     if json {
-        print_json(&lists.iter().map(list_json).collect::<Vec<_>>())?;
+        write_json(out, &lists.iter().map(list_json).collect::<Vec<_>>())?;
     } else {
         for l in &lists {
             if l.archived_at.is_some() {
-                println!("{}  {}  (archived)", l.id, l.name);
+                writeln!(out, "{}  {}  (archived)", l.id, l.name)?;
             } else {
-                println!("{}  {}", l.id, l.name);
+                writeln!(out, "{}  {}", l.id, l.name)?;
             }
         }
     }
-    session.flush().await?;
     Ok(())
 }
 
-async fn add(name: &str, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    let id = session.doc().add_list(name)?;
-    session.flush().await?;
-    println!("{id}");
+fn add(doc: &Doc, name: &str, out: &mut dyn Write) -> anyhow::Result<()> {
+    let id = doc.add_list(name)?;
+    writeln!(out, "{id}")?;
     Ok(())
 }
 
-async fn rename(list_id: &str, name: &str, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    session.doc().rename_list(list_id, name)?;
-    session.flush().await?;
-    println!("{list_id}");
+fn rename(doc: &Doc, list_id: &str, name: &str, out: &mut dyn Write) -> anyhow::Result<()> {
+    doc.rename_list(list_id, name)?;
+    writeln!(out, "{list_id}")?;
     Ok(())
 }
 
-async fn set_archived(list_id: &str, archived: bool, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    session.doc().set_list_archived(list_id, archived)?;
-    session.flush().await?;
-    println!("{list_id}");
+fn set_archived(
+    doc: &Doc,
+    list_id: &str,
+    archived: bool,
+    out: &mut dyn Write,
+) -> anyhow::Result<()> {
+    doc.set_list_archived(list_id, archived)?;
+    writeln!(out, "{list_id}")?;
     Ok(())
 }
 

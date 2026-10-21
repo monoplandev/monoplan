@@ -71,6 +71,9 @@ async fn status(json: bool) -> anyhow::Result<()> {
 
 async fn clear(force: bool) -> anyhow::Result<()> {
     let profile = Profile::require_active()?;
+    if crate::daemon::is_running(&profile.dir)? {
+        anyhow::bail!("monoplan daemon is running; `monoplan daemon stop` first");
+    }
 
     // The doc cache (ops + snapshot) and sync cursor live in the sqlite
     // db; account identity lives there too, so we truncate the cache

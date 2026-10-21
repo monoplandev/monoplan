@@ -1812,6 +1812,7 @@ dependencies = [
  "gethostname",
  "hex",
  "http",
+ "libc",
  "monoplan-core",
  "monoplan-protocol",
  "monoplan-server",

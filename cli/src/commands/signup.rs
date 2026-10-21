@@ -108,6 +108,11 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
         )
         .await?;
 
+    // A daemon for a previous login would keep the old doc open under
+    // the new credentials; stop it before the profile changes.
+    if let Some(existing) = Profile::active()? {
+        crate::client::stop_if_running(&existing.dir).await?;
+    }
     let profile = Profile::create()?;
     let primary_doc_uuid = uuid::Uuid::parse_str(&resp.primary_doc_id)
         .map_err(|e| anyhow::anyhow!("server returned malformed primary_doc_id: {e}"))?;

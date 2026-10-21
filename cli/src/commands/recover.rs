@@ -6,11 +6,11 @@ use monoplan_protocol::{
     PreloginRequest, PreloginResponse, RecoverRequest, RecoverResponse,
 };
 
+use crate::client::{self, Spawn};
 use crate::config::{Config, Profile, Secrets};
 use crate::keystore::{derive_master, parse_doc_id, unwrap_doc_key, unwrap_memberships};
 use crate::net::Client;
 use crate::storage::Account;
-use crate::sync::Session;
 
 use super::{default_device_name, default_server, prompt_new_password};
 
@@ -24,7 +24,7 @@ pub struct Args {
     pub device_name: Option<String>,
 }
 
-pub async fn run(args: Args) -> anyhow::Result<()> {
+pub async fn run(args: Args, spawn: Spawn) -> anyhow::Result<()> {
     let email = match args.email {
         Some(e) => e,
         None => Input::new().with_prompt("Email").interact_text()?,
@@ -128,6 +128,11 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
     let docs: DocsListResponse = client.get_authed("/api/docs", &reset.device_token).await?;
     let doc_keys = unwrap_memberships(&dek, doc_id, &docs.memberships)?;
 
+    // A daemon for a previous login would keep the old doc open under
+    // the new credentials; stop it before the profile changes.
+    if let Some(existing) = Profile::active()? {
+        crate::client::stop_if_running(&existing.dir).await?;
+    }
     let profile = Profile::create()?;
     let storage = crate::storage::open_storage(&profile)?;
     crate::storage::seed_snapshot(&storage, &dek, doc_id, &Doc::empty())?;
@@ -146,8 +151,9 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
     ))?;
 
     println!("Syncing…");
-    let session = Session::open(true).await?;
-    session.flush().await?;
+    if let Err(e) = client::sync(&profile, spawn).await {
+        eprintln!("offline — sync deferred ({e})");
+    }
 
     println!("Recovery complete. Account {}.", recovered.account_id);
     Ok(())

@@ -1,18 +1,21 @@
-//! `monoplan sync` — explicit pull + push, no doc mutation.
-//!
-//! Unlike the per-command `--sync` flag (which falls back to local-only
-//! on connect failure), this command treats a failed connect as a hard
-//! error: the user explicitly asked for a sync, so silently doing
-//! nothing would be a lie.
+//! `monoplan sync` — ask the daemon to push now and say whether the
+//! server is reachable. The daemon pulls continuously while connected,
+//! so "sync" is a push plus a liveness report; an unreachable server is
+//! a hard error because the user asked for the network explicitly.
 
-use crate::sync::Session;
+use crate::client::{self, Spawn};
+use crate::config::Profile;
+use crate::ipc::{Reply, Request};
 
-pub async fn run() -> anyhow::Result<()> {
-    let session = Session::open(true).await?;
-    if !session.is_online() {
-        anyhow::bail!("could not reach server");
+pub async fn run(spawn: Spawn) -> anyhow::Result<()> {
+    let profile = Profile::require_active()?;
+    match client::call(&profile, Request::Sync, spawn).await? {
+        Reply::Synced { sync } if sync.online => {
+            println!("Synced.");
+            Ok(())
+        }
+        Reply::Synced { .. } => anyhow::bail!("could not reach server"),
+        Reply::Err { message } => anyhow::bail!(message),
+        other => anyhow::bail!("unexpected daemon reply: {other:?}"),
     }
-    session.flush().await?;
-    println!("Synced.");
-    Ok(())
 }

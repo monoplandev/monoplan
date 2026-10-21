@@ -10,16 +10,16 @@
 //! Placement, tone, and ordering are pure functions of the item views
 //! and a `today` stamp, so they are unit-tested here without a doc.
 
+use std::io::Write;
+
 use chrono::{Datelike, Days, Local, NaiveDate};
 use clap::Parser;
-use monoplan_core::{ItemView, Place};
-use serde::Serialize;
+use monoplan_core::{Doc, ItemView, Place};
+use serde::{Deserialize, Serialize};
 
-use crate::sync::Session;
+use super::items::{date_tags, row_box, write_json};
 
-use super::items::{date_tags, print_json, row_box};
-
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 pub struct AgendaArgs {
     /// How many days past today to show (Today is always shown).
     #[arg(long, default_value_t = 14)]
@@ -203,7 +203,7 @@ pub fn unscheduled_events(items: &[ItemView]) -> Vec<&ItemView> {
     out
 }
 
-pub async fn run(args: AgendaArgs, sync: bool) -> anyhow::Result<()> {
+pub fn run(doc: &Doc, args: AgendaArgs, out: &mut dyn Write) -> anyhow::Result<()> {
     let today = match &args.today {
         Some(t) => NaiveDate::parse_from_str(t, "%Y-%m-%d")
             .map_err(|_| anyhow::anyhow!("--today must be YYYY-MM-DD: {t:?}"))?,
@@ -215,12 +215,11 @@ pub async fn run(args: AgendaArgs, sync: bool) -> anyhow::Result<()> {
     let today_s = today.format("%Y-%m-%d").to_string();
     let horizon_s = horizon.format("%Y-%m-%d").to_string();
 
-    let session = Session::open(sync).await?;
-    let items = session.doc().all_items();
+    let items = doc.all_items();
     let days = build_agenda(&items, &today_s, &horizon_s);
     let unscheduled = unscheduled_events(&items);
     if args.json {
-        let mut out: Vec<DayJson<'_>> = days
+        let mut rows: Vec<DayJson<'_>> = days
             .iter()
             .map(|d| DayJson {
                 day: Some(&d.day),
@@ -230,7 +229,7 @@ pub async fn run(args: AgendaArgs, sync: bool) -> anyhow::Result<()> {
             .collect();
         if !unscheduled.is_empty() {
             // After Today, which `build_agenda` always puts first.
-            out.insert(
+            rows.insert(
                 1,
                 DayJson {
                     day: None,
@@ -239,34 +238,38 @@ pub async fn run(args: AgendaArgs, sync: bool) -> anyhow::Result<()> {
                 },
             );
         }
-        print_json(&out)?;
+        write_json(out, &rows)?;
     } else {
-        print_agenda(&days, &unscheduled, &today_s);
+        print_agenda(out, &days, &unscheduled, &today_s)?;
     }
-    session.flush().await?;
     Ok(())
 }
 
-fn print_agenda(days: &[AgendaDay], unscheduled: &[&ItemView], today: &str) {
+fn print_agenda(
+    out: &mut dyn Write,
+    days: &[AgendaDay],
+    unscheduled: &[&ItemView],
+    today: &str,
+) -> anyhow::Result<()> {
     for (i, day) in days.iter().enumerate() {
         if i > 0 {
-            println!();
+            writeln!(out)?;
         }
         // Unscheduled sits after Today, ahead of the coming days.
         if i == 1 && !unscheduled.is_empty() {
-            print_unscheduled(unscheduled);
-            println!();
+            print_unscheduled(out, unscheduled)?;
+            writeln!(out)?;
         }
         let weekday = NaiveDate::parse_from_str(&day.day, "%Y-%m-%d")
             .map(|d| d.weekday().to_string())
             .unwrap_or_default();
         if day.day == today {
-            println!("Today  {}  {weekday}", day.day);
+            writeln!(out, "Today  {}  {weekday}", day.day)?;
         } else {
-            println!("{}  {weekday}", day.day);
+            writeln!(out, "{}  {weekday}", day.day)?;
         }
         if day.rows.is_empty() {
-            println!("  (nothing)");
+            writeln!(out, "  (nothing)")?;
         }
         for row in &day.rows {
             let tone = row
@@ -274,27 +277,30 @@ fn print_agenda(days: &[AgendaDay], unscheduled: &[&ItemView], today: &str) {
                 .label()
                 .map(|l| format!("  ({l})"))
                 .unwrap_or_default();
-            println!(
+            writeln!(
+                out,
                 "  {}  {} {}{}{tone}",
                 row.item.id,
                 row_box(&row.item),
                 row.item.text,
                 date_tags(&row.item)
-            );
+            )?;
         }
     }
     // Today was the only day: the group still follows it.
     if days.len() == 1 && !unscheduled.is_empty() {
-        println!();
-        print_unscheduled(unscheduled);
+        writeln!(out)?;
+        print_unscheduled(out, unscheduled)?;
     }
+    Ok(())
 }
 
-fn print_unscheduled(unscheduled: &[&ItemView]) {
-    println!("Unscheduled");
+fn print_unscheduled(out: &mut dyn Write, unscheduled: &[&ItemView]) -> anyhow::Result<()> {
+    writeln!(out, "Unscheduled")?;
     for item in unscheduled {
-        println!("  {}  {} {}", item.id, row_box(item), item.text);
+        writeln!(out, "  {}  {} {}", item.id, row_box(item), item.text)?;
     }
+    Ok(())
 }
 
 #[derive(Serialize)]

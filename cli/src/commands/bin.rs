@@ -7,13 +7,14 @@
 //! and route to the verb.
 
 use clap::{Parser, Subcommand};
-use serde::Serialize;
+use std::io::Write;
 
-use crate::sync::Session;
+use monoplan_core::Doc;
+use serde::{Deserialize, Serialize};
 
-use super::items::{IdArg, print_json};
+use super::items::{IdArg, write_json};
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 pub struct BinArgs {
     #[command(subcommand)]
     pub sub: BinSub,
@@ -21,7 +22,7 @@ pub struct BinArgs {
     pub json: bool,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone, Serialize, Deserialize)]
 pub enum BinSub {
     /// Show items in the bin.
     Show,
@@ -34,30 +35,27 @@ pub enum BinSub {
     Item(Vec<String>),
 }
 
-pub async fn run(args: BinArgs, sync: bool) -> anyhow::Result<()> {
+pub fn run(doc: &Doc, args: BinArgs, out: &mut dyn Write) -> anyhow::Result<()> {
     match args.sub {
-        BinSub::Show => show(args.json, sync).await,
-        BinSub::Empty => empty(sync).await,
-        BinSub::Rm(id) => rm(&id.item_id, sync).await,
+        BinSub::Show => show(doc, args.json, out),
+        BinSub::Empty => empty(doc, out),
+        BinSub::Rm(id) => rm(doc, &id.item_id, out),
         BinSub::Item(tokens) => match tokens.as_slice() {
-            [id] => {
-                super::items::bin(
-                    IdArg {
-                        item_id: id.clone(),
-                    },
-                    sync,
-                )
-                .await
-            }
+            [id] => super::items::bin(
+                doc,
+                IdArg {
+                    item_id: id.clone(),
+                },
+                out,
+            ),
             [] => anyhow::bail!("expected an item id; try `monoplan bin show`"),
             _ => anyhow::bail!("unexpected extra arguments after item id"),
         },
     }
 }
 
-async fn show(json: bool, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    let items = session.doc().binned_items();
+fn show(doc: &Doc, json: bool, out: &mut dyn Write) -> anyhow::Result<()> {
+    let items = doc.binned_items();
     if json {
         let v: Vec<BinnedJson> = items
             .iter()
@@ -68,29 +66,24 @@ async fn show(json: bool, sync: bool) -> anyhow::Result<()> {
                 binned_at: i.binned_at.unwrap_or_default(),
             })
             .collect();
-        print_json(&v)?;
+        write_json(out, &v)?;
     } else {
         for i in &items {
-            println!("{}  {}", i.id, i.text);
+            writeln!(out, "{}  {}", i.id, i.text)?;
         }
     }
-    session.flush().await?;
     Ok(())
 }
 
-async fn empty(sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    let removed = session.doc().empty_bin()?;
-    session.flush().await?;
-    println!("removed {removed}");
+fn empty(doc: &Doc, out: &mut dyn Write) -> anyhow::Result<()> {
+    let removed = doc.empty_bin()?;
+    writeln!(out, "removed {removed}")?;
     Ok(())
 }
 
-async fn rm(item_id: &str, sync: bool) -> anyhow::Result<()> {
-    let session = Session::open(sync).await?;
-    session.doc().delete_binned(item_id)?;
-    session.flush().await?;
-    println!("{item_id}");
+fn rm(doc: &Doc, item_id: &str, out: &mut dyn Write) -> anyhow::Result<()> {
+    doc.delete_binned(item_id)?;
+    writeln!(out, "{item_id}")?;
     Ok(())
 }
 
