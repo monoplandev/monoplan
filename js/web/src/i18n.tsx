@@ -318,7 +318,8 @@ export type Messages = {
     label: string;
     /** Placeholder of the place input when no place is set. */
     placeholder: string;
-    /** ✕ beside the input: removes the place. */
+    /** ✕ beside the input, and the Remove row under the results (the
+     *  only route on the mobile page): removes the place. */
     remove: string;
     /** The blank run of the field beside the label link: starts an edit. */
     edit: string;

@@ -1,6 +1,10 @@
 // The task dialog's place control, in its own ruled band under the
 // deadline with the dates' anatomy (a pin glyph inset at the left edge,
-// an inset ✕ that removes the place).
+// an inset ✕ that removes the place). The results card carries the same
+// removal as a Remove row pinned under the list while a place is set:
+// the only route on the mobile page, which hides the ✕ (as the date and
+// time inputs' pickers do), so starting an edit with a place in hand
+// opens the card for it.
 //
 // Two faces. With a place set and no edit under way, the band shows the
 // label as a link to the map (`placeUrl`: the pin when the place has
@@ -187,11 +191,16 @@ export function PlaceField(props: {
     debounce = setTimeout(() => void search(), DEBOUNCE_MS);
   };
 
-  // A blank field, focused, offers the most recent places.
+  // A blank field, focused, offers the most recent places. An edit of a
+  // set place opens the card for its Remove row (with whatever known
+  // places the label narrows to above it).
   const onFocused = () => {
-    if (draft().trim() !== "") return;
     ensureKnown();
-    if (localRows().length > 0) setOpen(true);
+    if (draft().trim() === "") {
+      if (localRows().length > 0) setOpen(true);
+    } else if (props.place()) {
+      setOpen(true);
+    }
   };
 
   // Focus inside the popover (arrow down into the results) is not a
@@ -481,6 +490,23 @@ export function PlaceField(props: {
                 </Show>
                 <Show when={remoteRows().length > 0}>
                   <div class="place-popover-credit">{m().place.credit}</div>
+                </Show>
+                {/* Removal, pinned under everything else while a place is
+                    set. Never focused (the cancelled mousedown keeps the
+                    caret in the input, as for a result row) and outside
+                    the arrow-key run through the results. */}
+                <Show when={props.place()}>
+                  <div class="place-popover-footer">
+                    <button
+                      type="button"
+                      class="place-popover-remove"
+                      tabIndex={-1}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={clear}
+                    >
+                      {m().place.remove}
+                    </button>
+                  </div>
                 </Show>
               </div>
             </Popover.Content>

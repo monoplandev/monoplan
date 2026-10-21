@@ -3399,6 +3399,37 @@ input.task-check:hover {
   color: var(--text-empty);
 }
 
+/* Remove row pinned under the results while a place is set: the time
+   picker's footer, ruled off from whatever sits above it (nothing, when
+   an edit of a set place matches no known place: then it stands alone). */
+.place-popover-footer {
+  flex-shrink: 0;
+}
+
+.place-popover-footer:not(:first-child) {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-row);
+}
+
+.place-popover-remove {
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text-muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.place-popover-remove:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
 /* The picker popover under the date / deadline / place inputs: shares the
    card look (`.deadline-dialog`) with tighter padding, and sits
    above the task dialog (z-index 100 / 101). Doubled up so the padding
@@ -3718,6 +3749,12 @@ input.task-check:hover {
   /* Nor on the start time: the picker's panel carries a Remove row. With
      no ✕ to clear, start and end share the plain right inset. */
   .task-page .time-picker-clear {
+    display: none;
+  }
+
+  /* Nor on the place: its results card carries a Remove row. The input
+     and the link face already take the date input's plain inset above. */
+  .task-page .task-dialog-place-action {
     display: none;
   }
 
