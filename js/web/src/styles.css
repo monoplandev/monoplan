@@ -535,6 +535,14 @@ body {
   height: var(--upcoming-line);
 }
 
+/* "in 45m" on a timed row later today: a muted countdown ahead of the
+   list badge. */
+.upcoming-row-soon {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 /* A ticked or crossed row stays on its day as the record of what
    happened, or was called off: muted, the box doing the talking.
    (`data-done`: the context-menu trigger owns `data-closed`.) The time

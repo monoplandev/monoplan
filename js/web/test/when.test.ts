@@ -23,6 +23,7 @@ import {
   endDayOffset,
   durationBetween,
   formatDurationShort,
+  whenStartMs,
   isValidEndDayOffset,
   MAX_DURATION_MINUTES,
   allDayEndOffset,
@@ -264,5 +265,18 @@ describe("formatWhenBadge", () => {
 
   test("null on a malformed value", () => {
     expect(formatWhenBadge("nope", today, labels, "en-US")).toBeNull();
+  });
+});
+
+describe("whenStartMs", () => {
+  test("a timed when is its local start instant", () => {
+    expect(whenStartMs("2026-10-21T14:30")).toBe(
+      new Date(2026, 9, 21, 14, 30).getTime(),
+    );
+  });
+
+  test("null for all-day and malformed values", () => {
+    expect(whenStartMs("2026-10-21")).toBeNull();
+    expect(whenStartMs("nope")).toBeNull();
   });
 });

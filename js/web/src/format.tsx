@@ -250,6 +250,17 @@ export function whenTime(when: string): Required<TimeParts> | null {
   return { hour: Number(m[1]), minute: Number(m[2]) };
 }
 
+/** The local instant a timed `when` starts, in ms, or null for an
+ *  all-day or malformed one. Built from explicit local parts (see
+ *  `parseLocalDateParts`), never `new Date(string)`. */
+export function whenStartMs(when: string): number | null {
+  const t = whenTime(when);
+  if (!t) return null;
+  const d = parseLocalDateParts(whenDay(when));
+  if (!d) return null;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), t.hour, t.minute).getTime();
+}
+
 /** Both parts set: the pair maps to a timed register. */
 export function isCompleteTime(t: TimeParts): t is Required<TimeParts> {
   return t.hour != null && t.minute != null;

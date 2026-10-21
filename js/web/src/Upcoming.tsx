@@ -13,8 +13,9 @@
 // happened and what was called off.
 //
 // Events (`spec/events-plan.md`) live here and nowhere else. An event row
-// is a task row without the list label: the checkbox is there for anyone
-// who wants the record, but nothing asks for it, the event just goes by.
+// looks like a task row: the checkbox is there for anyone who wants the
+// record, but nothing asks for it, the event just goes by. No row carries
+// its list label; the context menu and task surface name it.
 // Events with no date sit in an Unscheduled section between Overdue and
 // Today so they are never out of sight.
 //
@@ -48,8 +49,10 @@ import {
 import {
   addDaysToStamp,
   formatClockTime,
+  formatDurationShort,
   nowMs,
   todayStamp,
+  whenStartMs,
   whenTime,
 } from "./format.tsx";
 import { useAppI18n } from "./i18n.tsx";
@@ -57,7 +60,6 @@ import mapPinSvg from "./icons/map-pin.svg?raw";
 import {
   isCancelled,
   isClosed,
-  isEvent,
   type ItemActions,
 } from "./sync/store.ts";
 
@@ -224,6 +226,21 @@ export function Upcoming(props: {
     return formatClockTime(start, locale());
   };
 
+  // "in 2h 15m" beside a timed row later today: how soon it starts, read
+  // off the shared minute tick so it counts down in place. Only today's
+  // open rows with a start still ahead; the minute is rounded up so a
+  // row never reads "in 0m" before its time.
+  const startsIn = (r: DayRow): string | null => {
+    if (r.placedBy !== "when" || isClosed(r.item)) return null;
+    const start = whenStartMs(r.item.when!);
+    if (start === null) return null;
+    const now = nowMs();
+    if (todayStamp(now) !== todayStamp(start)) return null;
+    const diff = start - now;
+    if (diff <= 0) return null;
+    return m().upcoming.startsIn(formatDurationShort(Math.ceil(diff / 60_000)));
+  };
+
   return (
     <div
       ref={hostEl}
@@ -323,18 +340,13 @@ export function Upcoming(props: {
                         )}
                       </Show>
                     </span>
+                    {/* No list badge here: the agenda is about the day,
+                        the task surface names the list. */}
                     <span class="upcoming-row-meta">
-                      {/* No label is the event's mark: every task row
-                          carries its list, an event has none to show. */}
-                      <Show when={!isEvent(r.item)}>
-                        <span
-                          class="badge row-list"
-                          title={props.listLabel(r.item.listId, r.item.docId)}
-                        >
-                          <span class="row-list-name">
-                            {props.listLabel(r.item.listId, r.item.docId)}
-                          </span>
-                        </span>
+                      <Show when={startsIn(r)}>
+                        {(label) => (
+                          <span class="upcoming-row-soon">{label()}</span>
+                        )}
                       </Show>
                     </span>
                   </ContextMenu.Trigger>

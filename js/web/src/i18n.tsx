@@ -350,6 +350,9 @@ export type Messages = {
     event: string;
     /** Time-lane label for a row placed on its day by its deadline. */
     due: string;
+    /** Beside a timed row later today: how long until it starts,
+     *  `span` already formatted ("2h 15m"). */
+    startsIn: (span: string) => string;
   };
   sidePanel: {
     /** Accessible name of the desktop side panel. */
@@ -682,6 +685,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       unscheduled: "Sin fecha",
       event: "Evento",
       due: "Vence",
+      startsIn: (span) => `en ${span}`,
     },
     sidePanel: {
       title: "Barra de contexto",
@@ -1004,6 +1008,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       unscheduled: "Unscheduled",
       event: "Event",
       due: "Due",
+      startsIn: (span) => `in ${span}`,
     },
     sidePanel: {
       title: "Context sidebar",
