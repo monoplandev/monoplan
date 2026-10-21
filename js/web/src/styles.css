@@ -3000,11 +3000,15 @@ input.task-check:hover {
   }
 }
 
-/* Each picker fills its half of the row; the start field alone sits in
-   the left half until an end field appears beside it. */
+/* Each picker fills its half of the row; the start field alone (all-day,
+   no end field beside it) spans the whole row. */
 .task-dialog-time-row .time-picker-field {
   display: flex;
   min-width: 0;
+}
+
+.task-dialog-time-row .time-picker-field:only-child {
+  grid-column: 1 / -1;
 }
 
 /* The input with its glyph inset at the left edge, overlaid; the input
