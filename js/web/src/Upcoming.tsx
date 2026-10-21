@@ -303,9 +303,10 @@ export function Upcoming(props: {
                     // sets its own `data-closed` while the menu is shut.
                     data-done={isClosed(r.item) ? "" : undefined}
                   >
-                    {/* The check leads the row, then a fixed-width time
-                        lane kept even when empty so the titles line up
-                        down the day. */}
+                    {/* The check leads the row; the fixed-width time
+                        lane sits in source order here but CSS `order`
+                        moves it to the row's right edge, kept even
+                        when empty so the times line up down the day. */}
                     <span class="upcoming-row-check">
                       <input
                         type="checkbox"

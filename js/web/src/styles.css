@@ -458,17 +458,21 @@ body {
   align-items: center;
 }
 
-/* Time lane: a fixed column after the check, wide enough for the
-   longest 12-hour form ("12:30 PM"), so the titles line up down the
-   day whether or not a row has a time. */
+/* Time lane: a fixed column at the row's right edge (`order` moves it
+   past the body and meta), wide enough for the longest 12-hour form
+   ("12:30 PM") and right-aligned, so the times line up down the day
+   whether or not a row has a time. */
 .upcoming-row-time {
+  order: 1;
   flex-shrink: 0;
   width: 4.5em;
   height: var(--upcoming-line);
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  color: var(--text-muted);
 }
 
 /* Spanish's "Todo el día" runs past the 12-hour lane; its clock times are
@@ -546,8 +550,7 @@ body {
 /* A ticked or crossed row stays on its day as the record of what
    happened, or was called off: muted, the box doing the talking.
    (`data-done`: the context-menu trigger owns `data-closed`.) The time
-   lane mutes with the title so the whole line reads as settled. */
-.upcoming-row[data-done] .upcoming-row-time,
+   lane is already muted on every row. */
 .upcoming-row[data-done] .upcoming-row-text {
   color: var(--text-muted);
 }
