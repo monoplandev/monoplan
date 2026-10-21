@@ -105,3 +105,4 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - display options for showing completed items in calendar view, or not
 - consider better visibility over undo/redo
 - adding signing keys and add membership as a signed log https://github.com/loro-dev/loro/issues/612
+- Consider MANUALLY archiving older items (e.g. by year)

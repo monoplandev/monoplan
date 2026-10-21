@@ -1,5 +1,5 @@
-// Mobile Find: the phone's list switcher (and item search), opened from
-// the left pill in MobileShell.tsx. Shares FindPalette's query policy and
+// The phone's menu page: its list switcher (and item search), opened
+// from the left pill in MobileShell.tsx. Shares FindPalette's query policy and
 // row anatomy (findResults.tsx) but not its interaction model — there is
 // no keyboard cursor, no hover, no key legend. Instead the row matching
 // the view you're on carries a "current" mark, the way a native picker
@@ -10,19 +10,23 @@
 // The top line carries the account/sync indicator (left) and a Settings
 // icon (right): the bottom pill carries neither, so this is the phone's
 // only way into both. Neither is a FindResult, nor is the home page link
-// in the default menu's last card.
+// in the default menu's last card. Settings opens over the page, which
+// stays put beneath it.
 //
-// Rendered as a full page under the floating pills (which stay live):
-// no scrim, no card, no Close. The Find pill toggles it, a row pick or a
-// pill jump dismisses it, and a hardware Escape still closes it.
+// A page of its own: the workspace routes it as `#menu` with a history
+// entry (`spec/urls.md`), so Back and the swipe gesture leave it like a
+// row pick does. Rendered as a full page under the floating pills (which
+// stay live): no scrim, no card, no Close. The Menu pill opens it; a
+// row pick, a pill jump or Back leaves it, and a hardware Escape still
+// closes it.
 
-import { createEffect, For, onCleanup, Show, type JSX } from "solid-js";
+import { batch, createEffect, For, onCleanup, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import type { AttentionBadge } from "./dayGroups.ts";
 import type { DocsLayer } from "./sync/docs.ts";
 import type { ViewKey } from "./prefs.ts";
 import { useAppI18n } from "./i18n.tsx";
-import { trackOverlay } from "./overlay.ts";
+import { overlayDepth, trackOverlay } from "./overlay.ts";
 import externalLinkSvg from "./icons/external-link.svg?raw";
 import mixerHzSvg from "./icons/mixer-hz.svg?raw";
 import {
@@ -68,7 +72,7 @@ export function FindSheet(props: {
   view: ViewKey;
   onOpenChange: (open: boolean) => void;
   onSelect?: (result: FindResult) => void;
-  /** Opens the Settings dialog; the sheet closes first. */
+  /** Opens the Settings dialog over the page. */
   onOpenSettings: () => void;
   /** The account/sync indicator (StatusSlot), top left of the page. Its
    *  popover / sign-in dialog open over the page, which stays put. */
@@ -125,10 +129,13 @@ export function FindSheet(props: {
 
   // A hardware keyboard's Escape still dismisses, matching every other
   // overlay; capture-phase so the workspace shortcuts behind never see it.
+  // Not while a dialog (Settings, sign-in) sits over the page: that
+  // dialog owns Escape, and the page stays beneath it.
   createEffect(() => {
     if (!props.open) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      if (overlayDepth() > 1) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       props.onOpenChange(false);
@@ -138,8 +145,13 @@ export function FindSheet(props: {
   });
 
   function selectItem(item: FindResult) {
-    props.onSelect?.(item);
-    props.onOpenChange(false);
+    // One batch: the destination and the page's close reach the
+    // workspace's address-bar effect together, so the page's history
+    // entry is handed to the destination rather than popped and pushed.
+    batch(() => {
+      props.onSelect?.(item);
+      props.onOpenChange(false);
+    });
   }
 
   const row = (item: FindResult) => (
@@ -178,10 +190,7 @@ export function FindSheet(props: {
               type="button"
               class="icon-button find-sheet__settings"
               aria-label={m().nav.settings}
-              onClick={() => {
-                props.onOpenChange(false);
-                props.onOpenSettings();
-              }}
+              onClick={() => props.onOpenSettings()}
               innerHTML={mixerHzSvg}
             />
           </div>

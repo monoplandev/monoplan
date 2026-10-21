@@ -19,6 +19,11 @@ const [overlayCount, setOverlayCount] = createSignal(0);
 /** True while any tracked overlay is open. */
 export const isOverlayOpen = () => overlayCount() > 0;
 
+/** How many tracked overlays are open: a full-page surface that is
+ *  itself tracked (the phone's menu page) reads this to tell whether a
+ *  dialog sits over it. */
+export const overlayDepth = () => overlayCount();
+
 /** Mark an overlay as open while `open()` is true. Increments the shared
  *  count on open, decrements on close or unmount. Call from the overlay
  *  component's body: `trackOverlay(() => props.open)`. */

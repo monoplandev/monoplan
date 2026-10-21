@@ -3,13 +3,15 @@
 // On phones the desktop sidebar (and its footer chrome) is not rendered (see
 // Workspace.tsx). The left pill leads with icon-only jumps to the three
 // fixed views (Focus, Inbox, Upcoming, the same order as the sidebar's
-// top group, minus Done / Bin), then Find (FindSheet.tsx, which doubles
-// as the list switcher: on an empty query it lists Done, Bin and the
+// top group, minus Done / Bin), then Menu (FindSheet.tsx: a page of its
+// own, with a `#menu` route and history entry, that doubles as the list
+// switcher and item search: on an empty query it lists Done, Bin and the
 // user lists (the views this pill already reaches are left out), marks
 // the current one, and carries the account/sync indicator and Settings;
-// the page sits under these pills and the Find button toggles it, marked
-// active while it's up); the right pill is Add. No custom drawer: the
-// DOM can't fake a native sheet convincingly, so we don't try.
+// the page sits under these pills and the Menu button opens it, marked
+// active while it's up like any view's pill); the right pill is Add, which the menu page
+// hides (nothing there to capture into). No custom drawer: the DOM can't
+// fake a native sheet convincingly, so we don't try.
 //
 // Inbox and Upcoming carry a count bubble on the icon's corner, fed by the
 // same sources as the desktop nav (`openCountsByList["inbox"]` and
@@ -32,9 +34,9 @@ export function MobileBars(props: {
       matching `view` is marked active. */
   view: ViewKey;
   setView: (v: ViewKey) => void;
-  /** Toggles the Find page; `findOpen` marks the button while it's up. */
-  onFind: () => void;
-  findOpen: boolean;
+  /** Opens the menu page; `menuOpen` marks the button while it's up. */
+  onMenu: () => void;
+  menuOpen: boolean;
   /** null hides the add pill (views that can't capture). */
   onAdd: (() => void) | null;
   addDisabled: boolean;
@@ -45,9 +47,9 @@ export function MobileBars(props: {
   upcomingBadge: AttentionBadge;
 }) {
   const { m } = useAppI18n();
-  // One active pill at a time: while the Find page is up it covers the
-  // view, so the view's own button gives up its mark to the Find button.
-  const viewActive = (on: boolean) => (on && !props.findOpen ? "" : undefined);
+  // One active pill at a time: while the menu page is up it covers the
+  // view, so the view's own button gives up its mark to the Menu button.
+  const viewActive = (on: boolean) => (on && !props.menuOpen ? "" : undefined);
   return (
     <>
       {/* Left pill: icon over a small text label per button (the label
@@ -97,9 +99,9 @@ export function MobileBars(props: {
         <button
           type="button"
           class="mobile-bar-btn mobile-bar-btn--labelled"
-          data-active={props.findOpen ? "" : undefined}
-          aria-expanded={props.findOpen}
-          onClick={props.onFind}
+          data-active={props.menuOpen ? "" : undefined}
+          aria-current={props.menuOpen ? "page" : undefined}
+          onClick={props.onMenu}
         >
           <span class="mobile-bar-icon" innerHTML={hamburgerMenuSvg} aria-hidden="true" />
           <span class="mobile-bar-label">{m().common.menu}</span>

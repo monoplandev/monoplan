@@ -2095,7 +2095,7 @@ export function Workspace(props: {
     );
   };
 
-  // Shared by both Find surfaces (desktop palette / mobile sheet).
+  // Shared by both Find surfaces (desktop palette / the phone's menu page).
   const onFindOpenChange = (open: boolean) => {
     setFindOpen(open);
     if (open) return;
@@ -2107,11 +2107,13 @@ export function Workspace(props: {
     requestAnimationFrame(() => restoreItemsFocus());
   };
   const onFindPick = (r: FindResult) => {
-    // A pick navigates the workspace behind any open item's page
-    // (mobile pills can open Find over it); close the item so the
-    // result is actually visible.
-    setOpenItemId(null);
-    onFindSelect(r);
+    // A pick navigates the workspace behind any open item's page; close
+    // the item so the result is actually visible. One batch, so the
+    // address-bar effect sees the close and the destination together.
+    batch(() => {
+      setOpenItemId(null);
+      onFindSelect(r);
+    });
   };
 
   // Row context menu: hop an item between its home list and the Focus lens,
@@ -2175,7 +2177,38 @@ export function Workspace(props: {
     return true;
   };
 
-  const applyRoute = (route: Route): void => {
+  // Mobile shell: at narrow viewports the sidebar (and its footer chrome)
+  // is replaced by MobileBars (MobileShell.tsx), and the Find palette by
+  // FindSheet, the phone's menu page over the same result set. Declared
+  // ahead of the router: the menu page is a route of its own there.
+  const mobileMq = window.matchMedia("(max-width: 768px) and (pointer: coarse)");
+  const [isMobile, setIsMobile] = createSignal(mobileMq.matches);
+  const onMqChange = (e: MediaQueryListEvent) => {
+    setIsMobile(e.matches);
+  };
+  mobileMq.addEventListener("change", onMqChange);
+  onCleanup(() => mobileMq.removeEventListener("change", onMqChange));
+  // The menu page is the phone's: `findOpen` on a phone is the page, on
+  // desktop the palette, which is transient and never a route. A
+  // viewport crossing closes whichever was up rather than carrying one
+  // shell's surface into the other.
+  const menuOpen = () => isMobile() && findOpen();
+  createEffect(on(isMobile, () => setFindOpen(false), { defer: true }));
+
+  // Applies a route; false when it names nothing this shell can show (the
+  // menu page on desktop), so the caller rewrites the address bar.
+  const applyRoute = (route: Route): boolean => {
+    if (route.kind === "menu") {
+      if (!isMobile()) return false;
+      batch(() => {
+        setOpenItemId(null);
+        setFindOpen(true);
+      });
+      return true;
+    }
+    // A view or item route leaves the menu page (Back from it, or a link
+    // tapped while it is up).
+    if (isMobile()) setFindOpen(false);
     if (route.kind === "view") {
       // A list is looked up across every open doc (`spec/urls.md`): an
       // unknown one (deleted, or from another account) is ignored. The
@@ -2184,10 +2217,10 @@ export function Workspace(props: {
       let target = route.view;
       if (target.kind === "list") {
         if (target.id === "inbox") {
-          if (target.docId !== undefined && !docs.appOf(target.docId)) return;
+          if (target.docId !== undefined && !docs.appOf(target.docId)) return true;
         } else {
           const docId = docs.docIdOfList(target.id);
-          if (docId === undefined) return;
+          if (docId === undefined) return true;
           target = docs.listView(docId, target.id);
         }
       }
@@ -2206,9 +2239,10 @@ export function Workspace(props: {
         // selection. Board selections live inside Board and never saw it.
         if (!sameView) setView(target);
       });
-      return;
+      return true;
     }
     if (!openItemFromUrl(route.id)) setPendingItemId(route.id);
+    return true;
   };
 
   // Boot: a hash on the URL overrides the prefs-restored view. Applied
@@ -2235,13 +2269,21 @@ export function Workspace(props: {
   // close is the pane handing focus back (Escape, Enter): it carries on
   // showing the selection, so an Enter / Escape cycle there nets zero
   // history. The first run (boot) always replaces.
+  //
+  // The phone's menu page is an entry of its own, marked the same way:
+  // opening pushes it (over an entered item it takes that item's entry,
+  // since the item closes), closing with nothing else changing goes
+  // Back, and a pick from it (a view or an item) takes the entry over,
+  // so a menu visit never leaves a stale `#menu` behind the destination.
   const ITEM_ENTRY = { monoplanItem: true };
-  let prevUrlState: { viewKey: string; item: string | null } | undefined;
+  const MENU_ENTRY = { monoplanMenu: true };
+  let prevUrlState: { viewKey: string; item: string | null; menu: boolean } | undefined;
   createEffect(() => {
     const v = view();
     const item = openItemId();
-    const hash = stateHash(v, item);
-    const cur = { viewKey: viewKey(v), item };
+    const menu = menuOpen();
+    const hash = stateHash(v, item, menu);
+    const cur = { viewKey: viewKey(v), item, menu };
     const prev = prevUrlState;
     prevUrlState = cur;
     if (location.hash === hash) return;
@@ -2252,6 +2294,24 @@ export function Workspace(props: {
     const viewChanged = prev.viewKey !== cur.viewKey;
     const opened = prev.item === null && item !== null;
     const closed = prev.item !== null && item === null;
+    if (!prev.menu && menu) {
+      if (closed && history.state?.monoplanItem === true) {
+        history.replaceState(MENU_ENTRY, "", hash);
+      } else {
+        history.pushState(MENU_ENTRY, "", hash);
+      }
+      return;
+    }
+    if (prev.menu && !menu && history.state?.monoplanMenu === true) {
+      if (!viewChanged && !opened) {
+        // The popstate handler lands on the view beneath, already on
+        // screen, and leaves it alone.
+        history.back();
+        return;
+      }
+      history.replaceState(opened ? ITEM_ENTRY : null, "", hash);
+      return;
+    }
     if (closed && !viewChanged && history.state?.monoplanItem === true) {
       // The popstate handler sees the view we're already on and leaves
       // it (and the selection) alone.
@@ -2272,8 +2332,8 @@ export function Workspace(props: {
   // link click. An unrecognised hash is rewritten to the current state.
   const onPopState = () => {
     const route = parseHash(location.hash);
-    if (route) applyRoute(route);
-    else history.replaceState(history.state, "", stateHash(view(), openItemId()));
+    if (route && applyRoute(route)) return;
+    history.replaceState(history.state, "", stateHash(view(), openItemId(), menuOpen()));
   };
   window.addEventListener("popstate", onPopState);
   onCleanup(() => window.removeEventListener("popstate", onPopState));
@@ -2293,17 +2353,6 @@ export function Workspace(props: {
   };
   document.addEventListener("contextmenu", onContextMenu, true);
   onCleanup(() => document.removeEventListener("contextmenu", onContextMenu, true));
-
-  // Mobile shell: at narrow viewports the sidebar (and its footer chrome)
-  // is replaced by MobileBars (MobileShell.tsx), and the Find palette by FindSheet, a
-  // tap-first list switcher over the same result set.
-  const mobileMq = window.matchMedia("(max-width: 768px) and (pointer: coarse)");
-  const [isMobile, setIsMobile] = createSignal(mobileMq.matches);
-  const onMqChange = (e: MediaQueryListEvent) => {
-    setIsMobile(e.matches);
-  };
-  mobileMq.addEventListener("change", onMqChange);
-  onCleanup(() => mobileMq.removeEventListener("change", onMqChange));
 
   // Narrow desktop: below this width the side panel's third column
   // squeezes the main surface into uselessness, so the task surface uses
@@ -3284,35 +3333,50 @@ export function Workspace(props: {
           upcomingBadge={upcomingBadge()}
           setView={(v) => {
             // The pills stay live over an open item's page and over the
-            // Find page; close both so the destination view is visible.
-            setOpenItemId(null);
-            if (findOpen()) onFindOpenChange(false);
-            navigateTo(v);
+            // menu page; close both so the destination view is visible.
+            // One batch: the address-bar effect then sees one transition
+            // (the menu's entry handed to the destination) rather than a
+            // close and a push.
+            batch(() => {
+              setOpenItemId(null);
+              if (findOpen()) onFindOpenChange(false);
+              navigateTo(v);
+            });
           }}
-          onFind={() => onFindOpenChange(!findOpen())}
+          onMenu={() => {
+            // The menu is a page: opening it leaves an open item's page
+            // (one page at a time), and the item's history entry becomes
+            // the menu's. Tapping its pill while on it stays put, as the
+            // view pills do; the way out is a pick, another pill, or Back.
+            if (findOpen()) return;
+            batch(() => {
+              setOpenItemId(null);
+              onFindOpenChange(true);
+            });
+          }}
           onAdd={
-            view().kind === "upcoming"
-              ? () => {
-                  // No listbox to draft into on the calendar: capture a
-                  // new event through the dialog, as the header's Add
-                  // does on desktop.
-                  setOpenItemId(null);
-                  if (findOpen()) onFindOpenChange(false);
-                  setNewItemTarget(newEventTarget());
-                }
-              : (view().kind === "list" || view().kind === "focus") &&
-                  boardListId() === null
+            menuOpen()
+              ? null
+              : view().kind === "upcoming"
                 ? () => {
-                    // The pills stay live over an open item's page and the
-                    // Find page; Add captures into the list behind them,
-                    // so close both first.
+                    // No listbox to draft into on the calendar: capture a
+                    // new event through the dialog, as the header's Add
+                    // does on desktop.
                     setOpenItemId(null);
-                    if (findOpen()) onFindOpenChange(false);
-                    startDraft();
+                    setNewItemTarget(newEventTarget());
                   }
-                : null
+                : (view().kind === "list" || view().kind === "focus") &&
+                    boardListId() === null
+                  ? () => {
+                      // The pills stay live over an open item's page; Add
+                      // captures into the list behind it, so close it
+                      // first.
+                      setOpenItemId(null);
+                      startDraft();
+                    }
+                  : null
           }
-          findOpen={findOpen()}
+          menuOpen={menuOpen()}
           addDisabled={draft() !== null}
         />
         {/* Always mounted while mobile, so the first-run auth prompt

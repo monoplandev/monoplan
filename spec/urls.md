@@ -11,7 +11,7 @@ The whole address lives in the URL fragment. One self-describing token:
 ```
 url    = <origin> <path> "#" token
 token  = "item_" id | "list_" id | "inbox" | "inbox_" doc | "focus"
-       | "upcoming" | "done" | "bin"
+       | "upcoming" | "done" | "bin" | "menu"
 id     = [0-9a-f]{32}          -- uuid-v7 hex, same as ItemId / ListMeta.id
 doc    = [0-9a-f-]{32,36}      -- a server doc id (uuid, hyphenated)
 ```
@@ -36,6 +36,10 @@ lens, and an underscore day anchor on the agenda and grid
 The reserved `events` list (`events-plan.md`) has no token of its own:
 `#list_events` is accepted as an alias and canonicalised to `#upcoming`,
 its home.
+`#menu` is the phone's menu page (the mobile shell's list switcher and
+search, `FindSheet`): a page of its own there, over the view the prefs
+or the entry beneath it name. Desktop has no such page, so the token is
+ignored there and the address bar rewritten to the state on screen.
 Anything else is ignored: the client keeps whatever it was showing.
 There is no `#home`: a bare URL (no fragment) restores the last view
 from local prefs, as before URLs existed.
@@ -126,6 +130,15 @@ History entries:
   (focus handed back, or the panel swapping to its multi-select
   surface) pops the same way, so a focus-in / focus-out cycle in the
   panel leaves history unchanged.
+- The phone's menu page pushes one entry (so Back, and the swipe
+  gesture, leave it), marked in `history.state` like an item's. Opening
+  it leaves an open item's page (one page at a time) and takes over that
+  item's entry, so Back from the menu lands on the view, not the item.
+  The Menu pill opens it and, while on it, does nothing (a page's own
+  tab); leaving it with nothing else changing (Escape) pops the entry; a pick from it (a view or an item) takes the entry
+  over for the destination, so no `#menu` lingers behind it. Settings
+  opens over the page and leaves it in place. The Add pill is hidden
+  while the page is up. Crossing to the desktop viewport closes it.
 - Boot writes the initial hash with a replace, never a push.
 
 Back / Forward and hand-edited hashes apply the route the same way a

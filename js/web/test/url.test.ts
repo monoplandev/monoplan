@@ -22,6 +22,7 @@ describe("hash routes", () => {
     expect(parseHash("#bin")).toEqual({ kind: "view", view: { kind: "bin" } });
     expect(parseHash(`#list_${ID}`)).toEqual({ kind: "view", view: { kind: "list", id: ID } });
     expect(parseHash(`#item_${ID}`)).toEqual({ kind: "item", id: ID });
+    expect(parseHash("#menu")).toEqual({ kind: "menu" });
     // Leading `#` is optional.
     expect(parseHash(`item_${ID}`)).toEqual({ kind: "item", id: ID });
   });
@@ -69,6 +70,12 @@ describe("hash routes", () => {
   test("open item wins over the view", () => {
     expect(stateHash({ kind: "focus" }, null)).toBe("#focus");
     expect(stateHash({ kind: "focus" }, ID)).toBe(`#item_${ID}`);
+  });
+
+  test("the menu page wins over both", () => {
+    expect(stateHash({ kind: "focus" }, null, true)).toBe("#menu");
+    expect(stateHash({ kind: "focus" }, ID, true)).toBe("#menu");
+    expect(stateHash({ kind: "focus" }, ID, false)).toBe(`#item_${ID}`);
   });
 });
 
