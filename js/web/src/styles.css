@@ -1024,8 +1024,9 @@ body {
     display: none;
   }
 
-  /* Phone-scale title: the header is the only place the current view is
-     named (no sidebar), so give it page-heading weight. */
+  /* The title keeps the desktop's size and weight (a page-heading scale
+     overflowed the phone's width once a workspace prefix was in front
+     of it); only the header's own box changes. */
   .main-header {
     height: auto;
     padding: 16px 12px 8px;
@@ -1034,27 +1035,6 @@ body {
        top of it. */
     position: relative;
     z-index: 3;
-  }
-
-  .main-header h1 {
-    font-size: 1.5em;
-    font-weight: 700;
-  }
-
-  .main-header .list-icon-static,
-  .main-header .list-icon-trigger {
-    width: 36px;
-    height: 36px;
-  }
-
-  .main-header .list-icon-static svg,
-  .main-header .list-icon-trigger svg {
-    width: 22px;
-    height: 22px;
-  }
-
-  .main-header .list-icon-trigger {
-    font-size: 1.35em;
   }
 }
 
@@ -1246,10 +1226,16 @@ input.task-check:hover {
 /* Title line: a flex row whose text child shrinks (and ellipsizes /
    clamps) before the has-notes badge does, so the badge shrink-wraps to
    the text — right after the last word of a short title, right after
-   the ellipsis of a truncated one. */
+   the ellipsis of a truncated one.
+
+   Precedence against the inline badges: the title gives way first, down
+   to a floor (`--row-text-min`, a share of the row so it scales with
+   the phone); past that the badge group shrinks instead, and within it
+   only the place pill (the one free-text badge) ellipsizes, down to its
+   own floor. Dates and states never truncate. */
 .row-body {
   flex: 1;
-  min-width: 0;
+  min-width: var(--row-text-min, 40%);
   display: flex;
   align-items: flex-start;
   gap: 2px;
@@ -1258,7 +1244,8 @@ input.task-check:hover {
 /* Inline badge group on list rows: badges sit tighter to each other
    (4px) than the row's 8px gap that separates the group from the title. */
 .row-badges {
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -4511,9 +4498,17 @@ input.task-check:hover {
 }
 
 /* Place pill (`PlaceBadge`): the date pills' geometry and icon slot,
-   never toned; the label can run long, so it clips. */
+   never toned. The label can run long, so the pill caps its width and,
+   alone among the badges, gives way when the row is tight: the label
+   ellipsizes down to a few characters beside the pin. */
 .place-badge {
+  flex-shrink: 1;
   max-width: 160px;
+  min-width: 3.5em;
+}
+
+.place-badge-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
