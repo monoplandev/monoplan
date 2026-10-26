@@ -16,6 +16,7 @@
     "build:wasm": "wasm-pack build core/web --target nodejs --out-dir ../../js/core/wasm --out-name monoplan_core_web",
     "build:wasm:web": "wasm-pack build core/web --target bundler --out-dir ../../js/core/wasm-web --out-name monoplan_core_web",
     "build:apple": "apple/build-xcframework.sh",
+    "tray": "swift run --package-path apple/MonoplanMac",
     "start": "process-compose -f local/process-compose.yaml",
     "wipe": "scripts/wipe.sh",
     "test": "cargo test",

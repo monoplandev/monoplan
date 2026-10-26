@@ -34,6 +34,14 @@ pub enum Request {
     Doc(DocCmd),
     /// Push now and report whether the server is reachable.
     Sync,
+    /// Turn this connection into a watcher: the reply is `Watching`,
+    /// and from then on the daemon also sends `Event` frames on it
+    /// whenever the doc or the sync state changes. Ordinary requests
+    /// still work on the same connection; a client with one request in
+    /// flight at a time can tell replies and events apart by variant.
+    /// This is the projection tier of `spec/daemon-plan.md`: a watcher
+    /// re-requests what it shows, it holds no doc of its own.
+    Watch,
     /// Exit cleanly after replying.
     Shutdown,
 }
@@ -53,10 +61,30 @@ pub enum Reply {
     Synced {
         sync: SyncStatus,
     },
+    /// `Watch` accepted; events follow on this connection.
+    Watching {
+        sync: SyncStatus,
+    },
+    /// Unsolicited, only on a watching connection.
+    Event(WatchEvent),
     ShuttingDown,
     Err {
         message: String,
     },
+}
+
+/// What a watcher is told. Deliberately payload-free for doc changes:
+/// the watcher fetches the projection it shows (one request), which
+/// keeps the protocol view-agnostic and coalesces bursts for free. A
+/// watcher that falls behind the daemon's event buffer is sent one
+/// `Changed` rather than the backlog, since that is all it means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WatchEvent {
+    /// The doc changed: a local command committed, or remote ops
+    /// applied. Re-fetch.
+    Changed,
+    /// Online/offline flipped or `last_synced_at` moved.
+    Sync(SyncStatus),
 }
 
 /// Staleness, on every successful reply. A daemon that lost its
@@ -221,6 +249,61 @@ mod tests {
         assert!(read_frame::<_, Reply>(&mut b).await.unwrap().is_none());
     }
 
+    /// The wire shape foreign clients (the Swift menubar app) encode by
+    /// hand: `rmp_serde::to_vec_named`, so struct fields are string-keyed
+    /// maps, a unit variant is a bare string, and any other variant is a
+    /// one-entry map from the variant name to its payload. Pinned here
+    /// so a serde attribute change cannot silently strand them.
+    #[test]
+    fn wire_shape_is_named_maps_and_bare_unit_variants() {
+        use crate::commands::{DocCmd, agenda::AgendaArgs};
+        fn shape<T: Serialize>(v: &T) -> serde_json::Value {
+            rmp_serde::from_slice(&rmp_serde::to_vec_named(v).unwrap()).unwrap()
+        }
+        assert_eq!(
+            rmp_serde::to_vec_named(&Request::Watch).unwrap(),
+            b"\xa5Watch"
+        );
+        assert_eq!(
+            rmp_serde::to_vec_named(&Request::Hello {
+                build_id: "x".into()
+            })
+            .unwrap(),
+            b"\x81\xa5Hello\x81\xa8build_id\xa1x"
+        );
+        assert_eq!(
+            shape(&Request::Doc(DocCmd::Agenda(AgendaArgs {
+                days: 0,
+                today: None,
+                json: true,
+            }))),
+            serde_json::json!({"Doc": {"Agenda": {"days": 0, "today": null, "json": true}}})
+        );
+        let sync = SyncStatus {
+            online: false,
+            last_synced_at: Some(7),
+        };
+        assert_eq!(
+            shape(&Reply::Watching { sync }),
+            serde_json::json!({"Watching": {"sync": {"online": false, "last_synced_at": 7}}})
+        );
+        assert_eq!(
+            shape(&Reply::Event(WatchEvent::Changed)),
+            serde_json::json!({"Event": "Changed"})
+        );
+        assert_eq!(
+            shape(&Reply::Event(WatchEvent::Sync(sync))),
+            serde_json::json!({"Event": {"Sync": {"online": false, "last_synced_at": 7}}})
+        );
+        assert_eq!(
+            shape(&Reply::Output {
+                stdout: "[]\n".into(),
+                sync
+            }),
+            serde_json::json!({"Output": {"stdout": "[]\n", "sync": {"online": false, "last_synced_at": 7}}})
+        );
+    }
+
     #[test]
     fn offline_notice_reads_like_a_human_wrote_it() {
         let online = SyncStatus {
@@ -255,5 +338,8 @@ mod tests {
         let p = socket_path(&long);
         assert!(p.starts_with(std::env::temp_dir()));
         assert_eq!(p, socket_path(&long), "deterministic");
+        // Pinned so a foreign client (the Swift menubar app) computing
+        // the same fallback name can test against the same vector.
+        assert_eq!(fnv1a(b"/tmp/p"), 0x6cc12addf2745004);
     }
 }

@@ -50,3 +50,40 @@ gitignored:
 
 Run it before `swift build` / `swift test` on a fresh checkout — the package
 won't compile without those outputs present.
+
+## MonoplanMac — the menubar app
+
+`apple/MonoplanMac/` is a SwiftPM package: the macOS status-item app.
+Per `spec/daemon-plan.md` it is a *client* of `monoplan daemon`, never a
+host, and the tray and the future window app are one process. It holds
+no doc and does not depend on `MonoplanCore`: it connects to the
+daemon's Unix socket, sends `Watch`, and re-fetches
+`agenda --days 0 --json` whenever the daemon reports a change, once a
+minute, and when the menu opens. The menu shows Today's rows (time,
+title, "in 2h 15m" / "now" / "due today" / "overdue"; a row opens the
+item in the web client), an offline notice when the daemon has no
+server, "Open Monoplan" (alpha.monoplan.app) and "Quit Monoplan" (the
+daemon keeps running).
+
+Two targets: `MonoplanMacKit` (MessagePack codec for the subset
+`rmp_serde::to_vec_named` emits, the socket client, the agenda model;
+unit-tested) and the `MonoplanMac` executable (AppKit). The wire shape
+it hand-encodes is pinned on the Rust side by
+`wire_shape_is_named_maps_and_bare_unit_variants` in `cli/src/ipc.rs`.
+
+```sh
+bun run tray                                          # == swift run --package-path apple/MonoplanMac
+swift test --package-path apple/MonoplanMac           # codec / model tests, no daemon needed
+MONOPLAN_WEB_URL=http://localhost:5176 bun run tray   # point links at the dev stack
+MONOPLAN_DATA_DIR=local/cli bun run tray              # a different profile, same rule as the CLI
+MONOPLAN_TRAY_DEBUG=1 bun run tray                    # log state and rows to stderr
+```
+
+If no daemon holds the profile, the tray starts one like the CLI does
+(`monoplan daemon --detach`), using `MONOPLAN_BIN`, then
+`~/.cargo/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, then
+`./target/debug/monoplan` when run from the repo. It cannot judge build
+staleness (it is not built from the daemon's sources); the CLI still
+restarts a stale daemon on its next command.
+
+Next: an .app bundle with login-item registration; then the window.

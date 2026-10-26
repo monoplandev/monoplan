@@ -120,7 +120,8 @@ Every connection starts with a hello carrying a build id (package version plus t
 - Persists on a 1 s tick and immediately after any command that mutated, so a change is on disk before the client hears back and on the wire right after. Folds the WAL at the usual thresholds, and fully on exit.
 - Exits on SIGINT/SIGTERM, on `daemon stop`, or when it notices the profile dir has been purged.
 - There is no idle timeout: background sync is the point.
-- Not built yet: the locked state (`Unlock` over the socket when the DEK is not readable non-interactively), `install`, wake notifications, and the subscription stream for live clients (`spec/daemon-plan.md`).
+- `Watch` turns a connection into a watcher: the daemon replies `Watching` and then sends `Event(Changed)` whenever the doc changes (a local command committed, remote ops applied; a burst is one event) and `Event(Sync(..))` when online/offline or `last_synced_at` moves. Requests still work on a watching connection; replies and events are told apart by variant. The macOS menubar app (`apple/MonoplanMac`) is the first watcher: it re-fetches `agenda --days 0 --json` on `Changed`. No CLI verb exposes `Watch` yet.
+- Not built yet: the locked state (`Unlock` over the socket when the DEK is not readable non-interactively), `install`, wake notifications, and the doc-mirror subscription for full-view clients (`spec/daemon-plan.md`).
 
 ## Local state
 

@@ -27,12 +27,12 @@ use clap::{Parser, Subcommand};
 use futures_util::{SinkExt, StreamExt};
 use monoplan_core::{Event, hello_frame, parse_hello_response};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::commands::run_doc;
 use crate::config::Profile;
-use crate::ipc::{self, Reply, Request, SyncStatus, read_frame, write_frame};
+use crate::ipc::{self, Reply, Request, SyncStatus, WatchEvent, read_frame, write_frame};
 use crate::sync::{
     SNAPSHOT_MAX_WAL_BYTES, SNAPSHOT_MAX_WAL_ROWS, Session, SyncError, WsStream, connect_ws,
     drain_events, engine_options, send_outbox,
@@ -54,6 +54,10 @@ const BACKOFF_MAX: Duration = Duration::from_secs(30);
 const PING_INTERVAL: Duration = Duration::from_secs(30);
 /// Persist tick: WAL capture + threshold fold + engine timeout check.
 const PERSIST_INTERVAL: Duration = Duration::from_secs(1);
+/// Events buffered per watcher before it is deemed lagging. A lagging
+/// watcher gets one `Changed` instead of the backlog, so this only has
+/// to cover a burst between two of its reads.
+const WATCH_BUFFER: usize = 64;
 
 const LOCK_FILE: &str = "daemon.lock";
 
@@ -203,8 +207,9 @@ pub async fn run(args: DaemonArgs) -> anyhow::Result<()> {
     });
     let (status_tx, status_rx) = watch::channel(DaemonStatus::default());
     let (req_tx, req_rx) = mpsc::channel(16);
-    tokio::spawn(accept_loop(listener, req_tx, status_rx));
-    let result = Host::new(session, lock, status_tx, req_rx)
+    let (watch_tx, _) = broadcast::channel(WATCH_BUFFER);
+    tokio::spawn(accept_loop(listener, req_tx, status_rx, watch_tx.clone()));
+    let result = Host::new(session, lock, status_tx, req_rx, watch_tx)
         .run(shutdown_rx)
         .await;
     eprintln!("monoplan daemon: stopped");
@@ -289,13 +294,14 @@ fn bind(profile_dir: &Path) -> anyhow::Result<UnixListener> {
 }
 
 /// One task per connection: frames in, requests to the host, replies
-/// out. `Hello` is answered here (it needs no doc); everything else
-/// waits for the host loop, which runs requests inline against the
-/// resident doc one at a time.
+/// out. `Hello` and `Watch` are answered here (they need no doc);
+/// everything else waits for the host loop, which runs requests inline
+/// against the resident doc one at a time.
 async fn accept_loop(
     listener: UnixListener,
     req_tx: mpsc::Sender<Pending>,
     status: watch::Receiver<DaemonStatus>,
+    watch_tx: broadcast::Sender<WatchEvent>,
 ) {
     loop {
         let (stream, _) = match listener.accept().await {
@@ -311,8 +317,9 @@ async fn accept_loop(
         }
         let req_tx = req_tx.clone();
         let status = status.clone();
+        let watch_tx = watch_tx.clone();
         tokio::spawn(async move {
-            if let Err(e) = serve_conn(stream, req_tx, status).await {
+            if let Err(e) = serve_conn(stream, req_tx, status, watch_tx).await {
                 tracing::debug!("conn: {e}");
             }
         });
@@ -328,31 +335,78 @@ fn peer_is_us(stream: &UnixStream) -> bool {
 
 type Pending = (Request, oneshot::Sender<Reply>);
 
+/// Requests are read by a separate task and handed over a channel, so
+/// the `select!` below never cancels a half-read frame (a `read_frame`
+/// future dropped between its length prefix and payload would
+/// desynchronise the stream). The loop then interleaves replies with
+/// watch events on the one write half.
 async fn serve_conn(
-    mut stream: UnixStream,
+    stream: UnixStream,
     req_tx: mpsc::Sender<Pending>,
     status: watch::Receiver<DaemonStatus>,
+    watch_tx: broadcast::Sender<WatchEvent>,
 ) -> anyhow::Result<()> {
-    while let Some(req) = read_frame::<_, Request>(&mut stream).await? {
-        let reply = match req {
-            Request::Hello { .. } => Reply::Hello {
-                build_id: ipc::build_id(),
-                pid: std::process::id(),
-                sync: status.borrow().sync(),
-            },
-            other => {
-                let (tx, rx) = oneshot::channel();
-                if req_tx.send((other, tx)).await.is_err() {
-                    break;
+    let (mut rd, mut wr) = stream.into_split();
+    let (in_tx, mut in_rx) = mpsc::channel::<Request>(1);
+    let reader = tokio::spawn(async move {
+        loop {
+            match read_frame::<_, Request>(&mut rd).await {
+                Ok(Some(req)) => {
+                    if in_tx.send(req).await.is_err() {
+                        return Ok(());
+                    }
                 }
-                match rx.await {
-                    Ok(r) => r,
-                    Err(_) => break,
-                }
+                Ok(None) => return Ok(()),
+                Err(e) => return Err(e),
             }
-        };
-        write_frame(&mut stream, &reply).await?;
+        }
+    });
+    let mut events: Option<broadcast::Receiver<WatchEvent>> = None;
+    loop {
+        tokio::select! {
+            req = in_rx.recv() => {
+                let Some(req) = req else { break };
+                let reply = match req {
+                    Request::Hello { .. } => Reply::Hello {
+                        build_id: ipc::build_id(),
+                        pid: std::process::id(),
+                        sync: status.borrow().sync(),
+                    },
+                    Request::Watch => {
+                        // Subscribe before replying: nothing that
+                        // happens after `Watching` can be missed.
+                        events = Some(watch_tx.subscribe());
+                        Reply::Watching {
+                            sync: status.borrow().sync(),
+                        }
+                    }
+                    other => {
+                        let (tx, rx) = oneshot::channel();
+                        if req_tx.send((other, tx)).await.is_err() {
+                            break;
+                        }
+                        match rx.await {
+                            Ok(r) => r,
+                            Err(_) => break,
+                        }
+                    }
+                };
+                write_frame(&mut wr, &reply).await?;
+            }
+            ev = async { events.as_mut().expect("guarded").recv().await }, if events.is_some() => {
+                let ev = match ev {
+                    Ok(ev) => ev,
+                    // Behind by more than the buffer: the backlog
+                    // collapses to "something changed", which is all
+                    // a payload-free stream ever said anyway.
+                    Err(broadcast::error::RecvError::Lagged(_)) => WatchEvent::Changed,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
+                write_frame(&mut wr, &Reply::Event(ev)).await?;
+            }
+        }
     }
+    reader.abort();
     Ok(())
 }
 
@@ -368,8 +422,14 @@ pub async fn spawn(profile: Profile) -> Result<DaemonHandle, SyncError> {
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let (status_tx, status_rx) = watch::channel(DaemonStatus::default());
     let (req_tx, req_rx) = mpsc::channel(16);
-    tokio::spawn(accept_loop(listener, req_tx, status_rx.clone()));
-    let task = tokio::spawn(Host::new(session, lock, status_tx, req_rx).run(shutdown_rx));
+    let (watch_tx, _) = broadcast::channel(WATCH_BUFFER);
+    tokio::spawn(accept_loop(
+        listener,
+        req_tx,
+        status_rx.clone(),
+        watch_tx.clone(),
+    ));
+    let task = tokio::spawn(Host::new(session, lock, status_tx, req_rx, watch_tx).run(shutdown_rx));
     Ok(DaemonHandle {
         status: status_rx,
         shutdown: Some(shutdown_tx),
@@ -434,6 +494,9 @@ struct Host {
     socket_path: std::path::PathBuf,
     status: watch::Sender<DaemonStatus>,
     requests: mpsc::Receiver<Pending>,
+    /// Fan-out to watching connections. `send` fails when nobody is
+    /// watching, which is the common case and not an error.
+    watchers: broadcast::Sender<WatchEvent>,
     ws: Option<WsStream>,
     backoff: Duration,
     next_connect: Instant,
@@ -453,6 +516,7 @@ impl Host {
         lock: DaemonLock,
         status: watch::Sender<DaemonStatus>,
         requests: mpsc::Receiver<Pending>,
+        watchers: broadcast::Sender<WatchEvent>,
     ) -> Self {
         let dir = session.profile_dir().to_path_buf();
         Host {
@@ -462,6 +526,7 @@ impl Host {
             socket_path: ipc::socket_path(&dir),
             status,
             requests,
+            watchers,
             ws: None,
             backoff: BACKOFF_MIN,
             next_connect: Instant::now(),
@@ -552,6 +617,7 @@ impl Host {
                 self.session.persist_engine_state().await?;
                 self.session.engine.flush();
                 self.pump().await;
+                self.notify_if_changed();
                 match result {
                     Ok(()) => Reply::Output {
                         stdout: String::from_utf8_lossy(&buf).into_owned(),
@@ -585,6 +651,10 @@ impl Host {
                 let _ = reply.send(Reply::ShuttingDown);
                 return Ok(true);
             }
+            // Answered in the connection task; never reaches the host.
+            Request::Watch => Reply::Err {
+                message: "watch is handled per connection".into(),
+            },
         };
         let _ = reply.send(out);
         Ok(false)
@@ -664,6 +734,7 @@ impl Host {
                     return;
                 }
                 self.pump().await;
+                self.notify_if_changed();
             }
             Some(Ok(Message::Pong(_))) => self.awaiting_pong = false,
             // tungstenite queues the Pong reply itself; it leaves on the
@@ -681,9 +752,9 @@ impl Host {
         self.session
             .engine
             .snapshot_if_wal_exceeds(SNAPSHOT_MAX_WAL_ROWS, SNAPSHOT_MAX_WAL_BYTES)?;
-        // No subscribers yet (phase 5): drain the doc's AppEvents so
-        // they don't accumulate for the life of the process.
-        while self.session.engine.pop_app_event().is_some() {}
+        // Anything the two hot paths did not already report (there
+        // should be nothing); also keeps the queue from accumulating.
+        self.notify_if_changed();
         if self.ws.is_some() {
             if let Some(at) = self.connected_at
                 && at.elapsed() > HANDSHAKE_TIMEOUT
@@ -785,6 +856,8 @@ impl Host {
             last_contiguous_seq: self.session.engine.last_contiguous_seq(),
             connects: self.status.borrow().connects,
         };
+        let prev_sync = self.status.borrow().sync();
+        let now_sync = next.sync();
         self.status.send_if_modified(|s| {
             if *s == next {
                 false
@@ -793,5 +866,22 @@ impl Host {
                 true
             }
         });
+        if now_sync != prev_sync {
+            let _ = self.watchers.send(WatchEvent::Sync(now_sync));
+        }
+    }
+
+    /// Drain the doc's `AppEvent` queue and, if it held anything, tell
+    /// watchers once. The per-event payloads are for in-process
+    /// mirrors; over IPC a watcher re-fetches its projection, so a
+    /// burst of N events is one frame.
+    fn notify_if_changed(&mut self) {
+        let mut changed = false;
+        while self.session.engine.pop_app_event().is_some() {
+            changed = true;
+        }
+        if changed {
+            let _ = self.watchers.send(WatchEvent::Changed);
+        }
     }
 }

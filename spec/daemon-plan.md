@@ -1,6 +1,6 @@
 # Daemon plan
 
-Status: phases 1 to 3 built 2026-10-21 (`cli/src/daemon.rs` host + socket server, `cli/src/ipc.rs`, `cli/src/client.rs`, every doc verb ported, `-s` removed, `daemon stop|status`; tests in `cli/tests/daemon.rs` and `cli/tests/cli_bin.rs`). Not built: `daemon install`, the locked state, wake notifications, subscriptions. Written 2026-10-21. The built behaviour is documented in `spec/cli.md` "Process model"; this file keeps the reasoning and the remaining plan. Supersedes the deleted
+Status: phases 1 to 3 built 2026-10-21 (`cli/src/daemon.rs` host + socket server, `cli/src/ipc.rs`, `cli/src/client.rs`, every doc verb ported, `-s` removed, `daemon stop|status`; tests in `cli/tests/daemon.rs` and `cli/tests/cli_bin.rs`). Phase 5's projection tier built 2026-10-26 (`Watch` / `Watching` / `Event`; first watcher is the macOS menubar app in `apple/MonoplanMac`). Not built: `daemon install`, the locked state, wake notifications, the doc-mirror subscription. Written 2026-10-21. The built behaviour is documented in `spec/cli.md` "Process model"; this file keeps the reasoning and the remaining plan. Supersedes the deleted
 `spec/tui-plan.md` (its "no daemon" conclusion rested on boot time,
 which is no longer the question) and answers the daemon question that
 `spec/cli.md` "Sync lifecycle" deferred.
@@ -57,6 +57,10 @@ profile it is a second owner of one doc, on two profiles it is two
 devices on one laptop, each pinning the horizon and seeing the other's
 edits only via the server. Mobile is the exception (see "Mobile hosts"):
 iOS cannot run a daemon, so the iOS app embeds core as a full host.
+Decided 2026-10-26: the menubar item and the macOS window app are one
+process (accessory activation policy, status item always present, window
+on demand), not two; the daemon makes this a packaging choice only. It
+lives in `apple/MonoplanMac/` (`bun run tray`).
 
 ## Process topology
 
@@ -225,6 +229,23 @@ The one-shot CLI keeps using projections: a process that prints a list
 and exits should not import a doc to do it. Both shapes coexist (`Ls`
 returns a projection, `Subscribe` returns doc bytes).
 
+Lightweight live clients also use projections (built 2026-10-26). A
+tray that shows today's events, a widget, or a notification scheduler
+needs one projection plus a change signal, not a mirror: `Watch` turns
+the connection into a watcher (`Reply::Watching`), after which the
+daemon sends `Reply::Event(WatchEvent::Changed)` whenever the doc's
+`AppEvent` queue was non-empty after a local command or a remote frame
+(a burst is one event; a watcher that lags the 64-event buffer gets one
+`Changed`, since that is all the stream says anyway) and
+`Event(WatchEvent::Sync(SyncStatus))` on every status transition.
+Requests still work on a watching connection; with one in flight at a
+time the client tells replies and events apart by variant. The client
+re-requests its projection, debounced, and on a timer. The mirror
+(`Subscribe` / `Snapshot` / `Update` below) stays the plan for
+full-view clients, and only if projection re-fetch proves too slow for
+a specific view; Tailscale's frontends run on the equivalent of this
+tier (`WatchIPNBus`) and never mirror the backend.
+
 Types live in `cli/src/ipc.rs` for now; they move to a `crates/ipc`
 crate when the first non-CLI client (Swift, TUI) needs them.
 
@@ -357,12 +378,15 @@ about the product.
 4. **Lifecycle** (partly built). `daemon stop|status` exist. Not built:
    `install|uninstall`, the locked state and `Unlock`, wake
    notifications.
-5. **Subscriptions.** `Subscribe`, `Snapshot`, and `Update` fan-out
-   from the daemon's post-apply hook. Land this with the first live
-   client (TUI or tray), not before: there is nothing to test it
-   against until then. The first mirror test is a second `Doc` in the
-   test process importing the stream and asserting it converges with
-   the daemon's after a local intent and a remote frame.
+5. **Subscriptions.** Projection tier built 2026-10-26: `Watch` and
+   `Event` fan-out from the host after local commands and remote
+   frames, tested in `cli/tests/daemon.rs`
+   (`watcher_hears_sync_local_and_remote_changes`), consumed by the
+   macOS menubar app. The mirror tier (`Subscribe`, `Snapshot`,
+   `Update`) is deferred until a full-view client needs it; its first
+   test is a second `Doc` in the test process importing the stream and
+   asserting it converges with the daemon's after a local intent and a
+   remote frame.
 
 Update `spec/cli.md` ("Sync lifecycle", "Status", the `-s` flag) as
 each phase lands rather than in one rewrite.
