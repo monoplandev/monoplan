@@ -1,6 +1,6 @@
 # Monoplan
 
-[Monoplan](https://monoplan.app/) is an e2ee, local-first, tasks/reminders app i.e. todo list, with conflict resolution backed by Loro. It is optimised for ergonomics and frictionless capture and will work offline.
+[Monoplan](https://monoplan.app/) is an e2ee, local-first & collaborative, tasks + calendar app, with conflict resolution backed by Loro. It is optimised for ergonomics and frictionless capture and will work offline.
 
 https://github.com/user-attachments/assets/8b64c3d5-279a-4467-85c1-b5930639a0e9
 
@@ -12,7 +12,7 @@ https://github.com/user-attachments/assets/8b64c3d5-279a-4467-85c1-b5930639a0e9
 docker run -d \
     -p 8000:8000 \
     -v /srv/monoplan:/data \
-    ghcr.io/airdaydev/airday-server:v0.0.1-alpha.13
+    ghcr.io/airdaydev/airday-server:v0.0.1-alpha.15
 ```
 
 ```
@@ -28,10 +28,12 @@ docker run -d \
 ```
 
 ## Development Requirements
+
 - Rust
 - Bun
 - sqlx-cli: (`cargo install sqlx-cli`)
 - caddy with cloudflare plugin:
+
 ```
 go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
 export PATH="$PATH:$(go env GOPATH)/bin" >> .zshenv
@@ -40,6 +42,7 @@ mv caddy /usr/local/bin
 ```
 
 ## Development Setup (MacOS & Arch Linux)
+
 ```bash
 bun install
 bun run config
