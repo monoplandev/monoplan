@@ -286,6 +286,16 @@ mod tests {
             }))),
             serde_json::json!({"Doc": {"Focus": {"cmd": null, "json": true}}})
         );
+        assert_eq!(
+            shape(&Request::Doc(DocCmd::Lists(crate::commands::lists::ListsArgs {
+                cmd: crate::commands::lists::ListsCmd::Ls {
+                    json: true,
+                    archived: false,
+                    all: true,
+                },
+            }))),
+            serde_json::json!({"Doc": {"Lists": {"cmd": {"Ls": {"json": true, "archived": false, "all": true}}}}})
+        );
         let sync = SyncStatus {
             online: false,
             last_synced_at: Some(7),

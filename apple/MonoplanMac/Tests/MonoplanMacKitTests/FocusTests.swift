@@ -22,4 +22,19 @@ final class FocusTests: XCTestCase {
         XCTAssertEqual(lines.map(\.note), [nil, nil, nil])
         XCTAssertTrue(StarredMenu.lines(from: []).isEmpty)
     }
+
+    func testListNamesBecomeTheMutedNote() throws {
+        let names = Lists.names(from: try Lists.parse("""
+        [{"id":"work","name":"Work","archived_at":null,"created_at":1},
+         {"id":"inbox","name":"should not shadow","archived_at":null,"created_at":1}]
+        """))
+        XCTAssertEqual(names, ["work": "Work", "inbox": "Inbox", "events": "Events"])
+        let lines = StarredMenu.lines(from: try Focus.parse(sample), listNames: names)
+        XCTAssertEqual(lines.map(\.note), ["Work", "Inbox", "Inbox"])
+        // Unknown ids show nothing rather than a uuid.
+        let orphan = try Focus.parse("""
+        [{"pos":1,"id":"z","text":"t","list_id":"0192-uuid","state":"todo"}]
+        """)
+        XCTAssertNil(StarredMenu.lines(from: orphan, listNames: names)[0].note)
+    }
 }

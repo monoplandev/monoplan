@@ -26,6 +26,12 @@ final class DaemonClientTests: XCTestCase {
             .map(["Doc": .map(["Focus": .map(["cmd": .nil, "json": .bool(true)])])])
         )
         XCTAssertEqual(
+            Request.lists.value,
+            .map(["Doc": .map(["Lists": .map(["cmd": .map(["Ls": .map([
+                "json": .bool(true), "archived": .bool(false), "all": .bool(true),
+            ])])])])])
+        )
+        XCTAssertEqual(
             Request.agenda(days: 0).value,
             .map(["Doc": .map(["Agenda": .map(["days": .int(0), "today": .nil, "json": .bool(true)])])])
         )

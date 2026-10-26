@@ -26,9 +26,17 @@ public enum StarredMenu {
     /// point of curating it.
     public static let limit = 3
 
-    public static func lines(from rows: [FocusRow], limit: Int = limit) -> [MenuLine] {
+    /// `listNames` is id → name; the item's list is shown as the muted
+    /// note, or nothing when the id is unknown (a list the fetch missed
+    /// is not worth showing a uuid for).
+    public static func lines(from rows: [FocusRow], listNames: [String: String] = [:], limit: Int = limit) -> [MenuLine] {
         rows.prefix(limit).map { row in
-            MenuLine(id: row.id, title: TodayMenu.clipped(row.text), note: nil, done: false)
+            MenuLine(
+                id: row.id,
+                title: TodayMenu.clipped(row.text),
+                note: listNames[row.listId].map(TodayMenu.clipped),
+                done: false
+            )
         }
     }
 }

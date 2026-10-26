@@ -47,6 +47,9 @@ public enum Request {
     case agenda(days: Int)
     /// `monoplan focus --json`: the Starred lens (spec/focus.md).
     case focus
+    /// `monoplan lists ls --json --all`: id → name, archived included so
+    /// every list id an item can carry resolves.
+    case lists
 
     var value: MPValue {
         switch self {
@@ -60,6 +63,10 @@ public enum Request {
             ])])])
         case .focus:
             return .map(["Doc": .map(["Focus": .map(["cmd": .nil, "json": .bool(true)])])])
+        case .lists:
+            return .map(["Doc": .map(["Lists": .map(["cmd": .map(["Ls": .map([
+                "json": .bool(true), "archived": .bool(false), "all": .bool(true),
+            ])])])])])
         }
     }
 }

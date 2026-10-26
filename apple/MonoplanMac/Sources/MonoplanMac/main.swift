@@ -33,6 +33,8 @@ final class TrayController: NSObject, NSMenuDelegate {
     private let client: DaemonClient
     private var lines: [MenuLine] = []
     private var starred: [MenuLine] = []
+    private var starredRows: [FocusRow] = []
+    private var listNames: [String: String] = Lists.names(from: [])
     private var fetchError: String?
     private var refreshQueued = false
     private var minuteTimer: Timer?
@@ -101,16 +103,26 @@ final class TrayController: NSObject, NSMenuDelegate {
             }
             self.rebuildMenu()
         }
+        client.send(.lists) { [weak self] result in
+            guard let self else { return }
+            if case .success(.output(let stdout, _)) = result,
+               let rows = try? Lists.parse(stdout) {
+                self.listNames = Lists.names(from: rows)
+                self.starred = StarredMenu.lines(from: self.starredRows, listNames: self.listNames)
+                self.rebuildMenu()
+            }
+        }
         client.send(.focus) { [weak self] result in
             guard let self else { return }
             if case .success(.output(let stdout, _)) = result,
                let rows = try? Focus.parse(stdout) {
-                self.starred = StarredMenu.lines(from: rows)
+                self.starredRows = rows
             } else {
                 // Today is the headline; a failed Starred fetch just
                 // leaves the section empty rather than replacing it.
-                self.starred = []
+                self.starredRows = []
             }
+            self.starred = StarredMenu.lines(from: self.starredRows, listNames: self.listNames)
             self.rebuildMenu()
         }
     }
@@ -127,7 +139,7 @@ final class TrayController: NSObject, NSMenuDelegate {
             NSLog("MonoplanMac: state=%@ lines=%@ starred=%@ error=%@",
                   String(describing: client.state),
                   lines.map { "\($0.title)\($0.note.map { " [\($0)]" } ?? "")" }.joined(separator: " | "),
-                  starred.map(\.title).joined(separator: " | "),
+                  starred.map { "\($0.title)\($0.note.map { " [\($0)]" } ?? "")" }.joined(separator: " | "),
                   fetchError ?? "-")
         }
         menu.removeAllItems()
