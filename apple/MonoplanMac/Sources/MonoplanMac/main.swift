@@ -149,19 +149,20 @@ final class TrayController: NSObject, NSMenuDelegate {
         case .connecting(let reason):
             addDisabled("Daemon not running · \(reason)")
         case .connected:
+            let noteTab = Self.noteTabLocation(for: lines + starred)
             if let fetchError {
                 addDisabled(fetchError)
             } else if lines.isEmpty {
                 addDisabled("Nothing today")
             } else {
-                for line in lines { menu.addItem(rowItem(line)) }
+                for line in lines { menu.addItem(rowItem(line, noteTab: noteTab)) }
             }
             menu.addItem(.separator())
             addDisabled("Starred")
             if starred.isEmpty {
                 addDisabled("Nothing starred")
             } else {
-                for line in starred { menu.addItem(rowItem(line)) }
+                for line in starred { menu.addItem(rowItem(line, noteTab: noteTab)) }
             }
         }
 
@@ -171,10 +172,14 @@ final class TrayController: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
-        let open = NSMenuItem(title: "Open Monoplan", action: #selector(openWebsite), keyEquivalent: "o")
+        // No key equivalents: a status menu is not where shortcuts
+        // live, and one anywhere makes AppKit reserve a trailing
+        // column on every row, which shows as dead space after the
+        // right-aligned notes.
+        let open = NSMenuItem(title: "Open Monoplan", action: #selector(openWebsite), keyEquivalent: "")
         open.target = self
         menu.addItem(open)
-        let quit = NSMenuItem(title: "Quit Monoplan", action: #selector(quit), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit Monoplan", action: #selector(quit), keyEquivalent: "")
         quit.target = self
         menu.addItem(quit)
     }
@@ -185,22 +190,44 @@ final class TrayController: NSObject, NSMenuDelegate {
         menu.addItem(item)
     }
 
-    private func rowItem(_ line: MenuLine) -> NSMenuItem {
+    private static let titleFont = NSFont.menuFont(ofSize: 0)
+    private static let noteFont = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
+    /// Gap between the longest title and the start of the note column.
+    private static let noteGap: CGFloat = 20
+
+    private static func displayTitle(_ line: MenuLine) -> String {
+        line.done ? "✓ \(line.title)" : line.title
+    }
+
+    /// One right-aligned tab stop shared by every row: the widest title
+    /// plus a gap plus the widest note. Notes then end on a common right
+    /// edge across Today and Starred, and the menu is exactly as wide as
+    /// its widest title-plus-note, no wider.
+    private static func noteTabLocation(for lines: [MenuLine]) -> CGFloat {
+        let titles = lines.map { NSAttributedString(string: displayTitle($0), attributes: [.font: titleFont]).size().width }
+        let notes = lines.compactMap { $0.note }.map { NSAttributedString(string: $0, attributes: [.font: noteFont]).size().width }
+        return ceil((titles.max() ?? 0) + noteGap + (notes.max() ?? 0))
+    }
+
+    private func rowItem(_ line: MenuLine, noteTab: CGFloat) -> NSMenuItem {
         let item = NSMenuItem(title: "", action: #selector(openItem(_:)), keyEquivalent: "")
         item.target = self
         item.representedObject = line.id
-        let title = NSMutableAttributedString(
-            string: line.done ? "✓ \(line.title)" : line.title,
-            attributes: line.done ? [.foregroundColor: NSColor.secondaryLabelColor] : [:]
-        )
+        var titleAttributes: [NSAttributedString.Key: Any] = [.font: Self.titleFont]
+        if line.done { titleAttributes[.foregroundColor] = NSColor.secondaryLabelColor }
+        let title = NSMutableAttributedString(string: Self.displayTitle(line), attributes: titleAttributes)
         if let note = line.note {
             title.append(NSAttributedString(
-                string: "   \(note)",
+                string: "\t\(note)",
                 attributes: [
                     .foregroundColor: note == "overdue" ? NSColor.systemRed : NSColor.secondaryLabelColor,
-                    .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
+                    .font: Self.noteFont,
                 ]
             ))
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.tabStops = [NSTextTab(textAlignment: .right, location: noteTab, options: [:])]
+            paragraph.lineBreakMode = .byClipping
+            title.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: title.length))
         }
         item.attributedTitle = title
         return item
