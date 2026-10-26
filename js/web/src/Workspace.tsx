@@ -199,18 +199,6 @@ function loadDoneShowListPref(): boolean {
   }
 }
 
-// Same origin-list badge flag for the Focus lens, which is also a single
-// global view. Off by default — only the "on" state is persisted
-// (stored as "1").
-const FOCUS_SHOW_LIST_PREF_KEY = "monoplan:focus-show-list";
-function loadFocusShowListPref(): boolean {
-  try {
-    return localStorage.getItem(FOCUS_SHOW_LIST_PREF_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
 // Heuristic for "user has a real keyboard + precise pointer" — i.e. the
 // shortcut hints are worth showing. Reactive: an iPad gaining a Magic
 // Keyboard or a laptop docked to a touchscreen will flip live.
@@ -551,19 +539,6 @@ export function Workspace(props: {
     try {
       if (show) localStorage.removeItem(DONE_SHOW_LIST_PREF_KEY);
       else localStorage.setItem(DONE_SHOW_LIST_PREF_KEY, "0");
-    } catch {
-      // Quota/private-mode failures just lose the preference.
-    }
-  };
-  // Whether the Focus lens badges each item with its origin list.
-  const [focusShowList, setFocusShowListSignal] = createSignal<boolean>(
-    loadFocusShowListPref(),
-  );
-  const setFocusShowList = (show: boolean) => {
-    setFocusShowListSignal(show);
-    try {
-      if (show) localStorage.setItem(FOCUS_SHOW_LIST_PREF_KEY, "1");
-      else localStorage.removeItem(FOCUS_SHOW_LIST_PREF_KEY);
     } catch {
       // Quota/private-mode failures just lose the preference.
     }
@@ -3060,23 +3035,6 @@ export function Workspace(props: {
                 </Tooltip.Portal>
               </Tooltip>
             </Show>
-            <Show when={view().kind === "focus"}>
-              <DisplayOptionsPopover>
-                <Switch
-                  class="done-switch"
-                  checked={focusShowList()}
-                  onChange={(checked) => setFocusShowList(checked)}
-                >
-                  <Switch.Label class="done-switch-label">
-                    {m().workspace.showOriginList}
-                  </Switch.Label>
-                  <Switch.Input class="done-switch-input" />
-                  <Switch.Control class="done-switch-control">
-                    <Switch.Thumb class="done-switch-thumb" />
-                  </Switch.Control>
-                </Switch>
-              </DisplayOptionsPopover>
-            </Show>
             {/* The calendar merges every doc; each can be hidden here. A
                 synced personal pref on the Home doc
                 (`spec/sharing-plan.md`). Only offered once there is more
@@ -3224,9 +3182,7 @@ export function Workspace(props: {
                         selection={selection}
                         viewKind={view().kind}
                         showList={() =>
-                          view().kind === "focus"
-                            ? focusShowList()
-                            : doneShowList()
+                          view().kind === "focus" || doneShowList()
                         }
                         listLabel={listLabel}
                         showState={() => {
