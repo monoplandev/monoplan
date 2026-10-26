@@ -74,7 +74,8 @@ it hand-encodes is pinned on the Rust side by
 `wire_shape_is_named_maps_and_bare_unit_variants` in `cli/src/ipc.rs`.
 
 ```sh
-bun run tray                                          # == swift run --package-path apple/MonoplanMac
+bun run tray                                          # build Monoplan.app (debug) and run the binary inside it
+bun run tray:app                                      # build Monoplan.app (release) and `open` it
 swift test --package-path apple/MonoplanMac           # codec / model tests, no daemon needed
 MONOPLAN_WEB_URL=http://localhost:5176 bun run tray   # point links at the dev stack
 MONOPLAN_DATA_DIR=local/cli bun run tray              # a different profile, same rule as the CLI
@@ -88,4 +89,17 @@ If no daemon holds the profile, the tray starts one like the CLI does
 staleness (it is not built from the daemon's sources); the CLI still
 restarts a stale daemon on its next command.
 
-Next: an .app bundle with login-item registration; then the window.
+`apple/MonoplanMac/build-app.sh` lays out `apple/MonoplanMac/.build/Monoplan.app`
+(gitignored): the SwiftPM binary, an Info.plist (`app.monoplan.mac`,
+`LSUIElement`, version from the workspace `Cargo.toml`), an ad-hoc
+signature, and the app icon. The icon is the Icon Composer document
+`apple/icon.icon`; `actool` compiles it straight from that file into
+`Assets.car` (the layered icon macOS 26 renders) and `icon.icns` (the
+flat fallback for macOS 14 and 15). Edit the icon in Icon Composer and
+rebuild; nothing else references it. `bun run tray` runs the binary
+*inside* the bundle rather than `swift run`, so dev runs show the icon in
+Finder, Login Items and Force Quit while stderr stays on the terminal.
+The menu bar glyph is separate: a template image drawn in `main.swift`.
+
+Next: login-item registration and bundling the `monoplan` binary; then
+the window.
