@@ -1,13 +1,17 @@
-//! Focus lens commands: list (default action), add, rm, mv.
+//! Starred commands: `starred` (list, `mv` to reorder), `star`, `unstar`.
 //!
-//! The curated single-tier Focus lens (`spec/focus.md`). References items
-//! across lists; the referenced item stays in its home list. `monoplan
-//! focus` with no sub-subcommand lists the view; `add` / `rm` / `mv`
-//! mutate the reference container.
+//! The curated single-tier Focus lens (`spec/focus.md`), surfaced to the
+//! user as "Starred" (the spec's naming note). References items across
+//! lists; the referenced item stays in its home list. `monoplan starred`
+//! lists the view; `star` / `unstar` / `starred mv` mutate the reference
+//! container. `monoplan focus [add|rm|mv]` is the hidden pre-rename
+//! spelling: `focus` aliases `starred`, and `add` / `rm` stay as hidden
+//! sub-subcommands. The IPC frame is still `DocCmd::Focus(FocusArgs)`;
+//! `star` / `unstar` are folded into it in `Cli::run`.
 //!
 //! Positions on the CLI are **1-based** to match the numbered listing a
-//! user sees from `monoplan focus`; they are converted to the doc layer's
-//! 0-based visible index here.
+//! user sees from `monoplan starred`; they are converted to the doc
+//! layer's 0-based visible index here.
 
 use clap::{Parser, Subcommand};
 use std::io::Write;
@@ -26,19 +30,29 @@ pub struct FocusArgs {
     pub json: bool,
 }
 
+/// `monoplan star <item_id> [pos]`.
+#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
+pub struct StarArgs {
+    pub item_id: String,
+    /// 1-based position to insert at (default: append).
+    pub pos: Option<usize>,
+}
+
 #[derive(Subcommand, Debug, Clone, Serialize, Deserialize)]
 pub enum FocusCmd {
-    /// Add an item reference to Focus. Defaults to append; pass a 1-based
-    /// position to insert. No-op if the item is already focused or is not
-    /// Open (Done / binned items cannot be focused).
+    /// Hidden pre-rename spelling of `monoplan star`. No-op if the item is
+    /// already starred or is not Open (Done / binned items cannot be
+    /// starred).
+    #[command(hide = true)]
     Add {
         item_id: String,
         /// 1-based position to insert at (default: append).
         pos: Option<usize>,
     },
-    /// Remove an item's reference from Focus. The item is untouched.
+    /// Hidden pre-rename spelling of `monoplan unstar`.
+    #[command(hide = true)]
     Rm { item_id: String },
-    /// Reorder an item's reference to a 1-based position within Focus.
+    /// Reorder a starred item to a 1-based position.
     Mv { item_id: String, pos: usize },
 }
 
@@ -95,8 +109,9 @@ fn one_based_to_index(pos: usize) -> usize {
 
 fn print_items(out: &mut dyn Write, items: &[ItemView]) -> anyhow::Result<()> {
     for (i, item) in items.iter().enumerate() {
-        // 1-based position matches the `mv` / `add` argument space. Focus
-        // is Open-only, so the box carries the workflow state mark.
+        // 1-based position matches the `star` / `starred mv` argument
+        // space. Starred is Open-only, so the box carries the workflow
+        // state mark.
         let mark = super::items::state_mark(item.state);
         writeln!(out, "{:>3}  {}  [{mark}] {}", i + 1, item.id, item.text)?;
     }

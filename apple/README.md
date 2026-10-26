@@ -62,7 +62,7 @@ daemon's Unix socket, sends `Watch`, and re-fetches
 minute, and when the menu opens. The menu shows Today's rows (time,
 title, "in 2h 15m" / "now" / "due today" / "overdue"; a row opens the
 item in the web client), a Starred section with the first three rows of
-the Focus lens (`focus --json`) each with its list's name muted on the
+the Focus lens (`starred --json`) each with its list's name muted on the
 right (`lists ls --json --all`), an offline notice when the daemon has no
 server, "Open Monoplan" (alpha.monoplan.app) and "Quit Monoplan" (the
 daemon keeps running).

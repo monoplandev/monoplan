@@ -47,14 +47,16 @@ Single binary `monoplan`. Subcommands:
 Lifecycle is the atomic `lifecycle` workflow register (`[state, at]`, states Backlog | Todo | In Progress | Review | Done | Cancelled) masked by the orthogonal `binned_at` bin flag — see `spec/data-model.md` "Lifecycle". Each workflow command writes the register `[state, now]` (and clears any bin mask) in a single commit; re-applying the current resolved state is a no-op. `ls` boxes carry a one-character state mark (` ` backlog, `-` todo, `>` in progress, `?` review, `x` done, `/` cancelled, `~` binned). `ls` hides closed items (Done and Cancelled) unless `--done`; `agenda` never shows cancelled items.
 
 ### Focus
-The curated single-tier Focus lens (`spec/focus.md`). References items across lists; the item stays in its home list.
+The curated single-tier Focus lens (`spec/focus.md`), named "Starred" on every user-facing surface including the CLI (since 2026-10-26). References items across lists; the item stays in its home list.
 
-- `monoplan focus` — list the Focus view (Open referenced items, in curated order)
-- `monoplan focus add <item_id> [pos]` — add a reference (default append); no-op if already focused
-- `monoplan focus rm <item_id>` — remove the reference (item untouched)
-- `monoplan focus mv <item_id> <pos>` — reorder within Focus
+- `monoplan starred` — list the Starred view (Open referenced items, in curated order); `--json` for machine output
+- `monoplan star <item_id> [pos]` — add a reference (default append; `pos` is 1-based); no-op if already starred
+- `monoplan unstar <item_id>` — remove the reference (item untouched)
+- `monoplan starred mv <item_id> <pos>` — reorder within Starred
 
-Marking a focused item `done` removes it from Focus automatically; binning/deleting drops it from the view.
+`monoplan focus [add|rm|mv]` is the hidden pre-rename spelling and keeps working; the IPC frame is still `DocCmd::Focus`.
+
+Marking a starred item `done` removes it from Starred automatically; binning/deleting drops it from the view.
 
 ### Lists
 - `monoplan lists ls` — active lists only by default; `--archived` shows only archived lists, `--all` shows both. `--json` output includes `archived_at` (null for active lists).
@@ -98,7 +100,7 @@ One binary, two roles. `monoplan daemon` owns the profile for as long as it runs
 
 Dispatch, at the top of `Cli::run`:
 
-- Doc commands (`add`, `ls`, workflow verbs, `mv`, `edit`, dates, `place`/`places`, `agenda`, `focus`, `lists`, `bin`, `export-json`) are forwarded as a `DocCmd` and their output comes back as text. `add -` reads stdin in the client; `export-json --out` writes the file in the client.
+- Doc commands (`add`, `ls`, workflow verbs, `mv`, `edit`, dates, `place`/`places`, `agenda`, `starred`/`star`/`unstar`, `lists`, `bin`, `export-json`) are forwarded as a `DocCmd` and their output comes back as text. `add -` reads stdin in the client; `export-json --out` writes the file in the client.
 - `status` and `cache status` are direct, read-only sqlite reads and never contact or start the daemon. `cache clear` refuses while a daemon is running.
 - `signup`, `login`, `recover`, `password` and `logout` work on the profile files, so each first stops a running daemon; `login` and `recover` then sync through a fresh one, which is what starts it.
 - `share` is HTTP against the server and runs in the client.

@@ -1,9 +1,11 @@
 # Focus (curated lens)
 
 > **UI label (since 2026-10-20): "Starred"** ("Destacados" in Spanish), with
-> "Star" / "Unstar" as the verbs and the gold star glyph. "Focus" remains the
-> name of the concept, the `focus` container, `FocusRef`, and the CLI
-> `focus` subcommand; only user-facing strings changed.
+> "Star" / "Unstar" as the verbs and the gold star glyph. The CLI followed on
+> 2026-10-26: `starred`, `star`, `unstar`, `starred mv` (`focus` is a hidden
+> alias). "Focus" remains the name of the concept, the `focus` container,
+> `FocusRef`, the `#focus` URL fragment and the `DocCmd::Focus` IPC frame;
+> only user-facing strings changed.
 
 Focus is a reserved, single-tier, curated **list-by-reference**: it points at
 items that live in other lists rather than owning them. It is a *lens*, not a

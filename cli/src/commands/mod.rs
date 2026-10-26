@@ -88,8 +88,13 @@ enum Cmd {
     Places(items::PlacesArgs),
     /// Open items by day: Today (with overdue and past-dated folded in), then the coming days.
     Agenda(agenda::AgendaArgs),
-    /// Curated Focus lens: list (default), add, rm, mv.
-    Focus(focus::FocusArgs),
+    /// Starred items in curated order; `starred mv` reorders. (`focus` is a hidden alias.)
+    #[command(alias = "focus")]
+    Starred(focus::FocusArgs),
+    /// Star an item (append, or insert at a 1-based position). No-op if already starred.
+    Star(focus::StarArgs),
+    /// Unstar an item. The item itself is untouched.
+    Unstar(items::IdArg),
     /// Manage lists.
     Lists(lists::ListsArgs),
     /// Inspect the local cache.
@@ -216,7 +221,18 @@ impl Cli {
             Cmd::Place(a) => DocCmd::Place(a),
             Cmd::Places(a) => DocCmd::Places(a),
             Cmd::Agenda(a) => DocCmd::Agenda(a),
-            Cmd::Focus(a) => DocCmd::Focus(a),
+            Cmd::Starred(a) => DocCmd::Focus(a),
+            Cmd::Star(a) => DocCmd::Focus(focus::FocusArgs {
+                cmd: Some(focus::FocusCmd::Add {
+                    item_id: a.item_id,
+                    pos: a.pos,
+                }),
+                json: false,
+            }),
+            Cmd::Unstar(a) => DocCmd::Focus(focus::FocusArgs {
+                cmd: Some(focus::FocusCmd::Rm { item_id: a.item_id }),
+                json: false,
+            }),
             Cmd::Lists(a) => DocCmd::Lists(a),
         };
         let profile = Profile::require_active()?;
