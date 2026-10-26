@@ -185,6 +185,13 @@ impl Session {
     /// Borrow the local doc — commands read and mutate via this. Doc's
     /// own methods take `&self` (loro uses interior mutability) so a
     /// shared reference is enough for both reads and writes.
+    /// The enrolled account row (id, email, device), read from the db
+    /// on each call; it only changes across a login, which restarts
+    /// the daemon.
+    pub fn account(&self) -> Result<crate::storage::Account, monoplan_core::StorageError> {
+        self.store.read_account()
+    }
+
     pub fn doc(&self) -> &Doc {
         self.engine.doc()
     }

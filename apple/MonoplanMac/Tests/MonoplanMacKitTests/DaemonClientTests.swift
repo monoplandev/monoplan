@@ -21,6 +21,7 @@ final class DaemonClientTests: XCTestCase {
 
     func testRequestShapes() {
         XCTAssertEqual(Request.watch.value, .string("Watch"))
+        XCTAssertEqual(Request.account.value, .string("Account"))
         XCTAssertEqual(
             Request.focus.value,
             .map(["Doc": .map(["Focus": .map(["cmd": .nil, "json": .bool(true)])])])
@@ -49,8 +50,22 @@ final class DaemonClientTests: XCTestCase {
             .event(.sync(SyncStatus(online: true, lastSyncedAt: 99)))
         )
         XCTAssertEqual(try Reply.parse(.map(["Err": .map(["message": .string("no")])])), .error("no"))
+        XCTAssertEqual(
+            try Reply.parse(.map(["Account": .map([
+                "account_id": .string("a"), "email": .string("e"), "device_id": .string("d"),
+            ])])),
+            .account(accountId: "a", email: "e", deviceId: "d")
+        )
         XCTAssertEqual(try Reply.parse(.string("ShuttingDown")), .shuttingDown)
         XCTAssertThrowsError(try Reply.parse(.map(["Nope": .nil])))
+    }
+
+    func testConfigTomlStringScan() {
+        let text = "# comment\nserver_url = \"http://127.0.0.1:8000\"\nother = 1\n"
+        XCTAssertEqual(ProfileLocation.tomlString(key: "server_url", in: text), "http://127.0.0.1:8000")
+        XCTAssertNil(ProfileLocation.tomlString(key: "missing", in: text))
+        XCTAssertNil(ProfileLocation(dir: URL(fileURLWithPath: "/nonexistent/monoplan")).serverURL)
+        XCTAssertFalse(ProfileLocation(dir: URL(fileURLWithPath: "/nonexistent/monoplan")).isSignedIn)
     }
 
     func testOfflineNotice() {

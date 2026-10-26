@@ -50,6 +50,8 @@ public enum Request {
     /// `monoplan lists ls --json --all`: id → name, archived included so
     /// every list id an item can carry resolves.
     case lists
+    /// Who is logged in, from the daemon's account row.
+    case account
 
     var value: MPValue {
         switch self {
@@ -67,6 +69,8 @@ public enum Request {
             return .map(["Doc": .map(["Lists": .map(["cmd": .map(["Ls": .map([
                 "json": .bool(true), "archived": .bool(false), "all": .bool(true),
             ])])])])])
+        case .account:
+            return .string("Account")
         }
     }
 }
@@ -80,6 +84,7 @@ public enum Reply: Equatable {
     case hello(buildId: String, pid: Int64, sync: SyncStatus)
     case output(stdout: String, sync: SyncStatus)
     case watching(sync: SyncStatus)
+    case account(accountId: String, email: String, deviceId: String)
     case event(WatchEvent)
     case shuttingDown
     case error(String)
@@ -103,6 +108,11 @@ public enum Reply: Equatable {
             }
         case "Watching":
             if let sync = SyncStatus.from(body["sync"]) { return .watching(sync: sync) }
+        case "Account":
+            if let id = body["account_id"]?.stringValue, let email = body["email"]?.stringValue,
+               let device = body["device_id"]?.stringValue {
+                return .account(accountId: id, email: email, deviceId: device)
+            }
         case "Event":
             if case .string("Changed") = body { return .event(.changed) }
             if let sync = SyncStatus.from(body["Sync"]) { return .event(.sync(sync)) }
@@ -161,6 +171,35 @@ public struct ProfileLocation {
 
     public var lockPath: String { dir.path + "/daemon.lock" }
 
+    /// Logged in, by the CLI's own rule (`Profile::active`): the
+    /// profile holds device credentials, i.e. `secrets.toml` exists.
+    public var isSignedIn: Bool {
+        FileManager.default.fileExists(atPath: dir.appendingPathComponent("secrets.toml").path)
+    }
+
+    /// `server_url` from `config.toml`, or nil when there is no profile.
+    /// The file is one flat key per line, so a line scan stands in for
+    /// a TOML parser.
+    public var serverURL: String? {
+        guard let text = try? String(contentsOf: dir.appendingPathComponent("config.toml"), encoding: .utf8) else {
+            return nil
+        }
+        return Self.tomlString(key: "server_url", in: text)
+    }
+
+    static func tomlString(key: String, in text: String) -> String? {
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix(key) else { continue }
+            let rest = line.dropFirst(key.count).trimmingCharacters(in: .whitespaces)
+            guard rest.hasPrefix("=") else { continue }
+            let value = rest.dropFirst().trimmingCharacters(in: .whitespaces)
+            guard value.count >= 2, value.hasPrefix("\""), value.hasSuffix("\"") else { return nil }
+            return String(value.dropFirst().dropLast())
+        }
+        return nil
+    }
+
     /// Is a daemon holding the profile? Same probe as `daemon::is_running`:
     /// try the flock and release it at once.
     public func daemonIsRunning() -> Bool {
@@ -190,8 +229,16 @@ public final class DaemonClient {
         case connected(SyncStatus)
     }
 
+    /// What the daemon said about itself in its `Hello`.
+    public struct DaemonInfo: Equatable {
+        public let buildId: String
+        public let pid: Int64
+    }
+
     public var onEvent: ((WatchEvent) -> Void)?
     public var onState: ((State) -> Void)?
+    /// Set on a successful handshake, cleared when the connection drops.
+    public private(set) var daemon: DaemonInfo?
     public private(set) var state: State = .connecting("starting") {
         didSet { if state != oldValue { onState?(state) } }
     }
@@ -267,10 +314,11 @@ public final class DaemonClient {
         // enforce a match.
         pending.append { [weak self] result in
             guard let self else { return }
-            guard case .success(.hello) = result else {
+            guard case .success(.hello(let buildId, let pid, _)) = result else {
                 self.dropConnection(reason: "bad hello")
                 return
             }
+            self.daemon = DaemonInfo(buildId: buildId, pid: pid)
             self.pending.append { [weak self] result in
                 guard let self else { return }
                 guard case .success(.watching(let sync)) = result else {
@@ -288,6 +336,7 @@ public final class DaemonClient {
     private func dropConnection(reason: String) {
         connection?.cancel()
         connection = nil
+        daemon = nil
         fail(all: ClientError.closed)
         if stopped { return }
         maybeSpawnDaemon()

@@ -647,6 +647,16 @@ impl Host {
                     return Ok(false);
                 }
             }
+            Request::Account => match self.session.account() {
+                Ok(a) => Reply::Account {
+                    account_id: a.account_id,
+                    email: a.email,
+                    device_id: a.device_id,
+                },
+                Err(e) => Reply::Err {
+                    message: format!("read account: {e}"),
+                },
+            },
             Request::Shutdown => {
                 let _ = reply.send(Reply::ShuttingDown);
                 return Ok(true);

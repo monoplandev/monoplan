@@ -34,6 +34,10 @@ pub enum Request {
     Doc(DocCmd),
     /// Push now and report whether the server is reachable.
     Sync,
+    /// Who is logged in: the account row the daemon booted with. Read
+    /// here rather than from the profile files so a client that holds
+    /// no db (the menubar app) still gets the email.
+    Account,
     /// Turn this connection into a watcher: the reply is `Watching`,
     /// and from then on the daemon also sends `Event` frames on it
     /// whenever the doc or the sync state changes. Ordinary requests
@@ -60,6 +64,11 @@ pub enum Reply {
     },
     Synced {
         sync: SyncStatus,
+    },
+    Account {
+        account_id: String,
+        email: String,
+        device_id: String,
     },
     /// `Watch` accepted; events follow on this connection.
     Watching {
@@ -265,6 +274,18 @@ mod tests {
             b"\xa5Watch"
         );
         assert_eq!(
+            rmp_serde::to_vec_named(&Request::Account).unwrap(),
+            b"\xa7Account"
+        );
+        assert_eq!(
+            shape(&Reply::Account {
+                account_id: "a".into(),
+                email: "e".into(),
+                device_id: "d".into(),
+            }),
+            serde_json::json!({"Account": {"account_id": "a", "email": "e", "device_id": "d"}})
+        );
+        assert_eq!(
             rmp_serde::to_vec_named(&Request::Hello {
                 build_id: "x".into()
             })
@@ -280,20 +301,24 @@ mod tests {
             serde_json::json!({"Doc": {"Agenda": {"days": 0, "today": null, "json": true}}})
         );
         assert_eq!(
-            shape(&Request::Doc(DocCmd::Focus(crate::commands::focus::FocusArgs {
-                cmd: None,
-                json: true,
-            }))),
+            shape(&Request::Doc(DocCmd::Focus(
+                crate::commands::focus::FocusArgs {
+                    cmd: None,
+                    json: true,
+                }
+            ))),
             serde_json::json!({"Doc": {"Focus": {"cmd": null, "json": true}}})
         );
         assert_eq!(
-            shape(&Request::Doc(DocCmd::Lists(crate::commands::lists::ListsArgs {
-                cmd: crate::commands::lists::ListsCmd::Ls {
-                    json: true,
-                    archived: false,
-                    all: true,
-                },
-            }))),
+            shape(&Request::Doc(DocCmd::Lists(
+                crate::commands::lists::ListsArgs {
+                    cmd: crate::commands::lists::ListsCmd::Ls {
+                        json: true,
+                        archived: false,
+                        all: true,
+                    },
+                }
+            ))),
             serde_json::json!({"Doc": {"Lists": {"cmd": {"Ls": {"json": true, "archived": false, "all": true}}}}})
         );
         let sync = SyncStatus {

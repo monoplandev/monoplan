@@ -31,6 +31,8 @@ final class TrayController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
     private let client: DaemonClient
+    private let location: ProfileLocation
+    private var settingsWindow: SettingsWindowController?
     private var lines: [MenuLine] = []
     private var starred: [MenuLine] = []
     private var starredRows: [FocusRow] = []
@@ -41,7 +43,8 @@ final class TrayController: NSObject, NSMenuDelegate {
 
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        client = DaemonClient(location: ProfileLocation.resolve())
+        location = ProfileLocation.resolve()
+        client = DaemonClient(location: location)
         super.init()
 
         if let button = statusItem.button {
@@ -54,12 +57,14 @@ final class TrayController: NSObject, NSMenuDelegate {
 
         client.onState = { [weak self] state in
             if case .connected = state { self?.refresh() } else { self?.rebuildMenu() }
+            self?.settingsWindow?.refresh()
         }
         client.onEvent = { [weak self] event in
             switch event {
             case .changed: self?.scheduleRefresh()
             case .sync: self?.rebuildMenu()
             }
+            self?.settingsWindow?.refresh()
         }
         client.start()
 
@@ -172,16 +177,27 @@ final class TrayController: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
-        // No key equivalents: a status menu is not where shortcuts
-        // live, and one anywhere makes AppKit reserve a trailing
+        // No key equivalents and no images: a status menu is not where
+        // shortcuts live, and a key equivalent anywhere (even the
+        // customary ⌘, on Settings) makes AppKit reserve a trailing
         // column on every row, which shows as dead space after the
-        // right-aligned notes.
-        let open = NSMenuItem(title: "Open Monoplan", action: #selector(openWebsite), keyEquivalent: "")
-        open.target = self
-        menu.addItem(open)
-        let quit = NSMenuItem(title: "Quit Monoplan", action: #selector(quit), keyEquivalent: "")
-        quit.target = self
-        menu.addItem(quit)
+        // right-aligned notes. An image would likewise open an icon
+        // column that the other rows do not use.
+        addAction("Open Monoplan", #selector(openWebsite))
+        addAction("Settings…", #selector(openSettings))
+        addAction("Quit Monoplan", #selector(quit))
+    }
+
+    /// A plain command row. From macOS 27 AppKit supplies its own
+    /// symbol for recognisable items (a gear beside "Settings…") even
+    /// when none is set, so the item opts out explicitly.
+    private func addAction(_ title: String, _ action: Selector) {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        if #available(macOS 27, *) {
+            item.preferredImageVisibility = .hidden
+        }
+        menu.addItem(item)
     }
 
     private func addDisabled(_ title: String) {
@@ -291,6 +307,15 @@ final class TrayController: NSObject, NSMenuDelegate {
 
     @objc private func openWebsite() {
         NSWorkspace.shared.open(webURL)
+    }
+
+    /// One window controller for the process; reopening brings the
+    /// same window forward rather than stacking a second.
+    @objc private func openSettings() {
+        if settingsWindow == nil {
+            settingsWindow = SettingsWindowController(location: location, client: client)
+        }
+        settingsWindow?.show()
     }
 
     /// Item links are `#item_<id>` (spec/urls.md "Item URLs name only the item").
