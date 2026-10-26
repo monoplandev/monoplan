@@ -7,7 +7,7 @@ Primary CLI client. Also the integration test surface for everything below the G
 Single binary `monoplan`. Subcommands:
 
 ### Account
-- `monoplan signup [--server URL]` — interactive: email, password, optional recovery code generation
+- `monoplan signup [--server URL]` — interactive: email, password, recovery code shown once and typed back
 - `monoplan login [--server URL]` — interactive: email, password
 - `monoplan logout`
 - `monoplan recover` — interactive: email, recovery code, set new password
@@ -150,9 +150,8 @@ $ monoplan signup
 Server: https://monoplan.example
 Email: dan@example.com
 Password: ********
-Generate recovery code? [Y/n]
-  → 12 words shown once, user must type them back to confirm
 Device name [hostname]:
+  → recovery code: 12 words shown once, user must type them back to confirm
 Done. Doc initialized.
 ```
 

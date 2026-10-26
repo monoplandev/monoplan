@@ -23,7 +23,7 @@ CREATE TABLE accounts (
   kdf_t                       INTEGER NOT NULL,                -- argon2 iterations
   kdf_p                       INTEGER NOT NULL,                -- argon2 parallelism
   primary_doc_id              BLOB NOT NULL REFERENCES docs(id), -- the account's Home doc
-  recovery_salt               BLOB,                            -- present iff recovery code opted in
+  recovery_salt               BLOB,                            -- set at signup (mandatory); NULL only after a future opt-out
   recovery_auth_hash          BLOB,                            -- SHA-256(client recovery_auth_secret)
   created_at                  INTEGER NOT NULL                 -- unix millis
 );

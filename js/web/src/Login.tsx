@@ -1,20 +1,31 @@
-// Auth form (login + signup). Argon2id currently runs on the main
-// thread, so show a "deriving keys…" spinner during the
-// ~hundreds-of-ms hit. The API origin is the page's origin (vite
+// Auth form (login + signup + recovery). Argon2id currently runs on the
+// main thread, so show a "deriving keys…" spinner during the
+// ~hundreds-of-ms hit. Signup always enrols a 12-word recovery code,
+// shown once in a pane the dialog cannot be closed around; the login form
+// links to the recover mode, which redeems the code for a new password
+// (spec/encryption.md §Recovery). The API origin is the page's origin (vite
 // proxies /api/* in dev) — no runtime server picker; self-hosters
 // serve their own bundle from their own domain.
 
 import { Dialog } from "@kobalte/core/dialog";
-import { createSignal, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import {
   Dek,
   deriveLogin,
+  deriveRecovery,
   unwrapDek,
   unwrapDekWithDek,
   wrapDek,
 } from "@monoplan/core/wasm";
 import { api, ApiError, type LoginResponse, type Membership } from "./api.ts";
 import { dekVault } from "./sync/dekVault.ts";
+import { unwrapNewMemberships } from "./sync/docKeys.ts";
+import {
+  enrolRecovery,
+  normaliseRecoveryCode,
+  openRecoveryWrap,
+  randomBytes,
+} from "./sync/recovery.ts";
 import { useAppI18n } from "./i18n.tsx";
 import { closeToItems, trackOverlay } from "./overlay.ts";
 
@@ -65,36 +76,76 @@ function defaultDeviceName(): string {
   return `web-${typeof navigator !== "undefined" ? navigator.platform : "unknown"}`;
 }
 
+export type AuthMode = "login" | "signup" | "recover";
+
+/** Default Argon2id params (mirror `KdfParams::DEFAULT` in the protocol
+ *  crate), used wherever this client mints fresh password material. */
+const KDF_DEFAULT = { m_kib: 64 * 1024, t: 3, p: 1 };
+
 function AuthForm(props: {
-  initialMode?: "login" | "signup";
+  initialMode?: AuthMode;
   onSession: (s: Session) => void;
+  /** Signup: the session is live, but the dialog must show the new
+   *  recovery code before handing the session over. */
+  onRecoveryCode: (s: Session, code: string) => void;
 }) {
   const { m } = useAppI18n();
-  const [mode, setMode] = createSignal<"login" | "signup">(
-    props.initialMode ?? "login",
-  );
+  const [mode, setMode] = createSignal<AuthMode>(props.initialMode ?? "login");
   const [email, setEmail] = createSignal("");
   const [password, setPassword] = createSignal("");
+  const [recoveryCode, setRecoveryCode] = createSignal("");
   const [deviceName] = createSignal(defaultDeviceName());
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+
+  const switchMode = (next: AuthMode) => {
+    setError(null);
+    setMode(next);
+  };
 
   const submit = async (e: Event) => {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      const session =
-        mode() === "login"
-          ? await doLogin(email(), password(), deviceName())
-          : await doSignup(email(), password(), deviceName());
-      props.onSession(session);
+      switch (mode()) {
+        case "login":
+          props.onSession(await doLogin(email(), password(), deviceName()));
+          break;
+        case "signup": {
+          const { session, recoveryCode } = await doSignup(
+            email(),
+            password(),
+            deviceName(),
+          );
+          props.onRecoveryCode(session, recoveryCode);
+          break;
+        }
+        case "recover": {
+          let code: string;
+          try {
+            code = normaliseRecoveryCode(recoveryCode());
+          } catch {
+            setError(m().auth.recoveryCodeInvalid);
+            return;
+          }
+          props.onSession(await doRecover(email(), code, password(), deviceName()));
+          break;
+        }
+      }
     } catch (err) {
-      setError(humanError(err));
+      setError(humanError(err, m().auth.recoveryNotEnrolled));
     } finally {
       setBusy(false);
     }
   };
+
+  const title = () =>
+    mode() === "login"
+      ? m().auth.signIn
+      : mode() === "signup"
+        ? m().auth.signUp
+        : m().auth.resetPassword;
 
   return (
     <form class="auth-form" onSubmit={submit}>
@@ -107,9 +158,7 @@ function AuthForm(props: {
           </a>
         </span>
       </p>
-      <Dialog.Title class="auth-dialog-title">
-        {mode() === "login" ? m().auth.signIn : m().auth.signUp}
-      </Dialog.Title>
+      <Dialog.Title class="auth-dialog-title">{title()}</Dialog.Title>
       <label>
         {m().auth.email}
         <input
@@ -121,8 +170,23 @@ function AuthForm(props: {
           onInput={(e) => setEmail(e.currentTarget.value)}
         />
       </label>
+      <Show when={mode() === "recover"}>
+        <label>
+          {m().auth.recoveryCode}
+          <textarea
+            required
+            rows={3}
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck={false}
+            value={recoveryCode()}
+            disabled={busy()}
+            onInput={(e) => setRecoveryCode(e.currentTarget.value)}
+          />
+        </label>
+      </Show>
       <label>
-        {m().auth.password}
+        {mode() === "recover" ? m().auth.newPassword : m().auth.password}
         <input
           type="password"
           required
@@ -133,28 +197,88 @@ function AuthForm(props: {
           onInput={(e) => setPassword(e.currentTarget.value)}
         />
       </label>
+      <Show when={mode() === "signup"}>
+        <p class="auth-hint">{m().auth.signupRecoveryNote}</p>
+      </Show>
       <input type="hidden" value={deviceName()} />
       <button type="submit" disabled={busy()}>
-        {busy()
-          ? m().auth.derivingKeys
-          : mode() === "login"
-            ? m().auth.signIn
-            : m().auth.signUp}
+        {busy() ? m().auth.derivingKeys : title()}
       </button>
-      <button
-        type="button"
-        class="auth-form-toggle"
-        disabled={busy()}
-        onClick={() => setMode(mode() === "login" ? "signup" : "login")}
-      >
-        {mode() === "login"
-          ? m().auth.noAccount
-          : m().auth.haveAccount}
-      </button>
+      <Show when={mode() === "login"}>
+        <button
+          type="button"
+          class="auth-form-toggle"
+          disabled={busy()}
+          onClick={() => switchMode("signup")}
+        >
+          {m().auth.noAccount}
+        </button>
+        <button
+          type="button"
+          class="auth-form-toggle"
+          disabled={busy()}
+          onClick={() => switchMode("recover")}
+        >
+          {m().auth.forgotPassword}
+        </button>
+      </Show>
+      <Show when={mode() !== "login"}>
+        <button
+          type="button"
+          class="auth-form-toggle"
+          disabled={busy()}
+          onClick={() => switchMode("login")}
+        >
+          {mode() === "signup" ? m().auth.haveAccount : m().auth.backToSignIn}
+        </button>
+      </Show>
       <Show when={error()}>
         <div class="error">{error()}</div>
       </Show>
     </form>
+  );
+}
+
+/** The one time the recovery code is ever shown. Lives inside the auth
+ *  dialog in place of the form; the dialog refuses to close around it,
+ *  so the only way on is to confirm the words are written down. */
+function RecoveryCodePane(props: { code: string; onContinue: () => void }) {
+  const { m } = useAppI18n();
+  const [saved, setSaved] = createSignal(false);
+  const [copied, setCopied] = createSignal(false);
+  const words = () => props.code.split(" ");
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(props.code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard denied (insecure context, permissions): the words are
+      // on screen and selectable; nothing else to do.
+    }
+  };
+  return (
+    <div class="auth-form recovery-pane">
+      <Dialog.Title class="auth-dialog-title">{m().auth.recoveryTitle}</Dialog.Title>
+      <p class="auth-hint">{m().auth.recoveryIntro}</p>
+      <ol class="recovery-code" aria-label={m().auth.recoveryCode}>
+        <For each={words()}>{(w) => <li>{w}</li>}</For>
+      </ol>
+      <button type="button" class="auth-form-toggle" onClick={copy}>
+        {copied() ? m().auth.copied : m().common.copy}
+      </button>
+      <label class="auth-check">
+        <input
+          type="checkbox"
+          checked={saved()}
+          onChange={(e) => setSaved(e.currentTarget.checked)}
+        />
+        <span>{m().auth.recoverySaved}</span>
+      </label>
+      <button type="submit" disabled={!saved()} onClick={props.onContinue}>
+        {m().auth.continue}
+      </button>
+    </div>
   );
 }
 
@@ -165,26 +289,53 @@ export function AuthDialog(props: {
   open: boolean;
   onOpenChange: (b: boolean) => void;
   onSession: (s: Session) => void;
-  initialMode?: "login" | "signup";
+  initialMode?: AuthMode;
 }) {
   const { m } = useAppI18n();
   trackOverlay(() => props.open);
+  // A signup that enrolled a recovery code parks its session here until
+  // the user confirms the code is saved. The account already exists on
+  // the server and the vault is written, so the session must reach the
+  // owner regardless; closing is simply refused in the meantime.
+  const [pending, setPending] = createSignal<{ session: Session; code: string } | null>(
+    null,
+  );
+  const onOpenChange = (open: boolean) => {
+    if (!open && pending()) return;
+    props.onOpenChange(open);
+  };
+  const finish = () => {
+    const p = pending();
+    if (!p) return;
+    setPending(null);
+    props.onSession(p.session);
+  };
   return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange} modal>
+    <Dialog open={props.open} onOpenChange={onOpenChange} modal>
       <Dialog.Portal>
         <Dialog.Overlay class="dialog-overlay" />
         <div class="dialog-positioner">
           <Dialog.Content class="auth-dialog" onCloseAutoFocus={closeToItems}>
-            <Dialog.CloseButton class="auth-dialog-close" aria-label={m().common.close}>
-              <CloseIcon />
-            </Dialog.CloseButton>
+            <Show when={!pending()}>
+              <Dialog.CloseButton class="auth-dialog-close" aria-label={m().common.close}>
+                <CloseIcon />
+              </Dialog.CloseButton>
+            </Show>
             <div class="auth-dialog-art" aria-hidden="true">
               <img src={AUTH_ART_URL} alt="" decoding="async" />
             </div>
-            <AuthForm
-              initialMode={props.initialMode}
-              onSession={props.onSession}
-            />
+            <Show
+              when={pending()}
+              fallback={
+                <AuthForm
+                  initialMode={props.initialMode}
+                  onSession={props.onSession}
+                  onRecoveryCode={(session, code) => setPending({ session, code })}
+                />
+              }
+            >
+              {(p) => <RecoveryCodePane code={p().code} onContinue={finish} />}
+            </Show>
           </Dialog.Content>
         </div>
       </Dialog.Portal>
@@ -310,10 +461,8 @@ async function doSignup(
   email: string,
   password: string,
   deviceName: string,
-): Promise<Session> {
-  // Default Argon2id params (mirror `KdfParams::DEFAULT` in the
-  // protocol crate) plus a fresh random 16-byte salt.
-  const kdfParams = { m_kib: 64 * 1024, t: 3, p: 1 };
+): Promise<{ session: Session; recoveryCode: string }> {
+  const kdfParams = KDF_DEFAULT;
   const masterSalt = randomBytes(16);
   const derived = deriveLogin(
     password,
@@ -327,6 +476,9 @@ async function doSignup(
   // are wrapped under it (`wrapDekWithDek`, `api.createDoc`).
   const dek = Dek.generate();
   const wrapped = wrapDek(derived.kek, dek);
+  // Mandatory enrolment. The recovery wrap is of the same Home DEK, so
+  // the code covers every doc the account joins later.
+  const recovery = enrolRecovery(dek, kdfParams);
   const resp = await api.signup({
     email,
     master_salt: masterSalt,
@@ -334,6 +486,7 @@ async function doSignup(
     auth_secret: derived.authSecret,
     wrapped_dek: wrapped.ciphertext,
     wrapped_dek_nonce: wrapped.nonce,
+    recovery: recovery.material,
     device_name: deviceName,
   });
   const session: Session = {
@@ -345,6 +498,85 @@ async function doSignup(
     dek,
     docKeys: new Map([[resp.primary_doc_id, dek]]),
     freshSignup: true,
+  };
+  await persistVault(session);
+  return { session, recoveryCode: recovery.code };
+}
+
+/** Redeem a recovery code for a new password, registering this client
+ *  as a device on the way (the CLI's `monoplan recover`). The code
+ *  opens the primary membership's wrap; every other membership is under
+ *  the Home DEK and is read back from `GET /api/docs` once the reset
+ *  has made us a device. Not a fresh signup: the server already holds
+ *  the account's history and the bootstrap pulls it. */
+async function doRecover(
+  email: string,
+  recoveryCode: string,
+  newPassword: string,
+  deviceName: string,
+): Promise<Session> {
+  const pre = await api.prelogin(email);
+  if (!pre.recovery_salt) {
+    throw new ApiError(403, "recovery_not_enrolled", "", "recovery_not_enrolled");
+  }
+  const recovery = deriveRecovery(
+    recoveryCode,
+    pre.recovery_salt,
+    pre.kdf_params.m_kib,
+    pre.kdf_params.t,
+    pre.kdf_params.p,
+  );
+  const recovered = await api.recover({
+    email,
+    recovery_auth_secret: recovery.recoveryAuthSecret,
+  });
+  const dek = openRecoveryWrap(
+    recovery.recoveryKek,
+    recovered.primary_doc_id,
+    recovered.doc_keys,
+  );
+
+  // New password material; the server replaces the primary membership's
+  // password wrap and refuses anything but exactly that doc.
+  const newSalt = randomBytes(16);
+  const next = deriveLogin(
+    newPassword,
+    newSalt,
+    KDF_DEFAULT.m_kib,
+    KDF_DEFAULT.t,
+    KDF_DEFAULT.p,
+  );
+  const rewrapped = wrapDek(next.kek, dek);
+  const reset = await api.passwordReset({
+    recovery_session_token: recovered.recovery_session_token,
+    new_master_salt: newSalt,
+    new_kdf_params: KDF_DEFAULT,
+    new_auth_secret: next.authSecret,
+    new_doc_keys: [
+      {
+        doc_id: recovered.primary_doc_id,
+        wrapped_dek: rewrapped.ciphertext,
+        wrapped_dek_nonce: rewrapped.nonce,
+      },
+    ],
+    device_name: deviceName,
+  });
+  if (reset.primary_doc_id !== recovered.primary_doc_id) {
+    throw new Error("server changed primary_doc_id between recover and reset");
+  }
+
+  const docs = await api.listDocs();
+  const docKeys = unwrapNewMemberships(dek, reset.primary_doc_id, docs.memberships, new Set());
+  docKeys.set(reset.primary_doc_id, dek);
+  const session: Session = {
+    anonymous: false,
+    email,
+    accountId: recovered.account_id,
+    primaryDocId: reset.primary_doc_id,
+    deviceId: reset.device_id,
+    dek,
+    docKeys,
+    freshSignup: false,
   };
   await persistVault(session);
   return session;
@@ -369,13 +601,8 @@ async function persistVault(session: Session): Promise<void> {
   }
 }
 
-function randomBytes(n: number): Uint8Array {
-  const out = new Uint8Array(n);
-  crypto.getRandomValues(out);
-  return out;
-}
-
-function humanError(e: unknown): string {
+function humanError(e: unknown, notEnrolled: string): string {
+  if (e instanceof ApiError && e.code === "recovery_not_enrolled") return notEnrolled;
   if (e instanceof ApiError) return `${e.code}: ${e.message}`;
   if (e instanceof Error) return e.message;
   return String(e);

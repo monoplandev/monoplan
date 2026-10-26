@@ -1,5 +1,5 @@
 use clap::Parser;
-use dialoguer::{Confirm, Input};
+use dialoguer::Input;
 use monoplan_core::{Dek, Doc, NotesDeltaOp, generate_recovery_code, random_bytes};
 use monoplan_protocol::{KdfParams, RecoveryMaterial, SignupRequest, SignupResponse};
 
@@ -18,10 +18,6 @@ pub struct Args {
     pub email: Option<String>,
     #[arg(long)]
     pub device_name: Option<String>,
-    /// Skip the interactive recovery-code prompt; create an account
-    /// without a recovery wrap.
-    #[arg(long)]
-    pub no_recovery: bool,
 }
 
 pub async fn run(args: Args) -> anyhow::Result<()> {
@@ -37,15 +33,6 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
             .interact_text()
             .unwrap_or_else(|_| default_device_name())
     });
-
-    let want_recovery = if args.no_recovery {
-        false
-    } else {
-        Confirm::new()
-            .with_prompt("Generate a recovery code? (recommended)")
-            .default(true)
-            .interact()?
-    };
 
     let kdf_params = KdfParams::DEFAULT;
 
@@ -66,11 +53,13 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
     let dek = Dek::generate();
     let wrapped = kek.wrap(&dek)?;
 
-    let recovery_code_to_show: Option<String>;
-    let recovery_material: Option<RecoveryMaterial> = if want_recovery {
-        let code = generate_recovery_code()?;
+    // Every account enrols a recovery code (spec/encryption.md
+    // §Recovery tiers): the same Home DEK under a KEK derived from the
+    // 12 words, shown once below.
+    let recovery_code = generate_recovery_code()?;
+    let recovery_material = {
         let recovery_salt: [u8; 16] = random_bytes();
-        let code_str = code.as_str().to_string();
+        let code_str = recovery_code.as_str().to_string();
         let salt_vec = recovery_salt.to_vec();
         let r_master = tokio::task::spawn_blocking(move || {
             monoplan_core::derive_recovery_master(&code_str, &salt_vec, kdf_params)
@@ -79,16 +68,12 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
         let r_kek = r_master.kek()?;
         let r_auth = r_master.auth_secret()?;
         let r_wrapped = r_kek.wrap(&dek)?;
-        recovery_code_to_show = Some(code.as_str().to_string());
-        Some(RecoveryMaterial {
+        RecoveryMaterial {
             recovery_salt: recovery_salt.to_vec(),
             recovery_auth_secret: r_auth.as_bytes().to_vec(),
             recovery_wrapped_dek: r_wrapped.ciphertext,
             recovery_wrapped_dek_nonce: r_wrapped.nonce.to_vec(),
-        })
-    } else {
-        recovery_code_to_show = None;
-        None
+        }
     };
 
     let client = Client::new(args.server.clone());
@@ -167,28 +152,27 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
     profile.write_secrets(&Secrets::new(resp.device_token, [(doc_id, &dek)]))?;
 
     println!("Account created: {email} ({})", resp.account_id);
-    if let Some(code) = recovery_code_to_show {
-        println!();
-        println!("RECOVERY CODE — write this down NOW. It will not be shown again.");
-        println!();
-        println!("    {code}");
-        println!();
-        use std::io::{BufRead, Write};
-        let stdin = std::io::stdin();
-        let mut stdout = std::io::stdout();
-        loop {
-            print!("Type the recovery code back to confirm: ");
-            stdout.flush()?;
-            let mut line = String::new();
-            stdin.lock().read_line(&mut line)?;
-            let trimmed = line.trim();
-            match monoplan_core::parse_recovery_code(trimmed) {
-                Ok(parsed) if parsed.as_str() == code => break,
-                Ok(_) => println!("does not match the generated code"),
-                Err(_) => println!("not a valid 12-word phrase"),
-            }
+    let code = recovery_code.as_str();
+    println!();
+    println!("RECOVERY CODE — write this down NOW. It will not be shown again.");
+    println!();
+    println!("    {code}");
+    println!();
+    use std::io::{BufRead, Write};
+    let stdin = std::io::stdin();
+    let mut stdout = std::io::stdout();
+    loop {
+        print!("Type the recovery code back to confirm: ");
+        stdout.flush()?;
+        let mut line = String::new();
+        stdin.lock().read_line(&mut line)?;
+        let trimmed = line.trim();
+        match monoplan_core::parse_recovery_code(trimmed) {
+            Ok(parsed) if parsed.as_str() == code => break,
+            Ok(_) => println!("does not match the generated code"),
+            Err(_) => println!("not a valid 12-word phrase"),
         }
-        println!("Recovery code confirmed.");
     }
+    println!("Recovery code confirmed.");
     Ok(())
 }

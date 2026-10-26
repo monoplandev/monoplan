@@ -2344,6 +2344,72 @@ input.task-check:hover {
   font-size: 13px;
 }
 
+.auth-form textarea {
+  padding: 8px 10px;
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  font: inherit;
+  background: var(--bg-elevated);
+  color: var(--text);
+  resize: vertical;
+}
+
+/* Opt-in rows (signup's recovery code, the show-once confirmation). */
+.auth-form .auth-check {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.auth-form .auth-check input {
+  margin: 2px 0 0;
+}
+
+.auth-form .auth-check small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.auth-form .auth-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* The 12 words, numbered, in a selectable monospace grid. */
+.recovery-code {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px 12px;
+  margin: 0;
+  padding: 12px 12px 12px 28px;
+  list-style: decimal;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  user-select: all;
+  -webkit-user-select: all;
+}
+
+.recovery-code li {
+  padding-left: 4px;
+}
+
+.recovery-code li::marker {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.recovery-pane button[type="submit"]:disabled {
+  cursor: not-allowed;
+}
+
 .context-menu-content {
   min-width: 160px;
   padding: 4px;

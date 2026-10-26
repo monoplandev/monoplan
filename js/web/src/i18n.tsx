@@ -62,6 +62,22 @@ export type Messages = {
     noAccount: string;
     haveAccount: string;
     serverMissingDeviceCredential: string;
+    /** Recover mode: redeem the 12-word code for a new password. */
+    resetPassword: string;
+    newPassword: string;
+    recoveryCode: string;
+    forgotPassword: string;
+    backToSignIn: string;
+    recoveryCodeInvalid: string;
+    recoveryNotEnrolled: string;
+    /** Signup: tells the user a recovery code is coming and why. */
+    signupRecoveryNote: string;
+    /** The show-once pane after a signup that enrolled a code. */
+    recoveryTitle: string;
+    recoveryIntro: string;
+    recoverySaved: string;
+    copied: string;
+    continue: string;
     /** Pre-release banner shown above both sign-in and sign-up. The link
      *  text is rendered as an anchor to the mailing-list signup. */
     prereleaseNotice: string;
@@ -521,6 +537,21 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       noAccount: "¿No tienes cuenta? Crea una",
       haveAccount: "¿Ya tienes cuenta? Inicia sesión",
       serverMissingDeviceCredential: "el servidor no devolvió una credencial de dispositivo",
+      resetPassword: "Restablecer contraseña",
+      newPassword: "Nueva contraseña",
+      recoveryCode: "Código de recuperación (12 palabras)",
+      forgotPassword: "¿Olvidaste tu contraseña? Usa tu código de recuperación",
+      backToSignIn: "Volver a iniciar sesión",
+      recoveryCodeInvalid: "Eso no es un código de recuperación válido de 12 palabras",
+      recoveryNotEnrolled: "Esta cuenta no tiene código de recuperación",
+      signupRecoveryNote:
+        "Recibirás un código de recuperación de 12 palabras. Es la única forma de volver a entrar si olvidas tu contraseña: Monoplan no puede restablecerla por ti.",
+      recoveryTitle: "Tu código de recuperación",
+      recoveryIntro:
+        "Anota estas 12 palabras y guárdalas en un lugar seguro. Solo se muestran una vez y son la única forma de restablecer una contraseña olvidada.",
+      recoverySaved: "He anotado estas 12 palabras",
+      copied: "Copiado",
+      continue: "Continuar",
       prereleaseNotice:
         "Esta es una versión preliminar. Los datos se borrarán con regularidad.",
       prereleaseLink:
@@ -852,6 +883,21 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       noAccount: "Don't have an account? Sign up",
       haveAccount: "Have an account? Sign in",
       serverMissingDeviceCredential: "server did not return a device credential",
+      resetPassword: "Reset password",
+      newPassword: "New password",
+      recoveryCode: "Recovery code (12 words)",
+      forgotPassword: "Forgot your password? Use your recovery code",
+      backToSignIn: "Back to sign in",
+      recoveryCodeInvalid: "That is not a valid 12-word recovery code",
+      recoveryNotEnrolled: "This account has no recovery code",
+      signupRecoveryNote:
+        "You will get a 12-word recovery code. It is the only way back in if you forget your password: Monoplan cannot reset it for you.",
+      recoveryTitle: "Your recovery code",
+      recoveryIntro:
+        "Write these 12 words down and keep them somewhere safe. They are shown only once and are the only way to reset a forgotten password.",
+      recoverySaved: "I have written down these 12 words",
+      copied: "Copied",
+      continue: "Continue",
       prereleaseNotice:
         "This is a pre-release build. Data will be regularly deleted.",
       prereleaseLink:

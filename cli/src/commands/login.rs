@@ -115,7 +115,9 @@ pub async fn run(args: Args, spawn: Spawn) -> anyhow::Result<()> {
 
     println!("Logged in to account {}", resp.account_id);
     if !resp.recovery_present {
-        println!("(no recovery code is enrolled — losing your password loses your data)");
+        println!(
+            "(this account has opted out of a recovery code — losing your password loses your data)"
+        );
     }
     Ok(())
 }

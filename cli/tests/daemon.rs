@@ -38,7 +38,7 @@ async fn wait_until(
 #[tokio::test]
 async fn daemon_owns_profile_and_applies_peer_ops_live() {
     let server = TestServer::start().await;
-    let signup = signup_account(&server, "daemon-a", false).await;
+    let signup = signup_account(&server, "daemon-a").await;
 
     let tmp_a = tempfile::tempdir().unwrap();
     let profile_a = materialize_profile(
@@ -160,7 +160,7 @@ async fn connect(dir: &std::path::Path) -> UnixStream {
 #[tokio::test]
 async fn watcher_hears_sync_local_and_remote_changes() {
     let server = TestServer::start().await;
-    let signup = signup_account(&server, "watch-a", false).await;
+    let signup = signup_account(&server, "watch-a").await;
     let tmp_a = tempfile::tempdir().unwrap();
     let profile_a = materialize_profile(
         tmp_a.path(),

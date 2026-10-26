@@ -14,7 +14,7 @@ const RESET_PASSWORD: &str = "freshly chosen pass";
 #[tokio::test]
 async fn login_registers_second_device_and_pulls_existing_doc() {
     let server = TestServer::start().await;
-    let signup = signup_account(&server, "auth-login-a", false).await;
+    let signup = signup_account(&server, "auth-login-a").await;
 
     let tmp_a = tempfile::tempdir().unwrap();
     let profile_a = materialize_profile(
@@ -41,7 +41,7 @@ async fn login_registers_second_device_and_pulls_existing_doc() {
         .unwrap();
     assert_eq!(login.account_id, signup.account_id);
     assert_eq!(login.dek.as_bytes(), signup.dek.as_bytes());
-    assert!(!login.recovery_present);
+    assert!(login.recovery_present);
 
     let tmp_b = tempfile::tempdir().unwrap();
     let profile_b = materialize_profile(
@@ -66,7 +66,7 @@ async fn login_registers_second_device_and_pulls_existing_doc() {
 #[tokio::test]
 async fn password_change_preserves_dek_and_existing_items_for_new_login() {
     let server = TestServer::start().await;
-    let signup = signup_account(&server, "auth-password-a", false).await;
+    let signup = signup_account(&server, "auth-password-a").await;
 
     let tmp_a = tempfile::tempdir().unwrap();
     let profile_a = materialize_profile(
@@ -130,7 +130,7 @@ async fn password_change_preserves_dek_and_existing_items_for_new_login() {
 #[tokio::test]
 async fn recovery_reset_bootstraps_fresh_device_with_existing_items() {
     let server = TestServer::start().await;
-    let signup = signup_account(&server, "auth-recover-a", true).await;
+    let signup = signup_account(&server, "auth-recover-a").await;
 
     let tmp_a = tempfile::tempdir().unwrap();
     let profile_a = materialize_profile(
@@ -152,7 +152,7 @@ async fn recovery_reset_bootstraps_fresh_device_with_existing_items() {
     let recovered = recover_device(
         &server.base,
         &signup.email,
-        signup.recovery_code.as_deref().unwrap(),
+        &signup.recovery_code,
         RESET_PASSWORD,
         "auth-recover-b",
     )
@@ -198,7 +198,7 @@ async fn recovery_reset_bootstraps_fresh_device_with_existing_items() {
 #[tokio::test]
 async fn login_and_recover_open_a_created_doc_with_the_home_dek() {
     let server = TestServer::start().await;
-    let signup = signup_account(&server, "auth-home-dek", true).await;
+    let signup = signup_account(&server, "auth-home-dek").await;
     let (doc_id, dek) = create_doc(&server.base, &signup.device_token, &signup.dek)
         .await
         .unwrap();
@@ -232,7 +232,7 @@ async fn login_and_recover_open_a_created_doc_with_the_home_dek() {
     let recovered = recover_device(
         &server.base,
         &signup.email,
-        signup.recovery_code.as_deref().unwrap(),
+        &signup.recovery_code,
         RESET_PASSWORD,
         "auth-home-dek-c",
     )

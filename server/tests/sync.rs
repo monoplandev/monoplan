@@ -7,11 +7,13 @@
 
 use futures_util::{SinkExt, StreamExt};
 use http::header::AUTHORIZATION;
-use monoplan_core::{Dek, derive_password_master, random_bytes};
+use monoplan_core::{
+    Dek, derive_password_master, derive_recovery_master, generate_recovery_code, random_bytes,
+};
 use monoplan_protocol::{
     ClientFrame, CreateDocRequest, CreateDocResponse, DeviceCredential, DeviceRegistration,
     EncryptedBlob, Hello, HelloAck, HelloRejected, KdfParams, PROTOCOL_VERSION, PushBlob,
-    ServerFrame, SignupRequest, SignupResponse, SnapshotBase, StoredBlob,
+    RecoveryMaterial, ServerFrame, SignupRequest, SignupResponse, SnapshotBase, StoredBlob,
 };
 use monoplan_server::sync::{SnapshotCoordinator, queries};
 use monoplan_server::{AppState, router};
@@ -30,6 +32,21 @@ fn weak_params() -> KdfParams {
         m_kib: 8,
         t: 1,
         p: 1,
+    }
+}
+
+/// Signup enrols a recovery code unconditionally; sync tests never
+/// redeem it, so only the material is kept.
+fn enrol_recovery(dek: &Dek, kdf_params: KdfParams) -> RecoveryMaterial {
+    let code = generate_recovery_code().unwrap();
+    let salt: [u8; 16] = random_bytes();
+    let r_master = derive_recovery_master(code.as_str(), &salt, kdf_params).unwrap();
+    let r_wrapped = r_master.kek().unwrap().wrap(dek).unwrap();
+    RecoveryMaterial {
+        recovery_salt: salt.to_vec(),
+        recovery_auth_secret: r_master.auth_secret().unwrap().as_bytes().to_vec(),
+        recovery_wrapped_dek: r_wrapped.ciphertext,
+        recovery_wrapped_dek_nonce: r_wrapped.nonce.to_vec(),
     }
 }
 
@@ -245,7 +262,7 @@ async fn signup_into(server: TestServer) -> Account {
             auth_secret: auth_secret.as_bytes().to_vec(),
             wrapped_dek: wrapped.ciphertext,
             wrapped_dek_nonce: wrapped.nonce.to_vec(),
-            recovery: None,
+            recovery: enrol_recovery(&dek, kdf_params),
             device_name: "sync-test".into(),
             device_kind: "linux".into(),
         },
@@ -1848,7 +1865,7 @@ async fn signup_second(acc: &Account) -> (Uuid, String) {
             auth_secret: master.auth_secret().unwrap().as_bytes().to_vec(),
             wrapped_dek: wrapped.ciphertext,
             wrapped_dek_nonce: wrapped.nonce.to_vec(),
-            recovery: None,
+            recovery: enrol_recovery(&dek, kdf_params),
             device_name: "second-device".into(),
             device_kind: "linux".into(),
         },

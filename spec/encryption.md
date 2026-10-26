@@ -20,7 +20,7 @@ Wraps live on the **membership**, one row per `(doc, account)` in `doc_members` 
 | Field (on `doc_members`) | Primary membership | Every other membership |
 |---|---|---|
 | `wrapped_dek` / `wrapped_dek_nonce` | always: the Home DEK under the **password KEK** | always: this doc's DEK under the **Home DEK** |
-| `recovery_wrapped_dek` / `_nonce` | iff the member opted into a recovery code: the Home DEK under the recovery KEK | always NULL |
+| `recovery_wrapped_dek` / `_nonce` | the Home DEK under the recovery KEK; set at signup (mandatory), NULL only after a future opt-out | always NULL |
 | `escrowed_dek` | future optional field (Vault-held wrap of the Home DEK) | n/a |
 
 Consequences:
@@ -36,20 +36,22 @@ Consequences:
 - **Password + recovery code** — both wraps. Lose password → redeem recovery code → unwrap DEK → set new password.
 - **Password + server escrow** — adds Vault-held escrow. Future work.
 
-User picks tier at signup; can upgrade later. Default UX presents recovery code as recommended.
+**Recovery code is mandatory at signup** (decided 2026-10-26): `SignupRequest.recovery` is required and the server rejects a signup without it (400). The password-only tier is reachable only by a future, explicit opt-out after signup; the account/membership columns stay nullable and `LoginResponse.recovery_present` stays on the wire for that. Rationale: without a code a forgotten password is total data loss the server cannot help with, and nobody opts in to that knowingly at signup time.
+
+Client status (2026-10-26): CLI `signup` / `recover` and the web auth dialog both enrol at signup and redeem (web: "Forgot your password?" on sign-in → email + 12 words + new password, then `GET /api/docs` to open the other memberships). The web shows the code once in a pane the dialog cannot be dismissed around until the user confirms it is written down; the CLI makes the user type it back. Not built: opting out after signup, and re-enrolling after an opt-out (both need an authed endpoint gated by `current_auth_secret`).
 
 ## Flows
 
 ### Signup
 
-1. User picks password and (optionally) generates recovery code (client-side).
-2. Client generates `master_salt` (16 bytes random) and (if recovery code) `recovery_salt`.
+1. User picks password; client generates the recovery code (client-side, always).
+2. Client generates `master_salt` (16 bytes random) and `recovery_salt`.
 3. Client computes `master = Argon2id(password, master_salt)` → `kek`, `auth_secret` via HKDF.
-4. (If recovery code) Client computes `recovery_master = Argon2id(recovery_code, recovery_salt)` → `recovery_kek`, `recovery_auth_secret` via HKDF.
+4. Client computes `recovery_master = Argon2id(recovery_code, recovery_salt)` → `recovery_kek`, `recovery_auth_secret` via HKDF.
 5. Client generates DEK (32 bytes random).
-6. Client wraps DEK with `kek` and (if present) `recovery_kek`.
-7. Client posts `/api/account/signup` with `email`, `auth_secret`, `master_salt`, `wrapped_dek`, `wrapped_dek_nonce`, optional `{ recovery_salt, recovery_auth_secret, recovery_wrapped_dek, recovery_wrapped_dek_nonce }`. Both wraps are of the **primary doc's** DEK; the server mints the doc id.
-8. Server stores `password_hash = SHA-256(auth_secret)`, `recovery_auth_hash = SHA-256(recovery_auth_secret)` (if present) and the salts on `accounts`, and the wraps on the account's `owner` membership of the new primary doc (`doc_members`). Response carries `primary_doc_id`.
+6. Client wraps DEK with `kek` and `recovery_kek`.
+7. Client posts `/api/account/signup` with `email`, `auth_secret`, `master_salt`, `wrapped_dek`, `wrapped_dek_nonce`, `recovery: { recovery_salt, recovery_auth_secret, recovery_wrapped_dek, recovery_wrapped_dek_nonce }` (required). Both wraps are of the **primary doc's** DEK; the server mints the doc id.
+8. Server stores `password_hash = SHA-256(auth_secret)`, `recovery_auth_hash = SHA-256(recovery_auth_secret)` and the salts on `accounts`, and the wraps on the account's `owner` membership of the new primary doc (`doc_members`). Response carries `primary_doc_id`.
 
 ### Login (two-step)
 

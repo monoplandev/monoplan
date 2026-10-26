@@ -125,7 +125,9 @@ pub struct SignupRequest {
     pub wrapped_dek: Vec<u8>,
     #[serde(with = "serde_bytes")]
     pub wrapped_dek_nonce: Vec<u8>,
-    pub recovery: Option<RecoveryMaterial>,
+    /// Mandatory since 2026-10-26: every account enrols a recovery code
+    /// at signup. Opting out afterwards is future work.
+    pub recovery: RecoveryMaterial,
     pub device_name: String,
     /// See `DeviceRegistration::kind`.
     pub device_kind: String,

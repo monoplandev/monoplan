@@ -40,7 +40,9 @@ pub async fn signup(
     }
     let device_token = generate_token();
     let device_token_hash = sha256(&device_token).to_vec();
-    let recovery = req.recovery.as_ref();
+    // Enrolment is mandatory at signup (`spec/encryption.md` §Recovery
+    // tiers); the nullable columns stay for a future opt-out.
+    let recovery = &req.recovery;
     let new = NewAccount {
         email,
         password_hash: sha256(&req.auth_secret).to_vec(),
@@ -48,10 +50,10 @@ pub async fn signup(
         kdf_params: req.kdf_params,
         wrapped_dek: req.wrapped_dek,
         wrapped_dek_nonce: req.wrapped_dek_nonce,
-        recovery_salt: recovery.map(|r| r.recovery_salt.clone()),
-        recovery_auth_hash: recovery.map(|r| sha256(&r.recovery_auth_secret).to_vec()),
-        recovery_wrapped_dek: recovery.map(|r| r.recovery_wrapped_dek.clone()),
-        recovery_wrapped_dek_nonce: recovery.map(|r| r.recovery_wrapped_dek_nonce.clone()),
+        recovery_salt: Some(recovery.recovery_salt.clone()),
+        recovery_auth_hash: Some(sha256(&recovery.recovery_auth_secret).to_vec()),
+        recovery_wrapped_dek: Some(recovery.recovery_wrapped_dek.clone()),
+        recovery_wrapped_dek_nonce: Some(recovery.recovery_wrapped_dek_nonce.clone()),
         device_name: req.device_name,
         device_kind: req.device_kind,
         device_token_hash,

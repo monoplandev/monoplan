@@ -22,7 +22,9 @@ import { join, resolve } from "node:path";
 import {
   Dek,
   deriveLogin,
+  deriveRecovery,
   Doc,
+  generateRecoveryCode,
   helloFrame,
   parseHelloResponse,
   serverFrameDocId,
@@ -144,6 +146,21 @@ interface Account {
   primaryDocId: string;
 }
 
+/** Signup enrols a recovery code unconditionally; this suite never
+ *  redeems it, so only the material is built. */
+function enrolRecovery(dek: Dek) {
+  const code = generateRecoveryCode();
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const d = deriveRecovery(code, salt, KDF.m_kib, KDF.t, KDF.p);
+  const w = wrapDek(d.recoveryKek, dek);
+  return {
+    recovery_salt: salt,
+    recovery_auth_secret: d.recoveryAuthSecret,
+    recovery_wrapped_dek: w.ciphertext,
+    recovery_wrapped_dek_nonce: w.nonce,
+  };
+}
+
 async function signup(s: ServerHandle, dekForWrap: Dek): Promise<Account> {
   const masterSalt = crypto.getRandomValues(new Uint8Array(16));
   const derived = deriveLogin(
@@ -162,7 +179,7 @@ async function signup(s: ServerHandle, dekForWrap: Dek): Promise<Account> {
     auth_secret: derived.authSecret,
     wrapped_dek: wrapped.ciphertext,
     wrapped_dek_nonce: wrapped.nonce,
-    recovery: null,
+    recovery: enrolRecovery(dekForWrap),
     device_name: "device-a",
     device_kind: "web",
   });
@@ -192,7 +209,7 @@ async function registerDevice(
   primaryToken: string,
   name: string,
 ): Promise<string> {
-  const body = encode({ name });
+  const body = encode({ name, kind: "web" });
   const resp = await fetch(`${s.baseUrl}/api/devices`, {
     method: "POST",
     headers: {

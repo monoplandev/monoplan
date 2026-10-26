@@ -42,6 +42,43 @@ export interface Membership {
   wrapped_dek_nonce: Uint8Array;
 }
 
+/** A doc's DEK under one key the recipient holds. On the recovery path
+ *  it is the primary doc's DEK (the Home DEK) under the recovery KEK
+ *  (`/api/account/recover`) or under the new password KEK
+ *  (`/api/account/password/reset`). */
+export interface DocKey {
+  doc_id: string;
+  wrapped_dek: Uint8Array;
+  wrapped_dek_nonce: Uint8Array;
+}
+
+/** Optional signup material enrolling a recovery code: the salt the
+ *  code is stretched with, the auth secret the server hashes to gate
+ *  `/recover`, and the Home DEK under the recovery KEK
+ *  (spec/encryption.md §Recovery). */
+export interface RecoveryMaterial {
+  recovery_salt: Uint8Array;
+  recovery_auth_secret: Uint8Array;
+  recovery_wrapped_dek: Uint8Array;
+  recovery_wrapped_dek_nonce: Uint8Array;
+}
+
+export interface RecoverResponse {
+  account_id: string;
+  primary_doc_id: string;
+  /** Exactly one entry: the primary membership's recovery wrap. */
+  doc_keys: DocKey[];
+  /** Single use, 15-minute TTL; spent by `/password/reset`. */
+  recovery_session_token: string;
+}
+
+export interface PasswordResetResponse {
+  device_id: string;
+  /** CLI parity; the web client relies on the cookie set alongside. */
+  device_token: string;
+  primary_doc_id: string;
+}
+
 /** `GET /api/docs`: the same shape as the membership part of login, for a
  *  device that wants to learn about docs created since it logged in. */
 export interface DocsListResponse {
@@ -152,6 +189,8 @@ export const api = {
      *  stores it on the account's owner membership of that doc. */
     wrapped_dek: Uint8Array;
     wrapped_dek_nonce: Uint8Array;
+    /** Mandatory: every account enrols a recovery code at signup. */
+    recovery: RecoveryMaterial;
     device_name: string;
   }): Promise<{
     account_id: string;
@@ -167,7 +206,42 @@ export const api = {
       auth_secret: args.auth_secret,
       wrapped_dek: args.wrapped_dek,
       wrapped_dek_nonce: args.wrapped_dek_nonce,
-      recovery: null,
+      recovery: args.recovery,
+      device_name: args.device_name,
+      device_kind: DEVICE_KIND,
+    });
+  },
+
+  /** Prove possession of the recovery code. 403 `recovery_not_enrolled`
+   *  when the account has no code; 401 on a wrong one. Rate-limited
+   *  hardest of the credential endpoints. */
+  async recover(args: {
+    email: string;
+    recovery_auth_secret: Uint8Array;
+  }): Promise<RecoverResponse> {
+    return post("/api/account/recover", {
+      email: args.email,
+      recovery_auth_secret: args.recovery_auth_secret,
+    });
+  },
+
+  /** Set a new password with the session from `recover`; also registers
+   *  this client as a device and sets the device cookie. `new_doc_keys`
+   *  must be exactly the primary doc's Home DEK under the new KEK. */
+  async passwordReset(args: {
+    recovery_session_token: string;
+    new_master_salt: Uint8Array;
+    new_kdf_params: KdfParams;
+    new_auth_secret: Uint8Array;
+    new_doc_keys: DocKey[];
+    device_name: string;
+  }): Promise<PasswordResetResponse> {
+    return post("/api/account/password/reset", {
+      recovery_session_token: args.recovery_session_token,
+      new_master_salt: args.new_master_salt,
+      new_kdf_params: args.new_kdf_params,
+      new_auth_secret: args.new_auth_secret,
+      new_doc_keys: args.new_doc_keys,
       device_name: args.device_name,
       device_kind: DEVICE_KIND,
     });

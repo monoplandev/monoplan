@@ -33,7 +33,11 @@ pub fn generate_recovery_code() -> Result<RecoveryCode> {
 /// Validate + normalize a user-typed recovery phrase. Tolerates extra
 /// whitespace and case variation.
 pub fn parse_recovery_code(input: &str) -> Result<RecoveryCode> {
-    let normalized = input.split_whitespace().collect::<Vec<_>>().join(" ");
+    let normalized = input
+        .split_whitespace()
+        .map(|w| w.to_lowercase())
+        .collect::<Vec<_>>()
+        .join(" ");
     let mnemonic = Mnemonic::parse_in_normalized(Language::English, &normalized)
         .map_err(|e| CryptoError::InvalidRecoveryCode(e.to_string()))?;
     Ok(RecoveryCode(mnemonic.to_string()))
@@ -56,6 +60,13 @@ mod tests {
         let code = generate_recovery_code().unwrap();
         let messy = format!("  {}\n", code.as_str().replace(' ', "   "));
         let parsed = parse_recovery_code(&messy).unwrap();
+        assert_eq!(code.as_str(), parsed.as_str());
+    }
+
+    #[test]
+    fn case_insensitive() {
+        let code = generate_recovery_code().unwrap();
+        let parsed = parse_recovery_code(&code.as_str().to_uppercase()).unwrap();
         assert_eq!(code.as_str(), parsed.as_str());
     }
 

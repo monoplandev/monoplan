@@ -32,8 +32,8 @@ pub struct SignedUpAccount {
     pub dek: Dek,
     pub master_salt: Vec<u8>,
     pub kdf_params: KdfParams,
-    pub recovery_code: Option<String>,
-    pub recovery_salt: Option<Vec<u8>>,
+    pub recovery_code: String,
+    pub recovery_salt: Vec<u8>,
 }
 
 pub struct LoggedInDevice {
@@ -106,11 +106,26 @@ pub fn http() -> &'static reqwest::Client {
     C.get_or_init(reqwest::Client::new)
 }
 
-pub async fn signup_account(
-    server: &TestServer,
-    device_name: &str,
-    with_recovery: bool,
-) -> SignedUpAccount {
+/// A recovery code enrolment for `dek`: the material signup ships plus
+/// the code and salt a test needs to redeem it later.
+pub fn enrol_recovery(dek: &Dek, kdf_params: KdfParams) -> (RecoveryMaterial, String, Vec<u8>) {
+    let code = generate_recovery_code().unwrap();
+    let salt: [u8; 16] = random_bytes();
+    let recovery_master = derive_recovery_master(code.as_str(), &salt, kdf_params).unwrap();
+    let recovery_wrapped = recovery_master.kek().unwrap().wrap(dek).unwrap();
+    (
+        RecoveryMaterial {
+            recovery_salt: salt.to_vec(),
+            recovery_auth_secret: recovery_master.auth_secret().unwrap().as_bytes().to_vec(),
+            recovery_wrapped_dek: recovery_wrapped.ciphertext,
+            recovery_wrapped_dek_nonce: recovery_wrapped.nonce.to_vec(),
+        },
+        code.as_str().to_string(),
+        salt.to_vec(),
+    )
+}
+
+pub async fn signup_account(server: &TestServer, device_name: &str) -> SignedUpAccount {
     let email = format!("user-{}@example.com", Uuid::now_v7());
     let dek = Dek::generate();
     let kdf_params = weak_params();
@@ -121,26 +136,7 @@ pub async fn signup_account(
     let auth_secret = master.auth_secret().unwrap();
     let wrapped = kek.wrap(&dek).unwrap();
 
-    let mut recovery_code = None;
-    let mut recovery_salt = None;
-    let recovery = if with_recovery {
-        let code = generate_recovery_code().unwrap();
-        let salt: [u8; 16] = random_bytes();
-        let recovery_master = derive_recovery_master(code.as_str(), &salt, kdf_params).unwrap();
-        let recovery_kek = recovery_master.kek().unwrap();
-        let recovery_auth = recovery_master.auth_secret().unwrap();
-        let recovery_wrapped = recovery_kek.wrap(&dek).unwrap();
-        recovery_code = Some(code.as_str().to_string());
-        recovery_salt = Some(salt.to_vec());
-        Some(RecoveryMaterial {
-            recovery_salt: salt.to_vec(),
-            recovery_auth_secret: recovery_auth.as_bytes().to_vec(),
-            recovery_wrapped_dek: recovery_wrapped.ciphertext,
-            recovery_wrapped_dek_nonce: recovery_wrapped.nonce.to_vec(),
-        })
-    } else {
-        None
-    };
+    let (recovery, recovery_code, recovery_salt) = enrol_recovery(&dek, kdf_params);
 
     let req = SignupRequest {
         email: email.clone(),
@@ -197,7 +193,7 @@ pub async fn signup_via_http(server: &TestServer, dek: &Dek, device_name: &str) 
         auth_secret: auth_secret.as_bytes().to_vec(),
         wrapped_dek: wrapped.ciphertext,
         wrapped_dek_nonce: wrapped.nonce.to_vec(),
-        recovery: None,
+        recovery: enrol_recovery(dek, kdf_params).0,
         device_name: device_name.into(),
         device_kind: "linux".into(),
     };

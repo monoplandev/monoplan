@@ -184,12 +184,33 @@ struct Account {
     device_token: String,
     dek: Dek,
     master_salt: Vec<u8>,
-    recovery_code: Option<String>,
-    recovery_salt: Option<Vec<u8>>,
+    recovery_code: String,
+    recovery_salt: Vec<u8>,
     kdf_params: KdfParams,
 }
 
-async fn signup(with_recovery: bool) -> Account {
+/// A recovery code enrolment for `dek`: the material signup ships plus
+/// the code and salt a test needs to redeem it later.
+fn enrol_recovery(dek: &Dek, kdf_params: KdfParams) -> (RecoveryMaterial, String, Vec<u8>) {
+    let code = generate_recovery_code().unwrap();
+    let salt: [u8; 16] = random_bytes();
+    let r_master = derive_recovery_master(code.as_str(), &salt, kdf_params).unwrap();
+    let r_kek = r_master.kek().unwrap();
+    let r_auth = r_master.auth_secret().unwrap();
+    let r_wrapped = r_kek.wrap(dek).unwrap();
+    (
+        RecoveryMaterial {
+            recovery_salt: salt.to_vec(),
+            recovery_auth_secret: r_auth.as_bytes().to_vec(),
+            recovery_wrapped_dek: r_wrapped.ciphertext,
+            recovery_wrapped_dek_nonce: r_wrapped.nonce.to_vec(),
+        },
+        code.as_str().to_string(),
+        salt.to_vec(),
+    )
+}
+
+async fn signup() -> Account {
     let server = TestServer::start().await;
     let email = format!("user-{}@example.com", uuid::Uuid::now_v7());
     let password = "correct horse battery staple";
@@ -202,26 +223,7 @@ async fn signup(with_recovery: bool) -> Account {
     let dek = Dek::generate();
     let wrapped = kek.wrap(&dek).unwrap();
 
-    let mut recovery_code = None;
-    let mut recovery_salt: Option<Vec<u8>> = None;
-    let recovery = if with_recovery {
-        let code = generate_recovery_code().unwrap();
-        let salt: [u8; 16] = random_bytes();
-        let r_master = derive_recovery_master(code.as_str(), &salt, kdf_params).unwrap();
-        let r_kek = r_master.kek().unwrap();
-        let r_auth = r_master.auth_secret().unwrap();
-        let r_wrapped = r_kek.wrap(&dek).unwrap();
-        recovery_code = Some(code.as_str().to_string());
-        recovery_salt = Some(salt.to_vec());
-        Some(RecoveryMaterial {
-            recovery_salt: salt.to_vec(),
-            recovery_auth_secret: r_auth.as_bytes().to_vec(),
-            recovery_wrapped_dek: r_wrapped.ciphertext,
-            recovery_wrapped_dek_nonce: r_wrapped.nonce.to_vec(),
-        })
-    } else {
-        None
-    };
+    let (recovery, recovery_code, recovery_salt) = enrol_recovery(&dek, kdf_params);
 
     let url = format!("{}/api/account/signup", server.base);
     let resp: SignupResponse = post_msgpack(
@@ -258,7 +260,7 @@ async fn signup(with_recovery: bool) -> Account {
 
 #[tokio::test]
 async fn device_can_be_renamed() {
-    let acc = signup(false).await;
+    let acc = signup().await;
     let bytes = rmp_serde::to_vec_named(&DeviceRenameRequest {
         name: "  renamed device  ".into(),
     })
@@ -293,7 +295,7 @@ async fn device_can_be_renamed() {
 
 #[tokio::test]
 async fn login_with_wrong_password_is_rejected() {
-    let acc = signup(false).await;
+    let acc = signup().await;
 
     let pre: PreloginResponse = post_msgpack(
         &format!("{}/api/account/prelogin", acc.server.base),
@@ -334,7 +336,7 @@ async fn prelogin_unknown_email_is_404() {
 
 #[tokio::test]
 async fn signup_duplicate_email_is_409() {
-    let acc = signup(false).await;
+    let acc = signup().await;
 
     // Re-issue the same SignupRequest shape with a fresh-but-irrelevant
     // crypto load.
@@ -355,7 +357,7 @@ async fn signup_duplicate_email_is_409() {
             auth_secret: auth.as_bytes().to_vec(),
             wrapped_dek: wrapped.ciphertext,
             wrapped_dek_nonce: wrapped.nonce.to_vec(),
-            recovery: None,
+            recovery: enrol_recovery(&dek, kdf_params).0,
             device_name: "dup".into(),
             device_kind: "linux".into(),
         },
@@ -365,11 +367,56 @@ async fn signup_duplicate_email_is_409() {
 }
 
 #[tokio::test]
+async fn signup_without_recovery_material_is_rejected() {
+    // Enrolment is mandatory: the request type cannot even express the
+    // omission, so post the pre-2026-10-26 shape by hand.
+    #[derive(Serialize)]
+    struct LegacySignup {
+        email: String,
+        #[serde(with = "serde_bytes")]
+        master_salt: Vec<u8>,
+        kdf_params: KdfParams,
+        #[serde(with = "serde_bytes")]
+        auth_secret: Vec<u8>,
+        #[serde(with = "serde_bytes")]
+        wrapped_dek: Vec<u8>,
+        #[serde(with = "serde_bytes")]
+        wrapped_dek_nonce: Vec<u8>,
+        recovery: Option<RecoveryMaterial>,
+        device_name: String,
+        device_kind: String,
+    }
+    let server = TestServer::start().await;
+    let kdf_params = weak_params();
+    let master_salt: [u8; 16] = random_bytes();
+    let master = derive_password_master(b"x", &master_salt, kdf_params).unwrap();
+    let kek = master.kek().unwrap();
+    let dek = Dek::generate();
+    let wrapped = kek.wrap(&dek).unwrap();
+    let status = post_msgpack_status(
+        &format!("{}/api/account/signup", server.base),
+        &LegacySignup {
+            email: format!("user-{}@example.com", Uuid::now_v7()),
+            master_salt: master_salt.to_vec(),
+            kdf_params,
+            auth_secret: master.auth_secret().unwrap().as_bytes().to_vec(),
+            wrapped_dek: wrapped.ciphertext,
+            wrapped_dek_nonce: wrapped.nonce.to_vec(),
+            recovery: None,
+            device_name: "legacy".into(),
+            device_kind: "linux".into(),
+        },
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn email_is_normalised_server_side() {
     // Server owns the canonical form (trim + lowercase): a casing /
     // whitespace variant of an existing email is the same account for
     // prelogin, and a duplicate for signup.
-    let acc = signup(false).await;
+    let acc = signup().await;
     let variant = format!("  {} ", acc.email.to_uppercase());
 
     let status = post_msgpack_status(
@@ -397,7 +444,7 @@ async fn email_is_normalised_server_side() {
             auth_secret: auth.as_bytes().to_vec(),
             wrapped_dek: wrapped.ciphertext,
             wrapped_dek_nonce: wrapped.nonce.to_vec(),
-            recovery: None,
+            recovery: enrol_recovery(&dek, kdf_params).0,
             device_name: "dup".into(),
             device_kind: "linux".into(),
         },
@@ -408,9 +455,9 @@ async fn email_is_normalised_server_side() {
 
 #[tokio::test]
 async fn recovery_session_token_cannot_be_reused() {
-    let acc = signup(true).await;
-    let recovery_code = acc.recovery_code.clone().expect("opted in");
-    let recovery_salt = acc.recovery_salt.clone().expect("opted in");
+    let acc = signup().await;
+    let recovery_code = acc.recovery_code.clone();
+    let recovery_salt = acc.recovery_salt.clone();
 
     let pre: PreloginResponse = post_msgpack(
         &format!("{}/api/account/prelogin", acc.server.base),
@@ -614,7 +661,7 @@ fn unwrap_with_home(home: &Dek, wrapped_dek: &[u8], nonce: &[u8]) -> Dek {
 
 #[tokio::test]
 async fn login_returns_primary_membership_whose_wrap_opens_the_signup_dek() {
-    let acc = signup(false).await;
+    let acc = signup().await;
     let password = "correct horse battery staple";
     let login = login_with(&acc, password).await;
     assert_eq!(login.primary_doc_id, acc.primary_doc_id);
@@ -637,7 +684,7 @@ async fn login_returns_primary_membership_whose_wrap_opens_the_signup_dek() {
 
 #[tokio::test]
 async fn password_change_rewraps_only_the_primary_and_other_docs_follow_the_home_dek() {
-    let acc = signup(false).await;
+    let acc = signup().await;
     let password = "correct horse battery staple";
     let master =
         derive_password_master(password.as_bytes(), &acc.master_salt, acc.kdf_params).unwrap();
@@ -780,7 +827,7 @@ async fn signup_on(base: &str) -> SecondAccount {
             auth_secret: master.auth_secret().unwrap().as_bytes().to_vec(),
             wrapped_dek: wrapped.ciphertext,
             wrapped_dek_nonce: wrapped.nonce.to_vec(),
-            recovery: None,
+            recovery: enrol_recovery(&dek, kdf_params).0,
             device_name: "second-device".into(),
             device_kind: "linux".into(),
         },
@@ -810,7 +857,7 @@ async fn delete_status(url: &str, token: &str) -> reqwest::StatusCode {
 /// reads as absent (404).
 #[tokio::test]
 async fn owner_deletes_created_doc_but_never_the_primary() {
-    let acc = signup(false).await;
+    let acc = signup().await;
     let (doc_id, _dek) = create_doc(&acc, &acc.dek).await;
     let docs_url = format!("{}/api/docs", acc.server.base);
 
@@ -904,7 +951,7 @@ async fn owner_deletes_created_doc_but_never_the_primary() {
 /// whole delete.
 #[tokio::test]
 async fn owner_deletes_a_doc_out_from_under_its_other_members() {
-    let acc = signup(false).await;
+    let acc = signup().await;
     let other = signup_on(&acc.server.base).await;
     let (doc_id, dek) = create_doc(&acc, &acc.dek).await;
     let did = Uuid::parse_str(&doc_id).unwrap();
@@ -967,7 +1014,7 @@ async fn owner_deletes_a_doc_out_from_under_its_other_members() {
 /// Home DEK, which neither path alters.
 #[tokio::test]
 async fn created_doc_survives_password_change_and_recovery_with_no_per_doc_rewrap() {
-    let acc = signup(true).await;
+    let acc = signup().await;
     let password = "correct horse battery staple";
     let master =
         derive_password_master(password.as_bytes(), &acc.master_salt, acc.kdf_params).unwrap();
@@ -1067,8 +1114,8 @@ async fn created_doc_survives_password_change_and_recovery_with_no_per_doc_rewra
     );
 
     // --- Recovery: one wrap out, one wrap back, created doc untouched. ---
-    let recovery_code = acc.recovery_code.clone().expect("opted in");
-    let recovery_salt = acc.recovery_salt.clone().expect("opted in");
+    let recovery_code = acc.recovery_code.clone();
+    let recovery_salt = acc.recovery_salt.clone();
     let r_master = derive_recovery_master(&recovery_code, &recovery_salt, acc.kdf_params).unwrap();
     let r_kek = r_master.kek().unwrap();
     let recovered: RecoverResponse = post_msgpack(
@@ -1198,7 +1245,7 @@ async fn post_msgpack_status_authed<Req: Serialize>(
 
 #[tokio::test]
 async fn signup_sets_device_cookie_with_expected_attributes() {
-    let acc = signup(false).await;
+    let acc = signup().await;
     // We can't see the Set-Cookie from the existing helper-based signup
     // path, so re-issue a signup-like call directly to inspect headers.
     let server = TestServer::start().await;
@@ -1221,7 +1268,7 @@ async fn signup_sets_device_cookie_with_expected_attributes() {
             auth_secret: auth.as_bytes().to_vec(),
             wrapped_dek: wrapped.ciphertext,
             wrapped_dek_nonce: wrapped.nonce.to_vec(),
-            recovery: None,
+            recovery: enrol_recovery(&dek, kdf_params).0,
             device_name: "test".into(),
             device_kind: "linux".into(),
         },
@@ -1255,7 +1302,7 @@ async fn signup_sets_device_cookie_with_expected_attributes() {
 
 #[tokio::test]
 async fn cookie_authenticates_logout_without_bearer() {
-    let acc = signup(false).await;
+    let acc = signup().await;
     // Logout via cookie only (no Authorization header).
     let cookie_header = format!("monoplan_device={}", acc.device_token);
     let (status, set_cookies, _): (_, _, Option<()>) = post_msgpack_full(
@@ -1290,7 +1337,7 @@ async fn cookie_authenticates_logout_without_bearer() {
 
 #[tokio::test]
 async fn login_without_register_device_does_not_set_cookie() {
-    let acc = signup(false).await;
+    let acc = signup().await;
     let pre: PreloginResponse = post_msgpack(
         &format!("{}/api/account/prelogin", acc.server.base),
         &PreloginRequest {
@@ -1326,7 +1373,29 @@ async fn login_without_register_device_does_not_set_cookie() {
 
 #[tokio::test]
 async fn recover_without_enrollment_is_forbidden() {
-    let acc = signup(false).await;
+    // Signup always enrols, so model the future opt-out directly: clear
+    // the account's recovery material and the primary's recovery wrap.
+    let acc = signup().await;
+    let account_id = Uuid::parse_str(&acc.account_id).unwrap();
+    acc.server
+        .state
+        .db
+        .call(move |c| {
+            let tx = c.transaction()?;
+            tx.execute(
+                "UPDATE accounts SET recovery_salt = NULL, recovery_auth_hash = NULL WHERE id = ?",
+                [account_id.as_bytes().as_slice()],
+            )?;
+            tx.execute(
+                "UPDATE doc_members SET recovery_wrapped_dek = NULL, recovery_wrapped_dek_nonce = NULL
+                 WHERE account_id = ?",
+                [account_id.as_bytes().as_slice()],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     let status = post_msgpack_status(
         &format!("{}/api/account/recover", acc.server.base),
         &RecoverRequest {
@@ -1424,7 +1493,7 @@ async fn post_free_get<Resp: DeserializeOwned>(url: &str) -> Resp {
 /// consumed, and both members appear in the member list.
 #[tokio::test]
 async fn invite_link_joins_a_second_account_once() {
-    let acc = signup(false).await;
+    let acc = signup().await;
     let base = acc.server.base.clone();
     let (doc_id, doc_dek) = create_doc(&acc, &acc.dek).await;
     let (secret, created) = issue_invite(&acc, &doc_id, &doc_dek, None).await;
@@ -1536,7 +1605,7 @@ async fn invite_link_joins_a_second_account_once() {
 /// (404 on fetch, nothing to accept).
 #[tokio::test]
 async fn invite_issuance_is_owner_only_never_for_home_and_revocable() {
-    let acc = signup(false).await;
+    let acc = signup().await;
     let base = acc.server.base.clone();
     let secret = InviteSecret::generate();
     let w = secret.wrap(&acc.dek).unwrap();
@@ -1645,7 +1714,7 @@ async fn invite_issuance_is_owner_only_never_for_home_and_revocable() {
 /// own link is told they are already a member (409) without spending it.
 #[tokio::test]
 async fn invite_expires_and_is_not_spent_by_an_existing_member() {
-    let acc = signup(false).await;
+    let acc = signup().await;
     let base = acc.server.base.clone();
     let (doc_id, doc_dek) = create_doc(&acc, &acc.dek).await;
 
@@ -1715,7 +1784,7 @@ async fn invite_expires_and_is_not_spent_by_an_existing_member() {
 /// the same row.
 #[tokio::test]
 async fn member_removal_is_owner_only_never_self_nor_last_owner() {
-    let acc = signup(false).await;
+    let acc = signup().await;
     let base = acc.server.base.clone();
     let (doc_id, doc_dek) = create_doc(&acc, &acc.dek).await;
     let (secret, _) = issue_invite(&acc, &doc_id, &doc_dek, None).await;

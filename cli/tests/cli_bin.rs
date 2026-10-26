@@ -50,7 +50,7 @@ fn err(out: Output) -> String {
 #[tokio::test]
 async fn commands_start_and_share_one_daemon() {
     let server = TestServer::start().await;
-    let signup = signup_account(&server, "bin-a", false).await;
+    let signup = signup_account(&server, "bin-a").await;
     let tmp = tempfile::tempdir().unwrap();
     materialize_profile(
         tmp.path(),
@@ -146,7 +146,7 @@ async fn commands_start_and_share_one_daemon() {
 #[tokio::test]
 async fn offline_daemon_serves_locally_and_says_so() {
     let server = TestServer::start().await;
-    let signup = signup_account(&server, "bin-offline", false).await;
+    let signup = signup_account(&server, "bin-offline").await;
     let tmp = tempfile::tempdir().unwrap();
     let profile = materialize_profile(
         tmp.path(),
