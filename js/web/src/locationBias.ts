@@ -4,12 +4,15 @@
 // to the suburb down the road rather than the one in Virginia. Two
 // sources, best first:
 //
-// - The Geolocation API, attempted once per boot (`refreshLocationBias`).
+// - The Geolocation API, attempted when the place field takes focus
+//   (`refreshLocationBias`, called from `PlaceField.tsx`), never at boot:
+//   the permission prompt should appear beside the control it serves.
 //   The browser prompts the first time and remembers the answer per
-//   origin, so later boots are silent either way. A fix is rounded to two
-//   decimals (~1km) before it is stored or sent anywhere: ranking needs
-//   the city, not the street. It lives in localStorage so the next boot
-//   can bias from the last known point before (or without) a fresh fix.
+//   origin, so later focuses are silent either way. A fix is rounded to
+//   two decimals (~1km) before it is stored or sent anywhere: ranking
+//   needs the city, not the street. It lives in localStorage so the next
+//   session can bias from the last known point before (or without) a
+//   fresh fix.
 // - The time zone's principal city (`tz-coords.ts`), derived from the
 //   zone name the browser reports. No permission, no network; coarse,
 //   and sent with a wider zoom so it nudges rather than dominates.
@@ -21,8 +24,8 @@ import { TZ_COORDS } from "./tz-coords.ts";
 
 export const LOCATION_BIAS_KEY = "monoplan.location-bias";
 
-/** How long a stored fix is trusted before the boot refresh is allowed
- *  to ask the platform for a new one (also the `maximumAge` passed to the
+/** How long a stored fix is trusted before a refresh is allowed to ask
+ *  the platform for a new one (also the `maximumAge` passed to the
  *  platform, so a cached OS fix within this window costs nothing). */
 const FRESH_MS = 60 * 60 * 1000;
 const TIMEOUT_MS = 10_000;
@@ -103,7 +106,7 @@ export const locationBias = (): LocationBias | null =>
  *  rejects: a denied permission, an unsupported platform, a timeout or a
  *  stale stored fix that fails to refresh all leave things as they were.
  *  Skipped while the stored fix is fresh, so the platform is asked at
- *  most about once an hour across reloads. */
+ *  most about once an hour however often the field is focused. */
 export async function refreshLocationBias(): Promise<void> {
   try {
     if (typeof navigator === "undefined" || !navigator.geolocation) return;

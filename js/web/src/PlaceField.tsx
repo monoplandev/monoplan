@@ -33,6 +33,7 @@ import mapPinSvg from "./icons/map-pin.svg?raw";
 import clockSvg from "./icons/clock.svg?raw";
 import spinnerSvg from "./icons/spinner.svg?raw";
 import { useAppI18n } from "./i18n.tsx";
+import { refreshLocationBias } from "./locationBias.ts";
 import { trackOverlay } from "./overlay.ts";
 import { dropKnown, filterKnown, type PlaceSuggestion } from "./placeSuggest.ts";
 import type { Place } from "./sync/store.ts";
@@ -193,8 +194,13 @@ export function PlaceField(props: {
 
   // A blank field, focused, offers the most recent places. An edit of a
   // set place opens the card for its Remove row (with whatever known
-  // places the label narrows to above it).
+  // places the label narrows to above it). Focus is also the only point
+  // the app asks the platform where the user is: the permission prompt
+  // lands beside the field the fix serves, never at boot
+  // (`locationBias.ts`). Fire-and-forget; a fix arriving mid-edit ranks
+  // the next lookup.
   const onFocused = () => {
+    void refreshLocationBias();
     ensureKnown();
     if (draft().trim() === "") {
       if (localRows().length > 0) setOpen(true);
