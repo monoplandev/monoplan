@@ -105,6 +105,8 @@ export type Messages = {
      *  (named for the doc) and the failure alert. */
     deleteDoc: string;
     deleteDocConfirm: (name: string) => string;
+    /** Prompt above the type-the-name field in the delete confirmation. */
+    deleteDocTypeName: (name: string) => string;
     deleteDocFailed: string;
     createDocFailed: string;
     /** Non-Home workspace menu item opening `SharingDialog`. */
@@ -546,6 +548,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       deleteDoc: "Eliminar espacio",
       deleteDocConfirm: (name) =>
         `¿Eliminar «${name}»? Sus listas y elementos se eliminarán de todos los dispositivos. Esta acción no se puede deshacer.`,
+      deleteDocTypeName: (name) => `Escribe «${name}» para confirmar.`,
       deleteDocFailed: "No se pudo eliminar el espacio",
       createDocFailed: "No se pudo crear el espacio",
       sharing: "Compartir…",
@@ -877,6 +880,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       deleteDoc: "Delete workspace",
       deleteDocConfirm: (name) =>
         `Delete “${name}”? Its lists and items are removed from every device. This cannot be undone.`,
+      deleteDocTypeName: (name) => `Type “${name}” to confirm.`,
       deleteDocFailed: "Could not delete workspace",
       createDocFailed: "Could not create workspace",
       sharing: "Sharing…",

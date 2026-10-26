@@ -23,6 +23,13 @@ export function ConfirmDialog(props: {
   cancelLabel?: string;
   /** Optional body section rendered between the header and the buttons. */
   children?: JSX.Element;
+  /** Greys out the confirm button; the owner decides when the dialog's
+   *  own gate (a typed name, say) is satisfied. */
+  confirmDisabled?: boolean;
+  /** Element to focus on open instead of the confirm button, for a body
+   *  that wants the keyboard first (an input). Falls back to confirm when
+   *  it returns nothing. */
+  initialFocus?: () => HTMLElement | undefined;
   onConfirm: () => void;
 }) {
   const { m } = useAppI18n();
@@ -38,9 +45,12 @@ export function ConfirmDialog(props: {
             onCloseAutoFocus={closeToItems}
             onOpenAutoFocus={(e) => {
               // Kobalte focuses the first tabbable (Cancel, on the left);
-              // put focus on the confirm button instead so Enter confirms.
+              // put focus on the confirm button instead so Enter confirms,
+              // unless the owner names a body element that should go first.
               e.preventDefault();
-              requestAnimationFrame(() => confirmRef?.focus());
+              requestAnimationFrame(() =>
+                (props.initialFocus?.() ?? confirmRef)?.focus(),
+              );
             }}
           >
             <section class="confirm-dialog-section confirm-dialog-header">
@@ -68,6 +78,7 @@ export function ConfirmDialog(props: {
                 ref={confirmRef}
                 type="button"
                 class="confirm-dialog-btn confirm-dialog-confirm"
+                disabled={props.confirmDisabled}
                 onClick={() => {
                   props.onConfirm();
                   props.onOpenChange(false);

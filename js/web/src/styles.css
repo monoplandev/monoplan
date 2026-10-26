@@ -2222,6 +2222,15 @@ input.task-check:hover {
   color: var(--error-text);
 }
 
+/* Prompt sitting above a confirmation's gate field ("Type X to confirm"). */
+.confirm-dialog-prompt {
+  display: block;
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
 .auth-prerelease-notice {
   display: flex;
   align-items: flex-start;

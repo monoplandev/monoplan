@@ -543,6 +543,16 @@ function DocSection(props: {
   // primary doc is non-deletable), nor does an anonymous session.
   const canDelete = (): boolean => !props.entry.home && props.onDeleteDoc !== null;
   const [deleteConfirmOpen, setDeleteConfirmOpen] = createSignal(false);
+  // The confirmation gates on the user typing the workspace's name: a
+  // click-through dialog is too easy to confirm by reflex for something
+  // this final. Exact match against the shown label, after trimming.
+  const [deleteTyped, setDeleteTyped] = createSignal("");
+  let deleteInputRef: HTMLInputElement | undefined;
+  const deleteNameMatches = (): boolean => deleteTyped().trim() === label();
+  const setDeleteConfirm = (open: boolean): void => {
+    setDeleteTyped("");
+    setDeleteConfirmOpen(open);
+  };
   // Sharing is offered on non-Home docs only (Home is the account's
   // private doc and its DEK is the account key; `spec/sharing-plan.md`).
   const [sharingOpen, setSharingOpen] = createSignal(false);
@@ -810,7 +820,7 @@ function DocSection(props: {
               <DropdownMenu.Separator class="dropdown-menu-separator" />
               <DropdownMenu.Item
                 class="dropdown-menu-item"
-                onSelect={() => setDeleteConfirmOpen(true)}
+                onSelect={() => setDeleteConfirm(true)}
               >
                 {m().nav.deleteDoc}
               </DropdownMenu.Item>
@@ -864,12 +874,37 @@ function DocSection(props: {
       <Show when={canDelete()}>
         <ConfirmDialog
           open={deleteConfirmOpen()}
-          onOpenChange={setDeleteConfirmOpen}
+          onOpenChange={setDeleteConfirm}
           title={m().nav.deleteDoc}
           message={m().nav.deleteDocConfirm(label())}
           confirmLabel={m().common.delete}
+          confirmDisabled={!deleteNameMatches()}
+          initialFocus={() => deleteInputRef}
           onConfirm={deleteDoc}
-        />
+        >
+          <label class="confirm-dialog-prompt" for={`delete-doc-name-`}>
+            {m().nav.deleteDocTypeName(label())}
+          </label>
+          <input
+            ref={deleteInputRef}
+            id={`delete-doc-name-`}
+            class="name-dialog-input"
+            type="text"
+            autocomplete="off"
+            spellcheck={false}
+            value={deleteTyped()}
+            onInput={(e) => setDeleteTyped(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              // Enter from the field confirms only once the name matches;
+              // the button is the single path, so keep it in step.
+              if (e.key === "Enter" && deleteNameMatches()) {
+                e.preventDefault();
+                deleteDoc();
+                setDeleteConfirm(false);
+              }
+            }}
+          />
+        </ConfirmDialog>
       </Show>
       <Show when={!props.entry.home}>
         <SharingDialog
