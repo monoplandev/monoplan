@@ -78,10 +78,15 @@ pub async fn delete(
         ));
     }
     match delete_doc(&state.db, auth.account_id, doc_id).await? {
-        DeleteDocOutcome::Deleted => Ok(()),
-        DeleteDocOutcome::NotOwner => Err(ApiError::NotFound),
-        DeleteDocOutcome::HasOtherMembers => {
-            Err(ApiError::Conflict("doc has other members".into()))
+        DeleteDocOutcome::Deleted => {
+            // Unilateral: every other member's live session learns now;
+            // the deleting device forgets the doc itself on this reply.
+            let told = state
+                .sync_sessions
+                .close_doc(doc_id, Some(auth.device_id), "doc deleted");
+            tracing::info!(doc_id = %doc_id, live_sessions_closed = told, "doc deleted");
+            Ok(())
         }
+        DeleteDocOutcome::NotOwner => Err(ApiError::NotFound),
     }
 }

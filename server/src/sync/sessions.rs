@@ -54,6 +54,12 @@ pub enum Outbound {
     /// (drop the subscription, release any snapshot lease). The
     /// session loop must not serve another frame for the doc.
     Close(Vec<u8>),
+    /// Unbind the doc as for `Close`, but send nothing: the device on
+    /// this connection is the one that deleted the doc and tears it
+    /// down itself on the HTTP reply. Dropping its subscriber silently
+    /// is not an option: a closed channel reads as lag and ends the
+    /// whole session.
+    Unbind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,6 +201,42 @@ impl SyncSessions {
             });
             if subs.is_empty() {
                 inner.docs.remove(&doc_id);
+            }
+        }
+        told
+    }
+
+    /// The doc is gone (`DELETE /api/docs/:id`): drop every subscriber on
+    /// it and send each a `DocClosed`, except the sessions of
+    /// `except_device`, the device that asked for the delete. That device
+    /// tears the doc down itself once the HTTP call returns; a `DocClosed`
+    /// racing that teardown would make it forget the doc twice and show a
+    /// "closed by the server" notice for its own action. Its sessions get
+    /// a silent `Unbind` instead, so the doc still leaves the connection.
+    /// Delivery semantics as in `close_for_account`. Returns the number
+    /// sent a `DocClosed`.
+    pub fn close_doc(&self, doc_id: Uuid, except_device: Option<Uuid>, reason: &str) -> usize {
+        let bytes = match rmp_serde::to_vec_named(&ServerFrame::DocClosed {
+            doc_id,
+            reason: reason.into(),
+        }) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to encode DocClosed");
+                return 0;
+            }
+        };
+        let mut told = 0;
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(subs) = inner.docs.remove(&doc_id) {
+            for s in subs {
+                if Some(s.device_id) == except_device {
+                    let _ = s.tx.try_send(Outbound::Unbind);
+                    continue;
+                }
+                if s.tx.try_send(Outbound::Close(bytes.clone())).is_ok() {
+                    told += 1;
+                }
             }
         }
         told

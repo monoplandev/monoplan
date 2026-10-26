@@ -560,7 +560,9 @@ export function createWorkspaceRuntime(props: {
   // Delete a doc the account owns and forget it on this device. The
   // server goes first (owner-only; it refuses the primary doc, as does
   // the guard here — Home is non-deletable, `spec/sharing-plan.md`); a
-  // refusal leaves everything in place.
+  // refusal leaves everything in place. Deletion is unilateral: other
+  // members' live sessions get `DocClosed` and forget it the same way
+  // (above); this device is spared that frame and tears down here.
   const deleteDoc = async (docId: string): Promise<void> => {
     if (props.session.anonymous) {
       throw new Error("sign in to delete a workspace");

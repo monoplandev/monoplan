@@ -547,7 +547,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       docMenu: "Menú del espacio",
       deleteDoc: "Eliminar espacio",
       deleteDocConfirm: (name) =>
-        `¿Eliminar «${name}»? Sus listas y elementos se eliminarán de todos los dispositivos. Esta acción no se puede deshacer.`,
+        `¿Eliminar «${name}»? Sus listas y elementos se eliminarán de todos los dispositivos y quienes lo compartan perderán el acceso. Esta acción no se puede deshacer.`,
       deleteDocTypeName: (name) => `Escribe «${name}» para confirmar.`,
       deleteDocFailed: "No se pudo eliminar el espacio",
       createDocFailed: "No se pudo crear el espacio",
@@ -878,7 +878,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       docMenu: "Workspace menu",
       deleteDoc: "Delete workspace",
       deleteDocConfirm: (name) =>
-        `Delete “${name}”? Its lists and items are removed from every device. This cannot be undone.`,
+        `Delete “${name}”? Its lists and items are removed from every device, and anyone it is shared with loses access. This cannot be undone.`,
       deleteDocTypeName: (name) => `Type “${name}” to confirm.`,
       deleteDocFailed: "Could not delete workspace",
       createDocFailed: "Could not create workspace",

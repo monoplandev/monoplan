@@ -290,20 +290,17 @@ pub enum DeleteDocOutcome {
     /// doc does not exist, or the caller is not its owner). Reported as
     /// not-found so a non-member learns nothing.
     NotOwner,
-    /// Another account holds an active membership. Multi-member
-    /// deletion semantics are unresolved (`spec/sharing-plan.md` §Open
-    /// questions); until then an owner must be the sole member.
-    HasOtherMembers,
 }
 
 /// Delete a doc the caller owns, with every row that hangs off it: ops,
-/// snapshots, per-device frontiers, the sequence counter and the
-/// memberships. One transaction. The caller is responsible for
-/// refusing the account's primary doc *before* calling (a request-level
-/// decision, and the `accounts.primary_doc_id` FK would reject the
-/// delete anyway). Devices with the doc open on a live connection are
-/// not told; their next frame for it fails and `OpenDoc` on reconnect
-/// is refused (sharing-plan.md: `DocClosed` is future work).
+/// snapshots, per-device frontiers, the sequence counter, the invites
+/// and the memberships. One transaction. Deletion is unilateral: other
+/// active members lose the doc too (`spec/sharing-plan.md` §Deletion);
+/// the route tells their live sessions with `DocClosed`, and anything
+/// they already synced stays on their devices. The caller is
+/// responsible for refusing the account's primary doc *before* calling
+/// (a request-level decision, and the `accounts.primary_doc_id` FK would
+/// reject the delete anyway).
 pub async fn delete_doc(
     db: &Db,
     account_id: Uuid,
@@ -322,20 +319,12 @@ pub async fn delete_doc(
         if owner == 0 {
             return Ok(DeleteDocOutcome::NotOwner);
         }
-        let others: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM doc_members
-             WHERE doc_id = ? AND account_id != ? AND removed_at IS NULL",
-            params![doc_bytes, acc_bytes],
-            |r| r.get(0),
-        )?;
-        if others > 0 {
-            return Ok(DeleteDocOutcome::HasOtherMembers);
-        }
         for sql in [
             "DELETE FROM ops WHERE doc_id = ?",
             "DELETE FROM snapshots WHERE doc_id = ?",
             "DELETE FROM device_doc_frontiers WHERE doc_id = ?",
             "DELETE FROM doc_sequences WHERE doc_id = ?",
+            "DELETE FROM doc_invites WHERE doc_id = ?",
             "DELETE FROM doc_members WHERE doc_id = ?",
             "DELETE FROM docs WHERE id = ?",
         ] {

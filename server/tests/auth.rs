@@ -897,10 +897,13 @@ async fn owner_deletes_created_doc_but_never_the_primary() {
     );
 }
 
-/// A doc with a second active member is not deletable by its owner
-/// until multi-member semantics are settled (sharing-plan.md): 409.
+/// Deletion is unilateral (sharing-plan.md §Deletion): the owner deletes
+/// a doc with a second active member and an open invite, and the member
+/// simply stops seeing it. A plain member cannot delete (404, learns
+/// nothing). The invite row must go with the doc or the FK refuses the
+/// whole delete.
 #[tokio::test]
-async fn delete_is_refused_while_another_member_is_active() {
+async fn owner_deletes_a_doc_out_from_under_its_other_members() {
     let acc = signup(false).await;
     let other = signup_on(&acc.server.base).await;
     let (doc_id, dek) = create_doc(&acc, &acc.dek).await;
@@ -927,14 +930,34 @@ async fn delete_is_refused_while_another_member_is_active() {
         .await
         .unwrap();
     let url = format!("{}/api/docs/{}", acc.server.base, doc_id);
-    assert_eq!(
-        delete_status(&url, &acc.device_token).await,
-        reqwest::StatusCode::CONFLICT
-    );
     // A plain member is not the owner.
     assert_eq!(
         delete_status(&url, &other.device_token).await,
         reqwest::StatusCode::NOT_FOUND
+    );
+    let member_docs: DocsListResponse = get_msgpack_authed(
+        &format!("{}/api/docs", acc.server.base),
+        &other.device_token,
+    )
+    .await;
+    assert!(member_docs.memberships.iter().any(|m| m.doc_id == doc_id));
+
+    issue_invite(&acc, &doc_id, &dek, None).await;
+    assert!(delete_status(&url, &acc.device_token).await.is_success());
+
+    let member_docs: DocsListResponse = get_msgpack_authed(
+        &format!("{}/api/docs", acc.server.base),
+        &other.device_token,
+    )
+    .await;
+    assert!(
+        !member_docs.memberships.iter().any(|m| m.doc_id == doc_id),
+        "the member no longer sees the deleted doc"
+    );
+    assert_eq!(
+        delete_status(&url, &acc.device_token).await,
+        reqwest::StatusCode::NOT_FOUND,
+        "gone for the owner too"
     );
 }
 
@@ -1679,13 +1702,6 @@ async fn invite_expires_and_is_not_spent_by_an_existing_member() {
     );
     let (joined, _) = accept_invite(&base, &secret, &second.device_token, &second.dek).await;
     assert_eq!(joined, doc_id);
-
-    // The joined member can no longer be deleted around: the owner's
-    // delete is refused while another member is active.
-    assert_eq!(
-        delete_status(&format!("{base}/api/docs/{doc_id}"), &acc.device_token).await,
-        reqwest::StatusCode::CONFLICT
-    );
 }
 
 /// `DELETE /api/docs/:doc_id/members/:account_id`: the refusal matrix

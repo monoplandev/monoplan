@@ -47,7 +47,7 @@ Migrations: while pre-release, keep exactly one migration file per database (`00
 | [`spec/search.md`](spec/search.md) | Local search index + command palette query contract |
 | [`spec/urls.md`](spec/urls.md) | Fragment URLs for items / lists / views, history rules, internal links |
 | [`spec/cli.md`](spec/cli.md) | Commands, local key storage, device bootstrap UX |
-| [`spec/sharing-plan.md`](spec/sharing-plan.md) | Multi-doc substrate built (2026-10-19: N open docs per connection, `POST /api/docs`, host-owned handshake, js router); invites built 2026-10-21 (one fragment secret → HKDF lookup id + wrap key, single use, owner-only, never Home; web sharing dialog + invite accept, CLI `share`, member list); member removal / transfer / `DocClosed` not built |
+| [`spec/sharing-plan.md`](spec/sharing-plan.md) | Multi-doc substrate built (2026-10-19: N open docs per connection, `POST /api/docs`, host-owned handshake, js router); invites built 2026-10-21 (one fragment secret → HKDF lookup id + wrap key, single use, owner-only, never Home; web sharing dialog + invite accept, CLI `share`, member list); member removal + `DocClosed` built 2026-10-26, unilateral owner delete 2026-10-26; transfer / leave not built |
 | [`spec/pwa-plan.md`](spec/pwa-plan.md) | PWA conversion plan: manifest, service worker, `/api/session` probe |
 | [`spec/notes-plan.md`](spec/notes-plan.md) | Plan (not built): `notes` / `text` as mergeable `LoroText`, wasm delta bridge, flat rich text, images by reference |
 | [`spec/subtasks-plan.md`](spec/subtasks-plan.md) | Exploration (not built): subtasks as items located under a parent item, lifecycle cascade, "which part is next" rule |

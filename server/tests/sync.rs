@@ -1993,3 +1993,82 @@ async fn removing_a_member_closes_the_doc_on_its_live_connection() {
     }
     expect_closed(&mut ws_again).await;
 }
+
+/// Unilateral delete (`spec/sharing-plan.md` §Deletion): the owner
+/// deletes a shared doc over HTTP while a member has it open. The
+/// member's connection gets `DocClosed` for that doc and keeps serving
+/// its Home; the owner's own connection, the one that asked, hears
+/// nothing (it tears the doc down itself on the HTTP reply); nobody is
+/// left subscribed; and the member's reconnect is refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deleting_a_doc_closes_it_on_other_members_live_connections() {
+    let owner = signup_account().await;
+    let shared = create_doc(&owner).await;
+    let (member_id, member_token) = signup_second(&owner).await;
+    seed_member_row(&owner, shared, member_id).await;
+
+    let mut ws_owner = connect_ws(&owner.server, &owner.device_token).await;
+    handshake(&mut ws_owner, shared).await;
+    let mut ws_member = connect_ws(&owner.server, &member_token).await;
+    hello(&mut ws_member).await;
+    open_doc(&mut ws_member, shared).await;
+    let member_home = {
+        let state = owner.server.state.clone();
+        let rows = monoplan_server::auth::queries::list_memberships(&state.db, member_id)
+            .await
+            .unwrap();
+        rows.into_iter()
+            .map(|m| m.doc_id)
+            .find(|d| *d != shared)
+            .expect("member has a Home doc")
+    };
+    open_doc(&mut ws_member, member_home).await;
+    wait_for_subscribers_on(&owner, shared, 2).await;
+
+    let status = http()
+        .delete(format!("{}/api/docs/{shared}", owner.server.base))
+        .bearer_auth(&owner.device_token)
+        .send()
+        .await
+        .unwrap()
+        .status();
+    assert!(status.is_success(), "delete doc: {status}");
+
+    match recv_msgpack::<ServerFrame>(&mut ws_member).await {
+        ServerFrame::DocClosed { doc_id, reason } => {
+            assert_eq!(doc_id, shared);
+            assert!(reason.contains("deleted"), "reason: {reason}");
+        }
+        other => panic!("expected DocClosed, got {other:?}"),
+    }
+    assert_no_frame(&mut ws_owner, std::time::Duration::from_millis(200)).await;
+    assert_eq!(
+        owner.server.state.sync_sessions.subscriber_count(shared),
+        0,
+        "nobody stays subscribed to a deleted doc"
+    );
+
+    // The member's Home still syncs on the same connection.
+    send_msgpack(
+        &mut ws_member,
+        &ClientFrame::PushOps {
+            doc_id: member_home,
+            ops: vec![fake_push(2)],
+        },
+    )
+    .await;
+    assert_eq!(
+        ack_seqs(recv_msgpack::<ServerFrame>(&mut ws_member).await),
+        vec![1]
+    );
+
+    // A reconnect naming the deleted doc is refused outright.
+    let mut ws_again = connect_ws(&owner.server, &member_token).await;
+    hello(&mut ws_again).await;
+    send_msgpack(&mut ws_again, &ClientFrame::OpenDoc { doc_id: shared }).await;
+    match recv_msgpack::<ServerFrame>(&mut ws_again).await {
+        ServerFrame::DocRejected { doc_id, .. } => assert_eq!(doc_id, shared),
+        other => panic!("expected DocRejected, got {other:?}"),
+    }
+    expect_closed(&mut ws_again).await;
+}

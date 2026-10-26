@@ -267,13 +267,14 @@ async fn run_session(
                     // is `DocNotOpen` and ends the session, exactly as
                     // for a doc never opened.
                     Outbound::Close(bytes) => {
-                        if let Some(open) = ws_session.open.remove(&doc_id) {
-                            if let Some(lease_id) = open.snapshot_lease {
-                                state.snapshot_coordinator.release(doc_id, lease_id);
-                            }
-                        }
-                        tracing::info!(doc_id = %doc_id, "ws doc closed: membership removed");
+                        unbind_doc(&state, &mut ws_session, doc_id);
+                        tracing::info!(doc_id = %doc_id, "ws doc closed by the server");
                         socket.send(Message::Binary(bytes.into())).await?;
+                    }
+                    // This device deleted the doc itself: unbind quietly.
+                    Outbound::Unbind => {
+                        unbind_doc(&state, &mut ws_session, doc_id);
+                        tracing::info!(doc_id = %doc_id, "ws doc unbound: deleted by this device");
                     }
                 }
             }
@@ -288,6 +289,19 @@ async fn run_session(
         }
     }
     result
+}
+
+/// Drop a doc from the connection: the subscription goes with the entry
+/// (the registry has already forgotten it) and an unfinished snapshot
+/// lease goes back to the coordinator so another producer can be picked.
+fn unbind_doc(state: &AppState, ws_session: &mut WSSession, doc_id: Uuid) {
+    if let Some(lease_id) = ws_session
+        .open
+        .remove(&doc_id)
+        .and_then(|open| open.snapshot_lease)
+    {
+        state.snapshot_coordinator.release(doc_id, lease_id);
+    }
 }
 
 async fn handle_frame(
