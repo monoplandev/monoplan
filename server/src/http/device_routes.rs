@@ -26,6 +26,7 @@ pub async fn list(
             .map(|d| Device {
                 id: d.id.to_string(),
                 name: d.name,
+                kind: d.kind,
                 last_seen_at: d.last_seen_at,
                 last_seen_ip: d.last_seen_ip,
                 created_at: d.created_at,
@@ -44,11 +45,15 @@ pub async fn register(
     if req.name.trim().is_empty() {
         return Err(ApiError::BadRequest("name is required".into()));
     }
+    if req.kind.trim().is_empty() {
+        return Err(ApiError::BadRequest("kind is required".into()));
+    }
     let token = generate_token();
     let device_id = create_device(
         &state.db,
         auth.account_id,
         req.name,
+        req.kind,
         sha256(&token).to_vec(),
     )
     .await?;

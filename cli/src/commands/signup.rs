@@ -8,7 +8,7 @@ use crate::keystore::derive_master;
 use crate::net::Client;
 use crate::storage::Account;
 
-use super::{default_device_name, default_server, prompt_new_password};
+use super::{default_device_name, default_server, device_kind, prompt_new_password};
 
 #[derive(Parser, Debug)]
 pub struct Args {
@@ -104,6 +104,7 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                 wrapped_dek_nonce: wrapped.nonce.to_vec(),
                 recovery: recovery_material,
                 device_name: device_name.clone(),
+                device_kind: device_kind(),
             },
         )
         .await?;

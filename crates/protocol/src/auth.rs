@@ -127,6 +127,8 @@ pub struct SignupRequest {
     pub wrapped_dek_nonce: Vec<u8>,
     pub recovery: Option<RecoveryMaterial>,
     pub device_name: String,
+    /// See `DeviceRegistration::kind`.
+    pub device_kind: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -244,6 +246,8 @@ pub struct PasswordResetRequest {
     /// the Home DEK and are not touched. See `encryption.md` §Recovery.
     pub new_doc_keys: Vec<DocKey>,
     pub device_name: String,
+    /// See `DeviceRegistration::kind`.
+    pub device_kind: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -383,6 +387,12 @@ pub struct MembersListResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceRegistration {
     pub name: String,
+    /// What sort of client this is, so device lists can show an icon.
+    /// `web` for the browser client (installed PWA included); a native
+    /// app reports its host platform: `macos`, `linux`, `windows`,
+    /// `ios`, `android`. Self-reported and stored verbatim, like `name`;
+    /// the server only requires it to be non-empty.
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -400,6 +410,8 @@ pub struct DeviceCredential {
 pub struct Device {
     pub id: String,
     pub name: String,
+    /// See `DeviceRegistration::kind`.
+    pub kind: String,
     pub last_seen_at: i64,
     /// IP the device last connected from, as the server saw it. `None`
     /// until the device's first authed request.

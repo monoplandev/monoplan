@@ -235,6 +235,7 @@ async fn signup(with_recovery: bool) -> Account {
             wrapped_dek_nonce: wrapped.nonce.to_vec(),
             recovery,
             device_name: "test-device".into(),
+            device_kind: "linux".into(),
         },
         None,
     )
@@ -356,6 +357,7 @@ async fn signup_duplicate_email_is_409() {
             wrapped_dek_nonce: wrapped.nonce.to_vec(),
             recovery: None,
             device_name: "dup".into(),
+            device_kind: "linux".into(),
         },
     )
     .await;
@@ -397,6 +399,7 @@ async fn email_is_normalised_server_side() {
             wrapped_dek_nonce: wrapped.nonce.to_vec(),
             recovery: None,
             device_name: "dup".into(),
+            device_kind: "linux".into(),
         },
     )
     .await;
@@ -462,6 +465,7 @@ async fn recovery_session_token_cannot_be_reused() {
             new_auth_secret: new_auth.as_bytes().to_vec(),
             new_doc_keys: vec![],
             device_name: "incomplete".into(),
+            device_kind: "linux".into(),
         },
     )
     .await;
@@ -476,6 +480,7 @@ async fn recovery_session_token_cannot_be_reused() {
             new_auth_secret: new_auth.as_bytes().to_vec(),
             new_doc_keys: vec![wrap_doc_key(&new_kek, &acc.primary_doc_id, &dek)],
             device_name: "post-recover".into(),
+            device_kind: "linux".into(),
         },
         None,
     )
@@ -492,6 +497,7 @@ async fn recovery_session_token_cannot_be_reused() {
             new_auth_secret: new_auth.as_bytes().to_vec(),
             new_doc_keys: vec![wrap_doc_key(&new_kek, &acc.primary_doc_id, &dek)],
             device_name: "should-fail".into(),
+            device_kind: "linux".into(),
         },
     )
     .await;
@@ -776,6 +782,7 @@ async fn signup_on(base: &str) -> SecondAccount {
             wrapped_dek_nonce: wrapped.nonce.to_vec(),
             recovery: None,
             device_name: "second-device".into(),
+            device_kind: "linux".into(),
         },
         None,
     )
@@ -1071,6 +1078,7 @@ async fn created_doc_survives_password_change_and_recovery_with_no_per_doc_rewra
         new_auth_secret: reset_master.auth_secret().unwrap().as_bytes().to_vec(),
         new_doc_keys: keys,
         device_name: "post-recover".into(),
+        device_kind: "linux".into(),
     };
     // Including the created doc is a mismatch and does not burn the session.
     let status = post_msgpack_status(
@@ -1192,6 +1200,7 @@ async fn signup_sets_device_cookie_with_expected_attributes() {
             wrapped_dek_nonce: wrapped.nonce.to_vec(),
             recovery: None,
             device_name: "test".into(),
+            device_kind: "linux".into(),
         },
         None,
         None,

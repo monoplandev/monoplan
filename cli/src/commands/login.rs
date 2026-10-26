@@ -11,7 +11,7 @@ use crate::keystore::{derive_master, parse_doc_id, unwrap_home, unwrap_membershi
 use crate::net::Client;
 use crate::storage::Account;
 
-use super::{default_device_name, default_server};
+use super::{default_device_name, default_server, device_kind};
 
 #[derive(Parser, Debug)]
 pub struct Args {
@@ -64,7 +64,10 @@ pub async fn run(args: Args, spawn: Spawn) -> anyhow::Result<()> {
             &LoginRequest {
                 email: email.clone(),
                 auth_secret: auth_secret.as_bytes().to_vec(),
-                register_device: Some(DeviceRegistration { name: device_name }),
+                register_device: Some(DeviceRegistration {
+                    name: device_name,
+                    kind: device_kind(),
+                }),
             },
         )
         .await?;

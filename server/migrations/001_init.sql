@@ -87,6 +87,7 @@ CREATE TABLE devices (
   id                  BLOB PRIMARY KEY,                        -- uuid v7 bytes
   account_id          BLOB NOT NULL REFERENCES accounts(id),
   name                TEXT NOT NULL,
+  kind                TEXT NOT NULL,                           -- client-reported: web | macos | linux | windows | ios | android
   auth_token_hash     BLOB NOT NULL,                           -- SHA-256(device_token bytes)
   last_seen_at        INTEGER NOT NULL,
   last_seen_ip        TEXT,                                    -- client IP at last_seen_at; overwritten, never a history

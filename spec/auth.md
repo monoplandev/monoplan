@@ -10,8 +10,8 @@ POST   /api/account/recover            (recovery-code path; gated by recovery_au
 POST   /api/account/logout             (authed; revokes calling device + clears cookie)
 POST   /api/account/password/change    (change password, authed by device token + current_auth_secret; `new_doc_keys` names exactly the primary doc)
 POST   /api/account/password/reset     (set new password, authed by recovery_session_token)
-GET    /api/devices                    (list current account's devices: name, last_seen_at, last_seen_ip, last_acked_seq on the primary doc)
-POST   /api/devices                    (register a new device)
+GET    /api/devices                    (list current account's devices: name, kind, last_seen_at, last_seen_ip, last_acked_seq on the primary doc)
+POST   /api/devices                    (register a new device: `{ name, kind }`)
 PATCH  /api/devices/:device_id         (rename a device)
 DELETE /api/devices/:device_id
 GET    /api/docs                       (authed; `{ primary_doc_id, memberships }` in the login shape)
@@ -35,6 +35,7 @@ All HTTP request and response bodies are MessagePack-encoded (`Content-Type: app
 ## Token model
 
 - Opaque random 32-byte token, hex-encoded. Stored server-side as `auth_token_hash` (SHA-256 is sufficient — the token is already high-entropy).
+- Every registering call (`signup`, `login` with `register_device`, `password/reset`, `POST /devices`) carries a `name` and a `kind`; both are client-reported free text the server stores verbatim and requires non-empty. `kind` is what sort of client registered, so device lists can show an icon: `web` for the browser client (the installed PWA is still `web`); a native app reports its host platform, `macos` / `linux` / `windows` / `ios` / `android`. The CLI is the desktop app's front door and reports the host platform, not `cli`. There is no online/connected flag; presence is not tracked here.
 - Issued per-device on registration. Forever-lived. Revocable via `DELETE /api/devices/:id` (or `POST /api/account/logout` for the calling device).
 - Every authed request (HTTP and WS upgrade) bumps the device's `last_seen_at` and overwrites `last_seen_ip` with the client address: leftmost `X-Forwarded-For` (Caddy sets it), else `X-Real-IP`, else the TCP peer. One IP per device, no history; it is deleted with the row on revoke. Surfaced only to the account owner via `GET /api/devices` so they can spot a device they do not recognise.
 - Same token, two transports: CLI sends `Authorization: Bearer <token>`; web receives an HttpOnly cookie and never touches the token from JS.
@@ -100,7 +101,7 @@ Client cannot derive `auth_secret` without the salt. Standard pattern:
 2. Client derives `master` → `kek`, `auth_secret` from password + salt.
 3. POST `/api/account/login { email, auth_secret }` → returns `memberships` (one wrap per doc).
 4. Client unwraps the primary membership with `kek` (Home DEK), then the rest with the Home DEK.
-5. POST `/api/devices` → returns new `device_token`.
+5. POST `/api/devices { name, kind }` → returns new `device_token`.
 6. WS connect, `PullSnapshot` if present, then `PullOps`.
 
 ### Recovery (lost password / fresh device)
@@ -109,7 +110,7 @@ Client cannot derive `auth_secret` without the salt. Standard pattern:
 3. POST `/api/account/recover { email, recovery_auth_secret }` → server verifies `SHA-256(recovery_auth_secret) == recovery_auth_hash`, returns `{ account_id, primary_doc_id, doc_keys: [{ doc_id, wrapped_dek, wrapped_dek_nonce }], recovery_session_token }` — `doc_keys` is exactly one entry: the primary membership's recovery-KEK wrap of the Home DEK. **The wrap is never released without this proof.** `recovery_session_token` is single-use and TTL 15 min — long enough to type a strong new password without rushing, short enough that an abandoned tab doesn't leave the reset window open.
 4. Client unwraps the Home DEK locally with `recovery_kek`.
 5. Client picks new password, derives new `master_salt`, `master`, `kek`, `auth_secret`; re-wraps the Home DEK.
-6. POST `/api/account/password/reset { recovery_session_token, new_master_salt, new_auth_secret, new_doc_keys, device_name }` → in one transaction validates + consumes the session token, updates password material, rewrites the primary membership's wrap, creates the device row; returns `{ device_id, device_token, primary_doc_id }`. `new_doc_keys` must name exactly the primary doc (400 otherwise; the session survives for a retry). Other memberships are untouched.
+6. POST `/api/account/password/reset { recovery_session_token, new_master_salt, new_auth_secret, new_doc_keys, device_name, device_kind }` → in one transaction validates + consumes the session token, updates password material, rewrites the primary membership's wrap, creates the device row; returns `{ device_id, device_token, primary_doc_id }`. `new_doc_keys` must name exactly the primary doc (400 otherwise; the session survives for a retry). Other memberships are untouched.
 7. GET `/api/docs` with the new device token; unwrap every non-primary membership with the Home DEK.
 8. WS connect, `PullSnapshot` if present, then `PullOps`.
 

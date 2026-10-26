@@ -164,6 +164,7 @@ async function signup(s: ServerHandle, dekForWrap: Dek): Promise<Account> {
     wrapped_dek_nonce: wrapped.nonce,
     recovery: null,
     device_name: "device-a",
+    device_kind: "web",
   });
   const resp = await fetch(`${s.baseUrl}/api/account/signup`, {
     method: "POST",

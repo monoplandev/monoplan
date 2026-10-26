@@ -151,6 +151,7 @@ pub async fn signup_account(
         wrapped_dek_nonce: wrapped.nonce.to_vec(),
         recovery,
         device_name: device_name.into(),
+        device_kind: "linux".into(),
     };
     let bytes = rmp_serde::to_vec_named(&req).unwrap();
     let resp = http()
@@ -198,6 +199,7 @@ pub async fn signup_via_http(server: &TestServer, dek: &Dek, device_name: &str) 
         wrapped_dek_nonce: wrapped.nonce.to_vec(),
         recovery: None,
         device_name: device_name.into(),
+        device_kind: "linux".into(),
     };
     let bytes = rmp_serde::to_vec_named(&req).unwrap();
     let resp = http()
@@ -242,6 +244,7 @@ pub async fn login_device(
                 auth_secret: auth_secret.as_bytes().to_vec(),
                 register_device: Some(DeviceRegistration {
                     name: device_name.into(),
+                    kind: "linux".into(),
                 }),
             },
         )
@@ -403,6 +406,7 @@ pub async fn recover_device(
                 new_auth_secret: new_auth.as_bytes().to_vec(),
                 new_doc_keys,
                 device_name: device_name.into(),
+                device_kind: "linux".into(),
             },
         )
         .await?;
@@ -429,7 +433,11 @@ pub async fn register_device(
     owner_token: &str,
     name: &str,
 ) -> DeviceCredential {
-    let bytes = rmp_serde::to_vec_named(&DeviceRegistration { name: name.into() }).unwrap();
+    let bytes = rmp_serde::to_vec_named(&DeviceRegistration {
+        name: name.into(),
+        kind: "linux".into(),
+    })
+    .unwrap();
     let resp = http()
         .post(format!("{}/api/devices", server.base))
         .header(CONTENT_TYPE, MSGPACK)

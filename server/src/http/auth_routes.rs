@@ -35,6 +35,9 @@ pub async fn signup(
     if req.device_name.trim().is_empty() {
         return Err(ApiError::BadRequest("device_name is required".into()));
     }
+    if req.device_kind.trim().is_empty() {
+        return Err(ApiError::BadRequest("device_kind is required".into()));
+    }
     let device_token = generate_token();
     let device_token_hash = sha256(&device_token).to_vec();
     let recovery = req.recovery.as_ref();
@@ -50,6 +53,7 @@ pub async fn signup(
         recovery_wrapped_dek: recovery.map(|r| r.recovery_wrapped_dek.clone()),
         recovery_wrapped_dek_nonce: recovery.map(|r| r.recovery_wrapped_dek_nonce.clone()),
         device_name: req.device_name,
+        device_kind: req.device_kind,
         device_token_hash,
     };
     let created = create_account(&state.db, new).await.map_err(|e| {
@@ -103,9 +107,18 @@ pub async fn login(
         if reg.name.trim().is_empty() {
             return Err(ApiError::BadRequest("device.name is required".into()));
         }
+        if reg.kind.trim().is_empty() {
+            return Err(ApiError::BadRequest("device.kind is required".into()));
+        }
         let token = generate_token();
-        let device_id =
-            create_device(&state.db, account.id, reg.name, sha256(&token).to_vec()).await?;
+        let device_id = create_device(
+            &state.db,
+            account.id,
+            reg.name,
+            reg.kind,
+            sha256(&token).to_vec(),
+        )
+        .await?;
         Some(DeviceCredential {
             device_id: device_id.to_string(),
             device_token: encode_token(&token),
@@ -231,6 +244,9 @@ pub async fn password_reset(
     if req.device_name.trim().is_empty() {
         return Err(ApiError::BadRequest("device_name is required".into()));
     }
+    if req.device_kind.trim().is_empty() {
+        return Err(ApiError::BadRequest("device_kind is required".into()));
+    }
     let token = crate::auth::tokens::decode_token(&req.recovery_session_token)
         .ok_or(ApiError::RecoverySessionInvalid)?;
     let update = PasswordUpdate {
@@ -258,6 +274,7 @@ pub async fn password_reset(
         &state.db,
         account_id,
         req.device_name,
+        req.device_kind,
         sha256(&device_token).to_vec(),
     )
     .await?;

@@ -12,7 +12,7 @@ use crate::keystore::{derive_master, parse_doc_id, unwrap_doc_key, unwrap_member
 use crate::net::Client;
 use crate::storage::Account;
 
-use super::{default_device_name, default_server, prompt_new_password};
+use super::{default_device_name, default_server, device_kind, prompt_new_password};
 
 #[derive(Parser, Debug)]
 pub struct Args {
@@ -116,6 +116,7 @@ pub async fn run(args: Args, spawn: Spawn) -> anyhow::Result<()> {
                 new_auth_secret: new_auth.as_bytes().to_vec(),
                 new_doc_keys,
                 device_name,
+                device_kind: device_kind(),
             },
         )
         .await?;

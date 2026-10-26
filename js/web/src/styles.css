@@ -3971,6 +3971,18 @@ input.task-check:hover {
   min-width: 0;
 }
 
+.device-kind-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.device-kind-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
 .device-name {
   display: flex;
   align-items: center;

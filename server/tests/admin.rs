@@ -124,9 +124,9 @@ async fn seed_account_and_devices(state: &AppState, device_count: usize) {
                 let device_id = Uuid::now_v7();
                 transaction.execute(
                     "INSERT INTO devices (
-                        id, account_id, name, auth_token_hash,
+                        id, account_id, name, kind, auth_token_hash,
                         last_seen_at, created_at
-                     ) VALUES (?, ?, ?, ?, 1, 1)",
+                     ) VALUES (?, ?, ?, 'linux', ?, 1, 1)",
                     params![
                         device_id.as_bytes().as_slice(),
                         account_id.as_bytes().as_slice(),

@@ -263,6 +263,13 @@ pub fn default_device_name() -> String {
         .unwrap_or_else(|_| "monoplan-cli".to_string())
 }
 
+/// The `kind` this client registers under (`DeviceRegistration::kind`):
+/// the CLI is the desktop app's front door, so it reports the host
+/// platform rather than "cli".
+pub fn device_kind() -> String {
+    std::env::consts::OS.to_string()
+}
+
 pub fn default_server() -> String {
     std::env::var("MONOPLAN_SERVER").unwrap_or_else(|_| DEFAULT_SERVER.to_string())
 }

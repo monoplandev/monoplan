@@ -63,6 +63,9 @@ export interface LoginResponse {
 export interface Device {
   id: string;
   name: string;
+  /** `web` for this client; native apps report their host platform
+   *  (`macos`, `linux`, `windows`, `ios`, `android`). */
+  kind: string;
   last_seen_at: number;
   last_seen_ip: string | null;
   created_at: number;
@@ -119,6 +122,10 @@ export class ApiError extends Error {
   }
 }
 
+/** What this client registers as (`Device.kind`). The installed PWA is
+ *  still the browser client, so it is `web` too. */
+const DEVICE_KIND = "web";
+
 export const api = {
   async prelogin(email: string): Promise<PreloginResponse> {
     return post("/api/account/prelogin", { email });
@@ -132,7 +139,7 @@ export const api = {
     return post("/api/account/login", {
       email: args.email,
       auth_secret: args.auth_secret,
-      register_device: { name: args.device_name },
+      register_device: { name: args.device_name, kind: DEVICE_KIND },
     });
   },
 
@@ -162,6 +169,7 @@ export const api = {
       wrapped_dek_nonce: args.wrapped_dek_nonce,
       recovery: null,
       device_name: args.device_name,
+      device_kind: DEVICE_KIND,
     });
   },
 

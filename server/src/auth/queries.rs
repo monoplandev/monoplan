@@ -33,6 +33,7 @@ pub struct DeviceRow {
     pub id: Uuid,
     pub account_id: Uuid,
     pub name: String,
+    pub kind: String,
     pub last_seen_at: i64,
     /// IP the device last connected from, as seen by the server (or
     /// the proxy in front of it). `None` until first authed request.
@@ -76,6 +77,7 @@ pub struct NewAccount {
     pub recovery_wrapped_dek_nonce: Option<Vec<u8>>,
     /// Initial device created in the same transaction as the account.
     pub device_name: String,
+    pub device_kind: String,
     pub device_token_hash: Vec<u8>,
 }
 
@@ -152,12 +154,13 @@ pub async fn create_account(db: &Db, new: NewAccount) -> anyhow::Result<CreatedA
                 ],
             )?;
             tx.execute(
-                "INSERT INTO devices (id, account_id, name, auth_token_hash, last_seen_at, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO devices (id, account_id, name, kind, auth_token_hash, last_seen_at, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
                 params![
                     dev_bytes,
                     acc_bytes,
                     new.device_name,
+                    new.device_kind,
                     new.device_token_hash,
                     now,
                     now,
@@ -540,6 +543,7 @@ pub async fn create_device(
     db: &Db,
     account_id: Uuid,
     name: String,
+    kind: String,
     token_hash: Vec<u8>,
 ) -> anyhow::Result<Uuid> {
     let device_id = Uuid::now_v7();
@@ -548,9 +552,9 @@ pub async fn create_device(
     let now = now_millis();
     db.call(move |c| {
         c.execute(
-            "INSERT INTO devices (id, account_id, name, auth_token_hash, last_seen_at, created_at)
-             VALUES (?, ?, ?, ?, ?, ?)",
-            params![id_bytes, acc_bytes, name, token_hash, now, now],
+            "INSERT INTO devices (id, account_id, name, kind, auth_token_hash, last_seen_at, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            params![id_bytes, acc_bytes, name, kind, token_hash, now, now],
         )
     })
     .await?;
@@ -570,7 +574,7 @@ pub async fn list_devices(
     db.call(move |c| {
         let mut stmt = c.prepare(
             "SELECT d.id, d.account_id, d.name, d.last_seen_at, d.created_at,
-                    COALESCE(f.last_acked_seq, 0), d.last_seen_ip
+                    COALESCE(f.last_acked_seq, 0), d.last_seen_ip, d.kind
              FROM devices d
              LEFT JOIN device_doc_frontiers f
                ON f.device_id = d.id AND f.doc_id = ?
@@ -738,6 +742,7 @@ fn row_to_device(r: &rusqlite::Row<'_>) -> rusqlite::Result<DeviceRow> {
         created_at: r.get(4)?,
         last_acked_seq: r.get(5)?,
         last_seen_ip: r.get(6)?,
+        kind: r.get(7)?,
     })
 }
 

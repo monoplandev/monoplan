@@ -14,6 +14,10 @@ import { api, type Device } from "./api.ts";
 import { createDocSyncFacts } from "./syncFacts.tsx";
 import type { DocEntry, DocsLayer } from "./sync/docs.ts";
 import dotsVerticalSvg from "./icons/dots-vertical.svg?raw";
+import globeSvg from "./icons/globe.svg?raw";
+import laptopSvg from "./icons/laptop.svg?raw";
+import mobileSvg from "./icons/mobile.svg?raw";
+import questionMarkCircledSvg from "./icons/question-mark-circled.svg?raw";
 import type { Session } from "./Login.tsx";
 import { useAppI18n } from "./i18n.tsx";
 import { closeToItems, trackOverlay } from "./overlay.ts";
@@ -404,6 +408,7 @@ export function Settings(props: {
                       <For each={[...devices()!].sort((a, b) => b.last_seen_at - a.last_seen_at)}>
                         {(d) => (
                           <li class="device-row">
+                            <span class="device-kind-icon" innerHTML={deviceKindSvg(d.kind)} />
                             <div class="device-row-main">
                               <div class="device-name">
                                 <Show
@@ -552,6 +557,25 @@ function WorkspaceSyncGroup(props: { entry: DocEntry; online: boolean }) {
       </div>
     </>
   );
+}
+
+/** Radix icon for a `Device.kind`: the browser client is a globe, native
+ *  desktop platforms a laptop, phones a handset; anything this build
+ *  does not know is a question mark rather than a wrong guess. */
+function deviceKindSvg(kind: string): string {
+  switch (kind) {
+    case "web":
+      return globeSvg;
+    case "macos":
+    case "linux":
+    case "windows":
+      return laptopSvg;
+    case "ios":
+    case "android":
+      return mobileSvg;
+    default:
+      return questionMarkCircledSvg;
+  }
 }
 
 function SunIcon() {

@@ -134,7 +134,10 @@ struct ExtraDevice {
 async fn register_second_device(acc: &Account, name: &str) -> ExtraDevice {
     let resp: DeviceCredential = post_msgpack_authed(
         &format!("{}/api/devices", acc.server.base),
-        &DeviceRegistration { name: name.into() },
+        &DeviceRegistration {
+            name: name.into(),
+            kind: "linux".into(),
+        },
         Some(&acc.device_token),
     )
     .await;
@@ -244,6 +247,7 @@ async fn signup_into(server: TestServer) -> Account {
             wrapped_dek_nonce: wrapped.nonce.to_vec(),
             recovery: None,
             device_name: "sync-test".into(),
+            device_kind: "linux".into(),
         },
     )
     .await;
@@ -1846,6 +1850,7 @@ async fn signup_second(acc: &Account) -> (Uuid, String) {
             wrapped_dek_nonce: wrapped.nonce.to_vec(),
             recovery: None,
             device_name: "second-device".into(),
+            device_kind: "linux".into(),
         },
     )
     .await;
