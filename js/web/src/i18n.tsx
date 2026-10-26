@@ -782,13 +782,12 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     sharing: {
       title: (name) => `Compartir «${name}»`,
       description:
-        "Quien se une ve todo este espacio, incluido su historial. El espacio «Personal» nunca se comparte.",
+        "Quien se une ve todo este espacio, incluido su historial.",
       members: "Miembros",
       you: "Tú",
       owner: "Propietario",
       inviteLink: "Enlace de invitación",
-      linkHint:
-        "De un solo uso y caduca en 7 días. La clave viaja dentro del enlace: el servidor no puede leer el espacio.",
+      linkHint: "De un solo uso y caduca en 7 días.",
       createLink: "Crear enlace de invitación",
       creating: "Creando…",
       copied: "Copiado",
@@ -1113,13 +1112,12 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     sharing: {
       title: (name) => `Share “${name}”`,
       description:
-        "Anyone who joins can read everything in this workspace, including its history. Your Personal workspace is never shared.",
+        "Anyone who joins can read everything in this workspace, including its history.",
       members: "Members",
       you: "You",
       owner: "Owner",
       inviteLink: "Invite link",
-      linkHint:
-        "Single use, expires in 7 days. The key travels inside the link; the server cannot read the workspace.",
+      linkHint: "Single use, expires in 7 days.",
       createLink: "Create invite link",
       creating: "Creating…",
       copied: "Copied",

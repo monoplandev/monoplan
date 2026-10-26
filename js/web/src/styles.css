@@ -5064,6 +5064,13 @@ input.task-check:hover {
   color: var(--text);
 }
 
+/* Member count beside the heading; absent until the list has loaded. */
+.sharing-heading-count {
+  margin-left: 4px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
 .sharing-subheading {
   margin: 12px 0 4px;
   font-size: 12px;

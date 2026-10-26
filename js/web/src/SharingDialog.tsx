@@ -176,7 +176,12 @@ export function SharingDialog(props: {
             </section>
 
             <section class="confirm-dialog-section sharing-section">
-              <h3 class="sharing-heading">{m().sharing.members}</h3>
+              <h3 class="sharing-heading">
+                {m().sharing.members}
+                <Show when={members()}>
+                  {(list) => <span class="sharing-heading-count">({list().length})</span>}
+                </Show>
+              </h3>
               <Show
                 when={members()}
                 fallback={
