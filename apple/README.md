@@ -83,16 +83,21 @@ MONOPLAN_TRAY_DEBUG=1 bun run tray                    # log state and rows to st
 ```
 
 If no daemon holds the profile, the tray starts one like the CLI does
-(`monoplan daemon --detach`), using `MONOPLAN_BIN`, then
-`~/.cargo/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, then
-`./target/debug/monoplan` when run from the repo. It cannot judge build
+(`monoplan daemon --detach`), using `MONOPLAN_BIN`, then the copy
+bundled beside its own executable, then `~/.cargo/bin`,
+`/opt/homebrew/bin`, `/usr/local/bin`, then `./target/debug/monoplan`
+when run from the repo. When none exists the menu says so ("no monoplan
+binary to start it"). It cannot judge build
 staleness (it is not built from the daemon's sources); the CLI still
 restarts a stale daemon on its next command.
 
 `apple/MonoplanMac/build-app.sh` lays out `apple/MonoplanMac/.build/Monoplan.app`
-(gitignored): the SwiftPM binary, an Info.plist (`app.monoplan.mac`,
-`LSUIElement`, version from the workspace `Cargo.toml`), an ad-hoc
-signature, and the app icon. The icon is the Icon Composer document
+(gitignored): the SwiftPM binary, the `monoplan` CLI beside it in
+`Contents/MacOS` (built by cargo in the same configuration; the tray
+starts the daemon from that copy first, so an installed app needs no
+cargo-installed CLI), an Info.plist (`app.monoplan.mac`, `LSUIElement`,
+version from the workspace `Cargo.toml`), ad-hoc signatures, and the app
+icon. The icon is the Icon Composer document
 `apple/icon.icon`; `actool` compiles it straight from that file into
 `Assets.car` (the layered icon macOS 26 renders) and `icon.icns` (the
 flat fallback for macOS 14 and 15). Edit the icon in Icon Composer and
@@ -101,5 +106,4 @@ rebuild; nothing else references it. `bun run tray` runs the binary
 Finder, Login Items and Force Quit while stderr stays on the terminal.
 The menu bar glyph is separate: a template image drawn in `main.swift`.
 
-Next: login-item registration and bundling the `monoplan` binary; then
-the window.
+Next: login-item registration; then the window.

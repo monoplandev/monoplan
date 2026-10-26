@@ -48,6 +48,19 @@ VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml" | head -1)"
 # ("0.0.1-alpha.15") stays in CFBundleShortVersionString.
 BUILD_NUMBER="$(printf '%s' "$VERSION" | sed -E 's/-alpha\.([0-9]+)$/.\1/; s/-.*$//')"
 
+# The app bundles the `monoplan` binary (spec/daemon-plan.md) and starts
+# `monoplan daemon --detach` from that copy when none holds the profile,
+# so an installed Monoplan.app works without a cargo-installed CLI. Debug
+# and release follow the app's configuration; sync on a real-sized doc
+# is slow in debug, so install the release build.
+echo ">> cargo build -p monoplan ($CONFIG)"
+if [ "$CONFIG" = release ]; then
+  cargo build -p monoplan --release
+else
+  cargo build -p monoplan
+fi
+CLI="$ROOT/target/$CONFIG/monoplan"
+
 echo ">> swift build ($CONFIG)"
 swift build --package-path "$PKG" -c "$CONFIG" --product MonoplanMac
 BIN="$(swift build --package-path "$PKG" -c "$CONFIG" --show-bin-path)/MonoplanMac"
@@ -57,6 +70,7 @@ CONTENTS="$APP/Contents"
 rm -rf "$APP"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 cp "$BIN" "$CONTENTS/MacOS/MonoplanMac"
+cp "$CLI" "$CONTENTS/MacOS/monoplan"
 
 echo ">> actool $ICON"
 PARTIAL="$(mktemp -t monoplan-icon-plist)"
@@ -101,8 +115,10 @@ PLIST
 rm -f "$PARTIAL"
 printf 'APPL????' > "$CONTENTS/PkgInfo"
 
-# Ad-hoc signature: unsigned bundles are refused by Login Items and get
-# a fresh TCC identity every build.
+# Ad-hoc signatures: unsigned bundles are refused by Login Items and get
+# a fresh TCC identity every build. The helper is signed on its own;
+# bundle signing does not descend into Contents/MacOS siblings.
+codesign --force --sign - "$CONTENTS/MacOS/monoplan" >/dev/null 2>&1
 codesign --force --sign - "$APP" >/dev/null 2>&1
 
 echo ">> $APP"

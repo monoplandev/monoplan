@@ -294,7 +294,7 @@ public final class DaemonClient {
                 self.backoff = 1
                 self.handshake(conn)
             case .failed(let e):
-                self.dropConnection(reason: e.localizedDescription)
+                self.dropConnection(reason: Self.describe(e, socket: path))
             case .cancelled:
                 self.dropConnection(reason: "closed")
             case .waiting(let e):
@@ -339,8 +339,9 @@ public final class DaemonClient {
         daemon = nil
         fail(all: ClientError.closed)
         if stopped { return }
-        maybeSpawnDaemon()
-        state = .connecting(reason)
+        // A spawn problem is the more useful headline than the socket
+        // error it caused.
+        state = .connecting(maybeSpawnDaemon() ?? reason)
         let delay = backoff
         backoff = min(backoff * 2, 10)
         queue.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -426,14 +427,24 @@ public final class DaemonClient {
 
     // MARK: Spawning
 
+    /// No socket to connect to means the daemon is not up; say that
+    /// rather than quoting the ENOENT the framework wraps it in.
+    private static func describe(_ error: NWError, socket: String) -> String {
+        if case .posix(.ENOENT) = error { return "not started" }
+        return error.localizedDescription
+    }
+
     /// Start a daemon the way the CLI would, at most once per backoff
     /// window, and only when nothing holds the lock. Readiness is not
-    /// awaited: the connect loop retries and picks it up.
-    private func maybeSpawnDaemon() {
+    /// awaited: the connect loop retries and picks it up. Returns a
+    /// reason when it could not even try, for the menu to show.
+    private func maybeSpawnDaemon() -> String? {
         guard !location.daemonIsRunning(),
-              Date().timeIntervalSince(lastSpawnAttempt) > 5,
-              let bin = Self.findBinary()
-        else { return }
+              Date().timeIntervalSince(lastSpawnAttempt) > 5
+        else { return nil }
+        guard let bin = Self.findBinary() else {
+            return "no monoplan binary to start it"
+        }
         lastSpawnAttempt = Date()
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: bin)
@@ -452,16 +463,26 @@ public final class DaemonClient {
         do {
             try proc.run()
             NSLog("MonoplanMac: started %@ daemon --detach (pid %d)", bin, proc.processIdentifier)
+            return nil
         } catch {
             NSLog("MonoplanMac: could not start %@: %@", bin, error.localizedDescription)
+            return "could not start \(bin): \(error.localizedDescription)"
         }
     }
 
-    /// `MONOPLAN_BIN`, then the usual install spots, then a debug build
-    /// in the current directory (running from the repo).
-    static func findBinary(environment: [String: String] = ProcessInfo.processInfo.environment) -> String? {
+    /// `MONOPLAN_BIN`, then the copy `build-app.sh` puts beside this
+    /// executable in the .app bundle (spec/daemon-plan.md: the macOS
+    /// app bundles the binary), then the usual install spots, then a
+    /// debug build in the current directory (running from the repo).
+    public static func findBinary(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        executable: URL? = Bundle.main.executableURL
+    ) -> String? {
         var candidates: [String] = []
         if let bin = environment["MONOPLAN_BIN"], !bin.isEmpty { candidates.append(bin) }
+        if let executable {
+            candidates.append(executable.deletingLastPathComponent().appendingPathComponent("monoplan").path)
+        }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         candidates += [
             home + "/.cargo/bin/monoplan",
