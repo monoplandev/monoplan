@@ -41,7 +41,19 @@ struct Inner {
 struct Subscriber {
     sub_id: u64,
     device_id: Uuid,
-    tx: mpsc::Sender<Vec<u8>>,
+    account_id: Uuid,
+    tx: mpsc::Sender<Outbound>,
+}
+
+/// One message on a subscriber's channel: pre-encoded frame bytes plus
+/// what the session loop must do after forwarding them.
+pub enum Outbound {
+    /// An `OpsBroadcast`: send and carry on.
+    Frame(Vec<u8>),
+    /// A `DocClosed`: send, then unbind the doc from the connection
+    /// (drop the subscription, release any snapshot lease). The
+    /// session loop must not serve another frame for the doc.
+    Close(Vec<u8>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,7 +67,7 @@ pub struct Subscription {
     sessions: SyncSessions,
     doc_id: Uuid,
     sub_id: u64,
-    pub rx: mpsc::Receiver<Vec<u8>>,
+    pub rx: mpsc::Receiver<Outbound>,
 }
 
 impl Subscription {
@@ -78,13 +90,14 @@ impl SyncSessions {
         Self::default()
     }
 
-    pub fn subscribe(&self, doc_id: Uuid, device_id: Uuid) -> Subscription {
+    pub fn subscribe(&self, doc_id: Uuid, device_id: Uuid, account_id: Uuid) -> Subscription {
         let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
         let sub_id = next_sub_id();
         let mut inner = self.inner.lock().unwrap();
         inner.docs.entry(doc_id).or_default().push(Subscriber {
             sub_id,
             device_id,
+            account_id,
             tx,
         });
         Subscription {
@@ -134,7 +147,7 @@ impl SyncSessions {
                 if s.sub_id == exclude_sub {
                     return true;
                 }
-                match s.tx.try_send(bytes.clone()) {
+                match s.tx.try_send(Outbound::Frame(bytes.clone())) {
                     Ok(()) => {
                         delivered += 1;
                         true
@@ -147,6 +160,44 @@ impl SyncSessions {
             });
         }
         delivered
+    }
+
+    /// Live revocation (`spec/sharing-plan.md` §Member removal): tell
+    /// every connection of `account_id` that has `doc_id` open to drop
+    /// it. Each such session forwards a `DocClosed` and unbinds the doc;
+    /// the subscriber is removed from the registry here regardless, so
+    /// no later broadcast on the doc reaches it even if the session is
+    /// slow to act. A full or closed channel is handled as in
+    /// `broadcast`: the session ends and the client's reconnect finds
+    /// its `OpenDoc` refused. Returns the number of sessions told.
+    pub fn close_for_account(&self, doc_id: Uuid, account_id: Uuid, reason: &str) -> usize {
+        let bytes = match rmp_serde::to_vec_named(&ServerFrame::DocClosed {
+            doc_id,
+            reason: reason.into(),
+        }) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to encode DocClosed");
+                return 0;
+            }
+        };
+        let mut told = 0;
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(subs) = inner.docs.get_mut(&doc_id) {
+            subs.retain(|s| {
+                if s.account_id != account_id {
+                    return true;
+                }
+                if s.tx.try_send(Outbound::Close(bytes.clone())).is_ok() {
+                    told += 1;
+                }
+                false
+            });
+            if subs.is_empty() {
+                inner.docs.remove(&doc_id);
+            }
+        }
+        told
     }
 
     /// Snapshot the current subscriber ids for a doc. Used by

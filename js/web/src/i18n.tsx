@@ -468,6 +468,13 @@ export type Messages = {
     loadFailed: string;
     createFailed: string;
     revokeFailed: string;
+    memberMenu: string;
+    removeMember: string;
+    removeMemberTitle: string;
+    removeMemberConfirm: (email: string) => string;
+    removeMemberFailed: string;
+    lastOwner: string;
+    removedNotice: (name: string) => string;
     inviteTitle: string;
     inviteFrom: (hint: string) => string;
     inviteSignIn: string;
@@ -789,6 +796,14 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       loadFailed: "No se pudieron cargar los detalles",
       createFailed: "No se pudo crear el enlace",
       revokeFailed: "No se pudo revocar el enlace",
+      memberMenu: "Opciones del miembro",
+      removeMember: "Quitar usuario",
+      removeMemberTitle: "¿Quitar usuario?",
+      removeMemberConfirm: (email) =>
+        `${email} dejará de recibir cambios de este espacio. Lo que ya haya sincronizado sigue en sus dispositivos.`,
+      removeMemberFailed: "No se pudo quitar al usuario",
+      lastOwner: "El espacio necesita al menos un propietario.",
+      removedNotice: (name) => `Te han quitado del espacio «${name}». Se ha eliminado de este dispositivo.`,
       inviteTitle: "Te han invitado",
       inviteFrom: (hint) => `${hint} te invita a un espacio compartido.`,
       inviteSignIn: "Inicia sesión o crea una cuenta para unirte.",
@@ -1111,6 +1126,14 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       loadFailed: "Could not load sharing details",
       createFailed: "Could not create the link",
       revokeFailed: "Could not revoke the link",
+      memberMenu: "Member options",
+      removeMember: "Remove user",
+      removeMemberTitle: "Remove user?",
+      removeMemberConfirm: (email) =>
+        `${email} will stop receiving changes to this workspace. Anything they already synced stays on their devices.`,
+      removeMemberFailed: "Could not remove the user",
+      lastOwner: "A workspace needs at least one owner.",
+      removedNotice: (name) => `You were removed from “${name}”. It has been removed from this device.`,
       inviteTitle: "You're invited",
       inviteFrom: (hint) => `${hint} has invited you to a shared workspace.`,
       inviteSignIn: "Sign in or create an account to join.",

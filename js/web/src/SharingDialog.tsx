@@ -1,9 +1,12 @@
 import { Dialog } from "@kobalte/core/dialog";
+import { DropdownMenu } from "@kobalte/core/dropdown-menu";
 import { For, Show, createEffect, createSignal, on } from "solid-js";
 import { InviteSecret } from "@monoplan/core/wasm";
 import { api, type Invite, type Member } from "./api.ts";
+import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { formatRelative } from "./format.tsx";
 import { useAppI18n } from "./i18n.tsx";
+import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import { closeToItems, trackOverlay } from "./overlay.ts";
 import { useSession } from "./SessionContext.tsx";
 import { inviteUrl } from "./url.ts";
@@ -13,8 +16,11 @@ import { inviteUrl } from "./url.ts";
  *  owner issues single-use links: a fresh secret is generated here, the
  *  doc's DEK wrapped under the invite KEK, and only the HKDF id and the
  *  wrap go to the server, so the link shown below is the only copy of
- *  the secret that will ever exist. Unused links can be revoked. Same
- *  portal / overlay / positioner shape as `ConfirmDialog`. */
+ *  the secret that will ever exist. Unused links can be revoked. An
+ *  owner can also remove a member from their row's "..." menu (never
+ *  themself, never the last owner; confirmed, since revocation is
+ *  forward-only — §Member removal). Same portal / overlay / positioner
+ *  shape as `ConfirmDialog`. */
 export function SharingDialog(props: {
   open: boolean;
   onOpenChange: (b: boolean) => void;
@@ -34,10 +40,18 @@ export function SharingDialog(props: {
   const [createError, setCreateError] = createSignal(false);
   const [copied, setCopied] = createSignal(false);
   const [revoking, setRevoking] = createSignal<Set<string>>(new Set());
+  const [removing, setRemoving] = createSignal<Member | null>(null);
 
   const me = (): string => session.session().accountId;
   const isOwner = (): boolean =>
     members()?.some((mb) => mb.account_id === me() && mb.role === "owner") ?? false;
+  const ownerCount = (): number =>
+    members()?.filter((mb) => mb.role === "owner").length ?? 0;
+  /** Removable by the viewer: they own the doc, the row is not theirs
+   *  (leaving is a different verb), and the row is not the only owner. */
+  const canRemove = (mb: Member): boolean =>
+    isOwner() && mb.account_id !== me() && !(mb.role === "owner" && ownerCount() <= 1);
+  const isLastOwner = (mb: Member): boolean => mb.role === "owner" && ownerCount() <= 1;
 
   const load = async (): Promise<void> => {
     setLoadError(false);
@@ -68,10 +82,23 @@ export function SharingDialog(props: {
         setLink(null);
         setCreateError(false);
         setCopied(false);
+        setRemoving(null);
         void load();
       },
     ),
   );
+
+  const removeMember = async (mb: Member): Promise<void> => {
+    try {
+      await api.removeMember(props.docId, mb.account_id);
+      setMembers((list) => list?.filter((x) => x.account_id !== mb.account_id) ?? null);
+    } catch (e) {
+      console.error("sharing: remove member failed:", e);
+      alert(m().sharing.removeMemberFailed);
+      // Whatever the server now thinks is the truth.
+      void load();
+    }
+  };
 
   const createLink = async (): Promise<void> => {
     const dek = session.session().docKeys.get(props.docId);
@@ -172,6 +199,35 @@ export function SharingDialog(props: {
                               <span class="device-current-tag">{m().sharing.owner}</span>
                             </Show>
                           </span>
+                          {/* Owners get a per-row menu on every row but
+                              their own. The item is disabled, not hidden,
+                              on a last-owner row so the rule is visible. */}
+                          <Show when={isOwner() && mb.account_id !== me()}>
+                            <DropdownMenu placement="bottom-end" gutter={4}>
+                              <DropdownMenu.Trigger
+                                class="icon-button sharing-row-menu"
+                                aria-label={m().sharing.memberMenu}
+                                title={m().sharing.memberMenu}
+                                innerHTML={dotsHorizontalSvg}
+                              />
+                              <DropdownMenu.Portal>
+                                <DropdownMenu.Content class="dropdown-menu-content sharing-member-menu">
+                                  <DropdownMenu.Item
+                                    class="dropdown-menu-item"
+                                    disabled={!canRemove(mb)}
+                                    title={isLastOwner(mb) ? m().sharing.lastOwner : undefined}
+                                    onSelect={() => {
+                                      // Let the menu close and restore focus
+                                      // before the confirm dialog takes it.
+                                      requestAnimationFrame(() => setRemoving(mb));
+                                    }}
+                                  >
+                                    {m().sharing.removeMember}
+                                  </DropdownMenu.Item>
+                                </DropdownMenu.Content>
+                              </DropdownMenu.Portal>
+                            </DropdownMenu>
+                          </Show>
                         </li>
                       )}
                     </For>
@@ -266,6 +322,20 @@ export function SharingDialog(props: {
           </Dialog.Content>
         </div>
       </Dialog.Portal>
+      <ConfirmDialog
+        open={removing() !== null}
+        onOpenChange={(b) => {
+          if (!b) setRemoving(null);
+        }}
+        title={m().sharing.removeMemberTitle}
+        message={m().sharing.removeMemberConfirm(removing()?.email ?? "")}
+        confirmLabel={m().sharing.removeMember}
+        onConfirm={() => {
+          const mb = removing();
+          setRemoving(null);
+          if (mb) void removeMember(mb);
+        }}
+      />
     </Dialog>
   );
 }

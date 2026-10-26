@@ -53,7 +53,7 @@ Rules:
 - Re-opening an already-open doc is idempotent (another `DocOpened`, no second subscription).
 - A connection holds **any number** of open docs (multiplexing, `spec/sharing-plan.md`): one broadcast subscription and one snapshot-lease slot per open doc, the session loop polling every subscription. Which docs a connection opens is the client's choice; the server never assumes the full membership set is open. A closed broadcast channel on any one open doc (slow consumer) ends the whole session, and the client re-pulls every doc from its cursor on reconnect. On disconnect every open doc's subscription is dropped and any held snapshot lease is released.
 - Clients route inbound frames to the right engine by `doc_id` (core's `server_frame_doc_id`); a frame for a doc the client has no engine for is dropped and reported, never applied.
-- Membership is checked at `OpenDoc` only. A membership removed mid-session keeps serving until the connection drops; a `DocClosed` frame for live revocation is sharing work and not yet defined.
+- Membership is checked at `OpenDoc`; a membership removed mid-session is revoked live. `DELETE /api/docs/:doc_id/members/:account_id` drops the removed account's subscriptions on the doc and sends each of its open connections `DocClosed { doc_id, reason }`; the server unbinds the doc from that connection (the snapshot lease, if held, is released) and keeps serving its other docs. A later payload frame naming the closed doc ends the session like any frame for an unopened doc; a reconnect's `OpenDoc` is refused. Clients treat `DocClosed` and `DocRejected` alike: stop routing the doc and drop the local copy (`sharing-plan.md` §Member removal). The window between the membership commit and the frame's delivery is the only time a removed member can still push or receive on the doc.
 
 ## Client → Server
 
@@ -76,6 +76,7 @@ Rules:
 |---|---|---|
 | `DocOpened` | `{ doc_id, epoch: u64 }` | Response to `OpenDoc`; see §Doc binding. |
 | `DocRejected` | `{ doc_id, reason: string }` | Response to an `OpenDoc` the account may not access (or the connection cannot take on). Connection closes after. |
+| `DocClosed` | `{ doc_id, reason: string }` | The doc has been unbound from this connection mid-session (membership removed). Nothing further is served for it; the connection stays up for its other docs. |
 | `OpsAck` | `{ doc_id, acks: [PushAck] }` | Response to `PushOps`. One `PushAck = { push_id: uuid, seq: u64 }` per pushed blob, in input order — self-describing across retries (see §Push identity & retry). |
 | `OpsBatch` | `{ doc_id, ops: [(u64, EncryptedBlob)], complete: bool }` | Response to `PullOps`; may chunk. Each tuple's `u64` is the per-doc `seq`. |
 | `OpsBroadcast` | `{ doc_id, ops: [(u64, EncryptedBlob)] }` | Pushed when another device with the doc open sends ops. |

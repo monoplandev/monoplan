@@ -2340,6 +2340,12 @@ impl From<CoreEvent> for EngineEvent {
                 seq: None,
                 message: Some(message),
             },
+            CoreEvent::DocClosed { reason } => EngineEvent {
+                kind: "docClosed",
+                online: None,
+                seq: None,
+                message: Some(reason),
+            },
         }
     }
 }

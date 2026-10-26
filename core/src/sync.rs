@@ -98,6 +98,14 @@ pub enum Event {
     /// `ConnStateChanged { online: false }` so the caller knows the
     /// engine is already back to `Disconnected`.
     Error(String),
+    /// The server will not serve this doc to this account any more:
+    /// `DocRejected` answered our `OpenDoc`, or `DocClosed` unbound the
+    /// doc mid-session (membership removed, `spec/sharing-plan.md`
+    /// §Member removal). The engine is already `Disconnected` (a
+    /// `ConnStateChanged { online: false }` follows). The host should
+    /// stop routing this engine and forget the doc's local copy — a
+    /// reconnect would only be refused again.
+    DocClosed { reason: String },
 }
 
 /// Client identity advertised in the `Hello` frame: per connection,
@@ -731,11 +739,21 @@ impl SyncEngine {
                 }
             }
             ServerFrame::DocRejected { doc_id: _, reason } => {
-                // The server closes after this; nothing on this
-                // connection can succeed, so go down now rather than
-                // wait for the socket to drop.
-                self.events
-                    .push_back(Event::Error(format!("doc rejected: {reason}")));
+                // The server closes the connection after this; nothing
+                // on it can succeed, so go down now rather than wait
+                // for the socket to drop. Access was refused, so the
+                // host should forget the doc rather than retry.
+                self.events.push_back(Event::DocClosed {
+                    reason: format!("doc rejected: {reason}"),
+                });
+                self.go_disconnected();
+            }
+            ServerFrame::DocClosed { doc_id: _, reason } => {
+                // The connection stays up for the other docs; this one
+                // is gone from it. Same host contract as a rejection.
+                self.events.push_back(Event::DocClosed {
+                    reason: format!("doc closed: {reason}"),
+                });
                 self.go_disconnected();
             }
             ServerFrame::OpsBatch {
@@ -3203,7 +3221,7 @@ mod tests {
     }
 
     #[test]
-    fn doc_rejected_disconnects_with_error() {
+    fn doc_rejected_disconnects_with_doc_closed() {
         let mut eng = fresh_engine_clean();
         eng.handle_connected();
         let _ = drain_events(&mut eng);
@@ -3217,7 +3235,50 @@ mod tests {
         }));
         assert!(!eng.is_online());
         let events = drain_events(&mut eng);
-        assert!(matches!(events[0], Event::Error(ref s) if s.contains("not a member")));
+        assert!(
+            matches!(events[0], Event::DocClosed { ref reason } if reason.contains("not a member"))
+        );
+        assert!(matches!(
+            events.last(),
+            Some(Event::ConnStateChanged { online: false })
+        ));
+    }
+
+    /// `DocClosed` lands on an open, idle doc (membership removed while
+    /// syncing): the engine goes offline with the same `DocClosed`
+    /// event a rejection produces, and sends nothing more.
+    #[test]
+    fn doc_closed_mid_session_disconnects_with_doc_closed() {
+        let mut eng = fresh_engine_clean();
+        eng.handle_connected();
+        let _ = eng.pop_outbox().expect("OpenDoc");
+        eng.handle_server_bytes(&enc(&ServerFrame::DocOpened {
+            doc_id: DOC,
+            epoch: 0,
+        }));
+        let _ = eng.pop_outbox().expect("PullOps");
+        eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            doc_id: DOC,
+            ops: vec![],
+            complete: true,
+        }));
+        let _ = drain_events(&mut eng);
+        assert!(eng.is_online());
+
+        eng.handle_server_bytes(&enc(&ServerFrame::DocClosed {
+            doc_id: DOC,
+            reason: "membership removed".into(),
+        }));
+        assert!(!eng.is_online());
+        assert!(
+            eng.pop_outbox().is_none(),
+            "nothing more goes out for a closed doc"
+        );
+        let events = drain_events(&mut eng);
+        assert!(
+            matches!(events[0], Event::DocClosed { ref reason } if reason.contains("membership removed")),
+            "{events:?}"
+        );
         assert!(matches!(
             events.last(),
             Some(Event::ConnStateChanged { online: false })

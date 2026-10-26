@@ -396,6 +396,90 @@ pub async fn list_members(
     .context("auth.invites list_members")
 }
 
+/// What `remove_member` found; the route maps each to a status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoveMemberOutcome {
+    Removed,
+    /// The caller holds no active membership (404: learns nothing).
+    CallerNotMember,
+    /// The caller is a member but not an owner (403).
+    CallerNotOwner,
+    /// The target is the caller: leaving is a separate verb (409).
+    SelfRemoval,
+    /// The target is the doc's only active owner (409).
+    LastOwner,
+    /// The target holds no active membership (404).
+    TargetNotMember,
+}
+
+/// Owner removes a member (`spec/sharing-plan.md` §Member removal):
+/// stamps `removed_at` on the target's row. Forward-only: the row
+/// stays (an accepted invite reactivates it) and the removed account
+/// keeps whatever it already pulled. The horizon, `is_member` and the
+/// member list all filter on `removed_at IS NULL`, so the server
+/// stops serving the doc to that account from this commit; live
+/// connections are told by the caller (`SyncSessions::close_for_account`).
+pub async fn remove_member(
+    db: &Db,
+    caller: Uuid,
+    doc_id: Uuid,
+    target: Uuid,
+) -> anyhow::Result<RemoveMemberOutcome> {
+    let caller_bytes = caller.as_bytes().to_vec();
+    let target_bytes = target.as_bytes().to_vec();
+    let doc_bytes = doc_id.as_bytes().to_vec();
+    db.call(move |c| {
+        let tx = c.transaction()?;
+        let caller_role: Option<String> = tx
+            .query_row(
+                "SELECT role FROM doc_members
+                 WHERE doc_id = ? AND account_id = ? AND removed_at IS NULL",
+                params![&doc_bytes, &caller_bytes],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match caller_role.as_deref().and_then(MemberRole::parse) {
+            None => return Ok(RemoveMemberOutcome::CallerNotMember),
+            Some(MemberRole::Member) => return Ok(RemoveMemberOutcome::CallerNotOwner),
+            Some(MemberRole::Owner) => {}
+        }
+        if caller == target {
+            return Ok(RemoveMemberOutcome::SelfRemoval);
+        }
+        let target_role: Option<String> = tx
+            .query_row(
+                "SELECT role FROM doc_members
+                 WHERE doc_id = ? AND account_id = ? AND removed_at IS NULL",
+                params![&doc_bytes, &target_bytes],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(target_role) = target_role.as_deref().and_then(MemberRole::parse) else {
+            return Ok(RemoveMemberOutcome::TargetNotMember);
+        };
+        if target_role == MemberRole::Owner {
+            let owners: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM doc_members
+                 WHERE doc_id = ? AND role = ? AND removed_at IS NULL",
+                params![&doc_bytes, MemberRole::Owner.as_str()],
+                |r| r.get(0),
+            )?;
+            if owners <= 1 {
+                return Ok(RemoveMemberOutcome::LastOwner);
+            }
+        }
+        tx.execute(
+            "UPDATE doc_members SET removed_at = ?
+             WHERE doc_id = ? AND account_id = ? AND removed_at IS NULL",
+            params![now_millis(), &doc_bytes, &target_bytes],
+        )?;
+        tx.commit()?;
+        Ok(RemoveMemberOutcome::Removed)
+    })
+    .await
+    .context("auth.invites remove_member")
+}
+
 fn is_active_owner(
     tx: &rusqlite::Transaction<'_>,
     doc_bytes: &[u8],

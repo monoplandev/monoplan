@@ -74,6 +74,10 @@ pub fn router(state: AppState) -> Router {
             delete(invite_routes::revoke),
         )
         .route("/api/docs/{doc_id}/members", get(invite_routes::members))
+        .route(
+            "/api/docs/{doc_id}/members/{account_id}",
+            delete(invite_routes::remove_member_route),
+        )
         .route("/api/invites/{invite_id}", get(invite_routes::fetch))
         .route(
             "/api/invites/{invite_id}/accept",

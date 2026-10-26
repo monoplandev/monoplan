@@ -1265,13 +1265,13 @@ async fn expect_complete_batch(ws: &mut WsStream) -> Vec<StoredBlob> {
 /// so after `handshake` this is immediate; it still earns its keep for
 /// `target == 0` (waiting for a disconnect to deregister).
 async fn wait_for_subscribers(acc: &Account, target: usize) {
+    wait_for_subscribers_on(acc, acc.primary_doc_id, target).await
+}
+
+async fn wait_for_subscribers_on(acc: &Account, doc_id: Uuid, target: usize) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     loop {
-        let count = acc
-            .server
-            .state
-            .sync_sessions
-            .subscriber_count(acc.primary_doc_id);
+        let count = acc.server.state.sync_sessions.subscriber_count(doc_id);
         if (target == 0 && count == 0) || (target > 0 && count >= target) {
             return;
         }
@@ -1824,4 +1824,167 @@ async fn horizon_spans_device_doc_frontiers_and_drops_revoked_devices() {
         .await
         .unwrap();
     assert_eq!(horizon, 3);
+}
+
+/// A second account on `acc`'s server, for cross-account tests.
+async fn signup_second(acc: &Account) -> (Uuid, String) {
+    let kdf_params = weak_params();
+    let master_salt: [u8; 16] = random_bytes();
+    let master =
+        derive_password_master(b"another password entirely", &master_salt, kdf_params).unwrap();
+    let kek = master.kek().unwrap();
+    let dek = Dek::generate();
+    let wrapped = kek.wrap(&dek).unwrap();
+    let resp: SignupResponse = post_msgpack(
+        &format!("{}/api/account/signup", acc.server.base),
+        &SignupRequest {
+            email: format!("second-{}@example.com", Uuid::now_v7()),
+            master_salt: master_salt.to_vec(),
+            kdf_params,
+            auth_secret: master.auth_secret().unwrap().as_bytes().to_vec(),
+            wrapped_dek: wrapped.ciphertext,
+            wrapped_dek_nonce: wrapped.nonce.to_vec(),
+            recovery: None,
+            device_name: "second-device".into(),
+        },
+    )
+    .await;
+    (
+        Uuid::parse_str(&resp.account_id).unwrap(),
+        resp.device_token,
+    )
+}
+
+/// Seed an active `member` row for `account_id` on `doc_id` directly
+/// (the shape an accepted invite leaves behind).
+async fn seed_member_row(acc: &Account, doc_id: Uuid, account_id: Uuid) {
+    acc.server
+        .state
+        .db
+        .call(move |c| {
+            c.execute(
+                "INSERT INTO doc_members (
+                    doc_id, account_id, role, wrapped_dek, wrapped_dek_nonce, added_at
+                 ) VALUES (?, ?, 'member', ?, ?, 2)",
+                rusqlite::params![
+                    doc_id.as_bytes().as_slice(),
+                    account_id.as_bytes().as_slice(),
+                    vec![9u8; 48],
+                    vec![8u8; 24],
+                ],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+/// Live revocation (`spec/sharing-plan.md` §Member removal): the owner
+/// removes a member over HTTP while that member has the doc open. The
+/// member's connection gets `DocClosed` for that doc and nothing else;
+/// the rest of the connection (its Home doc) keeps working; the
+/// owner's own open is untouched and its next push is not broadcast
+/// to the removed member; and a later frame from the removed member
+/// naming the doc ends its session like any frame for an unopened doc.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn removing_a_member_closes_the_doc_on_its_live_connection() {
+    let owner = signup_account().await;
+    let shared = create_doc(&owner).await;
+    let (member_id, member_token) = signup_second(&owner).await;
+    seed_member_row(&owner, shared, member_id).await;
+
+    let mut ws_owner = connect_ws(&owner.server, &owner.device_token).await;
+    handshake(&mut ws_owner, shared).await;
+    let mut ws_member = connect_ws(&owner.server, &member_token).await;
+    hello(&mut ws_member).await;
+    open_doc(&mut ws_member, shared).await;
+    // The member's Home is a different doc; it must survive the close.
+    let member_home = {
+        let state = owner.server.state.clone();
+        let rows = monoplan_server::auth::queries::list_memberships(&state.db, member_id)
+            .await
+            .unwrap();
+        rows.into_iter()
+            .map(|m| m.doc_id)
+            .find(|d| *d != shared)
+            .expect("member has a Home doc")
+    };
+    open_doc(&mut ws_member, member_home).await;
+    wait_for_subscribers_on(&owner, shared, 2).await;
+
+    let status = http()
+        .delete(format!(
+            "{}/api/docs/{shared}/members/{member_id}",
+            owner.server.base
+        ))
+        .bearer_auth(&owner.device_token)
+        .send()
+        .await
+        .unwrap()
+        .status();
+    assert!(status.is_success(), "remove member: {status}");
+
+    match recv_msgpack::<ServerFrame>(&mut ws_member).await {
+        ServerFrame::DocClosed { doc_id, reason } => {
+            assert_eq!(doc_id, shared);
+            assert!(reason.contains("removed"), "reason: {reason}");
+        }
+        other => panic!("expected DocClosed, got {other:?}"),
+    }
+    assert_eq!(
+        owner.server.state.sync_sessions.subscriber_count(shared),
+        1,
+        "only the owner's session stays subscribed"
+    );
+
+    // The owner's push is acked and reaches nobody else.
+    send_msgpack(
+        &mut ws_owner,
+        &ClientFrame::PushOps {
+            doc_id: shared,
+            ops: vec![fake_push(1)],
+        },
+    )
+    .await;
+    assert_eq!(
+        ack_seqs(recv_msgpack::<ServerFrame>(&mut ws_owner).await),
+        vec![1]
+    );
+    assert_no_frame(&mut ws_member, std::time::Duration::from_millis(200)).await;
+
+    // The member's other doc still syncs on the same connection.
+    send_msgpack(
+        &mut ws_member,
+        &ClientFrame::PushOps {
+            doc_id: member_home,
+            ops: vec![fake_push(2)],
+        },
+    )
+    .await;
+    assert_eq!(
+        ack_seqs(recv_msgpack::<ServerFrame>(&mut ws_member).await),
+        vec![1]
+    );
+
+    // Naming the closed doc again ends the session, as for any doc
+    // the connection never opened.
+    send_msgpack(
+        &mut ws_member,
+        &ClientFrame::PullOps {
+            doc_id: shared,
+            since_seq: 0,
+        },
+    )
+    .await;
+    expect_closed(&mut ws_member).await;
+
+    // And a reconnect is refused outright.
+    let mut ws_again = connect_ws(&owner.server, &member_token).await;
+    hello(&mut ws_again).await;
+    send_msgpack(&mut ws_again, &ClientFrame::OpenDoc { doc_id: shared }).await;
+    match recv_msgpack::<ServerFrame>(&mut ws_again).await {
+        ServerFrame::DocRejected { doc_id, .. } => assert_eq!(doc_id, shared),
+        other => panic!("expected DocRejected, got {other:?}"),
+    }
+    expect_closed(&mut ws_again).await;
 }

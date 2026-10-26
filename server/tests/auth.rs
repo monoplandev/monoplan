@@ -1678,3 +1678,115 @@ async fn invite_expires_and_is_not_spent_by_an_existing_member() {
         reqwest::StatusCode::CONFLICT
     );
 }
+
+/// `DELETE /api/docs/:doc_id/members/:account_id`: the refusal matrix
+/// around removal, then one real removal. A non-member learns nothing
+/// (404), a non-owner member is told no (403), the owner cannot remove
+/// themself (409: leaving is a different verb) nor the last owner
+/// (409, by way of the same rule), and the primary doc is refused
+/// before any lookup (403). After the owner removes the invitee, the
+/// member list and the invitee's own doc list drop the doc, a second
+/// removal reads as 404, and a fresh link lets the invitee back in on
+/// the same row.
+#[tokio::test]
+async fn member_removal_is_owner_only_never_self_nor_last_owner() {
+    let acc = signup(false).await;
+    let base = acc.server.base.clone();
+    let (doc_id, doc_dek) = create_doc(&acc, &acc.dek).await;
+    let (secret, _) = issue_invite(&acc, &doc_id, &doc_dek, None).await;
+    let second = signup_on(&base).await;
+    accept_invite(&base, &secret, &second.device_token, &second.dek).await;
+    let third = signup_on(&base).await;
+    let member_url = |doc: &str, account: &str| format!("{base}/api/docs/{doc}/members/{account}");
+
+    // The primary doc is refused before any membership lookup.
+    assert_eq!(
+        delete_status(
+            &member_url(&acc.primary_doc_id, &second.account_id),
+            &acc.device_token
+        )
+        .await,
+        reqwest::StatusCode::FORBIDDEN
+    );
+    // A non-member learns nothing.
+    assert_eq!(
+        delete_status(
+            &member_url(&doc_id, &second.account_id),
+            &third.device_token
+        )
+        .await,
+        reqwest::StatusCode::NOT_FOUND
+    );
+    // A member who is not an owner is told no.
+    assert_eq!(
+        delete_status(&member_url(&doc_id, &acc.account_id), &second.device_token).await,
+        reqwest::StatusCode::FORBIDDEN
+    );
+    // The owner cannot remove themself: that would be "leave", and
+    // with one owner it would also orphan the doc.
+    assert_eq!(
+        delete_status(&member_url(&doc_id, &acc.account_id), &acc.device_token).await,
+        reqwest::StatusCode::CONFLICT
+    );
+    // A garbage account id is a bad request, not a lookup.
+    assert_eq!(
+        delete_status(&member_url(&doc_id, "not-a-uuid"), &acc.device_token).await,
+        reqwest::StatusCode::BAD_REQUEST
+    );
+    // Someone who was never a member is not found.
+    assert_eq!(
+        delete_status(&member_url(&doc_id, &third.account_id), &acc.device_token).await,
+        reqwest::StatusCode::NOT_FOUND
+    );
+
+    // The real thing.
+    assert!(
+        delete_status(&member_url(&doc_id, &second.account_id), &acc.device_token)
+            .await
+            .is_success()
+    );
+    let members: MembersListResponse = get_msgpack_authed(
+        &format!("{base}/api/docs/{doc_id}/members"),
+        &acc.device_token,
+    )
+    .await;
+    assert_eq!(
+        members
+            .members
+            .iter()
+            .map(|m| m.account_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![acc.account_id.as_str()]
+    );
+    let docs: DocsListResponse =
+        get_msgpack_authed(&format!("{base}/api/docs"), &second.device_token).await;
+    assert!(
+        docs.memberships.iter().all(|m| m.doc_id != doc_id),
+        "removed member still lists the doc"
+    );
+    // Removed: the member list is closed to them, and removing again
+    // finds nothing.
+    assert_eq!(
+        get_status(
+            &format!("{base}/api/docs/{doc_id}/members"),
+            Some(&second.device_token)
+        )
+        .await,
+        reqwest::StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        delete_status(&member_url(&doc_id, &second.account_id), &acc.device_token).await,
+        reqwest::StatusCode::NOT_FOUND
+    );
+
+    // A fresh link reactivates the same row.
+    let (again, _) = issue_invite(&acc, &doc_id, &doc_dek, None).await;
+    let (rejoined, _) = accept_invite(&base, &again, &second.device_token, &second.dek).await;
+    assert_eq!(rejoined, doc_id);
+    let members: MembersListResponse = get_msgpack_authed(
+        &format!("{base}/api/docs/{doc_id}/members"),
+        &second.device_token,
+    )
+    .await;
+    assert_eq!(members.members.len(), 2);
+}

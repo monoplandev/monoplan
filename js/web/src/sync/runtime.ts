@@ -264,6 +264,11 @@ export function createWorkspaceRuntime(props: {
   setOnline: (b: boolean) => void;
   setLastSyncAt: (ts: number | null) => void;
   logout: () => void;
+  /** The server closed a doc on us (membership removed, or the doc
+   *  deleted elsewhere) and the runtime has already forgotten it on
+   *  this device. `name` is what the doc called itself, if it had a
+   *  name; the UI tells the person. */
+  onDocClosed?: (docId: string, name: string | null) => void;
 }) {
   let bridge: SyncBridge | null = null;
   const pumpOutbox = (): void => bridge?.pumpOutbox();
@@ -374,6 +379,27 @@ export function createWorkspaceRuntime(props: {
         saveDeviceSoon();
       },
       onAuthFailed: () => void props.logout(),
+      // `docClosed`: the server refused our `OpenDoc` (`DocRejected`)
+      // or unbound the doc mid-session (`DocClosed`): this account is
+      // no longer a member, or the doc is gone. Either way a reconnect
+      // would only be refused again, so forget the doc here and now —
+      // the same local teardown as deleting it, minus the HTTP call.
+      // Home is never closed by the server; if it ever were, the next
+      // reconnect would surface it again rather than wipe the account's
+      // own doc from under it.
+      onEngineEvent: (ev, docId) => {
+        if (ev.kind !== "docClosed") return;
+        if (docId === props.session.primaryDocId) {
+          console.error("sync: server closed the Home doc:", ev.message);
+          return;
+        }
+        const r = runtimes.get(docId);
+        if (!r) return;
+        const name = r.app.state.settings.docName ?? null;
+        console.warn(`sync: doc ${docId} closed by the server:`, ev.message);
+        void forgetOpenDoc(docId, r);
+        props.onDocClosed?.(docId, name);
+      },
     });
     const b = bridge;
     for (const r of runtimes.values()) wireFlush(r, b);
@@ -500,26 +526,15 @@ export function createWorkspaceRuntime(props: {
     return openNewDoc(docId, dek, { seeded: false, name: null });
   };
 
-  // Delete a doc the account owns and forget it on this device. The
-  // server goes first (owner-only; it refuses the primary doc, as does
-  // the guard here — Home is non-deletable, `spec/sharing-plan.md`); a
-  // refusal leaves everything in place. Then, in an order where a
-  // failure part-way leaves nothing half-alive: the view leaves the doc,
-  // the engine stops routing, the layer and runtime maps forget it, and
-  // the key (session + vault) and the local op log go last. Other
-  // devices learn on their next boot (`refreshDocKeys` in App.tsx); a
-  // device with the doc open right now is not told — `DocClosed` is
-  // future work.
-  const deleteDoc = async (docId: string): Promise<void> => {
-    if (props.session.anonymous) {
-      throw new Error("sign in to delete a workspace");
-    }
-    if (docId === props.session.primaryDocId) {
-      throw new Error("the Home workspace cannot be deleted");
-    }
-    const r = runtimes.get(docId);
-    if (!r) throw new Error(`deleteDoc: no open doc ${docId}`);
-    await api.deleteDoc(docId);
+  // Forget an open non-Home doc on this device, in an order where a
+  // failure part-way leaves nothing half-alive: the view leaves the
+  // doc, the engine stops routing, the layer and runtime maps forget
+  // it, and the key (session + vault) and the local op log go last.
+  // Shared by `deleteDoc` (after the server agreed) and the server's
+  // own `DocClosed` / `DocRejected` (membership removed, doc deleted
+  // elsewhere). Other devices of this account learn on their next boot
+  // (`refreshDocKeys` in App.tsx) or from their own `DocClosed`.
+  const forgetOpenDoc = async (docId: string, r: DocRuntime): Promise<void> => {
     if (docs.viewDocId(view()) === docId)
       setView({ kind: "list", id: "inbox" });
     bridge?.removeEngine(docId);
@@ -532,14 +547,31 @@ export function createWorkspaceRuntime(props: {
       await dekVault.removeDocKey(docId);
     } catch (e) {
       // Next boot's `GET /api/docs` refresh drops it from the vault.
-      console.warn("deleteDoc: removing the vault entry failed:", e);
+      console.warn("forgetDoc: removing the vault entry failed:", e);
     }
     try {
       await r.flushed();
       await IdbStorage.wipe(docId);
     } catch (e) {
-      console.warn("deleteDoc: wiping the local op log failed:", e);
+      console.warn("forgetDoc: wiping the local op log failed:", e);
     }
+  };
+
+  // Delete a doc the account owns and forget it on this device. The
+  // server goes first (owner-only; it refuses the primary doc, as does
+  // the guard here — Home is non-deletable, `spec/sharing-plan.md`); a
+  // refusal leaves everything in place.
+  const deleteDoc = async (docId: string): Promise<void> => {
+    if (props.session.anonymous) {
+      throw new Error("sign in to delete a workspace");
+    }
+    if (docId === props.session.primaryDocId) {
+      throw new Error("the Home workspace cannot be deleted");
+    }
+    const r = runtimes.get(docId);
+    if (!r) throw new Error(`deleteDoc: no open doc ${docId}`);
+    await api.deleteDoc(docId);
+    await forgetOpenDoc(docId, r);
   };
 
   // ---------- Prefs: separate store, write-through ----------

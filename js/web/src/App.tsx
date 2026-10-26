@@ -389,12 +389,18 @@ function BootGate(props: {
 
 function MainApp(props: { session: Session; boot: BootInfo }) {
   const { setOnline, setLastSyncAt, logout } = useSession();
+  const { m } = useAppI18n();
   const { docs, view, setView, createDoc, joinDoc, deleteDoc } = createWorkspaceRuntime({
     session: props.session,
     boot: props.boot,
     setOnline,
     setLastSyncAt,
     logout,
+    // The doc is already gone from the nav by the time this fires; the
+    // alert is the one explanation the person gets for why.
+    onDocClosed: (_docId, name) => {
+      alert(m().sharing.removedNotice(name ?? m().nav.untitledDoc));
+    },
   });
 
   return (

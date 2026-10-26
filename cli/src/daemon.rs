@@ -829,6 +829,16 @@ impl Host {
                     tracing::warn!("engine: {msg}");
                     self.disconnect(&format!("engine error: {msg}"));
                 }
+                // The daemon syncs the Home doc only, and Home is
+                // non-leavable, so this means the server refused the
+                // account's own primary doc — a server-side fault, not
+                // something a reconnect loop will fix quickly. Treat
+                // it like any fatal engine error: drop the socket and
+                // let the ordinary backoff pace the retries.
+                Event::DocClosed { reason } => {
+                    tracing::warn!("engine: home doc closed: {reason}");
+                    self.disconnect(&format!("doc closed: {reason}"));
+                }
             }
         }
         self.publish();

@@ -1,6 +1,6 @@
 # Sharing — design + implementation plan
 
-**Status:** Substrate, multi-doc clients and **invites** built; member removal, ownership transfer and live revocation (`DocClosed`) are not. Invites (sharing links) landed 2026-10-21: see §Invites below.
+**Status:** Substrate, multi-doc clients, **invites** and **member removal with live revocation** (`DocClosed`, 2026-10-26) built; leave and ownership transfer are not. Invites (sharing links) landed 2026-10-21: see §Invites below.
 
 This document preserves the multi-doc / sharing design discussed during early planning. Pre-release, we made a deliberate scoping decision: lay the doc-keyed substrate now (so the eventual migration is incremental) but defer everything that needs a second doc to exist — membership tables, per-doc DEKs, multi-doc clients, sharing UX — until there is real conviction that shared lists are part of the product.
 
@@ -96,10 +96,10 @@ So the server stores an id it cannot invert and a wrap it cannot open; the link 
 
 ### Member removal
 
-- **Owner removes member.** `DELETE /api/docs/:doc_id/members/:account_id`. Sets `removed_at`. Server stops accepting any sync frames for `(doc_id, removed_account)`, excludes the removed account's devices from horizon calc, severs broadcast subscriptions.
-- **Member leaves voluntarily.** `DELETE /api/docs/:doc_id/members/:self`. Same effects. Rejected if the member is sole owner — must transfer first.
+- **Owner removes member** — built 2026-10-26. `DELETE /api/docs/:doc_id/members/:account_id` stamps `removed_at` (the row stays; a later accepted invite reactivates it). Refusals: the primary doc, 403 before any lookup; a caller with no active membership, 404 (learns nothing); a member who is not an owner, 403; the caller themself, 409 (leaving is a separate verb); the last active owner, 409. Everything that gates access already filters on `removed_at IS NULL` (`is_member` behind `OpenDoc`, the member list, the doc list, the compaction horizon), so the server stops serving the account from the commit. Live revocation: the route then calls `SyncSessions::close_for_account`, which drops the removed account's subscriptions on the doc and queues a `DocClosed` on each of its open connections; the session unbinds the doc (releasing a held snapshot lease), sends the frame, and carries on with its other docs (`sync-protocol.md`). Since ownership transfer is not built, every doc has exactly one owner — the caller — so no owner is removable today; the last-owner rule is enforced for when transfer lands.
+- **Member leaves voluntarily.** `DELETE /api/docs/:doc_id/members/:self`. Same effects. Rejected if the member is sole owner — must transfer first. Not built.
 
-Local client of the removed/leaving account should drop the local copy (snapshot, oplog, DEK entry). Can't enforce — if they took a backup, they keep it.
+Clients: the engine turns both `DocClosed` and `DocRejected` into one `Event::DocClosed` (the host contract is the same: the server will not serve this doc to this account, so stop routing it and drop the local copy). The web runtime forgets the doc exactly as after a delete (engine off the bridge, layer, session key, vault entry, op log) and the UI shows a one-line notice; a reconnect after removal is therefore never attempted, which also fixes the earlier reconnect loop a refused `OpenDoc` caused. The CLI daemon syncs Home only, where the event cannot legitimately occur, and treats it as a fatal engine error. Can't enforce the drop — if they took a backup, they keep it. UI: the web `SharingDialog` gives owners a "..." menu on every member row but their own, with "Remove user" (disabled on a last-owner row), confirmed with copy that says the removed person keeps what they already synced; CLI `monoplan share remove <doc> <email>`.
 
 ### Planned endpoints
 
@@ -116,7 +116,7 @@ POST   /api/invites/:invite_id/accept                     -- authed; body: { wra
 GET    /api/docs/:doc_id/members                          -- list active members (any member) — built 2026-10-21
 
 POST   /api/docs/:doc_id/transfer-ownership               -- owner only
-DELETE /api/docs/:doc_id/members/:account_id              -- remove or leave
+DELETE /api/docs/:doc_id/members/:account_id              -- owner removes a member — built 2026-10-26 (403 Home / 404 non-member / 403 non-owner / 409 self or last owner); leave not built
 ```
 
 ### Planned schema additions
@@ -174,7 +174,7 @@ Remaining for sharing:
 - ~~`can_open` becomes a `doc_members(doc_id, account_id)` lookup.~~ Done 2026-10-17.
 - ~~A connection holds one open doc; multiplexing lifts it to a map keyed by `doc_id`.~~ Done 2026-10-19 (`WSSession.open: HashMap<Uuid, OpenDoc>`, the broadcast arm is a `poll_fn` over every open subscription, leases released per doc on disconnect).
 - ~~Horizon spans the devices of every active member.~~ Done 2026-10-17 (`queries::doc_horizon` lost its `account_id` parameter).
-- Removal / leave severs the open doc on live connections (a `DocClosed { doc_id, reason }` frame is the obvious shape; not yet defined). Membership is checked at `OpenDoc` only today.
+- ~~Removal / leave severs the open doc on live connections (a `DocClosed { doc_id, reason }` frame).~~ Done 2026-10-26 for removal (`sync-protocol.md`).
 
 ### Auth flows (memberships shape) — built 2026-10-17, narrowed 2026-10-19
 
@@ -213,7 +213,7 @@ Compile breaks downstream — fix in Phase 2.
 
 **2c — Snapshot coordinator.** Already keyed by doc; nothing to do.
 
-**2d — HTTP endpoints.** ~~Signup / login / recover / reset / change in memberships shape.~~ Done 2026-10-17. ~~`POST /api/docs`, `GET /api/docs`.~~ Done 2026-10-19 (`server/src/http/doc_routes.rs`). ~~Invites, member list.~~ Done 2026-10-21 (`server/src/http/invite_routes.rs`, `server/src/auth/invites.rs`; `server/tests/auth.rs` covers issue → anonymous fetch → accept → listed membership, single use, expiry, owner-only, 403 on Home, 409 for an existing member, revoke). Still to add: member removal / leave, ownership transfer.
+**2d — HTTP endpoints.** ~~Signup / login / recover / reset / change in memberships shape.~~ Done 2026-10-17. ~~`POST /api/docs`, `GET /api/docs`.~~ Done 2026-10-19 (`server/src/http/doc_routes.rs`). ~~Invites, member list.~~ Done 2026-10-21 (`server/src/http/invite_routes.rs`, `server/src/auth/invites.rs`; `server/tests/auth.rs` covers issue → anonymous fetch → accept → listed membership, single use, expiry, owner-only, 403 on Home, 409 for an existing member, revoke). ~~Member removal~~ done 2026-10-26 (`remove_member` in `server/src/auth/invites.rs`; `server/tests/auth.rs` covers the refusal matrix and reactivation, `server/tests/sync.rs` the live `DocClosed`). Still to add: leave, ownership transfer.
 
 **2e — Tests.** ~~Fixture builders; "two docs on one account".~~ Done 2026-10-17 / 2026-10-19 (`server/tests/sync.rs`: two docs interleaved on one connection, broadcast isolation across three connections, per-doc lease release; `server/tests/auth.rs`: created doc covered by list / login / password change / recovery, recovery wrap required on enrolled accounts).
 
@@ -239,7 +239,7 @@ Compile breaks downstream — fix in Phase 2.
   - ~~**Per-doc vault.**~~ Done 2026-10-20: the vault record holds one AES-GCM entry per doc id under its single non-extractable wrapping key (`sealSession` / `openRecord` in `dek-vault.ts`, tested in `js/core/test/dek-vault.test.ts`); `DekVault.putDocKey` adds a doc that appears after login. Chosen over vaulting the Home DEK alone and re-deriving from `GET /api/docs`, so every membership opens offline on a cold reload. A reload now restores the full `Session.docKeys`.
   - ~~**`docId` on `ItemView`.**~~ Done 2026-10-20: the web store stamps every projected `ItemView` with its engine's doc id (snapshot and `itemAdded` paths; drafts take the current app's). Never on the wire. The cross-doc lenses merge by it and route mutations back to the owning `DocApp` by it.
   - ~~**Core keeps foreign Focus refs.**~~ Done 2026-10-20 (`spec/focus.md` §FocusRef grammar): the Home doc's core keeps `<doc_id>:<item_id>` refs through every sweep, surfaces them via `focus_entries()` / `focusEntriesJson`, writes one on `add_foreign_to_focus`, and leaves judging them dead to the host, which prunes by item id. No "resident docs" declaration was needed: a client that has not loaded the other doc simply never prunes.
-  - ~~**Boot every membership.**~~ Done 2026-10-20: `BootGate` (`App.tsx`) replays one `IdbStorage` + `Doc` per entry in `Session.docKeys` (Home first; a non-Home doc first seen on a device starts empty and takes the server snapshot), and `runtime.ts` builds one `DocRuntime` (engine, synced store, op-log persistence rhythm) per doc and hands every engine to one `createSyncBridge`, which routes server frames to the owning runtime's pulse. Boot also calls `GET /api/docs` (raced against the vaulted docs' replay, 5 s cap) and unwraps, vaults and boots any membership the vault lacks (`sync/docKeys.ts`), so a doc created on another device appears on the next boot; memberships the server no longer lists are not dropped (that is `DocClosed` work).
+  - ~~**Boot every membership.**~~ Done 2026-10-20: `BootGate` (`App.tsx`) replays one `IdbStorage` + `Doc` per entry in `Session.docKeys` (Home first; a non-Home doc first seen on a device starts empty and takes the server snapshot), and `runtime.ts` builds one `DocRuntime` (engine, synced store, op-log persistence rhythm) per doc and hands every engine to one `createSyncBridge`, which routes server frames to the owning runtime's pulse. Boot also calls `GET /api/docs` (raced against the vaulted docs' replay, 5 s cap) and unwraps, vaults and boots any membership the vault lacks (`sync/docKeys.ts`), so a doc created on another device appears on the next boot; memberships the server no longer lists are dropped (`forgetDoc`); a doc closed while open is handled live by `DocClosed` (2026-10-26).
   - ~~**Personal layer, create-doc, per-doc nav, merged lenses.**~~ Done 2026-10-20 (`js/web/src/sync/docs.ts`, `createDocsLayer`): the doc map (reactive, Home first), the `itemId → docId` reverse index (resolved by probing each doc's store), `routed: ItemActions` (every item-keyed `DocApp` mutation, grouped by doc; a call spanning docs commits once per doc) and the merged reads. `Workspace` renders a list view from its own doc's `DocApp` (`ViewKey.docId`, absent ≡ Home; `runtime.setView` normalises) and the lenses from the layer. `runtime.createDoc(name)`: fresh DEK wrapped under the Home DEK → `POST /api/docs` → `DekVault.putDocKey` → `Doc.create` (seeded like Home, same peer) → a `DocRuntime` under the runtime's owner → `SyncBridge.addEngine` (opens the doc on the live socket) → `setDocName`. The nav renders one collapsible `DocSection` per doc (own heading, Inbox, lists `Dnd`, new-list form; collapse state per doc in localStorage; rename via the heading's context menu) and, for authed sessions, a "New workspace" item in the footer app menu that opens a name dialog (`NewDocDialog`; no nav row). Search fans out over every doc's index and merge-ranks; list results carry their doc. Covered by `js/web/test/docs.test.ts` (routing, reverse index, foreign Focus refs + prune, Done / calendar prefs, per-doc undo) and the `addEngine` e2e in `js/core/test/sync-e2e.test.ts`; not yet exercised in a browser as of 2026-10-20.
 - ~~**Auth flows**: memberships-shaped bodies on relevant endpoints.~~ Done for login (the web has no recovery / password-change UI yet).
 - **Verification**: signup → add items → reload → still works. Two devices on same account → real-time sync.
@@ -271,10 +271,10 @@ Or split into 5 small PRs if needed: protocol → server → core+CLI → web �
 | Phase | Days |
 |---|---|
 | 1 — protocol + schema | 0.5 (done except `doc_invites`) |
-| 2 — server | 1.5 (memberships, keys, multi-open, `POST /api/docs`, invites, member list done; removal / transfer, `DocClosed` remain) |
+| 2 — server | 1 (memberships, keys, multi-open, `POST /api/docs`, invites, member list, removal + `DocClosed` done; leave / transfer remain) |
 | 3 — core | 0.5 (done) |
 | 4 — CLI | 0.5 (key storage, handshake, `share` done; `DocRouter` + doc selector remain) |
-| 5 — web | 1.5 (done: router, per-doc vault, boot-every-membership, `listDocs` refresh, personal layer, create-doc UI, per-doc nav sections, merged lenses, sharing dialog + invite accept) |
+| 5 — web | 1 (done: router, per-doc vault, boot-every-membership, `listDocs` refresh, personal layer, create-doc UI, per-doc nav sections, merged lenses, sharing dialog + invite accept, member removal + `DocClosed` handling) |
 | 6 — cleanup + verification | 0.5 |
 | **Total** | **~6 days** |
 
@@ -300,7 +300,7 @@ Plus: the rest of the sharing UI (member removal, presence, conflict UX) is **se
 
 ## Open questions
 
-- **Doc deletion semantics** when doc has multiple members: unilateral owner delete, member-by-member opt-in, or "leave for everyone else, doc keeps existing for the leaver"? TBD. Until decided, `DELETE /api/docs/:doc_id` (built 2026-10-20) requires the caller to be the sole active member and answers 409 otherwise; the primary doc is refused with 403 before any lookup (`accounts.primary_doc_id` on the server, `DocEntry.home` / `Session.primaryDocId` on the client). The web client offers Delete only on non-Home headings (the "..." menu, confirmed), then drops the engine from the bridge (`SyncBridge.removeEngine`), the doc from the layer (`DocsLayer.removeDoc`, which also drops its foreign Focus pins), the key from the session and vault (`DekVault.removeDocKey`) and the local op log (`IdbStorage.wipe`). Other devices drop a vaulted doc the server no longer lists at their next boot (`refreshDocKeys` in `App.tsx`), since its `OpenDoc` would be refused and a refusal ends the session; a device with the doc open *right now* is not told — that is the `DocClosed` frame.
+- **Doc deletion semantics** when doc has multiple members: unilateral owner delete, member-by-member opt-in, or "leave for everyone else, doc keeps existing for the leaver"? TBD. Until decided, `DELETE /api/docs/:doc_id` (built 2026-10-20) requires the caller to be the sole active member and answers 409 otherwise; the primary doc is refused with 403 before any lookup (`accounts.primary_doc_id` on the server, `DocEntry.home` / `Session.primaryDocId` on the client). The web client offers Delete only on non-Home headings (the "..." menu, confirmed), then drops the engine from the bridge (`SyncBridge.removeEngine`), the doc from the layer (`DocsLayer.removeDoc`, which also drops its foreign Focus pins), the key from the session and vault (`DekVault.removeDocKey`) and the local op log (`IdbStorage.wipe`). Other devices drop a vaulted doc the server no longer lists at their next boot (`refreshDocKeys` in `App.tsx`); a device with the doc open *right now* learns when its next frame for it fails and its reconnect's `OpenDoc` is refused, which the client now handles like `DocClosed` (forget the doc, keep the session). Deletion itself does not yet push `DocClosed` the way member removal does.
 - **Discovery / UI** for shared docs: flat list with primary doc privileged at top, or folder-like hierarchy? Product question, out of scope.
 - **Connection-per-doc vs multiplexing.** Decided: multiplexing (one WS per device, `doc_id` on every frame). Connection-per-doc was the alternative; rejected because it scales worse with many docs.
 

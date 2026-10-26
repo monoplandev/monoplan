@@ -5095,6 +5095,19 @@ input.task-check:hover {
   flex-shrink: 0;
 }
 
+/* The per-member "..." menu trigger: same glyph box as the nav's
+   heading menu, always visible (a dialog row has no hover reveal). Its
+   portaled content needs the same lift above the dialog overlay /
+   positioner (z-index 100 / 101) as `.device-menu-content`. */
+.sharing-row-menu {
+  flex-shrink: 0;
+  opacity: 1;
+}
+
+.sharing-member-menu {
+  z-index: 110;
+}
+
 .sharing-create {
   margin-top: 8px;
 }

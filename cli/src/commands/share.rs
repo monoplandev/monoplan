@@ -47,6 +47,10 @@ pub enum ShareCmd {
     Accept { link: String },
     /// Show the members of a workspace you belong to.
     Members { doc: String },
+    /// Remove a member from a workspace you own, by email. Not
+    /// yourself, and not the last owner. They keep what they already
+    /// synced; the server stops serving them the workspace from now.
+    Remove { doc: String, email: String },
 }
 
 pub async fn run(args: ShareArgs) -> anyhow::Result<()> {
@@ -56,6 +60,7 @@ pub async fn run(args: ShareArgs) -> anyhow::Result<()> {
         ShareCmd::Revoke { doc, invite_id } => revoke(&doc, &invite_id).await,
         ShareCmd::Accept { link } => accept(&link).await,
         ShareCmd::Members { doc } => members(&doc).await,
+        ShareCmd::Remove { doc, email } => remove(&doc, &email).await,
     }
 }
 
@@ -230,6 +235,34 @@ async fn members(doc: &str) -> anyhow::Result<()> {
             format_ts(m.added_at)
         );
     }
+    Ok(())
+}
+
+async fn remove(doc: &str, email: &str) -> anyhow::Result<()> {
+    let c = ctx()?;
+    let doc_id = parse_doc_id(doc)?;
+    let wanted = email.trim();
+    let list: MembersListResponse = c
+        .client
+        .get_authed(&format!("/api/docs/{}/members", doc_id.0), &c.token)
+        .await
+        .context("listing the members")?;
+    let target = list
+        .members
+        .iter()
+        .find(|m| m.email.eq_ignore_ascii_case(wanted))
+        .with_context(|| format!("{wanted} is not a member of this workspace"))?;
+    c.client
+        .delete_authed(
+            &format!("/api/docs/{}/members/{}", doc_id.0, target.account_id),
+            &c.token,
+        )
+        .await
+        .context("removing the member")?;
+    println!("Removed {}.", target.email);
+    eprintln!(
+        "They keep whatever they already synced; the server serves them nothing further from this workspace."
+    );
     Ok(())
 }
 

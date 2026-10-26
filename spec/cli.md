@@ -23,6 +23,7 @@ Single binary `monoplan`. Subcommands:
 - `monoplan share revoke <doc_id> <invite_id>`
 - `monoplan share accept <link-or-secret>` — join the workspace behind a link; stores its DEK in `secrets.toml`. The CLI still syncs the Personal workspace only (`sharing-plan.md` Phase 4), so the joined workspace shows up in the web client first.
 - `monoplan share members <doc_id>`
+- `monoplan share remove <doc_id> <email>` — owner removes a member (resolved through the member list; never yourself, never the last owner). Forward-only: they keep what they already synced.
 
 ### Items
 - `monoplan add <text> [--list <list>]` — `<text>` of `-` reads from stdin; one item per non-blank line. New items are created in **Backlog** (the workflow register is omitted).

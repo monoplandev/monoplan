@@ -190,6 +190,13 @@ pub enum ServerFrame {
     /// Response to an `OpenDoc` the account may not access (or that
     /// this connection cannot take on). The connection closes after.
     DocRejected { doc_id: Uuid, reason: String },
+    /// The server has unbound an open doc from this connection
+    /// mid-session: the account's membership was removed (or the doc
+    /// deleted) while the doc was open. No further frame for it is
+    /// served; a later payload frame naming it ends the session. The
+    /// rest of the connection carries on. The client should drop its
+    /// local copy of the doc (`spec/sharing-plan.md` §Member removal).
+    DocClosed { doc_id: Uuid, reason: String },
     /// Response to `PushOps`. One `PushAck` per pushed blob, in input
     /// order, each identifying the acknowledged `push_id` and its
     /// (possibly pre-existing, when deduplicated) server seq.
@@ -257,6 +264,7 @@ impl ServerFrame {
         match self {
             ServerFrame::DocOpened { doc_id, .. }
             | ServerFrame::DocRejected { doc_id, .. }
+            | ServerFrame::DocClosed { doc_id, .. }
             | ServerFrame::OpsAck { doc_id, .. }
             | ServerFrame::OpsBatch { doc_id, .. }
             | ServerFrame::OpsBroadcast { doc_id, .. }

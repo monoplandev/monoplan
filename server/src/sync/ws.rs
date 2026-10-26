@@ -40,7 +40,7 @@ use crate::auth::tokens::{decode_token, sha256};
 use crate::error::ApiError;
 use crate::http::request_id::RequestId;
 use crate::state::AppState;
-use crate::sync::sessions::Subscription;
+use crate::sync::sessions::{Outbound, Subscription};
 use crate::sync::snapshot::{Decision, PrevSnapshot, ReleaseResult};
 
 use super::queries;
@@ -85,7 +85,10 @@ impl WSSession {
     /// first doc that has a frame ready (or whose channel closed);
     /// pends forever while no doc is open, so the session loop's
     /// broadcast arm parks until an `OpenDoc` lands.
-    fn poll_broadcast(&mut self, cx: &mut std::task::Context<'_>) -> Poll<(Uuid, Option<Vec<u8>>)> {
+    fn poll_broadcast(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<(Uuid, Option<Outbound>)> {
         for (doc_id, open) in self.open.iter_mut() {
             if let Poll::Ready(msg) = open.sub.rx.poll_recv(cx) {
                 return Poll::Ready((*doc_id, msg));
@@ -245,14 +248,34 @@ async fn run_session(
             // on any one doc ends the whole session: the client
             // reconnects and re-pulls every doc from its cursor.
             (doc_id, broadcast) = std::future::poll_fn(|cx| ws_session.poll_broadcast(cx)) => {
-                let bytes = broadcast.ok_or(SessionError::BroadcastLagged(doc_id))?;
-                let broadcast_span = tracing::info_span!(
-                    "ws.broadcast_send",
-                    doc_id = %doc_id,
-                    message_bytes = bytes.len()
-                );
-                socket.send(Message::Binary(bytes.into())).await?;
-                tracing::debug!(parent: &broadcast_span, "ws broadcast delivered");
+                match broadcast.ok_or(SessionError::BroadcastLagged(doc_id))? {
+                    Outbound::Frame(bytes) => {
+                        let broadcast_span = tracing::info_span!(
+                            "ws.broadcast_send",
+                            doc_id = %doc_id,
+                            message_bytes = bytes.len()
+                        );
+                        socket.send(Message::Binary(bytes.into())).await?;
+                        tracing::debug!(parent: &broadcast_span, "ws broadcast delivered");
+                    }
+                    // Live revocation: the doc leaves this connection.
+                    // Unbind first so nothing else is served for it
+                    // even if the send below fails; the subscription
+                    // drops with the entry (the registry already
+                    // forgot it) and a snapshot lease goes back to the
+                    // coordinator. A later client frame naming the doc
+                    // is `DocNotOpen` and ends the session, exactly as
+                    // for a doc never opened.
+                    Outbound::Close(bytes) => {
+                        if let Some(open) = ws_session.open.remove(&doc_id) {
+                            if let Some(lease_id) = open.snapshot_lease {
+                                state.snapshot_coordinator.release(doc_id, lease_id);
+                            }
+                        }
+                        tracing::info!(doc_id = %doc_id, "ws doc closed: membership removed");
+                        socket.send(Message::Binary(bytes.into())).await?;
+                    }
+                }
             }
         }
     };
@@ -366,9 +389,11 @@ async fn open_doc(
             // `DocOpened` it may rely on broadcasts for everything
             // after its pull, so there must be no window in which a
             // peer's push could slip past unregistered.
-            let sub = state
-                .sync_sessions
-                .subscribe(doc_id, ws_session.auth.device_id);
+            let sub = state.sync_sessions.subscribe(
+                doc_id,
+                ws_session.auth.device_id,
+                ws_session.auth.account_id,
+            );
             ws_session.open.insert(
                 doc_id,
                 OpenDoc {

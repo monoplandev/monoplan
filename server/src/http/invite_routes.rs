@@ -18,8 +18,8 @@ use uuid::Uuid;
 use crate::auth::DeviceAuth;
 use crate::auth::invites::{
     AcceptInviteOutcome, AcceptWrap, CreateInviteOutcome, DEFAULT_TTL_MILLIS, FetchInviteOutcome,
-    MAX_TTL_MILLIS, MIN_TTL_MILLIS, NewInvite, accept_invite, create_invite, fetch_invite,
-    list_invites, list_members, revoke_invite,
+    MAX_TTL_MILLIS, MIN_TTL_MILLIS, NewInvite, RemoveMemberOutcome, accept_invite, create_invite,
+    fetch_invite, list_invites, list_members, remove_member, revoke_invite,
 };
 use crate::auth::tokens::decode_token;
 use crate::error::{ApiError, ApiResult};
@@ -188,6 +188,56 @@ pub async fn members(
             })
             .collect(),
     }))
+}
+
+/// `DELETE /api/docs/:doc_id/members/:account_id` — owner removes a
+/// member (`spec/sharing-plan.md` §Member removal). The membership row
+/// is stamped removed, then every live connection of that account with
+/// the doc open gets `DocClosed` and is unbound from it. Refused for the
+/// primary doc before any lookup (it has no other members to remove;
+/// the guard keeps Home out of every sharing path). Self-removal is
+/// not "leave" — that is a separate verb, not built — and the last
+/// owner is never removable. Revocation is forward-only: the removed
+/// account keeps what it already pulled.
+pub async fn remove_member_route(
+    State(state): State<AppState>,
+    auth: DeviceAuth,
+    Path((doc_id, account_id)): Path<(String, String)>,
+) -> ApiResult<()> {
+    let doc_id = parse_doc_id(&doc_id)?;
+    if doc_id == auth.primary_doc_id {
+        return Err(ApiError::Forbidden(
+            "the primary doc has no members to remove".into(),
+        ));
+    }
+    let target = Uuid::parse_str(&account_id)
+        .map_err(|_| ApiError::BadRequest("invalid account id".into()))?;
+    match remove_member(&state.db, auth.account_id, doc_id, target).await? {
+        RemoveMemberOutcome::Removed => {
+            let told = state
+                .sync_sessions
+                .close_for_account(doc_id, target, "membership removed");
+            tracing::info!(
+                doc_id = %doc_id,
+                removed_account_id = %target,
+                live_sessions_closed = told,
+                "member removed"
+            );
+            Ok(())
+        }
+        RemoveMemberOutcome::CallerNotMember | RemoveMemberOutcome::TargetNotMember => {
+            Err(ApiError::NotFound)
+        }
+        RemoveMemberOutcome::CallerNotOwner => Err(ApiError::Forbidden(
+            "only an owner can remove members".into(),
+        )),
+        RemoveMemberOutcome::SelfRemoval => Err(ApiError::Conflict(
+            "cannot remove yourself from a doc".into(),
+        )),
+        RemoveMemberOutcome::LastOwner => Err(ApiError::Conflict(
+            "cannot remove the last owner of a doc".into(),
+        )),
+    }
 }
 
 fn parse_doc_id(s: &str) -> ApiResult<Uuid> {
