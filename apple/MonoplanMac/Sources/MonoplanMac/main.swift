@@ -45,10 +45,7 @@ final class TrayController: NSObject, NSMenuDelegate {
         super.init()
 
         if let button = statusItem.button {
-            // Template image so it follows the menu bar's light/dark tint.
-            let image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "Monoplan")
-            image?.isTemplate = true
-            button.image = image
+            button.image = Self.moonIcon()
             button.toolTip = "Monoplan"
         }
         menu.delegate = self
@@ -207,6 +204,54 @@ final class TrayController: NSObject, NSMenuDelegate {
         }
         item.attributedTitle = title
         return item
+    }
+
+    /// The Monoplan moon as a menu bar glyph: a disc with a crescent
+    /// shade on the bottom-right. Drawn, not shipped as a PNG, so it is
+    /// resolution-independent and the shade is two numbers to tune.
+    ///
+    /// It is a *template* image: the menu bar ignores colour and reads
+    /// only alpha, painting the shape in its own ink (black on a light
+    /// bar, white on a dark one, dimmed when inactive). So the disc is
+    /// full alpha and the crescent is partial alpha; the app icon's blue
+    /// tile and cream fill cannot survive here, and on a light bar the
+    /// crescent reads as a highlight rather than a shadow, which is the
+    /// price of one-ink glyphs.
+    static func moonIcon() -> NSImage {
+        let side: CGFloat = 18
+        let radius: CGFloat = 7.5
+        /// How far the shading circle is pushed up-left, as a fraction
+        /// of the radius: the crescent's thickness at the bottom-right.
+        let shadeOffset: CGFloat = 0.16
+        /// The crescent's ink, as a fraction of the disc's.
+        let shadeAlpha: CGFloat = 0.45
+
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            let centre = NSPoint(x: rect.midX, y: rect.midY)
+            let disc = NSBezierPath(ovalIn: NSRect(
+                x: centre.x - radius, y: centre.y - radius, width: 2 * radius, height: 2 * radius))
+            NSColor.black.setFill()
+            disc.fill()
+
+            // Inside the disc, replace (not blend) the region outside the
+            // up-left-shifted circle with lighter ink: that is the crescent.
+            disc.addClip()
+            let shift = radius * shadeOffset
+            let lit = NSBezierPath(ovalIn: NSRect(
+                x: centre.x - radius - shift, y: centre.y - radius + shift,
+                width: 2 * radius, height: 2 * radius))
+            let crescent = NSBezierPath(rect: rect)
+            crescent.append(lit)
+            crescent.windingRule = .evenOdd
+            crescent.addClip()
+            NSColor(white: 0, alpha: shadeAlpha).setFill()
+            NSGraphicsContext.current?.compositingOperation = .copy
+            rect.fill()
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "Monoplan"
+        return image
     }
 
     private static let headerFormatter: DateFormatter = {
