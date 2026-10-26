@@ -1,4 +1,4 @@
-//! In-memory subscriber registry for op broadcast.
+//! In-memory subscriber registry for update broadcast.
 //!
 //! Each connected sync session subscribes against the doc it's synchronising
 //! (today: always the device's account's primary doc; tomorrow with sharing:
@@ -10,7 +10,7 @@
 //! (`CHANNEL_CAPACITY`). On a full or closed channel the broadcast
 //! drops the message *and* removes the subscriber. The session task
 //! observes its rx going `None` and exits; the client reconnects and
-//! pulls from `last_acked_seq`. The op stream is the durable
+//! pulls from `last_acked_seq`. The update stream is the durable
 //! channel — broadcast is just an optimization to skip the round-trip
 //! when peers are live, so dropping a frame is safe.
 
@@ -48,7 +48,7 @@ struct Subscriber {
 /// One message on a subscriber's channel: pre-encoded frame bytes plus
 /// what the session loop must do after forwarding them.
 pub enum Outbound {
-    /// An `OpsBroadcast`: send and carry on.
+    /// An `UpdatesBroadcast`: send and carry on.
     Frame(Vec<u8>),
     /// A `DocClosed`: send, then unbind the doc from the connection
     /// (drop the subscription, release any snapshot lease). The
@@ -124,7 +124,7 @@ impl SyncSessions {
         }
     }
 
-    /// Fan out an op set to every subscriber on `doc_id` except
+    /// Fan out an update set to every subscriber on `doc_id` except
     /// `exclude_sub`. Excluding by `sub_id` rather than `device_id`
     /// matters for multi-tab on the same device — both tabs share the
     /// device cookie, so a `device_id` filter would silence tab-to-tab
@@ -135,17 +135,18 @@ impl SyncSessions {
     /// Returns the number of subscribers that received it (slow /
     /// closed receivers are dropped from the registry as a side
     /// effect).
-    pub fn broadcast(&self, doc_id: Uuid, exclude_sub: u64, ops: Vec<StoredBlob>) -> usize {
-        if ops.is_empty() {
+    pub fn broadcast(&self, doc_id: Uuid, exclude_sub: u64, updates: Vec<StoredBlob>) -> usize {
+        if updates.is_empty() {
             return 0;
         }
-        let bytes = match rmp_serde::to_vec_named(&ServerFrame::OpsBroadcast { doc_id, ops }) {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::error!(error = %e, "failed to encode OpsBroadcast");
-                return 0;
-            }
-        };
+        let bytes =
+            match rmp_serde::to_vec_named(&ServerFrame::UpdatesBroadcast { doc_id, updates }) {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to encode UpdatesBroadcast");
+                    return 0;
+                }
+            };
         let mut delivered = 0;
         let mut inner = self.inner.lock().unwrap();
         if let Some(subs) = inner.docs.get_mut(&doc_id) {

@@ -50,7 +50,7 @@ Two more facts that shape everything below:
 
 ## Vocabulary you need
 
-- **seq**: server-assigned delivery number of an encrypted op blob.
+- **seq**: server-assigned delivery number of an encrypted update blob.
 - **horizon**: the smallest `last_acked_seq` across the doc's devices.
   Every device has everything at or below it.
 - **chain**: the server's snapshot rows: one full head, then deltas. Each
@@ -93,7 +93,7 @@ or above any point at or below the horizon. Under the default trim point
 no device's unsent work is ever sideways, with one exception: a device
 that pulled, acked, and crashed before pushing, whose ack claims more
 than its unsent work's deps do. That window is the gap between the end of
-`Pulling` and the first `PushOps`. Everything else that can strand work
+`Pulling` and the first `PushUpdates`. Everything else that can strand work
 requires `--at-head`, an explicit act. Offline use is therefore protected
 by default, not by a setting: a device in a drawer pins the horizon until
 the owner revokes it or trims at the head, and both prompts name it.
@@ -144,7 +144,7 @@ required for v1.
 
 ### The one guard on the hot path
 
-`PushOps` gains `epoch`. The server rejects a push whose epoch is not the
+`PushUpdates` gains `epoch`. The server rejects a push whose epoch is not the
 doc's current one with `EpochMismatch { epoch, root_vv }`. The device then
 runs Part 2 before pushing again. This is the only trim-related check on
 the normal push path, and it is a single integer compare.
@@ -214,7 +214,7 @@ else in the local store does.
 Then **discard**: adopt `F` from Part 2 as the live doc. It already *is*
 the server-known state trimmed at the root, so no download is needed.
 Set the leased peer id on it, write it as the checkpoint, drop the WAL and
-the in-flight push, store the new epoch, then `PullOps` from
+the in-flight push, store the new epoch, then `PullUpdates` from
 `last_acked_seq` as normal. (A device below the compaction floor never
 reaches Part 2; it gets `SnapshotRequired` and bootstraps from the chain
 into an empty doc as today.)
@@ -265,7 +265,7 @@ Five sentences.
 
 | Frame | Dir | Shape |
 |---|---|---|
-| `PushOps` | c→s | gains `epoch: u64` |
+| `PushUpdates` | c→s | gains `epoch: u64` |
 | `EpochMismatch` | s→c | `{ doc_id, epoch, root_vv: EncryptedBlob }` |
 | `TrimDoc` | c→s | `{ doc_id, up_to_seq, up_to_vv, root_vv, blob }` (all blobs sealed) |
 | `TrimAccepted` / `TrimRejected` | s→c | `{ doc_id, epoch }` / `{ doc_id, reason }` |

@@ -1,6 +1,6 @@
-//! Sqlite reads/writes for the op stream and per-device frontier.
+//! Sqlite reads/writes for the update stream and per-device frontier.
 //!
-//! Ops, snapshots, and the seq counter are keyed by **doc_id**. Today every
+//! Updates, snapshots, and the seq counter are keyed by **doc_id**. Today every
 //! account has exactly one doc (their primary), so the per-doc keying is
 //! 1:1 with per-account — but the storage layer already speaks docs so the
 //! eventual multi-doc / sharing migration (`spec/sharing-plan.md`) doesn't
@@ -14,21 +14,21 @@ use uuid::Uuid;
 
 use crate::db::{Db, now_millis};
 
-/// Hard caps per `OpsBatch` frame from `spec/sync-protocol.md`. The
+/// Hard caps per `UpdatesBatch` frame from `spec/sync-protocol.md`. The
 /// byte cap is the safety net; the count cap is the common one.
-pub const MAX_OPS_PER_BATCH: usize = 500;
+pub const MAX_UPDATES_PER_BATCH: usize = 500;
 pub const MAX_BYTES_PER_BATCH: usize = 256 * 1024;
 
-/// Result of [`insert_ops`]: the wire acks (one per input blob, in
-/// input order) plus the subset of ops that were freshly inserted —
+/// Result of [`insert_updates`]: the wire acks (one per input blob, in
+/// input order) plus the subset of updates that were freshly inserted —
 /// deduplicated retries must be acked but NOT re-broadcast (peers
 /// already received them on the original insert).
-pub struct InsertedOps {
+pub struct InsertedUpdates {
     pub acks: Vec<PushAck>,
     pub fresh: Vec<StoredBlob>,
 }
 
-/// Append pushed ops in a single transaction, deduplicating on
+/// Append pushed updates in a single transaction, deduplicating on
 /// `(doc, device, push_id)`. A repeat of an already-inserted push
 /// returns its original seq without inserting another row — the
 /// client-side crash-retry contract (spec/sync-protocol.md). Fresh
@@ -36,14 +36,14 @@ pub struct InsertedOps {
 /// check on the client is meaningful, unlike a global counter where
 /// another doc's writes would look like holes from this doc's
 /// perspective.
-pub async fn insert_ops(
+pub async fn insert_updates(
     db: &Db,
     doc_id: Uuid,
     device_id: Uuid,
     blobs: Vec<PushBlob>,
-) -> anyhow::Result<InsertedOps> {
+) -> anyhow::Result<InsertedUpdates> {
     if blobs.is_empty() {
-        return Ok(InsertedOps {
+        return Ok(InsertedUpdates {
             acks: Vec::new(),
             fresh: Vec::new(),
         });
@@ -55,13 +55,13 @@ pub async fn insert_ops(
         let tx = c.transaction()?;
         let mut acks = Vec::with_capacity(blobs.len());
         let mut fresh = Vec::new();
-        for op in blobs {
-            let push_bytes = op.push_id.as_bytes().to_vec();
+        for update in blobs {
+            let push_bytes = update.push_id.as_bytes().to_vec();
             // Dedup lookup before reserving a seq — a retry must not
             // burn a counter value (seqs are dense and gap-free).
             let existing: Option<i64> = tx
                 .query_row(
-                    "SELECT seq FROM ops
+                    "SELECT seq FROM updates
                      WHERE doc_id = ? AND device_id = ? AND push_id = ?",
                     params![doc_bytes, dev_bytes, push_bytes],
                     |r| r.get(0),
@@ -69,7 +69,7 @@ pub async fn insert_ops(
                 .optional()?;
             if let Some(seq) = existing {
                 acks.push(PushAck {
-                    push_id: op.push_id,
+                    push_id: update.push_id,
                     seq: seq as u64,
                 });
                 continue;
@@ -78,7 +78,7 @@ pub async fn insert_ops(
             // initialisation in the same write so we don't need a
             // separate bootstrap step at doc creation. The doc's
             // current epoch rides along under the same row lock so
-            // the op row is stamped consistently with it.
+            // the update row is stamped consistently with it.
             let (seq, epoch): (i64, i64) = tx.query_row(
                 "INSERT INTO doc_sequences (doc_id, next_seq) VALUES (?, 2)
                  ON CONFLICT(doc_id) DO UPDATE SET next_seq = next_seq + 1
@@ -87,7 +87,7 @@ pub async fn insert_ops(
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )?;
             tx.execute(
-                "INSERT INTO ops (doc_id, seq, epoch, device_id, push_id, payload, payload_nonce, created_at)
+                "INSERT INTO updates (doc_id, seq, epoch, device_id, push_id, payload, payload_nonce, created_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     doc_bytes,
@@ -95,36 +95,36 @@ pub async fn insert_ops(
                     epoch,
                     dev_bytes,
                     push_bytes,
-                    op.blob.ciphertext,
-                    op.blob.nonce,
+                    update.blob.ciphertext,
+                    update.blob.nonce,
                     now
                 ],
             )?;
             acks.push(PushAck {
-                push_id: op.push_id,
+                push_id: update.push_id,
                 seq: seq as u64,
             });
             fresh.push(StoredBlob {
                 seq: seq as u64,
-                blob: op.blob,
+                blob: update.blob,
             });
         }
         tx.commit()?;
-        Ok(InsertedOps { acks, fresh })
+        Ok(InsertedUpdates { acks, fresh })
     })
     .await
 }
 
-/// One batch's worth of ops with `seq > since_seq`, ordered ascending.
-/// Caps at `MAX_OPS_PER_BATCH` or `MAX_BYTES_PER_BATCH`, whichever
+/// One batch's worth of updates with `seq > since_seq`, ordered ascending.
+/// Caps at `MAX_UPDATES_PER_BATCH` or `MAX_BYTES_PER_BATCH`, whichever
 /// trips first. `has_more` is true iff the caller should issue another
 /// fetch from the last returned seq.
 pub struct FetchedBatch {
-    pub ops: Vec<StoredBlob>,
+    pub updates: Vec<StoredBlob>,
     pub has_more: bool,
 }
 
-pub async fn fetch_ops_batch(
+pub async fn fetch_updates_batch(
     db: &Db,
     doc_id: Uuid,
     since_seq: u64,
@@ -133,10 +133,10 @@ pub async fn fetch_ops_batch(
     db.call(move |c| {
         // Pull at most one extra row past the count cap; if it exists,
         // we know there's more without having to issue a count query.
-        let limit = (MAX_OPS_PER_BATCH + 1) as i64;
+        let limit = (MAX_UPDATES_PER_BATCH + 1) as i64;
         let mut stmt = c.prepare(
             "SELECT seq, payload, payload_nonce
-             FROM ops
+             FROM updates
              WHERE doc_id = ? AND seq > ?
              ORDER BY seq ASC
              LIMIT ?",
@@ -148,29 +148,29 @@ pub async fn fetch_ops_batch(
                 r.get::<_, Vec<u8>>(2)?,
             ))
         })?;
-        let mut ops = Vec::new();
+        let mut updates = Vec::new();
         let mut bytes = 0usize;
         let mut over_count = false;
         let mut over_bytes = false;
         for row in rows {
             let (seq, ciphertext, nonce) = row?;
-            if ops.len() >= MAX_OPS_PER_BATCH {
+            if updates.len() >= MAX_UPDATES_PER_BATCH {
                 over_count = true;
                 break;
             }
             let row_bytes = ciphertext.len() + nonce.len();
-            if !ops.is_empty() && bytes + row_bytes > MAX_BYTES_PER_BATCH {
+            if !updates.is_empty() && bytes + row_bytes > MAX_BYTES_PER_BATCH {
                 over_bytes = true;
                 break;
             }
             bytes += row_bytes;
-            ops.push(StoredBlob {
+            updates.push(StoredBlob {
                 seq,
                 blob: EncryptedBlob { nonce, ciphertext },
             });
         }
         Ok(FetchedBatch {
-            ops,
+            updates,
             has_more: over_count || over_bytes,
         })
     })
@@ -220,7 +220,7 @@ pub struct LatestSnapshot {
 }
 
 /// The latest snapshot's seq columns, epoch, chain shape and sealed
-/// VV, without the payload. Hot path for `pull_ops` (compaction-floor
+/// VV, without the payload. Hot path for `pull_updates` (compaction-floor
 /// check) and the snapshot coordinator (trigger eval + delta base).
 /// `None` if no snapshot exists.
 pub struct LatestSnapshotMeta {
@@ -517,7 +517,7 @@ pub async fn get_last_acked_seq(db: &Db, device_id: Uuid, doc_id: Uuid) -> anyho
 ///
 /// The device set is every device of every account with an active
 /// `doc_members` row on the doc — the same set `can_open` admits, so
-/// nobody who may pull the ops is left out of the floor.
+/// nobody who may pull the updates is left out of the floor.
 ///
 /// Returns 0 when no member has a device — caller treats that as "no
 /// compaction possible" via the trigger's horizon guard.
@@ -548,10 +548,10 @@ pub async fn doc_horizon(
 }
 
 pub struct CompactionStats {
-    pub ops_deleted: u64,
+    pub updates_deleted: u64,
 }
 
-/// Delete ops at or below the latest snapshot's `compaction_floor_seq`.
+/// Delete updates at or below the latest snapshot's `compaction_floor_seq`.
 /// Snapshot rows are never deleted: the chain is one full head plus
 /// every delta since, and only a trimmed snapshot (`storage.md`
 /// §Epochs, not built) will supersede it. The floor read + delete run
@@ -574,14 +574,14 @@ pub async fn compact_doc(db: &Db, doc_id: Uuid) -> anyhow::Result<CompactionStat
             .optional()?;
         let Some(floor) = floor else {
             tx.commit()?;
-            return Ok(CompactionStats { ops_deleted: 0 });
+            return Ok(CompactionStats { updates_deleted: 0 });
         };
-        let ops_deleted = tx.execute(
-            "DELETE FROM ops WHERE doc_id = ? AND seq <= ?",
+        let updates_deleted = tx.execute(
+            "DELETE FROM updates WHERE doc_id = ? AND seq <= ?",
             params![doc_bytes, floor],
         )? as u64;
         tx.commit()?;
-        Ok(CompactionStats { ops_deleted })
+        Ok(CompactionStats { updates_deleted })
     })
     .await
 }
@@ -592,7 +592,7 @@ pub async fn latest_doc_seq(db: &Db, doc_id: Uuid) -> anyhow::Result<u64> {
         let row = c
             .query_row(
                 "SELECT seq
-                 FROM ops
+                 FROM updates
                  WHERE doc_id = ?
                  ORDER BY seq DESC
                  LIMIT 1",

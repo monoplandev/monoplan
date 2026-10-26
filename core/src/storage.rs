@@ -14,9 +14,9 @@
 //!     re-derived later.
 //!   - What needs uploading is derived from Loro history against
 //!     `server_known_vv` — the operations proven to exist in the
-//!     server op stream — never from which WAL rows still exist.
+//!     server update stream — never from which WAL rows still exist.
 //!   - `last_acked_server_seq` is the durable server-log delivery
-//!     frontier (the resume `PullOps` cursor). Server seq stays the
+//!     frontier (the resume `PullUpdates` cursor). Server seq stays the
 //!     opaque delivery/resume/compaction coordinate; VVs never cross
 //!     the wire in plaintext.
 //!   - At most one durable in-flight push per doc records the exact
@@ -59,7 +59,7 @@ use crate::doc::{Doc, DocError};
 pub struct DocId(pub Uuid);
 
 /// Client-minted durable push identifier. Persisted with the in-flight
-/// push record *before* the first send and transmitted in `PushOps`;
+/// push record *before* the first send and transmitted in `PushUpdates`;
 /// the server stores it per originating device and deduplicates
 /// repeats (see `spec/sync-protocol.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -155,10 +155,10 @@ pub struct BootState {
     pub last_local_seq: LocalSeq,
     /// Highest contiguous `server_seq` we've durably applied. Seeds
     /// `SyncEngine::last_contiguous_seq` / `last_durable_seq` — the
-    /// `since_seq` of the resume `PullOps`.
+    /// `since_seq` of the resume `PullUpdates`.
     pub last_acked_server_seq: ServerSeq,
     /// Encoded `server_known_vv` — the Loro operations proven to exist
-    /// in the server op stream. Empty when the doc has never synced.
+    /// in the server update stream. Empty when the doc has never synced.
     pub server_known_vv: Vec<u8>,
     /// The durable in-flight push, if a previous session crashed (or
     /// disconnected) with one outstanding.

@@ -5,7 +5,7 @@
 //! act on the server side. The wrap a creator posts is under their
 //! Home DEK (the account key), never the password or recovery KEK, so
 //! password change / reset / recovery need not know the doc exists.
-//! The doc's history starts with the first `PushOps` the creator sends
+//! The doc's history starts with the first `PushUpdates` the creator sends
 //! after opening it.
 //!
 //! Deleting is owner-only and never allowed on the account's primary

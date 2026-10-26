@@ -67,7 +67,7 @@ export interface EngineBootRows {
   lastLocalSeq: number;
   /** Persisted resume cursor — the highest contiguous serverSeq the
    *  engine durably applied last session. Seeds `SyncEngine`'s
-   *  `lastAckedSeq` (the `since_seq` of the resume `PullOps`). */
+   *  `lastAckedSeq` (the `since_seq` of the resume `PullUpdates`). */
   lastAckedSeq: number;
   /** Encoded `serverKnownVv` (empty = never synced) — seeds
    *  `engine.seedServerKnownVv`. */

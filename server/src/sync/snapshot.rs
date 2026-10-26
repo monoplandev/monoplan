@@ -6,10 +6,10 @@ use std::{collections::HashMap, sync::Mutex, time::Duration};
 use monoplan_protocol::{EncryptedBlob, SnapshotBase};
 use uuid::Uuid;
 
-// Default threshold: 500 *op blobs* (each is one encrypted PushOps push;
+// Default threshold: 500 *update blobs* (each is one encrypted PushUpdates push;
 // see `spec/sync-protocol.md` §"Terminology") since the last snapshot
 // makes a doc eligible. Sized for a single-user doc: keeps bootstrap
-// catch-up (op replay after snapshot import) short and lets compaction
+// catch-up (update replay after snapshot import) short and lets compaction
 // advance without churning full-doc snapshots. Operators override via
 // `snapshot_threshold_blobs` in the server config (or
 // `MONOPLAN_SNAPSHOT_THRESHOLD_BLOBS`); JS e2e tests drop it to a handful
@@ -51,7 +51,7 @@ pub enum Decision {
         /// `last_acked_seq`, = `server_last_seq` since producer
         /// must be caught up).
         up_to_seq: u64,
-        /// Seq at/below which op blobs become eligible for GC once
+        /// Seq at/below which update blobs become eligible for GC once
         /// this snapshot lands (= `max(horizon, prev compaction_floor_seq)`).
         /// Server-only concept — does not affect what Loro encodes.
         compaction_floor_seq: u64,
@@ -88,7 +88,7 @@ impl SnapshotCoordinator {
     ///
     /// 1. `server_last_seq − latest snapshot's up_to_seq > threshold`
     ///    — enough new content for a new snapshot to materially cut
-    ///    bootstrap cost (smaller `PullOps` catch-up after import).
+    ///    bootstrap cost (smaller `PullUpdates` catch-up after import).
     /// 2. The triggering device is caught up
     ///    (`device_last_acked_seq == server_last_seq`) — that
     ///    value is what we hand back as `up_to_seq`. Lagging

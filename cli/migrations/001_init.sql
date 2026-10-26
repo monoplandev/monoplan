@@ -1,5 +1,5 @@
 -- CLI-only schema (spec/cli.md "Local state"). The generic doc-storage
--- tables (`docs`, `ops`, `snapshots`) live in `monoplan-storage-sqlite`
+-- tables (`docs`, `wal`, `snapshots`) live in `monoplan-storage-sqlite`
 -- and are applied first against the same db file; this migration adds
 -- only the CLI's identity row. Registered in the shared `_migrations`
 -- ledger under a distinct name (see `open_storage`) so it doesn't

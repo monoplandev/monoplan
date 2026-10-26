@@ -74,7 +74,7 @@ The server **can**:
 - compute horizon = min(`last_acked_seq`) across all non-revoked devices that can open the doc
 - decide when a snapshot is due (op-count threshold past last snapshot, triggering device caught up)
 - ask any caught-up connected client to produce the snapshot (state frontier = `server_last_seq`, compaction floor = `max(horizon, prev snapshot's compaction_floor_seq)`)
-- replace prior snapshots and prune ops up to the snapshot's `compaction_floor_seq`
+- replace prior snapshots and prune updates up to the snapshot's `compaction_floor_seq`
 
 This thesis is load-bearing for everything in `sync-protocol.md`.
 
@@ -89,7 +89,7 @@ under the DEK, so peer auth falls out of E2EE. The server-shaped part of
 the client is confined to the engine's seq bookkeeping; a direct
 transport would feed the same `Doc` and leave `server_known_vv` alone, so
 reconnect behaves as today (pull, then push everything the server lacks;
-duplicate rows from both sides pushing LAN-received ops are harmless and
+duplicate rows from both sides pushing LAN-received updates are harmless and
 GC'd). What it would need that does not exist: LAN discovery and first
 pairing. What it would not give: durability; the server is also the
 off-site copy. Trim applies the same rule on every transport (a trimmed
@@ -102,4 +102,4 @@ All HTTP bodies and all WebSocket frames are **MessagePack** (`rmp-serde`). Sing
 
 `Content-Type: application/msgpack` on HTTP. WS frames are binary.
 
-A `cargo run -p monoplan -- decode <file>` debug subcommand pretty-prints any captured frame as JSON for inspection (and, given the DEK, can decrypt op blobs in the same pass).
+A `cargo run -p monoplan -- decode <file>` debug subcommand pretty-prints any captured frame as JSON for inspection (and, given the DEK, can decrypt update blobs in the same pass).

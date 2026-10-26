@@ -312,12 +312,12 @@ async fn handle_frame(
 ) -> Result<(), SessionError> {
     match frame {
         ClientFrame::OpenDoc { doc_id } => open_doc(socket, state, ws_session, doc_id).await,
-        ClientFrame::PushOps { doc_id, ops } => {
-            push_ops(socket, state, ws_session, doc_id, ops).await
+        ClientFrame::PushUpdates { doc_id, updates } => {
+            push_updates(socket, state, ws_session, doc_id, updates).await
         }
-        ClientFrame::PullOps { doc_id, since_seq } => {
+        ClientFrame::PullUpdates { doc_id, since_seq } => {
             ws_session.open_doc(doc_id)?;
-            pull_ops(socket, state, doc_id, since_seq).await
+            pull_updates(socket, state, doc_id, since_seq).await
         }
         ClientFrame::Ack {
             doc_id,
@@ -427,8 +427,8 @@ async fn open_doc(
 /// Read snapshot/horizon state, compute the decision. Does no sends —
 /// caller is responsible for emitting `SnapshotRequest` when the
 /// decision is `Issue`. Separating compute from send lets the push
-/// path interleave `OpsAck` before `SnapshotRequest` (clients use
-/// `OpsAck` to advance `last_contiguous_seq` before producing the
+/// path interleave `UpdatesAck` before `SnapshotRequest` (clients use
+/// `UpdatesAck` to advance `last_contiguous_seq` before producing the
 /// snapshot — otherwise the snapshot stamps a stale frontier).
 async fn evaluate_snapshot_decision(
     state: &AppState,
@@ -509,21 +509,21 @@ async fn evaluate_snapshot(
     issue_snapshot_request(socket, ws_session, doc_id, decision).await
 }
 
-async fn push_ops(
+async fn push_updates(
     socket: &mut WebSocket,
     state: &AppState,
     ws_session: &mut WSSession,
     doc_id: Uuid,
-    ops: Vec<PushBlob>,
+    updates: Vec<PushBlob>,
 ) -> Result<(), SessionError> {
     let sub_id = ws_session.open_doc(doc_id)?.sub.sub_id();
-    let push_span = tracing::info_span!("ws.push_ops", op_count = ops.len());
-    if ops.is_empty() {
+    let push_span = tracing::info_span!("ws.push_updates", update_count = updates.len());
+    if updates.is_empty() {
         return async {
-            tracing::debug!("ws push_ops empty");
+            tracing::debug!("ws push_updates empty");
             send_msgpack(
                 socket,
-                &ServerFrame::OpsAck {
+                &ServerFrame::UpdatesAck {
                     doc_id,
                     acks: Vec::new(),
                 },
@@ -539,7 +539,7 @@ async fn push_ops(
         // already-inserted push acks its original seq without a second
         // row.
         let inserted =
-            queries::insert_ops(&state.db, doc_id, ws_session.auth.device_id, ops).await?;
+            queries::insert_updates(&state.db, doc_id, ws_session.auth.device_id, updates).await?;
 
         // Post-commit fan-out, before acking the originator — but only
         // the FRESH rows: a deduplicated retry was already broadcast on
@@ -559,12 +559,12 @@ async fn push_ops(
             fresh_count = fresh_count,
             first_seq = inserted.acks.first().map(|a| a.seq),
             last_seq = inserted.acks.last().map(|a| a.seq),
-            "ws push_ops persisted"
+            "ws push_updates persisted"
         );
 
         // Order matters: compute the snapshot decision (DB reads only)
-        // BEFORE sending OpsAck, then send OpsAck BEFORE
-        // SnapshotRequest. The client uses OpsAck to advance
+        // BEFORE sending UpdatesAck, then send UpdatesAck BEFORE
+        // SnapshotRequest. The client uses UpdatesAck to advance
         // `last_contiguous_seq` — and that's what gets stamped as the
         // snapshot's `up_to_seq` when it produces. If SnapshotRequest
         // arrives first, the client snapshots at its pre-push frontier,
@@ -578,7 +578,7 @@ async fn push_ops(
 
         send_msgpack(
             socket,
-            &ServerFrame::OpsAck {
+            &ServerFrame::UpdatesAck {
                 doc_id,
                 acks: inserted.acks,
             },
@@ -595,30 +595,30 @@ async fn push_ops(
     .await
 }
 
-async fn pull_ops(
+async fn pull_updates(
     socket: &mut WebSocket,
     state: &AppState,
     doc_id: Uuid,
     since_seq: u64,
 ) -> Result<(), SessionError> {
-    let pull_span = tracing::info_span!("ws.pull_ops", since_seq = since_seq);
+    let pull_span = tracing::info_span!("ws.pull_updates", since_seq = since_seq);
     // Bootstrap-from-snapshot precondition: if the latest snapshot's
     // `up_to_seq` is ahead of the client's cursor, the client cannot
-    // resume from ops alone (compacted ops below the floor are gone,
-    // and even when they aren't, replaying every op since 0 wastes
+    // resume from updates alone (compacted updates below the floor are gone,
+    // and even when they aren't, replaying every update since 0 wastes
     // round trips). Hand back `SnapshotRequired` and let the client
     // drive the bootstrap exchange.
     async {
         if let Some(meta) = queries::latest_snapshot_meta(&state.db, doc_id).await? {
             // Compaction floor (= snapshot's compaction_floor_seq) is
-            // what determines whether the ops are still available.
+            // what determines whether the updates are still available.
             // Devices between compaction_floor and up_to can still
             // delta-pull; only those below the floor need bootstrap.
             if since_seq < meta.compaction_floor_seq {
                 tracing::info!(
                     compaction_floor_seq = meta.compaction_floor_seq,
                     snapshot_up_to_seq = meta.up_to_seq,
-                    "ws pull_ops below compaction floor; sending SnapshotRequired"
+                    "ws pull_updates below compaction floor; sending SnapshotRequired"
                 );
                 send_msgpack(
                     socket,
@@ -634,29 +634,29 @@ async fn pull_ops(
 
         let mut cursor = since_seq;
         let mut batch_count = 0u64;
-        let mut total_ops = 0usize;
+        let mut total_updates = 0usize;
         loop {
-            let batch = queries::fetch_ops_batch(&state.db, doc_id, cursor).await?;
-            let batch_len = batch.ops.len();
-            let next_cursor = batch.ops.last().map(|o| o.seq).unwrap_or(cursor);
+            let batch = queries::fetch_updates_batch(&state.db, doc_id, cursor).await?;
+            let batch_len = batch.updates.len();
+            let next_cursor = batch.updates.last().map(|o| o.seq).unwrap_or(cursor);
             let complete = !batch.has_more;
             send_msgpack(
                 socket,
-                &ServerFrame::OpsBatch {
+                &ServerFrame::UpdatesBatch {
                     doc_id,
-                    ops: batch.ops,
+                    updates: batch.updates,
                     complete,
                 },
             )
             .await?;
             batch_count += 1;
-            total_ops += batch_len;
+            total_updates += batch_len;
             if complete {
                 tracing::info!(
                     batch_count = batch_count,
-                    op_count = total_ops,
+                    update_count = total_updates,
                     final_seq = next_cursor,
-                    "ws pull_ops completed"
+                    "ws pull_updates completed"
                 );
                 return Ok(());
             }
@@ -739,7 +739,10 @@ async fn push_snapshot(
             async move {
                 match queries::compact_doc(&db, doc_id).await {
                     Ok(stats) => {
-                        tracing::info!(ops_deleted = stats.ops_deleted, "compaction completed")
+                        tracing::info!(
+                            updates_deleted = stats.updates_deleted,
+                            "compaction completed"
+                        )
                     }
                     Err(e) => tracing::warn!(error = %e, "compaction failed"),
                 }
@@ -747,7 +750,7 @@ async fn push_snapshot(
             .instrument(compact_span),
         );
 
-        // Fire-and-forget per spec — no `OpsAck`-style reply. The
+        // Fire-and-forget per spec — no `UpdatesAck`-style reply. The
         // orchestrator (when wired) tracks completion via the row
         // landing in the snapshots table, not via a wire ack.
         Ok(())
@@ -770,7 +773,7 @@ async fn pull_snapshot(
                     row_count = chain.rows.len(),
                     "ws pull_snapshot served"
                 );
-                // One row per frame, fire-and-forget like `OpsBatch`:
+                // One row per frame, fire-and-forget like `UpdatesBatch`:
                 // the head can be tens of MiB and the client imports
                 // each row as it lands, so never pack the chain into a
                 // single message. TCP flow control paces a slow reader.

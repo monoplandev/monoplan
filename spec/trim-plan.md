@@ -12,15 +12,15 @@ facts and the appendix here remain the ground truth both documents cite.
 
 ## Vocabulary
 
-- **Seq log.** The server's `ops` rows for a doc plus the per-doc
+- **Seq log.** The server's `updates` rows for a doc plus the per-doc
   `doc_sequences.next_seq` counter. Dense, gap-free, append-only. Seq is
   *delivery order*, assigned by the server, and says nothing about
   causality inside the blobs (the server cannot read them).
 - **Chain.** The `snapshots` rows for a doc: one full head plus deltas.
-  Bootstrap = import the chain in order, then `PullOps` from its frontier.
+  Bootstrap = import the chain in order, then `PullUpdates` from its frontier.
 - **Horizon.** `min(last_acked_seq)` across the doc's devices.
 - **Floor** (`compaction_floor_seq`). Seq at/below which op rows may be
-  deleted. Also the bootstrap gate: a `PullOps` below it gets
+  deleted. Also the bootstrap gate: a `PullUpdates` below it gets
   `SnapshotRequired`.
 - **VV / frontier / deps.** A Loro version vector is a map
   `peer -> counter` saying which ops a doc contains. A frontier is the
@@ -164,7 +164,7 @@ machinery a continuous design would need (see §Rejected).
   there is no causal-cut computation.
 - **T2. Server accepts only if the log is still at `up_to_seq`.**
   `server_last_seq == up_to_seq` at accept time, checked under the same
-  row lock as `insert_ops`. Otherwise reject; the client re-pulls and
+  row lock as `insert_updates`. Otherwise reject; the client re-pulls and
   retries. This is the whole defence against the second race.
 - **T3. Accept = new epoch.** In one transaction: insert the trimmed row
   (`from_seq NULL`, `epoch = old + 1`, `compaction_floor_seq = up_to_seq`,
@@ -174,7 +174,7 @@ machinery a continuous design would need (see §Rejected).
   device will ever delta-pull across the boundary (T5), and in-flight
   pushes from behind devices are rejected by T4 rather than deduplicated.
   The horizon plays no part in a trim.
-- **T4. Pushes carry the epoch; mismatches are rejected.** `PushOps`
+- **T4. Pushes carry the epoch; mismatches are rejected.** `PushUpdates`
   gains `epoch`. The server rejects with `EpochMismatch { epoch }` when it
   differs from `doc_sequences.epoch`. There is no partial acceptance.
 - **T5. Every device wipes on epoch change.** On `DocOpened` with an
@@ -224,8 +224,8 @@ blob, so the trigger has to be a client that holds the DEK.
 
 | Frame | Direction | Shape |
 |---|---|---|
-| `PushOps` | c->s | gains `epoch: u64` (T4) |
-| `EpochMismatch` | s->c | `{ doc_id, epoch }` — reply to a stale `PushOps` |
+| `PushUpdates` | c->s | gains `epoch: u64` (T4) |
+| `EpochMismatch` | s->c | `{ doc_id, epoch }` — reply to a stale `PushUpdates` |
 | `TrimDoc` | c->s | `{ doc_id, up_to_seq, up_to_vv: EncryptedBlob, blob: EncryptedBlob }` |
 | `TrimAccepted` / `TrimRejected` | s->c | `{ doc_id, epoch }` / `{ doc_id, reason }` |
 | `EpochAdvanced` | s->c | `{ doc_id, epoch }` broadcast on accept (T3) |

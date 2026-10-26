@@ -6,7 +6,7 @@
 //!
 //!   open → mutate → flush → re-open → next pull observes nothing new.
 //!
-//! Confirms ops actually landed on the server by hitting the same
+//! Confirms updates actually landed on the server by hitting the same
 //! sqlite the server uses (via `monoplan-server`'s public queries
 //! module).
 
@@ -54,9 +54,13 @@ async fn session_pushes_and_acks_then_reopen_is_clean() {
     session.flush().await.unwrap();
 
     let primary_doc_id = Uuid::parse_str(&signup.primary_doc_id).unwrap();
-    let batch = wait_for_ops(&server, primary_doc_id, 1).await;
-    assert_eq!(batch.ops.len(), 1, "only the add-item mutation should push");
-    let highest_assigned = batch.ops.iter().map(|o| o.seq).max().unwrap();
+    let batch = wait_for_updates(&server, primary_doc_id, 1).await;
+    assert_eq!(
+        batch.updates.len(),
+        1,
+        "only the add-item mutation should push"
+    );
+    let highest_assigned = batch.updates.iter().map(|o| o.seq).max().unwrap();
 
     // Device's frontier should have advanced to the highest assigned id.
     let device_uuid = Uuid::parse_str(&signup.device_id).unwrap();
@@ -80,11 +84,11 @@ async fn session_pushes_and_acks_then_reopen_is_clean() {
     );
     session2.flush().await.unwrap();
 
-    // No new op blobs should have been pushed.
-    let after = queries::fetch_ops_batch(&server.state.db, primary_doc_id, 0)
+    // No new update blobs should have been pushed.
+    let after = queries::fetch_updates_batch(&server.state.db, primary_doc_id, 0)
         .await
         .unwrap();
-    assert_eq!(after.ops.len(), 1, "second flush must not re-push");
+    assert_eq!(after.updates.len(), 1, "second flush must not re-push");
 }
 
 /// The CLI is one-shot per command: an offline `add` must be captured
@@ -132,8 +136,8 @@ async fn offline_add_survives_restart_then_syncs() {
     session3.flush().await.unwrap();
 
     let primary_doc_id = Uuid::parse_str(&signup.primary_doc_id).unwrap();
-    let batch = wait_for_ops(&server, primary_doc_id, 1).await;
-    assert_eq!(batch.ops.len(), 1, "the offline op reached the server");
+    let batch = wait_for_updates(&server, primary_doc_id, 1).await;
+    assert_eq!(batch.updates.len(), 1, "the offline op reached the server");
 
     // Reopen once more: clean, nothing re-pushes (op acked + compacted).
     let session4 = Session::open_with_profile(reopen_profile(tmp.path()), true)
@@ -141,10 +145,10 @@ async fn offline_add_survives_restart_then_syncs() {
         .unwrap();
     assert!(session4.doc().get_item(&item_id).is_some());
     session4.flush().await.unwrap();
-    let after = queries::fetch_ops_batch(&server.state.db, primary_doc_id, 0)
+    let after = queries::fetch_updates_batch(&server.state.db, primary_doc_id, 0)
         .await
         .unwrap();
-    assert_eq!(after.ops.len(), 1, "no duplicate re-push after ack");
+    assert_eq!(after.updates.len(), 1, "no duplicate re-push after ack");
 }
 
 /// `last_sync_at` means "last successful *online* sync". It must stay
@@ -424,7 +428,7 @@ async fn focus_curation_converges_across_devices() {
     let fp_compacted = session_a2.doc().fingerprint();
     session_a2.flush().await.unwrap();
 
-    // B reopens to pull the Done + un-done ops; converges to [i3, i2] with
+    // B reopens to pull the Done + un-done updates; converges to [i3, i2] with
     // matching fingerprint.
     let session_b2 = Session::open_with_profile(reopen_profile(tmp_b.path()), true)
         .await
@@ -607,19 +611,23 @@ async fn events_converge_across_devices() {
     session_a2.flush().await.unwrap();
 }
 
-async fn wait_for_ops(server: &TestServer, doc_id: Uuid, target: usize) -> queries::FetchedBatch {
+async fn wait_for_updates(
+    server: &TestServer,
+    doc_id: Uuid,
+    target: usize,
+) -> queries::FetchedBatch {
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     loop {
-        let batch = queries::fetch_ops_batch(&server.state.db, doc_id, 0)
+        let batch = queries::fetch_updates_batch(&server.state.db, doc_id, 0)
             .await
             .unwrap();
-        if batch.ops.len() >= target {
+        if batch.updates.len() >= target {
             return batch;
         }
         if std::time::Instant::now() > deadline {
             panic!(
-                "ops never reached target={target} (got {})",
-                batch.ops.len()
+                "updates never reached target={target} (got {})",
+                batch.updates.len()
             );
         }
         tokio::time::sleep(Duration::from_millis(10)).await;

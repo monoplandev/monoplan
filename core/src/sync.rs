@@ -17,7 +17,7 @@
 //!     online/sync status.
 //!   - **Outbound sync** — what needs uploading is derived from Loro
 //!     history against `server_known_vv` (the operations proven to
-//!     exist in the server op stream), never from which WAL rows still
+//!     exist in the server update stream), never from which WAL rows still
 //!     exist. At most one push is in flight at a time, durably
 //!     recorded with a `push_id` before its first send so a crash
 //!     between server insert and client ack retries the exact same
@@ -30,7 +30,7 @@
 //!                          flush w/ pending
 //!   Disconnected           ┌───────────────┐
 //!        │                 │               ▼
-//!   handle_connected       │           Pushing ─── on OpsAck ──┐
+//!   handle_connected       │           Pushing ─── on UpdatesAck ──┐
 //!        ▼                 │             │  ▲                   │
 //!     Opening              │       mutated │  │ ack arrived,    │
 //!        │                 │       mid-push│  │ ack arrived &   │
@@ -84,11 +84,11 @@ pub enum Event {
     /// transitions to `Disconnected` (caller-driven, rejected handshake,
     /// or fatal frame error).
     ConnStateChanged { online: bool },
-    /// Initial pull (`PullOps` → terminal `OpsBatch{complete: true}`)
+    /// Initial pull (`PullUpdates` → terminal `UpdatesBatch{complete: true}`)
     /// finished. Catch-up done; from here on, broadcasts deliver peer
-    /// ops live.
+    /// updates live.
     PulledInitial,
-    /// Our own `PushOps` was acked and `server_known_vv` advanced.
+    /// Our own `PushUpdates` was acked and `server_known_vv` advanced.
     Pushed,
     /// The contiguous-prefix seq the engine has applied advanced.
     /// Useful for callers persisting `last_acked_seq` between sessions.
@@ -229,7 +229,7 @@ pub struct SyncEngine {
     /// (`server_known_vv`, `last_acked_server_seq`, the in-flight push)
     /// persist through it.
     storage: DynStorage,
-    /// The Loro operations proven to exist in the server op stream:
+    /// The Loro operations proven to exist in the server update stream:
     /// merged from every applied server blob's declared range and from
     /// each acked push's `to_vv`. The outbound delta is
     /// `Updates(server_known_vv)`. Persisted alongside every advance;
@@ -252,7 +252,7 @@ pub struct SyncEngine {
     wal_bytes: u64,
     state: ConnState,
     /// Contiguous-prefix seq we've applied in memory. Advances
-    /// synchronously inside `apply_remote_ops` / `OpsAck` / `Snapshot`.
+    /// synchronously inside `apply_remote_updates` / `UpdatesAck` / `Snapshot`.
     /// Server seqs are dense and delivered in order, so this equals the
     /// maximum seq seen. **Not** the value we ack — the engine only
     /// ships an Ack for a seq the host has confirmed durable via
@@ -266,7 +266,7 @@ pub struct SyncEngine {
     /// (encrypted WAL row committed for the bytes covering this seq).
     /// `<= last_contiguous_seq`. This is the value the engine sends
     /// in `Ack { last_acked_seq }`, and the value callers persist
-    /// between sessions as the resume cursor (`PullOps`'s
+    /// between sessions as the resume cursor (`PullUpdates`'s
     /// `since_seq`). Advances only via `notify_oplog_durable`.
     last_durable_seq: u64,
     /// Highest seq we've already shipped in an `Ack`. Lets us coalesce:
@@ -394,7 +394,7 @@ impl SyncEngine {
     /// Seed the durable in-flight push from a previous session. The
     /// reconnect flow re-sends it (same `push_id`) once the initial
     /// pull completes; the server deduplicates. A record whose `to_vv`
-    /// fails to decode is dropped with an `Event::Error` — its ops
+    /// fails to decode is dropped with an `Event::Error` — its updates
     /// remain covered by the VV-derived export.
     pub fn seed_in_flight_push(&mut self, push: InFlightPush) {
         match VersionVector::decode(&push.to_vv) {
@@ -411,7 +411,7 @@ impl SyncEngine {
         }
     }
 
-    /// The operations proven to exist in the server op stream.
+    /// The operations proven to exist in the server update stream.
     pub fn server_known_vv(&self) -> &VersionVector {
         &self.server_known_vv
     }
@@ -506,7 +506,7 @@ impl SyncEngine {
     fn write_local_snapshot(&mut self) -> Result<bool, StorageError> {
         // Every current commit is WAL-captured (capture ran above), so
         // the full-state export contains every row at or below the
-        // cutoff — including unsent local ops, which Loro's
+        // cutoff — including unsent local updates, which Loro's
         // full-history snapshot preserves for later VV-derived export.
         let cutoff = self.last_local_seq;
         let blob = self
@@ -521,7 +521,7 @@ impl SyncEngine {
 
     /// Contiguous-prefix seq the engine has applied **in memory**.
     /// Use this for transport-layer decisions (the `since_seq` of a
-    /// mid-session resume `PullOps`, snapshot eligibility) — NOT as
+    /// mid-session resume `PullUpdates`, snapshot eligibility) — NOT as
     /// the persisted resume cursor. The persisted cursor must be
     /// `last_durable_seq()` so a crash never resumes from a seq the
     /// local doc/WAL doesn't actually contain.
@@ -728,13 +728,13 @@ impl SyncEngine {
                 }
                 self.server_epoch = Some(epoch);
                 self.state = ConnState::Pulling;
-                let frame = ClientFrame::PullOps {
+                let frame = ClientFrame::PullUpdates {
                     doc_id: self.doc_id.0,
                     since_seq: self.last_contiguous_seq,
                 };
                 if let Err(e) = self.encode_into_outbox(&frame) {
                     self.events
-                        .push_back(Event::Error(format!("encode PullOps: {e}")));
+                        .push_back(Event::Error(format!("encode PullUpdates: {e}")));
                     self.go_disconnected();
                 }
             }
@@ -756,21 +756,21 @@ impl SyncEngine {
                 });
                 self.go_disconnected();
             }
-            ServerFrame::OpsBatch {
+            ServerFrame::UpdatesBatch {
                 doc_id: _,
-                ops,
+                updates,
                 complete,
             } => {
                 if matches!(self.state, ConnState::Bootstrapping) {
                     self.events.push_back(Event::Error(
-                        "OpsBatch received during Bootstrapping".into(),
+                        "UpdatesBatch received during Bootstrapping".into(),
                     ));
                     return;
                 }
-                self.apply_remote_ops(ops);
+                self.apply_remote_updates(updates);
                 // Ack is gated on `notify_oplog_durable` — the host
                 // calls back once the encrypted WAL row covering these
-                // ops is committed.
+                // updates is committed.
                 if complete && matches!(self.state, ConnState::Pulling) {
                     self.state = ConnState::Idle;
                     self.events.push_back(Event::PulledInitial);
@@ -781,38 +781,38 @@ impl SyncEngine {
                     self.try_start_push();
                 }
             }
-            ServerFrame::OpsBroadcast { doc_id: _, ops } => {
+            ServerFrame::UpdatesBroadcast { doc_id: _, updates } => {
                 if matches!(self.state, ConnState::Bootstrapping) {
                     // Broadcasts during bootstrap would either re-fire
                     // AppEvents on next pull or land before the snapshot
-                    // baseline. Drop them — the post-bootstrap PullOps
+                    // baseline. Drop them — the post-bootstrap PullUpdates
                     // re-delivers anything past `up_to_seq`.
                     return;
                 }
-                self.apply_remote_ops(ops);
+                self.apply_remote_updates(updates);
                 // Ack gated on host's `notify_oplog_durable`.
             }
-            ServerFrame::OpsAck { doc_id: _, acks } => {
+            ServerFrame::UpdatesAck { doc_id: _, acks } => {
                 if !matches!(self.state, ConnState::Pushing | ConnState::PushingDirty) {
                     self.events.push_back(Event::Error(format!(
-                        "OpsAck received in unexpected state {:?}",
+                        "UpdatesAck received in unexpected state {:?}",
                         self.state
                     )));
                     return;
                 }
                 let Some(in_flight) = self.in_flight.take() else {
                     self.events
-                        .push_back(Event::Error("OpsAck with no in-flight push".into()));
+                        .push_back(Event::Error("UpdatesAck with no in-flight push".into()));
                     self.state = ConnState::Idle;
                     return;
                 };
-                // We ship exactly one blob per PushOps, so exactly one
+                // We ship exactly one blob per PushUpdates, so exactly one
                 // ack identifying our push_id is well-formed.
                 let seq = match acks.as_slice() {
                     [ack] if ack.push_id == in_flight.push_id.0 => ack.seq,
                     other => {
                         self.events.push_back(Event::Error(format!(
-                            "OpsAck mismatch: expected push_id {}, got {:?}",
+                            "UpdatesAck mismatch: expected push_id {}, got {:?}",
                             in_flight.push_id.0,
                             other.iter().map(|a| a.push_id).collect::<Vec<_>>(),
                         )));
@@ -933,7 +933,7 @@ impl SyncEngine {
                 // checkpoint here: it lacks our unsent local operations,
                 // which pruned WAL rows may have carried. A full-history
                 // export of the merged doc contains both, and the next
-                // push still derives the unsent ops from
+                // push still derives the unsent updates from
                 // `server_known_vv`.
                 let cutoff = self.last_local_seq;
                 let local_blob = match self.doc.snapshot_blob(&self.dek) {
@@ -965,16 +965,16 @@ impl SyncEngine {
                 // The storage mirror now contains the snapshot. Ack remains
                 // gated on `notify_oplog_durable`: async hosts call it only
                 // after the queued disk transaction commits.
-                // Resume the catch-up: pull any ops written after the
+                // Resume the catch-up: pull any updates written after the
                 // snapshot was taken.
                 self.state = ConnState::Pulling;
-                let frame = ClientFrame::PullOps {
+                let frame = ClientFrame::PullUpdates {
                     doc_id: self.doc_id.0,
                     since_seq: self.last_contiguous_seq,
                 };
                 if let Err(e) = self.encode_into_outbox(&frame) {
                     self.events
-                        .push_back(Event::Error(format!("encode PullOps: {e}")));
+                        .push_back(Event::Error(format!("encode PullUpdates: {e}")));
                     self.go_disconnected();
                 }
             }
@@ -986,11 +986,11 @@ impl SyncEngine {
             } => {
                 // Server picked us as the snapshot producer. Produce at
                 // the frontiers of `server_known_vv` — exactly the
-                // state/history the server op stream represents — and
+                // state/history the server update stream represents — and
                 // tag with `last_contiguous_seq`, its seq-coordinate
                 // twin. Never the current doc: that may contain unsent
                 // local operations, and a bootstrapping device must not
-                // receive ops the server op stream doesn't have.
+                // receive updates the server update stream doesn't have.
                 //
                 // With a `base` the server wants a *delta*: the updates
                 // strictly after the previous snapshot's VV (which the
@@ -1001,7 +1001,7 @@ impl SyncEngine {
                 // out onto another producer.
                 //
                 // `compaction_floor_seq` is server-side bookkeeping for
-                // op-blob GC and is echoed back verbatim — it doesn't
+                // update-blob GC and is echoed back verbatim — it doesn't
                 // influence the produced blob.
                 let produced = match &base {
                     None => self.doc.snapshot_blob_at(&self.dek, &self.server_known_vv),
@@ -1057,8 +1057,8 @@ impl SyncEngine {
         }
     }
 
-    fn apply_remote_ops(&mut self, ops: Vec<StoredBlob>) {
-        if ops.is_empty() {
+    fn apply_remote_updates(&mut self, updates: Vec<StoredBlob>) {
+        if updates.is_empty() {
             return;
         }
 
@@ -1070,15 +1070,15 @@ impl SyncEngine {
         // server possession even when an import was a no-op duplicate.
         let imported_vv = match self
             .doc
-            .apply_remote_batch(&self.dek, ops.iter().map(|op| &op.blob))
+            .apply_remote_batch(&self.dek, updates.iter().map(|update| &update.blob))
         {
             Ok(vv) => vv,
             Err(e) => {
-                let failed_seq = ops
+                let failed_seq = updates
                     .iter()
-                    .find(|op| op.seq > self.last_contiguous_seq)
-                    .map(|op| op.seq)
-                    .unwrap_or_else(|| ops.iter().map(|op| op.seq).max().unwrap_or(0));
+                    .find(|update| update.seq > self.last_contiguous_seq)
+                    .map(|update| update.seq)
+                    .unwrap_or_else(|| updates.iter().map(|update| update.seq).max().unwrap_or(0));
                 self.events
                     .push_back(Event::Error(format!("apply remote blob {failed_seq}: {e}")));
                 return;
@@ -1093,12 +1093,12 @@ impl SyncEngine {
         // atomically with its row. Errors don't roll back the Loro
         // apply — the host surfaces the event and the next boot
         // re-pulls from the durable cursor.
-        for op in &ops {
+        for update in &updates {
             match self.storage.append_remote_wal(
                 self.doc_id,
                 RemoteWalRow {
-                    server_seq: ServerSeq(op.seq),
-                    payload: op.blob.clone(),
+                    server_seq: ServerSeq(update.seq),
+                    payload: update.blob.clone(),
                 },
                 &vv_bytes,
             ) {
@@ -1106,7 +1106,7 @@ impl SyncEngine {
                     if inserted {
                         self.last_local_seq = local_seq;
                         self.wal_rows += 1;
-                        self.wal_bytes += blob_len(&op.blob);
+                        self.wal_bytes += blob_len(&update.blob);
                     }
                 }
                 Err(e) => {
@@ -1122,8 +1122,8 @@ impl SyncEngine {
         // contiguous next; the Loro state is already current — we just
         // track what the *server* has gotten back to us about.
         let prev_contig = self.last_contiguous_seq;
-        for op in &ops {
-            self.ingest_seq(op.seq);
+        for update in &updates {
+            self.ingest_seq(update.seq);
         }
         if self.last_contiguous_seq > prev_contig {
             self.events.push_back(Event::FrontierAdvanced {
@@ -1220,16 +1220,16 @@ impl SyncEngine {
             });
         }
         let in_flight = self.in_flight.as_ref().expect("just ensured");
-        let frame = ClientFrame::PushOps {
+        let frame = ClientFrame::PushUpdates {
             doc_id: self.doc_id.0,
-            ops: vec![PushBlob {
+            updates: vec![PushBlob {
                 push_id: in_flight.push_id.0,
                 blob: in_flight.payload.clone(),
             }],
         };
         if let Err(e) = self.encode_into_outbox(&frame) {
             self.events
-                .push_back(Event::Error(format!("encode PushOps: {e}")));
+                .push_back(Event::Error(format!("encode PushUpdates: {e}")));
             return;
         }
         self.state = ConnState::Pushing;
@@ -1238,7 +1238,7 @@ impl SyncEngine {
     fn go_disconnected(&mut self) {
         self.state = ConnState::Disconnected;
         // The in-flight push survives — both here and durably. On
-        // reconnect the engine pulls first (the pull may prove the ops
+        // reconnect the engine pulls first (the pull may prove the updates
         // landed), then re-sends the same push_id; the server
         // deduplicates either way.
         self.outbox.clear();
@@ -1285,7 +1285,7 @@ mod tests {
 
     /// Drive a freshly connected engine from `Opening` to `Pulling`:
     /// consume the `OpenDoc` that `handle_connected` queued and open
-    /// the doc. Leaves the engine's `PullOps` in the outbox.
+    /// the doc. Leaves the engine's `PullUpdates` in the outbox.
     fn open_doc(eng: &mut SyncEngine) {
         let open: ClientFrame = dec(&eng.pop_outbox().expect("OpenDoc after handle_connected"));
         assert!(
@@ -1348,22 +1348,22 @@ mod tests {
         out
     }
 
-    /// Decode a wire frame as PushOps and build the matching one-blob
-    /// OpsAck at `seq` — the fake server's happy path.
+    /// Decode a wire frame as PushUpdates and build the matching one-blob
+    /// UpdatesAck at `seq` — the fake server's happy path.
     fn ack_frame(push_bytes: &[u8], seq: u64) -> ServerFrame {
         let frame: ClientFrame = dec(push_bytes);
         match frame {
-            ClientFrame::PushOps { ops, .. } => {
-                assert_eq!(ops.len(), 1, "engine ships exactly one blob per push");
-                ServerFrame::OpsAck {
+            ClientFrame::PushUpdates { updates, .. } => {
+                assert_eq!(updates.len(), 1, "engine ships exactly one blob per push");
+                ServerFrame::UpdatesAck {
                     doc_id: DOC,
                     acks: vec![PushAck {
-                        push_id: ops[0].push_id,
+                        push_id: updates[0].push_id,
                         seq,
                     }],
                 }
             }
-            other => panic!("expected PushOps, got {other:?}"),
+            other => panic!("expected PushUpdates, got {other:?}"),
         }
     }
 
@@ -1374,17 +1374,17 @@ mod tests {
         open_doc(eng);
         let _pull = eng
             .pop_outbox()
-            .expect("PullOps should be queued after DocOpened");
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+            .expect("PullUpdates should be queued after DocOpened");
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: vec![],
+            updates: vec![],
             complete: true,
         }));
         assert!(eng.is_idle(), "expected Idle after empty pull");
     }
 
     /// Encrypt a blob using a separate "remote" doc + matching DEK.
-    /// Lets a test simulate "another device pushed these ops to the
+    /// Lets a test simulate "another device pushed these updates to the
     /// server" without standing up a real network.
     ///
     /// We export the *full* remote state (seed + mutation) rather than
@@ -1443,7 +1443,7 @@ mod tests {
     fn server_frame_doc_id_routes_payload_frames_and_rejects_handshake_frames() {
         let other = uuid::Uuid::from_u128(0xBEEF);
         assert_eq!(
-            server_frame_doc_id(&enc(&ServerFrame::OpsAck {
+            server_frame_doc_id(&enc(&ServerFrame::UpdatesAck {
                 doc_id: other,
                 acks: vec![]
             })),
@@ -1470,11 +1470,14 @@ mod tests {
 
         open_doc(&mut eng);
         let pull: ClientFrame = dec(&eng.pop_outbox().unwrap());
-        assert!(matches!(pull, ClientFrame::PullOps { since_seq: 0, .. }));
+        assert!(matches!(
+            pull,
+            ClientFrame::PullUpdates { since_seq: 0, .. }
+        ));
 
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: vec![],
+            updates: vec![],
             complete: true,
         }));
         assert!(eng.is_idle());
@@ -1494,9 +1497,9 @@ mod tests {
         eng.handle_connected();
         open_doc(&mut eng);
         let _pull = eng.pop_outbox().unwrap();
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: vec![],
+            updates: vec![],
             complete: true,
         }));
         assert!(
@@ -1539,7 +1542,7 @@ mod tests {
 
         eng.doc_mut().add_item(LIST_INBOX, "thing").unwrap();
         eng.flush();
-        let push_bytes = eng.pop_outbox().expect("PushOps");
+        let push_bytes = eng.pop_outbox().expect("PushUpdates");
 
         eng.handle_server_bytes(&enc(&ack_frame(&push_bytes, 1)));
         assert!(eng.is_idle());
@@ -1548,7 +1551,7 @@ mod tests {
         assert!(events.contains(&Event::FrontierAdvanced { seq: 1 }));
 
         // Engine must NOT queue an Ack before the host confirms the
-        // op's bytes are locally durable — even on our own OpsAck.
+        // op's bytes are locally durable — even on our own UpdatesAck.
         assert!(
             eng.pop_outbox().is_none(),
             "Ack frame queued before notify_oplog_durable",
@@ -1565,7 +1568,7 @@ mod tests {
             }
         ));
 
-        // No double-push: `server_known_vv` covers the acked ops.
+        // No double-push: `server_known_vv` covers the acked updates.
         eng.flush();
         assert!(eng.pop_outbox().is_none(), "second flush is a no-op");
     }
@@ -1591,7 +1594,7 @@ mod tests {
 
         eng.doc_mut().add_item(LIST_INBOX, "buy milk").unwrap();
         eng.flush();
-        let _push = eng.pop_outbox().expect("PushOps");
+        let _push = eng.pop_outbox().expect("PushUpdates");
         assert_eq!(storage.wal_len(), 1, "commit WAL-captured at push time");
         assert!(
             !eng.doc().has_uncaptured_ops(),
@@ -1663,16 +1666,16 @@ mod tests {
         eng.handle_connected();
         open_doc(&mut eng);
         let _pull = eng.pop_outbox().unwrap();
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: vec![],
+            updates: vec![],
             complete: true,
         }));
         let push_bytes = eng.pop_outbox().expect("push of folded-but-unsent op");
         let frame: ClientFrame = dec(&push_bytes);
         let blob = match frame {
-            ClientFrame::PushOps { ops, .. } => ops.into_iter().next().unwrap().blob,
-            other => panic!("expected PushOps, got {other:?}"),
+            ClientFrame::PushUpdates { updates, .. } => updates.into_iter().next().unwrap().blob,
+            other => panic!("expected PushUpdates, got {other:?}"),
         };
         // A peer applying the blob sees the folded op.
         let mut peer = Doc::new().unwrap();
@@ -1699,7 +1702,7 @@ mod tests {
         // First mutation + flush starts a push.
         eng.doc_mut().add_item(LIST_INBOX, "first").unwrap();
         eng.flush();
-        let first_push = eng.pop_outbox().expect("first PushOps");
+        let first_push = eng.pop_outbox().expect("first PushUpdates");
 
         // Mutate again while the push is in flight.
         let item_id = eng.doc_mut().add_item(LIST_INBOX, "during-push").unwrap();
@@ -1713,7 +1716,7 @@ mod tests {
         // Engine should immediately re-push with the mid-push mutation.
         let second_push = eng.pop_outbox().expect("re-push after ack");
         let frame: ClientFrame = dec(&second_push);
-        assert!(matches!(frame, ClientFrame::PushOps { .. }));
+        assert!(matches!(frame, ClientFrame::PushUpdates { .. }));
 
         eng.handle_server_bytes(&enc(&ack_frame(&second_push, 2)));
         assert!(eng.is_idle());
@@ -1735,7 +1738,7 @@ mod tests {
 
         eng.doc_mut().add_item(LIST_INBOX, "first").unwrap();
         eng.flush();
-        let first_push = eng.pop_outbox().expect("PushOps");
+        let first_push = eng.pop_outbox().expect("PushUpdates");
 
         // Mutation mid-flight, no flush call.
         let mid_id = eng.doc_mut().add_item(LIST_INBOX, "mid-flight").unwrap();
@@ -1747,14 +1750,14 @@ mod tests {
         let dek = eng.dek.clone();
         let frame: ClientFrame = dec(&follow_up);
         let blob = match frame {
-            ClientFrame::PushOps { ops, .. } => ops.into_iter().next().unwrap().blob,
-            other => panic!("expected PushOps, got {other:?}"),
+            ClientFrame::PushUpdates { updates, .. } => updates.into_iter().next().unwrap().blob,
+            other => panic!("expected PushUpdates, got {other:?}"),
         };
         let mut peer = Doc::new().unwrap();
         // Peer needs the first push too for causal completeness.
         let first_frame: ClientFrame = dec(&first_push);
-        if let ClientFrame::PushOps { ops, .. } = first_frame {
-            peer.apply_remote(&dek, &ops[0].blob).unwrap();
+        if let ClientFrame::PushUpdates { updates, .. } = first_frame {
+            peer.apply_remote(&dek, &updates[0].blob).unwrap();
         }
         peer.apply_remote(&dek, &blob).unwrap();
         assert!(peer.get_item(&mid_id).is_some());
@@ -1765,7 +1768,7 @@ mod tests {
         let mut eng = fresh_engine_clean();
         eng.handle_connected();
         open_doc(&mut eng);
-        let _ = eng.pop_outbox().unwrap(); // PullOps
+        let _ = eng.pop_outbox().unwrap(); // PullUpdates
 
         // User mutates and flushes while we're still Pulling.
         eng.doc_mut().add_item(LIST_INBOX, "during pull").unwrap();
@@ -1773,13 +1776,13 @@ mod tests {
         assert!(eng.pop_outbox().is_none(), "Pulling defers push until Idle");
 
         // Pull completes — engine should self-trigger the push.
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: vec![],
+            updates: vec![],
             complete: true,
         }));
-        let frame: ClientFrame = dec(&eng.pop_outbox().expect("PushOps after pull"));
-        assert!(matches!(frame, ClientFrame::PushOps { .. }));
+        let frame: ClientFrame = dec(&eng.pop_outbox().expect("PushUpdates after pull"));
+        assert!(matches!(frame, ClientFrame::PushUpdates { .. }));
     }
 
     #[test]
@@ -1792,9 +1795,9 @@ mod tests {
         let remote_blob = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "from peer").unwrap();
         });
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBroadcast {
             doc_id: DOC,
-            ops: vec![StoredBlob {
+            updates: vec![StoredBlob {
                 seq: 1,
                 blob: remote_blob,
             }],
@@ -1849,9 +1852,9 @@ mod tests {
         let _ = drain_events(&mut eng);
         let _ = drain_outbox(&mut eng);
 
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: vec![
+            updates: vec![
                 StoredBlob {
                     seq: 1,
                     blob: setup_blob,
@@ -1901,15 +1904,15 @@ mod tests {
         // Mutate locally, start a push.
         eng.doc_mut().add_item(LIST_INBOX, "local-pushing").unwrap();
         eng.flush();
-        let push_bytes = eng.pop_outbox().expect("PushOps");
+        let push_bytes = eng.pop_outbox().expect("PushUpdates");
 
         // Broadcast arrives during Pushing.
         let remote_blob = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "peer-during-push").unwrap();
         });
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBroadcast {
             doc_id: DOC,
-            ops: vec![StoredBlob {
+            updates: vec![StoredBlob {
                 seq: 1,
                 blob: remote_blob,
             }],
@@ -1946,9 +1949,9 @@ mod tests {
         let blob1 = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "p1").unwrap();
         });
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: vec![StoredBlob {
+            updates: vec![StoredBlob {
                 seq: 1,
                 blob: blob1,
             }],
@@ -1961,9 +1964,9 @@ mod tests {
         let blob2 = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "p2").unwrap();
         });
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: vec![StoredBlob {
+            updates: vec![StoredBlob {
                 seq: 2,
                 blob: blob2,
             }],
@@ -1998,8 +2001,8 @@ mod tests {
         eng.flush();
         let first_push = eng.pop_outbox().unwrap();
         let first_id = match dec::<ClientFrame>(&first_push) {
-            ClientFrame::PushOps { ops, .. } => ops[0].push_id,
-            other => panic!("expected PushOps, got {other:?}"),
+            ClientFrame::PushUpdates { updates, .. } => updates[0].push_id,
+            other => panic!("expected PushUpdates, got {other:?}"),
         };
         let _ = drain_events(&mut eng);
 
@@ -2012,15 +2015,15 @@ mod tests {
         eng.handle_connected();
         open_doc(&mut eng);
         let _ = eng.pop_outbox().unwrap();
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: vec![],
+            updates: vec![],
             complete: true,
         }));
         let retry = eng.pop_outbox().expect("re-push after reconnect");
         match dec::<ClientFrame>(&retry) {
-            ClientFrame::PushOps { ops, .. } => assert_eq!(ops[0].push_id, first_id),
-            other => panic!("expected PushOps, got {other:?}"),
+            ClientFrame::PushUpdates { updates, .. } => assert_eq!(updates[0].push_id, first_id),
+            other => panic!("expected PushUpdates, got {other:?}"),
         }
 
         // Ack completes it: record cleared, VV persisted.
@@ -2058,15 +2061,17 @@ mod tests {
         eng.handle_connected();
         open_doc(&mut eng);
         let _pull = eng.pop_outbox().unwrap();
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: vec![],
+            updates: vec![],
             complete: true,
         }));
         let retry = eng.pop_outbox().expect("seeded push resent");
         match dec::<ClientFrame>(&retry) {
-            ClientFrame::PushOps { ops, .. } => assert_eq!(ops[0].push_id, push.push_id.0),
-            other => panic!("expected PushOps, got {other:?}"),
+            ClientFrame::PushUpdates { updates, .. } => {
+                assert_eq!(updates[0].push_id, push.push_id.0)
+            }
+            other => panic!("expected PushUpdates, got {other:?}"),
         }
 
         // Acking it merges to_vv → nothing further to push.
@@ -2089,7 +2094,7 @@ mod tests {
 
         eng.doc_mut().add_item(LIST_INBOX, "mine").unwrap();
         eng.flush();
-        let push_bytes = eng.pop_outbox().expect("PushOps");
+        let push_bytes = eng.pop_outbox().expect("PushUpdates");
 
         // A peer broadcast lands first (seq 1), then our ack arrives
         // deduplicated at seq 2... then simulate the *retry* case by
@@ -2100,9 +2105,9 @@ mod tests {
         let remote_blob = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "peer").unwrap();
         });
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBroadcast {
             doc_id: DOC,
-            ops: vec![StoredBlob {
+            updates: vec![StoredBlob {
                 seq: 1,
                 blob: remote_blob,
             }],
@@ -2142,9 +2147,9 @@ mod tests {
         let remote_blob = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "dup").unwrap();
         });
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBroadcast {
             doc_id: DOC,
-            ops: vec![StoredBlob {
+            updates: vec![StoredBlob {
                 seq: 1,
                 blob: remote_blob.clone(),
             }],
@@ -2155,9 +2160,9 @@ mod tests {
         // Wipe the in-memory VV to prove the duplicate *re-proves* it.
         eng.server_known_vv = vv.clone();
         // Re-deliver the same blob at the same seq (re-pull overlap).
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: vec![StoredBlob {
+            updates: vec![StoredBlob {
                 seq: 1,
                 blob: remote_blob,
             }],
@@ -2195,7 +2200,7 @@ mod tests {
         let mut eng = fresh_engine_clean();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsAck {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesAck {
             doc_id: DOC,
             acks: vec![PushAck {
                 push_id: uuid::Uuid::new_v4(),
@@ -2203,7 +2208,7 @@ mod tests {
             }],
         }));
         let evs = drain_events(&mut eng);
-        assert!(matches!(evs.as_slice(), [Event::Error(s)] if s.contains("OpsAck")));
+        assert!(matches!(evs.as_slice(), [Event::Error(s)] if s.contains("UpdatesAck")));
     }
 
     #[test]
@@ -2214,7 +2219,10 @@ mod tests {
         eng.handle_connected();
         open_doc(&mut eng);
         let pull: ClientFrame = dec(&eng.pop_outbox().unwrap());
-        assert!(matches!(pull, ClientFrame::PullOps { since_seq: 42, .. }));
+        assert!(matches!(
+            pull,
+            ClientFrame::PullUpdates { since_seq: 42, .. }
+        ));
     }
 
     #[test]
@@ -2231,9 +2239,9 @@ mod tests {
         let peer_blob = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "synced-peer-item").unwrap();
         });
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBroadcast {
             doc_id: DOC,
-            ops: vec![StoredBlob {
+            updates: vec![StoredBlob {
                 seq: 1,
                 blob: peer_blob,
             }],
@@ -2289,9 +2297,9 @@ mod tests {
 
     #[test]
     fn delta_snapshot_request_exports_only_ops_after_base() {
-        // Two synced peer ops (seq 1, 2). The server holds the VV at
+        // Two synced peer updates (seq 1, 2). The server holds the VV at
         // seq 1 from an earlier full snapshot and asks for a delta
-        // from it. The delta must carry seq 2's ops, nothing from seq
+        // from it. The delta must carry seq 2's updates, nothing from seq
         // 1, and nothing unsent.
         let mut eng = fresh_engine_clean();
         let dek = eng.dek.clone();
@@ -2302,9 +2310,9 @@ mod tests {
         let first = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "first").unwrap();
         });
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBroadcast {
             doc_id: DOC,
-            ops: vec![StoredBlob {
+            updates: vec![StoredBlob {
                 seq: 1,
                 blob: first,
             }],
@@ -2315,9 +2323,9 @@ mod tests {
         let second = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "second").unwrap();
         });
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBroadcast {
             doc_id: DOC,
-            ops: vec![StoredBlob {
+            updates: vec![StoredBlob {
                 seq: 2,
                 blob: second,
             }],
@@ -2426,9 +2434,9 @@ mod tests {
 
     #[test]
     fn snapshot_required_in_pulling_drives_bootstrap() {
-        // Wire:  HelloAck -> PullOps(since=0) -> SnapshotRequired
-        //   ->   PullSnapshot -> Snapshot -> PullOps(since=up_to)
-        //   ->   OpsBatch{complete} -> Idle
+        // Wire:  HelloAck -> PullUpdates(since=0) -> SnapshotRequired
+        //   ->   PullSnapshot -> Snapshot -> PullUpdates(since=up_to)
+        //   ->   UpdatesBatch{complete} -> Idle
         let dek = Dek::generate();
         let storage = std::sync::Arc::new(MemStorage::new());
         let mut eng = SyncEngine::new(
@@ -2440,7 +2448,7 @@ mod tests {
         );
         eng.handle_connected();
         open_doc(&mut eng);
-        let _ = eng.pop_outbox().unwrap(); // PullOps
+        let _ = eng.pop_outbox().unwrap(); // PullUpdates
 
         // Server says cursor is below the floor.
         eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequired {
@@ -2480,7 +2488,7 @@ mod tests {
             "VV persisted at bootstrap"
         );
 
-        // Engine advanced its frontier and re-issued PullOps. The Ack
+        // Engine advanced its frontier and re-issued PullUpdates. The Ack
         // waits for the host durability confirm.
         assert_eq!(eng.last_contiguous_seq(), 42);
         assert_eq!(eng.last_durable_seq(), 0);
@@ -2495,7 +2503,7 @@ mod tests {
         assert!(
             frames
                 .iter()
-                .any(|f| matches!(f, ClientFrame::PullOps { since_seq: 42, .. }))
+                .any(|f| matches!(f, ClientFrame::PullUpdates { since_seq: 42, .. }))
         );
 
         eng.notify_oplog_durable(42);
@@ -2515,9 +2523,9 @@ mod tests {
                 .any(|i| i.text == "from-snapshot")
         );
 
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: vec![],
+            updates: vec![],
             complete: true,
         }));
         assert!(eng.is_idle());
@@ -2525,10 +2533,10 @@ mod tests {
 
     #[test]
     fn bootstrap_checkpoint_preserves_unsent_local_work() {
-        // A device with unsent local ops receives a server bootstrap
+        // A device with unsent local updates receives a server bootstrap
         // snapshot. The new checkpoint prunes the whole WAL, so it must
         // be a re-export of the MERGED doc — and the next push must
-        // still derive the unsent ops.
+        // still derive the unsent updates.
         let dek = Dek::generate();
         let storage = std::sync::Arc::new(MemStorage::new());
         let doc = Doc::new().unwrap();
@@ -2547,7 +2555,7 @@ mod tests {
 
         eng.handle_connected();
         open_doc(&mut eng);
-        let _ = eng.pop_outbox().unwrap(); // PullOps
+        let _ = eng.pop_outbox().unwrap(); // PullUpdates
         eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequired {
             doc_id: DOC,
             up_to_seq: 42,
@@ -2576,20 +2584,23 @@ mod tests {
             "unsent local op must survive the bootstrap checkpoint"
         );
 
-        // The Snapshot frame queued the resume PullOps — drain it
+        // The Snapshot frame queued the resume PullUpdates — drain it
         // before finishing the catch-up.
-        let resume: ClientFrame = dec(&eng.pop_outbox().expect("resume PullOps"));
-        assert!(matches!(resume, ClientFrame::PullOps { since_seq: 42, .. }));
+        let resume: ClientFrame = dec(&eng.pop_outbox().expect("resume PullUpdates"));
+        assert!(matches!(
+            resume,
+            ClientFrame::PullUpdates { since_seq: 42, .. }
+        ));
         // Finish the catch-up; the push derives the unsent op.
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: vec![],
+            updates: vec![],
             complete: true,
         }));
         let push = eng.pop_outbox().expect("push of unsent local op");
         let blob = match dec::<ClientFrame>(&push) {
-            ClientFrame::PushOps { ops, .. } => ops.into_iter().next().unwrap().blob,
-            other => panic!("expected PushOps, got {other:?}"),
+            ClientFrame::PushUpdates { updates, .. } => updates.into_iter().next().unwrap().blob,
+            other => panic!("expected PushUpdates, got {other:?}"),
         };
         // Applied on top of the snapshot state, the delta must carry
         // the local op.
@@ -2603,7 +2614,7 @@ mod tests {
         let mut eng = SyncEngine::new(Doc::empty(), fake_doc_id(), dek.clone(), 0, mem());
         eng.handle_connected();
         open_doc(&mut eng);
-        let _ = eng.pop_outbox().unwrap(); // PullOps
+        let _ = eng.pop_outbox().unwrap(); // PullUpdates
         eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequired {
             doc_id: DOC,
             up_to_seq: 10,
@@ -2613,9 +2624,9 @@ mod tests {
         let stray = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "should-not-appear").unwrap();
         });
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBroadcast {
             doc_id: DOC,
-            ops: vec![StoredBlob {
+            updates: vec![StoredBlob {
                 seq: 11,
                 blob: stray,
             }],
@@ -2633,12 +2644,12 @@ mod tests {
     #[test]
     fn produce_then_bootstrap_round_trip() {
         // Full producer/consumer loop with a fake server in between:
-        //   A pushes ops; server stores them.
+        //   A pushes updates; server stores them.
         //   Server asks A for a snapshot; A produces PushSnapshot at
         //   its server-known frontier.
         //   B (fresh) connects with since=0; below the snapshot
         //   floor, so server replies SnapshotRequired -> Snapshot.
-        //   B applies, pulls past-the-snapshot ops, reaches Idle.
+        //   B applies, pulls past-the-snapshot updates, reaches Idle.
         //   Fingerprints converge.
         let dek = Dek::generate();
         let mut a = SyncEngine::new(Doc::new().unwrap(), fake_doc_id(), dek.clone(), 0, mem());
@@ -2656,29 +2667,29 @@ mod tests {
         a.handle_connected();
         open_doc(&mut a);
         let _ = a.pop_outbox().unwrap();
-        a.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+        a.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: vec![],
+            updates: vec![],
             complete: true,
         }));
         // Drain A's pushes; store + ack each.
         while let Some(bytes) = a.pop_outbox() {
-            if let Ok(ClientFrame::PushOps { ops, .. }) =
+            if let Ok(ClientFrame::PushUpdates { updates, .. }) =
                 rmp_serde::from_slice::<ClientFrame>(&bytes)
             {
                 let mut acks = Vec::new();
-                for op in ops {
+                for update in updates {
                     next_seq += 1;
                     ops_log.push(StoredBlob {
                         seq: next_seq,
-                        blob: op.blob,
+                        blob: update.blob,
                     });
                     acks.push(PushAck {
-                        push_id: op.push_id,
+                        push_id: update.push_id,
                         seq: next_seq,
                     });
                 }
-                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { doc_id: DOC, acks }));
+                a.handle_server_bytes(&enc(&ServerFrame::UpdatesAck { doc_id: DOC, acks }));
             }
         }
 
@@ -2686,22 +2697,22 @@ mod tests {
         let item_id = a.doc_mut().add_item(LIST_INBOX, "snapshotted").unwrap();
         a.flush();
         while let Some(bytes) = a.pop_outbox() {
-            if let Ok(ClientFrame::PushOps { ops, .. }) =
+            if let Ok(ClientFrame::PushUpdates { updates, .. }) =
                 rmp_serde::from_slice::<ClientFrame>(&bytes)
             {
                 let mut acks = Vec::new();
-                for op in ops {
+                for update in updates {
                     next_seq += 1;
                     ops_log.push(StoredBlob {
                         seq: next_seq,
-                        blob: op.blob,
+                        blob: update.blob,
                     });
                     acks.push(PushAck {
-                        push_id: op.push_id,
+                        push_id: update.push_id,
                         seq: next_seq,
                     });
                 }
-                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { doc_id: DOC, acks }));
+                a.handle_server_bytes(&enc(&ServerFrame::UpdatesAck { doc_id: DOC, acks }));
             }
         }
         let _ = drain_outbox(&mut a);
@@ -2735,28 +2746,28 @@ mod tests {
         let mid_id = a.doc_mut().add_item(LIST_INBOX, "in-delta").unwrap();
         a.flush();
         while let Some(bytes) = a.pop_outbox() {
-            if let Ok(ClientFrame::PushOps { ops, .. }) =
+            if let Ok(ClientFrame::PushUpdates { updates, .. }) =
                 rmp_serde::from_slice::<ClientFrame>(&bytes)
             {
                 let mut acks = Vec::new();
-                for op in ops {
+                for update in updates {
                     next_seq += 1;
                     ops_log.push(StoredBlob {
                         seq: next_seq,
-                        blob: op.blob,
+                        blob: update.blob,
                     });
                     acks.push(PushAck {
-                        push_id: op.push_id,
+                        push_id: update.push_id,
                         seq: next_seq,
                     });
                 }
-                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { doc_id: DOC, acks }));
+                a.handle_server_bytes(&enc(&ServerFrame::UpdatesAck { doc_id: DOC, acks }));
             }
         }
         let _ = drain_outbox(&mut a);
         assert!(
             next_seq > full_up_to,
-            "expected an op after the full snapshot"
+            "expected an update after the full snapshot"
         );
         a.handle_server_bytes(&enc(&ServerFrame::SnapshotRequest {
             doc_id: DOC,
@@ -2783,44 +2794,47 @@ mod tests {
 
         // -- A keeps mutating after the delta was taken, so B's
         //    bootstrap exercises the chain apply *and* the
-        //    post-snapshot catch-up via OpsBatch. --
+        //    post-snapshot catch-up via UpdatesBatch. --
         let post_snap_id = a.doc_mut().add_item(LIST_INBOX, "post-snap").unwrap();
         a.flush();
         let mut post_snap_ops: Vec<StoredBlob> = Vec::new();
         while let Some(bytes) = a.pop_outbox() {
-            if let Ok(ClientFrame::PushOps { ops, .. }) =
+            if let Ok(ClientFrame::PushUpdates { updates, .. }) =
                 rmp_serde::from_slice::<ClientFrame>(&bytes)
             {
                 let mut acks = Vec::new();
-                for op in ops {
+                for update in updates {
                     next_seq += 1;
                     post_snap_ops.push(StoredBlob {
                         seq: next_seq,
-                        blob: op.blob.clone(),
+                        blob: update.blob.clone(),
                     });
                     ops_log.push(StoredBlob {
                         seq: next_seq,
-                        blob: op.blob,
+                        blob: update.blob,
                     });
                     acks.push(PushAck {
-                        push_id: op.push_id,
+                        push_id: update.push_id,
                         seq: next_seq,
                     });
                 }
-                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { doc_id: DOC, acks }));
+                a.handle_server_bytes(&enc(&ServerFrame::UpdatesAck { doc_id: DOC, acks }));
             }
         }
         let _ = drain_outbox(&mut a);
         assert!(
             !post_snap_ops.is_empty(),
-            "expected at least one post-snapshot op"
+            "expected at least one post-snapshot update"
         );
 
         // -- B connects fresh, since=0 < snapshot floor --
         b.handle_connected();
         open_doc(&mut b);
         let pull: ClientFrame = dec(&b.pop_outbox().unwrap());
-        assert!(matches!(pull, ClientFrame::PullOps { since_seq: 0, .. }));
+        assert!(matches!(
+            pull,
+            ClientFrame::PullUpdates { since_seq: 0, .. }
+        ));
 
         b.handle_server_bytes(&enc(&ServerFrame::SnapshotRequired {
             doc_id: DOC,
@@ -2839,7 +2853,7 @@ mod tests {
         }));
         assert!(
             b.pop_outbox().is_none(),
-            "no PullOps before the chain completes"
+            "no PullUpdates before the chain completes"
         );
         b.handle_server_bytes(&enc(&ServerFrame::Snapshot {
             doc_id: DOC,
@@ -2848,20 +2862,20 @@ mod tests {
             complete: true,
         }));
 
-        // B should re-issue PullOps from the snapshot's up_to.
+        // B should re-issue PullUpdates from the snapshot's up_to.
         let mut saw_resume_pull = false;
         while let Some(bytes) = b.pop_outbox() {
             if let Ok(frame) = rmp_serde::from_slice::<ClientFrame>(&bytes)
-                && matches!(frame, ClientFrame::PullOps { since_seq, .. } if since_seq == snapshot_up_to)
+                && matches!(frame, ClientFrame::PullUpdates { since_seq, .. } if since_seq == snapshot_up_to)
             {
                 saw_resume_pull = true;
             }
         }
-        assert!(saw_resume_pull, "B must PullOps from snapshot.up_to");
+        assert!(saw_resume_pull, "B must PullUpdates from snapshot.up_to");
 
-        b.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+        b.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: post_snap_ops,
+            updates: post_snap_ops,
             complete: true,
         }));
         assert!(b.is_idle());
@@ -2901,9 +2915,9 @@ mod tests {
         let blob = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "x").unwrap();
         });
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBroadcast {
             doc_id: DOC,
-            ops: vec![StoredBlob { seq: 1, blob }],
+            updates: vec![StoredBlob { seq: 1, blob }],
         }));
         assert_eq!(eng.last_contiguous_seq(), 1);
         eng.notify_oplog_durable(999);
@@ -2928,9 +2942,9 @@ mod tests {
         let b1 = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "a").unwrap();
         });
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBroadcast {
             doc_id: DOC,
-            ops: vec![StoredBlob { seq: 1, blob: b1 }],
+            updates: vec![StoredBlob { seq: 1, blob: b1 }],
         }));
         assert!(eng.pop_outbox().is_none());
 
@@ -2956,9 +2970,9 @@ mod tests {
         let blob = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "remote").unwrap();
         });
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBroadcast {
             doc_id: DOC,
-            ops: vec![StoredBlob { seq: 1, blob }],
+            updates: vec![StoredBlob { seq: 1, blob }],
         }));
 
         assert_eq!(eng.last_contiguous_seq(), 1);
@@ -3000,28 +3014,28 @@ mod tests {
         a.handle_connected();
         open_doc(&mut a);
         let _ = a.pop_outbox().unwrap();
-        a.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+        a.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: vec![],
+            updates: vec![],
             complete: true,
         }));
         while let Some(bytes) = a.pop_outbox() {
-            if let Ok(ClientFrame::PushOps { ops, .. }) =
+            if let Ok(ClientFrame::PushUpdates { updates, .. }) =
                 rmp_serde::from_slice::<ClientFrame>(&bytes)
             {
                 let mut acks = Vec::new();
-                for op in ops {
+                for update in updates {
                     next_seq += 1;
                     ops_log.push(StoredBlob {
                         seq: next_seq,
-                        blob: op.blob,
+                        blob: update.blob,
                     });
                     acks.push(PushAck {
-                        push_id: op.push_id,
+                        push_id: update.push_id,
                         seq: next_seq,
                     });
                 }
-                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { doc_id: DOC, acks }));
+                a.handle_server_bytes(&enc(&ServerFrame::UpdatesAck { doc_id: DOC, acks }));
             }
         }
         let _ = drain_outbox(&mut a);
@@ -3030,22 +3044,22 @@ mod tests {
         let item_a = a.doc_mut().add_item(LIST_INBOX, "from-a").unwrap();
         a.flush();
         while let Some(bytes) = a.pop_outbox() {
-            if let Ok(ClientFrame::PushOps { ops, .. }) =
+            if let Ok(ClientFrame::PushUpdates { updates, .. }) =
                 rmp_serde::from_slice::<ClientFrame>(&bytes)
             {
                 let mut acks = Vec::new();
-                for op in ops {
+                for update in updates {
                     next_seq += 1;
                     ops_log.push(StoredBlob {
                         seq: next_seq,
-                        blob: op.blob,
+                        blob: update.blob,
                     });
                     acks.push(PushAck {
-                        push_id: op.push_id,
+                        push_id: update.push_id,
                         seq: next_seq,
                     });
                 }
-                a.handle_server_bytes(&enc(&ServerFrame::OpsAck { doc_id: DOC, acks }));
+                a.handle_server_bytes(&enc(&ServerFrame::UpdatesAck { doc_id: DOC, acks }));
             }
         }
         let _ = drain_outbox(&mut a);
@@ -3054,9 +3068,9 @@ mod tests {
         b.handle_connected();
         open_doc(&mut b);
         let _ = b.pop_outbox().unwrap();
-        b.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+        b.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: ops_log.clone(),
+            updates: ops_log.clone(),
             complete: true,
         }));
         assert!(b.doc().get_item(&item_a).is_some());
@@ -3078,9 +3092,9 @@ mod tests {
         let blob2 = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "from peer B").unwrap();
         });
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: vec![
+            updates: vec![
                 StoredBlob {
                     seq: 1,
                     blob: blob1,
@@ -3147,9 +3161,9 @@ mod tests {
         let remote_blob = make_remote_blob(&dek, |d| {
             d.add_item(LIST_INBOX, "remote-item").unwrap();
         });
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBroadcast {
             doc_id: DOC,
-            ops: vec![StoredBlob {
+            updates: vec![StoredBlob {
                 seq: 1,
                 blob: remote_blob,
             }],
@@ -3159,22 +3173,22 @@ mod tests {
         // Local mutation — beyond the VV.
         eng.doc_mut().add_item(LIST_INBOX, "local-item").unwrap();
         eng.flush();
-        let push = eng.pop_outbox().expect("PushOps");
+        let push = eng.pop_outbox().expect("PushUpdates");
         let blob = match dec::<ClientFrame>(&push) {
-            ClientFrame::PushOps { ops, .. } => ops.into_iter().next().unwrap().blob,
-            other => panic!("expected PushOps, got {other:?}"),
+            ClientFrame::PushUpdates { updates, .. } => updates.into_iter().next().unwrap().blob,
+            other => panic!("expected PushUpdates, got {other:?}"),
         };
 
         // A peer that already has the remote history imports ONLY the
         // local op from our delta — if the delta re-carried the remote
-        // ops, the declared range would include the remote peer.
+        // updates, the declared range would include the remote peer.
         let plaintext_meta = {
             let plain = dek.open(&blob.ciphertext, &blob.nonce).unwrap();
             loro::LoroDoc::decode_import_blob_meta(&plain, false).unwrap()
         };
         // The delta's declared start must not be genesis for peers the
         // server already knows — i.e. the blob must not span the
-        // remote peer's ops at all. The simplest check: every peer in
+        // remote peer's updates at all. The simplest check: every peer in
         // the delta is absent from... the remote blob's peers, except
         // our own. Equivalent practical assertion: applying the delta
         // to a doc that lacks the remote history leaves it pending
@@ -3207,7 +3221,7 @@ mod tests {
 
         eng.doc_mut().add_item(LIST_INBOX, "stranded op").unwrap();
         eng.flush();
-        let _push = eng.pop_outbox().expect("PushOps");
+        let _push = eng.pop_outbox().expect("PushUpdates");
         assert!(mem.in_flight().is_some());
 
         eng.handle_disconnected();
@@ -3227,7 +3241,10 @@ mod tests {
         let _ = drain_events(&mut eng);
         let open: ClientFrame = dec(&eng.pop_outbox().expect("OpenDoc after handle_connected"));
         assert!(matches!(open, ClientFrame::OpenDoc { doc_id } if doc_id == DOC));
-        assert!(eng.pop_outbox().is_none(), "no PullOps before DocOpened");
+        assert!(
+            eng.pop_outbox().is_none(),
+            "no PullUpdates before DocOpened"
+        );
 
         eng.handle_server_bytes(&enc(&ServerFrame::DocRejected {
             doc_id: DOC,
@@ -3256,10 +3273,10 @@ mod tests {
             doc_id: DOC,
             epoch: 0,
         }));
-        let _ = eng.pop_outbox().expect("PullOps");
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBatch {
+        let _ = eng.pop_outbox().expect("PullUpdates");
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
-            ops: vec![],
+            updates: vec![],
             complete: true,
         }));
         let _ = drain_events(&mut eng);
@@ -3311,9 +3328,9 @@ mod tests {
         assert_ne!(other, DOC);
         // Garbage ciphertext: the frame must be refused on its doc id
         // before anything tries to decrypt it.
-        eng.handle_server_bytes(&enc(&ServerFrame::OpsBroadcast {
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBroadcast {
             doc_id: other,
-            ops: vec![StoredBlob {
+            updates: vec![StoredBlob {
                 seq: 1,
                 blob: EncryptedBlob {
                     nonce: vec![0; 24],

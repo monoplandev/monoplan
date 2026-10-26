@@ -53,7 +53,7 @@ The multiplexed connection (`sync-protocol.md` §Doc binding) is proven end to e
 
 Ways to cover these without a fake server, in order of preference:
 
-- **Make the real server produce the condition.** A test-only server config (environment variable, like `MONOPLAN_SNAPSHOT_THRESHOLD_BLOBS` today) that delays or withholds the terminal `OpsBatch` for a named doc, or that delays `HelloAck`, would cover 1 and 3 with the real wire. Case 2 can be reached today by letting the test override the protocol version the bridge advertises (a `codec` whose `helloFrame` encodes `supported_protocol_versions: [9999]`), which needs no server change at all.
+- **Make the real server produce the condition.** A test-only server config (environment variable, like `MONOPLAN_SNAPSHOT_THRESHOLD_BLOBS` today) that delays or withholds the terminal `UpdatesBatch` for a named doc, or that delays `HelloAck`, would cover 1 and 3 with the real wire. Case 2 can be reached today by letting the test override the protocol version the bridge advertises (a `codec` whose `helloFrame` encodes `supported_protocol_versions: [9999]`), which needs no server change at all.
 - **Drive the bridge with a hand-held socket pair.** Bun's `WebSocketPair` is not available, but a bridge whose `socketFactory` returns an object implementing the four handlers the bridge touches (`onopen` / `onmessage` / `onclose` / `send`) is a dozen lines and tests only the router, with no server at all. This is a stub, not a server, and stays inside the test file.
 
 If one of these cases ever bites, add the override first; do not introduce a standalone fake server.
@@ -70,7 +70,7 @@ If one of these cases ever bites, add the override first; do not introduce a sta
 
 Use the fingerprint for E2E and property-test convergence checks instead of comparing snapshot bytes. Snapshot bytes are **not** required to be stable across replicas — Loro's serialization carries per-replica metadata (peer-ids, internal ordering) that legitimately differs even at logical equality, and per-snapshot encryption nonces would mask byte-stability anyway. Logical-state fingerprinting is the right granularity for "did we converge."
 
-**Future:** a merkle chain/tree over the encrypted op stream is a separate, complementary primitive — commits to *causal history* rather than logical state, enabling O(log n) sync-diff and tamper-evident audit of the server's op log. Out of scope for now.
+**Future:** a merkle chain/tree over the encrypted update stream is a separate, complementary primitive — commits to *causal history* rather than logical state, enabling O(log n) sync-diff and tamper-evident audit of the server's op log. Out of scope for now.
 
 ## Determinism
 

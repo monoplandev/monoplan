@@ -475,7 +475,7 @@ All mutations go through Loro APIs internally; the core exposes typed helpers:
 - `reconcile()` — explicit stale/duplicate/missing order-entry repair plus focus
   ref pruning/dedup; see Reconciliation.
 
-The wire format for ops is whatever Loro emits — opaque bytes from the server's POV.
+The wire format for updates is whatever Loro emits — opaque bytes from the server's POV.
 
 ## Schema versioning & compatibility
 
@@ -484,7 +484,7 @@ This layout is a **breaking CRDT-schema change** from v1 (document-wide
 legacy bridge, no data-carry-over guarantee while pre-release:
 
 - The **wire protocol version stays at 1** (`spec/sync-protocol.md`): frames
-  are unchanged and op blobs are opaque to the protocol, and with a single
+  are unchanged and update blobs are opaque to the protocol, and with a single
   pre-release user there are no old clients to fence off at the handshake.
   The cutover is operational: export JSON on the old build, wipe the
   account/local databases, import on the new build. (Loro root containers
@@ -521,7 +521,7 @@ Replacing the v2 item fields `live` / `done_at`-as-state with the atomic
 In Progress | Review) changes the meaning of every item's stored shape:
 **schema version bumps to 3**. (`binned_at` keeps its v2 shape and meaning.)
 Same clean-break policy as v1 → v2 — wire protocol stays 1, `001_init.sql` is
-untouched (op blobs are opaque), and the cutover is the one-time
+untouched (update blobs are opaque), and the cutover is the one-time
 **export → wipe → import** at a clean checkpoint.
 
 The JSON export carries `lifecycle: { state, at }` for every item, with

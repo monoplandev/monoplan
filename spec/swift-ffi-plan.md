@@ -42,7 +42,7 @@ Move from `cli/`:
 - `cli/src/db.rs` — `open()`, pragmas, migration ledger.
 - The `SqliteStorage` struct + its `impl LocalStorage` from
   `cli/src/storage.rs`.
-- The generic parts of the CLI schema: `docs`, `ops`, `snapshots`
+- The generic parts of the CLI schema: `docs`, `wal`, `snapshots`
   tables move into this crate's own `migrations/001_init.sql`. The
   `account` table is CLI-specific and stays behind.
 - The free functions at the bottom of `cli/src/storage.rs`

@@ -47,7 +47,7 @@ from local prefs, as before URLs existed.
 ## Why the fragment
 
 - **The server learns nothing.** Item and list ids only ever exist
-  inside encrypted op blobs. A path URL would put them in access logs
+  inside encrypted update blobs. A path URL would put them in access logs
   for the first time; a fragment never leaves the browser. This keeps
   the "server is dumb" property (`spec/architecture.md`) intact.
 - **No server route.** `web.rs` serves `/` and a flat set of files. The

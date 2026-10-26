@@ -133,7 +133,7 @@ impl Doc {
     }
 
     /// Empty doc — used when bootstrapping a second device that will
-    /// receive the seed via the op stream.
+    /// receive the seed via the update stream.
     #[wasm_bindgen(js_name = empty)]
     pub fn empty() -> Doc {
         Doc {
@@ -641,7 +641,7 @@ impl Doc {
         self.inner.get_list_meta(list_id).map(|l| list_to_json(&l))
     }
 
-    // -- op stream --
+    // -- update stream --
 
     #[wasm_bindgen(js_name = hasUncapturedOps)]
     pub fn has_uncaptured_ops(&self) -> bool {
@@ -666,7 +666,7 @@ impl Doc {
         self.inner.mark_persisted();
     }
 
-    /// Decrypt and apply a peer op blob.
+    /// Decrypt and apply a peer update blob.
     #[wasm_bindgen(js_name = applyRemote)]
     pub fn apply_remote(&mut self, dek: &Dek, blob: &EncryptedBlob) -> Result<(), JsError> {
         self.inner

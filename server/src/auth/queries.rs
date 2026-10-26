@@ -292,7 +292,7 @@ pub enum DeleteDocOutcome {
     NotOwner,
 }
 
-/// Delete a doc the caller owns, with every row that hangs off it: ops,
+/// Delete a doc the caller owns, with every row that hangs off it: updates,
 /// snapshots, per-device frontiers, the sequence counter, the invites
 /// and the memberships. One transaction. Deletion is unilateral: other
 /// active members lose the doc too (`spec/sharing-plan.md` §Deletion);
@@ -320,7 +320,7 @@ pub async fn delete_doc(
             return Ok(DeleteDocOutcome::NotOwner);
         }
         for sql in [
-            "DELETE FROM ops WHERE doc_id = ?",
+            "DELETE FROM updates WHERE doc_id = ?",
             "DELETE FROM snapshots WHERE doc_id = ?",
             "DELETE FROM device_doc_frontiers WHERE doc_id = ?",
             "DELETE FROM doc_sequences WHERE doc_id = ?",

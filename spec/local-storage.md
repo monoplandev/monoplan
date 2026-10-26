@@ -2,8 +2,8 @@
 
 Per-account local persistence for the doc — the **same logical model on every client**, behind one Rust trait (`core::LocalStorage`, `core/src/storage.rs`). The model separates two concerns that used to share one mechanism (`spec/vv-wal-separation.md`):
 
-1. **Crash recovery** is snapshot + WAL: one encrypted full-history Loro snapshot plus a bounded encrypted WAL of updates applied after it. Every commit — local mutation or applied remote op — appends a WAL row; when the WAL crosses a threshold it is folded into a fresh snapshot and the folded prefix pruned. Folding runs **regardless of online/sync status**.
-2. **Outbound sync** is derived from Loro history against `server_known_vv` — the operations proven to exist in the server op stream — never from which WAL rows still exist. There is no outbox of rows; a full Loro snapshot retains operation history, so even unsent local operations survive folding and re-derive at push time.
+1. **Crash recovery** is snapshot + WAL: one encrypted full-history Loro snapshot plus a bounded encrypted WAL of updates applied after it. Every commit — local mutation or applied remote update — appends a WAL row; when the WAL crosses a threshold it is folded into a fresh snapshot and the folded prefix pruned. Folding runs **regardless of online/sync status**.
+2. **Outbound sync** is derived from Loro history against `server_known_vv` — the operations proven to exist in the server update stream — never from which WAL rows still exist. There is no outbox of rows; a full Loro snapshot retains operation history, so even unsent local operations survive folding and re-derive at push time.
 
 The substrate differs by platform — **CLI: sqlite on disk; web: IndexedDB on the main thread** — but the schema, boot semantics, and fold policy are identical (the engine only ever sees the trait).
 
@@ -11,8 +11,8 @@ The substrate differs by platform — **CLI: sqlite on disk; web: IndexedDB on t
 
 - One encrypted full-history **Loro snapshot**.
 - A bounded encrypted **WAL** of updates applied after that snapshot.
-- **`server_known_vv`** — encoded Loro VersionVector of operations proven to exist in the server op stream (merged from every applied server blob's declared range and every acked push's `to_vv`).
-- **`last_acked_server_seq`** — the durable server-log delivery frontier (resume `PullOps` cursor).
+- **`server_known_vv`** — encoded Loro VersionVector of operations proven to exist in the server update stream (merged from every applied server blob's declared range and every acked push's `to_vv`).
+- **`last_acked_server_seq`** — the durable server-log delivery frontier (resume `PullUpdates` cursor).
 - At most one durable **in-flight push**: `{ push_id, encrypted blob, from_vv, to_vv }`, written *before* the blob's first send and cleared on ack, so a crash between server insert and client ack retries the exact same `push_id` (the server deduplicates — `spec/sync-protocol.md`).
 
 The in-memory WAL capture cursor is the doc's `last_persisted_vv`: it advances when an update is durably appended to the WAL, **not** on server acknowledgement. `pending_export` = `Updates(last_persisted_vv)` is the capture delta; `export_updates_since(server_known_vv)` is the push delta. The two cursors are independent.
@@ -30,7 +30,7 @@ The engine sees a single `LocalStorage` trait; storage is mandatory — there is
 CREATE TABLE docs (
   id                    BLOB PRIMARY KEY,           -- uuid v7, matches server-side docs.id
   created_at            INTEGER NOT NULL,
-  last_acked_server_seq INTEGER NOT NULL DEFAULT 0, -- resume PullOps cursor; persisted, never derived
+  last_acked_server_seq INTEGER NOT NULL DEFAULT 0, -- resume PullUpdates cursor; persisted, never derived
   server_known_vv       BLOB,                       -- encoded Loro VV; NULL = never synced
   last_sync_at          INTEGER                     -- unix millis of last ONLINE sync; observability only
 );
@@ -83,7 +83,7 @@ Local mutation (engine `capture_local_ops`):
 4. Advance `last_persisted_vv` to the pre-export oplog VV.
 5. `server_known_vv` is untouched.
 
-Remote server update (engine `apply_remote_ops`):
+Remote server update (engine `apply_remote_updates`):
 
 1. Decrypt; decode the blob's **declared** operation range (`decode_import_blob_meta` → `partial_end_vv`); apply to the doc.
 2. Merge the declared range into `server_known_vv` — the *declared* range, not `ImportStatus.success`: a duplicate import is a no-op but still proves the server possesses those operations.
@@ -121,7 +121,7 @@ A disconnect mid-push keeps the durable record; the reconnect re-pulls, then ret
 ## Server snapshots vs local snapshots
 
 - **Local snapshot** (this spec): the current full document, including unsent work. Crash-recovery baseline.
-- **Server snapshot** (produced on `SnapshotRequest`): exactly the state/history the server op stream represents. The producer exports at the frontiers corresponding to `server_known_vv` (`fork_at`), never the current doc — unsent local operations must not leak into a blob other devices bootstrap from.
+- **Server snapshot** (produced on `SnapshotRequest`): exactly the state/history the server update stream represents. The producer exports at the frontiers corresponding to `server_known_vv` (`fork_at`), never the current doc — unsent local operations must not leak into a blob other devices bootstrap from.
 
 Bootstrapping **from** a server snapshot: apply it, merge its declared frontier into `server_known_vv` (persisted via `write_server_known_vv`), then write the local checkpoint as a fresh full export of the **merged** doc with a full-prefix prune. The server blob alone is not a valid local checkpoint — it lacks any unsent local work the pruned WAL rows carried. Then pull and WAL-log the server tail after the snapshot's `up_to_seq`.
 

@@ -29,7 +29,7 @@ use uuid::Uuid;
 /// `OpenDoc` exchange went in without a bump.
 pub const PROTOCOL_VERSION: u32 = 1;
 
-/// Encrypted op or snapshot payload. Server-side these are opaque
+/// Encrypted update or snapshot payload. Server-side these are opaque
 /// blobs — only the client (with the DEK) can decrypt.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EncryptedBlob {
@@ -48,7 +48,7 @@ pub struct StoredBlob {
     pub blob: EncryptedBlob,
 }
 
-/// One pushed op: a client-minted durable push identifier plus the
+/// One pushed update: a client-minted durable push identifier plus the
 /// encrypted payload. `push_id` is the retry/idempotency key — the
 /// server stores it alongside the originating device and, on a repeat
 /// of the same `(device, push_id)`, returns the originally assigned
@@ -121,20 +121,23 @@ pub enum ClientFrame {
     /// `DocOpened` — or `DocRejected`, after which the connection
     /// closes. Re-opening an already-open doc is idempotent.
     OpenDoc { doc_id: Uuid },
-    /// Append ops. Server assigns per-doc seqs and replies `OpsAck`.
+    /// Append updates. Server assigns per-doc seqs and replies `UpdatesAck`.
     /// Each blob carries a durable `push_id`; re-sending a previously
     /// inserted `(device, push_id)` is idempotent (see [`PushBlob`]).
-    PushOps { doc_id: Uuid, ops: Vec<PushBlob> },
-    /// Request all ops with seq > since_seq. Streamed back as one or
-    /// more `OpsBatch` frames; the last carries `complete=true`.
-    PullOps { doc_id: Uuid, since_seq: u64 },
+    PushUpdates {
+        doc_id: Uuid,
+        updates: Vec<PushBlob>,
+    },
+    /// Request all updates with seq > since_seq. Streamed back as one or
+    /// more `UpdatesBatch` frames; the last carries `complete=true`.
+    PullUpdates { doc_id: Uuid, since_seq: u64 },
     /// Advance this device's frontier on `doc_id`. Sent after Loro
-    /// accepts the ops locally — never on raw byte receipt. Carries
+    /// accepts the updates locally — never on raw byte receipt. Carries
     /// the contiguous prefix of seqs the device has applied.
     Ack { doc_id: Uuid, last_acked_seq: u64 },
     /// Response to a `SnapshotRequest`. `up_to_seq` is the encoded
     /// state frontier; `compaction_floor_seq` is the seq at/below which
-    /// op blobs become eligible for server-side GC once this snapshot
+    /// update blobs become eligible for server-side GC once this snapshot
     /// lands. Echoed verbatim from `SnapshotRequest` — the producing
     /// client doesn't compute it.
     ///
@@ -167,8 +170,8 @@ impl ClientFrame {
     pub fn doc_id(&self) -> Uuid {
         match self {
             ClientFrame::OpenDoc { doc_id }
-            | ClientFrame::PushOps { doc_id, .. }
-            | ClientFrame::PullOps { doc_id, .. }
+            | ClientFrame::PushUpdates { doc_id, .. }
+            | ClientFrame::PullUpdates { doc_id, .. }
             | ClientFrame::Ack { doc_id, .. }
             | ClientFrame::PushSnapshot { doc_id, .. }
             | ClientFrame::PullSnapshot { doc_id } => *doc_id,
@@ -197,22 +200,25 @@ pub enum ServerFrame {
     /// rest of the connection carries on. The client should drop its
     /// local copy of the doc (`spec/sharing-plan.md` §Member removal).
     DocClosed { doc_id: Uuid, reason: String },
-    /// Response to `PushOps`. One `PushAck` per pushed blob, in input
+    /// Response to `PushUpdates`. One `PushAck` per pushed blob, in input
     /// order, each identifying the acknowledged `push_id` and its
     /// (possibly pre-existing, when deduplicated) server seq.
-    OpsAck { doc_id: Uuid, acks: Vec<PushAck> },
-    /// Chunk of pulled ops. May be one of several frames per `PullOps`.
-    OpsBatch {
+    UpdatesAck { doc_id: Uuid, acks: Vec<PushAck> },
+    /// Chunk of pulled updates. May be one of several frames per `PullUpdates`.
+    UpdatesBatch {
         doc_id: Uuid,
-        ops: Vec<StoredBlob>,
+        updates: Vec<StoredBlob>,
         complete: bool,
     },
-    /// Pushed when another device with the doc open commits ops.
-    OpsBroadcast { doc_id: Uuid, ops: Vec<StoredBlob> },
+    /// Pushed when another device with the doc open commits updates.
+    UpdatesBroadcast {
+        doc_id: Uuid,
+        updates: Vec<StoredBlob>,
+    },
     /// Server asks a connected, caught-up client to produce a snapshot.
     /// `up_to_seq` is the requested state frontier (= server's idea of
     /// the producer's `last_acked_seq`); `compaction_floor_seq` is the
-    /// seq at/below which op blobs become eligible for server-side GC
+    /// seq at/below which update blobs become eligible for server-side GC
     /// once this snapshot lands (= `max(horizon, prev snapshot's
     /// compaction_floor_seq)`). The client echoes `compaction_floor_seq`
     /// back verbatim in `PushSnapshot`; it does not influence the
@@ -237,8 +243,8 @@ pub enum ServerFrame {
     /// delta landed after it — and marks the last row `complete`.
     /// `up_to_seq` is this row's state frontier; on the `complete`
     /// frame it is the chain's final frontier, which the bootstrapping
-    /// client uses as its next `since_seq` for `PullOps`. Frames are
-    /// fire-and-forget like `OpsBatch`: the client imports each row as
+    /// client uses as its next `since_seq` for `PullUpdates`. Frames are
+    /// fire-and-forget like `UpdatesBatch`: the client imports each row as
     /// it lands rather than buffering the chain.
     Snapshot {
         doc_id: Uuid,
@@ -246,13 +252,13 @@ pub enum ServerFrame {
         blob: EncryptedBlob,
         complete: bool,
     },
-    /// Sent in lieu of `OpsBatch` when the client's `since_seq` is
-    /// below the latest snapshot's `compaction_floor_seq` — the ops it
-    /// needs have been compacted, so it can't resume from ops alone.
+    /// Sent in lieu of `UpdatesBatch` when the client's `since_seq` is
+    /// below the latest snapshot's `compaction_floor_seq` — the updates it
+    /// needs have been compacted, so it can't resume from updates alone.
     /// (Devices between `compaction_floor_seq` and `up_to_seq` can
     /// still delta-pull — horizon-bounded compaction preserves those.)
     /// The client must `PullSnapshot`, apply the returned `Snapshot`,
-    /// then re-issue `PullOps` from the snapshot's state frontier.
+    /// then re-issue `PullUpdates` from the snapshot's state frontier.
     /// `up_to_seq` here is informational; the authoritative value is
     /// the one in the `Snapshot` frame.
     SnapshotRequired { doc_id: Uuid, up_to_seq: u64 },
@@ -265,9 +271,9 @@ impl ServerFrame {
             ServerFrame::DocOpened { doc_id, .. }
             | ServerFrame::DocRejected { doc_id, .. }
             | ServerFrame::DocClosed { doc_id, .. }
-            | ServerFrame::OpsAck { doc_id, .. }
-            | ServerFrame::OpsBatch { doc_id, .. }
-            | ServerFrame::OpsBroadcast { doc_id, .. }
+            | ServerFrame::UpdatesAck { doc_id, .. }
+            | ServerFrame::UpdatesBatch { doc_id, .. }
+            | ServerFrame::UpdatesBroadcast { doc_id, .. }
             | ServerFrame::SnapshotRequest { doc_id, .. }
             | ServerFrame::Snapshot { doc_id, .. }
             | ServerFrame::SnapshotRequired { doc_id, .. } => *doc_id,

@@ -101,7 +101,7 @@ export interface PeerSlotRow {
  *  durably applied. Set explicitly via `writeAckedSeq` (never derived
  *  from `MAX(serverSeq)`, which over-shoots gaps and under-shoots after
  *  a snapshot prunes rows). `serverKnownVv` is the encoded Loro
- *  VersionVector of operations proven to exist in the server op stream
+ *  VersionVector of operations proven to exist in the server update stream
  *  — the outbound-delta base. See `spec/local-storage.md`. */
 export interface DocRow {
   id: string;

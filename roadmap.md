@@ -12,8 +12,8 @@
 
 One latent thing remains, but it was already scoped out in your handoff:
 core/src/doc.rs::snapshot_blob still calls ExportMode::Snapshot (full), so the
-snapshot payload doesn't trim Loro's internal history even though the ops table does.
-That means bootstrap downloads are bigger than they need to be, but the ops-table
+snapshot payload doesn't trim Loro's internal history even though the updates table does.
+That means bootstrap downloads are bigger than they need to be, but the updates-table
 storage win is fully realized. Switching to ExportMode::shallow_snapshot(frontier) means VV tracking.
 
 ## Wasm storage boundary — harden against retained `&[u8]` views (hardening, not urgent)

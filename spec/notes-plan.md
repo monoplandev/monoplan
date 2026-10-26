@@ -346,7 +346,7 @@ is written on title blur, close, target switch, `visibilitychange`
 closed tab lost a rename and a whole unsaved capture.
 
 Commit policy, as built: `applyNotesDelta` commits on every editor
-change, but that is not one op blob per keystroke. Loro merges
+change, but that is not one update blob per keystroke. Loro merges
 consecutive commits from one peer into a single `Change` when nothing
 remote interleaves and the timestamps are within its merge interval
 (origin is not part of the change, so the `notes:` tag does not split
@@ -356,7 +356,7 @@ WAL row and one push per `flush`), so the coalescing lives in the store:
 `applyNotesDelta` skips the store's `mutate` / `flush` path (no workspace
 undo step, no capture) and arms a 300 ms idle timer; `flushNotes` runs
 the capture now on blur / close / target switch / page hide. A typing
-burst is therefore one op blob holding one merged change. Compaction for
+burst is therefore one update blob holding one merged change. Compaction for
 the offline-by-default case (fold with retained outbox rows) remains a
 prerequisite for long offline editing sessions.
 
@@ -489,7 +489,7 @@ rebuilding the editor on snapshot import; loro-prosemirror itself (JS doc).
 
 ## 5. Images (Phase 4, own spec)
 
-Bytes never enter the CRDT: one photo would be a megabyte op blob in every
+Bytes never enter the CRDT: one photo would be a megabyte update blob in every
 snapshot and every device's WAL. Instead:
 
 - New server surface, `spec/attachments.md`: `PUT /attachments/<id>` and

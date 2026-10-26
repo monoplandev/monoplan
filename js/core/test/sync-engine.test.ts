@@ -116,7 +116,7 @@ describe("connection-level handshake helpers", () => {
 
   test("serverFrameDocId reads the routing key off payload frames only", () => {
     const frame = encode({
-      type: "OpsAck",
+      type: "UpdatesAck",
       doc_id: uuidBytes(OTHER_DOC_ID),
       acks: [],
     });
@@ -164,7 +164,7 @@ describe("transport callbacks", () => {
     const evt = eng.popEvent();
     expect(evt!.kind).toBe("error");
     expect(evt!.message).toContain(OTHER_DOC_ID);
-    // Still waiting on its own DocOpened: no PullOps went out.
+    // Still waiting on its own DocOpened: no PullUpdates went out.
     expect(eng.popOutbox()).toBeUndefined();
     expect(eng.isIdle()).toBe(false);
   });
@@ -309,7 +309,7 @@ describe("save / load round trip", () => {
     const snapshot = a.save();
 
     // Same DEK so the reconstructed engine could in principle decrypt
-    // remote ops; not exercised here, just locking down the API.
+    // remote updates; not exercised here, just locking down the API.
     const dek = Dek.generate();
     const restored = new SyncEngine(Doc.load(snapshot), DOC_ID, dek, 0n, memStorage());
     const fingerprintAfter = restored.fingerprint();

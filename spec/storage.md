@@ -100,7 +100,7 @@ CREATE TABLE device_doc_frontiers (
 );
 CREATE INDEX device_doc_frontiers_doc_id_idx ON device_doc_frontiers (doc_id);
 
--- Per-doc monotonic counter. UPDATEd in the same tx as the op
+-- Per-doc monotonic counter. Bumped in the same tx as the update
 -- insert so seqs are dense and gap-free for any single doc.
 -- `epoch` is the doc's current history epoch (see §Epochs).
 CREATE TABLE doc_sequences (
@@ -109,7 +109,7 @@ CREATE TABLE doc_sequences (
   epoch        INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE ops (
+CREATE TABLE updates (
   doc_id          BLOB NOT NULL REFERENCES docs(id),
   seq             INTEGER NOT NULL,                        -- per-doc monotonic, gap-free
   epoch           INTEGER NOT NULL,                        -- doc's epoch at insert, stamped server-side (see §Epochs)
@@ -122,17 +122,17 @@ CREATE TABLE ops (
 );
 -- Push idempotency (spec/sync-protocol.md §"Push identity & retry"): a
 -- crash-retry of the same (device, push_id) acks its original seq
--- without inserting a second row. Dedup records ride on the ops rows,
+-- without inserting a second row. Dedup records ride on the updates rows,
 -- so they persist until compaction — which only deletes rows every
 -- device (the originator included) has acked past.
-CREATE UNIQUE INDEX ops_device_push_idx ON ops (doc_id, device_id, push_id)
+CREATE UNIQUE INDEX updates_device_push_idx ON updates (doc_id, device_id, push_id)
   WHERE device_id IS NOT NULL AND push_id IS NOT NULL;
 
 CREATE TABLE snapshots (
   id                    INTEGER PRIMARY KEY AUTOINCREMENT,
   doc_id                BLOB NOT NULL REFERENCES docs(id),
   up_to_seq             INTEGER NOT NULL,    -- snapshot's encoded state frontier (per-doc)
-  compaction_floor_seq  INTEGER NOT NULL,    -- seq at/below which op blobs are eligible for GC once this snapshot lands (= max(horizon, prev snapshot's compaction_floor_seq) at snapshot time). Doubles as the bootstrap gate.
+  compaction_floor_seq  INTEGER NOT NULL,    -- seq at/below which update blobs are eligible for GC once this snapshot lands (= max(horizon, prev snapshot's compaction_floor_seq) at snapshot time). Doubles as the bootstrap gate.
   epoch                 INTEGER NOT NULL,    -- epoch this snapshot belongs to; a trimmed snapshot is the first row of its epoch
   from_seq              INTEGER,             -- NULL = full snapshot; else a delta starting after the previous row's up_to_seq (chain link, must equal it)
   up_to_vv              BLOB NOT NULL,       -- producer's Loro VV at up_to_seq, sealed under the DEK; opaque here, handed back as the next delta's base
@@ -146,9 +146,9 @@ CREATE INDEX snapshots_doc_id_idx ON snapshots (doc_id, id DESC);
 
 Snapshot rows form one linear **chain** per doc: a full snapshot (`from_seq IS NULL`) followed by zero or more deltas, each linking to the row before it (`from_seq = previous.up_to_seq`, enforced in the insert transaction). The bootstrap payload is the chain from the latest full row onward, in `id` order. The latest row's `compaction_floor_seq` is the doc's floor. See `sync-protocol.md` §"Snapshot orchestration" for shapes and cadence.
 
-`ops.seq` is per-doc, dense, and gap-free. The client relies on this: seqs arrive contiguous and in order over a single connection, so the engine only ever advances its frontier over the contiguous next seq (no reorder buffering). The composite `(doc_id, seq)` PK doubles as the per-doc ordering index — no separate index needed.
+`updates.seq` is per-doc, dense, and gap-free. The client relies on this: seqs arrive contiguous and in order over a single connection, so the engine only ever advances its frontier over the contiguous next seq (no reorder buffering). The composite `(doc_id, seq)` PK doubles as the per-doc ordering index — no separate index needed.
 
-The `doc_sequences` row for a doc is created on first `insert_ops` via `INSERT … ON CONFLICT DO UPDATE`, so signup doesn't need a separate seed step. Reads (`SELECT seq … ORDER BY seq`) never touch the counter; only writers contend on the per-doc row.
+The `doc_sequences` row for a doc is created on first `insert_updates` via `INSERT … ON CONFLICT DO UPDATE`, so signup doesn't need a separate seed step. Reads (`SELECT seq … ORDER BY seq`) never touch the counter; only writers contend on the per-doc row.
 
 Device frontiers are per-(device, doc) in `device_doc_frontiers`, keyed to match the per-doc `seq` space they live in. The row is upserted on `Ack` and only ever moves forward. `GET /api/devices` reports each device's frontier on the account's primary doc.
 
@@ -166,7 +166,7 @@ All in one tx with `BEGIN IMMEDIATE`. The invariant "`accounts.primary_doc_id` a
 ## Compaction
 
 After a snapshot lands, a background job may, per doc:
-1. Delete `ops` rows where `doc_id = X AND seq ≤ snapshot.compaction_floor_seq`. (`compaction_floor_seq` is set to `max(horizon, prev snapshot's compaction_floor_seq)` at snapshot creation time by the orchestrator — see `sync-protocol.md` §"Snapshot orchestration" — so it's safe by construction.)
+1. Delete `updates` rows where `doc_id = X AND seq ≤ snapshot.compaction_floor_seq`. (`compaction_floor_seq` is set to `max(horizon, prev snapshot's compaction_floor_seq)` at snapshot creation time by the orchestrator — see `sync-protocol.md` §"Snapshot orchestration" — so it's safe by construction.)
 2. Snapshot rows are never deleted. The chain is one full head plus every delta since; superseding it is the trimmed snapshot's job (§Epochs, not built), and the pruning rule will be written with it.
 
 Horizon is `min(last_acked_seq)` over the doc's `device_doc_frontiers` rows across the devices of every account with an active `doc_members` row on it (the same set `can_open` admits), joined so that a device with no row counts as 0.
@@ -179,8 +179,8 @@ An **epoch** is a span of a doc's history that shares one Loro root. A doc is bo
 
 Where it lives and what each copy is for:
 
-- `doc_sequences.epoch` is the doc's **current** epoch. It is the only copy that is written independently; `insert_ops` reads it under the same row lock as `next_seq`.
-- `ops.epoch` is the doc's epoch at insert time, stamped by the server. It is derivable from `seq` plus the snapshot rows, and is denormalised for cheap per-op lookup and as the natural key for a future hot/cold split. It is **not** the compaction predicate: ops pushed between a trimmed snapshot's `up_to_seq` and its acceptance belong to the old epoch but are in no snapshot, so GC stays `seq <= compaction_floor_seq`.
+- `doc_sequences.epoch` is the doc's **current** epoch. It is the only copy that is written independently; `insert_updates` reads it under the same row lock as `next_seq`.
+- `updates.epoch` is the doc's epoch at insert time, stamped by the server. It is derivable from `seq` plus the snapshot rows, and is denormalised for cheap per-op lookup and as the natural key for a future hot/cold split. It is **not** the compaction predicate: updates pushed between a trimmed snapshot's `up_to_seq` and its acceptance belong to the old epoch but are in no snapshot, so GC stays `seq <= compaction_floor_seq`.
 - `snapshots.epoch` is the epoch the snapshot belongs to. A trimmed snapshot's `compaction_floor_seq` is its epoch's compatibility line.
 
 `seq` never resets at an epoch boundary; `since_seq`, acks and the push_id dedup index all keep working across epochs.

@@ -75,7 +75,7 @@ async fn clear(force: bool) -> anyhow::Result<()> {
         anyhow::bail!("monoplan daemon is running; `monoplan daemon stop` first");
     }
 
-    // The doc cache (ops + snapshot) and sync cursor live in the sqlite
+    // The doc cache (wal + snapshot) and sync cursor live in the sqlite
     // db; account identity lives there too, so we truncate the cache
     // tables rather than unlink the file — clearing the cache must not
     // log the user out.

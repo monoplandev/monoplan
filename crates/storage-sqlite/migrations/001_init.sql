@@ -10,13 +10,13 @@ CREATE TABLE docs (
   id                    BLOB PRIMARY KEY,    -- uuid v7 bytes; matches server-side docs.id
   created_at            INTEGER NOT NULL,    -- unix seconds (unixepoch())
   -- Durable server-log delivery frontier: the highest *contiguous*
-  -- server_seq this device has durably applied — the resume `PullOps`
+  -- server_seq this device has durably applied — the resume `PullUpdates`
   -- cursor. Persisted explicitly (never derived from
   -- MAX(wal.server_seq)) so it survives snapshot folding pruning the
   -- very rows it was derived from, and never jumps a gap.
   last_acked_server_seq INTEGER NOT NULL DEFAULT 0,
   -- Encoded Loro VersionVector of the operations proven to exist in
-  -- the server op stream. The outbound delta is derived from Loro
+  -- the server update stream. The outbound delta is derived from Loro
   -- history against this — never from which WAL rows still exist.
   -- NULL = never synced.
   server_known_vv       BLOB,

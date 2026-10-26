@@ -26,7 +26,7 @@ POST   /api/invites/:invite_id/accept  (authed; `{ wrapped_dek, wrapped_dek_nonc
 
 Sharing links (`sharing-plan.md` §Invites): the link's fragment secret never reaches the server. `invite_id` is an HKDF subkey of it (the server's lookup key, one-way) and the wrap is under a second subkey, so the unauthenticated fetch hands out nothing a holder of the id could use without the secret. Accept consumes the invite and inserts the `doc_members` row in one transaction (single use).
 
-`POST /api/docs` is pure key management: the client generates the doc's DEK, wraps it under its **Home DEK** (the primary doc's DEK, which is the account key — `encryption.md`), and the server mints the doc id plus an `owner` row in `doc_members` carrying that wrap. No password or recovery wrap is involved: password change, reset and recovery only ever re-wrap the Home DEK, and a client that holds the Home DEK opens this wrap itself. The doc's history begins with the first `PushOps` after `OpenDoc`.
+`POST /api/docs` is pure key management: the client generates the doc's DEK, wraps it under its **Home DEK** (the primary doc's DEK, which is the account key — `encryption.md`), and the server mints the doc id plus an `owner` row in `doc_members` carrying that wrap. No password or recovery wrap is involved: password change, reset and recovery only ever re-wrap the Home DEK, and a client that holds the Home DEK opens this wrap itself. The doc's history begins with the first `PushUpdates` after `OpenDoc`.
 
 WebSocket upgrade: `GET /api/sync` with `Authorization: Bearer <device_token>` (CLI) or the `monoplan_device` cookie (web). Server validates on upgrade; the connection is bound to `(account_id, device_id)` for its lifetime. No per-message auth. (Frame encoding + version handshake: see `sync-protocol.md`.)
 
@@ -102,7 +102,7 @@ Client cannot derive `auth_secret` without the salt. Standard pattern:
 3. POST `/api/account/login { email, auth_secret }` → returns `memberships` (one wrap per doc).
 4. Client unwraps the primary membership with `kek` (Home DEK), then the rest with the Home DEK.
 5. POST `/api/devices { name, kind }` → returns new `device_token`.
-6. WS connect, `PullSnapshot` if present, then `PullOps`.
+6. WS connect, `PullSnapshot` if present, then `PullUpdates`.
 
 ### Recovery (lost password / fresh device)
 1. POST `/api/account/prelogin { email }` → `{ master_salt, recovery_salt }`.
@@ -112,7 +112,7 @@ Client cannot derive `auth_secret` without the salt. Standard pattern:
 5. Client picks new password, derives new `master_salt`, `master`, `kek`, `auth_secret`; re-wraps the Home DEK.
 6. POST `/api/account/password/reset { recovery_session_token, new_master_salt, new_auth_secret, new_doc_keys, device_name, device_kind }` → in one transaction validates + consumes the session token, updates password material, rewrites the primary membership's wrap, creates the device row; returns `{ device_id, device_token, primary_doc_id }`. `new_doc_keys` must name exactly the primary doc (400 otherwise; the session survives for a retry). Other memberships are untouched.
 7. GET `/api/docs` with the new device token; unwrap every non-primary membership with the Home DEK.
-8. WS connect, `PullSnapshot` if present, then `PullOps`.
+8. WS connect, `PullSnapshot` if present, then `PullUpdates`.
 
 ## Rate limiting
 

@@ -24,7 +24,7 @@ The one-shot CLI (open, mutate, flush, exit) was a proof of concept and
 is removed, not kept as a fallback. There is no in-process mode for
 commands. Reasons, in order:
 
-1. **Liveness.** Reactive `OpsBroadcast`, deadline and `when`
+1. **Liveness.** Reactive `UpdatesBroadcast`, deadline and `when`
    notifications, background sync, and reliably serving the
    snapshot-producer role all need a process that outlives a command.
 2. **Single ownership.** `spec/peer-id-plan.md` already requires one
@@ -307,7 +307,7 @@ processes.
 The daemon holds the WebSocket open. Polling is the mobile compromise,
 not the desktop design:
 
-- The server already pushes `OpsBroadcast` on every seq advance, so a
+- The server already pushes `UpdatesBroadcast` on every seq advance, so a
   connected daemon sees other devices' changes within a round trip.
 - Snapshot production requires a connected, caught-up client
   (`spec/sync-protocol.md`). An always-connected daemon is the natural

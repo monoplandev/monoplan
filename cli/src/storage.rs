@@ -1,6 +1,6 @@
 //! CLI local persistence.
 //!
-//! The generic doc storage — the `ops` / `snapshots` log and the
+//! The generic doc storage — the `wal` / `snapshots` log and the
 //! `LocalStorage` trait impl — now lives in `monoplan-storage-sqlite` so
 //! the FFI / native app builds can share it. This module is the thin
 //! CLI-specific layer on top: it adds the singleton `account` identity

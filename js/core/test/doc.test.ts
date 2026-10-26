@@ -194,7 +194,7 @@ describe("Dek round trip", () => {
   });
 });
 
-describe("Op stream round trip via two replicas", () => {
+describe("Update stream round trip via two replicas", () => {
   test("replica B converges to A's fingerprint after applying A's blob", () => {
     const dek = Dek.generate();
 
@@ -208,7 +208,7 @@ describe("Op stream round trip via two replicas", () => {
     expect(opBlob).toBeDefined();
     a.markPersisted();
 
-    // B starts empty and replays the single op stream.
+    // B starts empty and replays the single update stream.
     const b = Doc.empty();
     b.applyRemote(dek, opBlob!);
 

@@ -92,11 +92,11 @@ async fn daemon_owns_profile_and_applies_peer_ops_live() {
         .unwrap();
     session_b.flush().await.unwrap();
     let primary_doc_id = Uuid::parse_str(&signup.primary_doc_id).unwrap();
-    let batch = queries::fetch_ops_batch(&server.state.db, primary_doc_id, 0)
+    let batch = queries::fetch_updates_batch(&server.state.db, primary_doc_id, 0)
         .await
         .unwrap();
     let pushed_seq = batch
-        .ops
+        .updates
         .iter()
         .map(|o| o.seq)
         .max()

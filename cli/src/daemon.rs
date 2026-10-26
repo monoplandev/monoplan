@@ -736,7 +736,7 @@ impl Host {
         match msg {
             Some(Ok(Message::Binary(bytes))) => {
                 self.session.engine.handle_server_bytes(&bytes);
-                // Remote ops are WAL-appended by the engine as they
+                // Remote updates are WAL-appended by the engine as they
                 // apply; persisting now advances the durable cursor,
                 // which is what queues the Ack `pump` then sends.
                 if let Err(e) = self.session.persist_engine_state().await {

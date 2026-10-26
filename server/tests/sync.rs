@@ -1,6 +1,6 @@
 //! End-to-end WS sync: real server, real sqlite, real msgpack frames.
 //!
-//! Op blobs in these tests are random bytes — the server treats them
+//! Update blobs in these tests are random bytes — the server treats them
 //! as opaque, so we don't need the real DEK. Signup still needs valid
 //! crypto material because the auth route checks shape; we use the
 //! weak Argon2 params from the auth tests so the suite stays fast.
@@ -357,11 +357,11 @@ fn fake_pushes(range: std::ops::Range<u8>) -> Vec<PushBlob> {
     range.map(fake_push).collect()
 }
 
-/// Extract the assigned seqs from an OpsAck frame, in input order.
+/// Extract the assigned seqs from an UpdatesAck frame, in input order.
 fn ack_seqs(frame: ServerFrame) -> Vec<u64> {
     match frame {
-        ServerFrame::OpsAck { acks, .. } => acks.into_iter().map(|a| a.seq).collect(),
-        other => panic!("expected OpsAck, got {other:?}"),
+        ServerFrame::UpdatesAck { acks, .. } => acks.into_iter().map(|a| a.seq).collect(),
+        other => panic!("expected UpdatesAck, got {other:?}"),
     }
 }
 
@@ -374,9 +374,9 @@ async fn ack_does_not_move_backwards() {
     // Push one op so there's something to ack against.
     send_msgpack(
         &mut ws,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: acc.primary_doc_id,
-            ops: vec![fake_push(1)],
+            updates: vec![fake_push(1)],
         },
     )
     .await;
@@ -426,9 +426,9 @@ async fn repeated_push_id_dedups_to_original_seq_without_new_row() {
     let push = fake_push(3);
     send_msgpack(
         &mut ws_a,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: acc.primary_doc_id,
-            ops: vec![push.clone()],
+            updates: vec![push.clone()],
         },
     )
     .await;
@@ -436,17 +436,17 @@ async fn repeated_push_id_dedups_to_original_seq_without_new_row() {
     assert_eq!(first, vec![1]);
     // B sees the original broadcast once.
     let broadcast = match recv_msgpack::<ServerFrame>(&mut ws_b).await {
-        ServerFrame::OpsBroadcast { ops, .. } => ops,
-        other => panic!("expected OpsBroadcast on B, got {other:?}"),
+        ServerFrame::UpdatesBroadcast { updates, .. } => updates,
+        other => panic!("expected UpdatesBroadcast on B, got {other:?}"),
     };
     assert_eq!(broadcast.len(), 1);
 
     // Retry the exact same push (simulating a lost ack).
     send_msgpack(
         &mut ws_a,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: acc.primary_doc_id,
-            ops: vec![push],
+            updates: vec![push],
         },
     )
     .await;
@@ -454,10 +454,10 @@ async fn repeated_push_id_dedups_to_original_seq_without_new_row() {
     assert_eq!(second, vec![1], "retry must ack the original seq");
 
     // No second stored row.
-    let batch = queries::fetch_ops_batch(&acc.server.state.db, acc.primary_doc_id, 0)
+    let batch = queries::fetch_updates_batch(&acc.server.state.db, acc.primary_doc_id, 0)
         .await
         .unwrap();
-    assert_eq!(batch.ops.len(), 1, "dedup must not insert a second row");
+    assert_eq!(batch.updates.len(), 1, "dedup must not insert a second row");
 
     // No duplicate broadcast to B.
     let nothing = tokio::time::timeout(std::time::Duration::from_millis(200), ws_b.next()).await;
@@ -469,9 +469,9 @@ async fn repeated_push_id_dedups_to_original_seq_without_new_row() {
     // A *different* push_id from the same device still inserts fresh.
     send_msgpack(
         &mut ws_a,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: acc.primary_doc_id,
-            ops: vec![fake_push(4)],
+            updates: vec![fake_push(4)],
         },
     )
     .await;
@@ -527,14 +527,14 @@ async fn push_on_a_broadcasts_to_b_not_a() {
     let pushes = vec![fake_push(7), fake_push(8)];
     send_msgpack(
         &mut ws_a,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: acc.primary_doc_id,
-            ops: pushes.clone(),
+            updates: pushes.clone(),
         },
     )
     .await;
 
-    // A receives its own OpsAck; A must NOT receive a broadcast for
+    // A receives its own UpdatesAck; A must NOT receive a broadcast for
     // its own push. Asserting absence requires a small wait —
     // anything pending arrives well within 200ms on localhost.
     let assigned_seqs = ack_seqs(recv_msgpack::<ServerFrame>(&mut ws_a).await);
@@ -542,8 +542,8 @@ async fn push_on_a_broadcasts_to_b_not_a() {
 
     // B receives the broadcast with the same ids/blobs.
     let broadcast = match recv_msgpack::<ServerFrame>(&mut ws_b).await {
-        ServerFrame::OpsBroadcast { ops, .. } => ops,
-        other => panic!("expected OpsBroadcast on B, got {other:?}"),
+        ServerFrame::UpdatesBroadcast { updates, .. } => updates,
+        other => panic!("expected UpdatesBroadcast on B, got {other:?}"),
     };
     let want: Vec<StoredBlob> = assigned_seqs
         .iter()
@@ -575,9 +575,9 @@ async fn push_on_one_tab_broadcasts_to_other_tab_same_device() {
     let pushes = vec![fake_push(11)];
     send_msgpack(
         &mut tab_a,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: acc.primary_doc_id,
-            ops: pushes.clone(),
+            updates: pushes.clone(),
         },
     )
     .await;
@@ -588,8 +588,8 @@ async fn push_on_one_tab_broadcasts_to_other_tab_same_device() {
 
     // Tab B — receives the broadcast even though it shares device_id.
     let broadcast = match recv_msgpack::<ServerFrame>(&mut tab_b).await {
-        ServerFrame::OpsBroadcast { ops, .. } => ops,
-        other => panic!("expected OpsBroadcast on B, got {other:?}"),
+        ServerFrame::UpdatesBroadcast { updates, .. } => updates,
+        other => panic!("expected UpdatesBroadcast on B, got {other:?}"),
     };
     let want: Vec<StoredBlob> = assigned_seqs
         .into_iter()
@@ -617,7 +617,7 @@ async fn pull_at_or_above_snapshot_floor_streams_ops_normally() {
     // on the steady-state op-streaming path — no SnapshotRequired.
     let acc = signup_account().await;
     // compaction_floor = up_to here means cursor=50 is *at* the floor,
-    // not below — pull_ops should still stream normally without bootstrap.
+    // not below — pull_updates should still stream normally without bootstrap.
     seed_snapshot(&acc.server.state.db, acc.primary_doc_id, 50, 50, None, 0xAA).await;
 
     let mut ws = connect_ws(&acc.server, &acc.device_token).await;
@@ -625,7 +625,7 @@ async fn pull_at_or_above_snapshot_floor_streams_ops_normally() {
 
     send_msgpack(
         &mut ws,
-        &ClientFrame::PullOps {
+        &ClientFrame::PullUpdates {
             doc_id: acc.primary_doc_id,
             since_seq: 50,
         },
@@ -637,7 +637,7 @@ async fn pull_at_or_above_snapshot_floor_streams_ops_normally() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn no_snapshot_request_below_threshold() {
-    // Threshold=5; push 3 ops (well under) and ack them. The server
+    // Threshold=5; push 3 updates (well under) and ack them. The server
     // must never emit a SnapshotRequest.
     let acc = signup_account_with_snapshot_config(5, std::time::Duration::from_secs(60)).await;
     let mut ws = connect_ws(&acc.server, &acc.device_token).await;
@@ -646,9 +646,9 @@ async fn no_snapshot_request_below_threshold() {
     let pushes = fake_pushes(0..3);
     send_msgpack(
         &mut ws,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: acc.primary_doc_id,
-            ops: pushes,
+            updates: pushes,
         },
     )
     .await;
@@ -668,7 +668,7 @@ async fn no_snapshot_request_below_threshold() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn push_path_triggers_snapshot_request_and_persists() {
     // Single device crosses threshold on push. Server emits a
-    // SnapshotRequest before the OpsAck; client responds with a
+    // SnapshotRequest before the UpdatesAck; client responds with a
     // PushSnapshot; row lands in the snapshots table.
     let acc = signup_account_with_snapshot_config(5, std::time::Duration::from_secs(60)).await;
     let mut ws = connect_ws(&acc.server, &acc.device_token).await;
@@ -677,9 +677,9 @@ async fn push_path_triggers_snapshot_request_and_persists() {
     let pushes = fake_pushes(0..5);
     send_msgpack(
         &mut ws,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: acc.primary_doc_id,
-            ops: pushes,
+            updates: pushes,
         },
     )
     .await;
@@ -708,13 +708,13 @@ async fn push_path_triggers_snapshot_request_and_persists() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn ack_path_triggers_snapshot_request() {
-    // Inject ops directly via the query layer so the push-path
+    // Inject updates directly via the query layer so the push-path
     // doesn't fire eligibility for the connecting device. Once the
     // device acks the latest blob id, the Ack handler must drive
     // evaluate and emit a SnapshotRequest.
     let acc = signup_account_with_snapshot_config(5, std::time::Duration::from_secs(60)).await;
     let pushes = fake_pushes(0..5);
-    let inserted = queries::insert_ops(
+    let inserted = queries::insert_updates(
         &acc.server.state.db,
         acc.primary_doc_id,
         acc.device_id,
@@ -752,9 +752,9 @@ async fn stale_snapshot_after_lease_expiry_rejected() {
     let pushes = fake_pushes(0..5);
     send_msgpack(
         &mut ws_a,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: acc.primary_doc_id,
-            ops: pushes,
+            updates: pushes,
         },
     )
     .await;
@@ -764,7 +764,7 @@ async fn stale_snapshot_after_lease_expiry_rejected() {
     // compaction floor, just bootstrap state.
     assert_eq!(compaction_floor_seq, 0);
 
-    // A acks (a real client would, off the back of OpsAck) so its DB
+    // A acks (a real client would, off the back of UpdatesAck) so its DB
     // row advances. Otherwise B's later ack eval still sees horizon=0.
     // Lease 1 stays active — this eval skips on lease-in-flight.
     send_msgpack(
@@ -823,14 +823,14 @@ async fn stale_snapshot_after_lease_expiry_rejected() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn compact_doc_deletes_ops_below_floor_and_keeps_the_chain() {
-    // Insert 10 ops + a snapshot pinning compaction_floor at 6 (so ids
+    // Insert 10 updates + a snapshot pinning compaction_floor at 6 (so ids
     // 1..=6 are below the floor, 7..=10 are above). Run compaction:
-    // ops below should be gone, ops above intact, snapshot rows never
+    // updates below should be gone, updates above intact, snapshot rows never
     // touched.
     let acc = signup_account().await;
     let db = &acc.server.state.db;
     let pushes = fake_pushes(0..10);
-    let inserted = queries::insert_ops(db, acc.primary_doc_id, acc.device_id, pushes)
+    let inserted = queries::insert_updates(db, acc.primary_doc_id, acc.device_id, pushes)
         .await
         .unwrap();
     let ids: Vec<u64> = inserted.acks.iter().map(|a| a.seq).collect();
@@ -850,18 +850,18 @@ async fn compact_doc_deletes_ops_below_floor_and_keeps_the_chain() {
     assert_eq!(meta.from_seq, None);
 
     let stats = queries::compact_doc(db, acc.primary_doc_id).await.unwrap();
-    assert_eq!(stats.ops_deleted, 6);
+    assert_eq!(stats.updates_deleted, 6);
 
-    // Surviving ops are exactly 7..=10.
-    let batch = queries::fetch_ops_batch(db, acc.primary_doc_id, 0)
+    // Surviving updates are exactly 7..=10.
+    let batch = queries::fetch_updates_batch(db, acc.primary_doc_id, 0)
         .await
         .unwrap();
-    let surviving_ids: Vec<u64> = batch.ops.iter().map(|o| o.seq).collect();
+    let surviving_ids: Vec<u64> = batch.updates.iter().map(|o| o.seq).collect();
     assert_eq!(surviving_ids, vec![7, 8, 9, 10]);
 
     // Idempotent — second run finds no new floor movement.
     let stats2 = queries::compact_doc(db, acc.primary_doc_id).await.unwrap();
-    assert_eq!(stats2.ops_deleted, 0);
+    assert_eq!(stats2.updates_deleted, 0);
 
     // A delta chained on snap1 joins the chain; compaction leaves
     // both rows alone.
@@ -882,13 +882,13 @@ async fn compact_doc_deletes_ops_below_floor_and_keeps_the_chain() {
 
     // Bootstrap path still works: a fresh device pulling from 0 gets
     // SnapshotRequired (its cursor is below the compaction floor),
-    // not an OpsBatch with holes.
+    // not an UpdatesBatch with holes.
     let fresh_device = register_second_device(&acc, "device-fresh").await;
     let mut ws = connect_ws(&acc.server, &fresh_device.device_token).await;
     handshake(&mut ws, acc.primary_doc_id).await;
     send_msgpack(
         &mut ws,
-        &ClientFrame::PullOps {
+        &ClientFrame::PullUpdates {
             doc_id: acc.primary_doc_id,
             since_seq: 0,
         },
@@ -904,7 +904,7 @@ async fn compact_doc_deletes_ops_below_floor_and_keeps_the_chain() {
 async fn compact_doc_with_no_snapshot_is_noop() {
     let acc = signup_account().await;
     let db = &acc.server.state.db;
-    queries::insert_ops(
+    queries::insert_updates(
         db,
         acc.primary_doc_id,
         acc.device_id,
@@ -913,20 +913,20 @@ async fn compact_doc_with_no_snapshot_is_noop() {
     .await
     .unwrap();
     let stats = queries::compact_doc(db, acc.primary_doc_id).await.unwrap();
-    assert_eq!(stats.ops_deleted, 0);
+    assert_eq!(stats.updates_deleted, 0);
     // Ops untouched.
-    let batch = queries::fetch_ops_batch(db, acc.primary_doc_id, 0)
+    let batch = queries::fetch_updates_batch(db, acc.primary_doc_id, 0)
         .await
         .unwrap();
-    assert_eq!(batch.ops.len(), 2);
+    assert_eq!(batch.updates.len(), 2);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn push_snapshot_opportunistically_compacts_ops_below_floor() {
     // End-to-end: a real PushSnapshot through the WS handler should
-    // trigger the spawned compaction. With threshold=5, pushing 5 ops
+    // trigger the spawned compaction. With threshold=5, pushing 5 updates
     // and acking lands a snapshot at compaction_floor=5, after which ids
-    // 1..=5 should disappear from the ops table.
+    // 1..=5 should disappear from the updates table.
     let acc = signup_account_with_snapshot_config(5, std::time::Duration::from_secs(60)).await;
     let mut ws = connect_ws(&acc.server, &acc.device_token).await;
     handshake(&mut ws, acc.primary_doc_id).await;
@@ -934,9 +934,9 @@ async fn push_snapshot_opportunistically_compacts_ops_below_floor() {
     let pushes = fake_pushes(0..5);
     send_msgpack(
         &mut ws,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: acc.primary_doc_id,
-            ops: pushes,
+            updates: pushes,
         },
     )
     .await;
@@ -957,20 +957,20 @@ async fn push_snapshot_opportunistically_compacts_ops_below_floor() {
     .await;
     wait_for_snapshot(&acc, up_to_seq).await;
 
-    // Compaction is spawned, not awaited inline — poll until the ops
+    // Compaction is spawned, not awaited inline — poll until the updates
     // disappear (or the deadline trips).
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     loop {
-        let batch = queries::fetch_ops_batch(&acc.server.state.db, acc.primary_doc_id, 0)
+        let batch = queries::fetch_updates_batch(&acc.server.state.db, acc.primary_doc_id, 0)
             .await
             .unwrap();
-        if batch.ops.is_empty() {
+        if batch.updates.is_empty() {
             break;
         }
         if std::time::Instant::now() > deadline {
             panic!(
-                "ops below floor not compacted (still {} present)",
-                batch.ops.len()
+                "updates below floor not compacted (still {} present)",
+                batch.updates.len()
             );
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -986,12 +986,12 @@ async fn delta_chain_requested_and_served_in_order() {
     let mut ws = connect_ws(&acc.server, &acc.device_token).await;
     handshake(&mut ws, acc.primary_doc_id).await;
 
-    // 1. Two ops → full snapshot requested (no base).
+    // 1. Two updates → full snapshot requested (no base).
     send_msgpack(
         &mut ws,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: acc.primary_doc_id,
-            ops: fake_pushes(0..2),
+            updates: fake_pushes(0..2),
         },
     )
     .await;
@@ -1015,9 +1015,9 @@ async fn delta_chain_requested_and_served_in_order() {
     // 2. Two more → delta requested from the full snapshot's VV.
     send_msgpack(
         &mut ws,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: acc.primary_doc_id,
-            ops: fake_pushes(2..4),
+            updates: fake_pushes(2..4),
         },
     )
     .await;
@@ -1069,9 +1069,9 @@ async fn delta_chain_requested_and_served_in_order() {
     //    chain keeps growing and is served whole.
     send_msgpack(
         &mut ws,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: acc.primary_doc_id,
-            ops: fake_pushes(4..6),
+            updates: fake_pushes(4..6),
         },
     )
     .await;
@@ -1120,7 +1120,7 @@ async fn delta_chain_requested_and_served_in_order() {
 
 /// Collect a streamed snapshot chain: every `Snapshot` frame up to and
 /// including the `complete` one, as `(up_to_seq, blob, complete)`.
-/// Interleaved `OpsBroadcast` frames are skipped.
+/// Interleaved `UpdatesBroadcast` frames are skipped.
 async fn recv_snapshot_chain(ws: &mut WsStream) -> Vec<(u64, EncryptedBlob, bool)> {
     let mut rows = Vec::new();
     loop {
@@ -1136,7 +1136,7 @@ async fn recv_snapshot_chain(ws: &mut WsStream) -> Vec<(u64, EncryptedBlob, bool
                     return rows;
                 }
             }
-            ServerFrame::OpsBroadcast { .. } => continue,
+            ServerFrame::UpdatesBroadcast { .. } => continue,
             other => panic!("expected Snapshot, got {other:?}"),
         }
     }
@@ -1222,7 +1222,7 @@ async fn expect_snapshot_request(ws: &mut WsStream) -> (u64, u64, Option<Snapsho
                 compaction_floor_seq,
                 base,
             } => return (up_to_seq, compaction_floor_seq, base),
-            ServerFrame::OpsAck { .. } | ServerFrame::OpsBroadcast { .. } => continue,
+            ServerFrame::UpdatesAck { .. } | ServerFrame::UpdatesBroadcast { .. } => continue,
             other => panic!("unexpected frame while waiting for SnapshotRequest: {other:?}"),
         }
     }
@@ -1236,7 +1236,9 @@ async fn assert_no_snapshot_request(ws: &mut WsStream, window: std::time::Durati
             return;
         }
         match tokio::time::timeout(remaining, recv_msgpack::<ServerFrame>(ws)).await {
-            Ok(ServerFrame::OpsAck { .. }) | Ok(ServerFrame::OpsBroadcast { .. }) => continue,
+            Ok(ServerFrame::UpdatesAck { .. }) | Ok(ServerFrame::UpdatesBroadcast { .. }) => {
+                continue;
+            }
             Ok(ServerFrame::SnapshotRequest {
                 doc_id: _,
                 up_to_seq,
@@ -1273,11 +1275,13 @@ async fn wait_for_snapshot(acc: &Account, up_to: u64) -> queries::LatestSnapshot
 
 async fn expect_complete_batch(ws: &mut WsStream) -> Vec<StoredBlob> {
     match recv_msgpack(ws).await {
-        ServerFrame::OpsBatch { ops, complete, .. } => {
+        ServerFrame::UpdatesBatch {
+            updates, complete, ..
+        } => {
             assert!(complete, "expected single complete batch");
-            ops
+            updates
         }
-        other => panic!("expected OpsBatch, got {other:?}"),
+        other => panic!("expected UpdatesBatch, got {other:?}"),
     }
 }
 
@@ -1410,9 +1414,9 @@ async fn open_doc_for_seeded_membership_succeeds_and_seqs_stay_per_doc() {
     handshake(&mut ws, acc.primary_doc_id).await;
     send_msgpack(
         &mut ws,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: acc.primary_doc_id,
-            ops: vec![fake_push(1)],
+            updates: vec![fake_push(1)],
         },
     )
     .await;
@@ -1422,21 +1426,24 @@ async fn open_doc_for_seeded_membership_succeeds_and_seqs_stay_per_doc() {
     assert_eq!(epoch, 0);
     send_msgpack(
         &mut ws,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: second,
-            ops: vec![fake_push(2)],
+            updates: vec![fake_push(2)],
         },
     )
     .await;
     match recv_msgpack::<ServerFrame>(&mut ws).await {
-        ServerFrame::OpsAck { doc_id, .. } => assert_eq!(doc_id, second),
-        other => panic!("expected OpsAck, got {other:?}"),
+        ServerFrame::UpdatesAck { doc_id, .. } => assert_eq!(doc_id, second),
+        other => panic!("expected UpdatesAck, got {other:?}"),
     }
-    let batch = queries::fetch_ops_batch(&acc.server.state.db, second, 0)
+    let batch = queries::fetch_updates_batch(&acc.server.state.db, second, 0)
         .await
         .unwrap();
-    assert_eq!(batch.ops.len(), 1);
-    assert_eq!(batch.ops[0].seq, 1, "second doc has its own seq counter");
+    assert_eq!(batch.updates.len(), 1);
+    assert_eq!(
+        batch.updates[0].seq, 1,
+        "second doc has its own seq counter"
+    );
 
     // The horizon for the seeded doc is pinned by this account's device
     // via its membership, not via primary-doc ownership.
@@ -1462,42 +1469,42 @@ async fn two_docs_open_on_one_connection_interleave_with_independent_seqs() {
     for (doc, seed, expected_seq) in [(doc_a, 1u8, 1u64), (doc_b, 2, 1), (doc_a, 3, 2)] {
         send_msgpack(
             &mut ws,
-            &ClientFrame::PushOps {
+            &ClientFrame::PushUpdates {
                 doc_id: doc,
-                ops: vec![fake_push(seed)],
+                updates: vec![fake_push(seed)],
             },
         )
         .await;
         match recv_msgpack::<ServerFrame>(&mut ws).await {
-            ServerFrame::OpsAck { doc_id, acks } => {
+            ServerFrame::UpdatesAck { doc_id, acks } => {
                 assert_eq!(doc_id, doc);
                 assert_eq!(acks.len(), 1);
                 assert_eq!(acks[0].seq, expected_seq, "doc {doc}");
             }
-            other => panic!("expected OpsAck, got {other:?}"),
+            other => panic!("expected UpdatesAck, got {other:?}"),
         }
     }
 
     // Pull on the second-opened doc is served on the same connection.
     send_msgpack(
         &mut ws,
-        &ClientFrame::PullOps {
+        &ClientFrame::PullUpdates {
             doc_id: doc_b,
             since_seq: 0,
         },
     )
     .await;
     match recv_msgpack::<ServerFrame>(&mut ws).await {
-        ServerFrame::OpsBatch {
+        ServerFrame::UpdatesBatch {
             doc_id,
-            ops,
+            updates,
             complete,
         } => {
             assert_eq!(doc_id, doc_b);
-            assert_eq!(ops.iter().map(|o| o.seq).collect::<Vec<_>>(), vec![1]);
+            assert_eq!(updates.iter().map(|o| o.seq).collect::<Vec<_>>(), vec![1]);
             assert!(complete);
         }
-        other => panic!("expected OpsBatch, got {other:?}"),
+        other => panic!("expected UpdatesBatch, got {other:?}"),
     }
 
     // Acks are per (device, doc).
@@ -1565,37 +1572,37 @@ async fn broadcasts_route_per_doc_on_a_multiplexed_connection() {
 
     send_msgpack(
         &mut ws2,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: doc_a,
-            ops: vec![fake_push(0xA1)],
+            updates: vec![fake_push(0xA1)],
         },
     )
     .await;
     assert_eq!(ack_seqs(recv_msgpack(&mut ws2).await), vec![1]);
     match recv_msgpack::<ServerFrame>(&mut ws1).await {
-        ServerFrame::OpsBroadcast { doc_id, ops } => {
+        ServerFrame::UpdatesBroadcast { doc_id, updates } => {
             assert_eq!(doc_id, doc_a);
-            assert_eq!(ops[0].blob, fake_blob(0xA1));
+            assert_eq!(updates[0].blob, fake_blob(0xA1));
         }
-        other => panic!("expected OpsBroadcast on doc_a, got {other:?}"),
+        other => panic!("expected UpdatesBroadcast on doc_a, got {other:?}"),
     }
     assert_no_frame(&mut ws3, std::time::Duration::from_millis(200)).await;
 
     send_msgpack(
         &mut ws3,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: doc_b,
-            ops: vec![fake_push(0xB1)],
+            updates: vec![fake_push(0xB1)],
         },
     )
     .await;
     assert_eq!(ack_seqs(recv_msgpack(&mut ws3).await), vec![1]);
     match recv_msgpack::<ServerFrame>(&mut ws1).await {
-        ServerFrame::OpsBroadcast { doc_id, ops } => {
+        ServerFrame::UpdatesBroadcast { doc_id, updates } => {
             assert_eq!(doc_id, doc_b);
-            assert_eq!(ops[0].blob, fake_blob(0xB1));
+            assert_eq!(updates[0].blob, fake_blob(0xB1));
         }
-        other => panic!("expected OpsBroadcast on doc_b, got {other:?}"),
+        other => panic!("expected UpdatesBroadcast on doc_b, got {other:?}"),
     }
     assert_no_frame(&mut ws2, std::time::Duration::from_millis(200)).await;
 
@@ -1603,19 +1610,19 @@ async fn broadcasts_route_per_doc_on_a_multiplexed_connection() {
     // itself and reaches only the B subscriber.
     send_msgpack(
         &mut ws1,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: doc_b,
-            ops: vec![fake_push(0xB2)],
+            updates: vec![fake_push(0xB2)],
         },
     )
     .await;
     assert_eq!(ack_seqs(recv_msgpack(&mut ws1).await), vec![2]);
     match recv_msgpack::<ServerFrame>(&mut ws3).await {
-        ServerFrame::OpsBroadcast { doc_id, ops } => {
+        ServerFrame::UpdatesBroadcast { doc_id, updates } => {
             assert_eq!(doc_id, doc_b);
-            assert_eq!(ops[0].seq, 2);
+            assert_eq!(updates[0].seq, 2);
         }
-        other => panic!("expected OpsBroadcast on doc_b, got {other:?}"),
+        other => panic!("expected UpdatesBroadcast on doc_b, got {other:?}"),
     }
     assert_no_frame(&mut ws2, std::time::Duration::from_millis(200)).await;
     assert_no_frame(&mut ws1, std::time::Duration::from_millis(200)).await;
@@ -1638,9 +1645,9 @@ async fn snapshot_lease_on_any_open_doc_is_released_when_the_connection_drops() 
     open_doc(&mut ws1, doc_b).await;
     send_msgpack(
         &mut ws1,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: doc_b,
-            ops: fake_pushes(0..5),
+            updates: fake_pushes(0..5),
         },
     )
     .await;
@@ -1711,18 +1718,18 @@ async fn payload_frame_before_open_doc_closes_session() {
     // Right doc, but never opened on this connection.
     send_msgpack(
         &mut ws,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: acc.primary_doc_id,
-            ops: vec![fake_push(1)],
+            updates: vec![fake_push(1)],
         },
     )
     .await;
     expect_closed(&mut ws).await;
-    let batch = queries::fetch_ops_batch(&acc.server.state.db, acc.primary_doc_id, 0)
+    let batch = queries::fetch_updates_batch(&acc.server.state.db, acc.primary_doc_id, 0)
         .await
         .unwrap();
     assert!(
-        batch.ops.is_empty(),
+        batch.updates.is_empty(),
         "nothing may be inserted before OpenDoc"
     );
 }
@@ -1736,7 +1743,7 @@ async fn payload_frame_for_another_doc_closes_session() {
 
     send_msgpack(
         &mut ws,
-        &ClientFrame::PullOps {
+        &ClientFrame::PullUpdates {
             doc_id: Uuid::now_v7(),
             since_seq: 0,
         },
@@ -1783,9 +1790,9 @@ async fn horizon_spans_device_doc_frontiers_and_drops_revoked_devices() {
     handshake(&mut ws_a, doc).await;
     send_msgpack(
         &mut ws_a,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: doc,
-            ops: fake_pushes(1..4),
+            updates: fake_pushes(1..4),
         },
     )
     .await;
@@ -1962,9 +1969,9 @@ async fn removing_a_member_closes_the_doc_on_its_live_connection() {
     // The owner's push is acked and reaches nobody else.
     send_msgpack(
         &mut ws_owner,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: shared,
-            ops: vec![fake_push(1)],
+            updates: vec![fake_push(1)],
         },
     )
     .await;
@@ -1977,9 +1984,9 @@ async fn removing_a_member_closes_the_doc_on_its_live_connection() {
     // The member's other doc still syncs on the same connection.
     send_msgpack(
         &mut ws_member,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: member_home,
-            ops: vec![fake_push(2)],
+            updates: vec![fake_push(2)],
         },
     )
     .await;
@@ -1992,7 +1999,7 @@ async fn removing_a_member_closes_the_doc_on_its_live_connection() {
     // the connection never opened.
     send_msgpack(
         &mut ws_member,
-        &ClientFrame::PullOps {
+        &ClientFrame::PullUpdates {
             doc_id: shared,
             since_seq: 0,
         },
@@ -2068,9 +2075,9 @@ async fn deleting_a_doc_closes_it_on_other_members_live_connections() {
     // The member's Home still syncs on the same connection.
     send_msgpack(
         &mut ws_member,
-        &ClientFrame::PushOps {
+        &ClientFrame::PushUpdates {
             doc_id: member_home,
-            ops: vec![fake_push(2)],
+            updates: vec![fake_push(2)],
         },
     )
     .await;

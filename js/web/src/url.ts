@@ -1,7 +1,7 @@
 // Fragment URLs for items, lists and the built-in views (`spec/urls.md`).
 //
 // The whole address lives in the hash so the server never sees an item
-// or list id (ids only ever exist inside encrypted op blobs) and no
+// or list id (ids only ever exist inside encrypted update blobs) and no
 // server route is needed. The grammar is a single self-describing
 // token, safe to paste into a shell or a chat:
 //

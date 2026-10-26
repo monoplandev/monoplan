@@ -3965,7 +3965,7 @@ impl Doc {
         ids.into_iter().filter_map(move |id| self.get_item(&id))
     }
 
-    // ---------- op stream ----------
+    // ---------- update stream ----------
 
     /// Encrypted full-state snapshot at the doc's current frontier.
     /// Used by the sync engine to satisfy a server `SnapshotRequest`.
@@ -4034,7 +4034,7 @@ impl Doc {
     /// excluding everything past it. Backs server-snapshot production:
     /// the producer must snapshot exactly the server-known frontier
     /// (`server_known_vv`), never its own unsent local operations, or a
-    /// bootstrapping device would receive ops the server op stream
+    /// bootstrapping device would receive ops the server update stream
     /// doesn't contain. Implemented as a `fork_at` of the frontiers
     /// corresponding to `vv`.
     pub fn snapshot_blob_at(
@@ -4176,7 +4176,7 @@ impl Doc {
         self.last_persisted_vv.merge(&vv);
     }
 
-    /// Decrypt and apply a peer op blob. Returns the blob's *declared*
+    /// Decrypt and apply a peer update blob. Returns the blob's *declared*
     /// operation range (its decoded `partial_end_vv`) — the proof of
     /// which Loro ops the blob carries, independent of whether the
     /// import was a no-op duplicate. The engine merges this into its

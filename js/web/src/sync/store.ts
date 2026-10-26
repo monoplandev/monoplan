@@ -401,7 +401,7 @@ export interface DocApp extends ItemActions {
    *  again after a `null` (resync) notification to reload. Local edits go
    *  through `applyNotesDelta`, which commits immediately (excluded from
    *  workspace undo) but defers the durable capture + push to a short
-   *  idle timer so a typing burst is one op blob; `flushNotes` runs that
+   *  idle timer so a typing burst is one update blob; `flushNotes` runs that
    *  capture now (blur, close, page hide). */
   subscribeNotes(id: string): string;
   unsubscribeNotes(id: string): void;

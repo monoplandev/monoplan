@@ -10,11 +10,11 @@
 //   - a captured local commit lands as a WAL row, and the push is
 //     derived from `serverKnownVv` (a durable in-flight record with a
 //     pushId, persisted before the send);
-//   - an `OpsAck` naming that pushId clears the record and persists
+//   - an `UpdatesAck` naming that pushId clears the record and persists
 //     the merged `serverKnownVv`;
 //   - snapshot folding prunes the WAL prefix regardless of sync state
-//     — unsent ops survive inside the full-history snapshot;
-//   - remote ops applied from the wire are mirrored via
+//     — unsent updates survive inside the full-history snapshot;
+//   - remote updates applied from the wire are mirrored via
 //     `appendRemoteWal` together with the advanced `serverKnownVv`.
 
 import { describe, expect, test } from "bun:test";
@@ -33,42 +33,42 @@ function docOpenedBytes(): Uint8Array {
   return encode({ type: "DocOpened", doc_id: DOC_ID_BYTES, epoch: 0 });
 }
 function emptyBatchCompleteBytes(): Uint8Array {
-  return encode({ type: "OpsBatch", doc_id: DOC_ID_BYTES, ops: [], complete: true });
+  return encode({ type: "UpdatesBatch", doc_id: DOC_ID_BYTES, updates: [], complete: true });
 }
 function broadcastBytes(seq: number, blob: EncryptedBlob): Uint8Array {
   return encode({
-    type: "OpsBroadcast",
+    type: "UpdatesBroadcast",
     doc_id: DOC_ID_BYTES,
-    ops: [{ seq, blob: { nonce: blob.nonce, ciphertext: blob.ciphertext } }],
+    updates: [{ seq, blob: { nonce: blob.nonce, ciphertext: blob.ciphertext } }],
   });
 }
-/** Build the OpsAck for a decoded PushOps frame at `seq`. */
+/** Build the UpdatesAck for a decoded PushUpdates frame at `seq`. */
 function ackBytesFor(pushFrame: Uint8Array, seq: number): Uint8Array {
   const decoded = decode(pushFrame) as {
     type: string;
-    ops: { push_id: Uint8Array; blob: unknown }[];
+    updates: { push_id: Uint8Array; blob: unknown }[];
   };
-  if (decoded.type !== "PushOps") throw new Error(`expected PushOps, got ${decoded.type}`);
-  if (decoded.ops.length !== 1) throw new Error("engine ships one blob per push");
+  if (decoded.type !== "PushUpdates") throw new Error(`expected PushUpdates, got ${decoded.type}`);
+  if (decoded.updates.length !== 1) throw new Error("engine ships one blob per push");
   return encode({
-    type: "OpsAck",
+    type: "UpdatesAck",
     doc_id: DOC_ID_BYTES,
-    acks: [{ push_id: decoded.ops[0]!.push_id, seq }],
+    acks: [{ push_id: decoded.updates[0]!.push_id, seq }],
   });
 }
 
-/** OpenDoc → DocOpened → PullOps → empty OpsBatch → Idle. (The
+/** OpenDoc → DocOpened → PullUpdates → empty UpdatesBatch → Idle. (The
  *  `Hello` handshake is the host's, per socket — not the engine's.) */
 function driveToIdle(eng: SyncEngine): void {
   eng.handleConnected();
   eng.popOutbox(); // OpenDoc
   eng.handleServerBytes(docOpenedBytes());
-  eng.popOutbox(); // PullOps
+  eng.popOutbox(); // PullUpdates
   eng.handleServerBytes(emptyBatchCompleteBytes());
 }
 
 describe("engine ↔ EngineStorage (VV-derived web push path)", () => {
-  test("capture → durable in-flight push → OpsAck → threshold fold", () => {
+  test("capture → durable in-flight push → UpdatesAck → threshold fold", () => {
     const dek = Dek.generate();
     const storage = new MemEngineStorage();
     const doc = Doc.create();
@@ -99,16 +99,16 @@ describe("engine ↔ EngineStorage (VV-derived web push path)", () => {
     expect(frame).toBeDefined();
     const decoded = decode(frame!) as {
       type: string;
-      ops: { push_id: Uint8Array }[];
+      updates: { push_id: Uint8Array }[];
     };
-    expect(decoded.type).toBe("PushOps");
-    expect(decoded.ops.length).toBe(1);
+    expect(decoded.type).toBe("PushUpdates");
+    expect(decoded.updates.length).toBe(1);
     expect(storage.inFlight).not.toBeNull();
     expect(unhex(storage.inFlight!.pushId)).toEqual(
-      Uint8Array.from(decoded.ops[0]!.push_id),
+      Uint8Array.from(decoded.updates[0]!.push_id),
     );
 
-    // Server assigns seq=1; the OpsAck (by pushId) clears the record
+    // Server assigns seq=1; the UpdatesAck (by pushId) clears the record
     // and persists the merged serverKnownVv.
     engine.handleServerBytes(ackBytesFor(frame!, 1));
     expect(storage.inFlight).toBeNull();
@@ -155,10 +155,10 @@ describe("engine ↔ EngineStorage (VV-derived web push path)", () => {
     const frame = engine.popOutbox();
     expect(frame).toBeDefined();
     const decoded = decode(frame!) as { type: string };
-    expect(decoded.type).toBe("PushOps");
+    expect(decoded.type).toBe("PushUpdates");
   });
 
-  test("remote ops are mirrored via appendRemoteWal with the advanced VV", () => {
+  test("remote updates are mirrored via appendRemoteWal with the advanced VV", () => {
     const dek = Dek.generate();
 
     // Scratch peer doc: produce an encrypted remote blob.

@@ -64,7 +64,7 @@ Client status (2026-10-26): CLI `signup` / `recover` and the web auth dialog bot
 
 1. Client generates the new doc's DEK (32 bytes random) and wraps it under the Home DEK (fresh nonce).
 2. Client posts `/api/docs { wrapped_dek, wrapped_dek_nonce }` (device-token auth) → server mints the doc id and inserts an `owner` membership carrying the wrap; returns `{ doc_id }`.
-3. The doc's history starts with the first `PushOps` after `OpenDoc`. Nothing else is written: password change, reset and recovery never touch this row.
+3. The doc's history starts with the first `PushUpdates` after `OpenDoc`. Nothing else is written: password change, reset and recovery never touch this row.
 
 ### Recovery
 
@@ -92,7 +92,7 @@ Recorded with the 2026-10-19 decision; none of these is mitigated today.
 
 ## Op encryption
 
-Each op blob is independently encrypted with the DEK + a fresh 24-byte random nonce. Nonce stored alongside ciphertext. No additional authenticated data currently.
+Each update blob is independently encrypted with the DEK + a fresh 24-byte random nonce. Nonce stored alongside ciphertext. No additional authenticated data currently.
 
 ## Local key storage
 

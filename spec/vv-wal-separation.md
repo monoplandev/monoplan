@@ -18,7 +18,7 @@
 
   - One encrypted full-history Loro snapshot.
   - A bounded encrypted WAL containing updates applied after that snapshot.
-  - server_known_vv: the Loro operations proven to exist in the server op stream.
+  - server_known_vv: the Loro operations proven to exist in the server update stream.
   - last_acked_server_seq: the durable server-log delivery frontier.
   - At most one durable in-flight push containing:
       - push_id
@@ -108,10 +108,10 @@
 
   Required behavior:
 
-  - PushOps carries a push_id per blob.
+  - PushUpdates carries a push_id per blob.
   - Server stores the originating device and push_id.
   - Repeating the same push returns its original server seq without inserting another blob.
-  - OpsAck identifies the acknowledged push_id, not only positional rows.
+  - UpdatesAck identifies the acknowledged push_id, not only positional rows.
   - Keep deduplication records at least while the originating device frontier could still require the corresponding op.
 
   On reconnect, always pull before retrying the in-flight push. A pulled copy of the operation can also prove server possession, but durable push IDs should be the primary crash-

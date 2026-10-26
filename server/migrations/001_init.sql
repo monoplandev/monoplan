@@ -100,7 +100,7 @@ CREATE INDEX devices_token_hash_idx ON devices (auth_token_hash);
 -- device has acked on that doc. Rows appear on first `Ack`; a device
 -- with no row is at 0. The horizon for a doc is the minimum over the
 -- devices of every account with an active `doc_members` row on it,
--- which gates op-blob compaction. Revoking a device drops
+-- which gates update-blob compaction. Revoking a device drops
 -- its rows (cascade) and so drops it from the horizon.
 CREATE TABLE device_doc_frontiers (
   device_id        BLOB NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
@@ -111,7 +111,7 @@ CREATE TABLE device_doc_frontiers (
 CREATE INDEX device_doc_frontiers_doc_id_idx ON device_doc_frontiers (doc_id);
 
 -- Per-doc monotonic counter. Bumped inside the same transaction
--- that inserts ops so seqs are dense, contiguous, and gap-free for any
+-- that inserts updates so seqs are dense, contiguous, and gap-free for any
 -- single doc — clients spot real holes (replica lag, dropped frames)
 -- instead of confusing them with "another doc got that id".
 --
@@ -119,8 +119,8 @@ CREATE INDEX device_doc_frontiers_doc_id_idx ON device_doc_frontiers (doc_id);
 -- and the epoch advances only when a *trimmed* (Loro shallow) snapshot
 -- is accepted, the one lossy step in the storage story. Today every
 -- snapshot is full-history, so the value never moves; the column is
--- reserved so ops and snapshots are stamped from day one. It lives
--- here rather than on `docs` because `insert_ops` already holds this
+-- reserved so updates and snapshots are stamped from day one. It lives
+-- here rather than on `docs` because `insert_updates` already holds this
 -- row's lock and reads both values in one statement. `seq` never
 -- resets at an epoch boundary.
 CREATE TABLE doc_sequences (
@@ -129,7 +129,7 @@ CREATE TABLE doc_sequences (
   epoch        INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE ops (
+CREATE TABLE updates (
   doc_id          BLOB NOT NULL REFERENCES docs(id),
   seq             INTEGER NOT NULL,                            -- per-doc monotonic, gap-free
   epoch           INTEGER NOT NULL,                            -- doc's epoch at insert (stamped server-side; NOT the GC predicate, see storage.md §Epochs)
@@ -143,18 +143,18 @@ CREATE TABLE ops (
 -- Push idempotency: a client that crashed (or lost the ack) re-sends
 -- the same (device_id, push_id); the lookup below returns the original
 -- seq instead of inserting a duplicate row. Dedup records live on the
--- ops rows themselves, so they persist at least until compaction — and
+-- updates rows themselves, so they persist at least until compaction — and
 -- compaction only deletes rows below the horizon, i.e. rows every
 -- device (including the originator) has already acked past, at which
 -- point the originator can no longer legitimately retry that push_id.
-CREATE UNIQUE INDEX ops_device_push_idx ON ops (doc_id, device_id, push_id)
+CREATE UNIQUE INDEX updates_device_push_idx ON updates (doc_id, device_id, push_id)
   WHERE device_id IS NOT NULL AND push_id IS NOT NULL;
 
 CREATE TABLE snapshots (
   id                    INTEGER PRIMARY KEY AUTOINCREMENT,
   doc_id                BLOB NOT NULL REFERENCES docs(id),
   up_to_seq             INTEGER NOT NULL,                        -- encoded state frontier (per-doc)
-  compaction_floor_seq  INTEGER NOT NULL,                        -- seq at/below which op blobs are eligible for GC once this snapshot lands
+  compaction_floor_seq  INTEGER NOT NULL,                        -- seq at/below which update blobs are eligible for GC once this snapshot lands
   epoch                 INTEGER NOT NULL,                        -- epoch this snapshot belongs to; a trimmed snapshot is the first row of its epoch
   from_seq              INTEGER,                                 -- NULL = full snapshot; else a delta starting after the previous row's up_to_seq (chain link, must equal it)
   up_to_vv              BLOB NOT NULL,                           -- producer's Loro VV at up_to_seq, sealed under the DEK; opaque here, handed back as the next delta's base

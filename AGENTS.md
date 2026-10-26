@@ -12,9 +12,9 @@ Workflow: a reserved primary capture list ("Inbox", id `inbox`), any number of u
 - **Web** (`js/web/`, consuming `core/web/` wasm via `js/core/`) — browser client; multi-device proof spans CLI ↔ web.
 - **iOS / Android / native macOS** — future clients
 
-E2EE: password-derived KEK wraps a randomly-generated DEK. DEK encrypts every op blob. Server has no key. Recovery via a user-held recovery code (independent wrap of DEK) is implemented; server-assisted escrow (Vault-backed, opt-in) is future work.
+E2EE: password-derived KEK wraps a randomly-generated DEK. DEK encrypts every update blob. Server has no key. Recovery via a user-held recovery code (independent wrap of DEK) is implemented; server-assisted escrow (Vault-backed, opt-in) is future work.
 
-Sync: WebSocket per device. Auth on upgrade. Ops are append-only encrypted blobs with server-assigned monotonic ids. Each device tracks its `last_acked_op_id`; the minimum across active devices is the compaction horizon. Snapshots are produced by the most-acked active client on server request.
+Sync: WebSocket per device. Auth on upgrade. Updates are append-only encrypted blobs with server-assigned monotonic seqs. Each device tracks its `last_acked_seq`; the minimum across active devices is the compaction horizon. Snapshots are produced by the most-acked active client on server request.
 
 Migrations: while pre-release, keep exactly one migration file per database (`001_init.sql`) and edit it in place — never add incremental or legacy-bridge migrations.
 

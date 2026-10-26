@@ -36,9 +36,9 @@ pub struct Config {
     /// and don't care).
     #[serde(default = "default_secure_cookies")]
     pub secure_cookies: bool,
-    /// Encrypted op blobs accumulated since the last snapshot before
+    /// Encrypted update blobs accumulated since the last snapshot before
     /// the server starts asking clients to snapshot. One blob = one
-    /// `PushOps` push (see `spec/sync-protocol.md` §"Terminology"), so
+    /// `PushUpdates` push (see `spec/sync-protocol.md` §"Terminology"), so
     /// this counts pushes, not user actions. Lower in tests to exercise
     /// the path without churning out hundreds of pushes.
     #[serde(default = "default_snapshot_threshold_blobs")]
