@@ -22,6 +22,10 @@ final class DaemonClientTests: XCTestCase {
     func testRequestShapes() {
         XCTAssertEqual(Request.watch.value, .string("Watch"))
         XCTAssertEqual(
+            Request.focus.value,
+            .map(["Doc": .map(["Focus": .map(["cmd": .nil, "json": .bool(true)])])])
+        )
+        XCTAssertEqual(
             Request.agenda(days: 0).value,
             .map(["Doc": .map(["Agenda": .map(["days": .int(0), "today": .nil, "json": .bool(true)])])])
         )

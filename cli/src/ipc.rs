@@ -279,6 +279,13 @@ mod tests {
             }))),
             serde_json::json!({"Doc": {"Agenda": {"days": 0, "today": null, "json": true}}})
         );
+        assert_eq!(
+            shape(&Request::Doc(DocCmd::Focus(crate::commands::focus::FocusArgs {
+                cmd: None,
+                json: true,
+            }))),
+            serde_json::json!({"Doc": {"Focus": {"cmd": null, "json": true}}})
+        );
         let sync = SyncStatus {
             online: false,
             last_synced_at: Some(7),

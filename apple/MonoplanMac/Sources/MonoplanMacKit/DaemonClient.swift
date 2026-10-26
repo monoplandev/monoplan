@@ -45,6 +45,8 @@ public enum Request {
     case hello(buildId: String)
     case watch
     case agenda(days: Int)
+    /// `monoplan focus --json`: the Starred lens (spec/focus.md).
+    case focus
 
     var value: MPValue {
         switch self {
@@ -56,6 +58,8 @@ public enum Request {
             return .map(["Doc": .map(["Agenda": .map([
                 "days": .int(Int64(days)), "today": .nil, "json": .bool(true),
             ])])])
+        case .focus:
+            return .map(["Doc": .map(["Focus": .map(["cmd": .nil, "json": .bool(true)])])])
         }
     }
 }

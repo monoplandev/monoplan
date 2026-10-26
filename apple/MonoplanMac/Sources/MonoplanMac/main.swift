@@ -32,6 +32,7 @@ final class TrayController: NSObject, NSMenuDelegate {
     private let menu = NSMenu()
     private let client: DaemonClient
     private var lines: [MenuLine] = []
+    private var starred: [MenuLine] = []
     private var fetchError: String?
     private var refreshQueued = false
     private var minuteTimer: Timer?
@@ -100,6 +101,18 @@ final class TrayController: NSObject, NSMenuDelegate {
             }
             self.rebuildMenu()
         }
+        client.send(.focus) { [weak self] result in
+            guard let self else { return }
+            if case .success(.output(let stdout, _)) = result,
+               let rows = try? Focus.parse(stdout) {
+                self.starred = StarredMenu.lines(from: rows)
+            } else {
+                // Today is the headline; a failed Starred fetch just
+                // leaves the section empty rather than replacing it.
+                self.starred = []
+            }
+            self.rebuildMenu()
+        }
     }
 
     // MARK: Menu
@@ -111,9 +124,10 @@ final class TrayController: NSObject, NSMenuDelegate {
 
     private func rebuildMenu() {
         if debug {
-            NSLog("MonoplanMac: state=%@ lines=%@ error=%@",
+            NSLog("MonoplanMac: state=%@ lines=%@ starred=%@ error=%@",
                   String(describing: client.state),
                   lines.map { "\($0.title)\($0.note.map { " [\($0)]" } ?? "")" }.joined(separator: " | "),
+                  starred.map(\.title).joined(separator: " | "),
                   fetchError ?? "-")
         }
         menu.removeAllItems()
@@ -132,6 +146,13 @@ final class TrayController: NSObject, NSMenuDelegate {
                 addDisabled("Nothing today")
             } else {
                 for line in lines { menu.addItem(rowItem(line)) }
+            }
+            menu.addItem(.separator())
+            addDisabled("Starred")
+            if starred.isEmpty {
+                addDisabled("Nothing starred")
+            } else {
+                for line in starred { menu.addItem(rowItem(line)) }
             }
         }
 
