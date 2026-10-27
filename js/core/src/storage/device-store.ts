@@ -31,6 +31,18 @@ export async function getDevice(
   });
 }
 
+/** Drop the per-account device row (no-op when absent). */
+export async function deleteDevice(accountId: string): Promise<void> {
+  const db = await openMonoplanDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_DEVICE, "readwrite");
+    tx.objectStore(STORE_DEVICE).delete(accountId);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error("device delete aborted"));
+  });
+}
+
 export async function putDevice(
   accountId: string,
   device: DeviceConfig,

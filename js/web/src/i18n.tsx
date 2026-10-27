@@ -143,6 +143,9 @@ export type Messages = {
     settings: string;
     website: string;
     logOut: string;
+    /** Sign-out confirmation (title + body); mirrors the macOS app's alert. */
+    logOutTitle: string;
+    logOutConfirm: string;
     exportJson: string;
     exportFailed: string;
     importJson: string;
@@ -598,6 +601,9 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       settings: "Ajustes",
       website: "Sitio web de Monoplan",
       logOut: "Cerrar sesión",
+      logOutTitle: "¿Cerrar sesión en Monoplan?",
+      logOutConfirm:
+        "Esto elimina la copia local de tus datos de este navegador, incluidos los cambios que aún no se han sincronizado. Lo que ya está sincronizado permanece en el servidor y vuelve cuando inicias sesión de nuevo.",
       exportJson: "Exportar JSON",
       exportFailed: "No se pudo exportar",
       importJson: "Importar JSON",
@@ -943,6 +949,9 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       settings: "Settings",
       website: "Monoplan website",
       logOut: "Log out",
+      logOutTitle: "Sign out of Monoplan?",
+      logOutConfirm:
+        "This removes the local copy of your data from this browser, including any changes that haven't synced yet. Everything already synced stays on the server and comes back when you sign in again.",
       exportJson: "Export JSON",
       exportFailed: "Could not export",
       importJson: "Import JSON",

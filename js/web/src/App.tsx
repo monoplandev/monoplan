@@ -12,7 +12,7 @@
 
 import { createEffect, createSignal, onMount, Show } from "solid-js";
 import { Dek, Doc, EncryptedBlob } from "@monoplan/core/wasm";
-import { IdbStorage, readOrMintPeerSlot } from "@monoplan/core";
+import { IdbStorage, deleteDevice, readOrMintPeerSlot } from "@monoplan/core";
 import { deletePrefs, loadPrefs, savePrefs } from "./prefs.ts";
 import { api } from "./api.ts";
 import { dekVault } from "./sync/dekVault.ts";
@@ -78,8 +78,18 @@ export function App(props: {
   // a fresh anonymous one. Anonymous sessions also flow through here
   // (e.g. "discard local data") — `api.logout` no-ops cleanly when
   // there's no device cookie.
-  const logout = async () => {
+  //
+  // Two callers, two strengths. The user's sign-out (Settings / nav
+  // menu, behind a confirmation that says so) passes `wipeLocal` and
+  // deletes the local copy of every doc: a signed-out browser must not
+  // keep readable account data, and the rows would otherwise make the
+  // next login of the same account resume as a long-offline device.
+  // The sync runtime's `onAuthFailed` (expired or revoked cookie) calls
+  // this bare, so it only forgets keys and never destroys unsynced work
+  // (see spec/pwa-plan.md "Non-destructive auth failure").
+  const logout = async (opts?: { wipeLocal?: boolean }) => {
     const current = session();
+    const storages = (boot()?.docs ?? []).map((d) => d.storage);
     if (current && !current.anonymous) {
       try {
         await api.logout();
@@ -97,7 +107,28 @@ export function App(props: {
     setBootError(null);
     setOnline(false);
     setLastSyncAt(null);
+    // Swap first so the old runtime is disposed (keyed <Show>) before
+    // its rows go; the fresh anonymous doc has its own id, so the wipe
+    // below cannot touch it.
     setSession(await createAnonymousSession());
+    if (opts?.wipeLocal && current) {
+      // Let the disposed engines' queued IDB writes settle so a late
+      // append cannot resurrect a doc row after its wipe.
+      await Promise.allSettled(storages.map((s) => s.whenFlushed()));
+      for (const docId of current.docKeys.keys()) {
+        try {
+          await IdbStorage.wipe(docId);
+        } catch (e) {
+          console.warn("logout: wiping local doc failed:", docId, e);
+        }
+      }
+      try {
+        await deleteDevice(current.accountId);
+        await deletePrefs(current.accountId);
+      } catch (e) {
+        console.warn("logout: dropping account rows failed:", e);
+      }
+    }
   };
 
   // Signup adopts the anonymous doc (same doc id, so the op log,

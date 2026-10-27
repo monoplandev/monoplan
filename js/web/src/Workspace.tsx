@@ -285,6 +285,7 @@ export function Workspace(props: {
   const [dndItems, setDndItems] = createSignal<ItemView[]>([]);
   const [themePref, setThemePref] = createSignal<ThemePreference>(theme.get());
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = createSignal(false);
   // The "New workspace" dialog; opened from the nav footer's app menu.
   const [newDocOpen, setNewDocOpen] = createSignal(false);
   const [emptyBinConfirmOpen, setEmptyBinConfirmOpen] = createSignal(false);
@@ -2596,7 +2597,7 @@ export function Workspace(props: {
             <NavMenu
               docs={docs}
               session={session.session()}
-              logout={session.logout}
+              logout={() => setLogoutConfirmOpen(true)}
               onOpenSettings={() => setSettingsOpen(true)}
               onOpenShortcuts={() => setShortcutsOpen(true)}
               onSession={session.swapSession}
@@ -2683,9 +2684,20 @@ export function Workspace(props: {
         showListCounts={home.state.settings.showListCounts}
         onShowListCountsChange={(show) => home.setShowListCounts(show)}
         session={session.session()}
-        logout={session.logout}
+        logout={() => setLogoutConfirmOpen(true)}
         docs={docs}
         online={session.online()}
+      />
+      {/* Sign-out confirmation, same wording as the macOS app's alert:
+          the local copy goes, unsynced changes with it, synced data
+          comes back on the next sign-in. Confirming is what wipes. */}
+      <ConfirmDialog
+        open={logoutConfirmOpen()}
+        onOpenChange={setLogoutConfirmOpen}
+        title={m().nav.logOutTitle}
+        message={m().nav.logOutConfirm}
+        confirmLabel={m().nav.logOut}
+        onConfirm={() => void session.logout({ wipeLocal: true })}
       />
       <NewDocDialog
         open={newDocOpen()}

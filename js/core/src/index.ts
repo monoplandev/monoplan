@@ -12,7 +12,7 @@ export {
 } from "./storage/idb-storage.ts";
 export { openMonoplanDb, _resetMonoplanDbForTests } from "./storage/web-db.ts";
 export { readOrMintPeerSlot } from "./storage/peer-slots.ts";
-export { getDevice, putDevice } from "./storage/device-store.ts";
+export { deleteDevice, getDevice, putDevice } from "./storage/device-store.ts";
 export {
   DekVault,
   type DekFromHex,

@@ -25,8 +25,13 @@ export interface SessionContextValue {
   /** Wall-clock ms of the last successful server frame, or null. */
   lastSyncAt: Accessor<number | null>;
   setLastSyncAt: Setter<number | null>;
-  /** Tear down server state and drop to a fresh anonymous session. */
-  logout: () => void;
+  /** Tear down server state and drop to a fresh anonymous session.
+   *  `wipeLocal` also deletes the local copy of every doc (op log,
+   *  snapshot, device row, prefs): the user-initiated sign-out, taken
+   *  after a confirmation that names unsynced changes. The sync
+   *  runtime's auth-failure path calls this without it, so an expired
+   *  cookie never destroys data. */
+  logout: (opts?: { wipeLocal?: boolean }) => void;
   /** Replace the current session (e.g. anonymous → authenticated). */
   swapSession: (s: Session) => void;
 }
