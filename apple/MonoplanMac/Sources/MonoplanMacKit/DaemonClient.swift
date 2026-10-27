@@ -34,13 +34,13 @@ public struct SyncStatus: Equatable {
         if let at = lastSyncedAt {
             let secs = max(0, Int(now.timeIntervalSince1970) - Int(at / 1000))
             let ago: String
-            if secs < 60 { ago = "\(secs)s" }
-            else if secs < 3600 { ago = "\(secs / 60)m" }
-            else if secs < 86_400 { ago = "\(secs / 3600)h" }
-            else { ago = "\(secs / 86_400)d" }
-            line = "Offline · last synced \(ago) ago"
+            if secs < 60 { ago = String(localized: "\(secs)s") }
+            else if secs < 3600 { ago = String(localized: "\(secs / 60)m") }
+            else if secs < 86_400 { ago = String(localized: "\(secs / 3600)h") }
+            else { ago = String(localized: "\(secs / 86_400)d") }
+            line = String(localized: "Offline · last synced \(ago) ago")
         } else {
-            line = "Offline · never synced"
+            line = String(localized: "Offline · never synced")
         }
         if let offlineReason { line += " · \(offlineReason)" }
         return line
@@ -146,8 +146,8 @@ public enum ClientError: Error, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .notConnected: return "not connected to the daemon"
-        case .closed: return "the daemon closed the connection"
+        case .notConnected: return String(localized: "not connected to the daemon")
+        case .closed: return String(localized: "the daemon closed the connection")
         case .daemon(let m): return m
         case .protocolError(let m): return "protocol: \(m)"
         }
@@ -239,7 +239,7 @@ public final class DaemonClient {
     public var onState: ((State) -> Void)?
     /// Set on a successful handshake, cleared when the connection drops.
     public private(set) var daemon: DaemonInfo?
-    public private(set) var state: State = .connecting("starting") {
+    public private(set) var state: State = .connecting(String(localized: "starting")) {
         didSet { if state != oldValue { onState?(state) } }
     }
 
@@ -308,7 +308,7 @@ public final class DaemonClient {
             case .failed(let e):
                 self.dropConnection(reason: Self.describe(e, socket: path))
             case .cancelled:
-                self.dropConnection(reason: "closed")
+                self.dropConnection(reason: String(localized: "closed"))
             case .waiting(let e):
                 // No listener: a daemon may need starting.
                 self.dropConnection(reason: e.localizedDescription)
@@ -348,7 +348,7 @@ public final class DaemonClient {
     /// No socket to connect to means nothing is hosting; say that
     /// rather than quoting the ENOENT the framework wraps it in.
     private static func describe(_ error: NWError, socket: String) -> String {
-        if case .posix(.ENOENT) = error { return "nothing hosting the profile" }
+        if case .posix(.ENOENT) = error { return String(localized: "nothing hosting the profile") }
         return error.localizedDescription
     }
 
@@ -393,7 +393,7 @@ public final class DaemonClient {
             guard let self, self.connection === conn else { return }
             if let error { return self.dropConnection(reason: error.localizedDescription) }
             guard let data, data.count == 4 else {
-                return self.dropConnection(reason: complete ? "closed" : "short length prefix")
+                return self.dropConnection(reason: complete ? String(localized: "closed") : "short length prefix")
             }
             let len = Int(data.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }.bigEndian)
             guard len > 0, len <= 64 * 1024 * 1024 else {
@@ -426,7 +426,7 @@ public final class DaemonClient {
             }
             onEvent?(ev)
         case .shuttingDown:
-            dropConnection(reason: "daemon shutting down")
+            dropConnection(reason: String(localized: "daemon shutting down"))
         default:
             guard !pending.isEmpty else {
                 dropConnection(reason: "unsolicited reply")

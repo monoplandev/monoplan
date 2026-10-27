@@ -42,11 +42,11 @@ final class SettingsWindowController: NSWindowController {
             item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
             return item
         }
-        tabs.addTabViewItem(pane("Account", symbol: "person.crop.circle", AccountPane(model: model)))
-        tabs.addTabViewItem(pane("Advanced", symbol: "gearshape.2", AdvancedPane(model: model)))
+        tabs.addTabViewItem(pane(String(localized: "Account"), symbol: "person.crop.circle", AccountPane(model: model)))
+        tabs.addTabViewItem(pane(String(localized: "Advanced"), symbol: "gearshape.2", AdvancedPane(model: model)))
 
         let window = NSWindow(contentViewController: tabs)
-        window.title = "Account"
+        window.title = String(localized: "Account")
         window.styleMask = [.titled, .closable]
         window.toolbarStyle = .preference
         window.isReleasedWhenClosed = false
@@ -90,7 +90,7 @@ final class SettingsModel: ObservableObject {
     /// From the host's account row; nil until it answers.
     @Published var email: String?
     @Published var profilePath: String
-    @Published var hostLine: String = "Not running"
+    @Published var hostLine: String = String(localized: "Not running")
     /// The package version. From the host's hello once it answers
     /// (`version:mtime`, the mtime being the CLI's staleness check,
     /// not something to show); the bundle's own version until then.
@@ -145,11 +145,11 @@ final class SettingsModel: ObservableObject {
     /// it back.
     func signOut() {
         let alert = NSAlert()
-        alert.messageText = "Sign out of Monoplan?"
-        alert.informativeText = "This removes the local copy of your data from this Mac. Your data stays on the server and comes back when you sign in again."
+        alert.messageText = String(localized: "Sign out of Monoplan?")
+        alert.informativeText = String(localized: "This removes the local copy of your data from this Mac. Your data stays on the server and comes back when you sign in again.")
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Sign Out")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: String(localized: "Sign Out"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         signingOut = true
         signOutError = nil
@@ -168,24 +168,24 @@ final class SettingsModel: ObservableObject {
         openAtLogin = SMAppService.mainApp.status == .enabled
         if let cli {
             switch cli.state {
-            case .installed: cliLine = "Installed · \(cli.link)"
+            case .installed: cliLine = String(localized: "Installed · \(cli.link)")
             case .other(let what): cliLine = "\(cli.link) → \(what)"
-            case .missing: cliLine = "Not installed"
+            case .missing: cliLine = String(localized: "Not installed")
             }
         } else {
-            cliLine = "No bundled binary (run the built app)"
+            cliLine = String(localized: "No bundled binary (run the built app)")
         }
         switch client.state {
         case .connecting(let reason):
-            hostLine = "Not running · \(reason)"
+            hostLine = String(localized: "Not running · \(reason)")
             syncLine = "—"
             buildLine = Self.bundleVersion
         case .connected(let sync):
-            hostLine = "Running"
+            hostLine = String(localized: "Running")
             if let d = client.daemon {
                 buildLine = String(d.buildId.split(separator: ":", maxSplits: 1).first ?? "")
             }
-            syncLine = sync.online ? "Online" : (sync.offlineNotice() ?? "Offline")
+            syncLine = sync.online ? String(localized: "Online") : (sync.offlineNotice() ?? String(localized: "Offline"))
             client.send(.account) { [weak self] result in
                 if case .success(.account(_, let email, _)) = result {
                     self?.email = email
@@ -201,9 +201,9 @@ final class SettingsModel: ObservableObject {
     /// "Signed in (you@example.com)", or just the state while the
     /// host has not answered or there is no profile.
     var statusLine: String {
-        guard signedIn else { return "Not signed in" }
-        if let email { return "Signed in (\(email))" }
-        return "Signed in"
+        guard signedIn else { return String(localized: "Not signed in") }
+        if let email { return String(localized: "Signed in (\(email))") }
+        return String(localized: "Signed in")
     }
 
     func revealProfile() {
@@ -253,8 +253,10 @@ struct AccountPane: View {
             }
             LabeledContent("") {
                 if model.signedIn {
-                    Button(model.signingOut ? "Signing out…" : "Sign Out…") { model.signOut() }
-                        .disabled(model.signingOut)
+                    Button { model.signOut() } label: {
+                        if model.signingOut { Text("Signing out…") } else { Text("Sign Out…") }
+                    }
+                    .disabled(model.signingOut)
                 } else {
                     Button("Sign In…") { model.showSignIn = true }
                 }

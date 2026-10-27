@@ -97,10 +97,10 @@ final class TrayController: NSObject, NSMenuDelegate {
                     self.lines = TodayMenu.lines(from: try Agenda.parse(stdout), now: Date())
                     self.fetchError = nil
                 } catch {
-                    self.fetchError = "could not read agenda: \(error.localizedDescription)"
+                    self.fetchError = String(localized: "could not read agenda: \(error.localizedDescription)")
                 }
             case .success(let other):
-                self.fetchError = "unexpected reply: \(other)"
+                self.fetchError = String(localized: "unexpected reply: \(String(describing: other))")
             case .failure(let error):
                 if case ClientError.notConnected = error { break }
                 self.fetchError = error.localizedDescription
@@ -148,26 +148,26 @@ final class TrayController: NSObject, NSMenuDelegate {
         }
         menu.removeAllItems()
 
-        let header = NSMenuItem(title: "Today · \(Self.headerFormatter.string(from: Date()))", action: nil, keyEquivalent: "")
+        let header = NSMenuItem(title: String(localized: "Today · \(Self.headerFormatter.string(from: Date()))"), action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
 
         switch client.state {
         case .connecting(let reason):
-            addDisabled("Not running · \(reason)")
+            addDisabled(String(localized: "Not running · \(reason)"))
         case .connected:
             let noteTab = Self.noteTabLocation(for: lines + starred)
             if let fetchError {
                 addDisabled(fetchError)
             } else if lines.isEmpty {
-                addDisabled("Nothing today")
+                addDisabled(String(localized: "Nothing today"))
             } else {
                 for line in lines { menu.addItem(rowItem(line, noteTab: noteTab)) }
             }
             menu.addItem(.separator())
-            addDisabled("Starred")
+            addDisabled(String(localized: "Starred"))
             if starred.isEmpty {
-                addDisabled("Nothing starred")
+                addDisabled(String(localized: "Nothing starred"))
             } else {
                 for line in starred { menu.addItem(rowItem(line, noteTab: noteTab)) }
             }
@@ -186,11 +186,11 @@ final class TrayController: NSObject, NSMenuDelegate {
         // right-aligned notes. An image would likewise open an icon
         // column that the other rows do not use.
         if !location.isSignedIn {
-            addAction("Sign In…", #selector(signIn))
+            addAction(String(localized: "Sign In…"), #selector(signIn))
         }
-        addAction("Settings…", #selector(openSettings))
-        addAction("Open Monoplan", #selector(openWebsite))
-        addAction("Quit Monoplan", #selector(quit))
+        addAction(String(localized: "Settings…"), #selector(openSettings))
+        addAction(String(localized: "Open Monoplan"), #selector(openWebsite))
+        addAction(String(localized: "Quit Monoplan"), #selector(quit))
     }
 
     /// A plain command row. From macOS 27 AppKit supplies its own
@@ -241,7 +241,7 @@ final class TrayController: NSObject, NSMenuDelegate {
             title.append(NSAttributedString(
                 string: "\t\(note)",
                 attributes: [
-                    .foregroundColor: note == "overdue" ? NSColor.systemRed : NSColor.secondaryLabelColor,
+                    .foregroundColor: line.overdue ? NSColor.systemRed : NSColor.secondaryLabelColor,
                     .font: Self.noteFont,
                 ]
             ))

@@ -86,9 +86,9 @@ public struct CommandLineLink {
 
         public var errorDescription: String? {
             switch self {
-            case .fileInTheWay(let p): return "\(p) exists and is not a symlink; remove it first"
-            case .admin(let e): return e.isEmpty ? "cancelled" : e
-            case .notInstalled: return "link was not created"
+            case .fileInTheWay(let p): return String(localized: "\(p) exists and is not a symlink; remove it first")
+            case .admin(let e): return e.isEmpty ? String(localized: "cancelled") : e
+            case .notInstalled: return String(localized: "link was not created")
             }
         }
     }

@@ -66,6 +66,8 @@ public struct MenuLine: Equatable {
     /// Dimmed trailing note: "in 2h 15m", "now", "due today", "overdue".
     public let note: String?
     public let done: Bool
+    /// The row is past its deadline: the note is drawn in red.
+    public let overdue: Bool
 }
 
 public enum TodayMenu {
@@ -83,15 +85,16 @@ public enum TodayMenu {
                 id: row.id,
                 title: title,
                 note: note(for: row, now: now, calendar: calendar),
-                done: row.isDone
+                done: row.isDone,
+                overdue: row.tone == "overdue"
             )
         }
     }
 
     static func note(for row: AgendaRow, now: Date, calendar: Calendar) -> String? {
         switch row.tone {
-        case "overdue": return "overdue"
-        case "warning": return "due today"
+        case "overdue": return String(localized: "overdue")
+        case "warning": return String(localized: "due today")
         default: break
         }
         guard !row.isDone, row.isTimed, let when = row.when,
@@ -99,13 +102,13 @@ public enum TodayMenu {
         else { return nil }
         let until = start.timeIntervalSince(now)
         if until > 0 {
-            return "in \(span(until))"
+            return String(localized: "in \(span(until))")
         }
         let length = TimeInterval((row.duration ?? 0) * 60)
         if length > 0, -until < length {
-            return "now"
+            return String(localized: "now")
         }
-        return "started \(span(-until)) ago"
+        return String(localized: "started \(span(-until)) ago")
     }
 
     /// Longest item text shown in the menu, ellipsis included. A menu is
@@ -117,15 +120,19 @@ public enum TodayMenu {
         return String(text.prefix(maxTitleLength - 1)) + "…"
     }
 
-    /// "3m", "2h 15m", "1d 4h": two units at most, no seconds.
+    /// "3m", "2h 15m", "1d 4h": two units at most, no seconds. Each
+    /// unit is its own catalog string so a language can respell it.
     static func span(_ seconds: TimeInterval) -> String {
         let total = Int(seconds.rounded(.down)) / 60
-        if total < 1 { return "<1m" }
+        if total < 1 { return String(localized: "<1m") }
         let days = total / 1440
         let hours = (total % 1440) / 60
         let mins = total % 60
-        if days > 0 { return hours > 0 ? "\(days)d \(hours)h" : "\(days)d" }
-        if hours > 0 { return mins > 0 ? "\(hours)h \(mins)m" : "\(hours)h" }
-        return "\(mins)m"
+        let d = String(localized: "\(days)d")
+        let h = String(localized: "\(hours)h")
+        let m = String(localized: "\(mins)m")
+        if days > 0 { return hours > 0 ? "\(d) \(h)" : d }
+        if hours > 0 { return mins > 0 ? "\(h) \(m)" : h }
+        return m
     }
 }

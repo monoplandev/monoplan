@@ -18,6 +18,7 @@
     "build:apple": "apple/build-xcframework.sh",
     "tray": "apple/MonoplanMac/build-app.sh && exec apple/MonoplanMac/.build/Monoplan.app/Contents/MacOS/MonoplanMac",
     "tray:app": "apple/MonoplanMac/build-app.sh -c release && open apple/MonoplanMac/.build/Monoplan.app",
+    "check:strings": "bun apple/MonoplanMac/check-strings.ts",
     "start": "process-compose -f local/process-compose.yaml",
     "wipe": "scripts/wipe.sh",
     "test": "cargo test",

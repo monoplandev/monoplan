@@ -24,6 +24,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PKG="$ROOT/apple/MonoplanMac"
 ICON="$ROOT/apple/icon.icon"
+STRINGS="$PKG/Localizable.xcstrings"
 
 CONFIG=debug
 while [ $# -gt 0 ]; do
@@ -33,7 +34,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# actool ships with full Xcode, not the Command Line Tools.
+# actool and xcstringstool ship with full Xcode, not the Command Line Tools.
 if ! xcrun --find actool >/dev/null 2>&1; then
   if [ -d /Applications/Xcode.app ]; then
     export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
@@ -70,6 +71,13 @@ if [ ! -d "$ROOT/apple/MonoplanCore/MonoplanCoreFFI.xcframework" ]; then
   "$ROOT/apple/build-xcframework.sh"
 fi
 
+# The String Catalog is the one source of UI text in both languages
+# (apple/README.md "Localisation"). check-strings.ts refuses a source
+# string that is missing from it or has no Spanish, before anything
+# slow runs.
+echo ">> check-strings"
+bun "$PKG/check-strings.ts"
+
 echo ">> swift build ($CONFIG)"
 swift build --package-path "$PKG" -c "$CONFIG" --product MonoplanMac
 BIN="$(swift build --package-path "$PKG" -c "$CONFIG" --show-bin-path)/MonoplanMac"
@@ -80,6 +88,15 @@ rm -rf "$APP"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 cp "$BIN" "$CONTENTS/MacOS/MonoplanMac"
 cp "$CLI" "$CONTENTS/MacOS/monoplan"
+
+# SwiftPM cannot put the catalog in Bundle.main, so compile it here:
+# xcstringstool emits one <lang>.lproj/Localizable.strings per
+# translated language. The source language gets an empty en.lproj so
+# the bundle lists two localizations, which is what makes macOS offer
+# the app in System Settings › Language & Region › Applications.
+echo ">> xcstringstool $STRINGS"
+xcrun xcstringstool compile "$STRINGS" --output-directory "$CONTENTS/Resources"
+mkdir -p "$CONTENTS/Resources/en.lproj"
 
 echo ">> actool $ICON"
 PARTIAL="$(mktemp -t monoplan-icon-plist)"

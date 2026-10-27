@@ -142,4 +142,33 @@ launchd agent from `monoplan daemon install` is the headless
 alternative for Macs without the app: the app takes its daemon over at
 launch, and `install` refuses while the app hosts.
 
+### Localisation
+
+The app follows the system language, as a Mac app should: no language
+picker. `apple/MonoplanMac/Localizable.xcstrings` is a String Catalog
+with English keys and a Spanish translation for every UI string in both
+targets, the menu's agenda notes included ("in 2h 15m", "overdue",
+"Offline · last synced 3m ago"). English is the key itself, so the
+catalog has no `en` entries. SwiftUI literals (`Text("Account")`,
+`Button("Install")`) look the catalog up by themselves; everything else
+that reaches a user (AppKit titles, model strings, error descriptions)
+goes through `String(localized:)`, with `\(…)` interpolations as `%@` /
+`%lld` in the key. A ternary of literals or a `String` variable does not
+localize, so wrap those.
+
+SwiftPM cannot put the catalog in `Bundle.main`, so `build-app.sh`
+compiles it with `xcstringstool` into `Contents/Resources/es.lproj/
+Localizable.strings` and adds an empty `en.lproj`; two localizations is
+what makes System Settings › Language & Region › Applications offer the
+app. A bare `swift run` has no catalog and shows the English keys. In
+`swift test` the lookups miss too, so the Kit tests keep asserting the
+English text.
+
+`check-strings.ts` (run by `build-app.sh` and by `bun run check:strings`)
+scans `Sources/` for the call sites above and fails when a string is
+missing from the catalog, a catalog entry is no longer used, a Spanish
+translation is missing, or its placeholders differ from the English.
+Adding a string means adding the key and its Spanish to the catalog in
+the same change; the build will not let it drift.
+
 Next: the window.

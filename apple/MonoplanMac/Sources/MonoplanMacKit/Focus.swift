@@ -35,7 +35,8 @@ public enum StarredMenu {
                 id: row.id,
                 title: TodayMenu.clipped(row.text),
                 note: listNames[row.listId].map(TodayMenu.clipped),
-                done: false
+                done: false,
+                overdue: false
             )
         }
     }

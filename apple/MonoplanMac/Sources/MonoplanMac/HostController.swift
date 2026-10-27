@@ -44,19 +44,19 @@ final class HostController {
         if let host, host.isRunning() { return nil }
         host = nil
         if let accountWork { return accountWork }
-        if starting { return "starting" }
+        if starting { return String(localized: "starting") }
         if let failure {
             self.failure = nil
             return failure
         }
-        guard location.isSignedIn else { return "not signed in" }
+        guard location.isSignedIn else { return String(localized: "not signed in") }
         starting = true
         let dir = location.dir.path
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = Result { try MonoplanCore.Host.start(profileDir: dir) }
             DispatchQueue.main.async { self?.didStart(result) }
         }
-        return "starting"
+        return String(localized: "starting")
     }
 
     private func didStart(_ result: Result<MonoplanCore.Host, Error>) {
@@ -68,9 +68,9 @@ final class HostController {
         case .failure(HostError.NotLoggedIn):
             break
         case .failure(HostError.Busy):
-            failure = "profile in use by another process"
+            failure = String(localized: "profile in use by another process")
         case .failure(let e):
-            failure = "host failed: \(e.localizedDescription)"
+            failure = String(localized: "host failed: \(e.localizedDescription)")
             NSLog("MonoplanMac: host failed: %@", e.localizedDescription)
         }
         client.poke()
@@ -88,7 +88,7 @@ final class HostController {
     /// `accountWork` keeps the socket-down path from starting a fresh
     /// host between the stop and the wipe.
     func signOut(completion: @escaping (Error?) -> Void) {
-        accountWork = "signing out"
+        accountWork = String(localized: "signing out")
         let dir = location.dir.path
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.host?.shutdown()
@@ -109,7 +109,7 @@ final class HostController {
     /// running host for another account is stopped then and not before;
     /// on return the profile is free and the client's poke hosts it.
     func signIn(_ creds: SignInCredentials, completion: @escaping (Error?) -> Void) {
-        accountWork = "signing in"
+        accountWork = String(localized: "signing in")
         let dir = location.dir.path
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = Result {
