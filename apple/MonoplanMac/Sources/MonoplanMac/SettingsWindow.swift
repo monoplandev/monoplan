@@ -18,8 +18,12 @@ import MonoplanMacKit
 final class SettingsWindowController: NSWindowController {
     private let model: SettingsModel
 
-    init(location: ProfileLocation, client: DaemonClient, signOut: @escaping (@escaping (Error?) -> Void) -> Void) {
-        model = SettingsModel(location: location, client: client, signOut: signOut)
+    init(
+        location: ProfileLocation, client: DaemonClient,
+        signIn: @escaping (SignInCredentials, @escaping (Error?) -> Void) -> Void,
+        signOut: @escaping (@escaping (Error?) -> Void) -> Void
+    ) {
+        model = SettingsModel(location: location, client: client, signIn: signIn, signOut: signOut)
         // The toolbar tab style: AppKit builds the toolbar from the tab
         // items (one icon + label each) and, with the `.preference`
         // toolbar style, draws it as the full-height icon surface every
@@ -67,6 +71,14 @@ final class SettingsWindowController: NSWindowController {
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
     }
+
+    /// Open on the Account pane with the sign-in sheet up (the tray's
+    /// "Sign In…").
+    func showSignIn() {
+        (contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = 0
+        show()
+        model.showSignIn = true
+    }
 }
 
 /// What both panes show. Everything here is read from the profile
@@ -88,6 +100,9 @@ final class SettingsModel: ObservableObject {
     @Published var loginError: String?
     @Published var signingOut = false
     @Published var signOutError: String?
+    @Published var showSignIn = false
+    @Published var signingIn = false
+    @Published var signInError: String?
     @Published var cliLine: String = "—"
     @Published var cliError: String?
     /// nil when there is no bundled binary to link to (a `swift run`).
@@ -95,14 +110,34 @@ final class SettingsModel: ObservableObject {
 
     private let location: ProfileLocation
     private let client: DaemonClient
+    private let signInAction: (SignInCredentials, @escaping (Error?) -> Void) -> Void
     private let signOutAction: (@escaping (Error?) -> Void) -> Void
 
-    init(location: ProfileLocation, client: DaemonClient, signOut: @escaping (@escaping (Error?) -> Void) -> Void) {
+    init(
+        location: ProfileLocation, client: DaemonClient,
+        signIn: @escaping (SignInCredentials, @escaping (Error?) -> Void) -> Void,
+        signOut: @escaping (@escaping (Error?) -> Void) -> Void
+    ) {
         self.location = location
         self.client = client
+        self.signInAction = signIn
         self.signOutAction = signOut
         profilePath = location.dir.path
         refresh()
+    }
+
+    /// The sheet's submit. The password goes straight to Rust and is
+    /// never stored here; the sheet closes itself on success.
+    func signIn(_ creds: SignInCredentials, done: @escaping (Bool) -> Void) {
+        signingIn = true
+        signInError = nil
+        signInAction(creds) { [weak self] error in
+            guard let self else { return }
+            self.signingIn = false
+            self.signInError = error?.localizedDescription
+            self.refresh()
+            done(error == nil)
+        }
     }
 
     /// Confirm, then stop the host and wipe the profile. Local state
@@ -216,21 +251,100 @@ struct AccountPane: View {
             if let error = model.loginError {
                 Text(error).font(.footnote).foregroundStyle(.red)
             }
-            if model.signedIn {
-                LabeledContent("") {
+            LabeledContent("") {
+                if model.signedIn {
                     Button(model.signingOut ? "Signing out…" : "Sign Out…") { model.signOut() }
                         .disabled(model.signingOut)
-                }
-                if let error = model.signOutError {
-                    Text(error).font(.footnote).foregroundStyle(.red)
+                } else {
+                    Button("Sign In…") { model.showSignIn = true }
                 }
             }
-            Text("Sign in is done from the command line for now (`monoplan login --server …`); it works while Monoplan is running.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            if let error = model.signOutError {
+                Text(error).font(.footnote).foregroundStyle(.red)
+            }
         }
         .formStyle(.grouped)
         .frame(width: 460)
+        .sheet(isPresented: $model.showSignIn) {
+            SignInSheet(model: model)
+        }
+    }
+}
+
+/// The add-account sheet: email and password, with the server and
+/// device name under a disclosure since almost nobody changes them.
+/// The server is part of the account, not a preference, which is why
+/// it is set here and only read back on the Account pane.
+struct SignInSheet: View {
+    @ObservedObject var model: SettingsModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var email = ""
+    @State private var password = ""
+    @State private var server = SignInSheet.defaultServer
+    @State private var deviceName = Host.current().localizedName ?? "Mac"
+    @State private var advanced = false
+
+    static let defaultServer = "https://alpha.monoplan.app"
+
+    private var canSubmit: Bool {
+        !model.signingIn && !email.isEmpty && !password.isEmpty && !server.isEmpty && !deviceName.isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Sign in to Monoplan").font(.headline)
+            Form {
+                TextField("Email", text: $email)
+                    .textContentType(.username)
+                SecureField("Password", text: $password)
+                    .textContentType(.password)
+                    .onSubmit { if canSubmit { submit() } }
+                DisclosureGroup("Advanced", isExpanded: $advanced) {
+                    TextField("Server", text: $server)
+                        .textContentType(.URL)
+                    TextField("Device name", text: $deviceName)
+                }
+            }
+            .formStyle(.columns)
+            .disabled(model.signingIn)
+            if let error = model.signInError {
+                Text(error).font(.footnote).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Link("Create an account…", destination: webURL)
+                    .font(.footnote)
+                Spacer()
+                if model.signingIn { ProgressView().controlSize(.small) }
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(model.signingIn)
+                Button("Sign In") { submit() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canSubmit)
+            }
+        }
+        .padding(20)
+        .frame(width: 400)
+        .onDisappear { model.signInError = nil }
+    }
+
+    private func submit() {
+        let creds = SignInCredentials(
+            server: Self.normalise(server), email: email.trimmingCharacters(in: .whitespaces),
+            password: password, deviceName: deviceName.trimmingCharacters(in: .whitespaces))
+        model.signIn(creds) { ok in
+            if ok { dismiss() }
+        }
+    }
+
+    /// A bare host becomes https; a trailing slash would double up
+    /// against the `/api/…` paths the client appends.
+    static func normalise(_ raw: String) -> String {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !s.contains("://") { s = "https://" + s }
+        while s.hasSuffix("/") { s.removeLast() }
+        return s
     }
 }
 

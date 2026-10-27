@@ -128,7 +128,11 @@ impl Profile {
 
     /// Create (or reuse) the single per-install profile directory.
     pub fn create() -> Result<Self, ConfigError> {
-        let dir = root_dir()?;
+        Self::create_at(root_dir()?)
+    }
+
+    /// `create()` for an explicit directory (the app's sign-in).
+    pub fn create_at(dir: PathBuf) -> Result<Self, ConfigError> {
         std::fs::create_dir_all(&dir)?;
         Ok(Self::new(dir))
     }

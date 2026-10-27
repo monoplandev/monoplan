@@ -37,7 +37,61 @@ pub async fn run(args: Args, spawn: Spawn) -> anyhow::Result<()> {
             .unwrap_or_else(|_| default_device_name())
     });
 
-    let client = Client::new(args.server.clone());
+    println!("Deriving keys…");
+    let profile = Profile::create()?;
+    let outcome = login(
+        &profile,
+        Credentials {
+            server: args.server,
+            email,
+            password,
+            device_name,
+        },
+    )
+    .await?;
+
+    println!("Syncing…");
+    if let Err(e) = client::sync(&profile, spawn).await {
+        eprintln!("offline — sync deferred ({e})");
+    }
+
+    println!("Logged in to account {}", outcome.account_id);
+    if !outcome.recovery_present {
+        println!(
+            "(this account has opted out of a recovery code — losing your password loses your data)"
+        );
+    }
+    Ok(())
+}
+
+/// What a sign-in needs: prompted for by `run`, typed into a sheet by
+/// the app (`monoplan-ffi::login`).
+pub struct Credentials {
+    pub server: String,
+    pub email: String,
+    pub password: String,
+    pub device_name: String,
+}
+
+pub struct Outcome {
+    pub account_id: String,
+    pub recovery_present: bool,
+}
+
+/// Sign `profile` in: derive the keys, log in and register this
+/// device, then write the profile. The profile is claimed
+/// (`client::claim`: any host stopped, the lock held) only once the
+/// server has accepted the credentials, and released on return, so a
+/// wrong password leaves a running host alone and the app (or the
+/// caller's sync) hosts the new profile straight after.
+pub async fn login(profile: &Profile, creds: Credentials) -> anyhow::Result<Outcome> {
+    let Credentials {
+        server,
+        email,
+        password,
+        device_name,
+    } = creds;
+    let client = Client::new(server.clone());
     let pre: PreloginResponse = client
         .post(
             "/api/account/prelogin",
@@ -47,7 +101,6 @@ pub async fn run(args: Args, spawn: Spawn) -> anyhow::Result<()> {
         )
         .await?;
 
-    println!("Deriving keys…");
     let master_salt = pre.master_salt.clone();
     let kdf_params = pre.kdf_params;
     let master = tokio::task::spawn_blocking({
@@ -86,12 +139,11 @@ pub async fn run(args: Args, spawn: Spawn) -> anyhow::Result<()> {
     // A host for a previous login would keep the old doc open under
     // the new credentials: stop it, and hold the profile until the new
     // secrets are written so nothing boots the half-written one.
-    let profile = Profile::create()?;
-    let claim = crate::client::claim(&profile.dir).await?;
-    // Empty doc baseline; the initial sync below pulls from seq 0,
-    // applies device-1's seed + history, and we converge. secrets.toml
-    // is written last — it's the "logged in" marker.
-    let storage = crate::storage::open_storage(&profile)?;
+    let _claim = crate::client::claim(&profile.dir).await?;
+    // Empty doc baseline; the initial sync pulls from seq 0, applies
+    // device-1's seed + history, and we converge. secrets.toml is
+    // written last — it's the "logged in" marker.
+    let storage = crate::storage::open_storage(profile)?;
     crate::storage::seed_snapshot(&storage, &dek, doc_id, &Doc::empty())?;
     storage.write_account(&Account {
         account_id: resp.account_id.clone(),
@@ -99,25 +151,14 @@ pub async fn run(args: Args, spawn: Spawn) -> anyhow::Result<()> {
         device_id: device.device_id,
         primary_doc_id: doc_id,
     })?;
-    profile.write_config(&Config {
-        server_url: args.server,
-    })?;
+    profile.write_config(&Config { server_url: server })?;
     profile.write_secrets(&Secrets::new(
         device.device_token,
         doc_keys.iter().map(|(id, dek)| (*id, dek)),
     ))?;
 
-    drop(claim);
-    println!("Syncing…");
-    if let Err(e) = client::sync(&profile, spawn).await {
-        eprintln!("offline — sync deferred ({e})");
-    }
-
-    println!("Logged in to account {}", resp.account_id);
-    if !resp.recovery_present {
-        println!(
-            "(this account has opted out of a recovery code — losing your password loses your data)"
-        );
-    }
-    Ok(())
+    Ok(Outcome {
+        account_id: resp.account_id,
+        recovery_present: resp.recovery_present,
+    })
 }

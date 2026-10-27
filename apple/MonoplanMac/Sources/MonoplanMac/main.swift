@@ -185,6 +185,9 @@ final class TrayController: NSObject, NSMenuDelegate {
         // column on every row, which shows as dead space after the
         // right-aligned notes. An image would likewise open an icon
         // column that the other rows do not use.
+        if !location.isSignedIn {
+            addAction("Sign In…", #selector(signIn))
+        }
         addAction("Open Monoplan", #selector(openWebsite))
         addAction("Settings…", #selector(openSettings))
         addAction("Quit Monoplan", #selector(quit))
@@ -314,12 +317,21 @@ final class TrayController: NSObject, NSMenuDelegate {
     /// One window controller for the process; reopening brings the
     /// same window forward rather than stacking a second.
     @objc private func openSettings() {
-        if settingsWindow == nil {
-            settingsWindow = SettingsWindowController(location: location, client: client, signOut: { [weak self] done in
-                self?.hostController.signOut(completion: done)
-            })
-        }
-        settingsWindow?.show()
+        settings().show()
+    }
+
+    @objc private func signIn() {
+        settings().showSignIn()
+    }
+
+    private func settings() -> SettingsWindowController {
+        if let settingsWindow { return settingsWindow }
+        let w = SettingsWindowController(
+            location: location, client: client,
+            signIn: { [weak self] creds, done in self?.hostController.signIn(creds, completion: done) },
+            signOut: { [weak self] done in self?.hostController.signOut(completion: done) })
+        settingsWindow = w
+        return w
     }
 
     /// Item links are `#item_<id>` (spec/urls.md "Item URLs name only the item").

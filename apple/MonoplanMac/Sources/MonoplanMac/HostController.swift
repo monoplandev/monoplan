@@ -28,8 +28,9 @@ final class HostController {
     private var starting = false
     /// The last failed start, shown once and then retried.
     private var failure: String?
-    /// Sign-out in progress: do not re-host when the socket drops.
-    private var signingOut = false
+    /// A sign-in or sign-out in progress: what the menu says, and a
+    /// reason not to start a host when the socket drops meanwhile.
+    private var accountWork: String?
 
     init(location: ProfileLocation, client: DaemonClient) {
         self.location = location
@@ -42,7 +43,7 @@ final class HostController {
     private func ensureHosting() -> String? {
         if let host, host.isRunning() { return nil }
         host = nil
-        if signingOut { return "signing out" }
+        if let accountWork { return accountWork }
         if starting { return "starting" }
         if let failure {
             self.failure = nil
@@ -84,10 +85,10 @@ final class HostController {
     /// Sign out: stop our host, wipe the profile (what `monoplan
     /// logout` does), and let the client see "not signed in". Off the
     /// main thread, since the host's clean exit persists and folds.
-    /// `signingOut` keeps the socket-down path from starting a fresh
+    /// `accountWork` keeps the socket-down path from starting a fresh
     /// host between the stop and the wipe.
     func signOut(completion: @escaping (Error?) -> Void) {
-        signingOut = true
+        accountWork = "signing out"
         let dir = location.dir.path
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.host?.shutdown()
@@ -95,12 +96,43 @@ final class HostController {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.host = nil
-                self.signingOut = false
+                self.accountWork = nil
                 self.client.poke()
                 completion(result.failure)
             }
         }
     }
+
+    /// Sign in: what `monoplan login` does (`MonoplanCore.login`), off
+    /// the main thread for the key derivation. The Rust side claims the
+    /// profile only once the server has accepted the credentials, so a
+    /// running host for another account is stopped then and not before;
+    /// on return the profile is free and the client's poke hosts it.
+    func signIn(_ creds: SignInCredentials, completion: @escaping (Error?) -> Void) {
+        accountWork = "signing in"
+        let dir = location.dir.path
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = Result {
+                try MonoplanCore.login(
+                    profileDir: dir, server: creds.server, email: creds.email,
+                    password: creds.password, deviceName: creds.deviceName)
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if result.failure == nil { self.host = nil }
+                self.accountWork = nil
+                self.client.poke()
+                completion(result.failure)
+            }
+        }
+    }
+}
+
+struct SignInCredentials {
+    var server: String
+    var email: String
+    var password: String
+    var deviceName: String
 }
 
 private extension Result {

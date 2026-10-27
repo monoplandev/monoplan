@@ -380,6 +380,47 @@ pub enum HostError {
     Failed { message: String },
 }
 
+/// Sign in: what `monoplan login` does once it has the credentials,
+/// for the app's sign-in sheet. Blocks for the key derivation and two
+/// round trips, so call it off the main thread. On success the profile
+/// is written and released; the app's host controller then hosts it.
+#[uniffi::export]
+pub fn login(
+    profile_dir: String,
+    server: String,
+    email: String,
+    password: String,
+    device_name: String,
+) -> Result<(), HostError> {
+    use monoplan_cli::{
+        commands::login::{Credentials, login},
+        config::Profile,
+    };
+    let profile =
+        Profile::create_at(PathBuf::from(profile_dir)).map_err(|e| HostError::Failed {
+            message: e.to_string(),
+        })?;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| HostError::Failed {
+            message: e.to_string(),
+        })?;
+    rt.block_on(login(
+        &profile,
+        Credentials {
+            server,
+            email,
+            password,
+            device_name,
+        },
+    ))
+    .map(|_| ())
+    .map_err(|e| HostError::Failed {
+        message: format!("{e:#}"),
+    })
+}
+
 /// Sign out: stop whatever hosts the profile, hold it, wipe it. What
 /// `monoplan logout` does, for the app's Settings. The app stops its
 /// own host first and keeps its host controller from restarting one

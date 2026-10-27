@@ -8,7 +8,7 @@ Single binary `monoplan`. Subcommands:
 
 ### Account
 - `monoplan signup [--server URL]` — interactive: email, password, recovery code shown once and typed back
-- `monoplan login [--server URL]` — interactive: email, password
+- `monoplan login [--server URL]` — interactive: email, password. `--server` defaults to `https://alpha.monoplan.app` (or `MONOPLAN_SERVER`); the dev stack is `MONOPLAN_SERVER=http://127.0.0.1:8000`. The body is `login::login`, shared with the app's sign-in sheet (`monoplan-ffi::login`)
 - `monoplan logout`
 - `monoplan recover` — interactive: email, recovery code, set new password
 - `monoplan password` — change password (logged in)

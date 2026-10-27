@@ -17,7 +17,7 @@ pub mod export;
 pub mod focus;
 pub mod items;
 pub mod lists;
-mod login;
+pub mod login;
 pub mod logout;
 mod password;
 mod recover;
@@ -26,7 +26,10 @@ mod signup;
 pub mod status;
 mod sync;
 
-const DEFAULT_SERVER: &str = "http://127.0.0.1:8000";
+/// Where `signup` / `login` / `recover` go without `--server`: the
+/// hosted alpha, the same default as the app's sign-in sheet. The dev
+/// stack is `MONOPLAN_SERVER=http://127.0.0.1:8000`.
+const DEFAULT_SERVER: &str = "https://alpha.monoplan.app";
 
 #[derive(Parser, Debug)]
 #[command(name = "monoplan", version, about = "Monoplan CLI")]
