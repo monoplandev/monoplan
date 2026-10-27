@@ -48,11 +48,12 @@ VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml" | head -1)"
 # ("0.0.1-alpha.15") stays in CFBundleShortVersionString.
 BUILD_NUMBER="$(printf '%s' "$VERSION" | sed -E 's/-alpha\.([0-9]+)$/.\1/; s/-.*$//')"
 
-# The app bundles the `monoplan` binary (spec/daemon-plan.md) and starts
-# `monoplan daemon --detach` from that copy when none holds the profile,
-# so an installed Monoplan.app works without a cargo-installed CLI. Debug
-# and release follow the app's configuration; sync on a real-sized doc
-# is slow in debug, so install the release build.
+# The app bundles the `monoplan` binary (spec/daemon-plan.md) so the
+# Settings "Command line" row can symlink it onto PATH: the terminal
+# then talks to the app's in-process host at the app's own version.
+# The app never starts it; the host loop is linked in via MonoplanCore.
+# Debug and release follow the app's configuration; sync on a
+# real-sized doc is slow in debug, so install the release build.
 echo ">> cargo build -p monoplan ($CONFIG)"
 if [ "$CONFIG" = release ]; then
   cargo build -p monoplan --release

@@ -83,12 +83,11 @@ pub async fn run(args: Args, spawn: Spawn) -> anyhow::Result<()> {
         anyhow::anyhow!("server did not return a device credential despite register_device")
     })?;
 
-    // A daemon for a previous login would keep the old doc open under
-    // the new credentials; stop it before the profile changes.
-    if let Some(existing) = Profile::active()? {
-        crate::client::stop_if_running(&existing.dir).await?;
-    }
+    // A host for a previous login would keep the old doc open under
+    // the new credentials: stop it, and hold the profile until the new
+    // secrets are written so nothing boots the half-written one.
     let profile = Profile::create()?;
+    let claim = crate::client::claim(&profile.dir).await?;
     // Empty doc baseline; the initial sync below pulls from seq 0,
     // applies device-1's seed + history, and we converge. secrets.toml
     // is written last — it's the "logged in" marker.
@@ -108,6 +107,7 @@ pub async fn run(args: Args, spawn: Spawn) -> anyhow::Result<()> {
         doc_keys.iter().map(|(id, dek)| (*id, dek)),
     ))?;
 
+    drop(claim);
     println!("Syncing…");
     if let Err(e) = client::sync(&profile, spawn).await {
         eprintln!("offline — sync deferred ({e})");

@@ -11,8 +11,9 @@ use crate::net::Client;
 
 pub async fn run() -> anyhow::Result<()> {
     let profile = Profile::require_active()?;
-    // The daemon re-reads secrets only at boot; restart it afterwards.
-    crate::client::stop_if_running(&profile.dir).await?;
+    // The host reads secrets only at boot; keep it out until the
+    // change is through, then let it (or the app) come back.
+    let _claim = crate::client::claim(&profile.dir).await?;
     let config = profile.read_config()?;
     let secrets = profile.read_secrets()?;
     let storage = crate::storage::open_storage(&profile)?;

@@ -1,19 +1,21 @@
 // The app as the profile's host (spec/daemon-plan.md, amended
-// 2026-10-27). On macOS the normal path is one process: this controller
-// runs the Rust host loop (`Host` from MonoplanCore, the same loop as
-// `monoplan daemon`) on a background thread, and the tray's
-// `DaemonClient` talks to it over the socket like any other client.
+// 2026-10-27). One process: this controller runs the Rust host loop
+// (`Host` from MonoplanCore, the same loop as `monoplan daemon`) on a
+// background thread, and the tray's `DaemonClient` talks to it over the
+// socket like any other client. The app only ever talks to its own
+// host; it is never a client of some other process.
 //
-// The app and the headless daemon are alternatives, not partners:
-// - Host when the lock is free and the profile is signed in.
-//   `Host.start` blocks while the doc boots, so it runs off the main
-//   thread and the menu says "starting" meanwhile.
-// - If something else holds the lock (a `monoplan daemon`, another
-//   copy of the app), stay a client of it: the menu still works, and
-//   Settings says who is hosting. Never take over. Host once it goes.
-// - Our host ends only when the app quits (`stop`). It refuses a
-//   client's `Shutdown`, so `daemon stop`, `logout`, `login` and
-//   `password` from the terminal tell the user to quit the app first.
+// The app hosts whenever it runs:
+// - Whenever the socket is down and the profile is signed in, start.
+//   `Host.start` takes a headless `monoplan daemon` over (asks it to
+//   exit, then claims the profile) and blocks while the doc boots, so
+//   it runs off the main thread and the menu says "starting" meanwhile.
+// - A client's `Shutdown` ends our host like any other: `logout`,
+//   `login`, `password` from the terminal stop it, hold the profile
+//   while they rewrite it, and we re-host once it is free again.
+// - "Busy" is the one thing we wait out rather than take over: another
+//   copy of the app, a command holding the profile, or a host still
+//   starting. The menu says so and the client's backoff retries.
 
 import Foundation
 import MonoplanCore
@@ -33,9 +35,6 @@ final class HostController {
         client.hostProvider = { [weak self] in self?.ensureHosting() }
     }
 
-    /// Whether the connected host is this process.
-    var isHosting: Bool { host?.isRunning() == true }
-
     /// Called by the client whenever its socket is down. Returns what
     /// the menu should say about it, or nil for the socket's own error.
     private func ensureHosting() -> String? {
@@ -47,8 +46,6 @@ final class HostController {
             return failure
         }
         guard location.isSignedIn else { return "not signed in" }
-        // Someone else holds the profile: the client connects to them.
-        if location.daemonIsRunning() { return nil }
         starting = true
         let dir = location.dir.path
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -64,8 +61,10 @@ final class HostController {
         case .success(let h):
             host = h
             NSLog("MonoplanMac: hosting %@", location.dir.path)
-        case .failure(HostError.AlreadyRunning), .failure(HostError.NotLoggedIn):
+        case .failure(HostError.NotLoggedIn):
             break
+        case .failure(HostError.Busy):
+            failure = "profile in use by another process"
         case .failure(let e):
             failure = "host failed: \(e.localizedDescription)"
             NSLog("MonoplanMac: host failed: %@", e.localizedDescription)

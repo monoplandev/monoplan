@@ -69,15 +69,19 @@ notice when there is no server, "Open Monoplan" (alpha.monoplan.app),
 "Settings…" and "Quit Monoplan" (which stops the host: persist, fold,
 release the profile).
 
-Hosting rules (`Sources/MonoplanMac/HostController.swift`): host when
-nothing holds the lock and the profile is signed in; if something else
-holds it (a `monoplan daemon`, another copy of the app) stay a client of
-it and host once it is gone; never take over. The app's host ends only
-when the app quits: it refuses `Shutdown`, so `daemon stop`, `logout`,
-`login` and `password` in the terminal say "quit Monoplan.app first".
-Doc commands from the CLI work against the app's host; it is never
-restarted as stale, its hello only has to match the app's package
-version, which the bundled CLI symlinked onto `PATH` guarantees.
+Hosting rules (`Sources/MonoplanMac/HostController.swift`): the app
+hosts whenever it runs and only ever talks to its own host. Whenever
+the socket is down and the profile is signed in it starts the host,
+which takes a headless `monoplan daemon` over (asks it to exit, then
+claims the profile). It honours `Shutdown`, so `logout`, `login` and
+`password` in the terminal stop it, hold the profile while they
+rewrite it, and the app re-hosts once it is free. The one thing it
+waits out rather than takes over is "busy": another copy of the app, a
+host still starting, or a command holding the profile; the menu says
+"profile in use" and the client's backoff retries. Doc commands from
+the CLI work against the app's host; it is never restarted as stale,
+its hello only has to match the app's package version, which the
+bundled CLI symlinked onto `PATH` guarantees.
 
 Three targets: `MonoplanMacKit` (MessagePack codec for the subset
 `rmp_serde::to_vec_named` emits, the socket client, the agenda model;
@@ -112,13 +116,15 @@ in Finder, Login Items and Force Quit while stderr stays on the
 terminal. The menu bar glyph is separate: a template image drawn in
 `main.swift`.
 
-Settings: Account (server, status, host, sync), an "Open at login"
-toggle (`SMAppService.mainApp`, which lists the app under System
-Settings › Login Items; works only from an .app bundle), and a
+Settings has two panes. Account: server, status, sync, and an "Open at
+login" toggle (`SMAppService.mainApp`, which lists the app under System
+Settings › Login Items; works only from an .app bundle). Advanced: the
+Host row (running, or why not), the Build row (package version), a
 "Command line" row whose Install button symlinks `/usr/local/bin/monoplan`
-to the bundled binary (admin prompt if the directory is root's). The
+to the bundled binary (admin prompt if the directory is root's), and
+the profile path with a Reveal button. The
 launchd agent from `monoplan daemon install` is the headless
-alternative: while its daemon runs, the app is only a client of it, so
-`monoplan daemon uninstall` before switching to the app.
+alternative for Macs without the app: the app takes its daemon over at
+launch, and `install` refuses while the app hosts.
 
 Next: the window.

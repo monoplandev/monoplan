@@ -94,12 +94,11 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
         )
         .await?;
 
-    // A daemon for a previous login would keep the old doc open under
-    // the new credentials; stop it before the profile changes.
-    if let Some(existing) = Profile::active()? {
-        crate::client::stop_if_running(&existing.dir).await?;
-    }
+    // A host for a previous login would keep the old doc open under
+    // the new credentials: stop it, and hold the profile until the new
+    // secrets are written so nothing boots the half-written one.
     let profile = Profile::create()?;
+    let claim = crate::client::claim(&profile.dir).await?;
     let primary_doc_uuid = uuid::Uuid::parse_str(&resp.primary_doc_id)
         .map_err(|e| anyhow::anyhow!("server returned malformed primary_doc_id: {e}"))?;
     let doc_id = monoplan_core::DocId(primary_doc_uuid);
@@ -150,6 +149,7 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
         server_url: args.server,
     })?;
     profile.write_secrets(&Secrets::new(resp.device_token, [(doc_id, &dek)]))?;
+    drop(claim);
 
     println!("Account created: {email} ({})", resp.account_id);
     let code = recovery_code.as_str();

@@ -357,10 +357,13 @@ mod tests {
 
 // ---------------------------------------------------------------------
 // Host: the daemon loop, embedded (spec/daemon-plan.md, amended
-// 2026-10-27). On macOS the normal path is one process: the app runs
+// 2026-10-27). On macOS the app is the host whenever it runs: it runs
 // `daemon::start` / `daemon::serve` on its own thread and its UI is a
 // client of the resulting socket, exactly as the CLI is. The headless
-// `monoplan daemon` stays for CLI-only, Linux and servers.
+// `monoplan daemon` stays for CLI-only, Linux and servers, and fills in
+// on a Mac only while the app is not running: `start` takes a headless
+// daemon over, and the CLI's auto-spawn starts one again if the app
+// has quit.
 // ---------------------------------------------------------------------
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -368,19 +371,20 @@ pub enum HostError {
     /// No `secrets.toml` in the profile dir: nothing to host.
     #[error("not logged in")]
     NotLoggedIn,
-    /// Another process holds `daemon.lock`. The app then connects as a
-    /// client, reads the hello, and takes over if it is headless.
+    /// Something `start` will not take over holds `daemon.lock`:
+    /// another app's host, a host still starting, or a CLI command
+    /// rewriting the profile (`client::claim`). Try again later.
     #[error("another process holds this profile")]
-    AlreadyRunning,
+    Busy,
     #[error("{message}")]
     Failed { message: String },
 }
 
 /// One running host loop. Dropping it does *not* stop the loop; call
 /// `shutdown` (clean exit: persist, fold, close the socket, release the
-/// lock). A client's `Shutdown` request (`daemon stop`, `logout`) ends
-/// the loop too, after which `is_running` is false and the app may
-/// start a new one.
+/// lock). A client's `Shutdown` request (`daemon stop`, `logout`,
+/// `login`, `password`) ends the loop too, after which `is_running` is
+/// false and the app starts a new one once the profile is free.
 #[derive(uniffi::Object)]
 pub struct Host {
     shutdown: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
@@ -389,13 +393,13 @@ pub struct Host {
 
 #[uniffi::export]
 impl Host {
-    /// Claim the profile, bind the socket, boot the doc, and serve on a
-    /// background thread. Returns once the socket is listening (or the
-    /// start failed), so call it off the main thread: booting a large
-    /// doc takes a moment.
+    /// Claim the profile (stopping a headless daemon that holds it),
+    /// bind the socket, boot the doc, and serve on a background thread.
+    /// Returns once the socket is listening (or the start failed), so
+    /// call it off the main thread: booting a large doc takes a moment.
     #[uniffi::constructor]
     pub fn start(profile_dir: String) -> Result<Arc<Host>, HostError> {
-        use monoplan_cli::{config::Profile, daemon};
+        use monoplan_cli::{client, config::Profile, daemon};
         let profile =
             Profile::active_at(PathBuf::from(profile_dir)).ok_or(HostError::NotLoggedIn)?;
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
@@ -416,10 +420,25 @@ impl Host {
                     }
                 };
                 rt.block_on(async move {
+                    match client::take_over(&profile.dir).await {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            let _ = ready_tx.send(Err(HostError::Busy));
+                            return;
+                        }
+                        Err(e) => {
+                            let _ = ready_tx.send(Err(HostError::Failed {
+                                message: format!("{e:#}"),
+                            }));
+                            return;
+                        }
+                    }
                     let started = match daemon::start(profile).await {
                         Ok(Some(s)) => s,
+                        // Lost the lock to someone between the takeover
+                        // and the claim; the app tries again later.
                         Ok(None) => {
-                            let _ = ready_tx.send(Err(HostError::AlreadyRunning));
+                            let _ = ready_tx.send(Err(HostError::Busy));
                             return;
                         }
                         Err(e) => {

@@ -74,25 +74,35 @@ host for CLI-only use, Linux and servers (`daemon install` writes the
 systemd unit or launchd agent for that path) and is what the CLI
 auto-spawns when nothing holds the profile. Rules:
 
-The app and the headless daemon are alternatives, not partners:
-management never crosses the process boundary, only doc commands do.
+The app hosts whenever it runs (revised 2026-10-27, replacing the
+"alternatives, not partners" rules under which the app stayed a client
+of a foreign daemon and refused `Shutdown`; that branch was code for a
+case nobody needs, and the refusals it forced on the CLI were the only
+user-visible friction). The app only ever talks to its own host.
 
-1. The app hosts when the lock is free and the profile is signed in.
-   When something else holds the lock (a `monoplan daemon`, another
-   copy of the app) it stays a client of it, never takes over, and
-   hosts once that process is gone.
-2. The app's host ends only when the app quits. An embedded host
-   answers `Shutdown` with a refusal (`daemon::APP_HOSTED`), so
-   `daemon stop`, `logout`, `login`, `password` and `daemon install`
-   from the terminal say "quit Monoplan.app first". Sign-in and
-   sign-out in the app itself are the follow-up that makes those
-   commands unnecessary beside it.
-3. A client never restarts an embedded host for staleness. The build-id
+1. Whenever its socket is down and the profile is signed in, the app
+   starts its host. `Host.start` first takes a headless `monoplan
+   daemon` over: asks it to exit over the socket, waits for the lock,
+   then claims the profile (`client::take_over`). The headless daemon
+   fills in on a Mac only while the app is not running, which is what
+   the CLI's auto-spawn does after the app quits.
+2. The app's host honours `Shutdown` like any host. `logout`, `login`,
+   `recover`, `signup` and `password` from the terminal stop it and
+   hold `daemon.lock` while they rewrite the profile (`client::claim`,
+   dropped before anything that needs a host, such as `login`'s
+   initial sync), so neither the app nor a client's auto-spawn boots a
+   half-written profile; the app re-hosts once the lock is free.
+3. The app never takes over another app's host (two copies taking turns
+   would never settle), a host still starting, or a profile held by a
+   command: `Host.start` reports `Busy`, the menu says "profile in use"
+   and the client's reconnect backoff retries. `daemon install` refuses
+   while the app hosts: the agent is for Macs without the app.
+4. A client never restarts an embedded host for staleness. The build-id
    check applies to headless daemons only; against an embedded host the
    package version must match, else the command fails naming both
    versions. The bundled CLI, symlinked onto `PATH` from Settings, is
    how the terminal stays at the app's version.
-4. Login item is `SMAppService.mainApp` (System Settings › Login
+5. Login item is `SMAppService.mainApp` (System Settings › Login
    Items), not a launchd agent. `daemon install` is the headless path
    and is not used on a Mac that runs the app.
 

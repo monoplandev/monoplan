@@ -7,6 +7,7 @@ mod support;
 use std::time::Duration;
 
 use monoplan_cli::commands::DocCmd;
+use monoplan_cli::config::Profile;
 use monoplan_cli::daemon;
 use monoplan_cli::ipc::{self, Reply, Request, WatchEvent, read_frame, write_frame};
 use monoplan_cli::sync::{Session, SyncError};
@@ -263,11 +264,11 @@ async fn watcher_hears_sync_local_and_remote_changes() {
 }
 
 /// The app-hosted rules of the 2026-10-27 amendment: an embedded host
-/// says so in its hello, refuses `Shutdown` (so `daemon stop`, `logout`
-/// and friends stop at the process boundary), and still serves doc
-/// commands; only the app's own handle ends it.
+/// says so in its hello, serves doc commands, and honours `Shutdown`
+/// like any host (`logout`, `login`, `password` from the terminal work
+/// beside the app, which re-hosts afterwards).
 #[tokio::test]
-async fn embedded_host_refuses_shutdown_but_serves_commands() {
+async fn embedded_host_serves_commands_and_honours_shutdown() {
     let server = TestServer::start().await;
     let signup = signup_account(&server, "embedded-a").await;
     let tmp = tempfile::tempdir().unwrap();
@@ -301,22 +302,6 @@ async fn embedded_host_refuses_shutdown_but_serves_commands() {
     })
     .await;
 
-    write_frame(&mut stream, &Request::Shutdown).await.unwrap();
-    expect_frame(
-        &mut stream,
-        "refusal",
-        |r| matches!(r, Reply::Err { message } if message == daemon::APP_HOSTED),
-    )
-    .await;
-    assert!(daemon::is_running(tmp.path()).unwrap(), "still hosting");
-
-    // The CLI's stop path surfaces the refusal rather than waiting.
-    let err = monoplan_cli::client::stop_if_running(tmp.path())
-        .await
-        .unwrap_err();
-    assert!(err.to_string().contains("Monoplan.app"), "{err}");
-
-    // Doc commands are unaffected.
     write_frame(
         &mut stream,
         &Request::Doc(DocCmd::Add {
@@ -331,6 +316,83 @@ async fn embedded_host_refuses_shutdown_but_serves_commands() {
     })
     .await;
 
+    // The CLI's stop path ends it and waits for the profile to free.
+    assert!(
+        monoplan_cli::client::stop_if_running(tmp.path())
+            .await
+            .unwrap()
+    );
+    assert!(!daemon::is_running(tmp.path()).unwrap());
     handle.shutdown().await.unwrap();
+}
+
+/// The app's takeover at launch: a headless daemon is stopped and the
+/// profile handed over; another app's host is left alone; a profile
+/// held by a command (`client::claim`) is reported busy, not waited on.
+#[tokio::test]
+async fn take_over_stops_headless_only() {
+    let server = TestServer::start().await;
+    let signup = signup_account(&server, "takeover-a").await;
+    let tmp = tempfile::tempdir().unwrap();
+    let profile = materialize_profile(
+        tmp.path(),
+        &server.base,
+        &signup.account_id,
+        &signup.primary_doc_id,
+        &signup.device_id,
+        &signup.device_token,
+        &signup.dek,
+        &signup.email,
+        true,
+    )
+    .await;
+    drop(profile);
+
+    // Nothing running: free.
+    assert!(monoplan_cli::client::take_over(tmp.path()).await.unwrap());
+
+    // Headless: stopped and handed over.
+    let handle = daemon::spawn(Profile::new(tmp.path().to_path_buf()))
+        .await
+        .unwrap();
+    assert!(monoplan_cli::client::take_over(tmp.path()).await.unwrap());
+    assert!(!daemon::is_running(tmp.path()).unwrap());
+    handle.shutdown().await.unwrap();
+
+    // Another app: left alone.
+    let handle = daemon::spawn_with(Profile::new(tmp.path().to_path_buf()), true)
+        .await
+        .unwrap();
+    assert!(!monoplan_cli::client::take_over(tmp.path()).await.unwrap());
+    assert!(daemon::is_running(tmp.path()).unwrap(), "still hosting");
+    assert!(
+        monoplan_cli::client::hosted_by_app(tmp.path())
+            .await
+            .unwrap()
+    );
+    handle.shutdown().await.unwrap();
+
+    // A command rewriting the profile holds the lock with no socket:
+    // busy now, free once it drops the claim.
+    let claim = monoplan_cli::client::claim(tmp.path()).await.unwrap();
+    assert!(!monoplan_cli::client::take_over(tmp.path()).await.unwrap());
+    assert!(matches!(
+        daemon::spawn(Profile::new(tmp.path().to_path_buf())).await,
+        Err(SyncError::DaemonRunning)
+    ));
+    drop(claim);
+    assert!(monoplan_cli::client::take_over(tmp.path()).await.unwrap());
+
+    // `claim` against a running host stops it first.
+    let handle = daemon::spawn_with(Profile::new(tmp.path().to_path_buf()), true)
+        .await
+        .unwrap();
+    let claim = monoplan_cli::client::claim(tmp.path()).await.unwrap();
+    assert!(
+        daemon::is_running(tmp.path()).unwrap(),
+        "claim holds the lock"
+    );
+    handle.shutdown().await.unwrap();
+    drop(claim);
     assert!(!daemon::is_running(tmp.path()).unwrap());
 }

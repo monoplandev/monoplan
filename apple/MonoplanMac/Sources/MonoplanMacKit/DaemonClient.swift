@@ -6,9 +6,10 @@
 // the oldest pending request.
 //
 // Lifecycle: `start()` connects, with a capped backoff while nothing
-// listens. If no daemon holds the profile's `daemon.lock`, one is
-// started in-process by the app's host controller (`hostProvider`), when a
-// `monoplan` binary can be found. All callbacks run on `queue`.
+// listens. The host is this process: whenever the socket is down the
+// app's host controller is asked to (re)start it (`hostProvider`) and
+// says what the menu should show meanwhile. All callbacks run on
+// `queue`.
 
 import Foundation
 import Network
@@ -81,7 +82,7 @@ public enum WatchEvent: Equatable {
 }
 
 public enum Reply: Equatable {
-    case hello(buildId: String, pid: Int64, embedded: Bool, sync: SyncStatus)
+    case hello(buildId: String, pid: Int64, sync: SyncStatus)
     case output(stdout: String, sync: SyncStatus)
     case watching(sync: SyncStatus)
     case account(accountId: String, email: String, deviceId: String)
@@ -100,7 +101,7 @@ public enum Reply: Equatable {
         case "Hello":
             if let id = body["build_id"]?.stringValue, let pid = body["pid"]?.intValue,
                let sync = SyncStatus.from(body["sync"]) {
-                return .hello(buildId: id, pid: pid, embedded: body["embedded"]?.boolValue ?? false, sync: sync)
+                return .hello(buildId: id, pid: pid, sync: sync)
             }
         case "Output":
             if let out = body["stdout"]?.stringValue, let sync = SyncStatus.from(body["sync"]) {
@@ -200,19 +201,6 @@ public struct ProfileLocation {
         return nil
     }
 
-    /// Is a daemon holding the profile? Same probe as `daemon::is_running`:
-    /// try the flock and release it at once.
-    public func daemonIsRunning() -> Bool {
-        let fd = open(lockPath, O_RDONLY)
-        if fd < 0 { return false }
-        defer { close(fd) }
-        if flock(fd, LOCK_EX | LOCK_NB) == 0 {
-            flock(fd, LOCK_UN)
-            return false
-        }
-        return errno == EWOULDBLOCK
-    }
-
     static func fnv1a(_ bytes: [UInt8]) -> UInt64 {
         var h: UInt64 = 0xcbf29ce484222325
         for b in bytes {
@@ -229,13 +217,10 @@ public final class DaemonClient {
         case connected(SyncStatus)
     }
 
-    /// What the daemon said about itself in its `Hello`.
+    /// What the host said about itself in its `Hello`.
     public struct DaemonInfo: Equatable {
         public let buildId: String
         public let pid: Int64
-        /// The host loop runs inside a GUI process (this app, or
-        /// another copy of it) rather than a headless `monoplan daemon`.
-        public let embedded: Bool
     }
 
     public var onEvent: ((WatchEvent) -> Void)?
@@ -329,11 +314,11 @@ public final class DaemonClient {
         // enforce a match.
         pending.append { [weak self] result in
             guard let self else { return }
-            guard case .success(.hello(let buildId, let pid, let embedded, _)) = result else {
+            guard case .success(.hello(let buildId, let pid, _)) = result else {
                 self.dropConnection(reason: "bad hello")
                 return
             }
-            self.daemon = DaemonInfo(buildId: buildId, pid: pid, embedded: embedded)
+            self.daemon = DaemonInfo(buildId: buildId, pid: pid)
             self.pending.append { [weak self] result in
                 guard let self else { return }
                 guard case .success(.watching(let sync)) = result else {

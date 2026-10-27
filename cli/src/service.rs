@@ -62,6 +62,14 @@ pub async fn install() -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    // The agent is the headless alternative to the app, which takes a
+    // headless daemon over whenever it runs: installing beside it would
+    // only start a daemon for the app to stop.
+    if crate::client::hosted_by_app(&profile.dir).await? {
+        anyhow::bail!(
+            "Monoplan.app is hosting this profile; the login agent is for Macs without the app"
+        );
+    }
     // A daemon started by hand would hold the lock and make the
     // agent's instance fail; hand the profile over cleanly first.
     crate::client::stop_if_running(&profile.dir).await?;

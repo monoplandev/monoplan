@@ -61,11 +61,6 @@ const WATCH_BUFFER: usize = 64;
 
 const LOCK_FILE: &str = "daemon.lock";
 
-/// What an app-hosted profile says to `daemon stop`, `logout`, `login`,
-/// `password` and `daemon install`: the app's host ends when the app
-/// quits, and only then.
-pub const APP_HOSTED: &str = "this profile is hosted by Monoplan.app; quit it first";
-
 #[derive(Parser, Debug, Default)]
 pub struct DaemonArgs {
     #[command(subcommand)]
@@ -196,9 +191,10 @@ pub async fn start(profile: Profile) -> anyhow::Result<Option<Started>> {
 }
 
 /// Serve until `shutdown` fires or a client asks (`Request::Shutdown`).
-/// `embedded` is what the hello reports: a GUI-hosted loop that clients
-/// must not restart for staleness. Installs no signal handlers; the
-/// headless `run` does that itself.
+/// `embedded` is what the hello reports: a GUI-hosted loop, which
+/// clients must not restart for staleness and which the app, taking a
+/// profile over at launch, leaves alone. Installs no signal handlers;
+/// the headless `run` does that itself.
 pub async fn serve(
     started: Started,
     shutdown: oneshot::Receiver<()>,
@@ -318,7 +314,7 @@ async fn status() -> anyhow::Result<()> {
             let mine = ipc::build_id();
             let note = if embedded {
                 if ipc::version_of(&build_id) == ipc::version_of(&mine) {
-                    "  (hosted by Monoplan.app; quit it to stop)"
+                    "  (hosted by Monoplan.app)"
                 } else {
                     "  (hosted by Monoplan.app at another version; commands will refuse)"
                 }
@@ -738,12 +734,8 @@ impl Host {
                     message: format!("read account: {e}"),
                 },
             },
-            // The app owns its host for its whole life (spec/daemon-plan.md
-            // amendment): management commands stop at the process
-            // boundary, so the CLI gets a refusal, not a dead app.
-            Request::Shutdown if self.embedded => Reply::Err {
-                message: APP_HOSTED.into(),
-            },
+            // Honoured by every host, the app's included: the app
+            // re-hosts once the profile is free again (`monoplan-ffi`).
             Request::Shutdown => {
                 let _ = reply.send(Reply::ShuttingDown);
                 return Ok(true);

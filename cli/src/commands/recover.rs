@@ -129,12 +129,11 @@ pub async fn run(args: Args, spawn: Spawn) -> anyhow::Result<()> {
     let docs: DocsListResponse = client.get_authed("/api/docs", &reset.device_token).await?;
     let doc_keys = unwrap_memberships(&dek, doc_id, &docs.memberships)?;
 
-    // A daemon for a previous login would keep the old doc open under
-    // the new credentials; stop it before the profile changes.
-    if let Some(existing) = Profile::active()? {
-        crate::client::stop_if_running(&existing.dir).await?;
-    }
+    // A host for a previous login would keep the old doc open under
+    // the new credentials: stop it, and hold the profile until the new
+    // secrets are written so nothing boots the half-written one.
     let profile = Profile::create()?;
+    let claim = crate::client::claim(&profile.dir).await?;
     let storage = crate::storage::open_storage(&profile)?;
     crate::storage::seed_snapshot(&storage, &dek, doc_id, &Doc::empty())?;
     storage.write_account(&Account {
@@ -151,6 +150,7 @@ pub async fn run(args: Args, spawn: Spawn) -> anyhow::Result<()> {
         doc_keys.iter().map(|(id, dek)| (*id, dek)),
     ))?;
 
+    drop(claim);
     println!("Syncing…");
     if let Err(e) = client::sync(&profile, spawn).await {
         eprintln!("offline — sync deferred ({e})");
