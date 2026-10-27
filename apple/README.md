@@ -100,6 +100,14 @@ MONOPLAN_DATA_DIR=local/cli bun run tray              # a different profile, sam
 MONOPLAN_TRAY_DEBUG=1 bun run tray                    # log state and rows to stderr
 ```
 
+The in-app host logs to `daemon.log` in the profile dir (`~/Library/
+Application Support/monoplan/daemon.log` by default; `RUST_LOG`
+overrides the `info` level): connect failures and drops land there
+once per distinct reason, and the same reason shows on the Settings
+Sync row and in `monoplan daemon status` ("offline; never synced
+(connect failed: …)"). The app's own `NSLog` lines go to the unified
+log: `log show --predicate 'process == "MonoplanMac"' --last 1h`.
+
 `apple/MonoplanMac/build-app.sh` lays out `apple/MonoplanMac/.build/Monoplan.app`
 (gitignored): the SwiftPM binary (which links MonoplanCore; the script
 runs `build-xcframework.sh` when the XCFramework is missing), the

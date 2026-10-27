@@ -71,6 +71,12 @@ final class DaemonClientTests: XCTestCase {
     func testOfflineNotice() {
         XCTAssertNil(SyncStatus(online: true, lastSyncedAt: nil).offlineNotice())
         XCTAssertEqual(SyncStatus(online: false, lastSyncedAt: nil).offlineNotice(), "Offline · never synced")
+        XCTAssertEqual(
+            SyncStatus(online: false, lastSyncedAt: nil, offlineReason: "connect failed: x").offlineNotice(),
+            "Offline · never synced · connect failed: x")
+        XCTAssertEqual(
+            SyncStatus.from(.map(["online": .bool(false), "offline_reason": .string("x")])),
+            SyncStatus(online: false, lastSyncedAt: nil, offlineReason: "x"))
         let now = Date(timeIntervalSince1970: 1_000 + 3 * 60)
         XCTAssertEqual(
             SyncStatus(online: false, lastSyncedAt: 1_000_000).offlineNotice(now: now),

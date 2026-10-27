@@ -17,28 +17,40 @@ import Network
 public struct SyncStatus: Equatable {
     public let online: Bool
     public let lastSyncedAt: Int64?
+    /// Why the host is offline, when it knows (a failed connect, a
+    /// dropped socket); nil while online or before the first attempt.
+    public let offlineReason: String?
 
-    public init(online: Bool, lastSyncedAt: Int64?) {
+    public init(online: Bool, lastSyncedAt: Int64?, offlineReason: String? = nil) {
         self.online = online
         self.lastSyncedAt = lastSyncedAt
+        self.offlineReason = offlineReason
     }
 
     /// Mirrors `SyncStatus::offline_notice` in cli/src/ipc.rs.
     public func offlineNotice(now: Date = Date()) -> String? {
         if online { return nil }
-        guard let at = lastSyncedAt else { return "Offline · never synced" }
-        let secs = max(0, Int(now.timeIntervalSince1970) - Int(at / 1000))
-        let ago: String
-        if secs < 60 { ago = "\(secs)s" }
-        else if secs < 3600 { ago = "\(secs / 60)m" }
-        else if secs < 86_400 { ago = "\(secs / 3600)h" }
-        else { ago = "\(secs / 86_400)d" }
-        return "Offline · last synced \(ago) ago"
+        var line: String
+        if let at = lastSyncedAt {
+            let secs = max(0, Int(now.timeIntervalSince1970) - Int(at / 1000))
+            let ago: String
+            if secs < 60 { ago = "\(secs)s" }
+            else if secs < 3600 { ago = "\(secs / 60)m" }
+            else if secs < 86_400 { ago = "\(secs / 3600)h" }
+            else { ago = "\(secs / 86_400)d" }
+            line = "Offline · last synced \(ago) ago"
+        } else {
+            line = "Offline · never synced"
+        }
+        if let offlineReason { line += " · \(offlineReason)" }
+        return line
     }
 
     static func from(_ v: MPValue?) -> SyncStatus? {
         guard let online = v?["online"]?.boolValue else { return nil }
-        return SyncStatus(online: online, lastSyncedAt: v?["last_synced_at"]?.intValue)
+        return SyncStatus(
+            online: online, lastSyncedAt: v?["last_synced_at"]?.intValue,
+            offlineReason: v?["offline_reason"]?.stringValue)
     }
 }
 

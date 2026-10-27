@@ -130,6 +130,7 @@ pub fn is_running(profile_dir: &Path) -> std::io::Result<bool> {
 pub struct DaemonStatus {
     pub online: bool,
     pub last_synced_at: Option<i64>,
+    pub offline_reason: Option<String>,
     /// Contiguous-prefix server seq the engine has applied in memory.
     pub last_contiguous_seq: u64,
     pub connects: u32,
@@ -140,6 +141,7 @@ impl DaemonStatus {
         SyncStatus {
             online: self.online,
             last_synced_at: self.last_synced_at,
+            offline_reason: self.offline_reason.clone(),
         }
     }
 }
@@ -581,6 +583,8 @@ struct Host {
     /// `Sync` requests parked until the current connect attempt
     /// resolves (initial pull done, or the attempt failed).
     pending_syncs: Vec<oneshot::Sender<Reply>>,
+    /// The last connect failure or drop, until the next connect.
+    offline_reason: Option<String>,
     embedded: bool,
 }
 
@@ -609,6 +613,7 @@ impl Host {
             awaiting_pong: false,
             connecting: None,
             pending_syncs: Vec::new(),
+            offline_reason: None,
             embedded,
         }
     }
@@ -772,6 +777,7 @@ impl Host {
                 self.connected_at = Some(Instant::now());
                 self.awaiting_pong = false;
                 self.session.engine.handle_connected();
+                self.offline_reason = None;
                 self.status.send_modify(|s| s.connects += 1);
                 eprintln!("monoplan daemon: connected");
                 self.pump().await;
@@ -791,9 +797,10 @@ impl Host {
         let sync = SyncStatus {
             online,
             last_synced_at: self.session.last_synced_at(),
+            offline_reason: self.offline_reason.clone(),
         };
         for tx in self.pending_syncs.drain(..) {
-            let _ = tx.send(Reply::Synced { sync });
+            let _ = tx.send(Reply::Synced { sync: sync.clone() });
         }
     }
 
@@ -801,6 +808,7 @@ impl Host {
         SyncStatus {
             online: self.is_online(),
             last_synced_at: self.session.last_synced_at(),
+            offline_reason: self.offline_reason.clone(),
         }
     }
 
@@ -941,6 +949,13 @@ impl Host {
     }
 
     fn schedule_reconnect(&mut self, reason: &str) {
+        // Once per distinct failure, not once per backoff step: a
+        // wrong URL or a missing TLS backend should be one line in the
+        // log, and the same line is what status replies carry.
+        if self.offline_reason.as_deref() != Some(reason) {
+            tracing::warn!("offline: {reason}; reconnecting");
+            self.offline_reason = Some(reason.to_string());
+        }
         tracing::debug!("reconnect in {:?}: {reason}", self.backoff);
         let jitter = Duration::from_millis(rand::random::<u64>() % 250);
         self.next_connect = Instant::now() + self.backoff + jitter;
@@ -952,6 +967,7 @@ impl Host {
         let next = DaemonStatus {
             online: self.is_online(),
             last_synced_at: self.session.last_synced_at(),
+            offline_reason: self.offline_reason.clone(),
             last_contiguous_seq: self.session.engine.last_contiguous_seq(),
             connects: self.status.borrow().connects,
         };

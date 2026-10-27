@@ -37,7 +37,10 @@ gethostname = "0.5"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 rand = { workspace = true }
 rusqlite = { workspace = true }
-tokio-tungstenite = "0.24"
+# TLS for `wss://` (the hosted server); without a TLS feature every
+# secure connect fails with "TLS support not compiled in". rustls with
+# the bundled roots, matching reqwest's `rustls-tls` above.
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 http = "1"
 futures-util = "0.3"
 libc = "0.2"

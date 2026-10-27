@@ -380,6 +380,40 @@ pub enum HostError {
     Failed { message: String },
 }
 
+/// Where the embedded host's `tracing` output goes: `daemon.log` in
+/// the profile dir, the file the headless daemon's stderr is appended
+/// to, so there is one place to look on a Mac. A GUI process has no
+/// terminal, and the host's connect failures (`warn`) would otherwise
+/// vanish. `RUST_LOG` overrides the level. Set once per process; the
+/// file is reopened per write, so it survives a sign-out purge and
+/// comes back with the next profile.
+fn init_log(profile_dir: &std::path::Path) {
+    use tracing_subscriber::{EnvFilter, fmt::writer::MakeWriter};
+
+    struct Append(PathBuf);
+    impl<'a> MakeWriter<'a> for Append {
+        type Writer = Box<dyn std::io::Write + 'a>;
+        fn make_writer(&'a self) -> Self::Writer {
+            match std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.0)
+            {
+                Ok(f) => Box::new(f),
+                Err(_) => Box::new(std::io::sink()),
+            }
+        }
+    }
+
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .with_ansi(false)
+        .with_writer(Append(profile_dir.join("daemon.log")))
+        .try_init();
+}
+
 /// Sign in: what `monoplan login` does once it has the credentials,
 /// for the app's sign-in sheet. Blocks for the key derivation and two
 /// round trips, so call it off the main thread. On success the profile
@@ -463,6 +497,7 @@ impl Host {
         use monoplan_cli::{client, config::Profile, daemon};
         let profile =
             Profile::active_at(PathBuf::from(profile_dir)).ok_or(HostError::NotLoggedIn)?;
+        init_log(&profile.dir);
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), HostError>>();
         let thread = std::thread::Builder::new()

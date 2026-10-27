@@ -429,6 +429,31 @@ async fn recv_bytes(ws: &mut WsStream) -> Result<Vec<u8>, SyncError> {
 mod tests {
     use super::*;
 
+    /// `wss://` needs a TLS backend compiled into tokio-tungstenite;
+    /// without one `connect_async` opens the TCP connection and then
+    /// fails with `TlsFeatureNotEnabled`, which is how the first hosted
+    /// server (https) silently never synced. A local listener that
+    /// accepts and hangs up stands in for a server: with TLS present
+    /// the client gets as far as a handshake and is cut off.
+    #[tokio::test]
+    async fn wss_has_a_tls_backend() {
+        use tokio_tungstenite::tungstenite::{Error, error::UrlError};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                drop(stream);
+            }
+        });
+        let err = tokio_tungstenite::connect_async(format!("wss://127.0.0.1:{port}/api/sync"))
+            .await
+            .expect_err("the listener hangs up");
+        assert!(
+            !matches!(err, Error::Url(UrlError::TlsFeatureNotEnabled)),
+            "TLS backend missing: {err}"
+        );
+    }
+
     #[test]
     fn ws_url_strips_http_scheme() {
         assert_eq!(

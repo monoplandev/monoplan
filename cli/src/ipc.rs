@@ -91,7 +91,7 @@ pub enum Reply {
 /// keeps the protocol view-agnostic and coalesces bursts for free. A
 /// watcher that falls behind the daemon's event buffer is sent one
 /// `Changed` rather than the backlog, since that is all it means.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WatchEvent {
     /// The doc changed: a local command committed, or remote ops
     /// applied. Re-fetch.
@@ -104,13 +104,19 @@ pub enum WatchEvent {
 /// WebSocket keeps serving the local doc, which is right, but the
 /// one-shot `-s` used to fail loudly where the daemon succeeds quietly;
 /// this is how a client tells the difference.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncStatus {
     /// Socket up and the doc open on it right now.
     pub online: bool,
     /// Unix millis of the last completed pull/push/ack exchange, on
     /// any run of the daemon (it is persisted beside the sync cursor).
     pub last_synced_at: Option<i64>,
+    /// Why the last connect attempt failed or the socket dropped, for
+    /// a human: an embedded host has no terminal, so this is how
+    /// "offline" says what is wrong. Absent while online or before the
+    /// first attempt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offline_reason: Option<String>,
 }
 
 impl SyncStatus {
@@ -120,10 +126,14 @@ impl SyncStatus {
         if self.online {
             return None;
         }
-        Some(match self.last_synced_at {
+        let mut line = match self.last_synced_at {
             None => "offline; never synced".to_string(),
             Some(at) => format!("offline; last synced {} ago", ago(now_millis - at)),
-        })
+        };
+        if let Some(reason) = &self.offline_reason {
+            line.push_str(&format!(" ({reason})"));
+        }
+        Some(line)
     }
 }
 
@@ -250,6 +260,7 @@ mod tests {
         let sync = SyncStatus {
             online: true,
             last_synced_at: Some(5),
+            offline_reason: None,
         };
         write_frame(&mut a, &Reply::Synced { sync }).await.unwrap();
         drop(a);
@@ -261,7 +272,8 @@ mod tests {
             Reply::Synced {
                 sync: SyncStatus {
                     online: true,
-                    last_synced_at: Some(5)
+                    last_synced_at: Some(5),
+                    offline_reason: None,
                 }
             }
         ));
@@ -334,9 +346,10 @@ mod tests {
         let sync = SyncStatus {
             online: false,
             last_synced_at: Some(7),
+            offline_reason: None,
         };
         assert_eq!(
-            shape(&Reply::Watching { sync }),
+            shape(&Reply::Watching { sync: sync.clone() }),
             serde_json::json!({"Watching": {"sync": {"online": false, "last_synced_at": 7}}})
         );
         assert_eq!(
@@ -344,7 +357,7 @@ mod tests {
             serde_json::json!({"Event": "Changed"})
         );
         assert_eq!(
-            shape(&Reply::Event(WatchEvent::Sync(sync))),
+            shape(&Reply::Event(WatchEvent::Sync(sync.clone()))),
             serde_json::json!({"Event": {"Sync": {"online": false, "last_synced_at": 7}}})
         );
         assert_eq!(
@@ -361,24 +374,27 @@ mod tests {
         let online = SyncStatus {
             online: true,
             last_synced_at: None,
+            offline_reason: None,
         };
         assert!(online.offline_notice(0).is_none());
         let never = SyncStatus {
             online: false,
             last_synced_at: None,
+            offline_reason: None,
         };
         assert_eq!(never.offline_notice(0).unwrap(), "offline; never synced");
         let stale = SyncStatus {
             online: false,
             last_synced_at: Some(1_000),
+            offline_reason: Some("TLS support not compiled in".into()),
         };
         assert_eq!(
             stale.offline_notice(1_000 + 3 * 60_000).unwrap(),
-            "offline; last synced 3m ago"
+            "offline; last synced 3m ago (TLS support not compiled in)"
         );
         assert_eq!(
             stale.offline_notice(1_000 + 26 * 3_600_000).unwrap(),
-            "offline; last synced 1d ago"
+            "offline; last synced 1d ago (TLS support not compiled in)"
         );
     }
 
