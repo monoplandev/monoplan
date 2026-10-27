@@ -14,7 +14,7 @@ import MonoplanMacKit
 
 /// Where "Open Monoplan" and item rows go. The dev stack serves the web
 /// client on 5176 (see `local/process-compose.yaml`), so
-/// `MONOPLAN_WEB_URL=http://localhost:5176 bun run tray` points it there.
+/// `MONOPLAN_WEB_URL=http://localhost:5176 bun run mac` points it there.
 let webURL: URL = {
     if let raw = ProcessInfo.processInfo.environment["MONOPLAN_WEB_URL"],
        let url = URL(string: raw) {
@@ -23,9 +23,9 @@ let webURL: URL = {
     return URL(string: "https://alpha.monoplan.app")!
 }()
 
-/// `MONOPLAN_TRAY_DEBUG=1` logs every menu rebuild (connection state,
+/// `MONOPLAN_MAC_DEBUG=1` logs every menu rebuild (connection state,
 /// rows, fetch error) so the tray can be checked from a terminal.
-let debug = ProcessInfo.processInfo.environment["MONOPLAN_TRAY_DEBUG"] == "1"
+let debug = ProcessInfo.processInfo.environment["MONOPLAN_MAC_DEBUG"] == "1"
 
 final class TrayController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem

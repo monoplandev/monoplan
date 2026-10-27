@@ -60,7 +60,7 @@ iOS cannot run a daemon, so the iOS app embeds core as a full host.
 Decided 2026-10-26: the menubar item and the macOS window app are one
 process (accessory activation policy, status item always present, window
 on demand), not two; the daemon makes this a packaging choice only. It
-lives in `apple/MonoplanMac/` (`bun run tray`).
+lives in `apple/MonoplanMac/` (`bun run mac`).
 
 **Amended 2026-10-27: on macOS the normal path is one process.** The
 app hosts the doc in-process: the same Rust host loop, split into

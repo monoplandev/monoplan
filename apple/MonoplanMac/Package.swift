@@ -14,7 +14,7 @@
 // Two targets so the protocol code is testable without AppKit:
 // `MonoplanMacKit` (MessagePack codec, daemon client, agenda model) and
 // the `MonoplanMac` executable (status item, menu). Run from the repo root
-// with `bun run tray`; `swift test --package-path apple/MonoplanMac` runs
+// with `bun run mac`; `swift test --package-path apple/MonoplanMac` runs
 // the codec and model tests.
 
 import PackageDescription

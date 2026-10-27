@@ -15,7 +15,7 @@
 # that name them.
 #
 # Usage: apple/MonoplanMac/build-app.sh [-c debug|release]  (default debug)
-# Run from anywhere: `bun run tray` builds this and launches the binary
+# Run from anywhere: `bun run mac` builds this and launches the binary
 # inside the bundle, so dev runs carry the icon too and stderr stays
 # attached.
 
