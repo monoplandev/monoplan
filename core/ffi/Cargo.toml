@@ -16,15 +16,9 @@ name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
 
 [dependencies]
-monoplan-core = { path = "../../core" }
-monoplan-storage-sqlite = { path = "../../crates/storage-sqlite" }
 # The host loop (`Host` below): the CLI crate's daemon, embedded.
 monoplan = { path = "../../cli" }
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
 uniffi = { version = "0.32", features = ["cli"] }
-uuid = { workspace = true }
 thiserror = { workspace = true }
-
-[dev-dependencies]
-tempfile = "3"

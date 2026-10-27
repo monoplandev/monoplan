@@ -1880,14 +1880,10 @@ name = "monoplan-ffi"
 version = "0.0.1-alpha.15"
 dependencies = [
  "monoplan",
- "monoplan-core",
- "monoplan-storage-sqlite",
- "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tracing-subscriber",
  "uniffi",
- "uuid",
 ]
 
 [[package]]

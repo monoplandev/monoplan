@@ -1,5 +1,17 @@
 # Swift FFI prototype — Layers 1 & 2 (Rust FFI crate + SwiftPM package)
 
+Status: built, then superseded. Milestones 0 and 2 to 4 stand: the
+`crates/storage-sqlite` hoist, `apple/build-xcframework.sh`, the
+`MonoplanCore` SwiftPM package and `apple/README.md`. Milestone 1's
+`MonoplanStore` object (plus its `ItemView` / `ListView` records,
+`MonoplanError` and `generate_dek`) was removed on 2026-10-27: it booted
+a second doc under a fake doc id with a caller-held DEK and never saw the
+account's doc or sync, and nothing but its smoke test used it. The FFI
+crate now exports the profile lifecycle only (`login`, `logout`, `Host`;
+`spec/daemon-plan.md`, amendment 2026-10-27). In-process doc access for
+the native clients is the next plan, and it hangs off `Host`, not a
+store. The rest of this file is kept as the record of the build pipeline.
+
 Goal: prove the Rust↔Swift FFI boundary on macOS with an offline
 capture/read round-trip, packaged so an Xcode app (layer 3, out of scope
 here) can consume it as a local SwiftPM dependency.
