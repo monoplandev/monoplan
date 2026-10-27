@@ -115,6 +115,13 @@ impl Profile {
         Ok(Some(Self::new(dir)))
     }
 
+    /// `active()` for an explicit directory: the embedded host
+    /// (`monoplan-ffi`) is handed the profile path by the app rather
+    /// than reading `MONOPLAN_DATA_DIR`.
+    pub fn active_at(dir: PathBuf) -> Option<Self> {
+        dir.join(SECRETS_FILE).exists().then(|| Self::new(dir))
+    }
+
     pub fn require_active() -> Result<Self, ConfigError> {
         Self::active()?.ok_or(ConfigError::NotLoggedIn)
     }

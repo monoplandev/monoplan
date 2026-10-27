@@ -42,7 +42,7 @@ final class DaemonClientTests: XCTestCase {
         let sync: MPValue = .map(["online": .bool(true), "last_synced_at": .int(99)])
         XCTAssertEqual(
             try Reply.parse(.map(["Hello": .map(["build_id": .string("b"), "pid": .int(4), "sync": sync])])),
-            .hello(buildId: "b", pid: 4, sync: SyncStatus(online: true, lastSyncedAt: 99))
+            .hello(buildId: "b", pid: 4, embedded: false, sync: SyncStatus(online: true, lastSyncedAt: 99))
         )
         XCTAssertEqual(try Reply.parse(.map(["Event": .string("Changed")])), .event(.changed))
         XCTAssertEqual(

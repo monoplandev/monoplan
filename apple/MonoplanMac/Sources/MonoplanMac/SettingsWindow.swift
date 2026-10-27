@@ -10,14 +10,15 @@
 // a regular app is reserved for a real window later.
 
 import AppKit
+import ServiceManagement
 import SwiftUI
 import MonoplanMacKit
 
 final class SettingsWindowController: NSWindowController {
     private let model: AccountModel
 
-    init(location: ProfileLocation, client: DaemonClient) {
-        model = AccountModel(location: location, client: client)
+    init(location: ProfileLocation, client: DaemonClient, isHosting: @escaping () -> Bool) {
+        model = AccountModel(location: location, client: client, isHosting: isHosting)
         // The toolbar tab style: AppKit builds the toolbar from the tab
         // items (one icon + label each) and, with the `.preference`
         // toolbar style, draws it as the full-height icon surface every
@@ -35,7 +36,7 @@ final class SettingsWindowController: NSWindowController {
         window.styleMask = [.titled, .closable]
         window.toolbarStyle = .preference
         window.isReleasedWhenClosed = false
-        window.setContentSize(NSSize(width: 460, height: 260))
+        window.setContentSize(NSSize(width: 460, height: 320))
         window.center()
         super.init(window: window)
     }
@@ -70,13 +71,21 @@ final class AccountModel: ObservableObject {
     @Published var profilePath: String
     @Published var daemonLine: String = "Not connected"
     @Published var syncLine: String = "—"
+    @Published var openAtLogin = false
+    @Published var loginError: String?
+    @Published var cliLine: String = "—"
+    @Published var cliError: String?
+    /// nil when there is no bundled binary to link to (a `swift run`).
+    let cli: CommandLineLink? = bundledBinary().map { CommandLineLink(target: $0) }
+    private let isHosting: () -> Bool
 
     private let location: ProfileLocation
     private let client: DaemonClient
 
-    init(location: ProfileLocation, client: DaemonClient) {
+    init(location: ProfileLocation, client: DaemonClient, isHosting: @escaping () -> Bool) {
         self.location = location
         self.client = client
+        self.isHosting = isHosting
         profilePath = location.dir.path
         refresh()
     }
@@ -84,13 +93,24 @@ final class AccountModel: ObservableObject {
     func refresh() {
         serverURL = location.serverURL ?? "—"
         signedIn = location.isSignedIn
+        openAtLogin = SMAppService.mainApp.status == .enabled
+        if let cli {
+            switch cli.state {
+            case .installed: cliLine = "Installed · \(cli.link)"
+            case .other(let what): cliLine = "\(cli.link) → \(what)"
+            case .missing: cliLine = "Not installed"
+            }
+        } else {
+            cliLine = "No bundled binary (run the built app)"
+        }
         switch client.state {
         case .connecting(let reason):
             daemonLine = "Not connected · \(reason)"
             syncLine = "—"
         case .connected(let sync):
             if let d = client.daemon {
-                daemonLine = "Running · pid \(d.pid) · build \(d.buildId)"
+                let who = isHosting() ? "this app" : (d.embedded ? "another Monoplan app" : "headless daemon")
+                daemonLine = "Running · \(who) · pid \(d.pid) · build \(d.buildId)"
             } else {
                 daemonLine = "Running"
             }
@@ -114,6 +134,31 @@ final class AccountModel: ObservableObject {
     func revealProfile() {
         NSWorkspace.shared.activateFileViewerSelecting([location.dir])
     }
+
+    /// System Settings › Login Items, through the app's own identity:
+    /// no launchd plist. Only works from an .app bundle.
+    func setOpenAtLogin(_ on: Bool) {
+        do {
+            if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+            loginError = nil
+        } catch {
+            loginError = error.localizedDescription
+        }
+        refresh()
+    }
+
+    /// Symlink the bundled CLI onto PATH, at the app's version so its
+    /// hello is accepted.
+    func installCLI() {
+        guard let cli else { return }
+        do {
+            try cli.install()
+            cliError = nil
+        } catch {
+            cliError = error.localizedDescription
+        }
+        refresh()
+    }
 }
 
 struct AccountPane: View {
@@ -125,6 +170,27 @@ struct AccountPane: View {
             LabeledContent("Status", value: model.statusLine)
             LabeledContent("Daemon", value: model.daemonLine)
             LabeledContent("Sync", value: model.syncLine)
+            Toggle("Open at login", isOn: Binding(
+                get: { model.openAtLogin },
+                set: { model.setOpenAtLogin($0) }
+            ))
+            if let error = model.loginError {
+                Text(error).font(.footnote).foregroundStyle(.red)
+            }
+            LabeledContent("Command line") {
+                HStack {
+                    Text(model.cliLine)
+                        .truncationMode(.middle)
+                        .lineLimit(1)
+                        .foregroundStyle(.secondary)
+                    if let cli = model.cli, cli.state != .installed {
+                        Button("Install") { model.installCLI() }
+                    }
+                }
+            }
+            if let error = model.cliError {
+                Text(error).font(.footnote).foregroundStyle(.red)
+            }
             LabeledContent("Profile") {
                 HStack {
                     Text(model.profilePath)
@@ -134,7 +200,7 @@ struct AccountPane: View {
                     Button("Reveal") { model.revealProfile() }
                 }
             }
-            Text("Sign in and sign out are done from the command line for now (`monoplan login` / `monoplan logout`).")
+            Text("Sign in and sign out are done from the command line for now (`monoplan login` / `monoplan logout`); quit Monoplan first, it holds the profile while it runs.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

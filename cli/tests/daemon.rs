@@ -261,3 +261,76 @@ async fn watcher_hears_sync_local_and_remote_changes() {
 
     handle.shutdown().await.unwrap();
 }
+
+/// The app-hosted rules of the 2026-10-27 amendment: an embedded host
+/// says so in its hello, refuses `Shutdown` (so `daemon stop`, `logout`
+/// and friends stop at the process boundary), and still serves doc
+/// commands; only the app's own handle ends it.
+#[tokio::test]
+async fn embedded_host_refuses_shutdown_but_serves_commands() {
+    let server = TestServer::start().await;
+    let signup = signup_account(&server, "embedded-a").await;
+    let tmp = tempfile::tempdir().unwrap();
+    let profile = materialize_profile(
+        tmp.path(),
+        &server.base,
+        &signup.account_id,
+        &signup.primary_doc_id,
+        &signup.device_id,
+        &signup.device_token,
+        &signup.dek,
+        &signup.email,
+        true,
+    )
+    .await;
+    let handle = daemon::spawn_with(profile, true).await.unwrap();
+
+    let mut stream = UnixStream::connect(ipc::socket_path(tmp.path()))
+        .await
+        .unwrap();
+    write_frame(
+        &mut stream,
+        &Request::Hello {
+            build_id: "some-other-build".into(),
+        },
+    )
+    .await
+    .unwrap();
+    expect_frame(&mut stream, "embedded hello", |r| {
+        matches!(r, Reply::Hello { embedded: true, .. })
+    })
+    .await;
+
+    write_frame(&mut stream, &Request::Shutdown).await.unwrap();
+    expect_frame(
+        &mut stream,
+        "refusal",
+        |r| matches!(r, Reply::Err { message } if message == daemon::APP_HOSTED),
+    )
+    .await;
+    assert!(daemon::is_running(tmp.path()).unwrap(), "still hosting");
+
+    // The CLI's stop path surfaces the refusal rather than waiting.
+    let err = monoplan_cli::client::stop_if_running(tmp.path())
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("Monoplan.app"), "{err}");
+
+    // Doc commands are unaffected.
+    write_frame(
+        &mut stream,
+        &Request::Doc(DocCmd::Add {
+            list: LIST_INBOX.to_string(),
+            texts: vec!["from the cli".into()],
+        }),
+    )
+    .await
+    .unwrap();
+    expect_frame(&mut stream, "add output", |r| {
+        matches!(r, Reply::Output { .. })
+    })
+    .await;
+
+    handle.shutdown().await.unwrap();
+    assert!(!daemon::is_running(tmp.path()).unwrap());
+}

@@ -7,7 +7,7 @@
 //
 // Lifecycle: `start()` connects, with a capped backoff while nothing
 // listens. If no daemon holds the profile's `daemon.lock`, one is
-// started the way the CLI does it (`monoplan daemon --detach`), when a
+// started in-process by the app's host controller (`hostProvider`), when a
 // `monoplan` binary can be found. All callbacks run on `queue`.
 
 import Foundation
@@ -81,7 +81,7 @@ public enum WatchEvent: Equatable {
 }
 
 public enum Reply: Equatable {
-    case hello(buildId: String, pid: Int64, sync: SyncStatus)
+    case hello(buildId: String, pid: Int64, embedded: Bool, sync: SyncStatus)
     case output(stdout: String, sync: SyncStatus)
     case watching(sync: SyncStatus)
     case account(accountId: String, email: String, deviceId: String)
@@ -100,7 +100,7 @@ public enum Reply: Equatable {
         case "Hello":
             if let id = body["build_id"]?.stringValue, let pid = body["pid"]?.intValue,
                let sync = SyncStatus.from(body["sync"]) {
-                return .hello(buildId: id, pid: pid, sync: sync)
+                return .hello(buildId: id, pid: pid, embedded: body["embedded"]?.boolValue ?? false, sync: sync)
             }
         case "Output":
             if let out = body["stdout"]?.stringValue, let sync = SyncStatus.from(body["sync"]) {
@@ -233,6 +233,9 @@ public final class DaemonClient {
     public struct DaemonInfo: Equatable {
         public let buildId: String
         public let pid: Int64
+        /// The host loop runs inside a GUI process (this app, or
+        /// another copy of it) rather than a headless `monoplan daemon`.
+        public let embedded: Bool
     }
 
     public var onEvent: ((WatchEvent) -> Void)?
@@ -248,8 +251,12 @@ public final class DaemonClient {
     private var connection: NWConnection?
     private var pending: [(Result<Reply, Error>) -> Void] = []
     private var backoff: TimeInterval = 1
-    private var lastSpawnAttempt: Date = .distantPast
     private var stopped = false
+    /// Consulted whenever the socket is down. The app's host controller
+    /// starts the in-process host here and returns what to show while
+    /// that happens; nil means "show the socket error". Without one
+    /// (tests) the client only reconnects.
+    public var hostProvider: (() -> String?)?
 
     public init(location: ProfileLocation, queue: DispatchQueue = .main) {
         self.location = location
@@ -266,6 +273,14 @@ public final class DaemonClient {
         connection?.cancel()
         connection = nil
         fail(all: ClientError.closed)
+    }
+
+    /// Connect now instead of waiting out the backoff: the host just
+    /// came up, so the socket exists.
+    public func poke() {
+        guard !stopped, connection == nil else { return }
+        backoff = 1
+        connect()
     }
 
     /// One request, replied to in order. Fails immediately when there
@@ -314,11 +329,11 @@ public final class DaemonClient {
         // enforce a match.
         pending.append { [weak self] result in
             guard let self else { return }
-            guard case .success(.hello(let buildId, let pid, _)) = result else {
+            guard case .success(.hello(let buildId, let pid, let embedded, _)) = result else {
                 self.dropConnection(reason: "bad hello")
                 return
             }
-            self.daemon = DaemonInfo(buildId: buildId, pid: pid)
+            self.daemon = DaemonInfo(buildId: buildId, pid: pid, embedded: embedded)
             self.pending.append { [weak self] result in
                 guard let self else { return }
                 guard case .success(.watching(let sync)) = result else {
@@ -333,15 +348,22 @@ public final class DaemonClient {
         readFrame(conn)
     }
 
+    /// No socket to connect to means nothing is hosting; say that
+    /// rather than quoting the ENOENT the framework wraps it in.
+    private static func describe(_ error: NWError, socket: String) -> String {
+        if case .posix(.ENOENT) = error { return "nothing hosting the profile" }
+        return error.localizedDescription
+    }
+
     private func dropConnection(reason: String) {
         connection?.cancel()
         connection = nil
         daemon = nil
         fail(all: ClientError.closed)
         if stopped { return }
-        // A spawn problem is the more useful headline than the socket
-        // error it caused.
-        state = .connecting(maybeSpawnDaemon() ?? reason)
+        // What the host controller is doing about it is the more
+        // useful headline than the socket error.
+        state = .connecting(hostProvider?() ?? reason)
         let delay = backoff
         backoff = min(backoff * 2, 10)
         queue.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -425,71 +447,4 @@ public final class DaemonClient {
         }
     }
 
-    // MARK: Spawning
-
-    /// No socket to connect to means the daemon is not up; say that
-    /// rather than quoting the ENOENT the framework wraps it in.
-    private static func describe(_ error: NWError, socket: String) -> String {
-        if case .posix(.ENOENT) = error { return "not started" }
-        return error.localizedDescription
-    }
-
-    /// Start a daemon the way the CLI would, at most once per backoff
-    /// window, and only when nothing holds the lock. Readiness is not
-    /// awaited: the connect loop retries and picks it up. Returns a
-    /// reason when it could not even try, for the menu to show.
-    private func maybeSpawnDaemon() -> String? {
-        guard !location.daemonIsRunning(),
-              Date().timeIntervalSince(lastSpawnAttempt) > 5
-        else { return nil }
-        guard let bin = Self.findBinary() else {
-            return "no monoplan binary to start it"
-        }
-        lastSpawnAttempt = Date()
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: bin)
-        proc.arguments = ["daemon", "--detach"]
-        var env = ProcessInfo.processInfo.environment
-        env["MONOPLAN_DATA_DIR"] = location.dir.path
-        proc.environment = env
-        proc.standardInput = FileHandle.nullDevice
-        proc.standardOutput = FileHandle.nullDevice
-        if let log = try? FileHandle(forWritingTo: URL(fileURLWithPath: location.dir.path + "/daemon.log")) {
-            log.seekToEndOfFile()
-            proc.standardError = log
-        } else {
-            proc.standardError = FileHandle.nullDevice
-        }
-        do {
-            try proc.run()
-            NSLog("MonoplanMac: started %@ daemon --detach (pid %d)", bin, proc.processIdentifier)
-            return nil
-        } catch {
-            NSLog("MonoplanMac: could not start %@: %@", bin, error.localizedDescription)
-            return "could not start \(bin): \(error.localizedDescription)"
-        }
-    }
-
-    /// `MONOPLAN_BIN`, then the copy `build-app.sh` puts beside this
-    /// executable in the .app bundle (spec/daemon-plan.md: the macOS
-    /// app bundles the binary), then the usual install spots, then a
-    /// debug build in the current directory (running from the repo).
-    public static func findBinary(
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        executable: URL? = Bundle.main.executableURL
-    ) -> String? {
-        var candidates: [String] = []
-        if let bin = environment["MONOPLAN_BIN"], !bin.isEmpty { candidates.append(bin) }
-        if let executable {
-            candidates.append(executable.deletingLastPathComponent().appendingPathComponent("monoplan").path)
-        }
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        candidates += [
-            home + "/.cargo/bin/monoplan",
-            "/opt/homebrew/bin/monoplan",
-            "/usr/local/bin/monoplan",
-            FileManager.default.currentDirectoryPath + "/target/debug/monoplan",
-        ]
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
-    }
 }

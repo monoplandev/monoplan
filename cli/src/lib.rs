@@ -8,5 +8,6 @@ pub mod ipc;
 pub mod keystore;
 pub mod net;
 pub mod peer;
+pub mod service;
 pub mod storage;
 pub mod sync;

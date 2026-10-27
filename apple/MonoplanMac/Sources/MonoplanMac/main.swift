@@ -32,6 +32,7 @@ final class TrayController: NSObject, NSMenuDelegate {
     private let menu = NSMenu()
     private let client: DaemonClient
     private let location: ProfileLocation
+    private let hostController: HostController
     private var settingsWindow: SettingsWindowController?
     private var lines: [MenuLine] = []
     private var starred: [MenuLine] = []
@@ -45,6 +46,7 @@ final class TrayController: NSObject, NSMenuDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         location = ProfileLocation.resolve()
         client = DaemonClient(location: location)
+        hostController = HostController(location: location, client: client)
         super.init()
 
         if let button = statusItem.button {
@@ -152,7 +154,7 @@ final class TrayController: NSObject, NSMenuDelegate {
 
         switch client.state {
         case .connecting(let reason):
-            addDisabled("Daemon not running · \(reason)")
+            addDisabled("Not running · \(reason)")
         case .connected:
             let noteTab = Self.noteTabLocation(for: lines + starred)
             if let fetchError {
@@ -313,7 +315,9 @@ final class TrayController: NSObject, NSMenuDelegate {
     /// same window forward rather than stacking a second.
     @objc private func openSettings() {
         if settingsWindow == nil {
-            settingsWindow = SettingsWindowController(location: location, client: client)
+            settingsWindow = SettingsWindowController(location: location, client: client, isHosting: { [weak self] in
+                self?.hostController.isHosting ?? false
+            })
         }
         settingsWindow?.show()
     }
@@ -327,11 +331,17 @@ final class TrayController: NSObject, NSMenuDelegate {
         if let url = comps.url { NSWorkspace.shared.open(url) }
     }
 
-    /// Quits this process only. The daemon is a separate process and
-    /// keeps syncing; `monoplan daemon stop` is the way to end it.
+    /// Quitting ends the host too (`applicationShouldTerminate`), which
+    /// is how to stop syncing on a Mac; the CLI starts a headless
+    /// daemon on its next command if it needs one.
     @objc private func quit() {
-        client.stop()
         NSApp.terminate(nil)
+    }
+
+    /// Persist, fold and release the profile before the process goes.
+    func shutdown() {
+        client.stop()
+        hostController.stop()
     }
 }
 
@@ -340,6 +350,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         tray = TrayController()
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        tray?.shutdown()
+        return .terminateNow
     }
 }
 

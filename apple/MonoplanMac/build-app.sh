@@ -61,6 +61,14 @@ else
 fi
 CLI="$ROOT/target/$CONFIG/monoplan"
 
+# The app links MonoplanCore (the Rust host loop) through a prebuilt
+# XCFramework. Build it when missing; after core changes, refresh it
+# yourself with `bun run build:apple` (it is release-only and slow).
+if [ ! -d "$ROOT/apple/MonoplanCore/MonoplanCoreFFI.xcframework" ]; then
+  echo ">> xcframework missing; running build-xcframework.sh"
+  "$ROOT/apple/build-xcframework.sh"
+fi
+
 echo ">> swift build ($CONFIG)"
 swift build --package-path "$PKG" -c "$CONFIG" --product MonoplanMac
 BIN="$(swift build --package-path "$PKG" -c "$CONFIG" --show-bin-path)/MonoplanMac"

@@ -61,6 +61,11 @@ const WATCH_BUFFER: usize = 64;
 
 const LOCK_FILE: &str = "daemon.lock";
 
+/// What an app-hosted profile says to `daemon stop`, `logout`, `login`,
+/// `password` and `daemon install`: the app's host ends when the app
+/// quits, and only then.
+pub const APP_HOSTED: &str = "this profile is hosted by Monoplan.app; quit it first";
+
 #[derive(Parser, Debug, Default)]
 pub struct DaemonArgs {
     #[command(subcommand)]
@@ -78,6 +83,12 @@ pub enum DaemonSub {
     Stop,
     /// Is a daemon running for this profile?
     Status,
+    /// Run the daemon at login: a launchd agent (macOS) or systemd user
+    /// unit (Linux) pointing at this executable. Idempotent; also
+    /// (re)starts it now.
+    Install,
+    /// Remove the login agent / unit and stop the daemon it runs.
+    Uninstall,
 }
 
 /// Exclusive claim that a daemon owns this profile. Same mechanism and
@@ -159,27 +170,77 @@ impl DaemonHandle {
     }
 }
 
+/// A host that owns the profile and is listening, but not yet serving:
+/// the output of [`start`], the input of [`serve`]. Split so the same
+/// loop runs as the headless daemon (`run`) and inside the macOS app
+/// (`monoplan-ffi::Host`, `spec/daemon-plan.md` amendment 2026-10-27).
+pub struct Started {
+    lock: DaemonLock,
+    listener: UnixListener,
+    session: Session,
+}
+
+/// Claim the profile, bind the socket and boot the doc. `Ok(None)` when
+/// another process holds the lock.
+pub async fn start(profile: Profile) -> anyhow::Result<Option<Started>> {
+    let Some(lock) = try_acquire(&profile.dir)? else {
+        return Ok(None);
+    };
+    let listener = bind(&profile.dir)?;
+    let session = Session::open_resident(profile).await?;
+    Ok(Some(Started {
+        lock,
+        listener,
+        session,
+    }))
+}
+
+/// Serve until `shutdown` fires or a client asks (`Request::Shutdown`).
+/// `embedded` is what the hello reports: a GUI-hosted loop that clients
+/// must not restart for staleness. Installs no signal handlers; the
+/// headless `run` does that itself.
+pub async fn serve(
+    started: Started,
+    shutdown: oneshot::Receiver<()>,
+    embedded: bool,
+) -> anyhow::Result<()> {
+    let Started {
+        lock,
+        listener,
+        session,
+    } = started;
+    eprintln!("monoplan daemon: listening, connecting to server…");
+    let (status_tx, status_rx) = watch::channel(DaemonStatus::default());
+    let (req_tx, req_rx) = mpsc::channel(16);
+    let (watch_tx, _) = broadcast::channel(WATCH_BUFFER);
+    tokio::spawn(accept_loop(
+        listener,
+        req_tx,
+        status_rx,
+        watch_tx.clone(),
+        embedded,
+    ));
+    let result = Host::new(session, lock, status_tx, req_rx, watch_tx, embedded)
+        .run(shutdown)
+        .await;
+    eprintln!("monoplan daemon: stopped");
+    Ok(result?)
+}
+
 /// `monoplan daemon` entry point.
 pub async fn run(args: DaemonArgs) -> anyhow::Result<()> {
     match args.sub {
         Some(DaemonSub::Stop) => return stop().await,
         Some(DaemonSub::Status) => return status().await,
+        Some(DaemonSub::Install) => return crate::service::install().await,
+        Some(DaemonSub::Uninstall) => return crate::service::uninstall().await,
         None => {}
     }
     let detach = args.detach;
     // Everything up to "listening" is startup; in detach mode its
     // outcome is the one line the spawning client reads from stdout.
-    let started = async {
-        let profile = Profile::require_active()?;
-        let Some(lock) = try_acquire(&profile.dir)? else {
-            return Ok::<_, anyhow::Error>(None);
-        };
-        let listener = bind(&profile.dir)?;
-        let session = Session::open_resident(profile).await?;
-        Ok(Some((lock, listener, session)))
-    }
-    .await;
-    let (lock, listener, session) = match started {
+    let started = async { start(Profile::require_active()?).await }.await;
+    let started = match started {
         Ok(Some(parts)) => parts,
         Ok(None) => {
             if detach {
@@ -198,22 +259,12 @@ pub async fn run(args: DaemonArgs) -> anyhow::Result<()> {
     if detach {
         ready_line("ready");
     }
-    eprintln!("monoplan daemon: listening, connecting to server…");
-
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     tokio::spawn(async move {
         wait_for_signal().await;
         let _ = shutdown_tx.send(());
     });
-    let (status_tx, status_rx) = watch::channel(DaemonStatus::default());
-    let (req_tx, req_rx) = mpsc::channel(16);
-    let (watch_tx, _) = broadcast::channel(WATCH_BUFFER);
-    tokio::spawn(accept_loop(listener, req_tx, status_rx, watch_tx.clone()));
-    let result = Host::new(session, lock, status_tx, req_rx, watch_tx)
-        .run(shutdown_rx)
-        .await;
-    eprintln!("monoplan daemon: stopped");
-    Ok(result?)
+    serve(started, shutdown_rx, false).await
 }
 
 /// The one line a spawning client reads. Written with the error
@@ -239,7 +290,13 @@ async fn stop() -> anyhow::Result<()> {
 async fn status() -> anyhow::Result<()> {
     let profile = Profile::require_active()?;
     if !is_running(&profile.dir)? {
-        println!("not running");
+        if crate::service::is_installed_for(&profile.dir) {
+            println!(
+                "not running  (installed; starts at login, or now with `monoplan daemon install`)"
+            );
+        } else {
+            println!("not running");
+        }
         return Ok(());
     }
     let path = ipc::socket_path(&profile.dir);
@@ -255,9 +312,17 @@ async fn status() -> anyhow::Result<()> {
         Some(Reply::Hello {
             build_id,
             pid,
+            embedded,
             sync,
         }) => {
-            let note = if build_id == ipc::build_id() {
+            let mine = ipc::build_id();
+            let note = if embedded {
+                if ipc::version_of(&build_id) == ipc::version_of(&mine) {
+                    "  (hosted by Monoplan.app; quit it to stop)"
+                } else {
+                    "  (hosted by Monoplan.app at another version; commands will refuse)"
+                }
+            } else if build_id == mine {
                 ""
             } else {
                 "  (different build; the next command restarts it)"
@@ -302,6 +367,7 @@ async fn accept_loop(
     req_tx: mpsc::Sender<Pending>,
     status: watch::Receiver<DaemonStatus>,
     watch_tx: broadcast::Sender<WatchEvent>,
+    embedded: bool,
 ) {
     loop {
         let (stream, _) = match listener.accept().await {
@@ -319,7 +385,7 @@ async fn accept_loop(
         let status = status.clone();
         let watch_tx = watch_tx.clone();
         tokio::spawn(async move {
-            if let Err(e) = serve_conn(stream, req_tx, status, watch_tx).await {
+            if let Err(e) = serve_conn(stream, req_tx, status, watch_tx, embedded).await {
                 tracing::debug!("conn: {e}");
             }
         });
@@ -345,6 +411,7 @@ async fn serve_conn(
     req_tx: mpsc::Sender<Pending>,
     status: watch::Receiver<DaemonStatus>,
     watch_tx: broadcast::Sender<WatchEvent>,
+    embedded: bool,
 ) -> anyhow::Result<()> {
     let (mut rd, mut wr) = stream.into_split();
     let (in_tx, mut in_rx) = mpsc::channel::<Request>(1);
@@ -370,6 +437,7 @@ async fn serve_conn(
                     Request::Hello { .. } => Reply::Hello {
                         build_id: ipc::build_id(),
                         pid: std::process::id(),
+                        embedded,
                         sync: status.borrow().sync(),
                     },
                     Request::Watch => {
@@ -414,6 +482,12 @@ async fn serve_conn(
 /// fast if a daemon already holds the profile. Used by tests; `run` is
 /// the binary's path.
 pub async fn spawn(profile: Profile) -> Result<DaemonHandle, SyncError> {
+    spawn_with(profile, false).await
+}
+
+/// `spawn` reporting itself as embedded (what the app's host does), to
+/// test the client-facing rules without an app.
+pub async fn spawn_with(profile: Profile, embedded: bool) -> Result<DaemonHandle, SyncError> {
     let lock = try_acquire(&profile.dir)
         .map_err(crate::peer::PeerError::Io)?
         .ok_or(SyncError::DaemonRunning)?;
@@ -428,8 +502,11 @@ pub async fn spawn(profile: Profile) -> Result<DaemonHandle, SyncError> {
         req_tx,
         status_rx.clone(),
         watch_tx.clone(),
+        embedded,
     ));
-    let task = tokio::spawn(Host::new(session, lock, status_tx, req_rx, watch_tx).run(shutdown_rx));
+    let task = tokio::spawn(
+        Host::new(session, lock, status_tx, req_rx, watch_tx, embedded).run(shutdown_rx),
+    );
     Ok(DaemonHandle {
         status: status_rx,
         shutdown: Some(shutdown_tx),
@@ -508,6 +585,7 @@ struct Host {
     /// `Sync` requests parked until the current connect attempt
     /// resolves (initial pull done, or the attempt failed).
     pending_syncs: Vec<oneshot::Sender<Reply>>,
+    embedded: bool,
 }
 
 impl Host {
@@ -517,6 +595,7 @@ impl Host {
         status: watch::Sender<DaemonStatus>,
         requests: mpsc::Receiver<Pending>,
         watchers: broadcast::Sender<WatchEvent>,
+        embedded: bool,
     ) -> Self {
         let dir = session.profile_dir().to_path_buf();
         Host {
@@ -534,6 +613,7 @@ impl Host {
             awaiting_pong: false,
             connecting: None,
             pending_syncs: Vec::new(),
+            embedded,
         }
     }
 
@@ -607,6 +687,7 @@ impl Host {
             Request::Hello { .. } => Reply::Hello {
                 build_id: ipc::build_id(),
                 pid: std::process::id(),
+                embedded: self.embedded,
                 sync: self.sync_status(),
             },
             Request::Doc(cmd) => {
@@ -656,6 +737,12 @@ impl Host {
                 Err(e) => Reply::Err {
                     message: format!("read account: {e}"),
                 },
+            },
+            // The app owns its host for its whole life (spec/daemon-plan.md
+            // amendment): management commands stop at the process
+            // boundary, so the CLI gets a refusal, not a dead app.
+            Request::Shutdown if self.embedded => Reply::Err {
+                message: APP_HOSTED.into(),
             },
             Request::Shutdown => {
                 let _ = reply.send(Reply::ShuttingDown);

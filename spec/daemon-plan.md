@@ -1,6 +1,6 @@
 # Daemon plan
 
-Status: phases 1 to 3 built 2026-10-21 (`cli/src/daemon.rs` host + socket server, `cli/src/ipc.rs`, `cli/src/client.rs`, every doc verb ported, `-s` removed, `daemon stop|status`; tests in `cli/tests/daemon.rs` and `cli/tests/cli_bin.rs`). Phase 5's projection tier built 2026-10-26 (`Watch` / `Watching` / `Event`; first watcher is the macOS menubar app in `apple/MonoplanMac`). Not built: `daemon install`, the locked state, wake notifications, the doc-mirror subscription. Written 2026-10-21. The built behaviour is documented in `spec/cli.md` "Process model"; this file keeps the reasoning and the remaining plan. Supersedes the deleted
+Status: phases 1 to 3 built 2026-10-21 (`cli/src/daemon.rs` host + socket server, `cli/src/ipc.rs`, `cli/src/client.rs`, every doc verb ported, `-s` removed, `daemon stop|status`; tests in `cli/tests/daemon.rs` and `cli/tests/cli_bin.rs`). Phase 5's projection tier built 2026-10-26 (`Watch` / `Watching` / `Event`; first watcher is the macOS menubar app in `apple/MonoplanMac`). `daemon install|uninstall` built 2026-10-27 (`cli/src/service.rs`: the headless path for Linux and CLI-only Macs). Amended 2026-10-27 (see "Decision", amendment): on macOS the app hosts the loop in-process (`monoplan-ffi::Host`, `apple/MonoplanMac/Sources/MonoplanMac/HostController.swift`) for its whole life, the headless daemon is the alternative rather than a partner, and login uses the Login Items API; the mirror tier is no longer needed for the macOS window. Not built: the locked state, wake notifications. Written 2026-10-21. The built behaviour is documented in `spec/cli.md` "Process model"; this file keeps the reasoning and the remaining plan. Supersedes the deleted
 `spec/tui-plan.md` (its "no daemon" conclusion rested on boot time,
 which is no longer the question) and answers the daemon question that
 `spec/cli.md` "Sync lifecycle" deferred.
@@ -61,6 +61,48 @@ Decided 2026-10-26: the menubar item and the macOS window app are one
 process (accessory activation policy, status item always present, window
 on demand), not two; the daemon makes this a packaging choice only. It
 lives in `apple/MonoplanMac/` (`bun run tray`).
+
+**Amended 2026-10-27: on macOS the normal path is one process.** The
+app hosts the doc in-process: the same Rust host loop, split into
+`daemon::start` / `daemon::serve` and exposed through `monoplan-ffi` as
+`Host` (a background thread with its own tokio runtime). The tray, the
+window and every future view are clients of the app's own socket, so
+the UI code path is the one the tray already had, and the window reads
+the doc through the FFI directly, which is why the mirror tier below is
+no longer needed for macOS. The headless `monoplan daemon` remains the
+host for CLI-only use, Linux and servers (`daemon install` writes the
+systemd unit or launchd agent for that path) and is what the CLI
+auto-spawns when nothing holds the profile. Rules:
+
+The app and the headless daemon are alternatives, not partners:
+management never crosses the process boundary, only doc commands do.
+
+1. The app hosts when the lock is free and the profile is signed in.
+   When something else holds the lock (a `monoplan daemon`, another
+   copy of the app) it stays a client of it, never takes over, and
+   hosts once that process is gone.
+2. The app's host ends only when the app quits. An embedded host
+   answers `Shutdown` with a refusal (`daemon::APP_HOSTED`), so
+   `daemon stop`, `logout`, `login`, `password` and `daemon install`
+   from the terminal say "quit Monoplan.app first". Sign-in and
+   sign-out in the app itself are the follow-up that makes those
+   commands unnecessary beside it.
+3. A client never restarts an embedded host for staleness. The build-id
+   check applies to headless daemons only; against an embedded host the
+   package version must match, else the command fails naming both
+   versions. The bundled CLI, symlinked onto `PATH` from Settings, is
+   how the terminal stays at the app's version.
+4. Login item is `SMAppService.mainApp` (System Settings › Login
+   Items), not a launchd agent. `daemon install` is the headless path
+   and is not used on a Mac that runs the app.
+
+Why the 2026-10-21 reasons no longer hold: "a GUI that hosts takes the
+doc down when the user quits it" is covered by the CLI's auto-spawn;
+"two implementations of one host protocol" does not arise because the
+app embeds the Rust loop rather than rewriting it; and the mirror tier
+was the larger cost, paid only to serve full-view GUI clients of an
+out-of-process host. iOS embeds core the same way, so the two Apple
+apps share one shape.
 
 ## Process topology
 
@@ -267,10 +309,15 @@ exists so the keychain move is not a protocol change.
 ## Daemon host
 
 `monoplan daemon [--detach]` (attached to the terminal without the
-flag), plus `daemon stop`, `daemon status`, and (not built) `daemon
-install` / `daemon uninstall`, which write or remove the launchd agent
-plist on macOS or the systemd user unit on Linux; both run a plain
-`monoplan daemon`.
+flag), plus `daemon stop`, `daemon status`, and `daemon install` /
+`daemon uninstall` (built 2026-10-27, `cli/src/service.rs`), which
+write or remove the launchd agent plist on macOS or the systemd user
+unit on Linux; both run a plain `monoplan daemon` from the installing
+executable's resolved path. Restart is on failure only, so `stop`
+sticks until login. The agent and the CLI should be one file on disk
+(the app bundle's copy, symlinked into `PATH`): the build-id check
+below otherwise has a rebuilt CLI replace the agent's daemon with its
+own, and the agent take over again at the next login.
 
 The host is `Session` held open instead of torn down after one command
 (`cli/src/sync.rs`). Concretely:
@@ -375,10 +422,12 @@ about the product.
    `cache clear` refuses while it runs. Phases 2 and 3 had to land
    together: once the daemon auto-starts and holds the lock, any
    un-ported one-shot verb would simply be refused.
-4. **Lifecycle** (partly built). `daemon stop|status` exist. Not built:
-   `install|uninstall`, the locked state and `Unlock`, wake
+4. **Lifecycle** (partly built). `daemon stop|status|install|uninstall`
+   exist. Not built: the locked state and `Unlock`, wake
    notifications.
-5. **Subscriptions.** Projection tier built 2026-10-26: `Watch` and
+5. **Subscriptions.** (Mirror tier dropped for macOS 2026-10-27: the
+   app hosts in-process and reads the doc through the FFI.) Projection
+   tier built 2026-10-26: `Watch` and
    `Event` fan-out from the host after local commands and remote
    frames, tested in `cli/tests/daemon.rs`
    (`watcher_hears_sync_local_and_remote_changes`), consumed by the

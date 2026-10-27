@@ -22,14 +22,14 @@ final class MonoplanCoreTests: XCTestCase {
         // First handle: capture some work.
         do {
             let store = try MonoplanStore.open(dir: dir, dek: dek)
-            _ = try store.addItem(listId: "main", text: "first")
-            doneId = try store.addItem(listId: "main", text: "second")
+            _ = try store.addItem(listId: "inbox", text: "first")
+            doneId = try store.addItem(listId: "inbox", text: "second")
             try store.setItemDone(itemId: doneId, done: true)
             groceriesId = try store.addList(name: "Groceries")
             _ = try store.addItem(listId: groceriesId, text: "milk")
 
             // itemsInList returns every non-binned item, done included.
-            let main = store.itemsInList(listId: "main")
+            let main = store.itemsInList(listId: "inbox")
             XCTAssertEqual(main.map(\.text), ["first", "second"])
             let done = try XCTUnwrap(main.first { $0.id == doneId })
             XCTAssertTrue(done.isDone)
@@ -37,7 +37,7 @@ final class MonoplanCoreTests: XCTestCase {
 
         // Second handle over the same dir + DEK: state must replay.
         let store = try MonoplanStore.open(dir: dir, dek: dek)
-        let main = store.itemsInList(listId: "main")
+        let main = store.itemsInList(listId: "inbox")
         XCTAssertEqual(main.map(\.text), ["first", "second"],
                        "items replay from disk on reopen")
         let done = try XCTUnwrap(main.first { $0.id == doneId })
@@ -62,7 +62,7 @@ final class MonoplanCoreTests: XCTestCase {
         let dek = generateDek()
         do {
             let store = try MonoplanStore.open(dir: dir, dek: dek)
-            _ = try store.addItem(listId: "main", text: "secret")
+            _ = try store.addItem(listId: "inbox", text: "secret")
         }
 
         let wrongDek = generateDek()

@@ -354,3 +354,121 @@ mod tests {
         assert_eq!(generate_dek().len(), 32);
     }
 }
+
+// ---------------------------------------------------------------------
+// Host: the daemon loop, embedded (spec/daemon-plan.md, amended
+// 2026-10-27). On macOS the normal path is one process: the app runs
+// `daemon::start` / `daemon::serve` on its own thread and its UI is a
+// client of the resulting socket, exactly as the CLI is. The headless
+// `monoplan daemon` stays for CLI-only, Linux and servers.
+// ---------------------------------------------------------------------
+
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum HostError {
+    /// No `secrets.toml` in the profile dir: nothing to host.
+    #[error("not logged in")]
+    NotLoggedIn,
+    /// Another process holds `daemon.lock`. The app then connects as a
+    /// client, reads the hello, and takes over if it is headless.
+    #[error("another process holds this profile")]
+    AlreadyRunning,
+    #[error("{message}")]
+    Failed { message: String },
+}
+
+/// One running host loop. Dropping it does *not* stop the loop; call
+/// `shutdown` (clean exit: persist, fold, close the socket, release the
+/// lock). A client's `Shutdown` request (`daemon stop`, `logout`) ends
+/// the loop too, after which `is_running` is false and the app may
+/// start a new one.
+#[derive(uniffi::Object)]
+pub struct Host {
+    shutdown: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+#[uniffi::export]
+impl Host {
+    /// Claim the profile, bind the socket, boot the doc, and serve on a
+    /// background thread. Returns once the socket is listening (or the
+    /// start failed), so call it off the main thread: booting a large
+    /// doc takes a moment.
+    #[uniffi::constructor]
+    pub fn start(profile_dir: String) -> Result<Arc<Host>, HostError> {
+        use monoplan_cli::{config::Profile, daemon};
+        let profile =
+            Profile::active_at(PathBuf::from(profile_dir)).ok_or(HostError::NotLoggedIn)?;
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), HostError>>();
+        let thread = std::thread::Builder::new()
+            .name("monoplan-host".into())
+            .spawn(move || {
+                let rt = match tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        let _ = ready_tx.send(Err(HostError::Failed {
+                            message: e.to_string(),
+                        }));
+                        return;
+                    }
+                };
+                rt.block_on(async move {
+                    let started = match daemon::start(profile).await {
+                        Ok(Some(s)) => s,
+                        Ok(None) => {
+                            let _ = ready_tx.send(Err(HostError::AlreadyRunning));
+                            return;
+                        }
+                        Err(e) => {
+                            let _ = ready_tx.send(Err(HostError::Failed {
+                                message: format!("{e:#}"),
+                            }));
+                            return;
+                        }
+                    };
+                    let _ = ready_tx.send(Ok(()));
+                    if let Err(e) = daemon::serve(started, shutdown_rx, true).await {
+                        eprintln!("monoplan host: {e:#}");
+                    }
+                });
+            })
+            .map_err(|e| HostError::Failed {
+                message: e.to_string(),
+            })?;
+        match ready_rx.recv() {
+            Ok(Ok(())) => Ok(Arc::new(Host {
+                shutdown: Mutex::new(Some(shutdown_tx)),
+                thread: Mutex::new(Some(thread)),
+            })),
+            Ok(Err(e)) => {
+                let _ = thread.join();
+                Err(e)
+            }
+            Err(_) => Err(HostError::Failed {
+                message: "host thread exited before reporting".into(),
+            }),
+        }
+    }
+
+    /// Clean exit; blocks until the loop has released the profile.
+    pub fn shutdown(&self) {
+        if let Some(tx) = self.shutdown.lock().unwrap().take() {
+            let _ = tx.send(());
+        }
+        if let Some(t) = self.thread.lock().unwrap().take() {
+            let _ = t.join();
+        }
+    }
+
+    /// Still serving? False once a client's `Shutdown` ended the loop.
+    pub fn is_running(&self) -> bool {
+        self.thread
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|t| !t.is_finished())
+    }
+}

@@ -4,9 +4,12 @@
 // spec/daemon-plan.md "Decision"): the tray and the future window app are
 // one process, and that process is a *client* of `monoplan daemon`, never
 // a host. It holds no doc: it watches the daemon's socket and re-fetches
-// the agenda projection (the projection tier in spec/daemon-plan.md), so
-// MonoplanCore (the doc mirror) is not a dependency and will only become
-// one if a window view ever needs in-process reads.
+// the agenda projection (the projection tier in spec/daemon-plan.md).
+// Amended 2026-10-27: the app *hosts* the doc in-process (`Host` from
+// MonoplanCore, the same Rust loop as `monoplan daemon`) and its UI is a
+// client of its own socket, so the UI code path is unchanged. Run
+// `bun run build:apple` once before building: MonoplanCore wraps a
+// prebuilt XCFramework.
 //
 // Two targets so the protocol code is testable without AppKit:
 // `MonoplanMacKit` (MessagePack codec, daemon client, agenda model) and
@@ -19,6 +22,9 @@ import PackageDescription
 let package = Package(
     name: "MonoplanMac",
     platforms: [.macOS(.v14)],
+    dependencies: [
+        .package(path: "../MonoplanCore"),
+    ],
     targets: [
         .target(
             name: "MonoplanMacKit",
@@ -26,7 +32,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "MonoplanMac",
-            dependencies: ["MonoplanMacKit"],
+            dependencies: ["MonoplanMacKit", "MonoplanCore"],
             path: "Sources/MonoplanMac"
         ),
         .testTarget(

@@ -66,7 +66,8 @@ pub async fn call(profile: &Profile, req: Request, spawn: Spawn) -> anyhow::Resu
 }
 
 /// Ask a running daemon to exit and wait until the profile is free.
-/// `Ok(false)` when none was running.
+/// `Ok(false)` when none was running. An app-hosted profile refuses
+/// (`daemon::APP_HOSTED`): the app's host ends when the app quits.
 pub async fn stop_if_running(profile_dir: &Path) -> anyhow::Result<bool> {
     if !daemon::is_running(profile_dir)? {
         return Ok(false);
@@ -82,7 +83,9 @@ pub async fn stop_if_running(profile_dir: &Path) -> anyhow::Result<bool> {
         .await;
         let _ = read_frame::<_, Reply>(&mut stream).await;
         let _ = write_frame(&mut stream, &Request::Shutdown).await;
-        let _ = read_frame::<_, Reply>(&mut stream).await;
+        if let Ok(Some(Reply::Err { message })) = read_frame::<_, Reply>(&mut stream).await {
+            anyhow::bail!("{message}");
+        }
     }
     wait_until_stopped(profile_dir).await?;
     Ok(true)
@@ -116,6 +119,23 @@ async fn connect(profile: &Profile, spawn: Spawn) -> anyhow::Result<UnixStream> 
                 .await?;
                 match read_frame::<_, Reply>(&mut stream).await? {
                     Some(Reply::Hello { build_id, .. }) if build_id == mine => return Ok(stream),
+                    Some(Reply::Hello {
+                        build_id,
+                        embedded: true,
+                        ..
+                    }) => {
+                        // The app hosts this profile. Its executable is
+                        // never ours, so only the version has to agree;
+                        // it is not ours to restart either way.
+                        let (theirs, ours) = (ipc::version_of(&build_id), ipc::version_of(&mine));
+                        if theirs == ours {
+                            return Ok(stream);
+                        }
+                        anyhow::bail!(
+                            "the Monoplan app is hosting this profile at version {theirs}; \
+                             this CLI is {ours}. Update one of them (or quit the app)"
+                        );
+                    }
                     Some(Reply::Hello { build_id, pid, .. }) => {
                         tracing::info!(
                             "daemon pid {pid} is build {build_id}, this is {mine}; restarting it"

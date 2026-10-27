@@ -93,11 +93,11 @@ remove a list from the workspace. The core's `delete_list` stays internal
 - `monoplan daemon --detach` — what a client runs to start it: prints one readiness line on stdout (`ready` / `already-running` / `error: …`) and keeps running; stderr goes to `daemon.log` in the profile dir.
 - `monoplan daemon stop` — ask it to exit and wait until the profile is released.
 - `monoplan daemon status` — `not running`, or `running  pid N  build B` (noting when the build differs from this executable's).
-- `monoplan daemon install` / `uninstall` — not built: launchd agent / systemd user unit.
+- `monoplan daemon install` / `uninstall` — run the daemon at login: a launchd agent (`~/Library/LaunchAgents/app.monoplan.daemon.plist`, `gui/<uid>` domain) on macOS, a systemd user unit (`~/.config/systemd/user/monoplan.service`) on Linux. Both run a plain `monoplan daemon` from this executable's resolved path, pinned to the active profile via `MONOPLAN_DATA_DIR`, stderr appended to `daemon.log`. Restart on failure only, so `daemon stop` sticks until the next login; `install` is idempotent and also (re)starts it now. Stops a hand-started daemon first so the agent's instance owns the profile. `logout` uninstalls (a purged profile would fail at every login). `daemon status` notes `installed` when stopped. This is the headless path (Linux, CLI-only Macs); on macOS the app normally hosts the profile itself (`spec/daemon-plan.md`, amendment 2026-10-27) and the two are alternatives: `install` refuses while the app hosts, and an installed agent's daemon keeps the app a mere client until it is `uninstall`ed.
 
 ## Process model
 
-One binary, two roles. `monoplan daemon` owns the profile for as long as it runs: the sqlite file, the Loro doc, the DEK, the server WebSocket, and a Unix socket in the profile dir. Every other doc command is a thin client: it connects to that socket, sends the parsed command, prints the reply, and exits. Clients never open sqlite and never hold a key.
+One binary, two roles; and on macOS a third host, the app, which runs the same loop in-process (`monoplan-ffi::Host`) and reports `embedded` in its hello. `monoplan daemon` owns the profile for as long as it runs: the sqlite file, the Loro doc, the DEK, the server WebSocket, and a Unix socket in the profile dir. Every other doc command is a thin client: it connects to that socket, sends the parsed command, prints the reply, and exits. Clients never open sqlite and never hold a key.
 
 Dispatch, at the top of `Cli::run`:
 
@@ -114,17 +114,17 @@ A client that finds `daemon.lock` held but the socket not answering is looking a
 
 `--no-spawn` (or `MONOPLAN_NO_SPAWN=1`) turns a missing daemon into an error, for scripts and CI.
 
-Every connection starts with a hello carrying a build id (package version plus the executable's mtime). A daemon from a different build is asked to shut down and restarted from the client's executable, so a rebuilt CLI never talks to a stale daemon.
+Every connection starts with a hello carrying a build id (package version plus the executable's mtime). A headless daemon from a different build is asked to shut down and restarted from the client's executable, so a rebuilt CLI never talks to a stale daemon. An embedded host (the macOS app) is never restarted: its executable is never the CLI's, so only the package version has to agree, and a mismatch fails the command naming both versions. `daemon status` says `hosted by the app` for it.
 
 ### Daemon behaviour
 
 - Holds the server WebSocket open; reconnects with capped exponential backoff (0.5 s to 30 s, jitter), pings every 30 s and treats a missed pong as a disconnect (laptop sleep). Connecting runs as its own task, so commands are served while it is in progress. Offline is a state: commands keep working against the local doc and ship when the socket returns.
 - Every reply carries whether the daemon is online and when it last completed an exchange. The CLI prints `offline; last synced 3m ago` (or `offline; never synced`) on stderr when a command was served without a server behind it, including under `--json`, whose stdout shapes are unchanged.
 - Persists on a 1 s tick and immediately after any command that mutated, so a change is on disk before the client hears back and on the wire right after. Folds the WAL at the usual thresholds, and fully on exit.
-- Exits on SIGINT/SIGTERM, on `daemon stop`, or when it notices the profile dir has been purged.
+- Exits on SIGINT/SIGTERM, on `daemon stop`, or when it notices the profile dir has been purged. The embedded host refuses `daemon stop` (and so `logout`, `login`, `password`, `daemon install`, which all stop the host first) with "hosted by Monoplan.app; quit it first": it ends when the app quits.
 - There is no idle timeout: background sync is the point.
 - `Watch` turns a connection into a watcher: the daemon replies `Watching` and then sends `Event(Changed)` whenever the doc changes (a local command committed, remote ops applied; a burst is one event) and `Event(Sync(..))` when online/offline or `last_synced_at` moves. Requests still work on a watching connection; replies and events are told apart by variant. The macOS menubar app (`apple/MonoplanMac`) is the first watcher: it re-fetches `agenda --days 0 --json` on `Changed`. No CLI verb exposes `Watch` yet.
-- Not built yet: the locked state (`Unlock` over the socket when the DEK is not readable non-interactively), `install`, wake notifications, and the doc-mirror subscription for full-view clients (`spec/daemon-plan.md`).
+- Not built yet: the locked state (`Unlock` over the socket when the DEK is not readable non-interactively), wake notifications, and the doc-mirror subscription for full-view clients (`spec/daemon-plan.md`).
 
 ## Local state
 

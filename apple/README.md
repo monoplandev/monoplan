@@ -53,57 +53,72 @@ won't compile without those outputs present.
 
 ## MonoplanMac — the menubar app
 
-`apple/MonoplanMac/` is a SwiftPM package: the macOS status-item app.
-Per `spec/daemon-plan.md` it is a *client* of `monoplan daemon`, never a
-host, and the tray and the future window app are one process. It holds
-no doc and does not depend on `MonoplanCore`: it connects to the
-daemon's Unix socket, sends `Watch`, and re-fetches
-`agenda --days 0 --json` whenever the daemon reports a change, once a
-minute, and when the menu opens. The menu shows Today's rows (time,
-title, "in 2h 15m" / "now" / "due today" / "overdue"; a row opens the
-item in the web client), a Starred section with the first three rows of
-the Focus lens (`starred --json`) each with its list's name muted on the
-right (`lists ls --json --all`), an offline notice when the daemon has no
-server, "Open Monoplan" (alpha.monoplan.app) and "Quit Monoplan" (the
-daemon keeps running).
+`apple/MonoplanMac/` is a SwiftPM package: the macOS status-item app, and
+on macOS the normal host of the profile (`spec/daemon-plan.md`,
+amendment 2026-10-27). One process: it runs the Rust host loop
+in-process (`Host` from `MonoplanCore`, the same loop as `monoplan
+daemon`) on a background thread, and its tray is a client of its own
+socket, so the UI is exactly the client it was. It connects, sends
+`Watch`, and re-fetches `agenda --days 0 --json` whenever the host
+reports a change, once a minute, and when the menu opens. The menu shows
+Today's rows (time, title, "in 2h 15m" / "now" / "due today" /
+"overdue"; a row opens the item in the web client), a Starred section
+with the first three rows of the Focus lens (`starred --json`) each with
+its list's name muted on the right (`lists ls --json --all`), an offline
+notice when there is no server, "Open Monoplan" (alpha.monoplan.app),
+"Settings…" and "Quit Monoplan" (which stops the host: persist, fold,
+release the profile).
 
-Two targets: `MonoplanMacKit` (MessagePack codec for the subset
+Hosting rules (`Sources/MonoplanMac/HostController.swift`): host when
+nothing holds the lock and the profile is signed in; if something else
+holds it (a `monoplan daemon`, another copy of the app) stay a client of
+it and host once it is gone; never take over. The app's host ends only
+when the app quits: it refuses `Shutdown`, so `daemon stop`, `logout`,
+`login` and `password` in the terminal say "quit Monoplan.app first".
+Doc commands from the CLI work against the app's host; it is never
+restarted as stale, its hello only has to match the app's package
+version, which the bundled CLI symlinked onto `PATH` guarantees.
+
+Three targets: `MonoplanMacKit` (MessagePack codec for the subset
 `rmp_serde::to_vec_named` emits, the socket client, the agenda model;
-unit-tested) and the `MonoplanMac` executable (AppKit). The wire shape
-it hand-encodes is pinned on the Rust side by
-`wire_shape_is_named_maps_and_bare_unit_variants` in `cli/src/ipc.rs`.
+unit-tested, no MonoplanCore dependency), the `MonoplanMac` executable
+(AppKit, the host controller) and `MonoplanCore` (the prebuilt
+XCFramework). The wire shape it hand-encodes is pinned on the Rust side
+by `wire_shape_is_named_maps_and_bare_unit_variants` in `cli/src/ipc.rs`.
 
 ```sh
+bun run build:apple                                   # once, and after core changes: the XCFramework the app links
 bun run tray                                          # build Monoplan.app (debug) and run the binary inside it
 bun run tray:app                                      # build Monoplan.app (release) and `open` it
-swift test --package-path apple/MonoplanMac           # codec / model tests, no daemon needed
+swift test --package-path apple/MonoplanMac           # codec / model tests, no host needed
 MONOPLAN_WEB_URL=http://localhost:5176 bun run tray   # point links at the dev stack
 MONOPLAN_DATA_DIR=local/cli bun run tray              # a different profile, same rule as the CLI
 MONOPLAN_TRAY_DEBUG=1 bun run tray                    # log state and rows to stderr
 ```
 
-If no daemon holds the profile, the tray starts one like the CLI does
-(`monoplan daemon --detach`), using `MONOPLAN_BIN`, then the copy
-bundled beside its own executable, then `~/.cargo/bin`,
-`/opt/homebrew/bin`, `/usr/local/bin`, then `./target/debug/monoplan`
-when run from the repo. When none exists the menu says so ("no monoplan
-binary to start it"). It cannot judge build
-staleness (it is not built from the daemon's sources); the CLI still
-restarts a stale daemon on its next command.
-
 `apple/MonoplanMac/build-app.sh` lays out `apple/MonoplanMac/.build/Monoplan.app`
-(gitignored): the SwiftPM binary, the `monoplan` CLI beside it in
-`Contents/MacOS` (built by cargo in the same configuration; the tray
-starts the daemon from that copy first, so an installed app needs no
-cargo-installed CLI), an Info.plist (`app.monoplan.mac`, `LSUIElement`,
-version from the workspace `Cargo.toml`), ad-hoc signatures, and the app
-icon. The icon is the Icon Composer document
+(gitignored): the SwiftPM binary (which links MonoplanCore; the script
+runs `build-xcframework.sh` when the XCFramework is missing), the
+`monoplan` CLI beside it in `Contents/MacOS` (built by cargo in the same
+configuration, for the terminal), an Info.plist (`app.monoplan.mac`,
+`LSUIElement`, version from the workspace `Cargo.toml`), ad-hoc
+signatures, and the app icon. The icon is the Icon Composer document
 `apple/icon.icon`; `actool` compiles it straight from that file into
 `Assets.car` (the layered icon macOS 26 renders) and `icon.icns` (the
 flat fallback for macOS 14 and 15). Edit the icon in Icon Composer and
 rebuild; nothing else references it. `bun run tray` runs the binary
-*inside* the bundle rather than `swift run`, so dev runs show the icon in
-Finder, Login Items and Force Quit while stderr stays on the terminal.
-The menu bar glyph is separate: a template image drawn in `main.swift`.
+*inside* the bundle rather than `swift run`, so dev runs show the icon
+in Finder, Login Items and Force Quit while stderr stays on the
+terminal. The menu bar glyph is separate: a template image drawn in
+`main.swift`.
 
-Next: login-item registration; then the window.
+Settings: Account (server, status, host, sync), an "Open at login"
+toggle (`SMAppService.mainApp`, which lists the app under System
+Settings › Login Items; works only from an .app bundle), and a
+"Command line" row whose Install button symlinks `/usr/local/bin/monoplan`
+to the bundled binary (admin prompt if the directory is root's). The
+launchd agent from `monoplan daemon install` is the headless
+alternative: while its daemon runs, the app is only a client of it, so
+`monoplan daemon uninstall` before switching to the app.
+
+Next: the window.
