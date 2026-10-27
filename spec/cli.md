@@ -6,16 +6,16 @@ Primary CLI client. Also the integration test surface for everything below the G
 
 Single binary `monoplan`. Subcommands:
 
-### Account
-- `monoplan signup [--server URL]` — interactive: email, password, recovery code shown once and typed back
-- `monoplan login [--server URL]` — interactive: email, password. `--server` defaults to `https://alpha.monoplan.app` (or `MONOPLAN_SERVER`); the dev stack is `MONOPLAN_SERVER=http://127.0.0.1:8000`. The body is `login::login`, shared with the app's sign-in sheet (`monoplan-ffi::login`)
-- `monoplan logout`
-- `monoplan recover` — interactive: email, recovery code, set new password
-- `monoplan password` — change password (logged in)
+### Account (`monoplan auth …`)
+- `monoplan auth signup [--server URL]` — interactive: email, password, recovery code shown once and typed back
+- `monoplan auth login [--server URL]` — interactive: email, password. `--server` defaults to `https://alpha.monoplan.app` (or `MONOPLAN_SERVER`); the dev stack is `MONOPLAN_SERVER=http://127.0.0.1:8000`. The body is `login::login`, shared with the app's sign-in sheet (`monoplan-ffi::login`)
+- `monoplan auth logout`
+- `monoplan auth recover` — interactive: email, recovery code, set new password
+- `monoplan auth password` — change password (logged in)
 
 ### Devices
-- `monoplan devices` — list
-- `monoplan devices revoke <device_id>`
+- `monoplan auth devices` — list
+- `monoplan auth devices revoke <device_id>`
 
 ### Sharing
 - `monoplan share link <doc_id> [--expires-days N]` — print a single-use invite link for a workspace you own (`<server>/#invite_<secret>`; shown once, the server cannot rebuild it). Refused for the Personal workspace.
@@ -134,7 +134,7 @@ Single account per install. One dir under XDG paths (`~/.local/share/monoplan/` 
 - `daemon.lock` — flock held by the running daemon (never unlinked; see `spec/peer-id-plan.md` for the rules). `peer-<n>.lock` — the peer-id slot leases.
 - `daemon.sock` — the daemon's Unix socket (mode 0600; falls back to a hash-named socket in the temp dir when the profile path is too long for `sun_path`). `daemon.log` — stderr of a detached daemon.
 - `config.toml` — `{ server_url }`. Bootstrap input (needed before the db exists); operator-editable.
-- `secrets.toml` — `device_token` plus one `[docs."<doc_id>"] dek_hex = "…"` table per doc the account is a member of, in cleartext. The DEK is a doc key (`encryption.md`): login/recover store one entry per membership (the primary's unwrapped with the password or recovery KEK, the rest with the primary's DEK — the Home DEK); `monoplan password` re-wraps only the primary entry, since every other server-side wrap is under the Home DEK. Also the "logged in" marker: its presence is what `monoplan status`/commands gate on.
+- `secrets.toml` — `device_token` plus one `[docs."<doc_id>"] dek_hex = "…"` table per doc the account is a member of, in cleartext. The DEK is a doc key (`encryption.md`): login/recover store one entry per membership (the primary's unwrapped with the password or recovery KEK, the rest with the primary's DEK — the Home DEK); `monoplan auth password` re-wraps only the primary entry, since every other server-side wrap is under the Home DEK. Also the "logged in" marker: its presence is what `monoplan status`/commands gate on.
 
 Secrets in OS keychain (`security` on macOS, `libsecret` on linux):
 - `monoplan:<account_id>:token` — device auth token
@@ -146,7 +146,7 @@ Recovery code is **never** persisted by the client — shown once at signup, use
 
 ### First device
 ```
-$ monoplan signup
+$ monoplan auth signup
 Server: https://monoplan.example
 Email: dan@example.com
 Password: ********
@@ -157,7 +157,7 @@ Done. Doc initialized.
 
 ### Second device
 ```
-$ monoplan login
+$ monoplan auth login
 Server: https://monoplan.example
 Email: dan@example.com
 Password: ********
@@ -168,7 +168,7 @@ Done.
 
 ### Recovery
 ```
-$ monoplan recover
+$ monoplan auth recover
 Server: https://monoplan.example
 Email: dan@example.com
 Recovery code (12 words): ...

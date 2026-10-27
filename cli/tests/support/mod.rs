@@ -44,7 +44,7 @@ pub struct LoggedInDevice {
     /// The Home DEK (primary doc).
     pub dek: Dek,
     /// Every membership's key, server order, primary first — what
-    /// `monoplan login` writes to `secrets.toml`.
+    /// `monoplan auth login` writes to `secrets.toml`.
     pub doc_keys: Vec<(DocId, Dek)>,
     pub recovery_present: bool,
 }
@@ -248,7 +248,7 @@ pub async fn login_device(
     let device = resp
         .device
         .ok_or_else(|| anyhow::anyhow!("login did not mint a device credential"))?;
-    // Mirror `monoplan login`: the primary membership opens with the
+    // Mirror `monoplan auth login`: the primary membership opens with the
     // KEK (Home DEK), every other membership opens with the Home DEK.
     let primary_doc_id = parse_doc_id(&resp.primary_doc_id)?;
     let dek = unwrap_home(&kek, primary_doc_id, &resp.memberships)?;
@@ -375,7 +375,7 @@ pub async fn recover_device(
             },
         )
         .await?;
-    // Mirror `monoplan recover`: the one recovered key is the Home DEK;
+    // Mirror `monoplan auth recover`: the one recovered key is the Home DEK;
     // re-wrap it alone for the reset, then learn the other docs from
     // `GET /api/docs` and open them with the Home DEK.
     let dek = recovered
@@ -450,7 +450,7 @@ pub async fn register_device(
     rmp_serde::from_slice(&resp.bytes().await.unwrap()).unwrap()
 }
 
-/// Stand up the on-disk profile a real `monoplan signup` would have
+/// Stand up the on-disk profile a real `monoplan auth signup` would have
 /// written. Constructed directly under `data_dir` so each test owns
 /// its profile and parallel runs don't race on `MONOPLAN_DATA_DIR`.
 pub async fn materialize_profile(

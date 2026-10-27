@@ -79,7 +79,7 @@ fn init_log(profile_dir: &std::path::Path) {
         .try_init();
 }
 
-/// Sign in: what `monoplan login` does once it has the credentials,
+/// Sign in: what `monoplan auth login` does once it has the credentials,
 /// for the app's sign-in sheet. Blocks for the key derivation and two
 /// round trips, so call it off the main thread. On success the profile
 /// is written and released; the app's host controller then hosts it.
@@ -121,7 +121,7 @@ pub fn login(
 }
 
 /// Sign out: stop whatever hosts the profile, hold it, wipe it. What
-/// `monoplan logout` does, for the app's Settings. The app stops its
+/// `monoplan auth logout` does, for the app's Settings. The app stops its
 /// own host first and keeps its host controller from restarting one
 /// until this returns; `NotLoggedIn` when there was no profile.
 #[uniffi::export]

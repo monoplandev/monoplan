@@ -130,9 +130,9 @@ Settings › Login Items; works only from an .app bundle), and Sign In /
 Sign Out. Sign In is a sheet (email, password; server and device name
 under an Advanced disclosure, the server defaulting to
 `https://alpha.monoplan.app`) that runs `monoplan-ffi::login`, the
-same body as `monoplan login`; the tray shows "Sign In…" while signed
+same body as `monoplan auth login`; the tray shows "Sign In…" while signed
 out. Sign Out is confirmed and runs `monoplan-ffi::logout`, the same
-as `monoplan logout`: it stops the in-app host and wipes the profile.
+as `monoplan auth logout`: it stops the in-app host and wipes the profile.
 Advanced: the
 Host row (running, or why not), the Build row (package version, then
 the short commit `build-app.sh` baked into Info.plist, "+" if the tree

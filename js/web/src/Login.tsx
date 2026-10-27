@@ -504,7 +504,7 @@ async function doSignup(
 }
 
 /** Redeem a recovery code for a new password, registering this client
- *  as a device on the way (the CLI's `monoplan recover`). The code
+ *  as a device on the way (the CLI's `monoplan auth recover`). The code
  *  opens the primary membership's wrap; every other membership is under
  *  the Home DEK and is read back from `GET /api/docs` once the reset
  *  has made us a device. Not a fresh signup: the server already holds

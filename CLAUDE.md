@@ -59,7 +59,7 @@ Migrations: while pre-release, keep exactly one migration file per database (`00
 Root `package.json` is a Bun workspace (`js/*`) with thin script wrappers — there is no JS to build, the scripts just front cargo and the config generator:
 
 - `bun run config` — render `local/server.toml` from `js/config/templates/` (see `js/config/README.md`); `local/` holds gitignored dev artifacts
-- `bun run server` / `bun run cli` — `cargo run -p monoplan-server --` / `cargo run -p monoplan --` (debug build; faster compile, slower sync on real-sized docs). Pass flags after the script name (e.g. `bun run server -- --bind 0.0.0.0:8000`). `bun run cli:prod` for the release build when you need real sync perf. `signup` / `login` / `recover` default to `https://alpha.monoplan.app`; set `MONOPLAN_SERVER=http://127.0.0.1:8000` (or `--server`) for the local server.
+- `bun run server` / `bun run cli` — `cargo run -p monoplan-server --` / `cargo run -p monoplan --` (debug build; faster compile, slower sync on real-sized docs). Pass flags after the script name (e.g. `bun run server -- --bind 0.0.0.0:8000`). `bun run cli:prod` for the release build when you need real sync perf. `auth signup` / `auth login` / `auth recover` default to `https://alpha.monoplan.app`; set `MONOPLAN_SERVER=http://127.0.0.1:8000` (or `--server`) for the local server.
 - `bun run build` / `bun run test` / `bun run fmt` / `bun run lint` — cargo equivalents
 - `bun run build:wasm` — `wasm-pack build core/`. Always use this from the workspace root; bare `cargo build --target wasm32-...` will try to build `server`/`cli` for wasm and fail.
 - `bun run typecheck` — `tsc --noEmit -p js/config`

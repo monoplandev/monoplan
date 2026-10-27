@@ -7,7 +7,7 @@ multi-slot pool and multi-tab remain future work.
 Note for existing dev profiles: `peer_slots` was added to
 `cli/migrations/001_init.sql` in place (pre-release rule), so a profile
 whose `_migrations` ledger already contains `001_cli` lacks the table -
-wipe local dev state (`bun run wipe` / `monoplan logout`) rather than
+wipe local dev state (`bun run wipe` / `monoplan auth logout`) rather than
 adding a bridge migration.
 
 ## Problem

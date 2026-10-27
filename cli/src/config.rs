@@ -161,7 +161,7 @@ impl Profile {
         self.dir.join(DOC_DB_FILE)
     }
 
-    /// Wipe local state. Used by `monoplan logout`.
+    /// Wipe local state. Used by `monoplan auth logout`.
     pub fn purge(&self) -> Result<(), ConfigError> {
         if self.dir.exists() {
             std::fs::remove_dir_all(&self.dir)?;

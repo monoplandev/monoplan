@@ -45,16 +45,9 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
-    /// Create a new account on the given server.
-    Signup(signup::Args),
-    /// Log in to an existing account on a fresh device.
-    Login(login::Args),
-    /// Wipe local state. Does not revoke the device server-side.
-    Logout,
-    /// Use a recovery code to set a new password and bootstrap a fresh device.
-    Recover(recover::Args),
-    /// Change the password on the active account.
-    Password,
+    /// Account and device identity: signup, login, logout, recover, password.
+    #[command(subcommand)]
+    Auth(AuthCmd),
     /// Add an item.
     Add(items::AddArgs),
     /// List items.
@@ -112,6 +105,23 @@ enum Cmd {
     Sync,
     /// The resident sync process for this profile (spec/daemon-plan.md).
     Daemon(crate::daemon::DaemonArgs),
+}
+
+/// The account verbs, grouped under `monoplan auth` so the top level
+/// reads as the task tool it is: these are typed once per device, the
+/// item verbs daily. None of them touch the doc, so none go over IPC.
+#[derive(Subcommand, Debug)]
+enum AuthCmd {
+    /// Create a new account on the given server.
+    Signup(signup::Args),
+    /// Log in to an existing account on a fresh device.
+    Login(login::Args),
+    /// Wipe local state. Does not revoke the device server-side.
+    Logout,
+    /// Use a recovery code to set a new password and bootstrap a fresh device.
+    Recover(recover::Args),
+    /// Change the password on the active account.
+    Password,
 }
 
 /// A command that runs against the doc. Parsed by the client, shipped
@@ -186,11 +196,11 @@ impl Cli {
             Spawn::OnDemand
         };
         let doc_cmd = match self.cmd {
-            Cmd::Signup(a) => return signup::run(a).await,
-            Cmd::Login(a) => return login::run(a, spawn).await,
-            Cmd::Logout => return logout::run().await,
-            Cmd::Recover(a) => return recover::run(a, spawn).await,
-            Cmd::Password => return password::run().await,
+            Cmd::Auth(AuthCmd::Signup(a)) => return signup::run(a).await,
+            Cmd::Auth(AuthCmd::Login(a)) => return login::run(a, spawn).await,
+            Cmd::Auth(AuthCmd::Logout) => return logout::run().await,
+            Cmd::Auth(AuthCmd::Recover(a)) => return recover::run(a, spawn).await,
+            Cmd::Auth(AuthCmd::Password) => return password::run().await,
             Cmd::Cache(a) => return cache::run(a).await,
             Cmd::Share(a) => return share::run(a).await,
             Cmd::Status(a) => return status::run(a).await,

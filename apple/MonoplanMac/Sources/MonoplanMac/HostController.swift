@@ -103,7 +103,7 @@ final class HostController {
         }
     }
 
-    /// Sign in: what `monoplan login` does (`MonoplanCore.login`), off
+    /// Sign in: what `monoplan auth login` does (`MonoplanCore.login`), off
     /// the main thread for the key derivation. The Rust side claims the
     /// profile only once the server has accepted the credentials, so a
     /// running host for another account is stopped then and not before;
