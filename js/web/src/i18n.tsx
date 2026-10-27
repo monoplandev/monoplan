@@ -456,7 +456,6 @@ export type Messages = {
     email: string;
     thisDevice: string;
     lastSeen: string;
-    deviceSeq: (acked: number, head: number) => string;
     deviceActions: string;
     renameDevice: string;
     revoke: string;
@@ -799,7 +798,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       email: "Correo",
       thisDevice: "Este dispositivo",
       lastSeen: "Última vez visto",
-      deviceSeq: (acked, head) => `sincronizado hasta op ${acked} de ${head}`,
       deviceActions: "Acciones del dispositivo",
       renameDevice: "Renombrar",
       revoke: "Revocar",
@@ -1144,7 +1142,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       email: "Email",
       thisDevice: "This device",
       lastSeen: "Last seen",
-      deviceSeq: (acked, head) => `synced to op ${acked} of ${head}`,
       deviceActions: "Device actions",
       renameDevice: "Rename",
       revoke: "Revoke",

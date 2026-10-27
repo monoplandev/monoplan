@@ -106,12 +106,10 @@ export interface Device {
   last_seen_at: number;
   last_seen_ip: string | null;
   created_at: number;
-  last_acked_seq: number;
 }
 
 export interface DevicesListResponse {
   devices: Device[];
-  server_last_seq: number;
 }
 
 /** One sharing link as the owner sees it (`GET /api/docs/:id/invites`).

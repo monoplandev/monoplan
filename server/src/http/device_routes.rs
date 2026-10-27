@@ -17,9 +17,7 @@ pub async fn list(
     State(state): State<AppState>,
     auth: DeviceAuth,
 ) -> ApiResult<Msgpack<DevicesListResponse>> {
-    let rows = list_devices(&state.db, auth.account_id, auth.primary_doc_id).await?;
-    let server_last_seq =
-        crate::sync::queries::latest_doc_seq(&state.db, auth.primary_doc_id).await?;
+    let rows = list_devices(&state.db, auth.account_id).await?;
     Ok(Msgpack(DevicesListResponse {
         devices: rows
             .into_iter()
@@ -30,10 +28,8 @@ pub async fn list(
                 last_seen_at: d.last_seen_at,
                 last_seen_ip: d.last_seen_ip,
                 created_at: d.created_at,
-                last_acked_seq: d.last_acked_seq.max(0) as u64,
             })
             .collect(),
-        server_last_seq,
     }))
 }
 

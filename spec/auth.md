@@ -10,7 +10,7 @@ POST   /api/account/recover            (recovery-code path; gated by recovery_au
 POST   /api/account/logout             (authed; revokes calling device + clears cookie)
 POST   /api/account/password/change    (change password, authed by device token + current_auth_secret; `new_doc_keys` names exactly the primary doc)
 POST   /api/account/password/reset     (set new password, authed by recovery_session_token)
-GET    /api/devices                    (list current account's devices: name, kind, last_seen_at, last_seen_ip, last_acked_seq on the primary doc)
+GET    /api/devices                    (list current account's devices: name, kind, last_seen_at, last_seen_ip)
 POST   /api/devices                    (register a new device: `{ name, kind }`)
 PATCH  /api/devices/:device_id         (rename a device)
 DELETE /api/devices/:device_id

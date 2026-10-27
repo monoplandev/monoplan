@@ -39,8 +39,6 @@ pub struct DeviceRow {
     /// the proxy in front of it). `None` until first authed request.
     pub last_seen_ip: Option<String>,
     pub created_at: i64,
-    /// Frontier on the doc `list_devices` was asked about.
-    pub last_acked_seq: i64,
 }
 
 /// One row of `doc_members` as seen from an account: the doc, the role,
@@ -550,27 +548,16 @@ pub async fn create_device(
     Ok(device_id)
 }
 
-/// List an account's devices. `last_acked_seq` on each row is the
-/// device's frontier on `doc_id` (the caller passes the account's
-/// primary doc; a device with no frontier row yet reads as 0).
-pub async fn list_devices(
-    db: &Db,
-    account_id: Uuid,
-    doc_id: Uuid,
-) -> anyhow::Result<Vec<DeviceRow>> {
+/// List an account's devices.
+pub async fn list_devices(db: &Db, account_id: Uuid) -> anyhow::Result<Vec<DeviceRow>> {
     let acc_bytes = account_id.as_bytes().to_vec();
-    let doc_bytes = doc_id.as_bytes().to_vec();
     db.call(move |c| {
         let mut stmt = c.prepare(
-            "SELECT d.id, d.account_id, d.name, d.last_seen_at, d.created_at,
-                    COALESCE(f.last_acked_seq, 0), d.last_seen_ip, d.kind
-             FROM devices d
-             LEFT JOIN device_doc_frontiers f
-               ON f.device_id = d.id AND f.doc_id = ?
-             WHERE d.account_id = ? ORDER BY d.created_at",
+            "SELECT id, account_id, name, last_seen_at, created_at, last_seen_ip, kind
+             FROM devices WHERE account_id = ? ORDER BY created_at",
         )?;
         let rows = stmt
-            .query_map(params![doc_bytes, acc_bytes], row_to_device)?
+            .query_map(params![acc_bytes], row_to_device)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     })
@@ -729,9 +716,8 @@ fn row_to_device(r: &rusqlite::Row<'_>) -> rusqlite::Result<DeviceRow> {
         name: r.get(2)?,
         last_seen_at: r.get(3)?,
         created_at: r.get(4)?,
-        last_acked_seq: r.get(5)?,
-        last_seen_ip: r.get(6)?,
-        kind: r.get(7)?,
+        last_seen_ip: r.get(5)?,
+        kind: r.get(6)?,
     })
 }
 
