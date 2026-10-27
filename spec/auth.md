@@ -96,6 +96,10 @@ Client cannot derive `auth_secret` without the salt. Standard pattern:
 1. POST `/api/account/signup` with all the encryption material.
 2. Server creates account + initial device row, returns `device_token`.
 
+`primary_doc_id` in the request is optional. Absent, the server mints the primary doc id. Present, the server adopts it (must parse as a UUID, 400 otherwise; 409 `conflict` if a doc with that id already exists). The id grants nothing by itself: access comes from the `owner` membership row the same transaction inserts.
+
+**Anonymous → account (web, built 2026-10-27).** The web client runs without an account from the first visit: it mints a doc id and a DEK locally and keeps the doc's encrypted op log and snapshot in IndexedDB under that id. Signing up from that state must not discard the doc, so signup *adopts* it: the anonymous DEK becomes the Home DEK (wrapped under the new password KEK and the recovery code exactly as a fresh one would be), and the request names the local doc id as `primary_doc_id`. Nothing is copied or re-encrypted; the engine's empty `server_known_vv` means the first WebSocket connect pushes the whole local history into the account's empty Home doc. The client refuses a response whose `primary_doc_id` differs from the one it asked for. The CLI has no anonymous state and omits the field. Logging *in* to an existing account from an anonymous session does not merge: the server doc and the local doc are both seeded and have unrelated histories, so the anonymous doc is left behind (surfacing or exporting it first is not built yet).
+
 ### Device 2 (existing account)
 1. POST `/api/account/prelogin { email }` → returns `password_salt`.
 2. Client derives `master` → `kek`, `auth_secret` from password + salt.

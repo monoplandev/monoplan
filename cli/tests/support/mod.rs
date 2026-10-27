@@ -149,6 +149,7 @@ pub async fn signup_account(server: &TestServer, device_name: &str) -> SignedUpA
         recovery,
         device_name: device_name.into(),
         device_kind: "linux".into(),
+        primary_doc_id: None,
     };
     let bytes = rmp_serde::to_vec_named(&req).unwrap();
     let resp = http()
@@ -197,6 +198,7 @@ pub async fn signup_via_http(server: &TestServer, dek: &Dek, device_name: &str) 
         recovery: enrol_recovery(dek, kdf_params).0,
         device_name: device_name.into(),
         device_kind: "linux".into(),
+        primary_doc_id: None,
     };
     let bytes = rmp_serde::to_vec_named(&req).unwrap();
     let resp = http()

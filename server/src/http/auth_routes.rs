@@ -38,6 +38,12 @@ pub async fn signup(
     if req.device_kind.trim().is_empty() {
         return Err(ApiError::BadRequest("device_kind is required".into()));
     }
+    let primary_doc_id = req
+        .primary_doc_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|_| ApiError::BadRequest("primary_doc_id must be a uuid".into()))?;
     let device_token = generate_token();
     let device_token_hash = sha256(&device_token).to_vec();
     // Enrolment is mandatory at signup (`spec/encryption.md` §Recovery
@@ -57,10 +63,13 @@ pub async fn signup(
         device_name: req.device_name,
         device_kind: req.device_kind,
         device_token_hash,
+        primary_doc_id,
     };
     let created = create_account(&state.db, new).await.map_err(|e| {
         if e.to_string() == "account_exists" {
             ApiError::AccountExists
+        } else if e.to_string() == "doc_exists" {
+            ApiError::Conflict("primary_doc_id already exists".into())
         } else {
             ApiError::Internal(e)
         }

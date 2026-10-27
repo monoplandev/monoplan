@@ -57,6 +57,18 @@ export async function loadPrefs(accountId: string): Promise<Prefs | null> {
   });
 }
 
+/** Drop the per-account prefs row (no-op when absent). */
+export async function deletePrefs(accountId: string): Promise<void> {
+  const db = await openMonoplanDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_PREFS, "readwrite");
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error("idb tx aborted"));
+    tx.objectStore(STORE_PREFS).delete(accountId);
+  });
+}
+
 /** Replace the per-account prefs row. */
 export async function savePrefs(
   accountId: string,

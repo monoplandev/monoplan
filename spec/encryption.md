@@ -97,7 +97,7 @@ Each update blob is independently encrypted with the DEK + a fresh 24-byte rando
 ## Local key storage
 
 - CLI: `secrets.toml` holds one DEK per doc under `[docs."<doc_id>"]` (`cli.md`), unwrapped at login / recovery (Home via the KEK, the rest via the Home DEK); OS keychain is future work. Recovery code never persisted by client.
-- Web: every membership's DEK, each AES-GCM-wrapped under one non-extractable per-origin key in IndexedDB, one entry per doc id (`js/core/src/storage/dek-vault.ts`). Login unwraps every membership and vaults them all, so a reloaded session holds every doc without a network round trip. Vaulting the Home DEK alone and re-deriving the rest from `GET /api/docs` was considered and rejected (2026-10-20) because it makes non-primary docs unavailable offline on a cold reload.
+- Web: every membership's DEK, each AES-GCM-wrapped under one non-extractable per-origin key in IndexedDB, one entry per doc id (`js/core/src/storage/dek-vault.ts`). Login unwraps every membership and vaults them all, so a reloaded session holds every doc without a network round trip. Vaulting the Home DEK alone and re-deriving the rest from `GET /api/docs` was considered and rejected (2026-10-20) because it makes non-primary docs unavailable offline on a cold reload. An anonymous (no-account) session vaults a locally generated DEK the same way; signup promotes that DEK to the Home DEK rather than generating a new one, so the local op log needs no re-encryption (`auth.md` §Device pairing).
 
 ## KDF parameters
 

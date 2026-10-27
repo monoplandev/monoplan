@@ -238,6 +238,7 @@ async fn signup() -> Account {
             recovery,
             device_name: "test-device".into(),
             device_kind: "linux".into(),
+            primary_doc_id: None,
         },
         None,
     )
@@ -360,10 +361,98 @@ async fn signup_duplicate_email_is_409() {
             recovery: enrol_recovery(&dek, kdf_params).0,
             device_name: "dup".into(),
             device_kind: "linux".into(),
+            primary_doc_id: None,
         },
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::CONFLICT);
+}
+
+/// Builds a complete signup request for a fresh email; `primary_doc_id`
+/// is the only field the caller varies.
+fn signup_request(primary_doc_id: Option<String>) -> SignupRequest {
+    let kdf_params = weak_params();
+    let master_salt: [u8; 16] = random_bytes();
+    let master =
+        derive_password_master(b"correct horse battery staple", &master_salt, kdf_params).unwrap();
+    let kek = master.kek().unwrap();
+    let auth = master.auth_secret().unwrap();
+    let dek = Dek::generate();
+    let wrapped = kek.wrap(&dek).unwrap();
+    SignupRequest {
+        email: format!("user-{}@example.com", Uuid::now_v7()),
+        master_salt: master_salt.to_vec(),
+        kdf_params,
+        auth_secret: auth.as_bytes().to_vec(),
+        wrapped_dek: wrapped.ciphertext,
+        wrapped_dek_nonce: wrapped.nonce.to_vec(),
+        recovery: enrol_recovery(&dek, kdf_params).0,
+        device_name: "test-device".into(),
+        device_kind: "linux".into(),
+        primary_doc_id,
+    }
+}
+
+/// The web client signs up from an anonymous session whose doc already
+/// has history under a locally minted id; the server adopts that id as
+/// the account's primary doc so the history ships on first sync.
+#[tokio::test]
+async fn signup_adopts_client_chosen_primary_doc_id() {
+    let server = TestServer::start().await;
+    let url = format!("{}/api/account/signup", server.base);
+    let chosen = Uuid::new_v4().to_string();
+    let req = signup_request(Some(chosen.clone()));
+    let email = req.email.clone();
+    let resp: SignupResponse = post_msgpack(&url, &req, None).await;
+    assert_eq!(resp.primary_doc_id, chosen);
+
+    // Login resolves the same doc and its owner membership hangs off it.
+    let pre: PreloginResponse = post_msgpack(
+        &format!("{}/api/account/prelogin", server.base),
+        &PreloginRequest {
+            email: email.clone(),
+        },
+        None,
+    )
+    .await;
+    let master = derive_password_master(
+        b"correct horse battery staple",
+        &pre.master_salt,
+        pre.kdf_params,
+    )
+    .unwrap();
+    let login: LoginResponse = post_msgpack(
+        &format!("{}/api/account/login", server.base),
+        &LoginRequest {
+            email,
+            auth_secret: master.auth_secret().unwrap().as_bytes().to_vec(),
+            register_device: None,
+        },
+        None,
+    )
+    .await;
+    assert_eq!(login.primary_doc_id, chosen);
+    assert_eq!(login.memberships.len(), 1);
+    assert_eq!(login.memberships[0].doc_id, chosen);
+    assert_eq!(login.memberships[0].role, MemberRole::Owner);
+}
+
+#[tokio::test]
+async fn signup_with_taken_primary_doc_id_is_409() {
+    let server = TestServer::start().await;
+    let url = format!("{}/api/account/signup", server.base);
+    let chosen = Uuid::new_v4().to_string();
+    let _: SignupResponse = post_msgpack(&url, &signup_request(Some(chosen.clone())), None).await;
+    let status = post_msgpack_status(&url, &signup_request(Some(chosen))).await;
+    assert_eq!(status, reqwest::StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn signup_with_malformed_primary_doc_id_is_400() {
+    let server = TestServer::start().await;
+    let url = format!("{}/api/account/signup", server.base);
+    let status = post_msgpack_status(&url, &signup_request(Some("not-a-uuid".into()))).await;
+    assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -447,6 +536,7 @@ async fn email_is_normalised_server_side() {
             recovery: enrol_recovery(&dek, kdf_params).0,
             device_name: "dup".into(),
             device_kind: "linux".into(),
+            primary_doc_id: None,
         },
     )
     .await;
@@ -830,6 +920,7 @@ async fn signup_on(base: &str) -> SecondAccount {
             recovery: enrol_recovery(&dek, kdf_params).0,
             device_name: "second-device".into(),
             device_kind: "linux".into(),
+            primary_doc_id: None,
         },
         None,
     )
@@ -1271,6 +1362,7 @@ async fn signup_sets_device_cookie_with_expected_attributes() {
             recovery: enrol_recovery(&dek, kdf_params).0,
             device_name: "test".into(),
             device_kind: "linux".into(),
+            primary_doc_id: None,
         },
         None,
         None,

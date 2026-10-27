@@ -190,11 +190,17 @@ export const api = {
     /** Mandatory: every account enrols a recovery code at signup. */
     recovery: RecoveryMaterial;
     device_name: string;
+    /** Adopt this id for the primary doc instead of letting the server
+     *  mint one: signup from an anonymous session keeps its local doc
+     *  (history, DEK and all) and ships it on first sync. 409 if a doc
+     *  with that id already exists. */
+    primary_doc_id?: string;
   }): Promise<{
     account_id: string;
     device_id: string;
     device_token: string;
-    /** Server-assigned id of the new account's primary doc; see LoginResponse. */
+    /** Id of the new account's primary doc — the adopted one when the
+     *  request named it, else server-assigned; see LoginResponse. */
     primary_doc_id: string;
   }> {
     return post("/api/account/signup", {

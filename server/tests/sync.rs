@@ -265,6 +265,7 @@ async fn signup_into(server: TestServer) -> Account {
             recovery: enrol_recovery(&dek, kdf_params),
             device_name: "sync-test".into(),
             device_kind: "linux".into(),
+            primary_doc_id: None,
         },
     )
     .await;
@@ -1875,6 +1876,7 @@ async fn signup_second(acc: &Account) -> (Uuid, String) {
             recovery: enrol_recovery(&dek, kdf_params),
             device_name: "second-device".into(),
             device_kind: "linux".into(),
+            primary_doc_id: None,
         },
     )
     .await;

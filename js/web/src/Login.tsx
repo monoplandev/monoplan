@@ -28,6 +28,7 @@ import {
 } from "./sync/recovery.ts";
 import { useAppI18n } from "./i18n.tsx";
 import { closeToItems, trackOverlay } from "./overlay.ts";
+import { useSession } from "./SessionContext.tsx";
 
 export interface Session {
   /** Local-only session with no server account behind it. The web client
@@ -56,12 +57,25 @@ export interface Session {
    *  on reload holds every membership. `BootGate` boots a doc + engine
    *  for each entry; the UI renders the primary (sharing-plan.md Phase 5). */
   docKeys: Map<string, Dek>;
-  /** True iff this session was created via signup (we're device 1
-   *  and need to seed the doc with built-in lists), or for a freshly
-   *  minted anonymous session. False for login sessions and for
-   *  reload-restored sessions where the local IndexedDB op log is the
-   *  source of truth. */
+  /** True iff the Home doc does not exist yet and boot must create and
+   *  seed it with the built-in lists: a freshly minted anonymous
+   *  session, or a signup that could not adopt one. False for login
+   *  sessions, for reload-restored sessions, and for a signup that
+   *  adopted the anonymous doc — in all of those the local IndexedDB op
+   *  log is the source of truth. */
   freshSignup: boolean;
+}
+
+/** The anonymous session's doc that signup carries into the account:
+ *  its locally minted id becomes the server-side primary doc id and its
+ *  DEK becomes the Home DEK (wrapped under the new password KEK and the
+ *  recovery code). The op log and snapshot in IndexedDB are already
+ *  under that id and key, so nothing is copied or re-encrypted; the
+ *  engine's empty `serverKnownVv` makes the first connect push the
+ *  whole history to the account's empty Home doc. */
+interface AdoptedDoc {
+  primaryDocId: string;
+  dek: Dek;
 }
 
 /** Illustration shown as the left half of the auth dialog on wide
@@ -90,6 +104,7 @@ function AuthForm(props: {
   onRecoveryCode: (s: Session, code: string) => void;
 }) {
   const { m } = useAppI18n();
+  const { session } = useSession();
   const [mode, setMode] = createSignal<AuthMode>(props.initialMode ?? "login");
   const [email, setEmail] = createSignal("");
   const [password, setPassword] = createSignal("");
@@ -113,12 +128,20 @@ function AuthForm(props: {
           props.onSession(await doLogin(email(), password(), deviceName()));
           break;
         case "signup": {
-          const { session, recoveryCode } = await doSignup(
+          // Signing up from the anonymous session adopts its doc rather
+          // than starting a fresh one; a signup while already authed
+          // (not reachable from the UI today) would start fresh.
+          const current = session();
+          const adopt: AdoptedDoc | null = current.anonymous
+            ? { primaryDocId: current.primaryDocId, dek: current.dek }
+            : null;
+          const { session: next, recoveryCode } = await doSignup(
             email(),
             password(),
             deviceName(),
+            adopt,
           );
-          props.onRecoveryCode(session, recoveryCode);
+          props.onRecoveryCode(next, recoveryCode);
           break;
         }
         case "recover": {
@@ -461,6 +484,7 @@ async function doSignup(
   email: string,
   password: string,
   deviceName: string,
+  adopt: AdoptedDoc | null,
 ): Promise<{ session: Session; recoveryCode: string }> {
   const kdfParams = KDF_DEFAULT;
   const masterSalt = randomBytes(16);
@@ -471,10 +495,13 @@ async function doSignup(
     kdfParams.t,
     kdfParams.p,
   );
-  // Generate the Home DEK and wrap it with the KEK locally before
-  // shipping. It is the only key the KEK ever wraps; docs created later
-  // are wrapped under it (`wrapDekWithDek`, `api.createDoc`).
-  const dek = Dek.generate();
+  // The Home DEK is the anonymous doc's DEK when there is one to adopt,
+  // else freshly generated. Either way it is wrapped with the KEK
+  // locally before shipping; it is the only key the KEK ever wraps, and
+  // docs created later are wrapped under it (`wrapDekWithDek`,
+  // `api.createDoc`). The server never sees the DEK, so an adopted key
+  // is indistinguishable from a new one on its side.
+  const dek = adopt?.dek ?? Dek.generate();
   const wrapped = wrapDek(derived.kek, dek);
   // Mandatory enrolment. The recovery wrap is of the same Home DEK, so
   // the code covers every doc the account joins later.
@@ -488,7 +515,13 @@ async function doSignup(
     wrapped_dek_nonce: wrapped.nonce,
     recovery: recovery.material,
     device_name: deviceName,
+    primary_doc_id: adopt?.primaryDocId,
   });
+  if (adopt && resp.primary_doc_id !== adopt.primaryDocId) {
+    // The server honoured the request or rejected it (409); a silent
+    // substitution would strand the local history under the old id.
+    throw new Error("server did not adopt the local doc id at signup");
+  }
   const session: Session = {
     anonymous: false,
     email,
@@ -497,7 +530,9 @@ async function doSignup(
     deviceId: resp.device_id,
     dek,
     docKeys: new Map([[resp.primary_doc_id, dek]]),
-    freshSignup: true,
+    // An adopted doc already exists in IndexedDB (seeded, with the
+    // user's history); boot replays it instead of creating a new one.
+    freshSignup: adopt === null,
   };
   await persistVault(session);
   return { session, recoveryCode: recovery.code };

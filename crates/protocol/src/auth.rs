@@ -119,12 +119,22 @@ pub struct SignupRequest {
     #[serde(with = "serde_bytes")]
     pub auth_secret: Vec<u8>,
     /// The primary doc's DEK, generated client-side, wrapped under the
-    /// password KEK. The server mints the doc id and stores this wrap on
-    /// the account's `owner` membership of that doc.
+    /// password KEK. The server stores this wrap on the account's `owner`
+    /// membership of the primary doc.
     #[serde(with = "serde_bytes")]
     pub wrapped_dek: Vec<u8>,
     #[serde(with = "serde_bytes")]
     pub wrapped_dek_nonce: Vec<u8>,
+    /// Client-chosen id for the primary doc, or `None` to let the server
+    /// mint one. The web client signs up from an anonymous local-only
+    /// session whose doc already has history under a locally minted id
+    /// and a DEK it now wraps above; keeping the id means that history
+    /// becomes the account's Home doc and ships on first sync instead of
+    /// being discarded. The server only requires the id to be a UUID that
+    /// no doc already uses (409 otherwise); membership, not the id,
+    /// grants access.
+    #[serde(default)]
+    pub primary_doc_id: Option<String>,
     /// Mandatory since 2026-10-26: every account enrols a recovery code
     /// at signup. Opting out afterwards is future work.
     pub recovery: RecoveryMaterial,

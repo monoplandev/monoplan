@@ -77,6 +77,9 @@ pub struct NewAccount {
     pub device_name: String,
     pub device_kind: String,
     pub device_token_hash: Vec<u8>,
+    /// Client-chosen primary doc id (`SignupRequest::primary_doc_id`);
+    /// minted here when absent.
+    pub primary_doc_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,12 +92,13 @@ pub struct CreatedAccount {
 pub async fn create_account(db: &Db, new: NewAccount) -> anyhow::Result<CreatedAccount> {
     let account_id = Uuid::now_v7();
     let device_id = Uuid::now_v7();
-    let primary_doc_id = Uuid::now_v7();
+    let primary_doc_id = new.primary_doc_id.unwrap_or_else(Uuid::now_v7);
     let now = now_millis();
     let acc_bytes = account_id.as_bytes().to_vec();
     let dev_bytes = device_id.as_bytes().to_vec();
     let doc_bytes = primary_doc_id.as_bytes().to_vec();
     let dup_marker = "UNIQUE constraint failed: accounts.email";
+    let doc_dup_marker = "UNIQUE constraint failed: docs.id";
     let res: anyhow::Result<()> = db
         .call(move |c| {
             let tx = c.transaction()?;
@@ -172,6 +176,8 @@ pub async fn create_account(db: &Db, new: NewAccount) -> anyhow::Result<CreatedA
             // Surface unique-violation as a typed error caller can detect.
             if e.to_string().contains(dup_marker) {
                 anyhow::anyhow!("account_exists")
+            } else if e.to_string().contains(doc_dup_marker) {
+                anyhow::anyhow!("doc_exists")
             } else {
                 e
             }

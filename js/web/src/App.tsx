@@ -2,15 +2,18 @@
 // session (DEK generated client-side, no server account) and drops
 // straight into the workspace — no auth gate. Reads and mutations
 // always flow through the SyncEngine over an IndexedDB op log, anonymous
-// or authed. Signing up or logging in via Settings swaps the anonymous session for
-// an authenticated one (deleting the local doc) and turns on server
-// sync, so peer ops apply live. Anonymous sessions run the same engine
-// but never ship ops to a server.
+// or authed. Signing up swaps the anonymous session for an authenticated
+// one that *adopts* the anonymous doc (same doc id, same DEK; see
+// `AdoptedDoc` in Login.tsx) and turns on server sync, so the local
+// history ships to the new account's Home doc on first connect. Logging
+// in to an existing account swaps to that account's docs instead and
+// leaves the anonymous doc behind. Anonymous sessions run the same
+// engine but never ship ops to a server.
 
 import { createEffect, createSignal, onMount, Show } from "solid-js";
 import { Dek, Doc, EncryptedBlob } from "@monoplan/core/wasm";
 import { IdbStorage, readOrMintPeerSlot } from "@monoplan/core";
-import { loadPrefs } from "./prefs.ts";
+import { deletePrefs, loadPrefs, savePrefs } from "./prefs.ts";
 import { api } from "./api.ts";
 import { dekVault } from "./sync/dekVault.ts";
 import { unwrapNewMemberships } from "./sync/docKeys.ts";
@@ -97,10 +100,24 @@ export function App(props: {
     setSession(await createAnonymousSession());
   };
 
-  const onAuthenticated = (s: Session) => {
-    // Local-only anonymous data is left to drift in IndexedDB under the
-    // old anon accountId. It'll never be addressed again — option C
-    // says clobber, not migrate. A future cleanup pass can reap it.
+  // Signup adopts the anonymous doc (same doc id, so the op log,
+  // snapshot and vault entry need no move); only the per-account prefs
+  // row follows the account id, and boot reads prefs for the new id,
+  // hence the await before the swap. Login into an existing account
+  // takes the other branch: the anonymous doc is left to drift in
+  // IndexedDB under its own id and is never addressed again — warning
+  // about or exporting it first is the pending login-side counterpart.
+  const onAuthenticated = async (s: Session) => {
+    const current = session();
+    if (current?.anonymous && s.primaryDocId === current.primaryDocId) {
+      try {
+        const prefs = await loadPrefs(current.accountId);
+        if (prefs) await savePrefs(s.accountId, prefs);
+        await deletePrefs(current.accountId);
+      } catch (e) {
+        console.warn("migrating anonymous prefs failed:", e);
+      }
+    }
     setBoot(null);
     setBootError(null);
     setOnline(false);

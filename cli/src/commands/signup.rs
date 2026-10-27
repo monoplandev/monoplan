@@ -90,6 +90,7 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                 recovery: recovery_material,
                 device_name: device_name.clone(),
                 device_kind: device_kind(),
+                primary_doc_id: None,
             },
         )
         .await?;
