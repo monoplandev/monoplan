@@ -117,13 +117,20 @@ pub struct SyncStatus {
     /// first attempt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offline_reason: Option<String>,
+    /// The workspace has no account behind it (`crate::bootstrap`):
+    /// the host never connects, so `online` is false for good and the
+    /// offline notice does not apply. Absent on the wire when false,
+    /// so an account's replies are byte-for-byte what they were.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub local_only: bool,
 }
 
 impl SyncStatus {
     /// One stderr line for a human when the reply is stale; `None`
-    /// while online.
+    /// while online, and for a local-only workspace, which is not
+    /// stale with respect to anything.
     pub fn offline_notice(&self, now_millis: i64) -> Option<String> {
-        if self.online {
+        if self.online || self.local_only {
             return None;
         }
         let mut line = match self.last_synced_at {
@@ -261,6 +268,7 @@ mod tests {
             online: true,
             last_synced_at: Some(5),
             offline_reason: None,
+            local_only: false,
         };
         write_frame(&mut a, &Reply::Synced { sync }).await.unwrap();
         drop(a);
@@ -274,6 +282,7 @@ mod tests {
                     online: true,
                     last_synced_at: Some(5),
                     offline_reason: None,
+                    local_only: false,
                 }
             }
         ));
@@ -347,6 +356,7 @@ mod tests {
             online: false,
             last_synced_at: Some(7),
             offline_reason: None,
+            local_only: false,
         };
         assert_eq!(
             shape(&Reply::Watching { sync: sync.clone() }),
@@ -375,18 +385,32 @@ mod tests {
             online: true,
             last_synced_at: None,
             offline_reason: None,
+            local_only: false,
         };
         assert!(online.offline_notice(0).is_none());
         let never = SyncStatus {
             online: false,
             last_synced_at: None,
             offline_reason: None,
+            local_only: false,
         };
         assert_eq!(never.offline_notice(0).unwrap(), "offline; never synced");
+        // A local-only workspace is never offline from anything, and
+        // the flag is absent on the wire when it is false (above).
+        let local = SyncStatus {
+            local_only: true,
+            ..never.clone()
+        };
+        assert!(local.offline_notice(0).is_none());
+        assert_eq!(
+            serde_json::to_value(&local).unwrap(),
+            serde_json::json!({"online": false, "last_synced_at": null, "local_only": true})
+        );
         let stale = SyncStatus {
             online: false,
             last_synced_at: Some(1_000),
             offline_reason: Some("TLS support not compiled in".into()),
+            local_only: false,
         };
         assert_eq!(
             stale.offline_notice(1_000 + 3 * 60_000).unwrap(),

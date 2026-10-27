@@ -198,3 +198,59 @@ async fn offline_daemon_serves_locally_and_says_so() {
     );
     assert!(!daemon::is_running(dir).unwrap());
 }
+
+/// A fresh install needs no account (`cli/src/bootstrap.rs`): the
+/// first command mints a local-only workspace, replies never call it
+/// offline, and the verbs that need a server say what is missing.
+#[tokio::test]
+async fn fresh_install_works_without_an_account() {
+    let tmp = tempfile::tempdir().unwrap();
+    // Not even the directory exists yet.
+    let dir = tmp.path().join("fresh");
+
+    let out = monoplan(&dir, &["item", "add", "no account yet"]).await;
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    let id = ok(out).trim().to_string();
+    assert_eq!(id.len(), 32, "uuid v7 hex: {id}");
+    assert!(stderr.contains("created a local workspace"), "{stderr}");
+    assert!(stderr.contains("started monoplan daemon"), "{stderr}");
+    assert!(!stderr.contains("offline"), "{stderr}");
+    assert!(daemon::is_running(&dir).unwrap());
+
+    // Served from the local doc, seeded like a signup would be, and
+    // never reported as offline: there is nothing to be offline from.
+    let out = monoplan(&dir, &["item", "ls"]).await;
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    let ls = ok(out);
+    assert!(ls.contains("no account yet"), "{ls}");
+    assert!(!stderr.contains("offline"), "{stderr}");
+    let lists = ok(monoplan(&dir, &["lists", "ls"]).await);
+    assert!(lists.contains("Welcome"), "{lists}");
+
+    let status = ok(monoplan(&dir, &["daemon", "status"]).await);
+    assert!(status.contains("local only"), "{status}");
+    let status = ok(monoplan(&dir, &["status"]).await);
+    assert!(status.contains("local-only"), "{status}");
+    let json = ok(monoplan(&dir, &["status", "--json"]).await);
+    let compact: String = json.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(compact.contains("\"local_only\":true"), "{json}");
+    assert!(compact.contains("\"email\":null"), "{json}");
+
+    // Server-backed verbs name the gap instead of failing obscurely.
+    let e = err(monoplan(&dir, &["share", "pending", &id]).await);
+    assert!(e.contains("no account"), "{e}");
+    let e = err(monoplan(&dir, &["auth", "password"]).await);
+    assert!(e.contains("no account"), "{e}");
+
+    // Logging out of nothing keeps the workspace and its host.
+    let out = ok(monoplan(&dir, &["auth", "logout"]).await);
+    assert!(out.contains("local workspace is kept"), "{out}");
+    assert!(daemon::is_running(&dir).unwrap());
+    let ls = ok(monoplan(&dir, &["item", "ls"]).await);
+    assert!(ls.contains("no account yet"), "{ls}");
+
+    assert_eq!(
+        ok(monoplan(&dir, &["daemon", "stop"]).await).trim(),
+        "stopped"
+    );
+}

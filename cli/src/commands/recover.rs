@@ -10,7 +10,7 @@ use crate::client::{self, Spawn};
 use crate::config::{Config, Profile, Secrets};
 use crate::keystore::{derive_master, parse_doc_id, unwrap_doc_key, unwrap_memberships};
 use crate::net::Client;
-use crate::storage::Account;
+use crate::storage::{Account, Identity};
 
 use super::{default_device_name, default_server, device_kind, prompt_new_password};
 
@@ -41,6 +41,9 @@ pub async fn run(args: Args, spawn: Spawn) -> anyhow::Result<()> {
             .interact_text()
             .unwrap_or_else(|_| default_device_name())
     });
+
+    let profile = Profile::create()?;
+    super::confirm_discard_local_workspace(&profile)?;
 
     let client = Client::new(args.server.clone());
     let pre: PreloginResponse = client
@@ -132,21 +135,22 @@ pub async fn run(args: Args, spawn: Spawn) -> anyhow::Result<()> {
     // A host for a previous login would keep the old doc open under
     // the new credentials: stop it, and hold the profile until the new
     // secrets are written so nothing boots the half-written one.
-    let profile = Profile::create()?;
     let claim = crate::client::claim(&profile.dir).await?;
     let storage = crate::storage::open_storage(&profile)?;
     crate::storage::seed_snapshot(&storage, &dek, doc_id, &Doc::empty())?;
     storage.write_account(&Account {
-        account_id: recovered.account_id.clone(),
-        email,
-        device_id: reset.device_id,
         primary_doc_id: doc_id,
+        identity: Some(Identity {
+            account_id: recovered.account_id.clone(),
+            email,
+            device_id: reset.device_id,
+        }),
     })?;
     profile.write_config(&Config {
         server_url: args.server,
     })?;
     profile.write_secrets(&Secrets::new(
-        reset.device_token,
+        Some(reset.device_token),
         doc_keys.iter().map(|(id, dek)| (*id, dek)),
     ))?;
 

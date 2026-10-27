@@ -15,7 +15,7 @@ use std::time::Duration;
 use monoplan_cli::commands::agenda::{build_agenda, unscheduled_events};
 use monoplan_cli::commands::export::{deliver, render};
 use monoplan_cli::config::{Config, Profile, Secrets};
-use monoplan_cli::storage::Account;
+use monoplan_cli::storage::{Account, Identity};
 use monoplan_cli::sync::Session;
 use monoplan_core::{Dek, Doc, LIST_EVENTS, LIST_INBOX, NotesDeltaOp};
 use monoplan_server::sync::queries;
@@ -222,10 +222,12 @@ async fn default_open_skips_connect() {
     monoplan_cli::storage::seed_snapshot(&storage, &dek, doc_id, &Doc::new().unwrap()).unwrap();
     storage
         .write_account(&Account {
-            account_id: fake_account.clone(),
-            email: "offline@example.com".into(),
-            device_id: Uuid::now_v7().to_string(),
             primary_doc_id: doc_id,
+            identity: Some(Identity {
+                account_id: fake_account.clone(),
+                email: "offline@example.com".into(),
+                device_id: Uuid::now_v7().to_string(),
+            }),
         })
         .unwrap();
     profile
@@ -234,7 +236,7 @@ async fn default_open_skips_connect() {
         })
         .unwrap();
     profile
-        .write_secrets(&Secrets::new("deadbeef".repeat(8), [(doc_id, &dek)]))
+        .write_secrets(&Secrets::new(Some("deadbeef".repeat(8)), [(doc_id, &dek)]))
         .unwrap();
 
     // Without --sync the open call is fast — no 2s timeout penalty.
@@ -299,10 +301,12 @@ async fn second_device_observes_first_devices_items_via_pull() {
     let storage_b = monoplan_cli::storage::open_storage(&profile_b).unwrap();
     storage_b
         .write_account(&Account {
-            account_id: signup.account_id.clone(),
-            email: "smoke-test@example.com".into(),
-            device_id: device_b.device_id.clone(),
             primary_doc_id: doc_id_b,
+            identity: Some(Identity {
+                account_id: signup.account_id.clone(),
+                email: "smoke-test@example.com".into(),
+                device_id: device_b.device_id.clone(),
+            }),
         })
         .unwrap();
     profile_b
@@ -312,7 +316,7 @@ async fn second_device_observes_first_devices_items_via_pull() {
         .unwrap();
     profile_b
         .write_secrets(&Secrets::new(
-            device_b.device_token.clone(),
+            Some(device_b.device_token.clone()),
             [(doc_id_b, &dek)],
         ))
         .unwrap();

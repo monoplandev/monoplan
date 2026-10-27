@@ -9,7 +9,7 @@ use crate::client::{self, Spawn};
 use crate::config::{Config, Profile, Secrets};
 use crate::keystore::{derive_master, parse_doc_id, unwrap_home, unwrap_memberships};
 use crate::net::Client;
-use crate::storage::Account;
+use crate::storage::{Account, Identity};
 
 use super::{default_device_name, default_server, device_kind};
 
@@ -37,8 +37,9 @@ pub async fn run(args: Args, spawn: Spawn) -> anyhow::Result<()> {
             .unwrap_or_else(|_| default_device_name())
     });
 
-    println!("Deriving keys…");
     let profile = Profile::create()?;
+    super::confirm_discard_local_workspace(&profile)?;
+    println!("Deriving keys…");
     let outcome = login(
         &profile,
         Credentials {
@@ -146,14 +147,16 @@ pub async fn login(profile: &Profile, creds: Credentials) -> anyhow::Result<Outc
     let storage = crate::storage::open_storage(profile)?;
     crate::storage::seed_snapshot(&storage, &dek, doc_id, &Doc::empty())?;
     storage.write_account(&Account {
-        account_id: resp.account_id.clone(),
-        email,
-        device_id: device.device_id,
         primary_doc_id: doc_id,
+        identity: Some(Identity {
+            account_id: resp.account_id.clone(),
+            email,
+            device_id: device.device_id,
+        }),
     })?;
     profile.write_config(&Config { server_url: server })?;
     profile.write_secrets(&Secrets::new(
-        device.device_token,
+        Some(device.device_token),
         doc_keys.iter().map(|(id, dek)| (*id, dek)),
     ))?;
 

@@ -1,12 +1,15 @@
-//! Per-account on-disk config + secrets.
+//! Per-install on-disk config + secrets.
 //!
 //! `config.toml` holds operator-facing config (currently just
-//! `server_url`). `secrets.toml` holds the device token and one DEK per
-//! doc this account can open, in cleartext, and doubles as the "logged
-//! in" marker. Account identity
-//! (account/device/doc ids, email) and the sync cursor live in the
-//! sqlite db (`crate::storage`), not here. When keychain-backed storage
-//! lands, `secrets.toml` becomes a fallback for non-keychain hosts.
+//! `server_url`); it exists once the install has an account. `secrets.toml`
+//! holds one DEK per doc this install can open, in cleartext, plus the
+//! device token once there is an account; its presence is the "profile
+//! exists" marker and the token the "has an account" one. A profile
+//! without a token is a local-only workspace (`crate::bootstrap`).
+//! Identity (account/device/doc ids, email) and the sync cursor live in
+//! the sqlite db (`crate::storage`), not here. When keychain-backed
+//! storage lands, `secrets.toml` becomes a fallback for non-keychain
+//! hosts.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -29,8 +32,14 @@ pub enum ConfigError {
     Decode(#[from] toml::de::Error),
     #[error("no XDG data directory available")]
     NoDataDir,
-    #[error("not logged in")]
-    NotLoggedIn,
+    /// No profile at all: nothing has been run on this install yet.
+    #[error("no local workspace yet; any item command creates one")]
+    NoProfile,
+    /// A local-only workspace: the command needs a server account.
+    #[error(
+        "no account on this install; `monoplan auth signup` creates one (the local workspace comes with it) or `monoplan auth login` joins an existing one"
+    )]
+    NoAccount,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,18 +60,26 @@ pub struct DocSecrets {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Secrets {
-    pub device_token: String,
-    /// The DEK of every doc this account is a member of, keyed by doc
-    /// id (uuid hex). The DEK is a doc key, not an account key: login
-    /// hands back one wrap per membership and each lands here. Exactly
-    /// one entry (the primary doc) until sharing exists, but nothing
-    /// in the CLI may assume that.
+    /// This device's server token. `None` for a local-only workspace,
+    /// which is what makes it one: every other file is the same shape
+    /// with or without an account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_token: Option<String>,
+    /// The DEK of every doc this install can open, keyed by doc id
+    /// (uuid hex). The DEK is a doc key, not an account key: login
+    /// hands back one wrap per membership and each lands here; a
+    /// local-only workspace holds exactly its one minted doc. Nothing
+    /// in the CLI may assume a count.
     pub docs: BTreeMap<String, DocSecrets>,
 }
 
 impl Secrets {
-    /// Build from the device token plus `(doc, dek)` pairs.
-    pub fn new<'a>(device_token: String, docs: impl IntoIterator<Item = (DocId, &'a Dek)>) -> Self {
+    /// Build from the device token (none for a local-only workspace)
+    /// plus `(doc, dek)` pairs.
+    pub fn new<'a>(
+        device_token: Option<String>,
+        docs: impl IntoIterator<Item = (DocId, &'a Dek)>,
+    ) -> Self {
         Self {
             device_token,
             docs: docs
@@ -79,18 +96,28 @@ impl Secrets {
         }
     }
 
-    /// The stored DEK hex for `doc_id`, if this account holds one.
+    /// The stored DEK hex for `doc_id`, if this install holds one.
     pub fn doc(&self, doc_id: DocId) -> Option<&DocSecrets> {
         self.docs.get(&doc_id.0.to_string())
+    }
+
+    /// The device token, or the typed "no account" error for commands
+    /// that need a server behind them.
+    pub fn device_token(&self) -> Result<&str, ConfigError> {
+        self.device_token.as_deref().ok_or(ConfigError::NoAccount)
+    }
+
+    pub fn has_account(&self) -> bool {
+        self.device_token.is_some()
     }
 }
 
 /// Top-level on-disk handle. Path layout under the root dir (system
 /// default `<data>/monoplan/`, or `MONOPLAN_DATA_DIR` if set):
 /// ```text
-///   <root>/config.toml    — server_url
-///   <root>/secrets.toml   — device token + DEK ("logged in" marker)
-///   <root>/monoplan.sqlite  — doc cache + account identity + sync cursor
+///   <root>/config.toml    — server_url (once there is an account)
+///   <root>/secrets.toml   — DEKs + device token ("profile exists" marker)
+///   <root>/monoplan.sqlite  — doc cache + identity + sync cursor
 /// ```
 pub struct Profile {
     pub dir: PathBuf,
@@ -101,18 +128,17 @@ impl Profile {
         Self { dir }
     }
 
-    /// The single per-install profile, if one is logged in. Monoplan is
-    /// single-human-user (see product thesis); one account at a time,
-    /// no profile switching, so "active" collapses to "do we hold device
-    /// credentials?" — i.e. does `secrets.toml` exist. Run two accounts
-    /// side-by-side in dev by pointing `MONOPLAN_DATA_DIR` at distinct
-    /// roots.
+    /// The single per-install profile, if one exists: a local-only
+    /// workspace or an account's device. Monoplan is single-human-user
+    /// (see product thesis); one workspace at a time, no profile
+    /// switching, so "active" collapses to "does `secrets.toml` exist".
+    /// Run two side-by-side in dev by pointing `MONOPLAN_DATA_DIR` at
+    /// distinct roots. Doc commands do not call this: they go through
+    /// `crate::bootstrap::open_or_init`, which creates the local-only
+    /// workspace on a fresh install.
     pub fn active() -> Result<Option<Self>, ConfigError> {
         let dir = root_dir()?;
-        if !dir.join(SECRETS_FILE).exists() {
-            return Ok(None);
-        }
-        Ok(Some(Self::new(dir)))
+        Ok(Self::active_at(dir))
     }
 
     /// `active()` for an explicit directory: the embedded host
@@ -123,7 +149,23 @@ impl Profile {
     }
 
     pub fn require_active() -> Result<Self, ConfigError> {
-        Self::active()?.ok_or(ConfigError::NotLoggedIn)
+        Self::active()?.ok_or(ConfigError::NoProfile)
+    }
+
+    /// The profile's `MONOPLAN_DATA_DIR`-or-default root, whether or
+    /// not anything is there yet.
+    pub fn root() -> Result<PathBuf, ConfigError> {
+        root_dir()
+    }
+
+    /// Does this profile have an account behind it, i.e. a device
+    /// token in `secrets.toml`? False for a local-only workspace.
+    pub fn has_account(&self) -> Result<bool, ConfigError> {
+        Ok(self.read_secrets()?.has_account())
+    }
+
+    pub fn exists(&self) -> bool {
+        self.dir.join(SECRETS_FILE).exists()
     }
 
     /// Create (or reuse) the single per-install profile directory.

@@ -61,6 +61,8 @@ pub enum SyncError {
     Ws(String),
     #[error("engine: {0}")]
     Engine(String),
+    #[error("local-only workspace: no account to sync to")]
+    LocalOnly,
 }
 
 impl From<tokio_tungstenite::tungstenite::Error> for SyncError {
@@ -74,7 +76,10 @@ pub(crate) type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 /// One-shot per-command sync handle.
 pub struct Session {
     profile: Profile,
-    server_url: String,
+    /// `None` for a local-only workspace (`crate::bootstrap`): no
+    /// account, so no server to connect to. Hosts skip the socket
+    /// entirely and report `local_only` instead of offline.
+    server_url: Option<String>,
     doc_id: DocId,
     /// Handle for persisting the `last_sync_at` observability stamp — a
     /// clone of the storage the engine owns (same connection, see
@@ -119,8 +124,14 @@ impl Session {
     }
 
     async fn open_inner(profile: Profile, sync: bool) -> Result<Self, SyncError> {
-        let config = profile.read_config()?;
         let secrets = profile.read_secrets()?;
+        // `config.toml` exists once there is an account; a local-only
+        // workspace has no server to name.
+        let server_url = if secrets.has_account() {
+            Some(profile.read_config()?.server_url)
+        } else {
+            None
+        };
         // Boot the doc from the op log + snapshot. A fresh profile (no
         // snapshot yet) reconstructs an empty doc — the same healing
         // behaviour the old file-based `read_doc` NotFound branch had.
@@ -155,7 +166,7 @@ impl Session {
 
         let mut session = Session {
             profile,
-            server_url: config.server_url,
+            server_url,
             doc_id,
             store,
             last_synced_at,
@@ -164,7 +175,7 @@ impl Session {
             _peer: peer,
         };
 
-        if !sync {
+        if !sync || session.is_local_only() {
             return Ok(session);
         }
 
@@ -180,6 +191,11 @@ impl Session {
 
     pub fn is_online(&self) -> bool {
         self.ws.is_some()
+    }
+
+    /// No account behind this workspace: nothing ever connects.
+    pub fn is_local_only(&self) -> bool {
+        self.server_url.is_none()
     }
 
     /// Borrow the local doc — commands read and mutate via this. Doc's
@@ -248,7 +264,8 @@ impl Session {
     }
 
     async fn connect(&self) -> Result<WsStream, SyncError> {
-        connect_ws(&self.profile, &self.server_url).await
+        let server_url = self.server_url.as_deref().ok_or(SyncError::LocalOnly)?;
+        connect_ws(&self.profile, server_url).await
     }
 
     pub(crate) fn profile_dir(&self) -> &std::path::Path {
@@ -257,8 +274,9 @@ impl Session {
 
     /// Borrow what a host needs to open its own socket (the daemon
     /// does this from a `select!` loop without holding `&Session`).
-    pub(crate) fn connect_params(&self) -> (&Profile, &str) {
-        (&self.profile, &self.server_url)
+    /// `None` for a local-only workspace.
+    pub(crate) fn connect_params(&self) -> Option<(&Profile, &str)> {
+        self.server_url.as_deref().map(|url| (&self.profile, url))
     }
 
     pub(crate) async fn persist_engine_state(&mut self) -> Result<(), SyncError> {
@@ -310,7 +328,7 @@ pub(crate) async fn connect_ws(profile: &Profile, server_url: &str) -> Result<Ws
     let secrets = profile.read_secrets()?;
     req.headers_mut().insert(
         AUTHORIZATION,
-        format!("Bearer {}", secrets.device_token)
+        format!("Bearer {}", secrets.device_token()?)
             .parse()
             .map_err(|_| SyncError::Ws("invalid bearer header".into()))?,
     );

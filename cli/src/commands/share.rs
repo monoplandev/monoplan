@@ -73,11 +73,13 @@ struct Ctx {
 
 fn ctx() -> anyhow::Result<Ctx> {
     let profile = Profile::require_active()?;
-    let config = profile.read_config()?;
     let secrets = profile.read_secrets()?;
+    // Before `config.toml`, which a local-only workspace does not have.
+    let token = secrets.device_token()?.to_string();
+    let config = profile.read_config()?;
     Ok(Ctx {
         client: Client::new(config.server_url.clone()),
-        token: secrets.device_token,
+        token,
         server_url: config.server_url,
         profile,
     })

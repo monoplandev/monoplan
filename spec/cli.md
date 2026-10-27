@@ -6,8 +6,17 @@ Primary CLI client. Also the integration test surface for everything below the G
 
 Single binary `monoplan`. Subcommands:
 
+### No account (local-only workspace, built 2026-10-27)
+No account is needed to use the CLI. The first doc command on a fresh install creates a **local-only workspace** (`cli/src/bootstrap.rs`): a doc id and a DEK minted locally, the doc seeded with the same onboarding "Welcome" list a signup gets, and a profile written with no device token. Every command and the daemon then work against it exactly as for an account's device, minus the server: the host never connects, replies carry `local_only` and never an offline notice, `monoplan status` says `local-only workspace`, `daemon status` says `local only (no account)`. It is the CLI's counterpart of the web client's anonymous session (`auth.md` §Device pairing).
+
+- `monoplan auth signup` from that state **adopts** the workspace: its DEK becomes the Home DEK and its doc id is sent as `primary_doc_id`, so nothing is copied or re-encrypted and the whole local history ships on the first connect. The command says so (`Your local workspace is now this account's Personal workspace.`) and syncs right after the recovery code is confirmed.
+- `monoplan auth login` / `recover` from that state **discard** it (the account's doc replaces it; merging two seeded histories is not built, same as the web). They say so and ask for confirmation first, pointing at `signup` (keeps it) and `export-json` (saves a copy).
+- `monoplan auth logout` on a local-only workspace does nothing (`Not logged in (the local workspace is kept).`); `monoplan cache clear` is the way to erase it, and always asks (`--force` when not a TTY), then re-seeds a fresh one under the same id and key.
+- Verbs that need a server (`share …`, `auth password`) fail with `no account on this install; …`.
+- The macOS app hosts a CLI-made local-only profile like any other (its Settings get an `Err` to the `Account` request instead of an identity); it does not create one itself yet.
+
 ### Account (`monoplan auth …`)
-- `monoplan auth signup [--server URL]` — interactive: email, password, recovery code shown once and typed back
+- `monoplan auth signup [--server URL]` — interactive: email, password, recovery code shown once and typed back; then syncs. The body is `signup::signup` (`Credentials` → `Outcome { account_id, recovery_code, adopted }`), the same split as `login`
 - `monoplan auth login [--server URL]` — interactive: email, password. `--server` defaults to `https://alpha.monoplan.app` (or `MONOPLAN_SERVER`); the dev stack is `MONOPLAN_SERVER=http://127.0.0.1:8000`. The body is `login::login`, shared with the app's sign-in sheet (`monoplan-ffi::login`)
 - `monoplan auth logout`
 - `monoplan auth recover` — interactive: email, recovery code, set new password
@@ -75,11 +84,11 @@ Binning and restoring an item are `monoplan item bin` / `item restore` (see "Ite
 - `monoplan bin rm <item_id>`
 
 ### Status
-- `monoplan status` — server URL, account email, device id, last successful sync timestamp, `last_acked_seq`, pending-push op count. Read-only against local state; never opens a WS and never starts the daemon.
+- `monoplan status` — server URL, account email, device id, last successful sync timestamp, `last_acked_seq`, pending-push op count. Read-only against local state; never opens a WS and never starts the daemon. On a local-only workspace: `Account: none — local-only workspace` plus the doc id; `--json` has `local_only: true` and null identity / server fields.
 
 ### Cache
 - `monoplan cache status` — profile directory and `monoplan.sqlite` size. Read-only; never opens a WS.
-- `monoplan cache clear [--force]` — truncate the doc cache (`wal` + `snapshots`) and reset the per-doc sync cursor to 0, **keeping** account identity (so it does not log you out); the next command starts a daemon that rehydrates from the server. Refuses while a daemon is running. If there are unsynced local ops, prompts for confirmation (TTY) or refuses with an error (non-TTY) unless `--force` is passed.
+- `monoplan cache clear [--force]` — truncate the doc cache (`wal` + `snapshots`) and reset the per-doc sync cursor to 0, **keeping** account identity (so it does not log you out); the next command starts a daemon that rehydrates from the server. Refuses while a daemon is running. If there are unsynced local ops, prompts for confirmation (TTY) or refuses with an error (non-TTY) unless `--force` is passed. On a local-only workspace everything is unsynced, so it always asks, and afterwards re-seeds the onboarding doc under the same id and key rather than leaving an empty one.
 
 ### Export
 - `monoplan export-json [--out PATH]` — semantic account export: built-in/user lists plus items/lifecycle/timestamps as regular JSON. Defaults to stdout; `--out` writes a file. This is a portability dump, not a CRDT backup/restore format.
@@ -88,7 +97,7 @@ Binning and restoring an item are `monoplan item bin` / `item restore` (see "Ite
 - `monoplan daemon` — run the resident process attached to the terminal (`spec/daemon-plan.md`). Refuses if one already holds the profile.
 - `monoplan daemon --detach` — what a client runs to start it: prints one readiness line on stdout (`ready` / `already-running` / `error: …`) and keeps running; stderr goes to `daemon.log` in the profile dir.
 - `monoplan daemon stop` — ask it to exit and wait until the profile is released.
-- `monoplan daemon status` — `not running`, or `running  pid N  build B` (noting when the build differs from this executable's).
+- `monoplan daemon status` — `not running`, or `running  pid N  build B` followed by `online`, the offline notice, or `local only (no account)` (and noting when the build differs from this executable's).
 - `monoplan daemon install` / `uninstall` — run the daemon at login: a launchd agent (`~/Library/LaunchAgents/app.monoplan.daemon.plist`, `gui/<uid>` domain) on macOS, a systemd user unit (`~/.config/systemd/user/monoplan.service`) on Linux. Both run a plain `monoplan daemon` from this executable's resolved path, pinned to the active profile via `MONOPLAN_DATA_DIR`, stderr appended to `daemon.log`. Restart on failure only, so `daemon stop` sticks until the next login; `install` is idempotent and also (re)starts it now. Stops a hand-started daemon first so the agent's instance owns the profile. `logout` uninstalls (a purged profile would fail at every login). `daemon status` notes `installed` when stopped. This is the headless path (Linux, CLI-only Macs); on macOS the app hosts the profile itself whenever it runs (`spec/daemon-plan.md`, amendment 2026-10-27) and takes an agent's daemon over at launch, so `install` refuses while the app hosts.
 
 ## Process model
@@ -97,7 +106,7 @@ One binary, two roles; and on macOS a third host, the app, which runs the same l
 
 Dispatch, at the top of `Cli::run`:
 
-- Doc commands (`item …`, `places`, `agenda`, `starred`, `lists`, `bin`, `export-json`) are forwarded as a `DocCmd` and their output comes back as text. `item add -` reads stdin in the client; `export-json --out` writes the file in the client.
+- Doc commands (`item …`, `places`, `agenda`, `starred`, `lists`, `bin`, `export-json`) open the profile through `bootstrap::open_or_init`, which creates the local-only workspace on a fresh install (holding `daemon.lock` while it writes, so a racing second command waits and finds it), then are forwarded as a `DocCmd` and their output comes back as text. `item add -` reads stdin in the client; `export-json --out` writes the file in the client. A hand-run `monoplan daemon` on a fresh install creates the workspace the same way.
 - `status` and `cache status` are direct, read-only sqlite reads and never contact or start the daemon. `cache clear` refuses while a daemon is running.
 - `signup`, `login`, `recover`, `password` and `logout` work on the profile files, so each first stops a running host and holds `daemon.lock` until the files are written (`client::claim`), keeping the app and any auto-spawn out meanwhile; `login` and `recover` then sync through a fresh host, which is what starts it (or the app, if it re-hosted first).
 - `share` is HTTP against the server and runs in the client.
@@ -114,7 +123,7 @@ Every connection starts with a hello carrying a build id (package version plus t
 
 ### Daemon behaviour
 
-- Holds the server WebSocket open; reconnects with capped exponential backoff (0.5 s to 30 s, jitter), pings every 30 s and treats a missed pong as a disconnect (laptop sleep). Connecting runs as its own task, so commands are served while it is in progress. Offline is a state: commands keep working against the local doc and ship when the socket returns.
+- Holds the server WebSocket open; reconnects with capped exponential backoff (0.5 s to 30 s, jitter), pings every 30 s and treats a missed pong as a disconnect (laptop sleep). Connecting runs as its own task, so commands are served while it is in progress. Offline is a state: commands keep working against the local doc and ship when the socket returns. A local-only workspace is a third state: the host never starts a connect, `Sync` requests answer at once, and `SyncStatus.local_only` (absent on the wire when false) tells clients not to call the reply offline.
 - Every reply carries whether the daemon is online, when it last completed an exchange, and, while offline, why the last connect failed or the socket dropped (`offline_reason`). The CLI prints `offline; last synced 3m ago` (or `offline; never synced`), with the reason in parentheses when there is one, on stderr when a command was served without a server behind it, including under `--json`, whose stdout shapes are unchanged. The host logs each distinct reason once at `warn`; the embedded host writes its log to `daemon.log` in the profile dir, the file the headless daemon's stderr is appended to.
 - Persists on a 1 s tick and immediately after any command that mutated, so a change is on disk before the client hears back and on the wire right after. Folds the WAL at the usual thresholds, and fully on exit.
 - Exits on SIGINT/SIGTERM, on `daemon stop`, or when it notices the profile dir has been purged. The embedded host does the same; the app starts a fresh one as soon as the profile is free again, so `daemon stop` against the app is a restart, not a stop (quit the app to stop syncing on a Mac).
@@ -126,11 +135,11 @@ Every connection starts with a hello carrying a build id (package version plus t
 
 Single account per install. One dir under XDG paths (`~/.local/share/monoplan/` on linux, equivalents elsewhere) — `logout` wipes it, signup/login re-creates it. Two side-by-side test accounts in dev: point `MONOPLAN_DATA_DIR` at distinct roots.
 
-- `monoplan.sqlite` — doc cache (append-only `wal` + per-doc `snapshots`), the per-doc sync cursor (`docs.last_acked_server_seq` / `last_sync_at`), and the singleton `account` row (account/device/primary-doc ids + email). `primary_doc_id` is the server-assigned id of the account's Home doc, used to key local snapshot storage. See `spec/storage.md`.
+- `monoplan.sqlite` — doc cache (append-only `wal` + per-doc `snapshots`), the per-doc sync cursor (`docs.last_acked_server_seq` / `last_sync_at`), and the singleton `account` row (primary-doc id, plus account/device ids + email, all three NULL for a local-only workspace). `primary_doc_id` is the id of the Home doc, used to key local snapshot storage: server-assigned at login/recover, minted locally for a local-only workspace and kept through signup. See `spec/storage.md`.
 - `daemon.lock` — flock held by the running daemon (never unlinked; see `spec/peer-id-plan.md` for the rules). `peer-<n>.lock` — the peer-id slot leases.
 - `daemon.sock` — the daemon's Unix socket (mode 0600; falls back to a hash-named socket in the temp dir when the profile path is too long for `sun_path`). `daemon.log` — stderr of a detached daemon.
-- `config.toml` — `{ server_url }`. Bootstrap input (needed before the db exists); operator-editable.
-- `secrets.toml` — `device_token` plus one `[docs."<doc_id>"] dek_hex = "…"` table per doc the account is a member of, in cleartext. The DEK is a doc key (`encryption.md`): login/recover store one entry per membership (the primary's unwrapped with the password or recovery KEK, the rest with the primary's DEK — the Home DEK); `monoplan auth password` re-wraps only the primary entry, since every other server-side wrap is under the Home DEK. Also the "logged in" marker: its presence is what `monoplan status`/commands gate on.
+- `config.toml` — `{ server_url }`. Written by signup/login/recover; absent on a local-only workspace, which has no server to name. Operator-editable.
+- `secrets.toml` — optional `device_token` plus one `[docs."<doc_id>"] dek_hex = "…"` table per doc this install can open, in cleartext. The DEK is a doc key (`encryption.md`): login/recover store one entry per membership (the primary's unwrapped with the password or recovery KEK, the rest with the primary's DEK — the Home DEK); a local-only workspace holds its one minted doc; `monoplan auth password` re-wraps only the primary entry, since every other server-side wrap is under the Home DEK. Its presence is the "profile exists" marker (`Profile::active`), and the token the "has an account" one (`Secrets::has_account`): server-backed verbs fail with `ConfigError::NoAccount` without it.
 
 Secrets in OS keychain (`security` on macOS, `libsecret` on linux):
 - `monoplan:<account_id>:token` — device auth token
@@ -140,6 +149,14 @@ Recovery code is **never** persisted by the client — shown once at signup, use
 
 ## Bootstrap UX
 
+### No account
+```
+$ monoplan item add "first thought"
+created a local workspace in ~/.local/share/monoplan; `monoplan auth signup` syncs it across devices
+started monoplan daemon (pid 4242); run `monoplan daemon install` to start it at login
+0193…
+```
+
 ### First device
 ```
 $ monoplan auth signup
@@ -148,7 +165,8 @@ Email: dan@example.com
 Password: ********
 Device name [hostname]:
   → recovery code: 12 words shown once, user must type them back to confirm
-Done. Doc initialized.
+Syncing…
+Done. (An existing local workspace is adopted as the account's Personal workspace; otherwise the doc is seeded fresh.)
 ```
 
 ### Second device

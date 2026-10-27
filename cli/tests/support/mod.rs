@@ -5,7 +5,7 @@ use monoplan_cli::keystore::{
     derive_master, parse_doc_id, unwrap_doc_key, unwrap_home, unwrap_memberships,
 };
 use monoplan_cli::net::Client;
-use monoplan_cli::storage::Account;
+use monoplan_cli::storage::{Account, Identity};
 use monoplan_core::{
     Dek, Doc, DocId, Kek, derive_password_master, derive_recovery_master, generate_recovery_code,
     random_bytes,
@@ -480,10 +480,12 @@ pub async fn materialize_profile(
     monoplan_cli::storage::seed_snapshot(&storage, dek, doc_id, &doc).unwrap();
     storage
         .write_account(&Account {
-            account_id: account_id.into(),
-            email: email.into(),
-            device_id: device_id.into(),
             primary_doc_id: doc_id,
+            identity: Some(Identity {
+                account_id: account_id.into(),
+                email: email.into(),
+                device_id: device_id.into(),
+            }),
         })
         .unwrap();
     profile
@@ -492,7 +494,7 @@ pub async fn materialize_profile(
         })
         .unwrap();
     profile
-        .write_secrets(&Secrets::new(device_token.into(), [(doc_id, dek)]))
+        .write_secrets(&Secrets::new(Some(device_token.into()), [(doc_id, dek)]))
         .unwrap();
     profile
 }

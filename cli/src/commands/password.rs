@@ -11,13 +11,18 @@ use crate::net::Client;
 
 pub async fn run() -> anyhow::Result<()> {
     let profile = Profile::require_active()?;
+    // Before the claim below (a local-only workspace's host should not
+    // be stopped for a command that cannot run) and before
+    // `config.toml`, which such a workspace does not have.
+    let secrets = profile.read_secrets()?;
+    let device_token = secrets.device_token()?.to_string();
     // The host reads secrets only at boot; keep it out until the
     // change is through, then let it (or the app) come back.
     let _claim = crate::client::claim(&profile.dir).await?;
     let config = profile.read_config()?;
-    let secrets = profile.read_secrets()?;
     let storage = crate::storage::open_storage(&profile)?;
     let account = storage.read_account()?;
+    let identity = account.identity()?.clone();
 
     let current_password: String = Password::new().with_prompt("Current password").interact()?;
     let new_password = prompt_new_password("New password")?;
@@ -27,7 +32,7 @@ pub async fn run() -> anyhow::Result<()> {
         .post(
             "/api/account/prelogin",
             &PreloginRequest {
-                email: account.email.clone(),
+                email: identity.email.clone(),
             },
         )
         .await?;
@@ -68,7 +73,7 @@ pub async fn run() -> anyhow::Result<()> {
     client
         .post_authed_no_response(
             "/api/account/password/change",
-            &secrets.device_token,
+            &device_token,
             &PasswordChangeRequest {
                 current_auth_secret: current_auth.as_bytes().to_vec(),
                 new_master_salt: new_master_salt.to_vec(),

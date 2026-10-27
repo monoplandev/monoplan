@@ -1,5 +1,6 @@
 //! Internals shared between the `monoplan` binary and integration tests.
 
+pub mod bootstrap;
 pub mod client;
 pub mod commands;
 pub mod config;

@@ -5,18 +5,24 @@
 -- ledger under a distinct name (see `open_storage`) so it doesn't
 -- collide with the storage crate's own `001_init`.
 
--- Singleton (id pinned to 1): the account + device identity this
--- install is logged in as. Server-assigned, written once at
--- signup/login/recover. `primary_doc_id` is the Home doc's uuid bytes
--- (matches docs.id). Lives in the db rather than a config file so
--- identity and the doc cache share one transactional store; the
--- presence of `secrets.toml` (not this row) is the "logged in" marker.
+-- Singleton (id pinned to 1): the doc this install runs and, when it
+-- has an account, the account + device identity it is logged in as.
+-- `primary_doc_id` is the Home doc's uuid bytes (matches docs.id):
+-- server-assigned at login/recover, minted locally for a local-only
+-- workspace (the first doc command on a fresh install) and kept when
+-- signup adopts that workspace. The three identity columns are all
+-- NULL for a local-only workspace and all set once an account exists.
+-- Lives in the db rather than a config file so identity and the doc
+-- cache share one transactional store; the presence of `secrets.toml`
+-- (not this row) is the "profile exists" marker, and its device token
+-- the "has an account" one.
 CREATE TABLE account (
   id             INTEGER PRIMARY KEY CHECK (id = 1),
-  account_id     TEXT NOT NULL,
-  email          TEXT NOT NULL,
-  device_id      TEXT NOT NULL,
-  primary_doc_id BLOB NOT NULL
+  account_id     TEXT,
+  email          TEXT,
+  device_id      TEXT,
+  primary_doc_id BLOB NOT NULL,
+  CHECK ((account_id IS NULL) = (email IS NULL) AND (account_id IS NULL) = (device_id IS NULL))
 );
 
 -- Loro peer id per lease slot (spec/peer-id-plan.md). Slot N's peer id

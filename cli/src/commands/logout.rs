@@ -2,10 +2,13 @@ use crate::config::Profile;
 
 pub async fn run() -> anyhow::Result<()> {
     match Profile::active()? {
-        Some(p) => {
+        Some(p) if p.has_account()? => {
             logout(&p).await?;
             println!("Logged out (local state wiped).");
         }
+        // A local-only workspace has nothing to log out of, and
+        // nothing a sign-out should destroy.
+        Some(_) => println!("Not logged in (the local workspace is kept)."),
         None => println!("Not logged in."),
     }
     Ok(())

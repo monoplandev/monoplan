@@ -131,6 +131,8 @@ pub struct DaemonStatus {
     pub online: bool,
     pub last_synced_at: Option<i64>,
     pub offline_reason: Option<String>,
+    /// No account: the host never connects (see `ipc::SyncStatus`).
+    pub local_only: bool,
     /// Contiguous-prefix server seq the engine has applied in memory.
     pub last_contiguous_seq: u64,
     pub connects: u32,
@@ -142,6 +144,7 @@ impl DaemonStatus {
             online: self.online,
             last_synced_at: self.last_synced_at,
             offline_reason: self.offline_reason.clone(),
+            local_only: self.local_only,
         }
     }
 }
@@ -207,7 +210,11 @@ pub async fn serve(
         listener,
         session,
     } = started;
-    eprintln!("monoplan daemon: listening, connecting to server…");
+    if session.is_local_only() {
+        eprintln!("monoplan daemon: listening; local-only workspace, no server");
+    } else {
+        eprintln!("monoplan daemon: listening, connecting to server…");
+    }
     let (status_tx, status_rx) = watch::channel(DaemonStatus::default());
     let (req_tx, req_rx) = mpsc::channel(16);
     let (watch_tx, _) = broadcast::channel(WATCH_BUFFER);
@@ -237,7 +244,9 @@ pub async fn run(args: DaemonArgs) -> anyhow::Result<()> {
     let detach = args.detach;
     // Everything up to "listening" is startup; in detach mode its
     // outcome is the one line the spawning client reads from stdout.
-    let started = async { start(Profile::require_active()?).await }.await;
+    // A fresh install gets its local-only workspace here, as it would
+    // from any doc command.
+    let started = async { start(crate::bootstrap::open_or_init().await?).await }.await;
     let started = match started {
         Ok(Some(parts)) => parts,
         Ok(None) => {
@@ -325,7 +334,9 @@ async fn status() -> anyhow::Result<()> {
             } else {
                 "  (different build; the next command restarts it)"
             };
-            let link = if sync.online {
+            let link = if sync.local_only {
+                "local only (no account)".to_string()
+            } else if sync.online {
                 "online".to_string()
             } else {
                 sync.offline_notice(crate::sync::now_millis())
@@ -585,6 +596,8 @@ struct Host {
     pending_syncs: Vec<oneshot::Sender<Reply>>,
     /// The last connect failure or drop, until the next connect.
     offline_reason: Option<String>,
+    /// No account: never connect, never report offline.
+    local_only: bool,
     embedded: bool,
 }
 
@@ -598,6 +611,7 @@ impl Host {
         embedded: bool,
     ) -> Self {
         let dir = session.profile_dir().to_path_buf();
+        let local_only = session.is_local_only();
         Host {
             session,
             _lock: lock,
@@ -614,6 +628,7 @@ impl Host {
             connecting: None,
             pending_syncs: Vec::new(),
             offline_reason: None,
+            local_only,
             embedded,
         }
     }
@@ -632,7 +647,7 @@ impl Host {
                 _ = &mut shutdown => break,
 
                 _ = tokio::time::sleep_until(self.next_connect.into()),
-                    if self.ws.is_none() && self.connecting.is_none() =>
+                    if self.ws.is_none() && self.connecting.is_none() && !self.local_only =>
                 {
                     self.start_connect();
                 }
@@ -712,7 +727,13 @@ impl Host {
             }
             Request::Sync => {
                 self.session.persist_engine_state().await?;
-                if self.ws.is_some() && self.session.engine.is_idle() {
+                if self.local_only {
+                    // Nothing to push to; say so now rather than park
+                    // the request behind a connect that never starts.
+                    Reply::Synced {
+                        sync: self.sync_status(),
+                    }
+                } else if self.ws.is_some() && self.session.engine.is_idle() {
                     self.session.engine.flush();
                     self.pump().await;
                     Reply::Synced {
@@ -730,10 +751,17 @@ impl Host {
                 }
             }
             Request::Account => match self.session.account() {
-                Ok(a) => Reply::Account {
-                    account_id: a.account_id,
-                    email: a.email,
-                    device_id: a.device_id,
+                Ok(a) => match a.identity {
+                    Some(i) => Reply::Account {
+                        account_id: i.account_id,
+                        email: i.email,
+                        device_id: i.device_id,
+                    },
+                    // The shape stays what the app decodes; a
+                    // local-only workspace has no identity to put in it.
+                    None => Reply::Err {
+                        message: "no account: this workspace is local-only".into(),
+                    },
                 },
                 Err(e) => Reply::Err {
                     message: format!("read account: {e}"),
@@ -755,7 +783,10 @@ impl Host {
     }
 
     fn start_connect(&mut self) {
-        let (profile, server_url) = self.session.connect_params();
+        // Guarded by `local_only` in the loop; belt and braces here.
+        let Some((profile, server_url)) = self.session.connect_params() else {
+            return;
+        };
         let profile = Profile::new(profile.dir.clone());
         let server_url = server_url.to_string();
         self.connecting = Some(tokio::spawn(async move {
@@ -798,6 +829,7 @@ impl Host {
             online,
             last_synced_at: self.session.last_synced_at(),
             offline_reason: self.offline_reason.clone(),
+            local_only: self.local_only,
         };
         for tx in self.pending_syncs.drain(..) {
             let _ = tx.send(Reply::Synced { sync: sync.clone() });
@@ -809,6 +841,7 @@ impl Host {
             online: self.is_online(),
             last_synced_at: self.session.last_synced_at(),
             offline_reason: self.offline_reason.clone(),
+            local_only: self.local_only,
         }
     }
 
@@ -968,6 +1001,7 @@ impl Host {
             online: self.is_online(),
             last_synced_at: self.session.last_synced_at(),
             offline_reason: self.offline_reason.clone(),
+            local_only: self.local_only,
             last_contiguous_seq: self.session.engine.last_contiguous_seq(),
             connects: self.status.borrow().connects,
         };

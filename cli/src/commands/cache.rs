@@ -25,7 +25,8 @@ pub enum CacheCmd {
         json: bool,
     },
     /// Delete the local doc cache and reset the sync cursor. The next
-    /// command starts a daemon that rehydrates from the server.
+    /// command starts a daemon that rehydrates from the server. On a
+    /// local-only workspace this erases it and starts a fresh one.
     Clear {
         /// Skip the confirmation prompt when there are unsynced ops.
         #[arg(long)]
@@ -84,20 +85,33 @@ async fn clear(force: bool) -> anyhow::Result<()> {
     let doc_id = account.primary_doc_id;
 
     // Local operations the server has no proof of would be lost by a
-    // cache wipe.
+    // cache wipe. A local-only workspace has no server at all: the
+    // wipe is the whole workspace, so it always asks.
     let secrets = profile.read_secrets()?;
     let dek = crate::keystore::dek_for_doc(&secrets, doc_id)?;
-    let pending = crate::storage::has_unsynced_ops(&storage, &dek, doc_id)
-        .map_err(|e| anyhow::anyhow!("read pending state: {e}"))?;
+    let local_only = account.is_local_only();
+    let pending = local_only
+        || crate::storage::has_unsynced_ops(&storage, &dek, doc_id)
+            .map_err(|e| anyhow::anyhow!("read pending state: {e}"))?;
 
     if pending && !force {
         if !std::io::stdin().is_terminal() {
+            if local_only {
+                anyhow::bail!(
+                    "this is a local-only workspace; clearing it erases everything in it. Pass --force to do that, or `monoplan export-json` first"
+                );
+            }
             anyhow::bail!(
                 "local cache has unsynced changes; let a daemon push them first (`monoplan daemon status` shows when it is online) or pass --force"
             );
         }
+        let prompt = if local_only {
+            "This local-only workspace will be erased (nothing has ever synced). Clear anyway?"
+        } else {
+            "Local cache has unsynced changes that will be lost. Clear anyway?"
+        };
         let proceed = Confirm::new()
-            .with_prompt("Local cache has unsynced changes that will be lost. Clear anyway?")
+            .with_prompt(prompt)
             .default(false)
             .interact()?;
         if !proceed {
@@ -108,7 +122,19 @@ async fn clear(force: bool) -> anyhow::Result<()> {
 
     storage.clear_cache(doc_id)?;
 
-    println!("Cache cleared. The next command starts a daemon that rehydrates from the server.");
+    if local_only {
+        // Nothing will rehydrate it: start over from the onboarding
+        // doc under the same id and key, as a wiped anonymous web
+        // session does.
+        let peer = crate::peer::claim(&profile.dir, &storage)?;
+        let doc = crate::bootstrap::welcome_doc(peer.peer_id)?;
+        crate::storage::seed_snapshot(&storage, &dek, doc_id, &doc)?;
+        println!("Local workspace erased; a fresh one is ready.");
+    } else {
+        println!(
+            "Cache cleared. The next command starts a daemon that rehydrates from the server."
+        );
+    }
     Ok(())
 }
 

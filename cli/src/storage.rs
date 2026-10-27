@@ -37,16 +37,41 @@ pub use monoplan_storage_sqlite::DbError;
 const CLI_MIGRATION_NAME: &str = "001_cli";
 const CLI_MIGRATION_SQL: &str = include_str!("../migrations/001_init.sql");
 
-/// The account + device identity this install is logged in as. Persisted
-/// as the singleton `account` row (see `001_init.sql`); written once at
-/// signup/login/recover, read by every command that needs identity.
+/// The doc this install runs and, when it has one, the account + device
+/// identity behind it. Persisted as the singleton `account` row (see
+/// `001_init.sql`); written at first use / signup / login / recover,
+/// read by every command that needs the doc id or the identity.
 #[derive(Debug, Clone)]
 pub struct Account {
+    /// The primary (Home) doc. Server-assigned at login / recover;
+    /// minted locally for a local-only workspace and kept when signup
+    /// adopts it.
+    pub primary_doc_id: DocId,
+    /// `None` for a local-only workspace: no server account, nothing
+    /// to sync to. `Some` once this install is a device of an account.
+    pub identity: Option<Identity>,
+}
+
+/// The server-side identity of an install that has an account.
+#[derive(Debug, Clone)]
+pub struct Identity {
     pub account_id: String,
     pub email: String,
     pub device_id: String,
-    /// The account's primary (Home) doc. Server-assigned at signup.
-    pub primary_doc_id: DocId,
+}
+
+impl Account {
+    /// The identity, or the typed "no account" error for commands that
+    /// need a server behind them.
+    pub fn identity(&self) -> Result<&Identity, crate::config::ConfigError> {
+        self.identity
+            .as_ref()
+            .ok_or(crate::config::ConfigError::NoAccount)
+    }
+
+    pub fn is_local_only(&self) -> bool {
+        self.identity.is_none()
+    }
 }
 
 /// Per-doc sync cursor (the `last_acked_server_seq` / `last_sync_at`
@@ -83,9 +108,9 @@ impl SqliteStorage {
         self.0.connection()
     }
 
-    /// Read the singleton account row. Errors if no account is enrolled
-    /// (callers gate on `Profile::require_active` first, so a missing row
-    /// means a corrupt/half-written profile).
+    /// Read the singleton account row. Errors if there is none (callers
+    /// gate on `Profile::require_active` first, so a missing row means
+    /// a corrupt/half-written profile).
     pub fn read_account(&self) -> Result<Account, StorageError> {
         let conn = self.conn().lock().expect("SqliteStorage mutex poisoned");
         let row = conn
@@ -94,9 +119,9 @@ impl SqliteStorage {
                 [],
                 |r| {
                     Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, String>(2)?,
+                        r.get::<_, Option<String>>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
                         r.get::<_, Vec<u8>>(3)?,
                     ))
                 },
@@ -105,17 +130,32 @@ impl SqliteStorage {
             .map_err(backend)?;
         let (account_id, email, device_id, doc_bytes) =
             row.ok_or_else(|| StorageError::Backend("account row missing".into()))?;
+        // The schema's CHECK keeps the three together; a partial row
+        // can only be a hand edit, and is reported rather than read as
+        // local-only.
+        let identity = match (account_id, email, device_id) {
+            (None, None, None) => None,
+            (Some(account_id), Some(email), Some(device_id)) => Some(Identity {
+                account_id,
+                email,
+                device_id,
+            }),
+            _ => {
+                return Err(StorageError::Backend(
+                    "account row has a partial identity".into(),
+                ));
+            }
+        };
         Ok(Account {
-            account_id,
-            email,
-            device_id,
             primary_doc_id: DocId(uuid_from_slice(&doc_bytes)?),
+            identity,
         })
     }
 
     /// Upsert the singleton account row.
     pub fn write_account(&self, account: &Account) -> Result<(), StorageError> {
         let conn = self.conn().lock().expect("SqliteStorage mutex poisoned");
+        let identity = account.identity.as_ref();
         conn.execute(
             "INSERT INTO account (id, account_id, email, device_id, primary_doc_id)
              VALUES (1, ?1, ?2, ?3, ?4)
@@ -125,9 +165,9 @@ impl SqliteStorage {
                device_id      = excluded.device_id,
                primary_doc_id = excluded.primary_doc_id",
             params![
-                account.account_id,
-                account.email,
-                account.device_id,
+                identity.map(|i| i.account_id.as_str()),
+                identity.map(|i| i.email.as_str()),
+                identity.map(|i| i.device_id.as_str()),
                 account.primary_doc_id.0.as_bytes().to_vec(),
             ],
         )

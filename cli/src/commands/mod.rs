@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use clap::{Parser, Subcommand};
-use dialoguer::Password;
+use dialoguer::{Confirm, Password};
 use monoplan_core::Doc;
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +22,7 @@ pub mod logout;
 mod password;
 mod recover;
 mod share;
-mod signup;
+pub mod signup;
 pub mod status;
 
 /// Where `signup` / `login` / `recover` go without `--server`: the
@@ -78,9 +78,9 @@ enum Cmd {
 /// item verbs daily. None of them touch the doc, so none go over IPC.
 #[derive(Subcommand, Debug)]
 enum AuthCmd {
-    /// Create a new account on the given server.
+    /// Create a new account on the given server; the local workspace becomes its Personal workspace.
     Signup(signup::Args),
-    /// Log in to an existing account on a fresh device.
+    /// Log in to an existing account on a fresh device (a local-only workspace is discarded).
     Login(login::Args),
     /// Wipe local state. Does not revoke the device server-side.
     Logout,
@@ -158,7 +158,7 @@ impl Cli {
             Spawn::OnDemand
         };
         let doc_cmd = match self.cmd {
-            Cmd::Auth(AuthCmd::Signup(a)) => return signup::run(a).await,
+            Cmd::Auth(AuthCmd::Signup(a)) => return signup::run(a, spawn).await,
             Cmd::Auth(AuthCmd::Login(a)) => return login::run(a, spawn).await,
             Cmd::Auth(AuthCmd::Logout) => return logout::run().await,
             Cmd::Auth(AuthCmd::Recover(a)) => return recover::run(a, spawn).await,
@@ -168,7 +168,7 @@ impl Cli {
             Cmd::Status(a) => return status::run(a).await,
             Cmd::Daemon(a) => return crate::daemon::run(a).await,
             Cmd::ExportJson(a) => {
-                let profile = Profile::require_active()?;
+                let profile = crate::bootstrap::open_or_init().await?;
                 let (json, sync) = client::doc(&profile, DocCmd::ExportJson, spawn).await?;
                 export::deliver(json.trim_end_matches('\n'), a.out.as_deref())?;
                 offline_notice(sync);
@@ -188,12 +188,37 @@ impl Cli {
             Cmd::Starred(a) => DocCmd::Focus(a),
             Cmd::Lists(a) => DocCmd::Lists(a),
         };
-        let profile = Profile::require_active()?;
+        // A fresh install gets a local-only workspace here; no account
+        // needed to capture (`crate::bootstrap`).
+        let profile = crate::bootstrap::open_or_init().await?;
         let (stdout, sync) = client::doc(&profile, doc_cmd, spawn).await?;
         print!("{stdout}");
         offline_notice(sync);
         Ok(())
     }
+}
+
+/// `login` / `recover` from an install that holds a local-only
+/// workspace: the account's doc replaces it (the web client does the
+/// same; merging two seeded histories is not built), so say so and ask.
+/// Nothing to say when there is no profile or it already has an account.
+pub(crate) fn confirm_discard_local_workspace(profile: &Profile) -> anyhow::Result<()> {
+    if crate::bootstrap::local_only_doc(profile)?.is_none() {
+        return Ok(());
+    }
+    println!(
+        "This install has a local-only workspace. Signing in to an existing account \
+         discards it; `monoplan auth signup` would keep it instead, and \
+         `monoplan export-json` saves a copy first."
+    );
+    let proceed = Confirm::new()
+        .with_prompt("Discard the local workspace and sign in?")
+        .default(false)
+        .interact()?;
+    if !proceed {
+        anyhow::bail!("aborted");
+    }
+    Ok(())
 }
 
 /// The reply was served from the local doc with no server behind it:
