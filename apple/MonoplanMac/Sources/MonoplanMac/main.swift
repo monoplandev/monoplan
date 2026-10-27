@@ -188,8 +188,8 @@ final class TrayController: NSObject, NSMenuDelegate {
         if !location.isSignedIn {
             addAction("Sign In…", #selector(signIn))
         }
-        addAction("Open Monoplan", #selector(openWebsite))
         addAction("Settings…", #selector(openSettings))
+        addAction("Open Monoplan", #selector(openWebsite))
         addAction("Quit Monoplan", #selector(quit))
     }
 
