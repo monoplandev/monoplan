@@ -240,10 +240,10 @@ impl SqliteStorage {
         Ok(())
     }
 
-    /// Drop the doc cache (WAL + snapshot + in-flight push) and reset
-    /// every sync cursor, keeping account identity. Backs `monoplan cache
+    /// Drop the doc store (WAL + snapshot + in-flight push) and reset
+    /// every sync cursor, keeping account identity. Backs `monoplan db
     /// clear`: the next sync rehydrates from server_seq 0.
-    pub fn clear_cache(&self, doc_id: DocId) -> Result<(), StorageError> {
+    pub fn clear_db(&self, doc_id: DocId) -> Result<(), StorageError> {
         let mut conn = self.conn().lock().expect("SqliteStorage mutex poisoned");
         let id = doc_id.0.as_bytes().to_vec();
         let tx = conn.transaction().map_err(backend)?;

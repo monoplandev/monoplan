@@ -180,7 +180,7 @@ machinery a continuous design would need (see §Rejected).
 - **T5. Every device wipes on epoch change.** On `DocOpened` with an
   epoch above the stored one, on `EpochAdvanced`, or on `EpochMismatch`:
   discard the local doc, WAL, in-flight push and sync cursor (the same
-  wipe as `monoplan cache clear --force`), persist the new epoch, and run
+  wipe as `monoplan db clear --force`), persist the new epoch, and run
   the existing bootstrap path from an empty doc. Not just the behind
   devices: all of them. One uniform rule, and the existing bootstrap code
   works unchanged because importing a chain into an *empty* doc cannot

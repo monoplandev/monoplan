@@ -1,4 +1,4 @@
-//! `monoplan cache` — local cache inspection and reset. Local-only; never opens a WS.
+//! `monoplan db` — local database inspection and reset. Local-only; never opens a WS.
 
 use std::io::IsTerminal;
 
@@ -12,19 +12,19 @@ use super::items::print_json;
 
 #[derive(Parser, Debug)]
 #[command(subcommand_required = true, arg_required_else_help = true)]
-pub struct CacheArgs {
+pub struct DbArgs {
     #[command(subcommand)]
-    pub cmd: CacheCmd,
+    pub cmd: DbCmd,
 }
 
 #[derive(Subcommand, Debug)]
-pub enum CacheCmd {
-    /// Show cache location and size.
+pub enum DbCmd {
+    /// Show database location and size.
     Status {
         #[arg(long)]
         json: bool,
     },
-    /// Delete the local doc cache and reset the sync cursor. The next
+    /// Delete the local doc database and reset the sync cursor. The next
     /// command starts a daemon that rehydrates from the server. On a
     /// local-only workspace this erases it and starts a fresh one.
     Clear {
@@ -34,15 +34,15 @@ pub enum CacheCmd {
     },
 }
 
-pub async fn run(args: CacheArgs) -> anyhow::Result<()> {
+pub async fn run(args: DbArgs) -> anyhow::Result<()> {
     match args.cmd {
-        CacheCmd::Status { json } => status(json).await,
-        CacheCmd::Clear { force } => clear(force).await,
+        DbCmd::Status { json } => status(json).await,
+        DbCmd::Clear { force } => clear(force).await,
     }
 }
 
 #[derive(Serialize)]
-struct CacheStatusJson<'a> {
+struct DbStatusJson<'a> {
     profile_dir: &'a str,
     doc_path: &'a str,
     doc_bytes: Option<u64>,
@@ -54,7 +54,7 @@ async fn status(json: bool) -> anyhow::Result<()> {
     let doc_bytes = std::fs::metadata(&doc_path).ok().map(|m| m.len());
 
     if json {
-        print_json(&CacheStatusJson {
+        print_json(&DbStatusJson {
             profile_dir: profile.dir.to_string_lossy().as_ref(),
             doc_path: doc_path.to_string_lossy().as_ref(),
             doc_bytes,
@@ -76,16 +76,16 @@ async fn clear(force: bool) -> anyhow::Result<()> {
         anyhow::bail!("monoplan daemon is running; `monoplan daemon stop` first");
     }
 
-    // The doc cache (wal + snapshot) and sync cursor live in the sqlite
-    // db; account identity lives there too, so we truncate the cache
-    // tables rather than unlink the file — clearing the cache must not
+    // The doc store (wal + snapshot) and sync cursor live in the sqlite
+    // db; account identity lives there too, so we truncate the doc
+    // tables rather than unlink the file — clearing the db must not
     // log the user out.
     let storage = crate::storage::open_storage(&profile)?;
     let account = storage.read_account()?;
     let doc_id = account.primary_doc_id;
 
     // Local operations the server has no proof of would be lost by a
-    // cache wipe. A local-only workspace has no server at all: the
+    // db wipe. A local-only workspace has no server at all: the
     // wipe is the whole workspace, so it always asks.
     let secrets = profile.read_secrets()?;
     let dek = crate::keystore::dek_for_doc(&secrets, doc_id)?;
@@ -102,13 +102,13 @@ async fn clear(force: bool) -> anyhow::Result<()> {
                 );
             }
             anyhow::bail!(
-                "local cache has unsynced changes; let a daemon push them first (`monoplan daemon status` shows when it is online) or pass --force"
+                "local db has unsynced changes; let a daemon push them first (`monoplan daemon status` shows when it is online) or pass --force"
             );
         }
         let prompt = if local_only {
             "This local-only workspace will be erased (nothing has ever synced). Clear anyway?"
         } else {
-            "Local cache has unsynced changes that will be lost. Clear anyway?"
+            "Local db has unsynced changes that will be lost. Clear anyway?"
         };
         let proceed = Confirm::new()
             .with_prompt(prompt)
@@ -120,7 +120,7 @@ async fn clear(force: bool) -> anyhow::Result<()> {
         }
     }
 
-    storage.clear_cache(doc_id)?;
+    storage.clear_db(doc_id)?;
 
     if local_only {
         // Nothing will rehydrate it: start over from the onboarding
@@ -131,9 +131,7 @@ async fn clear(force: bool) -> anyhow::Result<()> {
         crate::storage::seed_snapshot(&storage, &dek, doc_id, &doc)?;
         println!("Local workspace erased; a fresh one is ready.");
     } else {
-        println!(
-            "Cache cleared. The next command starts a daemon that rehydrates from the server."
-        );
+        println!("Db cleared. The next command starts a daemon that rehydrates from the server.");
     }
     Ok(())
 }

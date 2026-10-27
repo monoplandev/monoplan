@@ -11,7 +11,7 @@ No account is needed to use the CLI. The first doc command on a fresh install cr
 
 - `monoplan auth signup` from that state **adopts** the workspace: its DEK becomes the Home DEK and its doc id is sent as `primary_doc_id`, so nothing is copied or re-encrypted and the whole local history ships on the first connect. The command says so (`Your local workspace is now this account's Personal workspace.`) and syncs right after the recovery code is confirmed.
 - `monoplan auth login` / `recover` from that state **discard** it (the account's doc replaces it; merging two seeded histories is not built, same as the web). They say so and ask for confirmation first, pointing at `signup` (keeps it) and `export-json` (saves a copy).
-- `monoplan auth logout` on a local-only workspace does nothing (`Not logged in (the local workspace is kept).`); `monoplan cache clear` is the way to erase it, and always asks (`--force` when not a TTY), then re-seeds a fresh one under the same id and key.
+- `monoplan auth logout` on a local-only workspace does nothing (`Not logged in (the local workspace is kept).`); `monoplan db clear` is the way to erase it, and always asks (`--force` when not a TTY), then re-seeds a fresh one under the same id and key.
 - Verbs that need a server (`share …`, `auth password`) fail with `no account on this install; …`.
 - The macOS app hosts a CLI-made local-only profile like any other (its Settings get an `Err` to the `Account` request instead of an identity); it does not create one itself yet.
 
@@ -86,9 +86,9 @@ Binning and restoring an item are `monoplan item bin` / `item restore` (see "Ite
 ### Status
 - `monoplan status` — server URL, account email, device id, last successful sync timestamp, `last_acked_seq`, pending-push op count. Read-only against local state; never opens a WS and never starts the daemon. On a local-only workspace: `Account: none — local-only workspace` plus the doc id; `--json` has `local_only: true` and null identity / server fields.
 
-### Cache
-- `monoplan cache status` — profile directory and `monoplan.sqlite` size. Read-only; never opens a WS.
-- `monoplan cache clear [--force]` — truncate the doc cache (`wal` + `snapshots`) and reset the per-doc sync cursor to 0, **keeping** account identity (so it does not log you out); the next command starts a daemon that rehydrates from the server. Refuses while a daemon is running. If there are unsynced local ops, prompts for confirmation (TTY) or refuses with an error (non-TTY) unless `--force` is passed. On a local-only workspace everything is unsynced, so it always asks, and afterwards re-seeds the onboarding doc under the same id and key rather than leaving an empty one.
+### Db
+- `monoplan db status` — profile directory and `monoplan.sqlite` size. Read-only; never opens a WS.
+- `monoplan db clear [--force]` — truncate the doc store (`wal` + `snapshots`) and reset the per-doc sync cursor to 0, **keeping** account identity (so it does not log you out); the next command starts a daemon that rehydrates from the server. Refuses while a daemon is running. If there are unsynced local ops, prompts for confirmation (TTY) or refuses with an error (non-TTY) unless `--force` is passed. On a local-only workspace everything is unsynced, so it always asks, and afterwards re-seeds the onboarding doc under the same id and key rather than leaving an empty one.
 
 ### Export
 - `monoplan export-json [--out PATH]` — semantic account export: built-in/user lists plus items/lifecycle/timestamps as regular JSON. Defaults to stdout; `--out` writes a file. This is a portability dump, not a CRDT backup/restore format.
@@ -107,7 +107,7 @@ One binary, two roles; and on macOS a third host, the app, which runs the same l
 Dispatch, at the top of `Cli::run`:
 
 - Doc commands (`item …`, `places`, `agenda`, `starred`, `lists`, `bin`, `export-json`) open the profile through `bootstrap::open_or_init`, which creates the local-only workspace on a fresh install (holding `daemon.lock` while it writes, so a racing second command waits and finds it), then are forwarded as a `DocCmd` and their output comes back as text. `item add -` reads stdin in the client; `export-json --out` writes the file in the client. A hand-run `monoplan daemon` on a fresh install creates the workspace the same way.
-- `status` and `cache status` are direct, read-only sqlite reads and never contact or start the daemon. `cache clear` refuses while a daemon is running.
+- `status` and `db status` are direct, read-only sqlite reads and never contact or start the daemon. `db clear` refuses while a daemon is running.
 - `signup`, `login`, `recover`, `password` and `logout` work on the profile files, so each first stops a running host and holds `daemon.lock` until the files are written (`client::claim`), keeping the app and any auto-spawn out meanwhile; `login` and `recover` then sync through a fresh host, which is what starts it (or the app, if it re-hosted first).
 - `share` is HTTP against the server and runs in the client.
 
@@ -135,7 +135,7 @@ Every connection starts with a hello carrying a build id (package version plus t
 
 Single account per install. One dir under XDG paths (`~/.local/share/monoplan/` on linux, equivalents elsewhere) — `logout` wipes it, signup/login re-creates it. Two side-by-side test accounts in dev: point `MONOPLAN_DATA_DIR` at distinct roots.
 
-- `monoplan.sqlite` — doc cache (append-only `wal` + per-doc `snapshots`), the per-doc sync cursor (`docs.last_acked_server_seq` / `last_sync_at`), and the singleton `account` row (primary-doc id, plus account/device ids + email, all three NULL for a local-only workspace). `primary_doc_id` is the id of the Home doc, used to key local snapshot storage: server-assigned at login/recover, minted locally for a local-only workspace and kept through signup. See `spec/storage.md`.
+- `monoplan.sqlite` — doc store (append-only `wal` + per-doc `snapshots`), the per-doc sync cursor (`docs.last_acked_server_seq` / `last_sync_at`), and the singleton `account` row (primary-doc id, plus account/device ids + email, all three NULL for a local-only workspace). `primary_doc_id` is the id of the Home doc, used to key local snapshot storage: server-assigned at login/recover, minted locally for a local-only workspace and kept through signup. See `spec/storage.md`.
 - `daemon.lock` — flock held by the running daemon (never unlinked; see `spec/peer-id-plan.md` for the rules). `peer-<n>.lock` — the peer-id slot leases.
 - `daemon.sock` — the daemon's Unix socket (mode 0600; falls back to a hash-named socket in the temp dir when the profile path is too long for `sun_path`). `daemon.log` — stderr of a detached daemon.
 - `config.toml` — `{ server_url }`. Written by signup/login/recover; absent on a local-only workspace, which has no server to name. Operator-editable.

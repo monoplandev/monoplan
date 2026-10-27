@@ -219,7 +219,7 @@ pub fn write_json<T: Serialize>(out: &mut dyn Write, value: &T) -> anyhow::Resul
 }
 
 /// `write_json` straight to this process's stdout, for the commands
-/// that stay local (`status`, `cache`).
+/// that stay local (`status`, `db`).
 pub fn print_json<T: Serialize>(value: &T) -> anyhow::Result<()> {
     write_json(&mut std::io::stdout().lock(), value)
 }

@@ -117,7 +117,7 @@ impl Secrets {
 /// ```text
 ///   <root>/config.toml    — server_url (once there is an account)
 ///   <root>/secrets.toml   — DEKs + device token ("profile exists" marker)
-///   <root>/monoplan.sqlite  — doc cache + identity + sync cursor
+///   <root>/monoplan.sqlite  — doc store + identity + sync cursor
 /// ```
 pub struct Profile {
     pub dir: PathBuf,

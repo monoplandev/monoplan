@@ -12,7 +12,7 @@ pub const MIN_PASSWORD_LEN: usize = 10;
 
 pub mod agenda;
 pub mod bin;
-pub mod cache;
+pub mod db;
 pub mod export;
 pub mod focus;
 pub mod items;
@@ -61,8 +61,8 @@ enum Cmd {
     Starred(focus::FocusArgs),
     /// Manage lists.
     Lists(lists::ListsArgs),
-    /// Inspect the local cache.
-    Cache(cache::CacheArgs),
+    /// Inspect the local database.
+    Db(db::DbArgs),
     /// Export the current account as semantic JSON.
     ExportJson(export::ExportArgs),
     /// Share a workspace: invite links, members.
@@ -163,7 +163,7 @@ impl Cli {
             Cmd::Auth(AuthCmd::Logout) => return logout::run().await,
             Cmd::Auth(AuthCmd::Recover(a)) => return recover::run(a, spawn).await,
             Cmd::Auth(AuthCmd::Password) => return password::run().await,
-            Cmd::Cache(a) => return cache::run(a).await,
+            Cmd::Db(a) => return db::run(a).await,
             Cmd::Share(a) => return share::run(a).await,
             Cmd::Status(a) => return status::run(a).await,
             Cmd::Daemon(a) => return crate::daemon::run(a).await,

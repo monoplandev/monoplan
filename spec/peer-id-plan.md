@@ -83,7 +83,7 @@ same-slot races, and sqlite's write serialisation covers the rest.
 Store as `i64` bit-cast (`peer as i64`), read back with `as u64`.
 
 Device-local, not CRDT state: the mapping never enters the Loro doc.
-It also survives `monoplan cache clear` deliberately - see counter
+It also survives `monoplan db clear` deliberately - see counter
 continuity below.
 
 ### Core API change: peer id is an input, not a callback
@@ -107,7 +107,7 @@ across wasm/FFI wants a plain `u64` in, so the arrow points inward:
 
 Counter continuity: setting the peer id before importing the snapshot +
 WAL is safe; Loro resumes that peer's counter from the imported oplog
-high-water. `cache clear` is also safe: rebuilding from the server
+high-water. `db clear` is also safe: rebuilding from the server
 replays every op the server has for this peer, so counters resume past
 them; ops the server never saw also never reached any other replica, so
 their counters are unobserved and reusable.

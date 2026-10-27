@@ -13,7 +13,7 @@
 -- signup adopts that workspace. The three identity columns are all
 -- NULL for a local-only workspace and all set once an account exists.
 -- Lives in the db rather than a config file so identity and the doc
--- cache share one transactional store; the presence of `secrets.toml`
+-- store share one transactional store; the presence of `secrets.toml`
 -- (not this row) is the "profile exists" marker, and its device token
 -- the "has an account" one.
 CREATE TABLE account (
@@ -32,7 +32,7 @@ CREATE TABLE account (
 -- count. Which slot a process may *use* is decided by the flock lease
 -- on `peer-<slot>.lock` in the profile dir, never by this table —
 -- device-local state, deliberately outside the CRDT doc, and
--- deliberately surviving `monoplan cache clear` (counters resume safely
+-- deliberately surviving `monoplan db clear` (counters resume safely
 -- from replayed history).
 CREATE TABLE peer_slots (
   slot     INTEGER PRIMARY KEY,

@@ -150,9 +150,9 @@ monoplan tui      ──UDS──┼──>  monoplan daemon ──WS──> ser
 Top of `Cli::run`:
 
 1. `daemon …` subcommands run the host (below).
-2. `status` and `cache status` stay direct, read-only sqlite reads (WAL
+2. `status` and `db status` stay direct, read-only sqlite reads (WAL
    mode allows a concurrent reader) and never spawn or contact the
-   daemon, as `spec/cli.md` already requires. `cache clear` refuses
+   daemon, as `spec/cli.md` already requires. `db clear` refuses
    while `daemon.lock` is held.
 3. Account bootstrap (`signup`, `login`, `recover`, `logout`,
    `password`) runs in the client process as today, because it works
@@ -430,7 +430,7 @@ about the product.
 3. **Port the verbs** (built). Every doc command is a pure function
    over `(doc, args, out)` (`commands::run_doc`); `-s` and
    `Session::open` are gone; account commands stop the daemon first;
-   `cache clear` refuses while it runs. Phases 2 and 3 had to land
+   `db clear` refuses while it runs. Phases 2 and 3 had to land
    together: once the daemon auto-starts and holds the lock, any
    un-ported one-shot verb would simply be refused.
 4. **Lifecycle** (partly built). `daemon stop|status|install|uninstall`
