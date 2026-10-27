@@ -116,9 +116,12 @@ in Finder, Login Items and Force Quit while stderr stays on the
 terminal. The menu bar glyph is separate: a template image drawn in
 `main.swift`.
 
-Settings has two panes. Account: server, status, sync, and an "Open at
+Settings has two panes. Account: server, status, sync, an "Open at
 login" toggle (`SMAppService.mainApp`, which lists the app under System
-Settings › Login Items; works only from an .app bundle). Advanced: the
+Settings › Login Items; works only from an .app bundle), and a Sign Out
+button (confirmed; stops the in-app host and wipes the profile through
+`monoplan-ffi::logout`, the same code as `monoplan logout`; sign-in
+stays with the CLI for now). Advanced: the
 Host row (running, or why not), the Build row (package version), a
 "Command line" row whose Install button symlinks `/usr/local/bin/monoplan`
 to the bundled binary (admin prompt if the directory is root's), and

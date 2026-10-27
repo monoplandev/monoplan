@@ -380,6 +380,26 @@ pub enum HostError {
     Failed { message: String },
 }
 
+/// Sign out: stop whatever hosts the profile, hold it, wipe it. What
+/// `monoplan logout` does, for the app's Settings. The app stops its
+/// own host first and keeps its host controller from restarting one
+/// until this returns; `NotLoggedIn` when there was no profile.
+#[uniffi::export]
+pub fn logout(profile_dir: String) -> Result<(), HostError> {
+    use monoplan_cli::{commands::logout, config::Profile};
+    let profile = Profile::active_at(PathBuf::from(profile_dir)).ok_or(HostError::NotLoggedIn)?;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| HostError::Failed {
+            message: e.to_string(),
+        })?;
+    rt.block_on(logout::logout(&profile))
+        .map_err(|e| HostError::Failed {
+            message: format!("{e:#}"),
+        })
+}
+
 /// One running host loop. Dropping it does *not* stop the loop; call
 /// `shutdown` (clean exit: persist, fold, close the socket, release the
 /// lock). A client's `Shutdown` request (`daemon stop`, `logout`,

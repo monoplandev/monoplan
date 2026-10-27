@@ -18,7 +18,7 @@ pub mod focus;
 pub mod items;
 pub mod lists;
 mod login;
-mod logout;
+pub mod logout;
 mod password;
 mod recover;
 mod share;

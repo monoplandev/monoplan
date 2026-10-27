@@ -18,8 +18,8 @@ import MonoplanMacKit
 final class SettingsWindowController: NSWindowController {
     private let model: SettingsModel
 
-    init(location: ProfileLocation, client: DaemonClient) {
-        model = SettingsModel(location: location, client: client)
+    init(location: ProfileLocation, client: DaemonClient, signOut: @escaping (@escaping (Error?) -> Void) -> Void) {
+        model = SettingsModel(location: location, client: client, signOut: signOut)
         // The toolbar tab style: AppKit builds the toolbar from the tab
         // items (one icon + label each) and, with the `.preference`
         // toolbar style, draws it as the full-height icon surface every
@@ -86,6 +86,8 @@ final class SettingsModel: ObservableObject {
     @Published var syncLine: String = "—"
     @Published var openAtLogin = false
     @Published var loginError: String?
+    @Published var signingOut = false
+    @Published var signOutError: String?
     @Published var cliLine: String = "—"
     @Published var cliError: String?
     /// nil when there is no bundled binary to link to (a `swift run`).
@@ -93,12 +95,36 @@ final class SettingsModel: ObservableObject {
 
     private let location: ProfileLocation
     private let client: DaemonClient
+    private let signOutAction: (@escaping (Error?) -> Void) -> Void
 
-    init(location: ProfileLocation, client: DaemonClient) {
+    init(location: ProfileLocation, client: DaemonClient, signOut: @escaping (@escaping (Error?) -> Void) -> Void) {
         self.location = location
         self.client = client
+        self.signOutAction = signOut
         profilePath = location.dir.path
         refresh()
+    }
+
+    /// Confirm, then stop the host and wipe the profile. Local state
+    /// only: everything is on the server, and signing in again pulls
+    /// it back.
+    func signOut() {
+        let alert = NSAlert()
+        alert.messageText = "Sign out of Monoplan?"
+        alert.informativeText = "This removes the local copy of your data from this Mac. Your data stays on the server and comes back when you sign in again."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Sign Out")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        signingOut = true
+        signOutError = nil
+        signOutAction { [weak self] error in
+            guard let self else { return }
+            self.signingOut = false
+            self.signOutError = error?.localizedDescription
+            self.email = nil
+            self.refresh()
+        }
     }
 
     func refresh() {
@@ -190,7 +216,16 @@ struct AccountPane: View {
             if let error = model.loginError {
                 Text(error).font(.footnote).foregroundStyle(.red)
             }
-            Text("Sign in and sign out are done from the command line for now (`monoplan login` / `monoplan logout`); they work while Monoplan is running.")
+            if model.signedIn {
+                LabeledContent("") {
+                    Button(model.signingOut ? "Signing out…" : "Sign Out…") { model.signOut() }
+                        .disabled(model.signingOut)
+                }
+                if let error = model.signOutError {
+                    Text(error).font(.footnote).foregroundStyle(.red)
+                }
+            }
+            Text("Sign in is done from the command line for now (`monoplan login --server …`); it works while Monoplan is running.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

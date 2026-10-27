@@ -315,7 +315,9 @@ final class TrayController: NSObject, NSMenuDelegate {
     /// same window forward rather than stacking a second.
     @objc private func openSettings() {
         if settingsWindow == nil {
-            settingsWindow = SettingsWindowController(location: location, client: client)
+            settingsWindow = SettingsWindowController(location: location, client: client, signOut: { [weak self] done in
+                self?.hostController.signOut(completion: done)
+            })
         }
         settingsWindow?.show()
     }

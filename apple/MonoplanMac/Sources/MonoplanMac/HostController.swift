@@ -28,6 +28,8 @@ final class HostController {
     private var starting = false
     /// The last failed start, shown once and then retried.
     private var failure: String?
+    /// Sign-out in progress: do not re-host when the socket drops.
+    private var signingOut = false
 
     init(location: ProfileLocation, client: DaemonClient) {
         self.location = location
@@ -40,6 +42,7 @@ final class HostController {
     private func ensureHosting() -> String? {
         if let host, host.isRunning() { return nil }
         host = nil
+        if signingOut { return "signing out" }
         if starting { return "starting" }
         if let failure {
             self.failure = nil
@@ -76,5 +79,33 @@ final class HostController {
     func stop() {
         host?.shutdown()
         host = nil
+    }
+
+    /// Sign out: stop our host, wipe the profile (what `monoplan
+    /// logout` does), and let the client see "not signed in". Off the
+    /// main thread, since the host's clean exit persists and folds.
+    /// `signingOut` keeps the socket-down path from starting a fresh
+    /// host between the stop and the wipe.
+    func signOut(completion: @escaping (Error?) -> Void) {
+        signingOut = true
+        let dir = location.dir.path
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.host?.shutdown()
+            let result = Result { try MonoplanCore.logout(profileDir: dir) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.host = nil
+                self.signingOut = false
+                self.client.poke()
+                completion(result.failure)
+            }
+        }
+    }
+}
+
+private extension Result {
+    var failure: Failure? {
+        if case .failure(let e) = self { return e }
+        return nil
     }
 }
