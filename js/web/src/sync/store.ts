@@ -464,6 +464,8 @@ export interface DocApp extends ItemActions {
     indexInList: number,
   ): string;
   moveItem(id: string, listId: string, indexInList: number): void;
+  /** Hard deletes are permanent: they clear this doc's undo / redo
+   *  history (core rearms its UndoManager on the same commit). */
   deleteBinned(id: string): void;
   deleteBinnedMany(ids: string[]): void;
   emptyBin(): number;
@@ -1135,6 +1137,31 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     redoStack.length = 0;
   };
 
+  // A hard delete (deleteBinned / emptyBin) is permanent: the core
+  // rearms its UndoManager on that commit, and this doc's stacks are
+  // dropped to match, so ⌘Z cannot walk back to before the delete. An
+  // enclosing action batch restarts from here, so only steps after the
+  // delete land on the stack when it closes.
+  const forgetUndoHistory = (): void => {
+    undoStack.length = 0;
+    redoStack.length = 0;
+    if (actionBatchDepth > 0) {
+      pendingActionSteps = 0;
+      pendingBatchNotes = [];
+      actionBatchStartVersion = version();
+    }
+  };
+
+  // Run a hard delete: commit, flush, then forget the undo history
+  // (only if something was actually removed).
+  const hardDelete = <T>(fn: () => T): T => {
+    const before = version();
+    const result = fn();
+    flush();
+    if (version() !== before) forgetUndoHistory();
+    return result;
+  };
+
   // Close the open notes session as one undo step (nothing if the text
   // is back where it started, e.g. fully undone natively while focused)
   // and start the next one from the current text.
@@ -1422,19 +1449,13 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       mutate(() => engine.moveItem(id, listId, indexInList));
     },
     deleteBinned(id) {
-      mutate(() => engine.deleteBinned(id));
+      hardDelete(() => engine.deleteBinned(id));
     },
     deleteBinnedMany(ids) {
-      mutate(() => engine.deleteBinnedItems(ids));
+      hardDelete(() => engine.deleteBinnedItems(ids));
     },
     emptyBin() {
-      const before = version();
-      const removed = engine.emptyBin();
-      if (removed > 0) {
-        flush();
-        if (version() !== before) recordAction(1);
-      }
-      return removed;
+      return hardDelete(() => engine.emptyBin());
     },
     addList(name) {
       return mutate(() => engine.addList(name));

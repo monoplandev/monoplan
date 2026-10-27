@@ -1657,6 +1657,10 @@ impl Doc {
     /// history. Recreating the manager clears both stacks, which is
     /// sound: same-peer ops arriving by import were never produced by
     /// this session and must not be undoable here.
+    ///
+    /// Also called after a hard delete (`hard_delete_items`): emptying
+    /// the bin is advertised as permanent, so neither the delete nor
+    /// anything before it may be undone afterwards.
     fn rearm_undo(&self) {
         let mut um = self.undo.lock().expect("undo mutex poisoned");
         *um = make_undo_manager(&self.inner);
@@ -2958,6 +2962,10 @@ impl Doc {
             }
         }
         self.inner.commit();
+        // A hard delete is permanent: drop the session's undo / redo
+        // history so neither the delete nor the steps before it can
+        // resurrect the item.
+        self.rearm_undo();
         {
             let mut guard = self.item_index.lock().expect("item index mutex poisoned");
             for item_id in item_ids {
@@ -10370,6 +10378,51 @@ mod tests {
         assert!(doc.redo().unwrap());
         let view = doc.get_item(&id).unwrap();
         assert_eq!(view.text, "buy milk");
+    }
+
+    #[test]
+    fn hard_delete_clears_undo_and_redo_history() {
+        let doc = Doc::new().unwrap();
+        let kept = doc.add_item(LIST_INBOX, "kept").unwrap();
+        let gone = doc.add_item(LIST_INBOX, "gone").unwrap();
+        doc.set_item_binned(&gone, true).unwrap();
+        // Leave something on the redo stack too.
+        let extra = doc.add_item(LIST_INBOX, "extra").unwrap();
+        assert!(doc.undo().unwrap());
+        assert!(doc.get_item(&extra).is_none());
+        assert!(doc.can_undo());
+        assert!(doc.can_redo());
+
+        doc.delete_binned(&gone).unwrap();
+        assert!(!doc.can_undo());
+        assert!(!doc.can_redo());
+        assert!(!doc.undo().unwrap());
+        assert!(!doc.redo().unwrap());
+        assert!(doc.get_item(&gone).is_none());
+        assert!(doc.get_item(&kept).is_some());
+
+        // Steps after the delete are undoable as usual.
+        let after = doc.add_item(LIST_INBOX, "after").unwrap();
+        assert!(doc.can_undo());
+        assert!(doc.undo().unwrap());
+        assert!(doc.get_item(&after).is_none());
+        assert!(!doc.can_undo());
+        assert!(doc.get_item(&gone).is_none());
+    }
+
+    #[test]
+    fn empty_bin_clears_undo_history() {
+        let doc = Doc::new().unwrap();
+        let a = doc.add_item(LIST_INBOX, "a").unwrap();
+        let b = doc.add_item(LIST_INBOX, "b").unwrap();
+        doc.set_items_binned(&[a.as_str(), b.as_str()], true)
+            .unwrap();
+        assert!(doc.can_undo());
+        assert_eq!(doc.empty_bin().unwrap(), 2);
+        assert!(!doc.can_undo());
+        assert!(!doc.undo().unwrap());
+        assert!(doc.get_item(&a).is_none());
+        assert!(doc.get_item(&b).is_none());
     }
 
     #[test]

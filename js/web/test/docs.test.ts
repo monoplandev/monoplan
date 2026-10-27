@@ -203,6 +203,54 @@ describe("docs layer", () => {
     dispose();
   });
 
+  test("a hard delete is permanent: it clears that doc's undo / redo history", () => {
+    const { home, other, layer, dispose } = setup();
+    const kept = home.addItem("inbox", "kept");
+    const gone = home.addItem("inbox", "gone");
+    home.setBinned(gone, true);
+    const b = other.addItem("inbox", "b");
+    // Leave Home with a redo entry as well.
+    const extra = home.addItem("inbox", "extra");
+    expect(layer.undo()).toBe(true);
+    expect(home.getItem(extra)).toBeUndefined();
+    expect(home.canUndo()).toBe(true);
+    expect(home.canRedo()).toBe(true);
+
+    layer.routed.deleteBinnedMany([gone]);
+    expect(home.getItem(gone)).toBeUndefined();
+    expect(home.canUndo()).toBe(false);
+    expect(home.canRedo()).toBe(false);
+    // The other doc's history is untouched, and undo goes there now.
+    expect(layer.canUndo()).toBe(true);
+    expect(layer.undo()).toBe(true);
+    expect(other.getItem(b)).toBeUndefined();
+    expect(layer.undo()).toBe(false);
+    expect(home.getItem(gone)).toBeUndefined();
+    expect(home.getItem(kept)).toBeDefined();
+
+    // Steps after the delete are undoable as usual.
+    const after = home.addItem("inbox", "after");
+    expect(layer.undo()).toBe(true);
+    expect(home.getItem(after)).toBeUndefined();
+    expect(home.canUndo()).toBe(false);
+
+    // emptyBin behaves the same, across every doc.
+    home.setBinned(kept, true);
+    const c = other.addItem("inbox", "c");
+    other.setBinned(c, true);
+    expect(layer.emptyBin()).toBe(2);
+    expect(layer.canUndo()).toBe(false);
+    expect(layer.undo()).toBe(false);
+    expect(home.getItem(kept)).toBeUndefined();
+    expect(other.getItem(c)).toBeUndefined();
+    // An empty bin is a no-op that keeps history.
+    const d = home.addItem("inbox", "d");
+    expect(layer.emptyBin()).toBe(0);
+    expect(layer.undo()).toBe(true);
+    expect(home.getItem(d)).toBeUndefined();
+    dispose();
+  });
+
   test("a doc added later joins the map and the merged reads", () => {
     const { layer, dispose } = createRoot((dispose) => {
       const home = appFor(HOME);
