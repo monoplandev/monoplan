@@ -166,10 +166,11 @@ Top of `Cli::run`:
    the reply (human or `--json` is a client-side rendering of the same
    reply type), exit with the reply's status.
 
-`-s` / `--sync` / `MONOPLAN_SYNC` are removed. The daemon is always
-syncing when it can; `monoplan sync` becomes "ask the daemon to flush
-now and report whether it is online", with the same hard-error
-semantics when the server is unreachable.
+`-s` / `--sync` / `MONOPLAN_SYNC` are removed, and so is `monoplan sync`
+(2026-10-27). The daemon is always syncing when it can, and a daemon
+restart is a fresh connection attempt. The IPC `Sync` request ("flush
+now, answer when the attempt resolves, hard error when unreachable")
+stays as the barrier `login` / `recover` and the tests use.
 
 ### Auto-spawn
 

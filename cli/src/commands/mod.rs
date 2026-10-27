@@ -24,7 +24,6 @@ mod recover;
 mod share;
 mod signup;
 pub mod status;
-mod sync;
 
 /// Where `signup` / `login` / `recover` go without `--server`: the
 /// hosted alpha, the same default as the app's sign-in sheet. The dev
@@ -101,8 +100,6 @@ enum Cmd {
     Share(share::ShareArgs),
     /// Show local sync state.
     Status(status::StatusArgs),
-    /// Push pending local ops now and report whether the server is reachable.
-    Sync,
     /// The resident sync process for this profile (spec/daemon-plan.md).
     Daemon(crate::daemon::DaemonArgs),
 }
@@ -205,7 +202,6 @@ impl Cli {
             Cmd::Share(a) => return share::run(a).await,
             Cmd::Status(a) => return status::run(a).await,
             Cmd::Daemon(a) => return crate::daemon::run(a).await,
-            Cmd::Sync => return sync::run(spawn).await,
             Cmd::ExportJson(a) => {
                 let profile = Profile::require_active()?;
                 let (json, sync) = client::doc(&profile, DocCmd::ExportJson, spawn).await?;

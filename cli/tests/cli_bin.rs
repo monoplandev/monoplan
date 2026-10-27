@@ -10,6 +10,7 @@ use std::process::Output;
 
 use tokio::process::Command;
 
+use monoplan_cli::client::{self, Spawn};
 use monoplan_cli::config::Config;
 use monoplan_cli::daemon;
 use monoplan_cli::sync::Session;
@@ -52,7 +53,7 @@ async fn commands_start_and_share_one_daemon() {
     let server = TestServer::start().await;
     let signup = signup_account(&server, "bin-a").await;
     let tmp = tempfile::tempdir().unwrap();
-    materialize_profile(
+    let profile = materialize_profile(
         tmp.path(),
         &server.base,
         &signup.account_id,
@@ -98,8 +99,9 @@ async fn commands_start_and_share_one_daemon() {
     let e = err(monoplan(dir, &["done", "nope"]).await);
     assert!(!e.trim().is_empty());
 
-    // The daemon pushed; a second device sees the item via a one-shot.
-    ok(monoplan(dir, &["sync"]).await);
+    // Wait for the daemon to push (the same barrier login uses); a
+    // second device then sees the item via a one-shot.
+    client::sync(&profile, Spawn::Never).await.unwrap();
     let login = login_device(&server.base, &signup.email, TEST_PASSWORD, "bin-b")
         .await
         .unwrap();
@@ -142,7 +144,7 @@ async fn commands_start_and_share_one_daemon() {
 }
 
 /// A daemon whose server is unreachable still serves the local doc, but
-/// every reply says so, and `sync` fails instead of pretending.
+/// every reply says so, and a flush request fails instead of pretending.
 #[tokio::test]
 async fn offline_daemon_serves_locally_and_says_so() {
     let server = TestServer::start().await;
@@ -182,8 +184,11 @@ async fn offline_daemon_serves_locally_and_says_so() {
     assert!(stdout.contains("captured offline"), "{stdout}");
     assert!(stderr.contains("offline; never synced"), "{stderr}");
 
-    let e = err(monoplan(dir, &["sync"]).await);
-    assert!(e.contains("could not reach server"), "{e}");
+    let e = client::sync(&profile, Spawn::Never)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("server unreachable"), "{e}");
     let status = ok(monoplan(dir, &["daemon", "status"]).await);
     assert!(status.contains("offline; never synced"), "{status}");
 

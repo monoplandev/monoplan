@@ -85,9 +85,6 @@ remove a list from the workspace. The core's `delete_list` stays internal
 ### Export
 - `monoplan export-json [--out PATH]` — semantic account export: built-in/user lists plus items/lifecycle/timestamps as regular JSON. Defaults to stdout; `--out` writes a file. This is a portability dump, not a CRDT backup/restore format.
 
-### Sync
-- `monoplan sync` — push any pending local ops now and report whether the server is reachable. The daemon pulls continuously while connected, so there is nothing separate to pull. Waits for an in-progress connection attempt (or starts one if the daemon is in backoff) rather than answering from stale state; an unreachable server exits non-zero.
-
 ### Daemon
 - `monoplan daemon` — run the resident process attached to the terminal (`spec/daemon-plan.md`). Refuses if one already holds the profile.
 - `monoplan daemon --detach` — what a client runs to start it: prints one readiness line on stdout (`ready` / `already-running` / `error: …`) and keeps running; stderr goes to `daemon.log` in the profile dir.

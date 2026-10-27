@@ -25,7 +25,7 @@ pub enum CacheCmd {
         json: bool,
     },
     /// Delete the local doc cache and reset the sync cursor. The next
-    /// `monoplan sync` will rehydrate from the server.
+    /// command starts a daemon that rehydrates from the server.
     Clear {
         /// Skip the confirmation prompt when there are unsynced ops.
         #[arg(long)]
@@ -93,7 +93,7 @@ async fn clear(force: bool) -> anyhow::Result<()> {
     if pending && !force {
         if !std::io::stdin().is_terminal() {
             anyhow::bail!(
-                "local cache has unsynced changes; run `monoplan sync` first or pass --force"
+                "local cache has unsynced changes; let a daemon push them first (`monoplan daemon status` shows when it is online) or pass --force"
             );
         }
         let proceed = Confirm::new()
@@ -108,7 +108,7 @@ async fn clear(force: bool) -> anyhow::Result<()> {
 
     storage.clear_cache(doc_id)?;
 
-    println!("Cache cleared. Run `monoplan sync` to rehydrate.");
+    println!("Cache cleared. The next command starts a daemon that rehydrates from the server.");
     Ok(())
 }
 
