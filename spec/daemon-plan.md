@@ -117,8 +117,8 @@ apps share one shape.
 ## Process topology
 
 ```
-monoplan add "x"  ──UDS──┐
-monoplan ls       ──UDS──┤
+monoplan item add ──UDS──┐
+monoplan item ls  ──UDS──┤
 monoplan tui      ──UDS──┼──>  monoplan daemon ──WS──> server
 (tray / window)   ──UDS──┘        │
                                   ├── <profile>/monoplan.sqlite

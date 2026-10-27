@@ -1,10 +1,5 @@
-//! Bin namespace + `bin <id>` action.
-//!
-//! `monoplan bin <id>` (the verb) lives in [`super::items::bin`]; this
-//! module owns the namespace operations and the dispatcher that picks
-//! between them. Clap's `external_subcommand` captures any token that
-//! isn't a known sub-subcommand, which we then treat as an item id
-//! and route to the verb.
+//! Bin namespace: `bin show` / `bin empty` / `bin rm <id>`. Binning an
+//! item is `item bin <id>` ([`super::items::bin`]).
 
 use clap::{Parser, Subcommand};
 use std::io::Write;
@@ -30,9 +25,6 @@ pub enum BinSub {
     Empty,
     /// Hard-delete a single binned item.
     Rm(IdArg),
-    /// Anything else is treated as an item id to bin.
-    #[command(external_subcommand)]
-    Item(Vec<String>),
 }
 
 pub fn run(doc: &Doc, args: BinArgs, out: &mut dyn Write) -> anyhow::Result<()> {
@@ -40,17 +32,6 @@ pub fn run(doc: &Doc, args: BinArgs, out: &mut dyn Write) -> anyhow::Result<()> 
         BinSub::Show => show(doc, args.json, out),
         BinSub::Empty => empty(doc, out),
         BinSub::Rm(id) => rm(doc, &id.item_id, out),
-        BinSub::Item(tokens) => match tokens.as_slice() {
-            [id] => super::items::bin(
-                doc,
-                IdArg {
-                    item_id: id.clone(),
-                },
-                out,
-            ),
-            [] => anyhow::bail!("expected an item id; try `monoplan bin show`"),
-            _ => anyhow::bail!("unexpected extra arguments after item id"),
-        },
     }
 }
 

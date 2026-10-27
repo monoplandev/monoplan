@@ -16,6 +16,7 @@ use monoplan_protocol::{
     PasswordResetRequest, PasswordResetResponse, PreloginRequest, PreloginResponse, RecoverRequest,
     RecoverResponse, RecoveryMaterial, SignupRequest, SignupResponse,
 };
+use monoplan_server::sync::queries;
 use monoplan_server::{AppState, router};
 use reqwest::header::CONTENT_TYPE;
 use uuid::Uuid;
@@ -518,4 +519,30 @@ pub async fn materialize_signup_profile(
 
 pub fn reopen_profile(data_dir: &std::path::Path) -> Profile {
     Profile::new(data_dir.to_path_buf())
+}
+
+/// Poll the server until `doc_id` holds at least `target` update blobs:
+/// the push barrier for tests that drive the real binary, since the
+/// daemon it spawns pushes asynchronously. Bounded at two seconds.
+pub async fn wait_for_updates(
+    server: &TestServer,
+    doc_id: Uuid,
+    target: usize,
+) -> queries::FetchedBatch {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let batch = queries::fetch_updates_batch(&server.state.db, doc_id, 0)
+            .await
+            .unwrap();
+        if batch.updates.len() >= target {
+            return batch;
+        }
+        if std::time::Instant::now() > deadline {
+            panic!(
+                "updates never reached target={target} (got {})",
+                batch.updates.len()
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
 }

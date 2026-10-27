@@ -1,6 +1,5 @@
-//! Item commands: add / ls / backlog / todo / start / review / done /
-//! bin (verb) / restore / mv / edit / when / duration / deadline / place /
-//! places.
+//! Item commands: `item add`, `item ls`, `item set` (every per-item
+//! field as a flag), `item bin`, `item restore`, and `places`.
 //!
 //! Every action is a pure function of the doc and its args that writes
 //! its output to `out`: the daemon runs it against the resident doc
@@ -8,7 +7,7 @@
 
 use std::io::{BufRead, IsTerminal, Write};
 
-use clap::Parser;
+use clap::{ArgGroup, Parser, ValueEnum};
 use monoplan_core::{
     Doc, ItemLifecycle, ItemView, LIST_INBOX, Place, PlaceSuggestion, WorkflowState, fold_label,
 };
@@ -48,7 +47,7 @@ pub fn collect_texts(arg: &str) -> anyhow::Result<Vec<String>> {
         let stdin = std::io::stdin();
         if stdin.is_terminal() {
             anyhow::bail!(
-                "`add -` reads from stdin but stdin is a tty — pipe input or pass text directly"
+                "`item add -` reads from stdin but stdin is a tty — pipe input or pass text directly"
             );
         }
         let mut out = Vec::new();
@@ -225,55 +224,41 @@ pub fn print_json<T: Serialize>(value: &T) -> anyhow::Result<()> {
     write_json(&mut std::io::stdout().lock(), value)
 }
 
-// ---------- backlog / todo / start / review / done / cancel / bin / restore ----------
+// ---------- lifecycle / bin / restore ----------
 
 #[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 pub struct IdArg {
     pub item_id: String,
 }
 
-/// Shared workflow transition: write the `[state, now]` register (and
-/// clear any bin mask) per the transition table in `spec/data-model.md`.
-/// One commit.
-fn transition(
-    doc: &Doc,
-    args: IdArg,
-    lifecycle: ItemLifecycle,
-    out: &mut dyn Write,
-) -> anyhow::Result<()> {
-    doc.set_item_lifecycle(&args.item_id, lifecycle)?;
-    writeln!(out, "{}", args.item_id)?;
-    Ok(())
+/// The workflow register's six states as `item set --lifecycle` spells
+/// them: the core's canonical names (`WorkflowState::name`), so they
+/// match what `ls --json` / `agenda --json` print back.
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LifecycleState {
+    Backlog,
+    Todo,
+    /// Stamps `started_at` on first entry.
+    #[value(name = "in_progress", alias = "in-progress")]
+    InProgress,
+    Review,
+    /// Stamps `done_at`.
+    Done,
+    /// Closed like Done, but stamps nothing: not a completion.
+    Cancelled,
 }
 
-/// Workflow → Backlog.
-pub fn backlog(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
-    transition(doc, args, ItemLifecycle::Backlog, out)
-}
-
-/// Workflow → Todo.
-pub fn todo(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
-    transition(doc, args, ItemLifecycle::Todo, out)
-}
-
-/// Workflow → In Progress (stamps `started_at` on first entry).
-pub fn start(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
-    transition(doc, args, ItemLifecycle::InProgress, out)
-}
-
-/// Workflow → Review.
-pub fn review(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
-    transition(doc, args, ItemLifecycle::Review, out)
-}
-
-/// Workflow → Done (stamps `done_at`).
-pub fn done(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
-    transition(doc, args, ItemLifecycle::Done, out)
-}
-
-/// Workflow → Cancelled (closed, but stamps nothing: not a completion).
-pub fn cancel(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
-    transition(doc, args, ItemLifecycle::Cancelled, out)
+impl From<LifecycleState> for ItemLifecycle {
+    fn from(s: LifecycleState) -> Self {
+        match s {
+            LifecycleState::Backlog => ItemLifecycle::Backlog,
+            LifecycleState::Todo => ItemLifecycle::Todo,
+            LifecycleState::InProgress => ItemLifecycle::InProgress,
+            LifecycleState::Review => ItemLifecycle::Review,
+            LifecycleState::Done => ItemLifecycle::Done,
+            LifecycleState::Cancelled => ItemLifecycle::Cancelled,
+        }
+    }
 }
 
 pub fn bin(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
@@ -291,31 +276,142 @@ pub fn restore(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()
     Ok(())
 }
 
-// ---------- mv ----------
+// ---------- set ----------
 
-#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
-pub struct MvArgs {
-    pub item_id: String,
-    pub list: String,
+/// Where `--star` puts the item: the end of Starred, or a 1-based slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StarPos {
+    Append,
+    At(usize),
 }
 
-pub fn mv(doc: &Doc, args: MvArgs, out: &mut dyn Write) -> anyhow::Result<()> {
-    // Append at the end of the target list (target_index = current
-    // length). `move_item` clamps to the existing range, so passing a
-    // huge index is safe — but the explicit count here is clearer.
-    let target_idx = doc.items_in_list(&args.list, true).len();
-    doc.move_item(&args.item_id, &args.list, target_idx)?;
-    writeln!(out, "{}", args.item_id)?;
+fn parse_star_pos(raw: &str) -> Result<StarPos, String> {
+    if raw == "end" {
+        return Ok(StarPos::Append);
+    }
+    raw.parse::<usize>()
+        .map(StarPos::At)
+        .map_err(|_| format!("position must be a 1-based number (or `end`): {raw:?}"))
+}
+
+/// `monoplan item set <id> …`: every per-item field as a flag, so one
+/// call can set several. At least one field flag is required (the
+/// `field` group). Each field is its own core setter and its own
+/// commit, applied in declaration order; the first error stops the
+/// sequence and the writes before it stand. What can be parsed up
+/// front (duration, coordinates) is, before anything is written; dates
+/// are validated by the core at write time.
+#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
+#[command(group = ArgGroup::new("field").required(true).multiple(true))]
+pub struct SetArgs {
+    pub item_id: String,
+    /// New item text.
+    #[arg(long, group = "field")]
+    pub text: Option<String>,
+    /// Move to this list (`events` makes the item an event; moving it back out makes it a task again, dates intact).
+    #[arg(long, group = "field", value_name = "LIST")]
+    pub list: Option<String>,
+    /// Workflow state: backlog | todo | in_progress | review | done | cancelled.
+    #[arg(long, group = "field", value_name = "STATE")]
+    pub lifecycle: Option<LifecycleState>,
+    /// Planned date, `YYYY-MM-DD` (all-day) or `YYYY-MM-DDTHH:MM` (timed, floating); `-` clears it and the duration.
+    #[arg(long, group = "field", value_name = "DATE|-")]
+    pub when: Option<String>,
+    /// Duration: minutes, or `1h30m` / `2h` / `45m` / `3d` / `1d2h`; `-` clears.
+    #[arg(long, group = "field", value_name = "LEN|-")]
+    pub duration: Option<String>,
+    /// Deadline, `YYYY-MM-DD`; `-` clears.
+    #[arg(long, group = "field", value_name = "DATE|-")]
+    pub deadline: Option<String>,
+    /// Place label; `-` clears. A bare label that matches a known place takes that place whole.
+    #[arg(long, group = "field", value_name = "LABEL|-")]
+    pub place: Option<String>,
+    /// Coordinates for --place, `<lat>,<lon>` in decimal degrees (WGS84).
+    #[arg(long, value_name = "LAT,LON", requires = "place")]
+    pub coords: Option<String>,
+    /// A formatted address for --place, shown beside the label.
+    #[arg(long, requires = "place")]
+    pub address: Option<String>,
+    /// Write --place as given, even if a known place matches it.
+    #[arg(long, requires = "place")]
+    pub new_place: bool,
+    /// Star the item: append to Starred, or insert at a 1-based POS. No-op if already starred.
+    #[arg(long, group = "field", value_name = "POS", num_args = 0..=1, default_missing_value = "end", value_parser = parse_star_pos, conflicts_with = "unstar")]
+    pub star: Option<StarPos>,
+    /// Unstar the item (the item itself is untouched).
+    #[arg(long, group = "field")]
+    pub unstar: bool,
+}
+
+pub fn set(doc: &Doc, args: SetArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+    let id = args.item_id.as_str();
+    // Parse first, so a typo in one flag writes nothing.
+    let duration = match args.duration.as_deref().map(clear_or) {
+        Some(Some(v)) => Some(Some(parse_duration(v)?)),
+        Some(None) => Some(None),
+        None => None,
+    };
+    let coords = args.coords.as_deref().map(parse_coords).transpose()?;
+
+    if let Some(text) = &args.text {
+        doc.edit_item_text(id, text)?;
+    }
+    if let Some(list) = &args.list {
+        // Append at the end of the target list (target_index = current
+        // length); `move_item` clamps to the existing range anyway.
+        let target_idx = doc.items_in_list(list, true).len();
+        doc.move_item(id, list, target_idx)?;
+    }
+    if let Some(state) = args.lifecycle {
+        doc.set_item_lifecycle(id, state.into())?;
+    }
+    if let Some(when) = &args.when {
+        doc.set_item_when(id, clear_or(when))?;
+    }
+    if let Some(duration) = duration {
+        doc.set_item_duration(id, duration)?;
+    }
+    if let Some(deadline) = &args.deadline {
+        doc.set_item_deadline(id, clear_or(deadline))?;
+    }
+    if let Some(label) = &args.place {
+        let value = match clear_or(label) {
+            None => None,
+            // A bare label that matches a place already on some item
+            // (case-insensitively, `spec/place-plan.md` "Reuse") takes
+            // that place whole, coordinates and address included, so
+            // `--place gym` finds the Gym the web client geocoded;
+            // --coords / --address / --new-place write exactly what was
+            // given. Validation lives in the core.
+            Some(label) => {
+                let known = if coords.is_none() && args.address.is_none() && !args.new_place {
+                    known_place(&doc.place_suggestions(label, 0), label)
+                } else {
+                    None
+                };
+                Some(known.unwrap_or_else(|| Place {
+                    label: label.to_string(),
+                    lat: coords.map(|c| c.0),
+                    lon: coords.map(|c| c.1),
+                    address: args.address.clone(),
+                    reference: None,
+                }))
+            }
+        };
+        doc.set_item_place(id, value.as_ref())?;
+    }
+    if let Some(pos) = args.star {
+        let index = match pos {
+            StarPos::Append => usize::MAX,
+            StarPos::At(p) => super::focus::one_based_to_index(p),
+        };
+        doc.add_to_focus(id, index)?;
+    }
+    if args.unstar {
+        doc.remove_from_focus(id)?;
+    }
+    writeln!(out, "{id}")?;
     Ok(())
-}
-
-// ---------- when / duration / deadline ----------
-
-#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
-pub struct DateArg {
-    pub item_id: String,
-    /// The value to set, or `-` to clear.
-    pub value: String,
 }
 
 /// Minutes in a day: the unit an all-day span's length counts in.
@@ -378,54 +474,11 @@ pub fn parse_duration(raw: &str) -> anyhow::Result<u32> {
         .ok_or_else(bad)
 }
 
-/// Set or clear the planned date: `YYYY-MM-DD` (all-day) or
-/// `YYYY-MM-DDTHH:MM` (timed); `-` clears. Validation lives in the core.
-pub fn when(doc: &Doc, args: DateArg, out: &mut dyn Write) -> anyhow::Result<()> {
-    doc.set_item_when(&args.item_id, clear_or(&args.value))?;
-    writeln!(out, "{}", args.item_id)?;
-    Ok(())
-}
-
-/// Set or clear the duration: minutes or `1h30m`; `-` clears. Range
-/// validation lives in the core.
-pub fn duration(doc: &Doc, args: DateArg, out: &mut dyn Write) -> anyhow::Result<()> {
-    let value = match clear_or(&args.value) {
-        Some(v) => Some(parse_duration(v)?),
-        None => None,
-    };
-    doc.set_item_duration(&args.item_id, value)?;
-    writeln!(out, "{}", args.item_id)?;
-    Ok(())
-}
-
-/// Set or clear the date-only deadline (`YYYY-MM-DD`); `-` clears.
-pub fn deadline(doc: &Doc, args: DateArg, out: &mut dyn Write) -> anyhow::Result<()> {
-    doc.set_item_deadline(&args.item_id, clear_or(&args.value))?;
-    writeln!(out, "{}", args.item_id)?;
-    Ok(())
-}
-
 fn clear_or(value: &str) -> Option<&str> {
     if value == "-" { None } else { Some(value) }
 }
 
-// ---------- place ----------
-
-#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
-pub struct PlaceArgs {
-    pub item_id: String,
-    /// The place's label, or `-` to clear.
-    pub label: String,
-    /// Coordinates as `<lat>,<lon>` in decimal degrees (WGS84).
-    #[arg(long, value_name = "LAT,LON")]
-    pub at: Option<String>,
-    /// A formatted address, shown beside the label.
-    #[arg(long)]
-    pub address: Option<String>,
-    /// Write the label as given, even if a known place matches it.
-    #[arg(long)]
-    pub new: bool,
-}
+// ---------- place helpers ----------
 
 /// Parse `<lat>,<lon>` in decimal degrees; the range check is the core's.
 pub fn parse_coords(raw: &str) -> anyhow::Result<(f64, f64)> {
@@ -436,38 +489,8 @@ pub fn parse_coords(raw: &str) -> anyhow::Result<(f64, f64)> {
     Ok((lat, lon))
 }
 
-/// Set or clear the place: a label, optionally with `--at lat,lon` and
-/// `--address`; `-` clears. A bare label that matches a place already on
-/// some item (case-insensitively, `spec/place-plan.md` "Reuse") takes
-/// that place whole, coordinates and address included, so `place <id>
-/// gym` finds the Gym the web client geocoded; `--at` / `--address` /
-/// `--new` write exactly what was given. Validation lives in the core.
-pub fn place(doc: &Doc, args: PlaceArgs, out: &mut dyn Write) -> anyhow::Result<()> {
-    let value = match clear_or(&args.label) {
-        None => None,
-        Some(label) => {
-            let coords = args.at.as_deref().map(parse_coords).transpose()?;
-            let known = if coords.is_none() && args.address.is_none() && !args.new {
-                known_place(&doc.place_suggestions(label, 0), label)
-            } else {
-                None
-            };
-            Some(known.unwrap_or_else(|| Place {
-                label: label.to_string(),
-                lat: coords.map(|c| c.0),
-                lon: coords.map(|c| c.1),
-                address: args.address.clone(),
-                reference: None,
-            }))
-        }
-    };
-    doc.set_item_place(&args.item_id, value.as_ref())?;
-    writeln!(out, "{}", args.item_id)?;
-    Ok(())
-}
-
 /// The top-ranked known place whose folded label equals `label`'s, if
-/// any. A prefix match is not enough: `place <id> gy` must not become
+/// any. A prefix match is not enough: `--place gy` must not become
 /// "Gym".
 pub fn known_place(suggestions: &[PlaceSuggestion], label: &str) -> Option<Place> {
     let want = fold_label(label);
@@ -529,21 +552,101 @@ pub fn format_place_row(row: &PlaceSuggestion) -> String {
 
 // ---------- edit ----------
 
-#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
-pub struct EditArgs {
-    pub item_id: String,
-    pub text: String,
-}
-
-pub fn edit(doc: &Doc, args: EditArgs, out: &mut dyn Write) -> anyhow::Result<()> {
-    doc.edit_item_text(&args.item_id, &args.text)?;
-    writeln!(out, "{}", args.item_id)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn set_args(item_id: &str) -> SetArgs {
+        SetArgs {
+            item_id: item_id.to_string(),
+            text: None,
+            list: None,
+            lifecycle: None,
+            when: None,
+            duration: None,
+            deadline: None,
+            place: None,
+            coords: None,
+            address: None,
+            new_place: false,
+            star: None,
+            unstar: false,
+        }
+    }
+
+    #[test]
+    fn set_applies_every_field_in_one_call() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "draft").unwrap();
+        let mut out = Vec::new();
+        set(
+            &doc,
+            SetArgs {
+                text: Some("final".into()),
+                lifecycle: Some(LifecycleState::InProgress),
+                when: Some("2026-11-02T09:00".into()),
+                duration: Some("1h30m".into()),
+                deadline: Some("2026-11-05".into()),
+                place: Some("Office".into()),
+                coords: Some("-33.87,151.21".into()),
+                star: Some(StarPos::Append),
+                ..set_args(&id)
+            },
+            &mut out,
+        )
+        .unwrap();
+        assert_eq!(String::from_utf8(out).unwrap().trim(), id);
+        let item = doc.get_item(&id).unwrap();
+        assert_eq!(item.text, "final");
+        assert_eq!(item.state, WorkflowState::InProgress);
+        assert_eq!(item.when.as_deref(), Some("2026-11-02T09:00"));
+        assert_eq!(item.duration, Some(90));
+        assert_eq!(item.deadline.as_deref(), Some("2026-11-05"));
+        let place = item.place.unwrap();
+        assert_eq!(place.label, "Office");
+        assert_eq!((place.lat, place.lon), (Some(-33.87), Some(151.21)));
+        assert_eq!(doc.focus_view().len(), 1);
+
+        // Clearing with `-`, and --unstar, through the same path.
+        let mut out = Vec::new();
+        set(
+            &doc,
+            SetArgs {
+                when: Some("-".into()),
+                deadline: Some("-".into()),
+                place: Some("-".into()),
+                unstar: true,
+                ..set_args(&id)
+            },
+            &mut out,
+        )
+        .unwrap();
+        let item = doc.get_item(&id).unwrap();
+        assert_eq!(item.when, None);
+        assert_eq!(item.duration, None, "clearing when clears the duration");
+        assert_eq!(item.deadline, None);
+        assert_eq!(item.place, None);
+        assert!(doc.focus_view().is_empty());
+    }
+
+    #[test]
+    fn set_rejects_bad_duration_before_writing_anything() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "draft").unwrap();
+        let mut out = Vec::new();
+        let err = set(
+            &doc,
+            SetArgs {
+                text: Some("changed".into()),
+                duration: Some("soon".into()),
+                ..set_args(&id)
+            },
+            &mut out,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("duration"), "{err}");
+        assert_eq!(doc.get_item(&id).unwrap().text, "draft");
+    }
 
     fn suggestion(
         label: &str,

@@ -47,49 +47,18 @@ enum Cmd {
     /// Account and device identity: signup, login, logout, recover, password.
     #[command(subcommand)]
     Auth(AuthCmd),
-    /// Add an item.
-    Add(items::AddArgs),
-    /// List items.
-    Ls(items::LsArgs),
-    /// Move an item to the Backlog state.
-    Backlog(items::IdArg),
-    /// Move an item to the Todo state.
-    Todo(items::IdArg),
-    /// Move an item to In Progress (stamps started_at on first entry).
-    Start(items::IdArg),
-    /// Move an item to the Review state.
-    Review(items::IdArg),
-    /// Mark an item done.
-    Done(items::IdArg),
-    /// Cancel an item (closed like Done, but not a completion).
-    Cancel(items::IdArg),
-    /// Send an item to the bin (or operate on the bin namespace).
+    /// Items: add, ls, set (every field as a flag), bin, restore.
+    #[command(subcommand)]
+    Item(ItemCmd),
+    /// The bin: show, empty, rm.
     Bin(bin::BinArgs),
-    /// Restore an item from the bin (reveals its preserved lifecycle).
-    Restore(items::IdArg),
-    /// Move an item to a different list.
-    Mv(items::MvArgs),
-    /// Edit an item's text.
-    Edit(items::EditArgs),
-    /// Set (YYYY-MM-DD or YYYY-MM-DDTHH:MM) or clear (-) an item's planned date.
-    When(items::DateArg),
-    /// Set (minutes or 1h30m) or clear (-) an item's duration; shown beside a timed planned date.
-    Duration(items::DateArg),
-    /// Set (YYYY-MM-DD) or clear (-) an item's deadline.
-    Deadline(items::DateArg),
-    /// Set (a label, optionally --at lat,lon and --address) or clear (-) an item's place.
-    Place(items::PlaceArgs),
     /// Places already on items, newest use first; an optional query narrows them.
     Places(items::PlacesArgs),
     /// Open items by day: Today (with overdue and past-dated folded in), then the coming days.
     Agenda(agenda::AgendaArgs),
-    /// Starred items in curated order; `starred mv` reorders. (`focus` is a hidden alias.)
+    /// Starred items in curated order; `starred mv` reorders, `item set --star` / `--unstar` add and remove. (`focus` is a hidden alias.)
     #[command(alias = "focus")]
     Starred(focus::FocusArgs),
-    /// Star an item (append, or insert at a 1-based position). No-op if already starred.
-    Star(focus::StarArgs),
-    /// Unstar an item. The item itself is untouched.
-    Unstar(items::IdArg),
     /// Manage lists.
     Lists(lists::ListsArgs),
     /// Inspect the local cache.
@@ -121,6 +90,21 @@ enum AuthCmd {
     Password,
 }
 
+/// `monoplan item …`: everything about one item except capturing it.
+#[derive(Subcommand, Debug)]
+enum ItemCmd {
+    /// Add an item.
+    Add(items::AddArgs),
+    /// List items.
+    Ls(items::LsArgs),
+    /// Set one or more fields on an item: --text, --list, --lifecycle, --when, --duration, --deadline, --place, --star, --unstar.
+    Set(Box<items::SetArgs>),
+    /// Send an item to the bin (its workflow state is preserved).
+    Bin(items::IdArg),
+    /// Restore an item from the bin (reveals its preserved workflow state).
+    Restore(items::IdArg),
+}
+
 /// A command that runs against the doc. Parsed by the client, shipped
 /// to the daemon over IPC (`crate::ipc`), executed by [`run_doc`]
 /// against the resident doc; its output comes back as text.
@@ -132,20 +116,11 @@ pub enum DocCmd {
         texts: Vec<String>,
     },
     Ls(items::LsArgs),
-    Backlog(items::IdArg),
-    Todo(items::IdArg),
-    Start(items::IdArg),
-    Review(items::IdArg),
-    Done(items::IdArg),
-    Cancel(items::IdArg),
-    Bin(bin::BinArgs),
+    Set(Box<items::SetArgs>),
+    ItemBin(items::IdArg),
     Restore(items::IdArg),
-    Mv(items::MvArgs),
-    Edit(items::EditArgs),
-    When(items::DateArg),
-    Duration(items::DateArg),
-    Deadline(items::DateArg),
-    Place(items::PlaceArgs),
+    /// The bin namespace (`bin show` / `empty` / `rm`).
+    Bin(bin::BinArgs),
     Places(items::PlacesArgs),
     Agenda(agenda::AgendaArgs),
     Focus(focus::FocusArgs),
@@ -160,20 +135,10 @@ pub fn run_doc(cmd: DocCmd, doc: &Doc, out: &mut dyn Write) -> anyhow::Result<()
     match cmd {
         DocCmd::Add { list, texts } => items::add(doc, &list, &texts, out),
         DocCmd::Ls(a) => items::ls(doc, a, out),
-        DocCmd::Backlog(a) => items::backlog(doc, a, out),
-        DocCmd::Todo(a) => items::todo(doc, a, out),
-        DocCmd::Start(a) => items::start(doc, a, out),
-        DocCmd::Review(a) => items::review(doc, a, out),
-        DocCmd::Done(a) => items::done(doc, a, out),
-        DocCmd::Cancel(a) => items::cancel(doc, a, out),
-        DocCmd::Bin(a) => bin::run(doc, a, out),
+        DocCmd::Set(a) => items::set(doc, *a, out),
+        DocCmd::ItemBin(a) => items::bin(doc, a, out),
         DocCmd::Restore(a) => items::restore(doc, a, out),
-        DocCmd::Mv(a) => items::mv(doc, a, out),
-        DocCmd::Edit(a) => items::edit(doc, a, out),
-        DocCmd::When(a) => items::when(doc, a, out),
-        DocCmd::Duration(a) => items::duration(doc, a, out),
-        DocCmd::Deadline(a) => items::deadline(doc, a, out),
-        DocCmd::Place(a) => items::place(doc, a, out),
+        DocCmd::Bin(a) => bin::run(doc, a, out),
         DocCmd::Places(a) => items::places(doc, a, out),
         DocCmd::Agenda(a) => agenda::run(doc, a, out),
         DocCmd::Focus(a) => focus::run(doc, a, out),
@@ -209,39 +174,18 @@ impl Cli {
                 offline_notice(sync);
                 return Ok(());
             }
-            Cmd::Add(a) => DocCmd::Add {
+            Cmd::Item(ItemCmd::Add(a)) => DocCmd::Add {
                 texts: items::collect_texts(&a.text)?,
                 list: a.list,
             },
-            Cmd::Ls(a) => DocCmd::Ls(a),
-            Cmd::Backlog(a) => DocCmd::Backlog(a),
-            Cmd::Todo(a) => DocCmd::Todo(a),
-            Cmd::Start(a) => DocCmd::Start(a),
-            Cmd::Review(a) => DocCmd::Review(a),
-            Cmd::Done(a) => DocCmd::Done(a),
-            Cmd::Cancel(a) => DocCmd::Cancel(a),
+            Cmd::Item(ItemCmd::Ls(a)) => DocCmd::Ls(a),
+            Cmd::Item(ItemCmd::Set(a)) => DocCmd::Set(a),
+            Cmd::Item(ItemCmd::Bin(a)) => DocCmd::ItemBin(a),
+            Cmd::Item(ItemCmd::Restore(a)) => DocCmd::Restore(a),
             Cmd::Bin(a) => DocCmd::Bin(a),
-            Cmd::Restore(a) => DocCmd::Restore(a),
-            Cmd::Mv(a) => DocCmd::Mv(a),
-            Cmd::Edit(a) => DocCmd::Edit(a),
-            Cmd::When(a) => DocCmd::When(a),
-            Cmd::Duration(a) => DocCmd::Duration(a),
-            Cmd::Deadline(a) => DocCmd::Deadline(a),
-            Cmd::Place(a) => DocCmd::Place(a),
             Cmd::Places(a) => DocCmd::Places(a),
             Cmd::Agenda(a) => DocCmd::Agenda(a),
             Cmd::Starred(a) => DocCmd::Focus(a),
-            Cmd::Star(a) => DocCmd::Focus(focus::FocusArgs {
-                cmd: Some(focus::FocusCmd::Add {
-                    item_id: a.item_id,
-                    pos: a.pos,
-                }),
-                json: false,
-            }),
-            Cmd::Unstar(a) => DocCmd::Focus(focus::FocusArgs {
-                cmd: Some(focus::FocusCmd::Rm { item_id: a.item_id }),
-                json: false,
-            }),
             Cmd::Lists(a) => DocCmd::Lists(a),
         };
         let profile = Profile::require_active()?;

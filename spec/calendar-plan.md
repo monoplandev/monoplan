@@ -190,7 +190,7 @@ Item register, integer minutes, optional. `1..=10080` (one week).
 - **Mutation** `set_item_duration(item_id, Option<u32>)`, event
   `ItemDurationChanged { id, duration }`, `ItemAdded.duration`, export
   `duration` (skipped when unset), wasm `setItemDuration`, CLI
-  `monoplan duration <id> <minutes | 1h30m | 3d | ->` and a `+<len>` suffix on
+  `monoplan item set <id> --duration <minutes | 1h30m | 3d | ->` and a `+<len>` suffix on
   the `@when` tag.
 
 ## Mutation and events
@@ -331,9 +331,9 @@ Amend `spec/urls.md` with the reservation only.
 
 `spec/cli.md` Items gains:
 
-- `monoplan when <item_id> <YYYY-MM-DD[THH:MM] | ->`: set or clear (`-`) the
+- `monoplan item set <item_id> --when <YYYY-MM-DD[THH:MM] | ->`: set or clear (`-`) the
   `when` register.
-- `monoplan deadline <item_id> <YYYY-MM-DD | ->`: set or clear the deadline.
+- `monoplan item set <item_id> --deadline <YYYY-MM-DD | ->`: set or clear the deadline.
   The CLI has no deadline verb today; add both together.
 - `monoplan agenda [--days N]`: the agenda as text, one day section per line
   group, default 14 days plus Today's fold.

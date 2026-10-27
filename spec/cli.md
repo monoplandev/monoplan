@@ -26,33 +26,30 @@ Single binary `monoplan`. Subcommands:
 - `monoplan share remove <doc_id> <email>` — owner removes a member (resolved through the member list; never yourself, never the last owner). Forward-only: they keep what they already synced.
 
 ### Items
-- `monoplan add <text> [--list <list>]` — `<text>` of `-` reads from stdin; one item per non-blank line. New items are created in **Backlog** (the workflow register is omitted).
-- `monoplan ls [--list <list>]` — `--list events` lists events (`spec/events-plan.md`). Rows carry a trailing ` @<when>` (with `+<len>` glued on when a timed `when` has a duration, e.g. `@2026-09-12T14:00+1h30m`, or an all-day one spans more than a day, in whole days: `@2026-09-12+3d`), ` !<deadline>` and ` at:<place label>` when set; `--json` adds `when` / `duration` (minutes) / `deadline` / `place` (`{label, lat?, lon?, address?, ref?}`) fields (omitted when unset)
-- `monoplan backlog <item_id>` — workflow → Backlog
-- `monoplan todo <item_id>` — workflow → Todo
-- `monoplan start <item_id>` — workflow → In Progress (stamps `started_at` on first entry)
-- `monoplan review <item_id>` — workflow → Review
-- `monoplan done <item_id>` — workflow → Done (stamps `done_at`)
-- `monoplan cancel <item_id>` — workflow → Cancelled (closed like Done, but stamps nothing: not a completion)
-- `monoplan bin <item_id>` — set the bin mask (`binned_at`); the workflow register is preserved
-- `monoplan restore <item_id>` — clear the bin mask only; reveals the preserved workflow state (Backlog / Todo / In Progress / Review / Done / Cancelled)
-- `monoplan mv <item_id> <list>` (`mv <item_id> events` makes the item an event; moving it back out makes it a task again, dates intact)
-- `monoplan edit <item_id> <text>`
-- `monoplan when <item_id> <YYYY-MM-DD[THH:MM] | ->` — set (all-day or timed, floating) or clear (`-`) the planned date; validation is the core's (`spec/calendar-plan.md`). A timed value on an item with no duration defaults it to 60 minutes; clearing also clears the duration.
-- `monoplan duration <item_id> <minutes | [Nd][Nh][Nm] | ->` — set (`90`, `1h30m`, `2h`, `45m`, `3d`, `1d2h`) or clear (`-`) the duration in whole minutes; range (`1..=10080`) is the core's. Beside an all-day `when` the length counts whole days (`spec/calendar-plan.md`), so `3d` makes a three-day span; `ls` shows it as `+3d` only past one day.
-- `monoplan deadline <item_id> <YYYY-MM-DD | ->` — set or clear the deadline
-- `monoplan place <item_id> <label | -> [--at <lat>,<lon>] [--address <text>] [--new]` — set (a label, optionally with WGS84 decimal-degree coordinates and a display address) or clear (`-`) the place; validation is the core's (`spec/place-plan.md`). No lookup from the CLI, but a bare label that matches a known place (case-insensitively, whole label) takes that place whole, coordinates and address included; `--new`, `--at` or `--address` write exactly what was given.
+- `monoplan item add <text> [--list <list>]` — `<text>` of `-` reads from stdin; one item per non-blank line. New items are created in **Backlog** (the workflow register is omitted).
+- `monoplan item ls [--list <list>] [--done] [--json]` — `--list events` lists events (`spec/events-plan.md`). Rows carry a trailing ` @<when>` (with `+<len>` glued on when a timed `when` has a duration, e.g. `@2026-09-12T14:00+1h30m`, or an all-day one spans more than a day, in whole days: `@2026-09-12+3d`), ` !<deadline>` and ` at:<place label>` when set; `--json` adds `when` / `duration` (minutes) / `deadline` / `place` (`{label, lat?, lon?, address?, ref?}`) fields (omitted when unset)
+- `monoplan item set <item_id> <flags…>` — every per-item field as a flag, so one call can set several; at least one is required. Each flag is its own core setter and its own commit, applied in the order below; the first error stops the sequence and the writes before it stand. Duration and coordinates are parsed before anything is written; dates are validated by the core at write time.
+  - `--text <text>`
+  - `--list <list>` — move (append) to that list; `--list events` makes the item an event, moving it back out makes it a task again, dates intact
+  - `--lifecycle <backlog | todo | in_progress | review | done | cancelled>` — set the workflow state (`in-progress` is accepted for `in_progress`). `in_progress` stamps `started_at` on first entry; `done` stamps `done_at`; `cancelled` is closed like Done but stamps nothing (not a completion). The names are the core's canonical ones, the same `state` that `--json` outputs print.
+  - `--when <YYYY-MM-DD[THH:MM] | ->` — set (all-day or timed, floating) or clear (`-`) the planned date; validation is the core's (`spec/calendar-plan.md`). A timed value on an item with no duration defaults it to 60 minutes; clearing also clears the duration.
+  - `--duration <minutes | [Nd][Nh][Nm] | ->` — set (`90`, `1h30m`, `2h`, `45m`, `3d`, `1d2h`) or clear (`-`) the duration in whole minutes; range (`1..=10080`) is the core's. Beside an all-day `when` the length counts whole days (`spec/calendar-plan.md`), so `3d` makes a three-day span; `ls` shows it as `+3d` only past one day.
+  - `--deadline <YYYY-MM-DD | ->` — set or clear the deadline
+  - `--place <label | -> [--coords <lat>,<lon>] [--address <text>] [--new-place]` — set (a label, optionally with WGS84 decimal-degree coordinates and a display address) or clear (`-`) the place; validation is the core's (`spec/place-plan.md`). No lookup from the CLI, but a bare label that matches a known place (case-insensitively, whole label) takes that place whole, coordinates and address included; `--new-place`, `--coords` or `--address` write exactly what was given. The three companions require `--place`.
+  - `--star [pos]` — add a Starred reference (default append; `pos` is 1-based, `end` appends); no-op if already starred or not Open. Conflicts with `--unstar`.
+  - `--unstar` — remove the Starred reference (item untouched)
+- `monoplan item bin <item_id>` — set the bin mask (`binned_at`); the workflow register is preserved
+- `monoplan item restore <item_id>` — clear the bin mask only; reveals the preserved workflow state (Backlog / Todo / In Progress / Review / Done / Cancelled)
 - `monoplan places [query] [--limit N] [--json]` — the places already on items (not binned), deduped and newest use first (`spec/place-plan.md` "Reuse"): `<label>  <address | @lat,lon>  (<count>)`, the address and count only when there is one to show; `query` keeps rows whose label or address words start with its words; `--json` emits `[{ place, count, last_used }]`.
 - `monoplan agenda [--days N] [--today YYYY-MM-DD] [--json]` — Open dated items by day: Today first (always shown, with overdue deadlines folded in, oldest first), then each non-empty day up to `N` days out (default 14). Rows carry the same `@` / `!` / `at:` tags as `ls` plus a trailing `(overdue)` / `(due today)` tone; a `when` before today places nothing, so an item with only a past `when` is not listed. Events place by the same rules; Open events with neither date print in an `Unscheduled` group after Today (in `--json`, a group with `day: null` whose rows omit `placed_by`). `--today` overrides the local date, for scripts and tests. `--json` emits `[{ day, today, rows: [{ id, text, list_id, state, when?, duration?, deadline?, place?, placed_by, tone }] }]`.
 
-Lifecycle is the atomic `lifecycle` workflow register (`[state, at]`, states Backlog | Todo | In Progress | Review | Done | Cancelled) masked by the orthogonal `binned_at` bin flag — see `spec/data-model.md` "Lifecycle". Each workflow command writes the register `[state, now]` (and clears any bin mask) in a single commit; re-applying the current resolved state is a no-op. `ls` boxes carry a one-character state mark (` ` backlog, `-` todo, `>` in progress, `?` review, `x` done, `/` cancelled, `~` binned). `ls` hides closed items (Done and Cancelled) unless `--done`; `agenda` never shows cancelled items.
+Lifecycle is the atomic `lifecycle` workflow register (`[state, at]`, states Backlog | Todo | In Progress | Review | Done | Cancelled) masked by the orthogonal `binned_at` bin flag — see `spec/data-model.md` "Lifecycle". `item set --lifecycle` writes the register `[state, now]` (and clears any bin mask) in a single commit; re-applying the current resolved state is a no-op. `ls` boxes carry a one-character state mark (` ` backlog, `-` todo, `>` in progress, `?` review, `x` done, `/` cancelled, `~` binned). `ls` hides closed items (Done and Cancelled) unless `--done`; `agenda` never shows cancelled items.
 
 ### Focus
 The curated single-tier Focus lens (`spec/focus.md`), named "Starred" on every user-facing surface including the CLI (since 2026-10-26). References items across lists; the item stays in its home list.
 
 - `monoplan starred` — list the Starred view (Open referenced items, in curated order); `--json` for machine output
-- `monoplan star <item_id> [pos]` — add a reference (default append; `pos` is 1-based); no-op if already starred
-- `monoplan unstar <item_id>` — remove the reference (item untouched)
+- `monoplan item set <item_id> --star [pos]` / `--unstar` — add or remove a reference (see "Items")
 - `monoplan starred mv <item_id> <pos>` — reorder within Starred
 
 `monoplan focus [add|rm|mv]` is the hidden pre-rename spelling and keeps working; the IPC frame is still `DocCmd::Focus`.
@@ -71,6 +68,8 @@ remove a list from the workspace. The core's `delete_list` stays internal
 (tests / future permanent deletion).
 
 ### Bin
+Binning and restoring an item are `monoplan item bin` / `item restore` (see "Items"); the namespace is the bin itself.
+
 - `monoplan bin show`
 - `monoplan bin empty`
 - `monoplan bin rm <item_id>`
@@ -98,7 +97,7 @@ One binary, two roles; and on macOS a third host, the app, which runs the same l
 
 Dispatch, at the top of `Cli::run`:
 
-- Doc commands (`add`, `ls`, workflow verbs, `mv`, `edit`, dates, `place`/`places`, `agenda`, `starred`/`star`/`unstar`, `lists`, `bin`, `export-json`) are forwarded as a `DocCmd` and their output comes back as text. `add -` reads stdin in the client; `export-json --out` writes the file in the client.
+- Doc commands (`item …`, `places`, `agenda`, `starred`, `lists`, `bin`, `export-json`) are forwarded as a `DocCmd` and their output comes back as text. `item add -` reads stdin in the client; `export-json --out` writes the file in the client.
 - `status` and `cache status` are direct, read-only sqlite reads and never contact or start the daemon. `cache clear` refuses while a daemon is running.
 - `signup`, `login`, `recover`, `password` and `logout` work on the profile files, so each first stops a running host and holds `daemon.lock` until the files are written (`client::claim`), keeping the app and any auto-spawn out meanwhile; `login` and `recover` then sync through a fresh host, which is what starts it (or the app, if it re-hosted first).
 - `share` is HTTP against the server and runs in the client.

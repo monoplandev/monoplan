@@ -1,13 +1,13 @@
-//! Starred commands: `starred` (list, `mv` to reorder), `star`, `unstar`.
+//! Starred commands: `starred` (list, `mv` to reorder).
 //!
 //! The curated single-tier Focus lens (`spec/focus.md`), surfaced to the
 //! user as "Starred" (the spec's naming note). References items across
 //! lists; the referenced item stays in its home list. `monoplan starred`
-//! lists the view; `star` / `unstar` / `starred mv` mutate the reference
-//! container. `monoplan focus [add|rm|mv]` is the hidden pre-rename
-//! spelling: `focus` aliases `starred`, and `add` / `rm` stay as hidden
-//! sub-subcommands. The IPC frame is still `DocCmd::Focus(FocusArgs)`;
-//! `star` / `unstar` are folded into it in `Cli::run`.
+//! lists the view; `item set --star [POS]` / `--unstar` (in `items`)
+//! and `starred mv` mutate the reference container. `monoplan focus
+//! [add|rm|mv]` is the hidden pre-rename spelling: `focus` aliases
+//! `starred`, and `add` / `rm` stay as hidden sub-subcommands. The IPC
+//! frame is still `DocCmd::Focus(FocusArgs)`.
 //!
 //! Positions on the CLI are **1-based** to match the numbered listing a
 //! user sees from `monoplan starred`; they are converted to the doc
@@ -30,17 +30,9 @@ pub struct FocusArgs {
     pub json: bool,
 }
 
-/// `monoplan star <item_id> [pos]`.
-#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
-pub struct StarArgs {
-    pub item_id: String,
-    /// 1-based position to insert at (default: append).
-    pub pos: Option<usize>,
-}
-
 #[derive(Subcommand, Debug, Clone, Serialize, Deserialize)]
 pub enum FocusCmd {
-    /// Hidden pre-rename spelling of `monoplan star`. No-op if the item is
+    /// Hidden pre-rename spelling of `item set --star`. No-op if the item is
     /// already starred or is not Open (Done / binned items cannot be
     /// starred).
     #[command(hide = true)]
@@ -49,7 +41,7 @@ pub enum FocusCmd {
         /// 1-based position to insert at (default: append).
         pos: Option<usize>,
     },
-    /// Hidden pre-rename spelling of `monoplan unstar`.
+    /// Hidden pre-rename spelling of `item set --unstar`.
     #[command(hide = true)]
     Rm { item_id: String },
     /// Reorder a starred item to a 1-based position.
@@ -103,13 +95,13 @@ fn mv(doc: &Doc, item_id: &str, pos: usize, out: &mut dyn Write) -> anyhow::Resu
 
 /// Map a user-facing 1-based position to the 0-based visible index. A `0`
 /// (or the absurd) clamps to the first slot; the doc layer clamps the top.
-fn one_based_to_index(pos: usize) -> usize {
+pub fn one_based_to_index(pos: usize) -> usize {
     pos.saturating_sub(1)
 }
 
 fn print_items(out: &mut dyn Write, items: &[ItemView]) -> anyhow::Result<()> {
     for (i, item) in items.iter().enumerate() {
-        // 1-based position matches the `star` / `starred mv` argument
+        // 1-based position matches the `--star` / `starred mv` argument
         // space. Starred is Open-only, so the box carries the workflow
         // state mark.
         let mark = super::items::state_mark(item.state);

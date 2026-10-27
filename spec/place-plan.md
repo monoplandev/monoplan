@@ -218,7 +218,7 @@ anything the web client has looked up once.
 
 ## CLI
 
-- `monoplan place <item_id> <label | -> [--at <lat>,<lon>] [--address <text>] [--new]`
+- `monoplan item set <item_id> --place <label | -> [--coords <lat>,<lon>] [--address <text>] [--new-place]`
 - `monoplan places [query] [--limit N] [--json]`
 - `ls` / `agenda` / `focus` rows append ` at:<label>`; `--json` adds a
   `place` object when set.

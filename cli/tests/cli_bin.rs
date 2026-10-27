@@ -10,11 +10,13 @@ use std::process::Output;
 
 use tokio::process::Command;
 
-use monoplan_cli::client::{self, Spawn};
 use monoplan_cli::config::Config;
 use monoplan_cli::daemon;
 use monoplan_cli::sync::Session;
-use support::{TEST_PASSWORD, TestServer, login_device, materialize_profile, signup_account};
+use support::{
+    TEST_PASSWORD, TestServer, login_device, materialize_profile, signup_account, wait_for_updates,
+};
+use uuid::Uuid;
 
 /// Async so the in-process test server keeps being served while the
 /// CLI (and the daemon it starts) talk to it.
@@ -53,7 +55,7 @@ async fn commands_start_and_share_one_daemon() {
     let server = TestServer::start().await;
     let signup = signup_account(&server, "bin-a").await;
     let tmp = tempfile::tempdir().unwrap();
-    let profile = materialize_profile(
+    materialize_profile(
         tmp.path(),
         &server.base,
         &signup.account_id,
@@ -68,7 +70,7 @@ async fn commands_start_and_share_one_daemon() {
     let dir = tmp.path();
 
     // Nothing running: --no-spawn is an error, and no daemon appears.
-    let e = err(monoplan(dir, &["--no-spawn", "ls"]).await);
+    let e = err(monoplan(dir, &["--no-spawn", "item", "ls"]).await);
     assert!(e.contains("not running"), "{e}");
     assert!(!daemon::is_running(dir).unwrap());
     assert_eq!(
@@ -77,7 +79,7 @@ async fn commands_start_and_share_one_daemon() {
     );
 
     // First real command starts the daemon and prints the new id.
-    let out = monoplan(dir, &["add", "hello from the cli"]).await;
+    let out = monoplan(dir, &["item", "add", "hello from the cli"]).await;
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     let id = ok(out).trim().to_string();
     assert_eq!(id.len(), 32, "uuid v7 hex: {id}");
@@ -85,7 +87,7 @@ async fn commands_start_and_share_one_daemon() {
     assert!(daemon::is_running(dir).unwrap());
 
     // Later commands reuse it (no spawn line) and see the write.
-    let out = monoplan(dir, &["ls"]).await;
+    let out = monoplan(dir, &["item", "ls"]).await;
     assert!(!String::from_utf8_lossy(&out.stderr).contains("started"));
     let ls = ok(out);
     assert!(
@@ -96,12 +98,15 @@ async fn commands_start_and_share_one_daemon() {
     assert!(status.starts_with("running  pid "), "{status}");
 
     // Errors from the doc come back as a non-zero exit with the message.
-    let e = err(monoplan(dir, &["done", "nope"]).await);
+    let e = err(monoplan(dir, &["item", "set", "nope", "--lifecycle", "done"]).await);
     assert!(!e.trim().is_empty());
 
-    // Wait for the daemon to push (the same barrier login uses); a
-    // second device then sees the item via a one-shot.
-    client::sync(&profile, Spawn::Never).await.unwrap();
+    // Wait for the daemon's push to land on the server; a second device
+    // then sees the item via a one-shot. (Not an in-process IPC call:
+    // this test binary is a different executable from the daemon's, so
+    // the build-id handshake would restart the daemon.)
+    let primary_doc_id = Uuid::parse_str(&signup.primary_doc_id).unwrap();
+    wait_for_updates(&server, primary_doc_id, 1).await;
     let login = login_device(&server.base, &signup.email, TEST_PASSWORD, "bin-b")
         .await
         .unwrap();
@@ -127,7 +132,7 @@ async fn commands_start_and_share_one_daemon() {
     session_b.flush().await.unwrap();
 
     // Online replies carry no offline line.
-    let out = monoplan(dir, &["ls"]).await;
+    let out = monoplan(dir, &["item", "ls"]).await;
     assert!(!String::from_utf8_lossy(&out.stderr).contains("offline"));
 
     // Stop releases the profile; the socket file is gone.
@@ -144,7 +149,7 @@ async fn commands_start_and_share_one_daemon() {
 }
 
 /// A daemon whose server is unreachable still serves the local doc, but
-/// every reply says so, and a flush request fails instead of pretending.
+/// every reply says so.
 #[tokio::test]
 async fn offline_daemon_serves_locally_and_says_so() {
     let server = TestServer::start().await;
@@ -171,24 +176,19 @@ async fn offline_daemon_serves_locally_and_says_so() {
         .unwrap();
     let dir = tmp.path();
 
-    let out = monoplan(dir, &["add", "captured offline"]).await;
+    let out = monoplan(dir, &["item", "add", "captured offline"]).await;
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     let id = ok(out).trim().to_string();
     assert_eq!(id.len(), 32);
     // The notice may lag the very first reply by one failed connect
     // attempt; `ls` right after is deterministic.
     let _ = stderr;
-    let out = monoplan(dir, &["ls"]).await;
+    let out = monoplan(dir, &["item", "ls"]).await;
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     let stdout = ok(out);
     assert!(stdout.contains("captured offline"), "{stdout}");
     assert!(stderr.contains("offline; never synced"), "{stderr}");
 
-    let e = client::sync(&profile, Spawn::Never)
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(e.contains("server unreachable"), "{e}");
     let status = ok(monoplan(dir, &["daemon", "status"]).await);
     assert!(status.contains("offline; never synced"), "{status}");
 

@@ -25,7 +25,7 @@ mod support;
 
 use support::{
     TestServer, materialize_profile, materialize_signup_profile, register_device, reopen_profile,
-    signup_via_http,
+    signup_via_http, wait_for_updates,
 };
 
 #[tokio::test]
@@ -609,27 +609,4 @@ async fn events_converge_across_devices() {
     assert!(session_a2.doc().get_item(&dinner).unwrap().is_event());
     assert_eq!(session_a2.doc().fingerprint(), fp_moved);
     session_a2.flush().await.unwrap();
-}
-
-async fn wait_for_updates(
-    server: &TestServer,
-    doc_id: Uuid,
-    target: usize,
-) -> queries::FetchedBatch {
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
-    loop {
-        let batch = queries::fetch_updates_batch(&server.state.db, doc_id, 0)
-            .await
-            .unwrap();
-        if batch.updates.len() >= target {
-            return batch;
-        }
-        if std::time::Instant::now() > deadline {
-            panic!(
-                "updates never reached target={target} (got {})",
-                batch.updates.len()
-            );
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
 }
