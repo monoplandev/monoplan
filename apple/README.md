@@ -134,7 +134,9 @@ same body as `monoplan login`; the tray shows "Sign In…" while signed
 out. Sign Out is confirmed and runs `monoplan-ffi::logout`, the same
 as `monoplan logout`: it stops the in-app host and wipes the profile.
 Advanced: the
-Host row (running, or why not), the Build row (package version), a
+Host row (running, or why not), the Build row (package version, then
+the short commit `build-app.sh` baked into Info.plist, "+" if the tree
+was dirty), a
 "Command line" row whose Install button symlinks `/usr/local/bin/monoplan`
 to the bundled binary (admin prompt if the directory is root's), and
 the profile path with a Reveal button. The

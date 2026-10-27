@@ -94,7 +94,9 @@ final class SettingsModel: ObservableObject {
     /// The package version. From the host's hello once it answers
     /// (`version:mtime`, the mtime being the CLI's staleness check,
     /// not something to show); the bundle's own version until then.
-    @Published var buildLine: String = SettingsModel.bundleVersion
+    /// Either way the bundle's commit follows it when the build script
+    /// recorded one.
+    @Published var buildLine: String = SettingsModel.withCommit(SettingsModel.bundleVersion)
     @Published var syncLine: String = "—"
     @Published var openAtLogin = false
     @Published var loginError: String?
@@ -179,11 +181,11 @@ final class SettingsModel: ObservableObject {
         case .connecting(let reason):
             hostLine = String(localized: "Not running · \(reason)")
             syncLine = "—"
-            buildLine = Self.bundleVersion
+            buildLine = Self.withCommit(Self.bundleVersion)
         case .connected(let sync):
             hostLine = String(localized: "Running")
             if let d = client.daemon {
-                buildLine = String(d.buildId.split(separator: ":", maxSplits: 1).first ?? "")
+                buildLine = Self.withCommit(String(d.buildId.split(separator: ":", maxSplits: 1).first ?? ""))
             }
             syncLine = sync.online ? String(localized: "Online") : (sync.offlineNotice() ?? String(localized: "Offline"))
             client.send(.account) { [weak self] result in
@@ -196,6 +198,21 @@ final class SettingsModel: ObservableObject {
 
     static var bundleVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+    }
+
+    /// The short commit `build-app.sh` wrote into Info.plist (a trailing
+    /// "+" means the tree was dirty); nil under `swift run`, which has
+    /// no bundle.
+    static var bundleCommit: String? {
+        guard let s = Bundle.main.infoDictionary?["MonoplanGitCommit"] as? String, !s.isEmpty else { return nil }
+        return s
+    }
+
+    /// "0.0.1-alpha.15 (96e2b3f3a1c0)", or just the version when the
+    /// commit is unknown.
+    static func withCommit(_ version: String) -> String {
+        guard let commit = bundleCommit else { return version }
+        return "\(version) (\(commit))"
     }
 
     /// "Signed in (you@example.com)", or just the state while the

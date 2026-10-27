@@ -48,6 +48,13 @@ VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml" | head -1)"
 # CFBundleVersion must be dot-separated integers; the pre-release tag
 # ("0.0.1-alpha.15") stays in CFBundleShortVersionString.
 BUILD_NUMBER="$(printf '%s' "$VERSION" | sed -E 's/-alpha\.([0-9]+)$/.\1/; s/-.*$//')"
+# The commit the bundle was built from, for the Settings Build row:
+# the version string does not move between dev builds, the commit does.
+# Same width as the server's build_info.rs; "+" marks a dirty tree.
+GIT_COMMIT="$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || true)"
+if [ -n "$GIT_COMMIT" ] && [ -n "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ]; then
+  GIT_COMMIT="$GIT_COMMIT+"
+fi
 
 # The app bundles the `monoplan` binary (spec/daemon-plan.md) so the
 # Settings "Command line" row can symlink it onto PATH: the terminal
@@ -128,6 +135,7 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
+  <key>MonoplanGitCommit</key><string>$GIT_COMMIT</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>

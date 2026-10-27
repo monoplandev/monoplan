@@ -63,3 +63,8 @@ Root `package.json` is a Bun workspace (`js/*`) with thin script wrappers — th
 - `bun run build` / `bun run test` / `bun run fmt` / `bun run lint` — cargo equivalents
 - `bun run build:wasm` — `wasm-pack build core/`. Always use this from the workspace root; bare `cargo build --target wasm32-...` will try to build `server`/`cli` for wasm and fail.
 - `bun run typecheck` — `tsc --noEmit -p js/config`
+
+## Git workflow
+
+- **Do not use worktrees when the working tree is clean.** Work directly in the checkout. A worktree is only for when the checkout has uncommitted work that must not be disturbed. Worktrees branch from a remote head, which is a stale base whenever local `main` is ahead.
+- Remotes: `origin` is GitHub (`monoplandev/monoplan`, the up-to-date one); `yokoso` is the self-hosted mirror. Base branches on `origin/main` or local `main`, never on `yokoso`.
