@@ -30,8 +30,18 @@ pub mod status;
 /// stack is `MONOPLAN_SERVER=http://127.0.0.1:8000`.
 const DEFAULT_SERVER: &str = "https://alpha.monoplan.app";
 
+/// `monoplan --version`: the crate version plus the commit it was built
+/// from, "+" when the tree was dirty (`cli/build.rs`), matching the
+/// app's Settings Build row.
+const VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("MONOPLAN_BUILD_GIT_SHA"),
+    ")"
+);
+
 #[derive(Parser, Debug)]
-#[command(name = "monoplan", version, about = "Monoplan CLI")]
+#[command(name = "monoplan", version = VERSION, about = "Monoplan CLI")]
 pub struct Cli {
     /// Fail instead of starting the daemon when none is running
     /// (scripts, CI). Equivalent to `MONOPLAN_NO_SPAWN=1`.

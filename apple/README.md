@@ -94,6 +94,7 @@ by `wire_shape_is_named_maps_and_bare_unit_variants` in `cli/src/ipc.rs`.
 bun run build:apple                                   # once, and after core changes: the XCFramework the app links
 bun run mac                                           # build Monoplan.app (debug) and run the binary inside it
 bun run mac:app                                       # build Monoplan.app (release) and `open` it
+bun run mac:install                                   # build release, quit a running Monoplan, install to /Applications (`-d ~/Applications`, `--no-open`) and launch
 swift test --package-path apple/MonoplanMac           # codec / model tests, no host needed
 MONOPLAN_WEB_URL=http://localhost:5176 bun run mac    # point links at the dev stack
 MONOPLAN_DATA_DIR=local/cli bun run mac               # a different profile, same rule as the CLI
