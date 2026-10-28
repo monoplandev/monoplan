@@ -149,7 +149,8 @@ export type Messages = {
     exportJson: string;
     exportFailed: string;
     importJson: string;
-    importSucceeded: (items: number, lists: number) => string;
+    /** `existing` counts items + lists matched by id and left untouched. */
+    importSucceeded: (items: number, lists: number, existing: number) => string;
     importFailed: string;
   };
   workspace: {
@@ -611,8 +612,9 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       exportJson: "Exportar JSON",
       exportFailed: "No se pudo exportar",
       importJson: "Importar JSON",
-      importSucceeded: (items, lists) =>
-        `Importado: ${items} elemento${items === 1 ? "" : "s"}, ${lists} lista${lists === 1 ? "" : "s"}`,
+      importSucceeded: (items, lists, existing) =>
+        `Importado: ${items} elemento${items === 1 ? "" : "s"}, ${lists} lista${lists === 1 ? "" : "s"}` +
+        (existing > 0 ? `; ${existing} ya existía${existing === 1 ? "" : "n"}` : ""),
       importFailed: "No se pudo importar el archivo",
     },
     workspace: {
@@ -961,8 +963,9 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       exportJson: "Export JSON",
       exportFailed: "Could not export",
       importJson: "Import JSON",
-      importSucceeded: (items, lists) =>
-        `Imported ${items} item${items === 1 ? "" : "s"}, ${lists} list${lists === 1 ? "" : "s"}`,
+      importSucceeded: (items, lists, existing) =>
+        `Imported ${items} item${items === 1 ? "" : "s"}, ${lists} list${lists === 1 ? "" : "s"}` +
+        (existing > 0 ? `; ${existing} already present, skipped` : ""),
       importFailed: "Could not import file",
     },
     workspace: {

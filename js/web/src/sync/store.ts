@@ -549,9 +549,11 @@ export interface DocApp extends ItemActions {
    *  resolve (an undone add removes the item outright). */
   onUndoRedo(cb: (outcome: UndoOutcome) => void): () => void;
   withActionBatch<T>(fn: () => T): T;
-  /** Additive JSON import: lists in `json` are created as fresh user
-   *  lists, items get fresh IDs and route into them (or local `main`).
-   *  Single Loro commit → one undo step. */
+  /** Additive, idempotent JSON import: lists and items keep their
+   *  exported ids, and a row whose id is already in the doc is skipped
+   *  untouched (`listsExisting` / `itemsExisting`); rows without a
+   *  well-formed id are minted fresh. Single Loro commit → one undo
+   *  step. */
   importJson(json: string): ImportSummary;
 }
 
@@ -566,6 +568,9 @@ export interface ImportSummary {
   itemsAdded: number;
   itemsSkipped: number;
   focusAdded: number;
+  /** Rows matched by id to one already in the doc and left untouched. */
+  listsExisting: number;
+  itemsExisting: number;
 }
 
 /** Process-wide stamp for undo / redo entries: strictly increasing

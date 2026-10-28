@@ -775,7 +775,10 @@ pub struct JsonExport {
 /// Counts surfaced to the UI after a successful `import_json`.
 /// `items_skipped` covers entries dropped because their `text` was
 /// empty after trim — defensively guarded so a malformed export can't
-/// land empty rows in the doc.
+/// land empty rows in the doc. `lists_existing` / `items_existing`
+/// count rows whose id was already present and were therefore left
+/// untouched (the skip-on-match rule, `spec/data-model.md` "JSON
+/// export / import").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportSummary {
@@ -784,6 +787,12 @@ pub struct ImportSummary {
     pub items_skipped: usize,
     /// Focus refs re-established for imported items (`spec/focus.md`).
     pub focus_added: usize,
+    /// User lists matched by id to one already in the doc and skipped.
+    #[serde(default)]
+    pub lists_existing: usize,
+    /// Items matched by id to one already in the doc and skipped.
+    #[serde(default)]
+    pub items_existing: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -800,6 +809,12 @@ pub struct ExportSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportList {
+    /// The list's id. A well-formed id (`[0-9a-f]{32}`, the uuid-v7
+    /// grammar) is **preserved** on import, which is what lets a
+    /// re-import find the list it created and skip it. Missing, blank or
+    /// malformed (a hand-written file) means a fresh id is minted and the
+    /// row can never match; items still reach it through `list_id`.
+    #[serde(default)]
     pub id: String,
     pub name: String,
     /// The list's display icon (a literal emoji grapheme). Skipped when
@@ -838,9 +853,17 @@ pub struct ExportLifecycle {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportItem {
+    /// The item's id, with the same preserve-or-mint rule as
+    /// [`ExportList::id`]: well-formed ids survive import and an id
+    /// already in the doc skips the row; anything else is minted fresh.
+    #[serde(default)]
     pub id: String,
     pub text: String,
     pub notes: String,
+    /// The source list's `id` as written in the same file (any string,
+    /// not only well-formed ids). Missing, or naming a list the file
+    /// doesn't carry, routes the item to `inbox`.
+    #[serde(default)]
     pub list_id: String,
     /// Workflow register (`{state, at}`), emitted for every item.
     pub lifecycle: ExportLifecycle,
@@ -3652,22 +3675,27 @@ impl Doc {
             .expect("JsonExport contains only primitives — serialization is infallible")
     }
 
-    /// Additive JSON import. Source lists are created as fresh user
-    /// lists (new IDs); source items keep their text / notes /
-    /// timestamps / done-binned state but get fresh IDs and placements
-    /// and follow the id-map: anything in the source's `inbox` lands in
+    /// Additive, **idempotent** JSON import (`spec/data-model.md` "JSON
+    /// export / import"). Lists and items keep their exported ids when
+    /// those are well-formed, and a row whose id is already in the doc
+    /// is **skipped untouched** (counted in `lists_existing` /
+    /// `items_existing`): no text, placement, lifecycle or notes update,
+    /// so importing the same file twice is a no-op and a backup can be
+    /// merged back without duplicating what's still here. A missing,
+    /// blank or malformed id is minted fresh (and so always imports).
+    /// Items follow the id-map: anything in the source's `inbox` lands in
     /// the local `inbox` (and `events` in the local `events`), builtin
-    /// entries are not duplicated, and items
-    /// whose `list_id` references a list not present in the export fall
-    /// back to `inbox` (same orphan handling as `delete_list`).
-    /// Focus membership (`spec/focus.md`) rides `export.focus`: refs are
-    /// remapped onto the fresh item ids and **appended** after any
-    /// existing local Focus (additive import doesn't disturb local
-    /// curation); refs to items that weren't imported or aren't Open are
-    /// dropped silently, like malformed `deadline` values.
-    /// Existing local content is untouched. All writes land in a
-    /// single Loro commit; UI events are emitted via the standard
-    /// pre/post state-diff.
+    /// entries are not duplicated, and items whose `list_id` references
+    /// a list not present in the export fall back to `inbox` (same orphan
+    /// handling as `delete_list`). Fresh items get fresh placements.
+    /// Focus membership (`spec/focus.md`) rides `export.focus`: refs to
+    /// items *added by this import* are **appended** after any existing
+    /// local Focus (additive import doesn't disturb local curation,
+    /// and an item already here keeps whatever Focus state it has);
+    /// refs to skipped or non-Open items are dropped silently, like
+    /// malformed `deadline` values. All writes land in a single Loro
+    /// commit; UI events are emitted via the standard pre/post
+    /// state-diff.
     pub fn import_json(&self, export: &JsonExport) -> Result<ImportSummary, DocError> {
         if export.version != 1 {
             return Err(DocError::Invalid(format!(
@@ -3686,6 +3714,7 @@ impl Doc {
 
         let lists = self.lists();
         let mut lists_added: usize = 0;
+        let mut lists_existing: usize = 0;
         for src_list in &export.lists {
             // Reserved ids map onto themselves (seeded above); any other
             // row flagged builtin collapses into the local `inbox`.
@@ -3693,14 +3722,30 @@ impl Doc {
                 continue;
             }
             if src_list.builtin || src_list.id == LIST_INBOX {
-                id_map.insert(src_list.id.clone(), LIST_INBOX.to_string());
+                if !src_list.id.is_empty() {
+                    id_map.insert(src_list.id.clone(), LIST_INBOX.to_string());
+                }
                 continue;
             }
             let name = src_list.name.trim();
             if name.is_empty() {
                 continue;
             }
-            let new_list_id = new_id();
+            // Skip on match: a well-formed id already in the doc (active
+            // or archived, and including a row earlier in this same file)
+            // is the same list. It is left exactly as it is — not renamed,
+            // not un-archived — and its items route to it.
+            let keep_id = is_well_formed_id(&src_list.id);
+            if keep_id && self.find_list(&src_list.id).is_ok() {
+                id_map.insert(src_list.id.clone(), src_list.id.clone());
+                lists_existing += 1;
+                continue;
+            }
+            let new_list_id = if keep_id {
+                src_list.id.clone()
+            } else {
+                new_id()
+            };
             let map = lists.push_container(LoroMap::new())?;
             let created_at = src_list.created_at.unwrap_or_else(now_millis);
             map.insert(KEY_ID, new_list_id.as_str())?;
@@ -3727,15 +3772,21 @@ impl Doc {
             if let Some(t) = src_list.archived_at {
                 map.insert(KEY_ARCHIVED_AT, t)?;
             }
-            id_map.insert(src_list.id.clone(), new_list_id);
+            // A blank source id can't be referenced by items, so it never
+            // enters the map (two blank-id lists must not alias).
+            if !src_list.id.is_empty() {
+                id_map.insert(src_list.id.clone(), new_list_id);
+            }
             lists_added += 1;
         }
 
         let items = self.items();
         let mut items_added: usize = 0;
         let mut items_skipped: usize = 0;
-        // Source item id → (fresh id, was-Open) — feeds the focus remap
-        // below. Skipped items never enter it, so their refs drop out.
+        let mut items_existing: usize = 0;
+        // Source item id → (local id, was-Open) — feeds the focus remap
+        // below. Only items *added here* enter it, so refs to skipped,
+        // blank-text and already-present items drop out.
         let mut item_id_map: HashMap<String, (String, bool)> = HashMap::new();
         for src_item in &export.items {
             let text = src_item.text.trim();
@@ -3743,11 +3794,23 @@ impl Doc {
                 items_skipped += 1;
                 continue;
             }
+            // Skip on match: the item is already here (live, done or
+            // binned — only a hard delete removes the key). Nothing about
+            // it is touched, not even its list.
+            let keep_id = is_well_formed_id(&src_item.id);
+            if keep_id && self.find_item(&src_item.id).is_ok() {
+                items_existing += 1;
+                continue;
+            }
             let target_list_id = id_map
                 .get(&src_item.list_id)
                 .cloned()
                 .unwrap_or_else(|| LIST_INBOX.to_string());
-            let new_item_id = new_id();
+            let new_item_id = if keep_id {
+                src_item.id.clone()
+            } else {
+                new_id()
+            };
             let placement = new_id();
             let map = items.insert_container(&new_item_id, LoroMap::new())?;
             map.insert(KEY_ID, new_item_id.as_str())?;
@@ -3830,18 +3893,29 @@ impl Doc {
                 .as_str(),
             )?;
             let open = src_item.binned_at.is_none() && state.is_open();
-            item_id_map.insert(src_item.id.clone(), (new_item_id, open));
+            if !src_item.id.is_empty() {
+                item_id_map.insert(src_item.id.clone(), (new_item_id, open));
+            }
             items_added += 1;
         }
 
-        // Re-establish Focus membership over the fresh ids, appended after
-        // any existing local refs. Imported ids are freshly minted, so
-        // they can't collide with local Focus — only in-export dedup is
-        // needed. Foreign-doc refs (never emitted, but a hand-edited file
-        // could carry one) and refs to skipped / non-Open items drop out.
+        // Re-establish Focus membership for the items added above,
+        // appended after any existing local refs. Ids are preserved, so
+        // a ref can in principle name an item local Focus already holds
+        // (a hand-edited file, or a fresh id that was also added in a
+        // previous import of a sibling file) — seed the dedup set with
+        // the local refs so the container never gains a duplicate.
+        // Foreign-doc refs (never emitted, but a hand-edited file could
+        // carry one) and refs to skipped / non-Open items drop out.
         let mut focus_added: usize = 0;
         let focus = self.focus_list();
-        let mut focus_seen: HashSet<String> = HashSet::new();
+        let mut focus_seen: HashSet<String> = self
+            .focus_raw()
+            .iter()
+            .filter_map(|s| FocusRef::parse(s))
+            .filter(FocusRef::is_local)
+            .map(|r| r.item_id)
+            .collect();
         for raw in &export.focus {
             let Some(r) = FocusRef::parse(raw).filter(FocusRef::is_local) else {
                 continue;
@@ -3870,6 +3944,8 @@ impl Doc {
             items_added,
             items_skipped,
             focus_added,
+            lists_existing,
+            items_existing,
         })
     }
 
@@ -6065,6 +6141,17 @@ fn now_millis() -> i64 {
 
 fn new_id() -> String {
     Uuid::now_v7().simple().to_string()
+}
+
+/// Whether `s` is an id this doc would have minted itself: 32 lowercase
+/// hex chars (`Uuid::simple`), the grammar `spec/data-model.md` reserves
+/// for list / item ids. The reserved literals are *not* well-formed by
+/// this test — callers that accept them check for them first. Used by
+/// `import_json` to decide whether an exported id may be preserved.
+fn is_well_formed_id(s: &str) -> bool {
+    s.len() == 32
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// Diff two ordered slices of `ItemView` by id and emit `AppEvent`s for
@@ -9206,7 +9293,7 @@ mod tests {
     }
 
     #[test]
-    fn import_json_creates_lists_with_fresh_ids_and_routes_main_locally() {
+    fn import_json_preserves_list_ids_and_routes_inbox_locally() {
         let src = Doc::new().unwrap();
         let other = src.add_list("Other").unwrap();
         let _ = src.add_item(LIST_INBOX, "in-main").unwrap();
@@ -9223,9 +9310,9 @@ mod tests {
         let dst_lists = dst.all_lists();
         assert_eq!(dst_lists.len(), 1);
         assert_eq!(dst_lists[0].name, "Other");
-        // New list got a fresh id — additive means we do *not* reuse the
-        // source's list id.
-        assert_ne!(dst_lists[0].id, other);
+        // The source's list id is preserved: that is what lets a later
+        // re-import of the same file find this list and skip it.
+        assert_eq!(dst_lists[0].id, other);
 
         let texts_main: Vec<String> = dst
             .iter_items()
@@ -9287,7 +9374,7 @@ mod tests {
     }
 
     #[test]
-    fn import_json_round_trips_focus_order_onto_fresh_ids() {
+    fn import_json_round_trips_focus_order_onto_preserved_ids() {
         let src = Doc::new().unwrap();
         let a = src.add_item(LIST_INBOX, "alpha").unwrap();
         let b = src.add_item(LIST_INBOX, "beta").unwrap();
@@ -9307,11 +9394,189 @@ mod tests {
 
         let focus_texts: Vec<String> = dst.focus_view().into_iter().map(|i| i.text).collect();
         assert_eq!(focus_texts, vec!["local", "beta", "alpha"]);
-        // Refs were remapped — none of the source ids appear verbatim.
-        for item in dst.focus_view() {
-            assert_ne!(item.id, a);
-            assert_ne!(item.id, b);
-        }
+        // Ids are preserved, so the refs name the source ids verbatim.
+        let focus_ids: Vec<String> = dst.focus_view().into_iter().map(|i| i.id).collect();
+        assert_eq!(focus_ids[1..], [b, a]);
+    }
+
+    #[test]
+    fn import_json_twice_is_a_no_op() {
+        let src = Doc::new().unwrap();
+        let work = src.add_list("Work").unwrap();
+        let a = src.add_item(LIST_INBOX, "alpha").unwrap();
+        let b = src.add_item(&work, "beta").unwrap();
+        let _c = src.add_item(&work, "gamma").unwrap();
+        src.set_item_lifecycle(&b, ItemLifecycle::Done).unwrap();
+        src.add_to_focus(&a, usize::MAX).unwrap();
+        let export = src.export_json();
+
+        let dst = Doc::new().unwrap();
+        let first = dst.import_json(&export).unwrap();
+        assert_eq!(
+            (first.lists_added, first.items_added, first.focus_added),
+            (1, 3, 1)
+        );
+        assert_eq!((first.lists_existing, first.items_existing), (0, 0));
+        let lists_after_first = dst.all_lists();
+        let items_after_first: Vec<ItemView> = dst.iter_items().collect();
+        let focus_after_first = dst.focus_refs();
+
+        let second = dst.import_json(&export).unwrap();
+        assert_eq!(
+            (second.lists_added, second.items_added, second.focus_added),
+            (0, 0, 0)
+        );
+        assert_eq!((second.lists_existing, second.items_existing), (1, 3));
+        assert_eq!(second.items_skipped, 0);
+        assert_eq!(dst.all_lists(), lists_after_first);
+        assert_eq!(dst.iter_items().collect::<Vec<_>>(), items_after_first);
+        assert_eq!(dst.focus_refs(), focus_after_first);
+    }
+
+    #[test]
+    fn import_json_leaves_matched_rows_untouched() {
+        let src = Doc::new().unwrap();
+        let work = src.add_list("Work").unwrap();
+        let a = src.add_item(&work, "original").unwrap();
+        src.add_to_focus(&a, usize::MAX).unwrap();
+        let export = src.export_json();
+
+        let dst = Doc::new().unwrap();
+        dst.import_json(&export).unwrap();
+        // Local edits after the first import: rename the list, archive
+        // it, and move / rewrite / un-focus the item.
+        dst.rename_list(&work, "Renamed").unwrap();
+        dst.set_list_archived(&work, true).unwrap();
+        dst.edit_item_text(&a, "edited locally").unwrap();
+        dst.move_item(&a, LIST_INBOX, usize::MAX).unwrap();
+        dst.set_item_lifecycle(&a, ItemLifecycle::InProgress)
+            .unwrap();
+        dst.remove_from_focus(&a).unwrap();
+
+        let summary = dst.import_json(&export).unwrap();
+        assert_eq!((summary.lists_existing, summary.items_existing), (1, 1));
+        assert_eq!(
+            (
+                summary.lists_added,
+                summary.items_added,
+                summary.focus_added
+            ),
+            (0, 0, 0)
+        );
+        let list = dst.get_list_meta(&work).unwrap();
+        assert_eq!(list.name, "Renamed");
+        assert!(list.archived_at.is_some());
+        let item = dst.get_item(&a).unwrap();
+        assert_eq!(item.text, "edited locally");
+        assert_eq!(item.list_id, LIST_INBOX);
+        assert_eq!(item.state, WorkflowState::InProgress);
+        assert!(dst.focus_refs().is_empty());
+        // The whole file matched, so nothing new entered the doc (the one
+        // list is the archived original — `all_lists` includes archived).
+        assert_eq!(dst.iter_items().count(), 1);
+        assert_eq!(dst.all_lists().len(), 1);
+    }
+
+    #[test]
+    fn import_json_mints_ids_for_blank_or_malformed_ids() {
+        // A hand-written file: the list id is a human label, the item has
+        // no id at all, and the item references the list by that label.
+        let mut export = Doc::new().unwrap().export_json();
+        export.lists.push(ExportList {
+            id: "groceries".to_string(),
+            name: "Groceries".to_string(),
+            icon: None,
+            view: None,
+            archived_at: None,
+            created_at: None,
+            builtin: false,
+        });
+        export.items.push(ExportItem {
+            id: String::new(),
+            text: "milk".to_string(),
+            notes: String::new(),
+            list_id: "groceries".to_string(),
+            lifecycle: ExportLifecycle {
+                state: "backlog".to_string(),
+                at: 1,
+            },
+            deadline: None,
+            when: None,
+            duration: None,
+            place: None,
+            created_at: 1,
+            created_by: None,
+            started_at: None,
+            done_at: None,
+            binned_at: None,
+        });
+
+        let dst = Doc::new().unwrap();
+        let summary = dst.import_json(&export).unwrap();
+        assert_eq!((summary.lists_added, summary.items_added), (1, 1));
+        let list = &dst.all_lists()[0];
+        assert_eq!(list.name, "Groceries");
+        assert!(is_well_formed_id(&list.id), "label replaced by a minted id");
+        let item = dst.iter_items().next().unwrap();
+        assert!(is_well_formed_id(&item.id));
+        // The in-file reference still resolved: the item landed in the
+        // freshly minted list, not in `inbox`.
+        assert_eq!(item.list_id, list.id);
+
+        // Minted ids can never match, so such a file is *not* idempotent:
+        // a second import adds the rows again.
+        let again = dst.import_json(&export).unwrap();
+        assert_eq!((again.lists_added, again.items_added), (1, 1));
+        assert_eq!((again.lists_existing, again.items_existing), (0, 0));
+    }
+
+    #[test]
+    fn import_json_str_accepts_rows_without_id_keys() {
+        let json = r#"{
+            "version": 1,
+            "settings": { "showListCounts": false },
+            "lists": [
+                { "name": "Work", "createdAt": 1, "builtin": false }
+            ],
+            "items": [
+                { "text": "no ids at all", "notes": "", "lifecycle": { "state": "backlog", "at": 1 }, "createdAt": 1 }
+            ]
+        }"#;
+        let doc = Doc::new().unwrap();
+        let summary = doc.import_json_str(json).unwrap();
+        assert_eq!((summary.lists_added, summary.items_added), (1, 1));
+        // No `listId` → `inbox`, the same orphan rule as an unknown list.
+        let item = doc.iter_items().next().unwrap();
+        assert_eq!(item.text, "no ids at all");
+        assert_eq!(item.list_id, LIST_INBOX);
+        assert!(is_well_formed_id(&item.id));
+    }
+
+    #[test]
+    fn import_json_does_not_duplicate_focus_refs_the_doc_already_holds() {
+        // Preserved ids mean an imported ref can name an item already in
+        // local Focus: a file that carries item `a` in Focus, imported
+        // into a doc where `a` was added by a sibling file and focused
+        // locally since. The dedup set is seeded with local refs.
+        let src = Doc::new().unwrap();
+        let a = src.add_item(LIST_INBOX, "alpha").unwrap();
+        let export_items_only = src.export_json();
+        src.add_to_focus(&a, usize::MAX).unwrap();
+        let export_with_focus = src.export_json();
+
+        let dst = Doc::new().unwrap();
+        dst.import_json(&export_items_only).unwrap();
+        dst.add_to_focus(&a, usize::MAX).unwrap();
+        let summary = dst.import_json(&export_with_focus).unwrap();
+        assert_eq!(summary.focus_added, 0);
+        assert_eq!(dst.focus_refs().len(), 1);
+        // Same again with the item *not* locally focused: the ref is to
+        // a skipped (already present) item, so it still isn't re-added —
+        // the doc's own Focus curation wins.
+        dst.remove_from_focus(&a).unwrap();
+        let summary = dst.import_json(&export_with_focus).unwrap();
+        assert_eq!(summary.focus_added, 0);
+        assert!(dst.focus_refs().is_empty());
     }
 
     #[test]

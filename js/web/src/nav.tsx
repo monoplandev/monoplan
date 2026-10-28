@@ -730,7 +730,13 @@ function DocSection(props: {
     try {
       const text = await file.text();
       const summary = app.importJson(text);
-      alert(m().nav.importSucceeded(summary.itemsAdded, summary.listsAdded));
+      alert(
+        m().nav.importSucceeded(
+          summary.itemsAdded,
+          summary.listsAdded,
+          summary.itemsExisting + summary.listsExisting,
+        ),
+      );
     } catch (err) {
       console.error("import json failed:", err);
       alert(m().nav.importFailed);

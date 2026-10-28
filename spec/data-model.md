@@ -479,6 +479,47 @@ All mutations go through Loro APIs internally; the core exposes typed helpers:
 
 The wire format for updates is whatever Loro emits — opaque bytes from the server's POV.
 
+## JSON export / import
+
+`export_json()` is the **semantic portability dump**: settings, every list
+(reserved rows flagged `builtin`), every item with its lifecycle register,
+reflection stamps, `deadline` / `when` / `duration` / `place` / `created_by`
+when set, and the Focus refs in order. It is not a CRDT backup — no Loro
+history rides it — and its ids are the doc's real ids.
+
+`import_json()` is **additive and idempotent by id** (built 2026-10-28):
+
+- **Ids are preserved.** A list or item whose exported id is well-formed
+  (`[0-9a-f]{32}`, the grammar above) keeps that id in the destination doc.
+- **Skip on match.** A well-formed id already present in the doc (active or
+  archived list; live, done or binned item — only a hard delete removes the
+  key) means the row is the same thing and is **left exactly as it is**: no
+  rename, no un-archive, no text / notes / placement / lifecycle update, no
+  Focus change. The summary reports these as `lists_existing` /
+  `items_existing`. Importing the same file twice is therefore a no-op, and a
+  backup can be merged back without duplicating what is still here. There is
+  no update path: the dump carries no per-item modified time to arbitrate
+  with, `notes` is a mergeable text whose history an overwrite would discard,
+  and an update would also undo whatever the user did to placement since the
+  export. A replace mode, if ever wanted, is an explicit opt-in, never the
+  default.
+- **Ids are optional.** A missing, blank or malformed id (a hand-written
+  file: `"id": "groceries"`, or no `id` key at all) is **minted fresh**. Such
+  a row always imports and can never match, so hand-written files are not
+  idempotent. Within one file an item's `listId` may still name a list by any
+  string, well-formed or not — the mapping is by the file's own ids. A missing
+  `listId`, or one naming a list the file doesn't carry, routes to `inbox`
+  (the `delete_list` orphan rule); the file's `inbox` / `events` rows and any
+  row flagged `builtin` collapse onto the local reserved lists.
+- **Focus** refs are re-established only for items *added by this import*,
+  appended after the doc's existing refs; refs to skipped, blank-text or
+  non-Open items drop silently. The dedup set is seeded with the doc's
+  existing local refs, so preserved ids can never produce a duplicate ref.
+- Everything else is lenient the same way: a blank `text` skips the item
+  (`items_skipped`), an unrecognised lifecycle name degrades to Backlog, and a
+  malformed `deadline` / `when` / `duration` / `place` / `view` is dropped
+  rather than failing the file. One Loro commit, one undo step.
+
 ## Schema versioning & compatibility
 
 This layout is a **breaking CRDT-schema change** from v1 (document-wide
