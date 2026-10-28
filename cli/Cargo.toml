@@ -33,14 +33,14 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 zeroize = { workspace = true }
 serde_json = "1"
-gethostname = "0.5"
+gethostname = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 rand = { workspace = true }
 rusqlite = { workspace = true }
 # TLS for `wss://` (the hosted server); without a TLS feature every
 # secure connect fails with "TLS support not compiled in". rustls with
 # the bundled roots, matching reqwest's `rustls-tls` above.
-tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 http = "1"
 futures-util = "0.3"
 libc = "0.2"

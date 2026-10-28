@@ -56,6 +56,6 @@ rust-embed = { version = "8", optional = true, features = [
 reqwest = { workspace = true }
 serde_json = { workspace = true }
 tempfile = "3"
-tokio-tungstenite = "0.24"
+tokio-tungstenite = "0.30"
 http = "1"
 futures-util = "0.3"

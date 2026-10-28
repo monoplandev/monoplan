@@ -24,7 +24,7 @@ impl std::fmt::Display for RecoveryCode {
 
 pub fn generate_recovery_code() -> Result<RecoveryCode> {
     let mut entropy = [0u8; 16];
-    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut entropy);
+    rand::Rng::fill_bytes(&mut rand::rng(), &mut entropy);
     let mnemonic = Mnemonic::from_entropy_in(Language::English, &entropy)
         .map_err(|e| CryptoError::InvalidRecoveryCode(e.to_string()))?;
     Ok(RecoveryCode(mnemonic.to_string()))

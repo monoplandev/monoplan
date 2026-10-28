@@ -547,9 +547,9 @@ async fn wait_for_signal() {
 /// function (not `&self`) so the host's `select!` future stays `Send`.
 async fn handshake(profile: &Profile, server_url: &str) -> Result<WsStream, SyncError> {
     let mut ws = connect_ws(profile, server_url).await?;
-    ws.send(Message::Binary(hello_frame(&engine_options(
-        "monoplan-daemon",
-    ))))
+    ws.send(Message::Binary(
+        hello_frame(&engine_options("monoplan-daemon")).into(),
+    ))
     .await?;
     let first = loop {
         match ws.next().await {
@@ -915,7 +915,7 @@ impl Host {
             return;
         }
         let Some(ws) = self.ws.as_mut() else { return };
-        match ws.send(Message::Ping(Vec::new())).await {
+        match ws.send(Message::Ping(Default::default())).await {
             Ok(()) => self.awaiting_pong = true,
             Err(e) => self.disconnect(&format!("ping failed: {e}")),
         }

@@ -6,7 +6,7 @@
 //! risk, and constant-time hash is fast enough at any traffic level we
 //! expect here.
 
-use rand::RngCore;
+use rand::Rng;
 use sha2::{Digest, Sha256};
 
 pub const TOKEN_LEN: usize = 32;
@@ -14,7 +14,7 @@ pub const TOKEN_LEN: usize = 32;
 /// 32 fresh random bytes.
 pub fn generate_token() -> [u8; TOKEN_LEN] {
     let mut buf = [0u8; TOKEN_LEN];
-    rand::thread_rng().fill_bytes(&mut buf);
+    rand::rng().fill_bytes(&mut buf);
     buf
 }
 

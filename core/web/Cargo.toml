@@ -20,9 +20,15 @@ console_error_panic_hook = "0.1"
 
 # Wasm-only flags for upstream crates that gate JS/web platform support
 # behind a feature. These pull through the dependency graph for the
-# wasm target so monoplan-core's `rand`/`uuid`/`getrandom` use the
-# browser/Node crypto + performance APIs instead of looking for libc.
+# wasm target so `rand`/`uuid`/`getrandom` use the browser/Node crypto
+# + performance APIs instead of looking for libc.
+#
+# Two getrandom generations are live: 0.2 via loro's `rand 0.8`, and
+# 0.4 via our own `rand 0.10` + RustCrypto crates. The 0.4 backend is
+# also selected by `--cfg getrandom_backend="wasm_js"` in
+# `.cargo/config.toml` for the wasm32-unknown-unknown target.
 getrandom = { version = "0.2", features = ["js"] }
+getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
 uuid = { workspace = true, features = ["js"] }
 
 [package.metadata.wasm-pack.profile.release]

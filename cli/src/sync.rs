@@ -311,9 +311,9 @@ impl Session {
             .map_err(|_| SyncError::Ws(format!("connect timed out after {CONNECT_TIMEOUT:?}")))??;
         // The version handshake is per socket, not per doc: run it
         // once here, then bring every doc's engine online.
-        ws.send(Message::Binary(hello_frame(&engine_options(
-            "monoplan-cli",
-        ))))
+        ws.send(Message::Binary(
+            hello_frame(&engine_options("monoplan-cli")).into(),
+        ))
         .await?;
         let first = tokio::time::timeout(CONNECT_TIMEOUT, recv_bytes(&mut ws))
             .await
@@ -599,7 +599,7 @@ pub(crate) async fn send_outbox(
     engine: &mut SyncEngine,
 ) -> Result<(), SyncError> {
     while let Some(bytes) = engine.pop_outbox() {
-        ws.send(Message::Binary(bytes)).await?;
+        ws.send(Message::Binary(bytes.into())).await?;
     }
     Ok(())
 }

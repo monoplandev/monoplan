@@ -1,4 +1,4 @@
-use argon2::password_hash::{PasswordHasher, SaltString};
+use argon2::password_hash::PasswordHasher;
 use argon2::{Algorithm, Argon2, Params, Version};
 use axum::Router;
 use axum::body::{Body, to_bytes};
@@ -79,9 +79,8 @@ fn request(password: Option<&str>) -> Request<Body> {
 fn test_password_hash() -> String {
     let params = Params::new(8, 1, 1, None).unwrap();
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    let salt = SaltString::encode_b64(b"monoplan-admin-test").unwrap();
     argon2
-        .hash_password(ADMIN_PASSWORD.as_bytes(), &salt)
+        .hash_password_with_salt(ADMIN_PASSWORD.as_bytes(), b"monoplan-admin-test")
         .unwrap()
         .to_string()
 }

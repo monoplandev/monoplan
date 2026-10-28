@@ -120,6 +120,15 @@ const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
  *  cost negligible. */
 const TICK_INTERVAL_MS = 1_000;
 
+/** `WebSocket.send` is typed over `BufferSource`, i.e. views on a plain
+ *  (non-shared) `ArrayBuffer`. The wasm outbox and the msgpack codec both
+ *  hand back fresh standalone buffers, so narrowing the generic is
+ *  truthful; it only exists to satisfy TypeScript >= 7's stricter
+ *  `Uint8Array<ArrayBufferLike>` default. */
+function sendable(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+  return bytes as Uint8Array<ArrayBuffer>;
+}
+
 export class SyncBridge {
   private ws: WebSocket | null = null;
   /** `hello` from socket open until `HelloAck`; `open` after. */
@@ -249,7 +258,7 @@ export class SyncBridge {
       while (true) {
         const bytes = engine.popOutbox();
         if (!bytes) break;
-        this.ws.send(bytes);
+        this.ws.send(sendable(bytes));
       }
     }
     this.opts.onChange?.("drain");
@@ -266,7 +275,7 @@ export class SyncBridge {
     ws.onopen = () => {
       opened = true;
       // Version handshake first; engines come online on `HelloAck`.
-      ws.send(this.opts.codec.helloFrame(this.opts.clientName, this.opts.clientVersion));
+      ws.send(sendable(this.opts.codec.helloFrame(this.opts.clientName, this.opts.clientVersion)));
       this.handshakeTimer = setTimeout(() => {
         this.handshakeTimer = null;
         this.opts.onError?.(`handshake timed out after ${this.handshakeTimeoutMs}ms`);

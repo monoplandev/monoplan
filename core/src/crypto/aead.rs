@@ -34,7 +34,7 @@ impl Kek {
         let cipher = XChaCha20Poly1305::new(self.as_bytes().into());
         let nonce: [u8; AEAD_NONCE_LEN] = random_bytes();
         let ciphertext = cipher
-            .encrypt(XNonce::from_slice(&nonce), dek.as_bytes().as_slice())
+            .encrypt(&XNonce::from(nonce), dek.as_bytes().as_slice())
             .map_err(|_| CryptoError::Aead)?;
         Ok(WrappedDek { ciphertext, nonce })
     }
@@ -49,7 +49,7 @@ impl Kek {
         }
         let cipher = XChaCha20Poly1305::new(self.as_bytes().into());
         let plaintext = cipher
-            .decrypt(XNonce::from_slice(&w.nonce), w.ciphertext.as_slice())
+            .decrypt(&XNonce::from(w.nonce), w.ciphertext.as_slice())
             .map_err(|_| CryptoError::Aead)?;
         Dek::from_bytes(&plaintext)
     }
@@ -61,21 +61,22 @@ impl Dek {
         let cipher = XChaCha20Poly1305::new(self.as_bytes().into());
         let nonce: [u8; AEAD_NONCE_LEN] = random_bytes();
         let ct = cipher
-            .encrypt(XNonce::from_slice(&nonce), plaintext)
+            .encrypt(&XNonce::from(nonce), plaintext)
             .map_err(|_| CryptoError::Aead)?;
         Ok((ct, nonce))
     }
 
     pub fn open(&self, ciphertext: &[u8], nonce: &[u8]) -> Result<Vec<u8>> {
-        if nonce.len() != AEAD_NONCE_LEN {
-            return Err(CryptoError::InvalidNonceLength {
-                expected: AEAD_NONCE_LEN,
-                actual: nonce.len(),
-            });
-        }
+        let nonce: [u8; AEAD_NONCE_LEN] =
+            nonce
+                .try_into()
+                .map_err(|_| CryptoError::InvalidNonceLength {
+                    expected: AEAD_NONCE_LEN,
+                    actual: nonce.len(),
+                })?;
         let cipher = XChaCha20Poly1305::new(self.as_bytes().into());
         cipher
-            .decrypt(XNonce::from_slice(nonce), ciphertext)
+            .decrypt(&XNonce::from(nonce), ciphertext)
             .map_err(|_| CryptoError::Aead)
     }
 

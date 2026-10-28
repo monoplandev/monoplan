@@ -39,7 +39,7 @@ impl Db {
         F: FnOnce(&mut rusqlite::Connection) -> rusqlite::Result<T> + Send + 'static,
         T: Send + 'static,
     {
-        Ok(self.conn.call(move |c| f(c).map_err(Into::into)).await?)
+        Ok(self.conn.call(f).await?)
     }
 
     async fn apply_pragmas(&self) -> anyhow::Result<()> {

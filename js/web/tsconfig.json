@@ -17,7 +17,7 @@
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "types": ["bun"]
+    "types": ["bun", "vite/client"]
   },
   "include": ["src/**/*", "test/**/*", "vite.config.ts"]
 }

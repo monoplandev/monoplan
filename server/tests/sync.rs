@@ -292,7 +292,7 @@ async fn connect_ws(server: &TestServer, token: &str) -> WsStream {
 
 async fn send_msgpack<T: Serialize>(ws: &mut WsStream, value: &T) {
     let bytes = rmp_serde::to_vec_named(value).unwrap();
-    ws.send(Message::Binary(bytes)).await.unwrap();
+    ws.send(Message::Binary(bytes.into())).await.unwrap();
 }
 
 async fn recv_msgpack<T: DeserializeOwned>(ws: &mut WsStream) -> T {

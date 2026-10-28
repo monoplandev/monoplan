@@ -3,8 +3,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use argon2::Argon2;
-use argon2::password_hash::rand_core::OsRng;
-use argon2::password_hash::{PasswordHasher, SaltString};
+use argon2::password_hash::PasswordHasher;
 use clap::{Parser, Subcommand};
 use monoplan_server::{AppState, Config, build_info, router};
 
@@ -103,9 +102,9 @@ fn hash_admin_password() -> anyhow::Result<()> {
         anyhow::bail!("admin password must not be empty");
     }
 
-    let salt = SaltString::generate(&mut OsRng);
+    // `hash_password` draws a fresh random salt via getrandom.
     let hash = Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password(password.as_bytes())
         .map_err(|e| anyhow::anyhow!("failed to hash admin password: {e}"))?;
     println!("{hash}");
     Ok(())

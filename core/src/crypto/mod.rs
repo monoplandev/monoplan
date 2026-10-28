@@ -35,12 +35,12 @@ pub use secrets::{AuthSecret, Dek, Kek, PasswordMaster, RecoveryMaster};
 /// `monoplan-protocol` for the one struct that crosses the boundary.
 pub use monoplan_protocol::KdfParams;
 
-use rand::RngCore;
+use rand::Rng;
 
 /// Generate `N` cryptographically-random bytes.
 pub fn random_bytes<const N: usize>() -> [u8; N] {
     let mut out = [0u8; N];
-    rand::thread_rng().fill_bytes(&mut out);
+    rand::rng().fill_bytes(&mut out);
     out
 }
 
