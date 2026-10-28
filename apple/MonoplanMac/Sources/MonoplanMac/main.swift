@@ -190,6 +190,7 @@ final class TrayController: NSObject, NSMenuDelegate {
         }
         addAction(String(localized: "Settings…"), #selector(openSettings))
         addAction(String(localized: "Open Monoplan"), #selector(openWebsite))
+        menu.addItem(.separator())
         addAction(String(localized: "Quit Monoplan"), #selector(quit))
     }
 
