@@ -1,7 +1,7 @@
 //! `monoplan daemon` — the resident host (`spec/daemon-plan.md`).
 //!
-//! Hold a [`Session`] open for the life of the process and drive the
-//! sans-IO engine from one `select!` loop over the WebSocket, client
+//! Hold a [`Session`] open for the life of the process and drive its
+//! sans-IO engines (one per doc) from one `select!` loop over the WebSocket, client
 //! requests arriving on a Unix socket, a persist tick, a liveness ping,
 //! and shutdown signals.
 //!
@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 use clap::{Parser, Subcommand};
 use futures_util::{SinkExt, StreamExt};
-use monoplan_core::{Event, hello_frame, parse_hello_response};
+use monoplan_core::{DocId, Event, hello_frame, parse_hello_response};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_tungstenite::tungstenite::Message;
@@ -33,10 +33,7 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::commands::run_doc;
 use crate::config::Profile;
 use crate::ipc::{self, Reply, Request, SyncStatus, WatchEvent, read_frame, write_frame};
-use crate::sync::{
-    SNAPSHOT_MAX_WAL_BYTES, SNAPSHOT_MAX_WAL_ROWS, Session, SyncError, WsStream, connect_ws,
-    drain_events, engine_options, send_outbox,
-};
+use crate::sync::{Session, SyncError, WsStream, connect_ws, engine_options, send_outboxes};
 
 /// Socket connect + version handshake budget. Longer than the one-shot
 /// CLI's 2 s: the daemon is not holding up a command, and real networks
@@ -685,7 +682,7 @@ impl Host {
         // time), socket closed politely. Errors here are reported, not
         // swallowed — the lock releases regardless when `self` drops.
         self.session.persist_engine_state().await?;
-        self.session.engine.force_snapshot()?;
+        self.session.force_snapshot()?;
         if let Some(mut ws) = self.ws.take() {
             let _ = ws.close(None).await;
         }
@@ -706,13 +703,26 @@ impl Host {
                 embedded: self.embedded,
                 sync: self.sync_status(),
             },
-            Request::Doc(cmd) => {
+            Request::Doc { workspace, cmd } => {
+                let doc_id = match self.session.resolve(workspace.as_deref()) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        let _ = reply.send(Reply::Err {
+                            message: e.to_string(),
+                        });
+                        return Ok(false);
+                    }
+                };
                 let mut buf = Vec::new();
-                let result = run_doc(cmd, self.session.doc(), &mut buf);
+                let doc = self
+                    .session
+                    .doc_for(doc_id)
+                    .expect("resolved against open docs");
+                let result = run_doc(cmd, doc, &mut buf);
                 // Whatever the command committed is durable before the
                 // client hears back, and on the wire right after.
                 self.session.persist_engine_state().await?;
-                self.session.engine.flush();
+                self.session.flush_engines();
                 self.pump().await;
                 self.notify_if_changed();
                 match result {
@@ -733,8 +743,8 @@ impl Host {
                     Reply::Synced {
                         sync: self.sync_status(),
                     }
-                } else if self.ws.is_some() && self.session.engine.is_idle() {
-                    self.session.engine.flush();
+                } else if self.ws.is_some() && self.session.all_idle() {
+                    self.session.flush_engines();
                     self.pump().await;
                     Reply::Synced {
                         sync: self.sync_status(),
@@ -807,7 +817,7 @@ impl Host {
                 self.backoff = BACKOFF_MIN;
                 self.connected_at = Some(Instant::now());
                 self.awaiting_pong = false;
-                self.session.engine.handle_connected();
+                self.session.handle_connected();
                 self.offline_reason = None;
                 self.status.send_modify(|s| s.connects += 1);
                 eprintln!("monoplan daemon: connected");
@@ -846,7 +856,7 @@ impl Host {
     }
 
     fn is_online(&self) -> bool {
-        self.ws.is_some() && self.session.engine.is_online()
+        self.ws.is_some() && self.session.home_engine().is_online()
     }
 
     async fn on_ws_message(
@@ -855,7 +865,7 @@ impl Host {
     ) {
         match msg {
             Some(Ok(Message::Binary(bytes))) => {
-                self.session.engine.handle_server_bytes(&bytes);
+                self.session.route_server_bytes(&bytes);
                 // Remote updates are WAL-appended by the engine as they
                 // apply; persisting now advances the durable cursor,
                 // which is what queues the Ack `pump` then sends.
@@ -879,9 +889,7 @@ impl Host {
     async fn on_persist_tick(&mut self) -> Result<(), SyncError> {
         self.session.persist_engine_state().await?;
         // Hot-path fold uses the real thresholds; exit folds everything.
-        self.session
-            .engine
-            .snapshot_if_wal_exceeds(SNAPSHOT_MAX_WAL_ROWS, SNAPSHOT_MAX_WAL_BYTES)?;
+        self.session.snapshot_if_wal_exceeds()?;
         // Anything the two hot paths did not already report (there
         // should be nothing); also keeps the queue from accumulating.
         self.notify_if_changed();
@@ -892,9 +900,9 @@ impl Host {
                 // Escalates only while still in `Opening`; a no-op
                 // once the doc is open, so calling it every tick
                 // past the budget is harmless.
-                self.session.engine.handle_timeout();
+                self.session.handle_timeout();
             }
-            self.session.engine.flush();
+            self.session.flush_engines();
             self.pump().await;
         }
         self.publish();
@@ -917,13 +925,19 @@ impl Host {
     /// Called after every engine interaction while a socket is open.
     async fn pump(&mut self) {
         if let Some(ws) = self.ws.as_mut()
-            && let Err(e) = send_outbox(ws, &mut self.session.engine).await
+            && let Err(e) = send_outboxes(ws, &mut self.session).await
         {
             self.disconnect(&format!("send failed: {e}"));
             return;
         }
-        for event in drain_events(&mut self.session.engine) {
+        let home = self.session.primary_doc_id();
+        let mut forget: Vec<DocId> = Vec::new();
+        for (doc_id, event) in self.session.drain_events() {
             match event {
+                // A non-Home engine going offline on its own is the
+                // `DocClosed` below, already handled; the socket stays
+                // up for the other docs.
+                Event::ConnStateChanged { online: false } if doc_id != home => {}
                 Event::ConnStateChanged { online: false } => {
                     // Engine already went Disconnected (rejected
                     // handshake, fatal frame); drop the socket to match.
@@ -931,35 +945,49 @@ impl Host {
                 }
                 Event::ConnStateChanged { online: true } => {}
                 Event::PulledInitial => {
-                    if let Err(e) = self.session.mark_synced() {
+                    if let Err(e) = self.session.mark_synced(doc_id) {
                         tracing::warn!("mark_synced: {e}");
                     }
-                    if !self.pending_syncs.is_empty() {
-                        self.session.engine.flush();
+                    if doc_id == home && !self.pending_syncs.is_empty() {
+                        self.session.flush_engines();
                         self.resolve_pending_syncs(true);
                     }
                 }
                 Event::Pushed => {
-                    if let Err(e) = self.session.mark_synced() {
+                    if let Err(e) = self.session.mark_synced(doc_id) {
                         tracing::warn!("mark_synced: {e}");
                     }
                 }
                 Event::FrontierAdvanced { .. } => {}
                 Event::Error(msg) => {
-                    tracing::warn!("engine: {msg}");
+                    tracing::warn!("engine {}: {msg}", doc_id.0);
                     self.disconnect(&format!("engine error: {msg}"));
                 }
-                // The daemon syncs the Home doc only, and Home is
-                // non-leavable, so this means the server refused the
-                // account's own primary doc — a server-side fault, not
-                // something a reconnect loop will fix quickly. Treat
-                // it like any fatal engine error: drop the socket and
-                // let the ordinary backoff pace the retries.
+                // The server will not serve this doc to this account
+                // any more (membership removed, or the invite was
+                // revoked under us): forget it, keep the socket for
+                // the rest (`spec/sharing-plan.md` §Member removal).
+                Event::DocClosed { reason } if doc_id != home => {
+                    tracing::warn!("engine: doc {} closed: {reason}; forgetting it", doc_id.0);
+                    forget.push(doc_id);
+                }
+                // Home is non-leavable, so this means the server
+                // refused the account's own primary doc — a
+                // server-side fault, not something a reconnect loop
+                // will fix quickly. Treat it like any fatal engine
+                // error: drop the socket and let the ordinary backoff
+                // pace the retries.
                 Event::DocClosed { reason } => {
                     tracing::warn!("engine: home doc closed: {reason}");
                     self.disconnect(&format!("doc closed: {reason}"));
                 }
             }
+        }
+        for doc_id in forget {
+            if let Err(e) = self.session.forget_doc(doc_id) {
+                tracing::warn!("forget doc {}: {e}", doc_id.0);
+            }
+            let _ = self.watchers.send(WatchEvent::Changed);
         }
         self.publish();
     }
@@ -967,7 +995,7 @@ impl Host {
     /// Host-initiated disconnect: tell the engine, drop the socket,
     /// schedule a reconnect.
     fn disconnect(&mut self, reason: &str) {
-        self.session.engine.handle_disconnected();
+        self.session.handle_disconnected();
         self.drop_socket(reason);
     }
 
@@ -1002,7 +1030,7 @@ impl Host {
             last_synced_at: self.session.last_synced_at(),
             offline_reason: self.offline_reason.clone(),
             local_only: self.local_only,
-            last_contiguous_seq: self.session.engine.last_contiguous_seq(),
+            last_contiguous_seq: self.session.home_engine().last_contiguous_seq(),
             connects: self.status.borrow().connects,
         };
         let prev_sync = self.status.borrow().sync();
@@ -1025,11 +1053,7 @@ impl Host {
     /// mirrors; over IPC a watcher re-fetches its projection, so a
     /// burst of N events is one frame.
     fn notify_if_changed(&mut self) {
-        let mut changed = false;
-        while self.session.engine.pop_app_event().is_some() {
-            changed = true;
-        }
-        if changed {
+        if self.session.drain_app_events() {
             let _ = self.watchers.send(WatchEvent::Changed);
         }
     }

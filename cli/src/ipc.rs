@@ -30,8 +30,14 @@ pub enum Request {
     /// First frame on every connection. The daemon answers with its own
     /// build id; a mismatch means the client restarts it.
     Hello { build_id: String },
-    /// Run a doc command; the reply carries its rendered output.
-    Doc(DocCmd),
+    /// Run a doc command in a workspace; the reply carries its
+    /// rendered output. `workspace` is the `-w` selector (name or doc
+    /// id, `spec/cli.md` §Workspaces); absent on the wire means Home.
+    Doc {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace: Option<String>,
+        cmd: DocCmd,
+    },
     /// Push now and report whether the server is reachable.
     Sync,
     /// Who is logged in: the account row the daemon booted with. Read
@@ -324,34 +330,38 @@ mod tests {
             b"\x81\xa5Hello\x81\xa8build_id\xa1x"
         );
         assert_eq!(
-            shape(&Request::Doc(DocCmd::Agenda(AgendaArgs {
-                days: 0,
-                today: None,
-                json: true,
-            }))),
-            serde_json::json!({"Doc": {"Agenda": {"days": 0, "today": null, "json": true}}})
+            shape(&Request::Doc {
+                workspace: None,
+                cmd: DocCmd::Agenda(AgendaArgs {
+                    days: 0,
+                    today: None,
+                    json: true,
+                })
+            }),
+            serde_json::json!({"Doc": {"cmd": {"Agenda": {"days": 0, "today": null, "json": true}}}})
         );
         assert_eq!(
-            shape(&Request::Doc(DocCmd::Focus(
-                crate::commands::focus::FocusArgs {
+            shape(&Request::Doc {
+                workspace: Some("Work".into()),
+                cmd: DocCmd::Focus(crate::commands::focus::FocusArgs {
                     cmd: None,
                     json: true,
-                }
-            ))),
-            serde_json::json!({"Doc": {"Focus": {"cmd": null, "json": true}}})
+                })
+            }),
+            serde_json::json!({"Doc": {"workspace": "Work", "cmd": {"Focus": {"cmd": null, "json": true}}}})
         );
-        assert_eq!(
-            shape(&Request::Doc(DocCmd::Lists(
-                crate::commands::lists::ListsArgs {
-                    cmd: crate::commands::lists::ListsCmd::Ls {
-                        json: true,
-                        archived: false,
-                        all: true,
-                    },
-                }
-            ))),
-            serde_json::json!({"Doc": {"Lists": {"cmd": {"Ls": {"json": true, "archived": false, "all": true}}}}})
-        );
+        // A client that omits `workspace` (the macOS app) means Home.
+        let home: Request = rmp_serde::from_slice(
+            &rmp_serde::to_vec_named(&serde_json::json!({"Doc": {"cmd": {"Lists": {"cmd": {"Ls": {"json": true, "archived": false, "all": true}}}}}})).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            home,
+            Request::Doc {
+                workspace: None,
+                cmd: DocCmd::Lists(_)
+            }
+        ));
         let sync = SyncStatus {
             online: false,
             last_synced_at: Some(7),

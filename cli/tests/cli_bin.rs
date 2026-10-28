@@ -10,11 +10,12 @@ use std::process::Output;
 
 use tokio::process::Command;
 
-use monoplan_cli::config::Config;
+use monoplan_cli::config::{Config, Secrets};
 use monoplan_cli::daemon;
 use monoplan_cli::sync::Session;
 use support::{
-    TEST_PASSWORD, TestServer, login_device, materialize_profile, signup_account, wait_for_updates,
+    TEST_PASSWORD, TestServer, create_doc, login_device, materialize_profile, signup_account,
+    wait_for_updates,
 };
 use uuid::Uuid;
 
@@ -244,8 +245,14 @@ async fn fresh_install_works_without_an_account() {
     assert!(compact.contains("\"last_sync_at\":null"), "{json}");
 
     // Server-backed verbs name the gap instead of failing obscurely.
-    let e = err(monoplan(&dir, &["workspace", "share", "pending", &id]).await);
+    let e = err(monoplan(&dir, &["-w", "Work", "workspace", "share", "pending"]).await);
     assert!(e.contains("no account"), "{e}");
+    // One workspace per accountless install: any other `-w` names
+    // what there is.
+    let e = err(monoplan(&dir, &["-w", "Work", "item", "ls"]).await);
+    assert!(e.contains("this install has: Personal"), "{e}");
+    let ls = ok(monoplan(&dir, &["-w", "personal", "item", "ls"]).await);
+    assert!(ls.contains("no account yet"), "{ls}");
     let e = err(monoplan(&dir, &["auth", "password"]).await);
     assert!(e.contains("no account"), "{e}");
 
@@ -258,6 +265,129 @@ async fn fresh_install_works_without_an_account() {
 
     assert_eq!(
         ok(monoplan(&dir, &["daemon", "stop"]).await).trim(),
+        "stopped"
+    );
+}
+
+/// `-w <workspace>` (`spec/cli.md` §Workspaces): a second doc the
+/// account owns is selected by name or id, an omitted `-w` stays on
+/// Home, the daemon pushes each doc's ops to the right server doc, and
+/// a second device with no local rows for the shared doc is filled
+/// from the server on first open.
+#[tokio::test]
+async fn workspace_flag_selects_a_second_doc() {
+    let server = TestServer::start().await;
+    let signup = signup_account(&server, "bin-w").await;
+    let tmp = tempfile::tempdir().unwrap();
+    let profile = materialize_profile(
+        tmp.path(),
+        &server.base,
+        &signup.account_id,
+        &signup.primary_doc_id,
+        &signup.device_id,
+        &signup.device_token,
+        &signup.dek,
+        &signup.email,
+        true,
+    )
+    .await;
+    let dir = tmp.path();
+
+    // A second doc, created the way the web client does, named "Work"
+    // in its own settings and seeded locally as a membership login
+    // would leave it.
+    let (work_id, work_dek) = create_doc(&server.base, &signup.device_token, &signup.dek)
+        .await
+        .unwrap();
+    let work_doc_id = monoplan_core::DocId(Uuid::parse_str(&work_id).unwrap());
+    let home_doc_id = monoplan_core::DocId(Uuid::parse_str(&signup.primary_doc_id).unwrap());
+    let storage = monoplan_cli::storage::open_storage(&profile).unwrap();
+    let work = monoplan_core::Doc::new().unwrap();
+    work.set_doc_name(Some("Work")).unwrap();
+    monoplan_cli::storage::seed_snapshot(&storage, &work_dek, work_doc_id, &work).unwrap();
+    profile
+        .write_secrets(&Secrets::new(
+            Some(signup.device_token.clone()),
+            [(home_doc_id, &signup.dek), (work_doc_id, &work_dek)],
+        ))
+        .unwrap();
+
+    // Name, case-insensitive; id; alias for Home; unknown lists what
+    // there is.
+    let work_item = ok(monoplan(dir, &["-w", "Work", "item", "add", "in work"]).await)
+        .trim()
+        .to_string();
+    let home_item = ok(monoplan(dir, &["item", "add", "in home"]).await)
+        .trim()
+        .to_string();
+    let ls = ok(monoplan(dir, &["-w", "work", "item", "ls"]).await);
+    assert!(ls.contains(&work_item) && !ls.contains(&home_item), "{ls}");
+    let ls = ok(monoplan(dir, &["item", "ls", "-w", &work_id]).await);
+    assert!(ls.contains(&work_item), "{ls}");
+    let ls = ok(monoplan(dir, &["-w", "home", "item", "ls"]).await);
+    assert!(ls.contains(&home_item) && !ls.contains(&work_item), "{ls}");
+    let e = err(monoplan(dir, &["-w", "Play", "item", "ls"]).await);
+    assert!(e.contains("this install has: Personal, Work"), "{e}");
+    let e = err(monoplan(dir, &["-w", "Work", "auth", "status"]).await);
+    assert!(e.contains("does not take --workspace"), "{e}");
+
+    // `workspace status` resolves without the daemon and names the doc.
+    let json = ok(monoplan(dir, &["-w", "Work", "workspace", "status", "--json"]).await);
+    assert!(json.contains(&work_id), "{json}");
+    let json = ok(monoplan(dir, &["workspace", "status", "--json"]).await);
+    assert!(json.contains(&signup.primary_doc_id), "{json}");
+
+    // The export is per workspace too.
+    let export = ok(monoplan(dir, &["-w", "Work", "workspace", "export-json"]).await);
+    assert!(
+        export.contains("in work") && !export.contains("in home"),
+        "{export}"
+    );
+
+    // Each doc's ops reached its own server doc.
+    wait_for_updates(&server, Uuid::parse_str(&work_id).unwrap(), 1).await;
+    wait_for_updates(&server, Uuid::parse_str(&signup.primary_doc_id).unwrap(), 1).await;
+
+    // A second device logs in (both keys) and has no local rows for
+    // Work: its session boots the doc empty and the server fills it.
+    let login = login_device(&server.base, &signup.email, TEST_PASSWORD, "bin-w-b")
+        .await
+        .unwrap();
+    assert_eq!(login.doc_keys.len(), 2, "both memberships come back");
+    let tmp_b = tempfile::tempdir().unwrap();
+    let profile_b = materialize_profile(
+        tmp_b.path(),
+        &server.base,
+        &login.account_id,
+        &login.primary_doc_id,
+        &login.device_id,
+        &login.device_token,
+        &login.dek,
+        &signup.email,
+        false,
+    )
+    .await;
+    profile_b
+        .write_secrets(&Secrets::new(
+            Some(login.device_token.clone()),
+            login.doc_keys.iter().map(|(id, dek)| (*id, dek)),
+        ))
+        .unwrap();
+    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
+    assert!(session_b.is_online());
+    assert_eq!(
+        session_b.doc().get_item(&home_item).unwrap().text,
+        "in home"
+    );
+    let work_b = session_b.doc_for(work_doc_id).expect("work doc open");
+    assert_eq!(work_b.get_item(&work_item).unwrap().text, "in work");
+    assert_eq!(work_b.get_settings().doc_name.as_deref(), Some("Work"));
+    assert!(session_b.doc().get_item(&work_item).is_none());
+    assert_eq!(session_b.resolve(Some("work")).unwrap(), work_doc_id);
+    session_b.flush().await.unwrap();
+
+    assert_eq!(
+        ok(monoplan(dir, &["daemon", "stop"]).await).trim(),
         "stopped"
     );
 }

@@ -72,16 +72,18 @@ public enum Request {
             return .map(["Hello": .map(["build_id": .string(buildId)])])
         case .watch:
             return .string("Watch")
+        // `Doc { workspace?, cmd }`: no `workspace` means the Personal
+        // workspace (`spec/cli.md` §Workspaces), which is all the app shows.
         case .agenda(let days):
-            return .map(["Doc": .map(["Agenda": .map([
+            return .map(["Doc": .map(["cmd": .map(["Agenda": .map([
                 "days": .int(Int64(days)), "today": .nil, "json": .bool(true),
-            ])])])
+            ])])])])
         case .focus:
-            return .map(["Doc": .map(["Focus": .map(["cmd": .nil, "json": .bool(true)])])])
+            return .map(["Doc": .map(["cmd": .map(["Focus": .map(["cmd": .nil, "json": .bool(true)])])])])
         case .lists:
-            return .map(["Doc": .map(["Lists": .map(["cmd": .map(["Ls": .map([
+            return .map(["Doc": .map(["cmd": .map(["Lists": .map(["cmd": .map(["Ls": .map([
                 "json": .bool(true), "archived": .bool(false), "all": .bool(true),
-            ])])])])])
+            ])])])])])])
         case .account:
             return .string("Account")
         }

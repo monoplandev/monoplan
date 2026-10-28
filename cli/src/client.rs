@@ -36,10 +36,11 @@ const POLL: Duration = Duration::from_millis(50);
 /// staleness so the caller can say when the answer is offline.
 pub async fn doc(
     profile: &Profile,
+    workspace: Option<String>,
     cmd: DocCmd,
     spawn: Spawn,
 ) -> anyhow::Result<(String, SyncStatus)> {
-    match call(profile, Request::Doc(cmd), spawn).await? {
+    match call(profile, Request::Doc { workspace, cmd }, spawn).await? {
         Reply::Output { stdout, sync } => Ok((stdout, sync)),
         Reply::Err { message } => Err(anyhow::anyhow!(message)),
         other => anyhow::bail!("unexpected daemon reply: {other:?}"),

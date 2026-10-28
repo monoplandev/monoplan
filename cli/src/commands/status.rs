@@ -74,7 +74,7 @@ pub async fn run_auth(args: StatusArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn run_workspace(args: StatusArgs) -> anyhow::Result<()> {
+pub async fn run_workspace(args: StatusArgs, workspace: Option<String>) -> anyhow::Result<()> {
     let profile = Profile::require_active()?;
     let secrets = profile.read_secrets()?;
 
@@ -84,15 +84,17 @@ pub async fn run_workspace(args: StatusArgs) -> anyhow::Result<()> {
     // tell (folded rows may carry unsent ops) — so this rebuilds the doc.
     let storage = crate::storage::open_storage(&profile)?;
     let account = storage.read_account()?;
-    let cursor = storage.read_sync_cursor(account.primary_doc_id)?;
-    let dek = dek_for_doc(&secrets, account.primary_doc_id)?;
-    let pending = crate::storage::has_unsynced_ops(&storage, &dek, account.primary_doc_id)
+    let doc_id =
+        crate::workspace::resolve_offline(&storage, &secrets, &account, workspace.as_deref())?;
+    let cursor = storage.read_sync_cursor(doc_id)?;
+    let dek = dek_for_doc(&secrets, doc_id)?;
+    let pending = crate::storage::has_unsynced_ops(&storage, &dek, doc_id)
         .map_err(|e| anyhow::anyhow!("read pending state: {e}"))?;
     let local_only = account.identity.is_none();
 
     if args.json {
         print_json(&WorkspaceStatusJson {
-            doc_id: account.primary_doc_id.0.to_string(),
+            doc_id: doc_id.0.to_string(),
             local_only,
             last_sync_at: cursor.last_sync_at,
             last_acked_seq: cursor.last_acked_server_seq.0,
@@ -100,7 +102,7 @@ pub async fn run_workspace(args: StatusArgs) -> anyhow::Result<()> {
         })?;
         return Ok(());
     }
-    println!("Doc:     {}", account.primary_doc_id.0);
+    println!("Doc:     {}", doc_id.0);
     if local_only {
         println!("Sync:    none — local-only workspace");
         println!("         `monoplan auth signup` syncs it across devices");

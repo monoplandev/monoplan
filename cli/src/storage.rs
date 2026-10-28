@@ -240,6 +240,25 @@ impl SqliteStorage {
         Ok(())
     }
 
+    /// Delete every local row of a doc this install may no longer open
+    /// (`DocClosed`, `spec/sharing-plan.md` §Member removal). Never the
+    /// primary: callers guard that.
+    pub fn forget_doc(&self, doc_id: DocId) -> Result<(), StorageError> {
+        let mut conn = self.conn().lock().expect("SqliteStorage mutex poisoned");
+        let id = doc_id.0.as_bytes().to_vec();
+        let tx = conn.transaction().map_err(backend)?;
+        for sql in [
+            "DELETE FROM wal WHERE doc_id = ?1",
+            "DELETE FROM snapshots WHERE doc_id = ?1",
+            "DELETE FROM in_flight_push WHERE doc_id = ?1",
+            "DELETE FROM docs WHERE id = ?1",
+        ] {
+            tx.execute(sql, [&id]).map_err(backend)?;
+        }
+        tx.commit().map_err(backend)?;
+        Ok(())
+    }
+
     /// Drop the doc store (WAL + snapshot + in-flight push) and reset
     /// every sync cursor, keeping account identity. Backs `monoplan db
     /// clear`: the next sync rehydrates from server_seq 0.

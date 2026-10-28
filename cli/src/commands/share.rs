@@ -5,21 +5,23 @@
 //! machine except inside the printed link: the server gets an
 //! HKDF-derived id and the doc's DEK wrapped under a second subkey.
 //! Accepting stores the recovered DEK in `secrets.toml` under the doc
-//! id, exactly where login would have put it; the CLI's sync engine
-//! still runs the Home doc only (`spec/sharing-plan.md` Phase 4), so a
-//! joined doc shows up in the web client first.
+//! id, exactly where login would have put it, and stops a running
+//! daemon so the next command boots the joined doc (`spec/cli.md`
+//! §Workspaces). The doc the other verbs act on is the global `-w`
+//! selector, resolved without a daemon (`workspace::resolve_offline`).
 
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
-use monoplan_core::{AEAD_NONCE_LEN, InviteSecret, WrappedDek};
+use monoplan_core::{AEAD_NONCE_LEN, DocId, InviteSecret, WrappedDek};
 use monoplan_protocol::{
     AcceptInviteRequest, AcceptInviteResponse, CreateInviteRequest, CreateInviteResponse,
     InvitePayloadResponse, InvitesListResponse, MembersListResponse,
 };
 
 use crate::config::{DocSecrets, Profile};
-use crate::keystore::{dek_for_doc, parse_doc_id};
+use crate::keystore::dek_for_doc;
 use crate::net::Client;
+use crate::workspace::resolve_offline;
 
 #[derive(Parser, Debug)]
 #[command(subcommand_required = true, arg_required_else_help = true)]
@@ -28,39 +30,50 @@ pub struct ShareArgs {
     pub cmd: ShareCmd,
 }
 
+/// Every verb but `accept` acts on the workspace `-w` names; Home is
+/// refused up front, since the server would 403 it anyway and the
+/// message here says why.
 #[derive(Subcommand, Debug)]
 pub enum ShareCmd {
-    /// Create a single-use invite link for a workspace you own. The
-    /// link is printed once and cannot be recovered afterwards.
+    /// Create a single-use invite link for the workspace (-w) you own.
+    /// The link is printed once and cannot be recovered afterwards.
     Link {
-        /// The workspace (doc) id. Never the Personal workspace.
-        doc: String,
         /// Lifetime in days (server default 7, at most 30).
         #[arg(long)]
         expires_days: Option<u64>,
     },
-    /// Show unused invite links on a workspace you own.
-    Pending { doc: String },
-    /// Revoke an unused invite link.
-    Revoke { doc: String, invite_id: String },
+    /// Show unused invite links on the workspace (-w) you own.
+    Pending,
+    /// Revoke an unused invite link on the workspace (-w).
+    Revoke { invite_id: String },
     /// Join a workspace from an invite link (or its bare secret).
     Accept { link: String },
-    /// Show the members of a workspace you belong to.
-    Members { doc: String },
-    /// Remove a member from a workspace you own, by email. Not
+    /// Show the members of the workspace (-w).
+    Members,
+    /// Remove a member from the workspace (-w) you own, by email. Not
     /// yourself, and not the last owner. They keep what they already
     /// synced; the server stops serving them the workspace from now.
-    Remove { doc: String, email: String },
+    Remove { email: String },
 }
 
-pub async fn run(args: ShareArgs) -> anyhow::Result<()> {
+pub async fn run(args: ShareArgs, workspace: Option<String>) -> anyhow::Result<()> {
+    if let ShareCmd::Accept { link } = &args.cmd {
+        if workspace.is_some() {
+            bail!(
+                "`share accept` joins the workspace the link names; it does not take --workspace"
+            );
+        }
+        return accept(link).await;
+    }
+    let c = ctx()?;
+    let doc_id = c.shared_doc(workspace.as_deref())?;
     match args.cmd {
-        ShareCmd::Link { doc, expires_days } => link(&doc, expires_days).await,
-        ShareCmd::Pending { doc } => pending(&doc).await,
-        ShareCmd::Revoke { doc, invite_id } => revoke(&doc, &invite_id).await,
-        ShareCmd::Accept { link } => accept(&link).await,
-        ShareCmd::Members { doc } => members(&doc).await,
-        ShareCmd::Remove { doc, email } => remove(&doc, &email).await,
+        ShareCmd::Link { expires_days } => link(&c, doc_id, expires_days).await,
+        ShareCmd::Pending => pending(&c, doc_id).await,
+        ShareCmd::Revoke { invite_id } => revoke(&c, doc_id, &invite_id).await,
+        ShareCmd::Members => members(&c, doc_id).await,
+        ShareCmd::Remove { email } => remove(&c, doc_id, &email).await,
+        ShareCmd::Accept { .. } => unreachable!("handled above"),
     }
 }
 
@@ -85,14 +98,26 @@ fn ctx() -> anyhow::Result<Ctx> {
     })
 }
 
-async fn link(doc: &str, expires_days: Option<u64>) -> anyhow::Result<()> {
-    let c = ctx()?;
-    let doc_id = parse_doc_id(doc)?;
-    let storage = crate::storage::open_storage(&c.profile)?;
-    let account = storage.read_account()?;
-    if doc_id == account.primary_doc_id {
-        bail!("the Personal workspace cannot be shared: its key is the account key");
+impl Ctx {
+    /// The non-Home doc `-w` names.
+    fn shared_doc(&self, workspace: Option<&str>) -> anyhow::Result<DocId> {
+        let storage = crate::storage::open_storage(&self.profile)?;
+        let account = storage.read_account()?;
+        let secrets = self.profile.read_secrets()?;
+        let doc_id = resolve_offline(&storage, &secrets, &account, workspace)?;
+        if doc_id == account.primary_doc_id {
+            if workspace.is_none() {
+                bail!(
+                    "name the workspace to share with -w; the Personal workspace cannot be shared (its key is the account key)"
+                );
+            }
+            bail!("the Personal workspace cannot be shared: its key is the account key");
+        }
+        Ok(doc_id)
     }
+}
+
+async fn link(c: &Ctx, doc_id: DocId, expires_days: Option<u64>) -> anyhow::Result<()> {
     let secrets = c.profile.read_secrets()?;
     let dek = dek_for_doc(&secrets, doc_id)?;
 
@@ -123,15 +148,13 @@ async fn link(doc: &str, expires_days: Option<u64>) -> anyhow::Result<()> {
     eprintln!("Single use. Expires {}.", format_ts(resp.expires_at));
     eprintln!(
         "Anyone with this link can join and read the whole workspace. It is shown once; \
-         revoke it with `monoplan workspace share revoke {} {}`.",
+         revoke it with `monoplan -w {} workspace share revoke {}`.",
         doc_id.0, resp.invite_id
     );
     Ok(())
 }
 
-async fn pending(doc: &str) -> anyhow::Result<()> {
-    let c = ctx()?;
-    let doc_id = parse_doc_id(doc)?;
+async fn pending(c: &Ctx, doc_id: DocId) -> anyhow::Result<()> {
     let resp: InvitesListResponse = c
         .client
         .get_authed(&format!("/api/docs/{}/invites", doc_id.0), &c.token)
@@ -157,9 +180,7 @@ async fn pending(doc: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn revoke(doc: &str, invite_id: &str) -> anyhow::Result<()> {
-    let c = ctx()?;
-    let doc_id = parse_doc_id(doc)?;
+async fn revoke(c: &Ctx, doc_id: DocId, invite_id: &str) -> anyhow::Result<()> {
     c.client
         .delete_authed(
             &format!("/api/docs/{}/invites/{}", doc_id.0, invite_id.trim()),
@@ -216,15 +237,20 @@ async fn accept(link: &str) -> anyhow::Result<()> {
         "Joined workspace {} (invited by {}).",
         joined.doc_id, payload.inviter_hint
     );
+    // A running host booted before this key existed; the next command
+    // starts one that opens the joined doc too (the app re-hosts on
+    // its own after a `Shutdown`).
+    if crate::client::stop_if_running(&c.profile.dir).await? {
+        eprintln!("Restarting the daemon so it opens the new workspace.");
+    }
     eprintln!(
-        "The CLI syncs the Personal workspace only for now; the shared workspace is available in the web client."
+        "Use it with `-w <name>` (or `-w {}`) once it has synced.",
+        joined.doc_id
     );
     Ok(())
 }
 
-async fn members(doc: &str) -> anyhow::Result<()> {
-    let c = ctx()?;
-    let doc_id = parse_doc_id(doc)?;
+async fn members(c: &Ctx, doc_id: DocId) -> anyhow::Result<()> {
     let resp: MembersListResponse = c
         .client
         .get_authed(&format!("/api/docs/{}/members", doc_id.0), &c.token)
@@ -240,9 +266,7 @@ async fn members(doc: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn remove(doc: &str, email: &str) -> anyhow::Result<()> {
-    let c = ctx()?;
-    let doc_id = parse_doc_id(doc)?;
+async fn remove(c: &Ctx, doc_id: DocId, email: &str) -> anyhow::Result<()> {
     let wanted = email.trim();
     let list: MembersListResponse = c
         .client

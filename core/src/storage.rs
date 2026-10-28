@@ -55,7 +55,7 @@ use crate::doc::{Doc, DocError};
 
 /// Server-assigned doc identifier. UUID v7 bytes; matches
 /// `server/spec/storage.md`'s `docs.id`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct DocId(pub Uuid);
 
 /// Client-minted durable push identifier. Persisted with the in-flight

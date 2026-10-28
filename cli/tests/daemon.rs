@@ -197,10 +197,13 @@ async fn watcher_hears_sync_local_and_remote_changes() {
     let mut cli = connect(tmp_a.path()).await;
     write_frame(
         &mut cli,
-        &Request::Doc(DocCmd::Add {
-            list: LIST_INBOX.to_string(),
-            texts: vec!["from-the-cli".into()],
-        }),
+        &Request::Doc {
+            workspace: None,
+            cmd: DocCmd::Add {
+                list: LIST_INBOX.to_string(),
+                texts: vec!["from-the-cli".into()],
+            },
+        },
     )
     .await
     .unwrap();
@@ -217,11 +220,14 @@ async fn watcher_hears_sync_local_and_remote_changes() {
     // event, and sees the item.
     write_frame(
         &mut watcher,
-        &Request::Doc(DocCmd::Agenda(monoplan_cli::commands::agenda::AgendaArgs {
-            days: 0,
-            today: None,
-            json: true,
-        })),
+        &Request::Doc {
+            workspace: None,
+            cmd: DocCmd::Agenda(monoplan_cli::commands::agenda::AgendaArgs {
+                days: 0,
+                today: None,
+                json: true,
+            }),
+        },
     )
     .await
     .unwrap();
@@ -304,10 +310,13 @@ async fn embedded_host_serves_commands_and_honours_shutdown() {
 
     write_frame(
         &mut stream,
-        &Request::Doc(DocCmd::Add {
-            list: LIST_INBOX.to_string(),
-            texts: vec!["from the cli".into()],
-        }),
+        &Request::Doc {
+            workspace: None,
+            cmd: DocCmd::Add {
+                list: LIST_INBOX.to_string(),
+                texts: vec!["from the cli".into()],
+            },
+        },
     )
     .await
     .unwrap();

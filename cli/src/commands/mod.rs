@@ -38,6 +38,16 @@ pub struct Cli {
     #[arg(long, global = true)]
     no_spawn: bool,
 
+    /// The workspace to act in: its name or doc id. Omitted means the
+    /// Personal workspace (`personal` and `home` name it too).
+    #[arg(
+        short = 'w',
+        long = "workspace",
+        global = true,
+        value_name = "WORKSPACE"
+    )]
+    workspace: Option<String>,
+
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -171,20 +181,43 @@ impl Cli {
         } else {
             Spawn::OnDemand
         };
+        let workspace = self.workspace;
+        // Only doc commands act in a workspace; the rest refuse the
+        // flag rather than silently ignore it.
+        let no_workspace = |verb: &str| -> anyhow::Result<()> {
+            if workspace.is_some() {
+                anyhow::bail!("`{verb}` does not take --workspace");
+            }
+            Ok(())
+        };
         let doc_cmd = match self.cmd {
-            Cmd::Auth(AuthCmd::Signup(a)) => return signup::run(a, spawn).await,
-            Cmd::Auth(AuthCmd::Login(a)) => return login::run(a, spawn).await,
-            Cmd::Auth(AuthCmd::Logout) => return logout::run().await,
-            Cmd::Auth(AuthCmd::Recover(a)) => return recover::run(a, spawn).await,
-            Cmd::Auth(AuthCmd::Password) => return password::run().await,
-            Cmd::Db(a) => return db::run(a).await,
-            Cmd::Workspace(WorkspaceCmd::Share(a)) => return share::run(a).await,
-            Cmd::Auth(AuthCmd::Status(a)) => return status::run_auth(a).await,
-            Cmd::Workspace(WorkspaceCmd::Status(a)) => return status::run_workspace(a).await,
-            Cmd::Daemon(a) => return crate::daemon::run(a).await,
+            Cmd::Auth(a) => {
+                no_workspace("auth")?;
+                return match a {
+                    AuthCmd::Signup(a) => signup::run(a, spawn).await,
+                    AuthCmd::Login(a) => login::run(a, spawn).await,
+                    AuthCmd::Logout => logout::run().await,
+                    AuthCmd::Recover(a) => recover::run(a, spawn).await,
+                    AuthCmd::Password => password::run().await,
+                    AuthCmd::Status(a) => status::run_auth(a).await,
+                };
+            }
+            Cmd::Db(a) => {
+                no_workspace("db")?;
+                return db::run(a).await;
+            }
+            Cmd::Daemon(a) => {
+                no_workspace("daemon")?;
+                return crate::daemon::run(a).await;
+            }
+            Cmd::Workspace(WorkspaceCmd::Share(a)) => return share::run(a, workspace).await,
+            Cmd::Workspace(WorkspaceCmd::Status(a)) => {
+                return status::run_workspace(a, workspace).await;
+            }
             Cmd::Workspace(WorkspaceCmd::ExportJson(a)) => {
                 let profile = crate::bootstrap::open_or_init().await?;
-                let (json, sync) = client::doc(&profile, DocCmd::ExportJson, spawn).await?;
+                let (json, sync) =
+                    client::doc(&profile, workspace, DocCmd::ExportJson, spawn).await?;
                 export::deliver(json.trim_end_matches('\n'), a.out.as_deref())?;
                 offline_notice(sync);
                 return Ok(());
@@ -206,7 +239,7 @@ impl Cli {
         // A fresh install gets a local-only workspace here; no account
         // needed to capture (`crate::bootstrap`).
         let profile = crate::bootstrap::open_or_init().await?;
-        let (stdout, sync) = client::doc(&profile, doc_cmd, spawn).await?;
+        let (stdout, sync) = client::doc(&profile, workspace, doc_cmd, spawn).await?;
         print!("{stdout}");
         offline_notice(sync);
         Ok(())
