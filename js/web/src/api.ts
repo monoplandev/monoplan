@@ -261,6 +261,7 @@ export const api = {
       recovery: args.recovery,
       device_name: args.device_name,
       device_kind: DEVICE_KIND,
+      primary_doc_id: args.primary_doc_id,
     });
   },
 
