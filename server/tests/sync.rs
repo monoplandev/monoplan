@@ -12,8 +12,9 @@ use monoplan_core::{
 };
 use monoplan_protocol::{
     ClientFrame, CreateDocRequest, CreateDocResponse, DeviceCredential, DeviceRegistration,
-    EncryptedBlob, Hello, HelloAck, HelloRejected, KdfParams, PROTOCOL_VERSION, PushBlob,
-    RecoveryMaterial, ServerFrame, SignupRequest, SignupResponse, SnapshotBase, StoredBlob,
+    EncryptedBlob, Hello, HelloAck, HelloRejected, KdfParams, PROTOCOL_VERSION, PresentAccount,
+    PushBlob, RecoveryMaterial, ServerFrame, SignupRequest, SignupResponse, SnapshotBase,
+    StoredBlob,
 };
 use monoplan_server::sync::{SnapshotCoordinator, queries};
 use monoplan_server::{AppState, router};
@@ -193,6 +194,26 @@ async fn open_doc(ws: &mut WsStream, doc_id: Uuid) -> u64 {
         }
         other => panic!("expected DocOpened, got {other:?}"),
     }
+}
+
+/// The next frame must be a `Presence` for `doc_id`; returns its
+/// accounts sorted by id so two lists compare regardless of open order.
+async fn expect_presence(ws: &mut WsStream, doc_id: Uuid) -> Vec<PresentAccount> {
+    match recv_msgpack::<ServerFrame>(ws).await {
+        ServerFrame::Presence {
+            doc_id: d,
+            mut accounts,
+        } => {
+            assert_eq!(d, doc_id);
+            accounts.sort_by_key(|a| a.account_id);
+            accounts
+        }
+        other => panic!("expected Presence, got {other:?}"),
+    }
+}
+
+fn account_ids(accounts: &[PresentAccount]) -> Vec<Uuid> {
+    accounts.iter().map(|a| a.account_id).collect()
 }
 
 /// Fail if any frame at all arrives within `window`.
@@ -1929,6 +1950,11 @@ async fn removing_a_member_closes_the_doc_on_its_live_connection() {
     let mut ws_member = connect_ws(&owner.server, &member_token).await;
     hello(&mut ws_member).await;
     open_doc(&mut ws_member, shared).await;
+    // The member's open puts a second account on the doc: both sides
+    // hear the new present set (read here so nothing is left queued
+    // ahead of the frames asserted below).
+    expect_presence(&mut ws_member, shared).await;
+    expect_presence(&mut ws_owner, shared).await;
     // The member's Home is a different doc; it must survive the close.
     let member_home = {
         let state = owner.server.state.clone();
@@ -1967,6 +1993,9 @@ async fn removing_a_member_closes_the_doc_on_its_live_connection() {
         1,
         "only the owner's session stays subscribed"
     );
+    // The removed account leaves the present set; the owner is told.
+    let left = expect_presence(&mut ws_owner, shared).await;
+    assert_eq!(account_ids(&left), vec![owner.account_id]);
 
     // The owner's push is acked and reaches nobody else.
     send_msgpack(
@@ -2038,6 +2067,8 @@ async fn deleting_a_doc_closes_it_on_other_members_live_connections() {
     let mut ws_member = connect_ws(&owner.server, &member_token).await;
     hello(&mut ws_member).await;
     open_doc(&mut ws_member, shared).await;
+    expect_presence(&mut ws_member, shared).await;
+    expect_presence(&mut ws_owner, shared).await;
     let member_home = {
         let state = owner.server.state.clone();
         let rows = monoplan_server::auth::queries::list_memberships(&state.db, member_id)
@@ -2097,4 +2128,91 @@ async fn deleting_a_doc_closes_it_on_other_members_live_connections() {
         other => panic!("expected DocRejected, got {other:?}"),
     }
     expect_closed(&mut ws_again).await;
+}
+
+/// Presence (`sync-protocol.md` §Presence): the set of accounts with a
+/// doc open is announced to a doc's subscribers when it changes, and
+/// to a newcomer who finds others already there. One account on
+/// several connections counts once; a connection alone on a doc hears
+/// nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn presence_lists_the_accounts_with_the_doc_open() {
+    let owner = signup_account().await;
+    let shared = create_doc(&owner).await;
+    let (member_id, member_token) = signup_second(&owner).await;
+    seed_member_row(&owner, shared, member_id).await;
+    let owner_laptop = register_second_device(&owner, "laptop").await;
+    let quiet = std::time::Duration::from_millis(150);
+
+    // Alone on the doc: nothing is said.
+    let mut ws_owner = connect_ws(&owner.server, &owner.device_token).await;
+    handshake(&mut ws_owner, shared).await;
+    assert_no_frame(&mut ws_owner, quiet).await;
+
+    // A second device of the same account: still one account, still
+    // nothing, on either connection.
+    let mut ws_owner2 = connect_ws(&owner.server, &owner_laptop.device_token).await;
+    handshake(&mut ws_owner2, shared).await;
+    wait_for_subscribers_on(&owner, shared, 2).await;
+    assert_no_frame(&mut ws_owner, quiet).await;
+    assert_no_frame(&mut ws_owner2, quiet).await;
+    assert_eq!(
+        account_ids(&owner.server.state.sync_sessions.present_accounts(shared)),
+        vec![owner.account_id]
+    );
+
+    // A second account opens: every connection on the doc, the new one
+    // included, hears the two-account set with emails.
+    let mut ws_member = connect_ws(&owner.server, &member_token).await;
+    hello(&mut ws_member).await;
+    open_doc(&mut ws_member, shared).await;
+    let mut expected = vec![owner.account_id, member_id];
+    expected.sort();
+    for ws in [&mut ws_owner, &mut ws_owner2, &mut ws_member] {
+        let who = expect_presence(ws, shared).await;
+        assert_eq!(account_ids(&who), expected);
+        for a in &who {
+            let prefix = if a.account_id == member_id {
+                "second-"
+            } else {
+                "user-"
+            };
+            assert!(
+                a.email.starts_with(prefix) && a.email.ends_with("@example.com"),
+                "email on the frame: {}",
+                a.email
+            );
+        }
+    }
+
+    // A second tab of the member: the set is unchanged, so only that
+    // tab is told (it needs the list; the others already have it).
+    let mut ws_member2 = connect_ws(&owner.server, &member_token).await;
+    hello(&mut ws_member2).await;
+    open_doc(&mut ws_member2, shared).await;
+    assert_eq!(
+        account_ids(&expect_presence(&mut ws_member2, shared).await),
+        expected
+    );
+    assert_no_frame(&mut ws_owner, quiet).await;
+    assert_no_frame(&mut ws_member, quiet).await;
+
+    // That tab goes away: the member is still present on its first
+    // connection, so nobody hears anything.
+    drop(ws_member2);
+    wait_for_subscribers_on(&owner, shared, 3).await;
+    assert_no_frame(&mut ws_owner, quiet).await;
+
+    // The member's last connection goes away: the owner's connections
+    // hear the one-account set, and the registry agrees.
+    drop(ws_member);
+    wait_for_subscribers_on(&owner, shared, 2).await;
+    for ws in [&mut ws_owner, &mut ws_owner2] {
+        let who = expect_presence(ws, shared).await;
+        assert_eq!(account_ids(&who), vec![owner.account_id]);
+    }
+    assert_eq!(
+        account_ids(&owner.server.state.sync_sessions.present_accounts(shared)),
+        vec![owner.account_id]
+    );
 }

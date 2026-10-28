@@ -34,6 +34,12 @@ function seedWelcome(app: DocApp): void {
   app.addItem("inbox", WELCOME_ITEM);
 }
 
+/** One account with a doc open on the server right now, as the server
+ *  announces it (`ServerFrame::Presence`, `spec/sync-protocol.md`
+ *  §Presence). `accountId` is the hyphenated uuid `Session.accountId`
+ *  and `Member.account_id` use; `email` is display. */
+export type PresentAccount = { accountId: string; email: string };
+
 /** One doc rebuilt from its op log by `BootGate`: the doc, the durable
  *  cursors, and the opened store. */
 export type DocBoot = {
@@ -272,6 +278,20 @@ export function createWorkspaceRuntime(props: {
 }) {
   let bridge: SyncBridge | null = null;
   const pumpOutbox = (): void => bridge?.pumpOutbox();
+  // Who has each doc open on the server right now, per doc id, as last
+  // announced. The server only speaks when more than one account is
+  // present, so a missing entry means "only me"; the whole map resets
+  // when the socket drops, since a reconnect starts from "only me" too.
+  // Anonymous sessions never populate it.
+  const [presence, setPresence] = createSignal<Record<string, PresentAccount[]>>({});
+  const forgetPresence = (docId: string): void => {
+    setPresence((prev) => {
+      if (!(docId in prev)) return prev;
+      const next = { ...prev };
+      delete next[docId];
+      return next;
+    });
+  };
   // One runtime per booted doc, keyed by doc id. The Home doc's `app`
   // is what the workspace renders today; the others sync headlessly
   // until the cross-doc lenses land (`spec/sharing-plan.md` Phase 5).
@@ -368,7 +388,10 @@ export function createWorkspaceRuntime(props: {
           props.setOnline(true);
           props.setLastSyncAt(Date.now());
         }
-        if (kind === "offline") props.setOnline(false);
+        if (kind === "offline") {
+          props.setOnline(false);
+          setPresence({});
+        }
         // `drain` fires after every recv-frame pump and every outbox
         // flush, so it's the natural pulse for "we just round-tripped
         // with the server" — even when no app events were produced.
@@ -388,6 +411,15 @@ export function createWorkspaceRuntime(props: {
       // reconnect would surface it again rather than wipe the account's
       // own doc from under it.
       onEngineEvent: (ev, docId) => {
+        if (ev.kind === "presence") {
+          const emails = ev.presenceEmails;
+          const list = ev.presenceAccountIds.map((accountId, i) => ({
+            accountId,
+            email: emails[i] ?? "",
+          }));
+          setPresence((prev) => ({ ...prev, [docId]: list }));
+          return;
+        }
         if (ev.kind !== "docClosed") return;
         if (docId === props.session.primaryDocId) {
           console.error("sync: server closed the Home doc:", ev.message);
@@ -540,6 +572,7 @@ export function createWorkspaceRuntime(props: {
   const forgetOpenDoc = async (docId: string, r: DocRuntime): Promise<void> => {
     if (docs.viewDocId(view()) === docId)
       setView({ kind: "list", id: "inbox" });
+    forgetPresence(docId);
     bridge?.removeEngine(docId);
     docs.removeDoc(docId);
     runtimes.delete(docId);
@@ -642,5 +675,20 @@ export function createWorkspaceRuntime(props: {
     if (deviceTimer) clearTimeout(deviceTimer);
   });
 
-  return { app, docApps, docs, view, setView, createDoc, joinDoc, deleteDoc };
+  /** The accounts with `docId` open on the server right now, this
+   *  account's own included when the server listed it; empty when the
+   *  server has said nothing (alone on the doc, offline, anonymous). */
+  const presenceOf = (docId: string): PresentAccount[] => presence()[docId] ?? [];
+
+  return {
+    app,
+    docApps,
+    docs,
+    view,
+    setView,
+    createDoc,
+    joinDoc,
+    deleteDoc,
+    presence: presenceOf,
+  };
 }

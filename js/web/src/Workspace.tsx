@@ -72,6 +72,7 @@ import { TaskDialog } from "./TaskDialog.tsx";
 import { Upcoming, type UpcomingImperative } from "./Upcoming.tsx";
 import { useSession } from "./SessionContext.tsx";
 import { createMemberDirectory } from "./sync/members.ts";
+import type { PresentAccount } from "./sync/runtime.ts";
 import type { DocsLayer } from "./sync/docs.ts";
 import {
   isBinned,
@@ -256,6 +257,9 @@ export function Workspace(props: {
   // `DeviceConfig`.
   view: () => ViewKey;
   setView: (v: ViewKey) => void;
+  /** Who has a doc open on the server right now (`runtime.presence`):
+   *  drives the avatars by each workspace name in the nav. */
+  presence: (docId: string) => PresentAccount[];
   /** Create a doc the account owns and open it (`runtime.createDoc`). */
   createDoc: (name: string) => Promise<string>;
   /** Open a doc the account just joined through a sharing link
@@ -2610,6 +2614,7 @@ export function Workspace(props: {
         view={view()}
         setView={navigateTo}
         onDeleteDoc={session.session().anonymous ? null : props.deleteDoc}
+        presence={props.presence}
         footer={
           <>
             <NavMenu

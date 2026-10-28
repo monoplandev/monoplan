@@ -136,6 +136,7 @@ pub async fn ws_handler(
         account_id: lookup.account_id,
         device_id: lookup.device_id,
         primary_doc_id: lookup.primary_doc_id,
+        email: lookup.email,
     };
     let session_id = Uuid::now_v7().to_string();
     let upgrade_request_id = request_id.0;
@@ -402,11 +403,15 @@ async fn open_doc(
             // Subscribe *before* replying: once the client sees
             // `DocOpened` it may rely on broadcasts for everything
             // after its pull, so there must be no window in which a
-            // peer's push could slip past unregistered.
+            // peer's push could slip past unregistered. A `Presence`
+            // frame the registry queues for this connection on
+            // subscribe is delivered by the session loop, i.e. after
+            // the `DocOpened` below.
             let sub = state.sync_sessions.subscribe(
                 doc_id,
                 ws_session.auth.device_id,
                 ws_session.auth.account_id,
+                ws_session.auth.email.clone(),
             );
             ws_session.open.insert(
                 doc_id,

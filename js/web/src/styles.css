@@ -672,9 +672,34 @@ body {
   user-select: none;
 }
 
+/* The label sizes to its text (shrinking with an ellipsis when the row
+   is tight) so the presence avatars can sit right after the name; the
+   workspace-menu glyph takes the leftover space as its left margin,
+   which keeps the three trailing glyphs at the trailing edge. */
 .nav-section-label {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
+}
+
+.nav-section-menu {
+  margin-left: auto;
+}
+
+/* Who else has the workspace open (`ServerFrame::Presence`): a row of
+   avatars right after the label, one per other account, folded into a
+   "+N" disc past three. Always visible, unlike the hover-only glyphs
+   after it: presence is information, not an affordance. */
+.nav-section-presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+}
+
+.nav-section-presence .avatar {
+  width: 16px;
+  height: 16px;
+  font-size: 9px;
 }
 
 @media (max-width: 768px) and (pointer: coarse) {

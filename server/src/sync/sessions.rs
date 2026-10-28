@@ -6,6 +6,13 @@
 //! peer sessions subscribed to the same doc. The fan-out delivers
 //! pre-encoded msgpack bytes so we encode once per push, not once per peer.
 //!
+//! **Presence.** The registry is also the source of truth for who has a
+//! doc open (`ServerFrame::Presence`): every subscriber carries its
+//! account and email, and the distinct-account set of a doc's
+//! subscribers is what the frame lists. The frame goes out from the
+//! registry's own mutations (subscribe, unsubscribe, live revocation),
+//! so it can never disagree with the broadcast fan-out.
+//!
 //! **Backpressure policy.** Each subscriber gets a bounded mpsc
 //! (`CHANNEL_CAPACITY`). On a full or closed channel the broadcast
 //! drops the message *and* removes the subscriber. The session task
@@ -18,7 +25,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use monoplan_protocol::{ServerFrame, StoredBlob};
+use monoplan_protocol::{PresentAccount, ServerFrame, StoredBlob};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -42,7 +49,52 @@ struct Subscriber {
     sub_id: u64,
     device_id: Uuid,
     account_id: Uuid,
+    email: String,
     tx: mpsc::Sender<Outbound>,
+}
+
+/// The distinct accounts among `subs`, in first-subscribed order, as
+/// `Presence` lists them.
+fn present_accounts(subs: &[Subscriber]) -> Vec<PresentAccount> {
+    let mut out: Vec<PresentAccount> = Vec::new();
+    for s in subs {
+        if !out.iter().any(|p| p.account_id == s.account_id) {
+            out.push(PresentAccount {
+                account_id: s.account_id,
+                email: s.email.clone(),
+            });
+        }
+    }
+    out
+}
+
+/// The distinct account ids among `subs`, order-independent, for
+/// "did the present set change" comparisons.
+fn account_set(subs: &[Subscriber]) -> std::collections::BTreeSet<Uuid> {
+    subs.iter().map(|s| s.account_id).collect()
+}
+
+/// Queue a `Presence` frame listing `subs`' accounts on every one of
+/// them, or on the one subscriber `only` names. Best-effort: a full or
+/// closed channel is left alone here rather than dropped, because the
+/// update broadcast is the path that polices slow consumers and the
+/// next `broadcast` ends such a session anyway; its eventual
+/// `unsubscribe` then announces the change to the rest.
+fn send_presence(doc_id: Uuid, subs: &[Subscriber], only: Option<u64>) {
+    let accounts = present_accounts(subs);
+    let bytes = match rmp_serde::to_vec_named(&ServerFrame::Presence { doc_id, accounts }) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to encode Presence");
+            return;
+        }
+    };
+    for s in subs {
+        if only.is_some_and(|id| id != s.sub_id) {
+            continue;
+        }
+        let _ = s.tx.try_send(Outbound::Frame(bytes.clone()));
+    }
 }
 
 /// One message on a subscriber's channel: pre-encoded frame bytes plus
@@ -96,16 +148,41 @@ impl SyncSessions {
         Self::default()
     }
 
-    pub fn subscribe(&self, doc_id: Uuid, device_id: Uuid, account_id: Uuid) -> Subscription {
+    /// Register a connection on `doc_id`. Presence: if this is the
+    /// account's first open on the doc the new present set goes to
+    /// every subscriber (the new one included); if the account was
+    /// already present (another device or tab) and others are here
+    /// too, only the new subscriber is told. A connection alone on a
+    /// doc hears nothing: "only me" is the client's default.
+    pub fn subscribe(
+        &self,
+        doc_id: Uuid,
+        device_id: Uuid,
+        account_id: Uuid,
+        email: String,
+    ) -> Subscription {
         let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
         let sub_id = next_sub_id();
         let mut inner = self.inner.lock().unwrap();
-        inner.docs.entry(doc_id).or_default().push(Subscriber {
+        let subs = inner.docs.entry(doc_id).or_default();
+        let before = account_set(subs);
+        subs.push(Subscriber {
             sub_id,
             device_id,
             account_id,
+            email,
             tx,
         });
+        // One account present (however many of its connections) means
+        // nobody has anything to show: say nothing.
+        let after = account_set(subs);
+        if after.len() > 1 {
+            if after != before {
+                send_presence(doc_id, subs, None);
+            } else {
+                send_presence(doc_id, subs, Some(sub_id));
+            }
+        }
         Subscription {
             sessions: self.clone(),
             doc_id,
@@ -114,12 +191,17 @@ impl SyncSessions {
         }
     }
 
+    /// Deregister a connection. When that was the account's last open
+    /// on the doc, the remaining subscribers get the new present set.
     fn unsubscribe(&self, doc_id: Uuid, sub_id: u64) {
         let mut inner = self.inner.lock().unwrap();
         if let Some(subs) = inner.docs.get_mut(&doc_id) {
+            let before = account_set(subs);
             subs.retain(|s| s.sub_id != sub_id);
             if subs.is_empty() {
                 inner.docs.remove(&doc_id);
+            } else if account_set(subs) != before {
+                send_presence(doc_id, subs, None);
             }
         }
     }
@@ -191,6 +273,7 @@ impl SyncSessions {
         let mut told = 0;
         let mut inner = self.inner.lock().unwrap();
         if let Some(subs) = inner.docs.get_mut(&doc_id) {
+            let before = account_set(subs);
             subs.retain(|s| {
                 if s.account_id != account_id {
                     return true;
@@ -202,6 +285,9 @@ impl SyncSessions {
             });
             if subs.is_empty() {
                 inner.docs.remove(&doc_id);
+            } else if account_set(subs) != before {
+                // The removed account leaves the present set too.
+                send_presence(doc_id, subs, None);
             }
         }
         told
@@ -262,6 +348,17 @@ impl SyncSessions {
     pub fn subscriber_count(&self, doc_id: Uuid) -> usize {
         let inner = self.inner.lock().unwrap();
         inner.docs.get(&doc_id).map(|s| s.len()).unwrap_or(0)
+    }
+
+    /// The accounts currently present on `doc_id`, as the next
+    /// `Presence` frame would list them. For tests and observability.
+    pub fn present_accounts(&self, doc_id: Uuid) -> Vec<PresentAccount> {
+        let inner = self.inner.lock().unwrap();
+        inner
+            .docs
+            .get(&doc_id)
+            .map(|subs| present_accounts(subs))
+            .unwrap_or_default()
     }
 
     pub fn connected_subscribers(&self, doc_id: Uuid) -> Vec<ConnectedSubscriber> {

@@ -959,6 +959,9 @@ impl Host {
                     }
                 }
                 Event::FrontierAdvanced { .. } => {}
+                // Who else has the doc open. Nothing in the CLI shows
+                // it yet; the web client's navbar does.
+                Event::Presence { .. } => {}
                 Event::Error(msg) => {
                     tracing::warn!("engine {}: {msg}", doc_id.0);
                     self.disconnect(&format!("engine error: {msg}"));

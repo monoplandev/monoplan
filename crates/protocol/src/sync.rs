@@ -179,6 +179,15 @@ impl ClientFrame {
     }
 }
 
+/// One account with the doc open on at least one live connection, as
+/// listed by `ServerFrame::Presence`. `account_id` matches the ids in
+/// `Member` / item attribution; `email` is display.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PresentAccount {
+    pub account_id: Uuid,
+    pub email: String,
+}
+
 // ---------- server → client frames ----------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -262,6 +271,19 @@ pub enum ServerFrame {
     /// `up_to_seq` here is informational; the authoritative value is
     /// the one in the `Snapshot` frame.
     SnapshotRequired { doc_id: Uuid, up_to_seq: u64 },
+    /// Who has the doc open right now: every account with at least one
+    /// live connection subscribed to `doc_id`, the receiver's own
+    /// included, one entry per account however many devices or tabs it
+    /// has. Sent whenever that set changes (an account's first open, its
+    /// last close) to every subscriber of the doc, and to a connection
+    /// that opens a doc others already have open. A connection alone on
+    /// a doc hears nothing and should assume "only me". Not persisted,
+    /// not acked: presence is a live signal only, and a reconnect
+    /// starts from "only me" until the next frame.
+    Presence {
+        doc_id: Uuid,
+        accounts: Vec<PresentAccount>,
+    },
 }
 
 impl ServerFrame {
@@ -276,7 +298,8 @@ impl ServerFrame {
             | ServerFrame::UpdatesBroadcast { doc_id, .. }
             | ServerFrame::SnapshotRequest { doc_id, .. }
             | ServerFrame::Snapshot { doc_id, .. }
-            | ServerFrame::SnapshotRequired { doc_id, .. } => *doc_id,
+            | ServerFrame::SnapshotRequired { doc_id, .. }
+            | ServerFrame::Presence { doc_id, .. } => *doc_id,
         }
     }
 }

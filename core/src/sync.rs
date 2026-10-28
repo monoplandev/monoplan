@@ -54,8 +54,8 @@ use std::collections::VecDeque;
 
 use loro::VersionVector;
 use monoplan_protocol::{
-    ClientFrame, EncryptedBlob, Hello, HelloAck, HelloRejected, PROTOCOL_VERSION, PushBlob,
-    ServerFrame, StoredBlob,
+    ClientFrame, EncryptedBlob, Hello, HelloAck, HelloRejected, PROTOCOL_VERSION, PresentAccount,
+    PushBlob, ServerFrame, StoredBlob,
 };
 use serde::Serialize;
 
@@ -106,6 +106,12 @@ pub enum Event {
     /// stop routing this engine and forget the doc's local copy — a
     /// reconnect would only be refused again.
     DocClosed { reason: String },
+    /// Who has this doc open on the server right now, this device's
+    /// own account included (`ServerFrame::Presence`). Replaces, never
+    /// extends, whatever the host showed before; a host should reset
+    /// to "only me" when the engine goes offline, since the server
+    /// sends nothing to a connection alone on a doc.
+    Presence { accounts: Vec<PresentAccount> },
 }
 
 /// Client identity advertised in the `Hello` frame: per connection,
@@ -755,6 +761,14 @@ impl SyncEngine {
                     reason: format!("doc closed: {reason}"),
                 });
                 self.go_disconnected();
+            }
+            // Live signal for the host; the sync state machine is not
+            // involved, so it is accepted in every connected state.
+            ServerFrame::Presence {
+                doc_id: _,
+                accounts,
+            } => {
+                self.events.push_back(Event::Presence { accounts });
             }
             ServerFrame::UpdatesBatch {
                 doc_id: _,
@@ -3259,6 +3273,55 @@ mod tests {
             events.last(),
             Some(Event::ConnStateChanged { online: false })
         ));
+    }
+
+    /// `Presence` is a host-facing signal: it surfaces as an event in
+    /// any connected state and leaves the sync state machine alone.
+    #[test]
+    fn presence_surfaces_as_event_without_touching_sync_state() {
+        let mut eng = fresh_engine_clean();
+        eng.handle_connected();
+        let _ = eng.pop_outbox().expect("OpenDoc");
+        eng.handle_server_bytes(&enc(&ServerFrame::DocOpened {
+            doc_id: DOC,
+            epoch: 0,
+        }));
+        let _ = eng.pop_outbox().expect("PullUpdates");
+        let _ = drain_events(&mut eng);
+        let who = vec![PresentAccount {
+            account_id: uuid::Uuid::from_u128(7),
+            email: "a@example.com".into(),
+        }];
+        // Mid-pull: still accepted, nothing goes out, pull continues.
+        eng.handle_server_bytes(&enc(&ServerFrame::Presence {
+            doc_id: DOC,
+            accounts: who.clone(),
+        }));
+        assert_eq!(
+            drain_events(&mut eng),
+            vec![Event::Presence {
+                accounts: who.clone()
+            }]
+        );
+        assert!(eng.pop_outbox().is_none());
+        eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
+            doc_id: DOC,
+            updates: vec![],
+            complete: true,
+        }));
+        let _ = drain_events(&mut eng);
+        assert!(eng.is_online());
+        // Idle: same.
+        eng.handle_server_bytes(&enc(&ServerFrame::Presence {
+            doc_id: DOC,
+            accounts: vec![],
+        }));
+        assert_eq!(
+            drain_events(&mut eng),
+            vec![Event::Presence { accounts: vec![] }]
+        );
+        assert!(eng.is_online());
+        assert!(eng.pop_outbox().is_none());
     }
 
     /// `DocClosed` lands on an open, idle doc (membership removed while

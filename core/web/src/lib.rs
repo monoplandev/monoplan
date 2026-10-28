@@ -2284,13 +2284,16 @@ impl SyncEngine {
 /// Flat JS-friendly view of `monoplan_core::Event`. The host switches on
 /// `kind` and reads the payload-specific getter — exactly one of
 /// `online`, `seq`, `message` will be set per event (or none, for
-/// payload-less variants).
+/// payload-less variants). `presence` events carry two parallel
+/// arrays, `presenceAccountIds` / `presenceEmails` (empty on every
+/// other kind).
 #[wasm_bindgen]
 pub struct EngineEvent {
     kind: &'static str,
     online: Option<bool>,
     seq: Option<u64>,
     message: Option<String>,
+    presence: Vec<monoplan_protocol::PresentAccount>,
 }
 
 #[wasm_bindgen]
@@ -2314,46 +2317,62 @@ impl EngineEvent {
     pub fn message(&self) -> Option<String> {
         self.message.clone()
     }
+
+    /// `presence` only: the accounts with the doc open, as hyphenated
+    /// uuid strings (the form `Session.accountId` and `Member.account_id`
+    /// use). Index-aligned with `presenceEmails`.
+    #[wasm_bindgen(getter, js_name = presenceAccountIds)]
+    pub fn presence_account_ids(&self) -> Vec<String> {
+        self.presence
+            .iter()
+            .map(|p| p.account_id.to_string())
+            .collect()
+    }
+
+    /// `presence` only: the accounts' emails, index-aligned with
+    /// `presenceAccountIds`.
+    #[wasm_bindgen(getter, js_name = presenceEmails)]
+    pub fn presence_emails(&self) -> Vec<String> {
+        self.presence.iter().map(|p| p.email.clone()).collect()
+    }
+}
+
+impl EngineEvent {
+    fn bare(kind: &'static str) -> Self {
+        EngineEvent {
+            kind,
+            online: None,
+            seq: None,
+            message: None,
+            presence: Vec::new(),
+        }
+    }
 }
 
 impl From<CoreEvent> for EngineEvent {
     fn from(e: CoreEvent) -> Self {
         match e {
             CoreEvent::ConnStateChanged { online } => EngineEvent {
-                kind: "connStateChanged",
                 online: Some(online),
-                seq: None,
-                message: None,
+                ..EngineEvent::bare("connStateChanged")
             },
-            CoreEvent::PulledInitial => EngineEvent {
-                kind: "pulledInitial",
-                online: None,
-                seq: None,
-                message: None,
-            },
-            CoreEvent::Pushed => EngineEvent {
-                kind: "pushed",
-                online: None,
-                seq: None,
-                message: None,
-            },
+            CoreEvent::PulledInitial => EngineEvent::bare("pulledInitial"),
+            CoreEvent::Pushed => EngineEvent::bare("pushed"),
             CoreEvent::FrontierAdvanced { seq } => EngineEvent {
-                kind: "frontierAdvanced",
-                online: None,
                 seq: Some(seq),
-                message: None,
+                ..EngineEvent::bare("frontierAdvanced")
             },
             CoreEvent::Error(message) => EngineEvent {
-                kind: "error",
-                online: None,
-                seq: None,
                 message: Some(message),
+                ..EngineEvent::bare("error")
             },
             CoreEvent::DocClosed { reason } => EngineEvent {
-                kind: "docClosed",
-                online: None,
-                seq: None,
                 message: Some(reason),
+                ..EngineEvent::bare("docClosed")
+            },
+            CoreEvent::Presence { accounts } => EngineEvent {
+                presence: accounts,
+                ..EngineEvent::bare("presence")
             },
         }
     }

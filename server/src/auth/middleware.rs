@@ -21,6 +21,8 @@ pub struct DeviceAuth {
     pub account_id: Uuid,
     pub device_id: Uuid,
     pub primary_doc_id: Uuid,
+    /// The account's email, for presence on the sync socket.
+    pub email: String,
 }
 
 impl FromRequestParts<AppState> for DeviceAuth {
@@ -50,6 +52,7 @@ impl FromRequestParts<AppState> for DeviceAuth {
             account_id: lookup.account_id,
             device_id: lookup.device_id,
             primary_doc_id: lookup.primary_doc_id,
+            email: lookup.email,
         })
     }
 }

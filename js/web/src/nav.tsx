@@ -17,6 +17,9 @@ import { createPopoverTooltipGuard } from "./popoverTooltip.ts";
 import { createSyncStatus } from "./syncFacts.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { SharingDialog } from "./SharingDialog.tsx";
+import { Avatar } from "./Avatar.tsx";
+import { useSession } from "./SessionContext.tsx";
+import type { PresentAccount } from "./sync/runtime.ts";
 import { pendingInvite } from "./invite.ts";
 import type { AttentionBadge } from "./dayGroups.ts";
 import { Dnd, DndSelection, type DndOp } from "./dnd/solid";
@@ -312,6 +315,9 @@ export function Nav(props: {
   /** Delete a non-Home doc (`runtime.deleteDoc`), or null when this
    *  session can't (anonymous). Drives the heading menu's Delete item. */
   onDeleteDoc: ((docId: string) => Promise<void>) | null;
+  /** Who has a doc open on the server right now (`runtime.presence`).
+   *  Each heading shows the *other* accounts as avatars. */
+  presence: (docId: string) => PresentAccount[];
   /** Chrome pinned to the bottom of the sidebar (app menu + account/sync
    *  widget) — see `.nav-footer` in styles.css. */
   footer?: JSX.Element;
@@ -456,6 +462,7 @@ export function Nav(props: {
             mobile={navIsMobile()}
             onToggled={() => setSectionTick((n) => n + 1)}
             onDeleteDoc={props.onDeleteDoc}
+            presence={props.presence}
           />
         )}
       </For>
@@ -525,6 +532,9 @@ function exportSlug(label: string): string {
  *  form. Every list row names its doc for the drop targets
  *  (`data-drop-doc-id`) so the Workspace routes a drop to the right
  *  `DocApp`. */
+/** Avatars shown by a workspace name before the rest fold into "+N". */
+const PRESENCE_MAX_AVATARS = 3;
+
 function DocSection(props: {
   entry: DocEntry;
   docs: DocsLayer;
@@ -534,10 +544,18 @@ function DocSection(props: {
   mobile: boolean;
   onToggled: () => void;
   onDeleteDoc: ((docId: string) => Promise<void>) | null;
+  presence: (docId: string) => PresentAccount[];
 }) {
   const { m } = useAppI18n();
+  const session = useSession();
   const app = props.entry.app;
   const docId = props.entry.docId;
+  // Who else has this workspace open right now: the server's present
+  // set minus this account (one's own avatar says nothing). Home is
+  // never shared, so it stays empty there.
+  const others = createMemo((): PresentAccount[] =>
+    props.presence(docId).filter((p) => p.accountId !== session.session().accountId),
+  );
   // Delete runs through a confirmation: it is server-side, cross-device
   // and not undoable. Home never offers it (`spec/sharing-plan.md`: the
   // primary doc is non-deletable), nor does an anonymous session.
@@ -767,6 +785,26 @@ function DocSection(props: {
           onSave={(next) => app.setDocName(next)}
           registerStart={(fn) => (startRename = fn)}
         />
+      </Show>
+      {/* Who else is here: one avatar per other account with the
+          workspace open, capped with a "+N" disc. Hidden when alone. */}
+      <Show when={others().length > 0}>
+        <span class="nav-section-presence" role="group" aria-label={m().nav.presenceGroup}>
+          <For each={others().slice(0, PRESENCE_MAX_AVATARS)}>
+            {(p) => <Avatar email={p.email} title={m().nav.presenceHere(p.email)} />}
+          </For>
+          <Show when={others().length > PRESENCE_MAX_AVATARS}>
+            <span
+              class="avatar"
+              title={others()
+                .slice(PRESENCE_MAX_AVATARS)
+                .map((p) => m().nav.presenceHere(p.email))
+                .join("\n")}
+            >
+              +{others().length - PRESENCE_MAX_AVATARS}
+            </span>
+          </Show>
+        </span>
       </Show>
       {/* Workspace menu: the first of the three trailing glyphs, opening a
           dropdown with the heading's actions (Rename on non-Home docs,

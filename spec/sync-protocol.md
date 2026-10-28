@@ -55,6 +55,21 @@ Rules:
 - Clients route inbound frames to the right engine by `doc_id` (core's `server_frame_doc_id`); a frame for a doc the client has no engine for is dropped and reported, never applied.
 - Membership is checked at `OpenDoc`; a membership removed mid-session is revoked live. `DELETE /api/docs/:doc_id/members/:account_id` drops the removed account's subscriptions on the doc and sends each of its open connections `DocClosed { doc_id, reason }`; the server unbinds the doc from that connection (the snapshot lease, if held, is released) and keeps serving its other docs. A later payload frame naming the closed doc ends the session like any frame for an unopened doc; a reconnect's `OpenDoc` is refused. Clients treat `DocClosed` and `DocRejected` alike: stop routing the doc and drop the local copy (`sharing-plan.md` §Member removal). The window between the membership commit and the frame's delivery is the only time a removed member can still push or receive on the doc.
 
+## Presence
+
+**Status:** Implemented (2026-10-28).
+
+The subscriber registry (`sessions.rs`) is also the source of truth for who has a doc open: every subscription carries the connection's account id and email (looked up with the device token at upgrade), and a doc's **present set** is the distinct accounts among its subscribers. One account on several devices or tabs counts once. The server announces the set with `Presence { doc_id, accounts }`, the receiver's own account included, from the registry's own mutations, so it can never disagree with the broadcast fan-out:
+
+- **An account's first open on a doc** (the set grows): every subscriber of the doc, the newcomer included, gets the new set.
+- **A further connection of an already-present account** while others are present: only that connection gets the set (the rest already have it).
+- **An account's last close on a doc** (the set shrinks — a dropped socket, or live revocation via `DELETE .../members/:account_id`): every remaining subscriber gets the new set, even when that leaves one account alone, so its clients fall back to "only me".
+- **One account present**, however many connections: nothing is sent. A connection alone on a doc hears nothing, and "only me" is the client's default.
+
+The frame is a live signal only: not persisted, not acked, not part of the `seq` stream, and ignored by the sync state machine (the core engine surfaces it as `Event::Presence` in any connected state). Delivery is best-effort on the same per-subscriber channel as broadcasts; a full channel drops the frame rather than the subscriber (the next update broadcast polices slow consumers, and that session's eventual unsubscribe announces the change). Ordering: a `Presence` queued for a connection during its own `OpenDoc` is delivered after `DocOpened`, but it can land before or after the reply to any *later* client frame, so clients must accept it at any point. Clients reset to "only me" for every doc when the socket drops and when a doc is closed or forgotten; a reconnect's `OpenDoc` yields a fresh set if others are present. Emails are already visible to every member via `GET /api/docs/:doc_id/members`, so the frame reveals nothing new; Home is never shared, so it only ever lists its owner and is never announced.
+
+The web client shows the *other* present accounts as avatars beside the workspace name in the sidebar (`nav.tsx`, `Avatar.tsx`), capped at three plus a "+N" disc. The CLI daemon receives the event and ignores it.
+
 ## Client → Server
 
 **Status:** Implemented.
@@ -83,6 +98,7 @@ Rules:
 | `SnapshotRequest` | `{ doc_id, up_to_seq: u64, compaction_floor_seq: u64, base: Option<SnapshotBase> }` | Server asks a connected client to produce a snapshot. `up_to_seq` = state frontier to encode at (= the producer's `last_acked_seq`); `compaction_floor_seq` = seq at/below which update blobs become eligible for GC once this snapshot lands (= `max(horizon, prev compaction_floor_seq)`); `base` = `None` for a full snapshot, or `{ seq, vv }` (the latest stored snapshot's `up_to_seq` and sealed `up_to_vv`) for a delta strictly after it. |
 | `Snapshot` | `{ doc_id, up_to_seq: u64, blob: EncryptedBlob, complete: bool }` | One row of the stored chain, in reply to `PullSnapshot`. The server streams the chain one row per frame in import order (the latest full snapshot, then each delta after it), fire-and-forget like `UpdatesBatch`, with `complete: true` on the last row. `up_to_seq` is this row's state frontier; on the `complete` frame it is the chain's final frontier, which the bootstrapping client uses as its next `since_seq`. |
 | `SnapshotRequired` | `{ doc_id, up_to_seq: u64 }` | Sent in lieu of `UpdatesBatch` when the client's `since_seq` is below the latest snapshot's `compaction_floor_seq` — server can't serve the missing updates. Client must bootstrap from snapshot before resuming updates. `up_to_seq` is informational; the authoritative state frontier is the one returned in `Snapshot`. |
+| `Presence` | `{ doc_id, accounts: [PresentAccount] }` | Who has the doc open right now; see §Presence. `PresentAccount = { account_id: uuid, email: string }`. |
 
 `EncryptedBlob = { nonce: bytes, ciphertext: bytes }`.
 

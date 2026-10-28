@@ -117,6 +117,11 @@ export type Messages = {
     renameDoc: string;
     /** Label of the "..." button on a workspace heading. */
     docMenu: string;
+    /** Accessible name of the avatar row by a workspace heading: the
+     *  other people who have the workspace open right now. */
+    presenceGroup: string;
+    /** Tooltip on one of those avatars. */
+    presenceHere: (email: string) => string;
     /** "..." menu delete on a non-Home doc heading, its confirmation
      *  (named for the doc) and the failure alert. */
     deleteDoc: string;
@@ -583,6 +588,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       createDoc: "Crear",
       renameDoc: "Renombrar espacio",
       docMenu: "Menú del espacio",
+      presenceGroup: "Quién está aquí",
+      presenceHere: (email) => `${email} está aquí`,
       deleteDoc: "Eliminar espacio",
       deleteDocConfirm: (name) =>
         `¿Eliminar «${name}»? Sus listas y elementos se eliminarán de todos los dispositivos y quienes lo compartan perderán el acceso. Esta acción no se puede deshacer.`,
@@ -934,6 +941,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       createDoc: "Create",
       renameDoc: "Rename workspace",
       docMenu: "Workspace menu",
+      presenceGroup: "Who's here",
+      presenceHere: (email) => `${email} is here`,
       deleteDoc: "Delete workspace",
       deleteDocConfirm: (name) =>
         `Delete “${name}”? Its lists and items are removed from every device, and anyone it is shared with loses access. This cannot be undone.`,

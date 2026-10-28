@@ -610,6 +610,9 @@ pub struct DeviceLookup {
     pub account_id: Uuid,
     pub device_id: Uuid,
     pub primary_doc_id: Uuid,
+    /// The account's email, carried on the connection so presence
+    /// (`ServerFrame::Presence`) can name it without a lookup per open.
+    pub email: String,
 }
 
 pub async fn find_device_by_token_hash(
@@ -618,7 +621,7 @@ pub async fn find_device_by_token_hash(
 ) -> anyhow::Result<Option<DeviceLookup>> {
     db.call(move |c| {
         c.query_row(
-            "SELECT d.id, d.account_id, a.primary_doc_id
+            "SELECT d.id, d.account_id, a.primary_doc_id, a.email
              FROM devices d
              JOIN accounts a ON a.id = d.account_id
              WHERE d.auth_token_hash = ?",
@@ -627,10 +630,12 @@ pub async fn find_device_by_token_hash(
                 let id = uuid_from_blob(r.get::<_, Vec<u8>>(0)?)?;
                 let account_id = uuid_from_blob(r.get::<_, Vec<u8>>(1)?)?;
                 let primary_doc_id = uuid_from_blob(r.get::<_, Vec<u8>>(2)?)?;
+                let email: String = r.get(3)?;
                 Ok(DeviceLookup {
                     account_id,
                     device_id: id,
                     primary_doc_id,
+                    email,
                 })
             },
         )
