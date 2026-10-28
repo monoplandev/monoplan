@@ -199,6 +199,14 @@ match wins), and can be cleaned opportunistically (see Reconciliation).
   above.)
 - **Duplicate entries produce one visible item.** First visible match in
   container order wins; later duplicates are ignored.
+- **Duplicate ListMeta rows produce one visible list.** `lists` is a
+  sequence, not a map, so two rows can carry the same `id` (two peers
+  importing the same JSON file while both offline, or a direct Loro writer).
+  The first row in container order is the list — the same row every id-keyed
+  mutator (`rename_list`, `set_list_archived`, `move_list`, …) reaches — and
+  later rows are hidden by `all_lists` and ignored when resolving a reorder
+  target. Items are a map keyed by id, so the same race collapses to one item
+  plus a stale order entry.
 - **Missing canonical entries never hide data.** An item whose `location`
   names list `L`/placement `p` but has no matching entry in `order/L` (lost
   to concurrent deletion, partial history, or bugs) is still projected: it is
@@ -325,7 +333,8 @@ Every mutation below forms **one Loro commit** (one undo step, one op group).
 `reconcile()` is an explicit, idempotent maintenance mutation (never run
 implicitly by reads): for every list it removes stale/duplicate entries and
 appends real entries for fallback-tail items (using each item's existing
-placement id). It also prunes **focus** refs that are missing / closed / binned /
+placement id), and it deletes ListMeta rows that repeat an earlier row's id
+(keeping the first). It also prunes **focus** refs that are missing / closed / binned /
 foreign and dedups them (`spec/focus.md`). One commit; a no-op when the doc is
 clean. Clients may run it opportunistically (e.g. after bootstrap); nothing
 depends on it running — Focus stays bounded via auto-remove-on-close and the
@@ -511,6 +520,10 @@ history rides it — and its ids are the doc's real ids.
   `listId`, or one naming a list the file doesn't carry, routes to `inbox`
   (the `delete_list` orphan rule); the file's `inbox` / `events` rows and any
   row flagged `builtin` collapse onto the local reserved lists.
+- **Concurrent imports of the same file** on two offline peers converge: the
+  item inserts collapse to one item per id (the loser's order entry goes
+  stale), and the duplicate ListMeta rows fall under the one-visible-list
+  invariant above, with `reconcile` deleting the extra row.
 - **Focus** refs are re-established only for items *added by this import*,
   appended after the doc's existing refs; refs to skipped, blank-text or
   non-Open items drop silently. The dedup set is seeded with the doc's

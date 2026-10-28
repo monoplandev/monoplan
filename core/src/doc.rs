@@ -3416,10 +3416,11 @@ impl Doc {
 
     /// Explicit, idempotent order-entry repair (never run implicitly by
     /// reads): removes stale and duplicate entries and materializes
-    /// real entries for fallback-tail items, in one commit. Returns the
-    /// number of repairs; `0` means the doc was clean and nothing was
-    /// committed. Visible projections are unchanged by construction, so
-    /// no events are emitted.
+    /// real entries for fallback-tail items, in one commit. Also deletes
+    /// ListMeta rows that repeat an earlier row's id (see
+    /// [`Self::all_lists`]). Returns the number of repairs; `0` means the
+    /// doc was clean and nothing was committed. Visible projections are
+    /// unchanged by construction, so no events are emitted.
     pub fn reconcile(&self) -> Result<usize, DocError> {
         struct ListPlan {
             stale: Vec<usize>,
@@ -3495,10 +3496,19 @@ impl Doc {
         // primary compaction paths are auto-remove-on-Done and the sweep
         // folded into each focus mutation (`spec/focus.md`).
         let focus_dead = self.scan_focus().dead_idx;
-        if plans.is_empty() && focus_dead.is_empty() {
+        let list_dups = self.duplicate_list_rows();
+        if plans.is_empty() && focus_dead.is_empty() && list_dups.is_empty() {
             return Ok(0);
         }
         let mut repairs = 0usize;
+        // Later duplicate rows first, in reverse so indices stay valid.
+        // The first row per id is the one every mutator reaches, so the
+        // visible list is unchanged.
+        let lists = self.lists();
+        for p in list_dups.iter().rev() {
+            lists.delete(*p, 1)?;
+            repairs += 1;
+        }
         for (item_id, placement) in &fix_location {
             let map = self.find_item(item_id)?;
             map.insert(
@@ -3556,17 +3566,43 @@ impl Doc {
     /// Includes archived lists; archiving never removes a list from
     /// here (`spec/data-model.md` "Archived lists"). Use
     /// [`Self::active_lists`] for the active-workspace view.
+    ///
+    /// **One row per id.** Two ListMeta rows can share an id — two
+    /// peers importing the same JSON file while both offline each push
+    /// a row for the same preserved id, or a direct Loro writer does it
+    /// on purpose. The first row in container order is the list (the
+    /// same row every id-keyed mutator reaches through `find_list`);
+    /// later rows are invisible garbage that `reconcile` removes.
     pub fn all_lists(&self) -> Vec<ListView> {
         let lists = self.lists();
         let mut out = Vec::with_capacity(lists.len());
+        let mut seen: HashSet<String> = HashSet::with_capacity(lists.len());
         for i in 0..lists.len() {
             if let Some(map) = list_map_at(&lists, i)
                 && let Some(view) = list_view(&map)
+                && seen.insert(view.id.clone())
             {
                 out.push(view);
             }
         }
         out
+    }
+
+    /// Raw indices of ListMeta rows that repeat an earlier row's id, in
+    /// ascending order — the rows [`Self::all_lists`] hides.
+    fn duplicate_list_rows(&self) -> Vec<usize> {
+        let lists = self.lists();
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut dups = Vec::new();
+        for i in 0..lists.len() {
+            if let Some(map) = list_map_at(&lists, i)
+                && let Some(id) = read_string(&map, KEY_ID)
+                && !seen.insert(id)
+            {
+                dups.push(i);
+            }
+        }
+        dups
     }
 
     /// [`Self::all_lists`] filtered to active (non-archived) lists, in
@@ -5347,17 +5383,21 @@ impl Doc {
     ) -> Result<usize, DocError> {
         let lists = self.lists();
         // Active flag per remaining row (mover excluded), in raw order.
-        // Unparseable rows count as occupied-but-inactive slots.
+        // Unparseable rows, and rows repeating an earlier row's id (which
+        // `all_lists` hides), count as occupied-but-inactive slots.
         let mut rest: Vec<bool> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
         for i in 0..lists.len() {
             let Some(map) = list_map_at(&lists, i) else {
                 rest.push(false);
                 continue;
             };
-            if read_string(&map, KEY_ID).as_deref() == Some(list_id) {
+            let id = read_string(&map, KEY_ID);
+            if id.as_deref() == Some(list_id) {
                 continue;
             }
-            rest.push(read_i64(&map, KEY_ARCHIVED_AT).is_none());
+            let first_for_id = id.is_some_and(|id| seen.insert(id));
+            rest.push(first_for_id && read_i64(&map, KEY_ARCHIVED_AT).is_none());
         }
         let mut active_seen = 0usize;
         let mut after_last_active = 0usize;
@@ -12419,5 +12459,109 @@ mod tests {
         let via_two = apply(&apply("hello", &a_ops), &b_ops);
         let via_one = apply("hello", &compose_utf16_deltas(&a_ops, &b_ops));
         assert_eq!(via_one, via_two);
+    }
+}
+
+#[cfg(test)]
+mod duplicate_list_rows {
+    use super::*;
+
+    /// Two peers import the same JSON file while both offline. Items
+    /// are a map keyed by id, so the two inserts of one key collapse to
+    /// one item (plus a stale order entry `reconcile` sweeps). Lists are
+    /// a sequence of rows, so both rows survive the merge with the same
+    /// id: the projection must show one list, id-keyed mutators must hit
+    /// that same row, and `reconcile` must delete the other.
+    #[test]
+    fn concurrent_import_of_the_same_file_converges_to_one_list() {
+        let dek = Dek::generate();
+        let src = Doc::new().unwrap();
+        let work = src.add_list("Work").unwrap();
+        let alpha = src.add_item(&work, "alpha").unwrap();
+        src.add_to_focus(&alpha, usize::MAX).unwrap();
+        let export = src.export_json();
+
+        let mut a = Doc::new().unwrap();
+        a.add_item(LIST_INBOX, "seed").unwrap();
+        let seed = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        let mut b = Doc::empty();
+        b.apply_remote(&dek, &seed).unwrap();
+
+        a.import_json(&export).unwrap();
+        b.import_json(&export).unwrap();
+        let blob_a = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        let blob_b = b.pending_export(&dek).unwrap().unwrap();
+        b.mark_persisted();
+        a.apply_remote(&dek, &blob_b).unwrap();
+        b.apply_remote(&dek, &blob_a).unwrap();
+        assert_eq!(a.fingerprint(), b.fingerprint());
+
+        // Raw container holds two rows for `work`; the projection one.
+        assert_eq!(a.lists().len(), 2);
+        assert_eq!(a.all_lists().len(), 1);
+        assert_eq!(a.all_lists()[0].id, work);
+        // Items collapsed to one, visible once, focused once.
+        assert_eq!(a.iter_items().count(), 2);
+        assert_eq!(a.open_item_ids(&work), vec![alpha.clone()]);
+        assert_eq!(a.focus_refs(), vec![alpha.clone()]);
+
+        // Id-keyed mutators and the projection agree on which row is
+        // the list: renaming and archiving leave no second "Work".
+        a.rename_list(&work, "Renamed").unwrap();
+        a.set_list_archived(&work, true).unwrap();
+        assert_eq!(a.all_lists()[0].name, "Renamed");
+        assert!(a.active_lists().is_empty());
+
+        // Reconcile deletes the duplicate row (and B's stale order entry
+        // for alpha's losing placement), then has nothing left to do.
+        let repairs = a.reconcile().unwrap();
+        assert!(repairs >= 2, "duplicate row + stale entry, got {repairs}");
+        assert_eq!(a.lists().len(), 1);
+        assert_eq!(a.all_lists()[0].name, "Renamed");
+        assert_eq!(a.reconcile().unwrap(), 0);
+
+        // Converges on B too after exchanging the repairs.
+        let blob_a = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        b.apply_remote(&dek, &blob_a).unwrap();
+        assert_eq!(b.lists().len(), 1);
+        assert_eq!(a.fingerprint(), b.fingerprint());
+    }
+
+    /// A duplicate row of *another* list must not skew a drop position
+    /// computed against the active-only nav.
+    #[test]
+    fn move_list_ignores_duplicate_rows_of_other_lists() {
+        let doc = Doc::new().unwrap();
+        let x = doc.add_list("X").unwrap();
+        let y = doc.add_list("Y").unwrap();
+        let z = doc.add_list("Z").unwrap();
+        // Forge a second row for X right after it, as a direct Loro
+        // writer (or a concurrent import) could.
+        let lists = doc.lists();
+        let dup = lists.insert_container(1, LoroMap::new()).unwrap();
+        dup.insert(KEY_ID, x.as_str()).unwrap();
+        dup.insert(KEY_NAME, "X again").unwrap();
+        dup.insert(KEY_CREATED_AT, 1i64).unwrap();
+        doc.inner.commit();
+        doc.rebuild_index();
+        let names = |d: &Doc| {
+            d.active_lists()
+                .into_iter()
+                .map(|l| l.name)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(&doc), ["X", "Y", "Z"]);
+
+        // Nav shows X Y Z; drop Z at active index 1 → X Z Y.
+        doc.move_list(&z, 1).unwrap();
+        assert_eq!(names(&doc), ["X", "Z", "Y"]);
+        // And Y back to the front.
+        doc.move_list(&y, 0).unwrap();
+        assert_eq!(names(&doc), ["Y", "X", "Z"]);
+        assert_eq!(doc.reconcile().unwrap(), 1);
+        assert_eq!(names(&doc), ["Y", "X", "Z"]);
     }
 }
