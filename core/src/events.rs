@@ -40,6 +40,8 @@ pub enum AppEvent {
         text: String,
         notes: String,
         created_at: i64,
+        /// Creator's account id, when the creating client stamped one.
+        created_by: Option<String>,
         /// Workflow register state (`spec/data-model.md` "Lifecycle").
         /// Masked by `binned_at` when that is set.
         state: WorkflowState,

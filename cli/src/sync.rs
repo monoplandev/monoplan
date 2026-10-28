@@ -167,9 +167,12 @@ impl Session {
                 doc_ids.push(id);
             }
         }
+        // Local item creation is attributed to the account; a local-only
+        // profile has no identity and writes no `created_by`.
+        let author = account.identity.as_ref().map(|i| i.account_id.as_str());
         let mut docs = BTreeMap::new();
         for doc_id in doc_ids {
-            let state = boot_doc_state(&storage, &secrets, doc_id, peer.peer_id)?;
+            let state = boot_doc_state(&storage, &secrets, doc_id, peer.peer_id, author)?;
             docs.insert(doc_id, state);
         }
 
@@ -498,9 +501,11 @@ fn boot_doc_state(
     secrets: &crate::config::Secrets,
     doc_id: DocId,
     peer_id: u64,
+    author: Option<&str>,
 ) -> Result<DocState, SyncError> {
     let dek = dek_for_doc(secrets, doc_id)?;
-    let (doc, boot_meta) = crate::storage::boot_doc(storage, &dek, doc_id, Some(peer_id))?;
+    let (mut doc, boot_meta) = crate::storage::boot_doc(storage, &dek, doc_id, Some(peer_id))?;
+    doc.set_author(author);
     let last_synced_at = storage.read_sync_cursor(doc_id)?.last_sync_at;
     let mut engine = SyncEngine::new(
         doc,

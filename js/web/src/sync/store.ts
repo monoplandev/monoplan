@@ -118,6 +118,11 @@ export interface ItemView {
   /** Optional place (`spec/place-plan.md`). Absent means unset. */
   place?: Place;
   createdAt: number;
+  /** Account id of the item's creator, when the creating client stamped
+   *  one (`Doc.setAuthor`). Absent on items from anonymous sessions and
+   *  on everything from before the register existed. Rendered as an
+   *  avatar on shared docs only (`spec/sharing-plan.md` §Attribution). */
+  createdBy?: string;
   /** Reflection stamp: first entry into In Progress, if any. */
   startedAt?: number;
   /** Reflection stamp: last entry into Done, if any. View sorts use
@@ -811,6 +816,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
           duration: ev.duration != null ? Number(ev.duration) : undefined,
           place: parsePlaceJson(ev.place),
           createdAt: Number(ev.createdAt ?? 0),
+          createdBy: ev.createdBy ?? undefined,
           startedAt: ev.startedAt != null ? Number(ev.startedAt) : undefined,
           doneAt: ev.doneAt != null ? Number(ev.doneAt) : undefined,
           binnedAt: ev.binnedAt != null ? Number(ev.binnedAt) : undefined,

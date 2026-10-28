@@ -237,6 +237,7 @@ mod tests {
             list_id: "inbox".into(),
             state: WorkflowState::Backlog,
             lifecycle_at: created_at,
+            created_by: None,
             deadline: None,
             when: None,
             duration: None,

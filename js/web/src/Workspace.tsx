@@ -71,6 +71,7 @@ import { ShortcutsDialog } from "./ShortcutsDialog.tsx";
 import { TaskDialog } from "./TaskDialog.tsx";
 import { Upcoming, type UpcomingImperative } from "./Upcoming.tsx";
 import { useSession } from "./SessionContext.tsx";
+import { createMemberDirectory } from "./sync/members.ts";
 import type { DocsLayer } from "./sync/docs.ts";
 import {
   isBinned,
@@ -828,6 +829,23 @@ export function Workspace(props: {
       : listId === LIST_EVENTS
         ? m().nav.events
         : (docs.listOf(docId ?? viewDocId(), listId)?.name ?? listId);
+
+  // Item attribution (`spec/sharing-plan.md` §Attribution), shown in the
+  // item dialog's "Created …" line for every stamped item on a shared
+  // doc, one's own included: on a shared doc, who added what is the
+  // point. Home is one person, so nothing is shown there. The member
+  // directory turns the stamped account id into an email; it loads once
+  // per shared doc per session.
+  const members = createMemberDirectory();
+  createEffect(() => {
+    if (session.session().anonymous) return;
+    for (const d of docs.docs()) if (!d.home) members.ensure(d.docId);
+  });
+  const creatorOf = (item: ItemView): { email: string | null } | null => {
+    const who = item.createdBy;
+    if (!who || item.docId === docs.homeDocId) return null;
+    return { email: members.emailOf(item.docId, who) ?? null };
+  };
 
   // The list an item is filed under in its doc, for writes that need a
   // real home: a reserved list or a ListMeta row that still exists, else
@@ -2722,6 +2740,7 @@ export function Workspace(props: {
       <Show keyed when={taskApp()}>
         {(tApp) => (
       <TaskDialog
+        creatorOf={creatorOf}
         itemId={shownItemId}
         setItemId={setOpenItemId}
         newItem={newItemTarget}

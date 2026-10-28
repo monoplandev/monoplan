@@ -27,6 +27,7 @@ import {
   untrack,
 } from "solid-js";
 import { Portal } from "solid-js/web";
+import { Avatar } from "./Avatar.tsx";
 import { DeadlineField } from "./DeadlineField.tsx";
 import { PlaceField } from "./PlaceField.tsx";
 import { WhenField } from "./WhenField.tsx";
@@ -85,6 +86,11 @@ import {
 const KNOWN_PLACES_LIMIT = 200;
 
 export function TaskDialog(props: {
+  /** Who to attribute the item to in the activity log: the creator's
+   *  email, `{ email: null }` for a creator no longer in the member
+   *  list, or null to show nothing (Home, unstamped items). Resolved by
+   *  the workspace (`spec/sharing-plan.md` §Attribution). */
+  creatorOf?: (item: ItemView) => { email: string | null } | null;
   /** The open item's id, or null when closed. */
   itemId: () => string | null;
   setItemId: (id: string | null) => void;
@@ -1431,6 +1437,18 @@ export function TaskDialog(props: {
                     {m().workspace.createdStamp(
                       formatDialogStamp(it().createdAt, nowMs(), locale(), { inline: true }),
                     )}
+                    {/* "… by (avatar)" on shared docs: who added it. */}
+                    <Show when={props.creatorOf?.(it())}>
+                      {(c) => (
+                        <span class="task-dialog-by">
+                          {m().workspace.createdBy}
+                          <Avatar
+                            email={c().email}
+                            title={c().email ?? m().sharing.formerMember}
+                          />
+                        </span>
+                      )}
+                    </Show>
                   </li>
                   <Show when={isDone(it())}>
                     <li title={formatDateTime(doneAt(it()), locale())}>

@@ -379,6 +379,7 @@ mod tests {
             duration: None,
             place: None,
             created_at,
+            created_by: None,
             started_at: None,
             done_at: None,
             binned_at: None,

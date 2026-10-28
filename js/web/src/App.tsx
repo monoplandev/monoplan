@@ -370,6 +370,9 @@ function BootGate(props: {
           // Authed device, empty local store — sync will send a snapshot.
           doc = empty();
         }
+        // Items this session creates carry the account id (`createdBy`,
+        // spec/data-model.md "Item"); an anonymous session has none.
+        if (!props.session.anonymous) doc.setAuthor(props.session.accountId);
         return {
           docId,
           dek,

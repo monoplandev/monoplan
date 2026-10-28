@@ -4612,6 +4612,47 @@ input.task-check:hover {
   color: var(--text-badge-faint);
 }
 
+/* "Created … by ●" in the item dialog's activity log. The line is a
+   centred flex row so the avatar disc sits level with the text instead
+   of hanging off its baseline. */
+.task-dialog-activity-log li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.task-dialog-by {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Person disc (Avatar.tsx): grayscale on purpose for now. Sized to the
+   badge line. */
+.avatar {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  text-transform: uppercase;
+  color: var(--text-badge);
+  background: color-mix(in srgb, var(--text-badge) 18%, var(--bg-badge));
+  user-select: none;
+}
+
+.avatar[data-unknown] {
+  color: var(--text-badge-faint);
+  background: var(--bg-badge);
+  border: 1px dashed var(--text-badge-faint);
+}
+
 /* Card feel: each dnd slot is CARD_HEIGHT tall, but the row sits shorter so
    the column background shows through below it as an inter-card gutter.
    Rounded corners + a hairline border finish the card. Wrapping puts the

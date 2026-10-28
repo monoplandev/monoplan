@@ -463,6 +463,9 @@ export function createWorkspaceRuntime(props: {
       : peerId !== null
         ? Doc.emptyWithPeer(peerId)
         : Doc.empty();
+    // Same attribution as the docs booted in `App.tsx`: a doc created or
+    // joined mid-session is only ever reached from an authed session.
+    if (!props.session.anonymous) doc.setAuthor(props.session.accountId);
     const boot: DocBoot = {
       docId,
       dek,

@@ -46,6 +46,7 @@ One child `LoroMap` under `items`, keyed by `ItemId`.
 | `duration` | i64? | optional **length in whole minutes**, `1..=10080` (one week). A length rather than an end so that moving `when` on one device and setting the length on another can never produce an item that ends before it starts; the end is derived (`when` + `duration`). Read by the shape of `when`: minutes from a timed start, whole days (`ceil(minutes / 1440)`, the last day being that many minus one past the start) beside an all-day one, ignored beside an absent one; the register is never cross-checked against `when` (no invalid state under concurrent edit). Absent ≡ unset; clearing deletes the key. Written by `set_item_when` too: a timed `when` on an item with no duration defaults it to 60 minutes in the same commit, and clearing `when` deletes it; timed → all-day keeps it. Out-of-range values read as unset. See `calendar-plan.md`. |
 | `place` | value? | optional **atomic place register** — a plain `LoroValue` map `{label, lat?, lon?, address?, ref?}` set whole (the `lifecycle` pattern as a map), so a label and its coordinates can never be torn apart by concurrent edits. `label` is required (trimmed, 1..=200 chars); `lat` / `lon` are WGS84 decimal degrees and come as a pair or not at all; `address` is display-only; `ref` is an opaque provider hint. Absent ≡ unset; clearing deletes the key. Canonicalised and validated by `set_item_place`; a malformed value from another writer reads as unset. Shared by events ("where it happens") and tasks ("where it can be done"). See `place-plan.md`. |
 | `created_at` | i64 | unix millis (client clock) |
+| `created_by` | string? | optional **attribution**: the account id of whoever created the item. Written at creation iff the writing `Doc` has an author (`Doc::set_author`, set once at boot by hosts that know their account: the web client from the session, the CLI from the profile; anonymous and local-only writers set none). Never rewritten: edits, moves and lifecycle changes leave it alone, and import carries the exported value rather than the importer's id. Absent ≡ unattributed (pre-register items, anonymous writers). Rendered as an avatar in the item dialog's creation line on **shared docs only** (`sharing-plan.md` §Attribution). |
 | `started_at` | i64? | **reflection stamp**: set (write-once) the first time the item enters In Progress; never cleared. Feeds analytics (created → started); no view reads it. |
 | `done_at` | i64? | **reflection stamp**: set each time the item enters Done; never cleared, so it survives later binning and un-doing. Feeds analytics (started → done); view sorts use the register's `at`, not this. |
 
@@ -252,7 +253,8 @@ Tradeoffs considered:
 
 Every mutation below forms **one Loro commit** (one undo step, one op group).
 
-- **Add item** — create the item map in `items` (id, text, created_at),
+- **Add item** — create the item map in `items` (id, text, created_at,
+  and created_by when the doc has an author),
   generate a placement id, set `location = target:placement` atomically,
   insert `"item:placement"` into `order/target` at the requested position.
 - **Reorder within one list** — `MovableList::mov` on the list's order

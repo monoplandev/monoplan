@@ -158,6 +158,15 @@ impl Doc {
         self.inner.peer_id()
     }
 
+    /// Set (or clear, with `undefined` / empty) the account id stamped
+    /// into `createdBy` on items this doc creates from now on. Call once
+    /// at boot, after replay and before the engine takes the doc; leave
+    /// unset for anonymous sessions.
+    #[wasm_bindgen(js_name = setAuthor)]
+    pub fn set_author(&mut self, account_id: Option<String>) {
+        self.inner.set_author(account_id.as_deref());
+    }
+
     /// Decode a doc previously written via [`Doc::save`].
     #[wasm_bindgen(js_name = load)]
     pub fn load(bytes: &[u8]) -> Result<Doc, JsError> {
@@ -2358,7 +2367,7 @@ impl From<CoreEvent> for EngineEvent {
 ///
 /// Variant → fields:
 /// - `fullResync` — no fields; rematerialize current state once
-/// - `itemAdded` — id, listId, text, notes, createdAt, state, lifecycleAt, startedAt?, doneAt?, binnedAt?, deadline?, when?, duration?, place?, openIndex?
+/// - `itemAdded` — id, listId, text, notes, createdAt, createdBy?, state, lifecycleAt, startedAt?, doneAt?, binnedAt?, deadline?, when?, duration?, place?, openIndex?
 /// - `itemRemoved` — id
 /// - `itemMoved` — id, openIndex?
 /// - `itemTextChanged` — id, text
@@ -2419,6 +2428,8 @@ pub struct AppEventJs {
     /// `{label, lat?, lon?, address?, ref?}`; `None` means unset.
     place: Option<String>,
     created_at: Option<i64>,
+    /// Creator's account id (`itemAdded`), when stamped.
+    created_by: Option<String>,
     /// Reflection stamp: last entry into Done, if any.
     done_at: Option<i64>,
     binned_at: Option<i64>,
@@ -2487,6 +2498,10 @@ impl AppEventJs {
     #[wasm_bindgen(getter, js_name = createdAt)]
     pub fn created_at(&self) -> Option<i64> {
         self.created_at
+    }
+    #[wasm_bindgen(getter, js_name = createdBy)]
+    pub fn created_by(&self) -> Option<String> {
+        self.created_by.clone()
     }
     #[wasm_bindgen(getter, js_name = doneAt)]
     pub fn done_at(&self) -> Option<i64> {
@@ -2592,6 +2607,7 @@ impl From<CoreAppEvent> for AppEventJs {
             duration: None,
             place: None,
             created_at: None,
+            created_by: None,
             done_at: None,
             binned_at: None,
             archived_at: None,
@@ -2618,6 +2634,7 @@ impl From<CoreAppEvent> for AppEventJs {
                 text,
                 notes,
                 created_at,
+                created_by,
                 state,
                 lifecycle_at,
                 started_at,
@@ -2635,6 +2652,7 @@ impl From<CoreAppEvent> for AppEventJs {
                 text: Some(text),
                 notes: Some(notes),
                 created_at: Some(created_at),
+                created_by,
                 state: Some(state.name()),
                 lifecycle_at: Some(lifecycle_at),
                 started_at,
@@ -2883,6 +2901,10 @@ fn item_to_json(it: &monoplan_core::ItemView) -> String {
     );
     if let Some(t) = it.started_at {
         s.push_str(&format!(",\"startedAt\":{t}"));
+    }
+    if let Some(a) = &it.created_by {
+        s.push_str(",\"createdBy\":");
+        s.push_str(&json_string(a));
     }
     if let Some(t) = it.done_at {
         s.push_str(&format!(",\"doneAt\":{t}"));

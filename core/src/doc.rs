@@ -280,6 +280,11 @@ const KEY_ICON: &str = "icon";
 /// default.
 const KEY_VIEW: &str = "view";
 const KEY_CREATED_AT: &str = "created_at";
+/// Optional attribution register: the account id of whoever created the
+/// item (`spec/data-model.md` "Item"). Written only when the writing
+/// `Doc` has an author set; absent on anonymous / local-only writes and
+/// on every item from before the register existed.
+const KEY_CREATED_BY: &str = "created_by";
 /// Reflection stamp: set on each entry into Done; never cleared, so it
 /// survives later binning and un-doing. View sorts use the workflow
 /// register's `at`, not this.
@@ -538,6 +543,9 @@ pub struct ItemView {
     /// Optional place (`spec/place-plan.md`). `None` ≡ unset.
     pub place: Option<Place>,
     pub created_at: i64,
+    /// Account id of the item's creator, when the creating client knew
+    /// it (`Doc::set_author`). `None` ≡ unattributed.
+    pub created_by: Option<String>,
     /// Reflection stamp: first entry into In Progress (write-once).
     pub started_at: Option<i64>,
     /// Reflection stamp: last entry into Done; never cleared. The Done
@@ -853,6 +861,10 @@ pub struct ExportItem {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub place: Option<Place>,
     pub created_at: i64,
+    /// Creator's account id. Skipped when unset so older dumps stay
+    /// byte-identical.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub created_by: Option<String>,
     /// Reflection stamp (first entry into In Progress). Skipped when
     /// unset; v2 exports never carry it.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -1549,6 +1561,11 @@ pub struct Doc {
     /// Root diff subscription feeding `diff_capture`. Dropping it
     /// unsubscribes, so it lives exactly as long as the doc.
     _diff_sub: Subscription,
+    /// Who local writes are attributed to: the account id stamped into
+    /// `created_by` on every item this handle creates. `None` (the
+    /// default) writes no attribution — anonymous web sessions and
+    /// local-only CLI profiles have no account. See [`Doc::set_author`].
+    author: Option<String>,
 }
 
 /// Configure an UndoManager bound to `inner`, excluding remote-tagged
@@ -1600,6 +1617,7 @@ impl Doc {
             notes_shadows: Mutex::new(HashMap::new()),
             search: Mutex::new(SearchIndex::new()),
             _diff_sub,
+            author: None,
         })
     }
 
@@ -1633,7 +1651,27 @@ impl Doc {
             notes_shadows: Mutex::new(HashMap::new()),
             search: Mutex::new(SearchIndex::new()),
             _diff_sub,
+            author: None,
         }
+    }
+
+    /// Set (or clear) the account id stamped into `created_by` on items
+    /// this handle creates from now on. Hosts call it once at boot, after
+    /// replay and before the engine takes the doc: the web client with
+    /// the session's account id, the CLI with the profile's. Existing
+    /// items are untouched; a trimmed-empty id clears. Attribution is
+    /// per write, not per doc, so the same doc opened by two members
+    /// stamps each one's own id.
+    pub fn set_author(&mut self, account_id: Option<&str>) {
+        self.author = account_id
+            .map(str::trim)
+            .filter(|a| !a.is_empty())
+            .map(str::to_string);
+    }
+
+    /// The account id local item creation is attributed to, if any.
+    pub fn author(&self) -> Option<&str> {
+        self.author.as_deref()
     }
 
     /// Oplog counter end of the local peer — how many ops this peer id
@@ -1847,6 +1885,9 @@ impl Doc {
             map.insert(KEY_ID, id.as_str())?;
             map.insert(KEY_TEXT, *text)?;
             map.insert(KEY_CREATED_AT, now)?;
+            if let Some(author) = &self.author {
+                map.insert(KEY_CREATED_BY, author.as_str())?;
+            }
             map.insert(
                 KEY_LOCATION,
                 Location {
@@ -1921,6 +1962,7 @@ impl Doc {
                 text,
                 notes: String::new(),
                 created_at: now,
+                created_by: self.author.clone(),
                 state,
                 lifecycle_at: now,
                 started_at: (state == WorkflowState::InProgress).then_some(now),
@@ -3578,6 +3620,7 @@ impl Doc {
                 duration: item.duration,
                 place: item.place,
                 created_at: item.created_at,
+                created_by: item.created_by,
                 started_at: item.started_at,
                 done_at: item.done_at,
                 binned_at: item.binned_at,
@@ -3719,6 +3762,16 @@ impl Doc {
                 .as_str(),
             )?;
             map.insert(KEY_CREATED_AT, src_item.created_at)?;
+            // Attribution survives a round trip; the importer's own id is
+            // not substituted, since the import is not the creation.
+            if let Some(author) = src_item
+                .created_by
+                .as_deref()
+                .map(str::trim)
+                .filter(|a| !a.is_empty())
+            {
+                map.insert(KEY_CREATED_BY, author)?;
+            }
             // Workflow register + reflection stamps. An unrecognized
             // state name in a hand-edited export degrades to Backlog:
             // visible and open.
@@ -4610,6 +4663,7 @@ impl Doc {
                     text: view.text,
                     notes: view.notes,
                     created_at: view.created_at,
+                    created_by: view.created_by,
                     state: view.state,
                     lifecycle_at: view.lifecycle_at,
                     started_at: view.started_at,
@@ -4675,6 +4729,7 @@ impl Doc {
                             text: view.text,
                             notes: view.notes,
                             created_at: view.created_at,
+                            created_by: view.created_by,
                             state: view.state,
                             lifecycle_at: view.lifecycle_at,
                             started_at: view.started_at,
@@ -4938,6 +4993,7 @@ impl Doc {
                 text: item.text,
                 notes: item.notes,
                 created_at: item.created_at,
+                created_by: item.created_by,
                 state: item.state,
                 lifecycle_at: item.lifecycle_at,
                 started_at: item.started_at,
@@ -4999,6 +5055,7 @@ impl Doc {
             notes_shadows: Mutex::new(HashMap::new()),
             search: Mutex::new(SearchIndex::new()),
             _diff_sub,
+            author: None,
         };
         doc.rebuild_index();
         Ok(doc)
@@ -5808,6 +5865,7 @@ fn item_view(map: &LoroMap) -> Option<ItemView> {
         duration: read_duration(map),
         place: read_place(map),
         created_at: read_i64(map, KEY_CREATED_AT)?,
+        created_by: read_string(map, KEY_CREATED_BY).filter(|s| !s.is_empty()),
         started_at: read_i64(map, KEY_STARTED_AT),
         done_at: read_i64(map, KEY_DONE_AT),
         binned_at: read_i64(map, KEY_BINNED_AT),
@@ -6055,6 +6113,7 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                     text: post_it.text.clone(),
                     notes: post_it.notes.clone(),
                     created_at: post_it.created_at,
+                    created_by: post_it.created_by.clone(),
                     state: post_it.state,
                     lifecycle_at: post_it.lifecycle_at,
                     started_at: post_it.started_at,
@@ -7065,6 +7124,103 @@ mod tests {
         assert_eq!(view.list_id, LIST_INBOX);
         assert!(!view.is_done());
         assert!(!view.is_binned());
+    }
+
+    #[test]
+    fn add_item_without_author_writes_no_created_by() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "x").unwrap();
+        assert_eq!(doc.get_item(&id).unwrap().created_by, None);
+        let map = doc.find_item(&id).unwrap();
+        assert!(
+            map.get(KEY_CREATED_BY).is_none(),
+            "no key when unattributed"
+        );
+        let evs = doc.drain_events();
+        assert!(evs.iter().any(|e| matches!(
+            e,
+            AppEvent::ItemAdded { id: eid, created_by: None, .. } if eid == &id
+        )));
+    }
+
+    #[test]
+    fn add_item_with_author_stamps_created_by_on_item_and_event() {
+        let mut doc = Doc::new().unwrap();
+        doc.set_author(Some("acct-1"));
+        assert_eq!(doc.author(), Some("acct-1"));
+        let _ = doc.drain_events();
+        let id = doc.add_item(LIST_INBOX, "x").unwrap();
+        assert_eq!(
+            doc.get_item(&id).unwrap().created_by.as_deref(),
+            Some("acct-1")
+        );
+        let evs = doc.drain_events();
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                AppEvent::ItemAdded { id: eid, created_by: Some(a), .. }
+                    if eid == &id && a == "acct-1"
+            )),
+            "{evs:?}"
+        );
+        // Direct capture into an open lane takes the same path.
+        let id2 = doc
+            .add_item_in_state(LIST_INBOX, "y", WorkflowState::Todo)
+            .unwrap();
+        assert_eq!(
+            doc.get_item(&id2).unwrap().created_by.as_deref(),
+            Some("acct-1")
+        );
+    }
+
+    #[test]
+    fn set_author_trims_and_clears() {
+        let mut doc = Doc::new().unwrap();
+        doc.set_author(Some("  acct-2  "));
+        assert_eq!(doc.author(), Some("acct-2"));
+        doc.set_author(Some("   "));
+        assert_eq!(doc.author(), None);
+        doc.set_author(Some("acct-3"));
+        doc.set_author(None);
+        assert_eq!(doc.author(), None);
+        let id = doc.add_item(LIST_INBOX, "x").unwrap();
+        assert_eq!(doc.get_item(&id).unwrap().created_by, None);
+    }
+
+    #[test]
+    fn created_by_survives_remote_import_and_json_round_trip() {
+        let dek = Dek::generate();
+        let mut a = Doc::new().unwrap();
+        a.set_author(Some("acct-a"));
+        let id = a.add_item(LIST_INBOX, "shared").unwrap();
+        let blob = a.pending_export(&dek).unwrap().unwrap();
+
+        // The receiving replica reads the writer's id, not its own.
+        let mut b = Doc::empty();
+        b.set_author(Some("acct-b"));
+        let _ = b.drain_events();
+        b.apply_remote(&dek, &blob).unwrap();
+        assert_eq!(
+            b.get_item(&id).unwrap().created_by.as_deref(),
+            Some("acct-a")
+        );
+        let evs = b.drain_events();
+        assert!(evs.iter().any(|e| matches!(
+            e,
+            AppEvent::ItemAdded { id: eid, created_by: Some(who), .. }
+                if eid == &id && who == "acct-a"
+        )));
+
+        // Export carries it; import writes it back rather than
+        // substituting the importer's own id.
+        let export = a.export_json();
+        assert_eq!(export.items[0].created_by.as_deref(), Some("acct-a"));
+        let mut c = Doc::new().unwrap();
+        c.set_author(Some("acct-c"));
+        c.import_json(&export).unwrap();
+        let imported: Vec<_> = c.iter_items().filter(|i| i.text == "shared").collect();
+        assert_eq!(imported.len(), 1);
+        assert_eq!(imported[0].created_by.as_deref(), Some("acct-a"));
     }
 
     #[test]
@@ -9179,6 +9335,7 @@ mod tests {
             duration: None,
             place: None,
             created_at: 1,
+            created_by: None,
             started_at: None,
             done_at: None,
             binned_at: None,
@@ -10134,6 +10291,7 @@ mod tests {
                 duration: None,
                 place: None,
                 created_at: 1_700_000_000_000,
+                created_by: None,
                 started_at: None,
                 done_at: None,
                 binned_at: None,
@@ -10256,6 +10414,7 @@ mod tests {
             notes_shadows: Mutex::new(HashMap::new()),
             search: Mutex::new(SearchIndex::new()),
             _diff_sub,
+            author: None,
         };
         restored.rebuild_index();
 

@@ -175,6 +175,8 @@ export type Messages = {
      *  line ("Completed yesterday 8:06 PM") is followed by the elapsed
      *  span since creation on its own line ("3 hours elapsed"). */
     createdStamp: (when: string) => string;
+    /** Joins the creation stamp to the creator's avatar: "Created 5:49 PM by ●". */
+    createdBy: string;
     activity: string;
     activityCompleted: (when: string) => string;
     activityElapsed: (span: string) => string;
@@ -495,6 +497,8 @@ export type Messages = {
     removeMemberFailed: string;
     lastOwner: string;
     removedNotice: (name: string) => string;
+    /** Avatar tooltip when the creator is no longer a member. */
+    formerMember: string;
     inviteTitle: string;
     inviteFrom: (hint: string) => string;
     inviteSignIn: string;
@@ -624,6 +628,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       markCancelled: "Cancelar",
       reopen: "Reabrir",
       createdStamp: (when) => `Creado ${when}`,
+      createdBy: "por",
       activity: "Actividad",
       activityCompleted: (when) => `Completado ${when}`,
       activityElapsed: (span) => `Tiempo transcurrido: ${span}`,
@@ -841,6 +846,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       removeMemberFailed: "No se pudo quitar al usuario",
       lastOwner: "El espacio necesita al menos un propietario.",
       removedNotice: (name) => `Te han quitado del espacio «${name}». Se ha eliminado de este dispositivo.`,
+      formerMember: "Un antiguo miembro",
       inviteTitle: "Te han invitado",
       inviteFrom: (hint) => `${hint} te invita a un espacio compartido.`,
       inviteSignIn: "Inicia sesión o crea una cuenta para unirte.",
@@ -972,6 +978,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       markCancelled: "Cancel",
       reopen: "Reopen",
       createdStamp: (when) => `Created ${when}`,
+      createdBy: "by",
       activity: "Activity",
       activityCompleted: (when) => `Completed ${when}`,
       activityElapsed: (span) => `${span} elapsed`,
@@ -1188,6 +1195,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       removeMemberFailed: "Could not remove the user",
       lastOwner: "A workspace needs at least one owner.",
       removedNotice: (name) => `You were removed from “${name}”. It has been removed from this device.`,
+      formerMember: "A former member",
       inviteTitle: "You're invited",
       inviteFrom: (hint) => `${hint} has invited you to a shared workspace.`,
       inviteSignIn: "Sign in or create an account to join.",

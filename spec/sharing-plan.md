@@ -90,6 +90,16 @@ So the server stores an id it cannot invert and a wrap it cannot open; the link 
 
 **Why not X25519 public keys.** The alternative considered was per-account public keys with the inviter encrypting the DEK to the invitee directly. Rejected for now: it adds key material and a rotation story to every account and a key directory the server would have to serve honestly, for a UX that is only one-shot if the inviter already knows the invitee's account. The link needs none of that and works for someone with no account yet. Revisit if sharing between existing accounts becomes the common case.
 
+### Attribution (built 2026-10-28)
+
+Items carry an optional `created_by` register holding the creator's account id (`data-model.md` "Item"). It is the first piece of "this is collaborative" the UI shows and the seed for presence: the avatar it introduces is the same component a later "who's here" row by the workspace name would use.
+
+- **Written by the core**, not the client: `Doc::set_author(account_id)` once at boot, after replay and before the engine takes the doc (web `App.tsx` `bootDoc` and `runtime.ts` `openNewDoc` from `Session.accountId`; CLI `sync::boot_doc_state` from the profile's identity). Every add path (`add_item*`, `add_items_at`, `add_item_in_state*`) stamps it in the same commit as the item; anonymous web sessions and local-only CLI profiles have no author and write nothing. The stamp is stored, not derived: a replica reads the writer's id, never its own.
+- **Account id, not email.** The id is stable; the email is display. The web client resolves ids through a per-doc member directory (`js/web/src/sync/members.ts`), loaded once per shared doc per session from `GET /api/docs/:doc_id/members`. A creator no longer in the list renders as a "?" disc titled "a former member".
+- **Shown on shared docs only, in the item dialog.** The activity log's creation line reads "Created 5:49 PM by ●" for every stamped item on a non-Home doc, one's own included: on a shared doc, who added what is the point, and the dialog is where one looks for it. Rows and cards stay clean. Home is one person, so nothing is shown there. The `creatorOf` resolver (`Workspace.tsx`) returns nothing for Home and for unstamped items; the avatar's tooltip is the email.
+- **Grayscale for now.** `Avatar.tsx` renders the first code point of the email, upper-cased, on a neutral disc. A per-account hue is a later change to the component alone.
+- **Not done:** attribution on rows and cards (tried, pulled: too much per-row noise); `modified_by` (deliberately — edit attribution is where this starts to read as surveillance); presence.
+
 ### Ownership transfer
 
 `POST /api/docs/:doc_id/transfer-ownership { to_account_id }` (current owner only): atomic UPDATE setting target's role to `'owner'`. Old owner stays a member unless they also `DELETE .../members/:self` in the same client flow. `accounts.primary_doc_id` is **not** affected — primary doc ≠ owned doc. (You can't transfer ownership of your primary doc; it's not shared.)

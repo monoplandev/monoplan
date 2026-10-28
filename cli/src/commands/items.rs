@@ -102,6 +102,9 @@ struct ItemJson<'a> {
     /// Unix millis the register's state was entered.
     lifecycle_at: i64,
     created_at: i64,
+    /// Creator's account id, when the creating client stamped one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    created_by: Option<&'a str>,
     started_at: Option<i64>,
     done_at: Option<i64>,
     binned_at: Option<i64>,
@@ -127,6 +130,7 @@ fn item_json(item: &ItemView) -> ItemJson<'_> {
         state: item.state.name(),
         lifecycle_at: item.lifecycle_at,
         created_at: item.created_at,
+        created_by: item.created_by.as_deref(),
         started_at: item.started_at,
         done_at: item.done_at,
         binned_at: item.binned_at,
@@ -752,6 +756,7 @@ mod tests {
             duration: None,
             place: None,
             created_at: 0,
+            created_by: None,
             started_at: None,
             done_at: None,
             binned_at: None,
