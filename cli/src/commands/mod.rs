@@ -54,7 +54,7 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
-    /// Account and device identity: status, signup, login, logout, recover, password.
+    /// Manage account and login.
     #[command(subcommand)]
     Auth(AuthCmd),
     /// Items: add, ls, set (every field as a flag), bin, restore.
@@ -66,8 +66,7 @@ enum Cmd {
     Places(items::PlacesArgs),
     /// Open items by day: Today (with overdue and past-dated folded in), then the coming days.
     Agenda(agenda::AgendaArgs),
-    /// Starred items in curated order; `starred mv` reorders, `item set --star` / `--unstar` add and remove. (`focus` is a hidden alias.)
-    #[command(alias = "focus")]
+    /// Starred items in curated order; `starred mv` reorders, `item set --star` / `--unstar` add and remove.
     Starred(focus::FocusArgs),
     /// Manage lists.
     Lists(lists::ListsArgs),
@@ -76,7 +75,7 @@ enum Cmd {
     /// Workspaces: sync status, sharing (invite links, members), JSON export.
     #[command(subcommand)]
     Workspace(WorkspaceCmd),
-    /// The resident sync process for this profile (spec/daemon-plan.md).
+    /// The resident sync process for this profile.
     Daemon(crate::daemon::DaemonArgs),
 }
 
