@@ -223,7 +223,7 @@ impl SqliteStorage {
     }
 
     /// Persist the observability timestamp only — the "Last sync" shown
-    /// by `monoplan status`. Deliberately separate from the resume cursor:
+    /// by `monoplan workspace status`. Deliberately separate from the resume cursor:
     /// the engine owns `last_acked_server_seq` (via the `LocalStorage`
     /// trait's `write_acked_seq`), while `last_sync_at` is a CLI-only
     /// stamp nothing in the sync path reads. (Creates the `docs` row if

@@ -44,7 +44,7 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
-    /// Account and device identity: signup, login, logout, recover, password.
+    /// Account and device identity: status, signup, login, logout, recover, password.
     #[command(subcommand)]
     Auth(AuthCmd),
     /// Items: add, ls, set (every field as a flag), bin, restore.
@@ -63,12 +63,9 @@ enum Cmd {
     Lists(lists::ListsArgs),
     /// Inspect the local database.
     Db(db::DbArgs),
-    /// Export the current account as semantic JSON.
-    ExportJson(export::ExportArgs),
-    /// Share a workspace: invite links, members.
-    Share(share::ShareArgs),
-    /// Show local sync state.
-    Status(status::StatusArgs),
+    /// Workspaces: sync status, sharing (invite links, members), JSON export.
+    #[command(subcommand)]
+    Workspace(WorkspaceCmd),
     /// The resident sync process for this profile (spec/daemon-plan.md).
     Daemon(crate::daemon::DaemonArgs),
 }
@@ -88,6 +85,23 @@ enum AuthCmd {
     Recover(recover::Args),
     /// Change the password on the active account.
     Password,
+    /// Show the account, device and server behind this install (local; never connects).
+    Status(status::StatusArgs),
+}
+
+/// `monoplan workspace …`: the verbs that act on a workspace (doc) as a
+/// whole rather than on its items. An accountless install has exactly
+/// one workspace (`spec/auth.md` §One workspace per accountless
+/// install): `status` and `export-json` work on it, `share` needs an
+/// account.
+#[derive(Subcommand, Debug)]
+enum WorkspaceCmd {
+    /// Show the workspace's sync state: doc id, last sync, acked seq, pending changes (local; never connects).
+    Status(status::StatusArgs),
+    /// Share a workspace: invite links, members.
+    Share(share::ShareArgs),
+    /// Export the workspace as semantic JSON.
+    ExportJson(export::ExportArgs),
 }
 
 /// `monoplan item …`: everything about one item except capturing it.
@@ -164,10 +178,11 @@ impl Cli {
             Cmd::Auth(AuthCmd::Recover(a)) => return recover::run(a, spawn).await,
             Cmd::Auth(AuthCmd::Password) => return password::run().await,
             Cmd::Db(a) => return db::run(a).await,
-            Cmd::Share(a) => return share::run(a).await,
-            Cmd::Status(a) => return status::run(a).await,
+            Cmd::Workspace(WorkspaceCmd::Share(a)) => return share::run(a).await,
+            Cmd::Auth(AuthCmd::Status(a)) => return status::run_auth(a).await,
+            Cmd::Workspace(WorkspaceCmd::Status(a)) => return status::run_workspace(a).await,
             Cmd::Daemon(a) => return crate::daemon::run(a).await,
-            Cmd::ExportJson(a) => {
+            Cmd::Workspace(WorkspaceCmd::ExportJson(a)) => {
                 let profile = crate::bootstrap::open_or_init().await?;
                 let (json, sync) = client::doc(&profile, DocCmd::ExportJson, spawn).await?;
                 export::deliver(json.trim_end_matches('\n'), a.out.as_deref())?;
@@ -209,7 +224,7 @@ pub(crate) fn confirm_discard_local_workspace(profile: &Profile) -> anyhow::Resu
     println!(
         "This install has a local-only workspace. Signing in to an existing account \
          discards it; `monoplan auth signup` would keep it instead, and \
-         `monoplan export-json` saves a copy first."
+         `monoplan workspace export-json` saves a copy first."
     );
     let proceed = Confirm::new()
         .with_prompt("Discard the local workspace and sign in?")

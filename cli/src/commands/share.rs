@@ -123,7 +123,7 @@ async fn link(doc: &str, expires_days: Option<u64>) -> anyhow::Result<()> {
     eprintln!("Single use. Expires {}.", format_ts(resp.expires_at));
     eprintln!(
         "Anyone with this link can join and read the whole workspace. It is shown once; \
-         revoke it with `monoplan share revoke {} {}`.",
+         revoke it with `monoplan workspace share revoke {} {}`.",
         doc_id.0, resp.invite_id
     );
     Ok(())

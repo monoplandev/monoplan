@@ -155,7 +155,7 @@ async fn offline_add_survives_restart_then_syncs() {
 /// unset across offline flushes (every command flushes, even read-only
 /// ones) and land only after a real server exchange. Regression guard
 /// for the bug where `flush()` stamped it unconditionally — which made
-/// `monoplan status` report "Last sync: 0s ago" while fully offline.
+/// `monoplan workspace status` report "Last sync: 0s ago" while fully offline.
 #[tokio::test]
 async fn last_sync_at_set_only_after_online_sync() {
     let server = TestServer::start().await;

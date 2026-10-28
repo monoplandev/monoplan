@@ -229,15 +229,22 @@ async fn fresh_install_works_without_an_account() {
 
     let status = ok(monoplan(&dir, &["daemon", "status"]).await);
     assert!(status.contains("local only"), "{status}");
-    let status = ok(monoplan(&dir, &["status"]).await);
+    let status = ok(monoplan(&dir, &["auth", "status"]).await);
     assert!(status.contains("local-only"), "{status}");
-    let json = ok(monoplan(&dir, &["status", "--json"]).await);
+    let json = ok(monoplan(&dir, &["auth", "status", "--json"]).await);
     let compact: String = json.chars().filter(|c| !c.is_whitespace()).collect();
     assert!(compact.contains("\"local_only\":true"), "{json}");
     assert!(compact.contains("\"email\":null"), "{json}");
+    let status = ok(monoplan(&dir, &["workspace", "status"]).await);
+    assert!(status.contains("local-only"), "{status}");
+    assert!(status.contains("Doc:"), "{status}");
+    let json = ok(monoplan(&dir, &["workspace", "status", "--json"]).await);
+    let compact: String = json.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(compact.contains("\"local_only\":true"), "{json}");
+    assert!(compact.contains("\"last_sync_at\":null"), "{json}");
 
     // Server-backed verbs name the gap instead of failing obscurely.
-    let e = err(monoplan(&dir, &["share", "pending", &id]).await);
+    let e = err(monoplan(&dir, &["workspace", "share", "pending", &id]).await);
     assert!(e.contains("no account"), "{e}");
     let e = err(monoplan(&dir, &["auth", "password"]).await);
     assert!(e.contains("no account"), "{e}");

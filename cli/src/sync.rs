@@ -303,7 +303,7 @@ impl Session {
 
     /// Stamp "last successful online sync" = now. Called only after a
     /// confirmed online exchange — never on an offline or purely local
-    /// flush — so `monoplan status` reports when this device actually last
+    /// flush — so `monoplan workspace status` reports when this device actually last
     /// reached the server, not when it last ran a command. Pure
     /// observability; nothing in the sync path reads it.
     pub(crate) fn mark_synced(&mut self) -> Result<(), SyncError> {

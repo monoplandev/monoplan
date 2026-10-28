@@ -98,7 +98,7 @@ async fn clear(force: bool) -> anyhow::Result<()> {
         if !std::io::stdin().is_terminal() {
             if local_only {
                 anyhow::bail!(
-                    "this is a local-only workspace; clearing it erases everything in it. Pass --force to do that, or `monoplan export-json` first"
+                    "this is a local-only workspace; clearing it erases everything in it. Pass --force to do that, or `monoplan workspace export-json` first"
                 );
             }
             anyhow::bail!(

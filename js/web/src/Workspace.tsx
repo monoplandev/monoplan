@@ -2601,6 +2601,8 @@ export function Workspace(props: {
               onOpenSettings={() => setSettingsOpen(true)}
               onOpenShortcuts={() => setShortcutsOpen(true)}
               onSession={session.swapSession}
+              // One workspace per accountless install (`auth.md`); signup
+              // is the gate to more.
               onNewDoc={session.session().anonymous ? null : () => setNewDocOpen(true)}
             />
             <StatusSlot

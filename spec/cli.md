@@ -10,9 +10,10 @@ Single binary `monoplan`. Subcommands:
 No account is needed to use the CLI. The first doc command on a fresh install creates a **local-only workspace** (`cli/src/bootstrap.rs`): a doc id and a DEK minted locally, the doc seeded with the same onboarding "Welcome" list a signup gets, and a profile written with no device token. Every command and the daemon then work against it exactly as for an account's device, minus the server: the host never connects, replies carry `local_only` and never an offline notice, `monoplan status` says `local-only workspace`, `daemon status` says `local only (no account)`. It is the CLI's counterpart of the web client's anonymous session (`auth.md` §Device pairing).
 
 - `monoplan auth signup` from that state **adopts** the workspace: its DEK becomes the Home DEK and its doc id is sent as `primary_doc_id`, so nothing is copied or re-encrypted and the whole local history ships on the first connect. The command says so (`Your local workspace is now this account's Personal workspace.`) and syncs right after the recovery code is confirmed.
-- `monoplan auth login` / `recover` from that state **discard** it (the account's doc replaces it; merging two seeded histories is not built, same as the web). They say so and ask for confirmation first, pointing at `signup` (keeps it) and `export-json` (saves a copy).
+- `monoplan auth login` / `recover` from that state **discard** it (the account's doc replaces it; merging two seeded histories is not built, same as the web). They say so and ask for confirmation first, pointing at `signup` (keeps it) and `workspace export-json` (saves a copy).
 - `monoplan auth logout` on a local-only workspace does nothing (`Not logged in (the local workspace is kept).`); `monoplan db clear` is the way to erase it, and always asks (`--force` when not a TTY), then re-seeds a fresh one under the same id and key.
-- Verbs that need a server (`share …`, `auth password`) fail with `no account on this install; …`.
+- Verbs that need a server (`workspace share …`, `auth password`) fail with `no account on this install; …`.
+- A local-only profile holds exactly one workspace; `workspace` has no verb to create a second (`auth.md` §One workspace per accountless install). Signup is the gate to more.
 - The macOS app hosts a CLI-made local-only profile like any other (its Settings get an `Err` to the `Account` request instead of an identity); it does not create one itself yet.
 
 ### Account (`monoplan auth …`)
@@ -21,18 +22,22 @@ No account is needed to use the CLI. The first doc command on a fresh install cr
 - `monoplan auth logout`
 - `monoplan auth recover` — interactive: email, recovery code, set new password
 - `monoplan auth password` — change password (logged in)
+- `monoplan auth status [--json]` — account email + id, device id, server URL. Read-only against local state; never opens a WS and never starts the daemon. On a local-only workspace: `Account: none — local-only workspace`; `--json` has `local_only: true` and null identity / server fields.
 
 ### Devices
 - `monoplan auth devices` — list
 - `monoplan auth devices revoke <device_id>`
 
-### Sharing
-- `monoplan share link <doc_id> [--expires-days N]` — print a single-use invite link for a workspace you own (`<server>/#invite_<secret>`; shown once, the server cannot rebuild it). Refused for the Personal workspace.
-- `monoplan share pending <doc_id>` — unused links (id, created, expires)
-- `monoplan share revoke <doc_id> <invite_id>`
-- `monoplan share accept <link-or-secret>` — join the workspace behind a link; stores its DEK in `secrets.toml`. The CLI still syncs the Personal workspace only (`sharing-plan.md` Phase 4), so the joined workspace shows up in the web client first.
-- `monoplan share members <doc_id>`
-- `monoplan share remove <doc_id> <email>` — owner removes a member (resolved through the member list; never yourself, never the last owner). Forward-only: they keep what they already synced.
+### Workspaces
+`monoplan workspace …` groups the verbs that act on a workspace as a whole: `status`, `share` and `export-json` (an accountless install has one workspace and cannot create another, `auth.md` §One workspace per accountless install).
+- `monoplan workspace status [--json]` — doc id, last successful sync timestamp, `last_acked_seq`, whether unsynced local changes exist. Read-only against local state; never opens a WS and never starts the daemon. On a local-only workspace: `Sync: none — local-only workspace`; `--json` has `local_only: true`.
+- `monoplan workspace export-json [--out PATH]` — semantic export of the workspace: built-in/user lists plus items/lifecycle/timestamps as regular JSON. Defaults to stdout; `--out` writes a file. This is a portability dump, not a CRDT backup/restore format. Works without an account.
+- `monoplan workspace share link <doc_id> [--expires-days N]` — print a single-use invite link for a workspace you own (`<server>/#invite_<secret>`; shown once, the server cannot rebuild it). Refused for the Personal workspace.
+- `monoplan workspace share pending <doc_id>` — unused links (id, created, expires)
+- `monoplan workspace share revoke <doc_id> <invite_id>`
+- `monoplan workspace share accept <link-or-secret>` — join the workspace behind a link; stores its DEK in `secrets.toml`. The CLI still syncs the Personal workspace only (`sharing-plan.md` Phase 4), so the joined workspace shows up in the web client first.
+- `monoplan workspace share members <doc_id>`
+- `monoplan workspace share remove <doc_id> <email>` — owner removes a member (resolved through the member list; never yourself, never the last owner). Forward-only: they keep what they already synced.
 
 ### Items
 - `monoplan item add <text> [--list <list>]` — `<text>` of `-` reads from stdin; one item per non-blank line. New items are created in **Backlog** (the workflow register is omitted).
@@ -84,14 +89,10 @@ Binning and restoring an item are `monoplan item bin` / `item restore` (see "Ite
 - `monoplan bin rm <item_id>`
 
 ### Status
-- `monoplan status` — server URL, account email, device id, last successful sync timestamp, `last_acked_seq`, pending-push op count. Read-only against local state; never opens a WS and never starts the daemon. On a local-only workspace: `Account: none — local-only workspace` plus the doc id; `--json` has `local_only: true` and null identity / server fields.
 
 ### Db
 - `monoplan db status` — profile directory and `monoplan.sqlite` size. Read-only; never opens a WS.
 - `monoplan db clear [--force]` — truncate the doc store (`wal` + `snapshots`) and reset the per-doc sync cursor to 0, **keeping** account identity (so it does not log you out); the next command starts a daemon that rehydrates from the server. Refuses while a daemon is running. If there are unsynced local ops, prompts for confirmation (TTY) or refuses with an error (non-TTY) unless `--force` is passed. On a local-only workspace everything is unsynced, so it always asks, and afterwards re-seeds the onboarding doc under the same id and key rather than leaving an empty one.
-
-### Export
-- `monoplan export-json [--out PATH]` — semantic account export: built-in/user lists plus items/lifecycle/timestamps as regular JSON. Defaults to stdout; `--out` writes a file. This is a portability dump, not a CRDT backup/restore format.
 
 ### Daemon
 - `monoplan daemon` — run the resident process attached to the terminal (`spec/daemon-plan.md`). Refuses if one already holds the profile.
@@ -106,7 +107,7 @@ One binary, two roles; and on macOS a third host, the app, which runs the same l
 
 Dispatch, at the top of `Cli::run`:
 
-- Doc commands (`item …`, `places`, `agenda`, `starred`, `lists`, `bin`, `export-json`) open the profile through `bootstrap::open_or_init`, which creates the local-only workspace on a fresh install (holding `daemon.lock` while it writes, so a racing second command waits and finds it), then are forwarded as a `DocCmd` and their output comes back as text. `item add -` reads stdin in the client; `export-json --out` writes the file in the client. A hand-run `monoplan daemon` on a fresh install creates the workspace the same way.
+- Doc commands (`item …`, `places`, `agenda`, `starred`, `lists`, `bin`, `workspace export-json`) open the profile through `bootstrap::open_or_init`, which creates the local-only workspace on a fresh install (holding `daemon.lock` while it writes, so a racing second command waits and finds it), then are forwarded as a `DocCmd` and their output comes back as text. `item add -` reads stdin in the client; `workspace export-json --out` writes the file in the client. A hand-run `monoplan daemon` on a fresh install creates the workspace the same way.
 - `status` and `db status` are direct, read-only sqlite reads and never contact or start the daemon. `db clear` refuses while a daemon is running.
 - `signup`, `login`, `recover`, `password` and `logout` work on the profile files, so each first stops a running host and holds `daemon.lock` until the files are written (`client::claim`), keeping the app and any auto-spawn out meanwhile; `login` and `recover` then sync through a fresh host, which is what starts it (or the app, if it re-hosted first).
 - `share` is HTTP against the server and runs in the client.
