@@ -16,17 +16,17 @@
 use axum::extract::{Path, State};
 use monoplan_protocol::{CreateDocRequest, CreateDocResponse, DocsListResponse, Membership};
 
+use super::json::Json;
 use crate::auth::DeviceAuth;
 use crate::auth::queries::{DeleteDocOutcome, NewDoc, create_doc, delete_doc, list_memberships};
 use crate::error::{ApiError, ApiResult};
-use crate::http::msgpack::Msgpack;
 use crate::state::AppState;
 use uuid::Uuid;
 
 pub async fn list(
     State(state): State<AppState>,
     auth: DeviceAuth,
-) -> ApiResult<Msgpack<DocsListResponse>> {
+) -> ApiResult<Json<DocsListResponse>> {
     let memberships = list_memberships(&state.db, auth.account_id)
         .await?
         .into_iter()
@@ -37,7 +37,7 @@ pub async fn list(
             wrapped_dek_nonce: m.wrapped_dek_nonce,
         })
         .collect();
-    Ok(Msgpack(DocsListResponse {
+    Ok(Json(DocsListResponse {
         primary_doc_id: auth.primary_doc_id.to_string(),
         memberships,
     }))
@@ -46,8 +46,8 @@ pub async fn list(
 pub async fn create(
     State(state): State<AppState>,
     auth: DeviceAuth,
-    Msgpack(req): Msgpack<CreateDocRequest>,
-) -> ApiResult<Msgpack<CreateDocResponse>> {
+    Json(req): Json<CreateDocRequest>,
+) -> ApiResult<Json<CreateDocResponse>> {
     if req.wrapped_dek.is_empty() || req.wrapped_dek_nonce.is_empty() {
         return Err(ApiError::BadRequest("wrapped_dek is required".into()));
     }
@@ -60,7 +60,7 @@ pub async fn create(
         },
     )
     .await?;
-    Ok(Msgpack(CreateDocResponse {
+    Ok(Json(CreateDocResponse {
         doc_id: doc_id.to_string(),
     }))
 }

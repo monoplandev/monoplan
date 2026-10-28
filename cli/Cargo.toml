@@ -19,7 +19,6 @@ monoplan-storage-sqlite = { path = "../crates/storage-sqlite" }
 tokio = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
-serde_bytes = { workspace = true }
 rmp-serde = { workspace = true }
 toml = { workspace = true }
 clap = { workspace = true }

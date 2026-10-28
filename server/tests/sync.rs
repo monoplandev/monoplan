@@ -1,4 +1,5 @@
-//! End-to-end WS sync: real server, real sqlite, real msgpack frames.
+//! End-to-end WS sync: real server, real sqlite, real msgpack frames
+//! (HTTP setup calls are JSON like every other client).
 //!
 //! Update blobs in these tests are random bytes — the server treats them
 //! as opaque, so we don't need the real DEK. Signup still needs valid
@@ -26,7 +27,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use uuid::Uuid;
 
-const MSGPACK: &str = "application/msgpack";
+const JSON: &str = "application/json";
 
 fn weak_params() -> KdfParams {
     KdfParams {
@@ -107,21 +108,21 @@ fn http() -> &'static reqwest::Client {
     C.get_or_init(reqwest::Client::new)
 }
 
-async fn post_msgpack<Req, Resp>(url: &str, body: &Req) -> Resp
+async fn post_json<Req, Resp>(url: &str, body: &Req) -> Resp
 where
     Req: Serialize,
     Resp: DeserializeOwned,
 {
-    post_msgpack_authed(url, body, None).await
+    post_json_authed(url, body, None).await
 }
 
-async fn post_msgpack_authed<Req, Resp>(url: &str, body: &Req, token: Option<&str>) -> Resp
+async fn post_json_authed<Req, Resp>(url: &str, body: &Req, token: Option<&str>) -> Resp
 where
     Req: Serialize,
     Resp: DeserializeOwned,
 {
-    let bytes = rmp_serde::to_vec_named(body).unwrap();
-    let mut req = http().post(url).header(CONTENT_TYPE, MSGPACK).body(bytes);
+    let bytes = serde_json::to_vec(body).unwrap();
+    let mut req = http().post(url).header(CONTENT_TYPE, JSON).body(bytes);
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
@@ -133,7 +134,7 @@ where
         resp.text().await.unwrap_or_default()
     );
     let bytes = resp.bytes().await.unwrap();
-    rmp_serde::from_slice(&bytes).unwrap()
+    serde_json::from_slice(&bytes).unwrap()
 }
 
 struct Account {
@@ -150,7 +151,7 @@ struct ExtraDevice {
 }
 
 async fn register_second_device(acc: &Account, name: &str) -> ExtraDevice {
-    let resp: DeviceCredential = post_msgpack_authed(
+    let resp: DeviceCredential = post_json_authed(
         &format!("{}/api/devices", acc.server.base),
         &DeviceRegistration {
             name: name.into(),
@@ -169,7 +170,7 @@ async fn register_second_device(acc: &Account, name: &str) -> ExtraDevice {
 /// The wrap (nominally the doc's DEK under the Home DEK) is fake bytes:
 /// the server stores it opaquely and these tests never unwrap.
 async fn create_doc(acc: &Account) -> Uuid {
-    let resp: CreateDocResponse = post_msgpack_authed(
+    let resp: CreateDocResponse = post_json_authed(
         &format!("{}/api/docs", acc.server.base),
         &CreateDocRequest {
             wrapped_dek: vec![7u8; 48],
@@ -274,7 +275,7 @@ async fn signup_into(server: TestServer) -> Account {
     let dek = Dek::generate();
     let wrapped = kek.wrap(&dek).unwrap();
 
-    let resp: SignupResponse = post_msgpack(
+    let resp: SignupResponse = post_json(
         &format!("{}/api/account/signup", server.base),
         &SignupRequest {
             email,
@@ -1885,7 +1886,7 @@ async fn signup_second(acc: &Account) -> (Uuid, String) {
     let kek = master.kek().unwrap();
     let dek = Dek::generate();
     let wrapped = kek.wrap(&dek).unwrap();
-    let resp: SignupResponse = post_msgpack(
+    let resp: SignupResponse = post_json(
         &format!("{}/api/account/signup", acc.server.base),
         &SignupRequest {
             email: format!("second-{}@example.com", Uuid::now_v7()),

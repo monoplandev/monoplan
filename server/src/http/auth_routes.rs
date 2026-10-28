@@ -10,6 +10,7 @@ use monoplan_protocol::{
 };
 use uuid::Uuid;
 
+use super::json::Json;
 use crate::auth::cookie;
 use crate::auth::queries::{
     DocKeyUpdate, NewAccount, PasswordResetOutcome, PasswordUpdate, PasswordUpdateOutcome,
@@ -20,7 +21,6 @@ use crate::auth::queries::{
 use crate::auth::tokens::{encode_token, generate_token, sha256};
 use crate::auth::{DeviceAuth, normalize_email};
 use crate::error::{ApiError, ApiResult};
-use crate::http::msgpack::Msgpack;
 use crate::state::AppState;
 
 /// 15 minutes per `spec/auth.md`.
@@ -28,8 +28,8 @@ const RECOVERY_SESSION_TTL_MILLIS: i64 = 15 * 60 * 1000;
 
 pub async fn signup(
     State(state): State<AppState>,
-    Msgpack(req): Msgpack<SignupRequest>,
-) -> ApiResult<(HeaderMap, Msgpack<SignupResponse>)> {
+    Json(req): Json<SignupRequest>,
+) -> ApiResult<(HeaderMap, Json<SignupResponse>)> {
     let email = normalize_email(&req.email)
         .ok_or_else(|| ApiError::BadRequest("email is required".into()))?;
     if req.device_name.trim().is_empty() {
@@ -77,7 +77,7 @@ pub async fn signup(
     let token_hex = encode_token(&device_token);
     Ok((
         cookie_headers(cookie::set_cookie(&token_hex, state.secure_cookies)),
-        Msgpack(SignupResponse {
+        Json(SignupResponse {
             account_id: created.account_id.to_string(),
             device_id: created.device_id.to_string(),
             device_token: token_hex,
@@ -88,14 +88,14 @@ pub async fn signup(
 
 pub async fn prelogin(
     State(state): State<AppState>,
-    Msgpack(req): Msgpack<PreloginRequest>,
-) -> ApiResult<Msgpack<PreloginResponse>> {
+    Json(req): Json<PreloginRequest>,
+) -> ApiResult<Json<PreloginResponse>> {
     let email = normalize_email(&req.email)
         .ok_or_else(|| ApiError::BadRequest("email is required".into()))?;
     let account = find_account_by_email(&state.db, email)
         .await?
         .ok_or(ApiError::NotFound)?;
-    Ok(Msgpack(PreloginResponse {
+    Ok(Json(PreloginResponse {
         master_salt: account.password_salt,
         kdf_params: account.kdf_params,
         recovery_salt: account.recovery_salt,
@@ -104,8 +104,8 @@ pub async fn prelogin(
 
 pub async fn login(
     State(state): State<AppState>,
-    Msgpack(req): Msgpack<LoginRequest>,
-) -> ApiResult<(HeaderMap, Msgpack<LoginResponse>)> {
+    Json(req): Json<LoginRequest>,
+) -> ApiResult<(HeaderMap, Json<LoginResponse>)> {
     let email = normalize_email(&req.email).ok_or(ApiError::InvalidCredentials)?;
     let account = find_account_by_email(&state.db, email)
         .await?
@@ -157,7 +157,7 @@ pub async fn login(
     };
     Ok((
         headers,
-        Msgpack(LoginResponse {
+        Json(LoginResponse {
             account_id: account.id.to_string(),
             primary_doc_id: account.primary_doc_id.to_string(),
             memberships,
@@ -169,8 +169,8 @@ pub async fn login(
 
 pub async fn recover(
     State(state): State<AppState>,
-    Msgpack(req): Msgpack<RecoverRequest>,
-) -> ApiResult<Msgpack<RecoverResponse>> {
+    Json(req): Json<RecoverRequest>,
+) -> ApiResult<Json<RecoverResponse>> {
     let email = normalize_email(&req.email).ok_or(ApiError::InvalidCredentials)?;
     let account = find_account_by_email(&state.db, email)
         .await?
@@ -214,7 +214,7 @@ pub async fn recover(
         RECOVERY_SESSION_TTL_MILLIS,
     )
     .await?;
-    Ok(Msgpack(RecoverResponse {
+    Ok(Json(RecoverResponse {
         account_id: account.id.to_string(),
         primary_doc_id: account.primary_doc_id.to_string(),
         doc_keys,
@@ -225,7 +225,7 @@ pub async fn recover(
 pub async fn password_change(
     State(state): State<AppState>,
     auth: DeviceAuth,
-    Msgpack(req): Msgpack<PasswordChangeRequest>,
+    Json(req): Json<PasswordChangeRequest>,
 ) -> ApiResult<()> {
     let account = find_account_by_id(&state.db, auth.account_id)
         .await?
@@ -250,8 +250,8 @@ pub async fn password_change(
 
 pub async fn password_reset(
     State(state): State<AppState>,
-    Msgpack(req): Msgpack<PasswordResetRequest>,
-) -> ApiResult<(HeaderMap, Msgpack<PasswordResetResponse>)> {
+    Json(req): Json<PasswordResetRequest>,
+) -> ApiResult<(HeaderMap, Json<PasswordResetResponse>)> {
     if req.device_name.trim().is_empty() {
         return Err(ApiError::BadRequest("device_name is required".into()));
     }
@@ -302,7 +302,7 @@ pub async fn password_reset(
     let token_hex = encode_token(&device_token);
     Ok((
         cookie_headers(cookie::set_cookie(&token_hex, state.secure_cookies)),
-        Msgpack(PasswordResetResponse {
+        Json(PasswordResetResponse {
             device_id: device_id.to_string(),
             device_token: token_hex,
             primary_doc_id: primary_doc_id.to_string(),

@@ -1961,7 +1961,6 @@ dependencies = [
  "rmp-serde",
  "rusqlite",
  "serde",
- "serde_bytes",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
@@ -2029,8 +2028,10 @@ dependencies = [
 name = "monoplan-protocol"
 version = "0.0.1-alpha.15"
 dependencies = [
+ "base64 0.22.1",
  "serde",
  "serde_bytes",
+ "serde_json",
  "uuid",
 ]
 
@@ -2055,7 +2056,6 @@ dependencies = [
  "rusqlite",
  "rust-embed",
  "serde",
- "serde_bytes",
  "serde_json",
  "sha2",
  "tempfile",

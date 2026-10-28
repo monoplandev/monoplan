@@ -1,14 +1,62 @@
-// Slim msgpack-over-fetch HTTP client for the auth surface. Same wire
-// format as the CLI; relative paths because the bundle is always served
-// from the same origin as the API (vite proxy in dev, single host in
-// prod). The device token rides as an HttpOnly cookie set by the server
-// — never touched from JS — so this module deliberately knows nothing
-// about it on the read side.
+// Slim JSON-over-fetch HTTP client for the auth surface. Same wire
+// format as the CLI (spec/auth.md §Wire encoding); relative paths because
+// the bundle is always served from the same origin as the API (vite proxy
+// in dev, single host in prod). The device token rides as an HttpOnly
+// cookie set by the server — never touched from JS — so this module
+// deliberately knows nothing about it on the read side.
+//
+// Byte fields (salts, nonces, wrapped keys) are `Uint8Array` on this side
+// of the module and standard base64 strings on the wire. The conversion
+// happens once, in `encodeBody` / `decodeBody`, keyed on field name: every
+// byte-valued field the API speaks is listed in `BYTE_FIELDS`, so adding
+// one to the protocol means adding it here too (the Rust side marks the
+// same fields with `serde_b64`).
 
-import { encode, decode } from "@msgpack/msgpack";
-
-export const MSGPACK_CT = "application/msgpack";
+export const JSON_CT = "application/json";
 export const REQUEST_ID_HEADER = "X-Request-Id";
+
+const BYTE_FIELDS: ReadonlySet<string> = new Set([
+  "master_salt",
+  "new_master_salt",
+  "auth_secret",
+  "new_auth_secret",
+  "current_auth_secret",
+  "recovery_salt",
+  "recovery_auth_secret",
+  "recovery_wrapped_dek",
+  "recovery_wrapped_dek_nonce",
+  "wrapped_dek",
+  "wrapped_dek_nonce",
+]);
+
+export function bytesToBase64(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+export function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/** JSON-encode a request body, base64-ing every `Uint8Array` wherever
+ *  it sits (the replacer sees nested objects and arrays too). */
+export function encodeBody(body: unknown): string {
+  return JSON.stringify(body, (_key, value: unknown) =>
+    value instanceof Uint8Array ? bytesToBase64(value) : value,
+  );
+}
+
+/** Parse a response body, turning every `BYTE_FIELDS` string back into a
+ *  `Uint8Array`. `null` stays `null` (optional fields like `recovery_salt`). */
+export function decodeBody<T>(text: string): T {
+  return JSON.parse(text, (key: string, value: unknown) =>
+    BYTE_FIELDS.has(key) && typeof value === "string" ? base64ToBytes(value) : value,
+  ) as T;
+}
 
 export interface KdfParams {
   m_kib: number;
@@ -366,7 +414,7 @@ export const api = {
 };
 
 async function post<T>(path: string, body: unknown): Promise<T> {
-  return request<T>(path, { method: "POST", body: encode(body) });
+  return request<T>(path, { method: "POST", body: encodeBody(body) });
 }
 
 async function get<T>(path: string): Promise<T> {
@@ -374,7 +422,7 @@ async function get<T>(path: string): Promise<T> {
 }
 
 async function patch<T>(path: string, body: unknown): Promise<T> {
-  return request<T>(path, { method: "PATCH", body: encode(body) });
+  return request<T>(path, { method: "PATCH", body: encodeBody(body) });
 }
 
 async function del<T>(path: string): Promise<T> {
@@ -383,7 +431,7 @@ async function del<T>(path: string): Promise<T> {
 
 async function request<T>(
   path: string,
-  init: { method: string; body?: BodyInit },
+  init: { method: string; body?: string },
 ): Promise<T> {
   const requestId = newRequestId();
   const res = await fetch(path, {
@@ -393,20 +441,20 @@ async function request<T>(
     // accidental `'omit'` would silently break logged-in calls.
     credentials: "same-origin",
     headers: {
-      "Content-Type": MSGPACK_CT,
-      Accept: MSGPACK_CT,
+      ...(init.body !== undefined ? { "Content-Type": JSON_CT } : {}),
+      Accept: JSON_CT,
       [REQUEST_ID_HEADER]: requestId,
     },
     body: init.body,
   });
   const echoedRequestId = res.headers.get(REQUEST_ID_HEADER) ?? requestId;
-  const buf = new Uint8Array(await res.arrayBuffer());
+  const text = await res.text();
   if (!res.ok) {
     let err: ApiErrorBody | null = null;
     try {
-      err = decode(buf) as ApiErrorBody;
+      err = JSON.parse(text) as ApiErrorBody;
     } catch {
-      // body wasn't msgpack — surface a generic error
+      // body wasn't JSON — surface a generic error
     }
     throw new ApiError(
       res.status,
@@ -415,8 +463,8 @@ async function request<T>(
       err?.message ?? `${res.status} ${res.statusText}`,
     );
   }
-  if (buf.length === 0) return undefined as T;
-  return decode(buf) as T;
+  if (text.length === 0) return undefined as T;
+  return decodeBody<T>(text);
 }
 
 function newRequestId(): string {

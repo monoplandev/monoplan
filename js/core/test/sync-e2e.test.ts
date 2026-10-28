@@ -14,7 +14,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawn, type Subprocess } from "bun";
 import { Database } from "bun:sqlite";
-import { decode, encode } from "@msgpack/msgpack";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -34,6 +33,13 @@ import {
 import type { EngineStorage } from "../wasm/monoplan_core_web.js";
 import { SyncBridge } from "../src/sync-bridge.ts";
 import { MemEngineStorage } from "./mem-engine-storage.ts";
+
+/** HTTP bodies are JSON with byte fields as base64 (spec/auth.md). */
+function jsonBody(body: unknown): string {
+  return JSON.stringify(body, (_k, v: unknown) =>
+    v instanceof Uint8Array ? Buffer.from(v).toString("base64") : v,
+  );
+}
 
 const REPO_ROOT = resolve(import.meta.dir, "../../..");
 const SERVER_BIN = join(REPO_ROOT, "target/debug/monoplan-server");
@@ -172,7 +178,7 @@ async function signup(s: ServerHandle, dekForWrap: Dek): Promise<Account> {
   );
   const wrapped = wrapDek(derived.kek, dekForWrap);
   const email = `e2e-${crypto.randomUUID()}@example.com`;
-  const body = encode({
+  const body = jsonBody({
     email,
     master_salt: masterSalt,
     kdf_params: KDF,
@@ -185,13 +191,13 @@ async function signup(s: ServerHandle, dekForWrap: Dek): Promise<Account> {
   });
   const resp = await fetch(`${s.baseUrl}/api/account/signup`, {
     method: "POST",
-    headers: { "Content-Type": "application/msgpack" },
+    headers: { "Content-Type": "application/json" },
     body,
   });
   if (!resp.ok) {
     throw new Error(`signup failed: ${resp.status} ${await resp.text()}`);
   }
-  const decoded = decode(new Uint8Array(await resp.arrayBuffer())) as {
+  const decoded = (await resp.json()) as {
     account_id: string;
     device_token: string;
     device_id: string;
@@ -209,11 +215,11 @@ async function registerDevice(
   primaryToken: string,
   name: string,
 ): Promise<string> {
-  const body = encode({ name, kind: "web" });
+  const body = jsonBody({ name, kind: "web" });
   const resp = await fetch(`${s.baseUrl}/api/devices`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/msgpack",
+      "Content-Type": "application/json",
       Authorization: `Bearer ${primaryToken}`,
     },
     body,
@@ -221,7 +227,7 @@ async function registerDevice(
   if (!resp.ok) {
     throw new Error(`register device failed: ${resp.status} ${await resp.text()}`);
   }
-  const decoded = decode(new Uint8Array(await resp.arrayBuffer())) as {
+  const decoded = (await resp.json()) as {
     device_token: string;
   };
   return decoded.device_token;
@@ -231,14 +237,14 @@ async function registerDevice(
  *  the doc's DEK under the Home DEK) is opaque to the server, so random
  *  bytes do for a test that keeps the DEK in memory. */
 async function createDoc(s: ServerHandle, token: string): Promise<string> {
-  const body = encode({
+  const body = jsonBody({
     wrapped_dek: crypto.getRandomValues(new Uint8Array(48)),
     wrapped_dek_nonce: crypto.getRandomValues(new Uint8Array(24)),
   });
   const resp = await fetch(`${s.baseUrl}/api/docs`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/msgpack",
+      "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
     body,
@@ -246,7 +252,7 @@ async function createDoc(s: ServerHandle, token: string): Promise<string> {
   if (!resp.ok) {
     throw new Error(`create doc failed: ${resp.status} ${await resp.text()}`);
   }
-  const decoded = decode(new Uint8Array(await resp.arrayBuffer())) as {
+  const decoded = (await resp.json()) as {
     doc_id: string;
   };
   return decoded.doc_id;

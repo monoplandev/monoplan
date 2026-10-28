@@ -6,19 +6,19 @@ use monoplan_protocol::{
 };
 use uuid::Uuid;
 
+use super::json::Json;
 use crate::auth::DeviceAuth;
 use crate::auth::queries::{create_device, list_devices, rename_device, revoke_device};
 use crate::auth::tokens::{encode_token, generate_token, sha256};
 use crate::error::{ApiError, ApiResult};
-use crate::http::msgpack::Msgpack;
 use crate::state::AppState;
 
 pub async fn list(
     State(state): State<AppState>,
     auth: DeviceAuth,
-) -> ApiResult<Msgpack<DevicesListResponse>> {
+) -> ApiResult<Json<DevicesListResponse>> {
     let rows = list_devices(&state.db, auth.account_id).await?;
-    Ok(Msgpack(DevicesListResponse {
+    Ok(Json(DevicesListResponse {
         devices: rows
             .into_iter()
             .map(|d| Device {
@@ -36,8 +36,8 @@ pub async fn list(
 pub async fn register(
     State(state): State<AppState>,
     auth: DeviceAuth,
-    Msgpack(req): Msgpack<DeviceRegistration>,
-) -> ApiResult<Msgpack<DeviceCredential>> {
+    Json(req): Json<DeviceRegistration>,
+) -> ApiResult<Json<DeviceCredential>> {
     if req.name.trim().is_empty() {
         return Err(ApiError::BadRequest("name is required".into()));
     }
@@ -53,7 +53,7 @@ pub async fn register(
         sha256(&token).to_vec(),
     )
     .await?;
-    Ok(Msgpack(DeviceCredential {
+    Ok(Json(DeviceCredential {
         device_id: device_id.to_string(),
         device_token: encode_token(&token),
     }))
@@ -77,7 +77,7 @@ pub async fn rename(
     State(state): State<AppState>,
     auth: DeviceAuth,
     Path(device_id): Path<String>,
-    Msgpack(req): Msgpack<DeviceRenameRequest>,
+    Json(req): Json<DeviceRenameRequest>,
 ) -> ApiResult<()> {
     let name = req.name.trim();
     if name.is_empty() {

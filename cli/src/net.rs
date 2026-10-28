@@ -1,4 +1,5 @@
-//! Tiny msgpack-over-http client.
+//! Tiny JSON-over-http client (`spec/auth.md` §Wire encoding). Byte
+//! fields are base64 strings courtesy of the protocol types' serde attrs.
 
 use monoplan_protocol::ErrorBody;
 use reqwest::header::CONTENT_TYPE;
@@ -6,7 +7,7 @@ use reqwest::{Method, StatusCode};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-const MSGPACK: &str = "application/msgpack";
+const JSON: &str = "application/json";
 
 #[derive(Debug, thiserror::Error)]
 pub enum NetError {
@@ -18,10 +19,8 @@ pub enum NetError {
     },
     #[error("request failed: {0}")]
     Transport(#[from] reqwest::Error),
-    #[error("encode: {0}")]
-    Encode(#[from] rmp_serde::encode::Error),
-    #[error("decode: {0}")]
-    Decode(#[from] rmp_serde::decode::Error),
+    #[error("encode/decode: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 pub struct Client {
@@ -115,8 +114,8 @@ impl Client {
         let url = format!("{}{}", self.base, path);
         let mut req = self.inner.request(method, url);
         if let Some(b) = body {
-            let bytes = rmp_serde::to_vec_named(b)?;
-            req = req.header(CONTENT_TYPE, MSGPACK).body(bytes);
+            let bytes = serde_json::to_vec(b)?;
+            req = req.header(CONTENT_TYPE, JSON).body(bytes);
         }
         if let Some(t) = token {
             req = req.bearer_auth(t);
@@ -125,7 +124,7 @@ impl Client {
         let status = resp.status();
         let bytes = resp.bytes().await?;
         if !status.is_success() {
-            let err: ErrorBody = rmp_serde::from_slice(&bytes).unwrap_or(ErrorBody {
+            let err: ErrorBody = serde_json::from_slice(&bytes).unwrap_or(ErrorBody {
                 code: "unknown".into(),
                 message: String::from_utf8_lossy(&bytes).into_owned(),
             });
@@ -137,13 +136,13 @@ impl Client {
         }
         // Empty body (HTTP 200 with no payload) is decoded as `Empty`.
         if bytes.is_empty() {
-            return Ok(rmp_serde::from_slice(&[0x80][..])?);
+            return Ok(serde_json::from_slice(b"{}")?);
         }
-        Ok(rmp_serde::from_slice(&bytes)?)
+        Ok(serde_json::from_slice(&bytes)?)
     }
 }
 
-/// Stand-in for handlers that return no body. Decodes from an empty
-/// fixmap (`0x80`) so `serde` is happy.
+/// Stand-in for handlers that return no body. Decodes from `{}` so
+/// `serde` is happy.
 #[derive(Debug, serde::Deserialize)]
 struct Empty {}

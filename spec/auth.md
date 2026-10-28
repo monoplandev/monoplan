@@ -30,7 +30,7 @@ Sharing links (`sharing-plan.md` §Invites): the link's fragment secret never re
 
 WebSocket upgrade: `GET /api/sync` with `Authorization: Bearer <device_token>` (CLI) or the `monoplan_device` cookie (web). Server validates on upgrade; the connection is bound to `(account_id, device_id)` for its lifetime. No per-message auth. (Frame encoding + version handshake: see `sync-protocol.md`.)
 
-All HTTP request and response bodies are MessagePack-encoded (`Content-Type: application/msgpack`). Same encoding as the WS path; one wire format across the system.
+All HTTP request and response bodies are JSON (`Content-Type: application/json`); byte fields (`*_salt`, `*_secret`, `wrapped_dek*`) are standard base64 strings. The WS path is MessagePack: see `architecture.md` §Wire encoding for why the two differ. A body the server cannot parse, including invalid base64 in a byte field or a wrong `Content-Type`, is a `400 bad_request` in the usual error envelope.
 
 ## Token model
 

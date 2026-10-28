@@ -27,7 +27,6 @@ axum = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
 serde = { workspace = true }
-serde_bytes = { workspace = true }
 rmp-serde = { workspace = true }
 toml = { workspace = true }
 rusqlite = { workspace = true }

@@ -10,4 +10,8 @@ path = "src/lib.rs"
 [dependencies]
 serde = { workspace = true }
 serde_bytes = { workspace = true }
+base64 = { workspace = true }
 uuid = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

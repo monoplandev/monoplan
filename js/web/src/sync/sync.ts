@@ -3,7 +3,7 @@
 // this module only contributes the things that depend on the browser
 // environment: the `WebSocket` factory (cookie auth via same-origin,
 // URL derived from `window.location`), the auth probe (the
-// `/api/devices` endpoint via our msgpack HTTP client), the bundler
+// `/api/devices` endpoint via our JSON HTTP client), the bundler
 // wasm build's handshake helpers, and the client identity.
 
 import {

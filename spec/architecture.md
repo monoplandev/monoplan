@@ -5,7 +5,7 @@
 ```
 Cargo.toml         workspace root
 crates/
-  protocol/        shared wire types (serde + rmp-serde)
+  protocol/        shared wire types (serde; JSON on HTTP, rmp-serde on WS)
 core/              rust lib — loro, e2ee, sync engine. native + wasm targets.
 core/web/          wasm-bindgen surface (excluded from default-members)
 server/            rust bin — http + ws, sqlite-backed, dumb relay
@@ -98,8 +98,11 @@ coordination there is, and the direct mode is additive to it.
 
 ## Wire encoding
 
-All HTTP bodies and all WebSocket frames are **MessagePack** (`rmp-serde`). Single encoding everywhere; same `#[derive(Serialize, Deserialize)]` types as everything else. Native byte support means no base64-wrap of encrypted blobs. MessagePack's tagged-map semantics give us free additive compat (add a field → old decoders ignore it; remove a field → use `Option`).
+Two encodings, chosen per transport:
 
-`Content-Type: application/msgpack` on HTTP. WS frames are binary.
+- **HTTP bodies are JSON** (`Content-Type: application/json`), via `serde_json` / `axum::Json`. Byte fields (salts, nonces, wrapped keys; a few dozen bytes each) travel as standard padded base64 strings, marked `#[serde(with = "serde_b64")]` on the protocol types and mirrored by a field-name list in the web client. The REST surface is key management and account admin: small payloads, read by humans in a browser Network tab or `curl | jq` far more often than by anything that cares about bytes on the wire. (Switched from MessagePack 2026-10-29; the "no base64" argument never applied here because encrypted blobs do not cross HTTP.)
+- **WebSocket frames are MessagePack** (`rmp-serde`), binary. Encrypted update and snapshot blobs ride this path, so native `bin` support matters, and the frame rate makes a compact encoding worth the opacity. Byte fields are `serde_bytes`.
 
-A `cargo run -p monoplan -- decode <file>` debug subcommand pretty-prints any captured frame as JSON for inspection (and, given the DEK, can decrypt update blobs in the same pass).
+Both use the same `#[derive(Serialize, Deserialize)]` types with string-keyed maps, so additive compat is free on either path (add a field → old decoders ignore it; remove a field → use `Option`). Malformed HTTP bodies (bad JSON, missing field, invalid base64) return the standard `400 bad_request` error envelope. The admin API (`admin.md`) was JSON from the start.
+
+Not built: a `monoplan decode <file>` debug subcommand that pretty-prints a captured WS frame as JSON (and, given the DEK, decrypts the blobs inside).

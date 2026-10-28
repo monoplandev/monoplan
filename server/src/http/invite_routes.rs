@@ -15,6 +15,7 @@ use monoplan_protocol::{
 };
 use uuid::Uuid;
 
+use super::json::Json;
 use crate::auth::DeviceAuth;
 use crate::auth::invites::{
     AcceptInviteOutcome, AcceptWrap, CreateInviteOutcome, DEFAULT_TTL_MILLIS, FetchInviteOutcome,
@@ -23,15 +24,14 @@ use crate::auth::invites::{
 };
 use crate::auth::tokens::decode_token;
 use crate::error::{ApiError, ApiResult};
-use crate::http::msgpack::Msgpack;
 use crate::state::AppState;
 
 pub async fn create(
     State(state): State<AppState>,
     auth: DeviceAuth,
     Path(doc_id): Path<String>,
-    Msgpack(req): Msgpack<CreateInviteRequest>,
-) -> ApiResult<Msgpack<CreateInviteResponse>> {
+    Json(req): Json<CreateInviteRequest>,
+) -> ApiResult<Json<CreateInviteResponse>> {
     let doc_id = parse_doc_id(&doc_id)?;
     if doc_id == auth.primary_doc_id {
         return Err(ApiError::Forbidden(
@@ -66,7 +66,7 @@ pub async fn create(
     )
     .await?
     {
-        CreateInviteOutcome::Created { expires_at } => Ok(Msgpack(CreateInviteResponse {
+        CreateInviteOutcome::Created { expires_at } => Ok(Json(CreateInviteResponse {
             invite_id: req.invite_id,
             expires_at,
         })),
@@ -81,12 +81,12 @@ pub async fn list(
     State(state): State<AppState>,
     auth: DeviceAuth,
     Path(doc_id): Path<String>,
-) -> ApiResult<Msgpack<InvitesListResponse>> {
+) -> ApiResult<Json<InvitesListResponse>> {
     let doc_id = parse_doc_id(&doc_id)?;
     let rows = list_invites(&state.db, auth.account_id, doc_id)
         .await?
         .ok_or(ApiError::NotFound)?;
-    Ok(Msgpack(InvitesListResponse {
+    Ok(Json(InvitesListResponse {
         invites: rows
             .into_iter()
             .map(|r| Invite {
@@ -119,10 +119,10 @@ pub async fn revoke(
 pub async fn fetch(
     State(state): State<AppState>,
     Path(invite_id): Path<String>,
-) -> ApiResult<Msgpack<InvitePayloadResponse>> {
+) -> ApiResult<Json<InvitePayloadResponse>> {
     let id = decode_token(&invite_id).ok_or(ApiError::NotFound)?;
     match fetch_invite(&state.db, id.to_vec()).await? {
-        FetchInviteOutcome::Open(p) => Ok(Msgpack(InvitePayloadResponse {
+        FetchInviteOutcome::Open(p) => Ok(Json(InvitePayloadResponse {
             doc_id: p.doc_id.to_string(),
             wrapped_dek: p.wrapped_dek,
             wrapped_dek_nonce: p.wrapped_dek_nonce,
@@ -139,8 +139,8 @@ pub async fn accept(
     State(state): State<AppState>,
     auth: DeviceAuth,
     Path(invite_id): Path<String>,
-    Msgpack(req): Msgpack<AcceptInviteRequest>,
-) -> ApiResult<Msgpack<AcceptInviteResponse>> {
+    Json(req): Json<AcceptInviteRequest>,
+) -> ApiResult<Json<AcceptInviteResponse>> {
     let id = decode_token(&invite_id).ok_or(ApiError::NotFound)?;
     if req.wrapped_dek.is_empty() || req.wrapped_dek_nonce.is_empty() {
         return Err(ApiError::BadRequest("wrapped_dek is required".into()));
@@ -156,7 +156,7 @@ pub async fn accept(
     )
     .await?
     {
-        AcceptInviteOutcome::Joined { doc_id } => Ok(Msgpack(AcceptInviteResponse {
+        AcceptInviteOutcome::Joined { doc_id } => Ok(Json(AcceptInviteResponse {
             doc_id: doc_id.to_string(),
         })),
         AcceptInviteOutcome::NotFound => Err(ApiError::NotFound),
@@ -172,12 +172,12 @@ pub async fn members(
     State(state): State<AppState>,
     auth: DeviceAuth,
     Path(doc_id): Path<String>,
-) -> ApiResult<Msgpack<MembersListResponse>> {
+) -> ApiResult<Json<MembersListResponse>> {
     let doc_id = parse_doc_id(&doc_id)?;
     let rows = list_members(&state.db, auth.account_id, doc_id)
         .await?
         .ok_or(ApiError::NotFound)?;
-    Ok(Msgpack(MembersListResponse {
+    Ok(Json(MembersListResponse {
         members: rows
             .into_iter()
             .map(|r| Member {

@@ -25,7 +25,7 @@ use serde::de::DeserializeOwned;
 use std::sync::OnceLock;
 use uuid::Uuid;
 
-const MSGPACK: &str = "application/msgpack";
+const JSON: &str = "application/json";
 
 fn weak_params() -> KdfParams {
     KdfParams {
@@ -75,13 +75,13 @@ fn http() -> &'static reqwest::Client {
     C.get_or_init(reqwest::Client::new)
 }
 
-async fn post_msgpack<Req, Resp>(url: &str, body: &Req, token: Option<&str>) -> Resp
+async fn post_json<Req, Resp>(url: &str, body: &Req, token: Option<&str>) -> Resp
 where
     Req: Serialize,
     Resp: DeserializeOwned,
 {
-    let bytes = rmp_serde::to_vec_named(body).unwrap();
-    let mut req = http().post(url).header(CONTENT_TYPE, MSGPACK).body(bytes);
+    let bytes = serde_json::to_vec(body).unwrap();
+    let mut req = http().post(url).header(CONTENT_TYPE, JSON).body(bytes);
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
@@ -93,12 +93,12 @@ where
         resp.text().await.unwrap_or_default()
     );
     let bytes = resp.bytes().await.unwrap();
-    rmp_serde::from_slice(&bytes).unwrap()
+    serde_json::from_slice(&bytes).unwrap()
 }
 
-async fn post_msgpack_no_response<Req: Serialize>(url: &str, body: &Req, token: Option<&str>) {
-    let bytes = rmp_serde::to_vec_named(body).unwrap();
-    let mut req = http().post(url).header(CONTENT_TYPE, MSGPACK).body(bytes);
+async fn post_json_no_response<Req: Serialize>(url: &str, body: &Req, token: Option<&str>) {
+    let bytes = serde_json::to_vec(body).unwrap();
+    let mut req = http().post(url).header(CONTENT_TYPE, JSON).body(bytes);
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
@@ -111,11 +111,11 @@ async fn post_msgpack_no_response<Req: Serialize>(url: &str, body: &Req, token: 
     );
 }
 
-async fn post_msgpack_status<Req: Serialize>(url: &str, body: &Req) -> reqwest::StatusCode {
-    let bytes = rmp_serde::to_vec_named(body).unwrap();
+async fn post_json_status<Req: Serialize>(url: &str, body: &Req) -> reqwest::StatusCode {
+    let bytes = serde_json::to_vec(body).unwrap();
     let resp = http()
         .post(url)
-        .header(CONTENT_TYPE, MSGPACK)
+        .header(CONTENT_TYPE, JSON)
         .body(bytes)
         .send()
         .await
@@ -125,7 +125,7 @@ async fn post_msgpack_status<Req: Serialize>(url: &str, body: &Req) -> reqwest::
 
 /// Returns `(status, set-cookie values, decoded body)`. Used by cookie
 /// tests to assert both transport behaviour and response content.
-async fn post_msgpack_full<Req, Resp>(
+async fn post_json_full<Req, Resp>(
     url: &str,
     body: &Req,
     token: Option<&str>,
@@ -135,8 +135,8 @@ where
     Req: Serialize,
     Resp: DeserializeOwned,
 {
-    let bytes = rmp_serde::to_vec_named(body).unwrap();
-    let mut req = http().post(url).header(CONTENT_TYPE, MSGPACK).body(bytes);
+    let bytes = serde_json::to_vec(body).unwrap();
+    let mut req = http().post(url).header(CONTENT_TYPE, JSON).body(bytes);
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
@@ -155,7 +155,7 @@ where
     let parsed = if bytes.is_empty() {
         None
     } else {
-        Some(rmp_serde::from_slice(&bytes).unwrap())
+        Some(serde_json::from_slice(&bytes).unwrap())
     };
     (status, set_cookies, parsed)
 }
@@ -226,7 +226,7 @@ async fn signup() -> Account {
     let (recovery, recovery_code, recovery_salt) = enrol_recovery(&dek, kdf_params);
 
     let url = format!("{}/api/account/signup", server.base);
-    let resp: SignupResponse = post_msgpack(
+    let resp: SignupResponse = post_json(
         &url,
         &SignupRequest {
             email: email.clone(),
@@ -262,14 +262,14 @@ async fn signup() -> Account {
 #[tokio::test]
 async fn device_can_be_renamed() {
     let acc = signup().await;
-    let bytes = rmp_serde::to_vec_named(&DeviceRenameRequest {
+    let bytes = serde_json::to_vec(&DeviceRenameRequest {
         name: "  renamed device  ".into(),
     })
     .unwrap();
     let response = http()
         .patch(format!("{}/api/devices/{}", acc.server.base, acc.device_id))
         .bearer_auth(&acc.device_token)
-        .header(CONTENT_TYPE, MSGPACK)
+        .header(CONTENT_TYPE, JSON)
         .body(bytes)
         .send()
         .await
@@ -284,7 +284,7 @@ async fn device_can_be_renamed() {
         .unwrap();
     assert!(response.status().is_success());
     let devices: DevicesListResponse =
-        rmp_serde::from_slice(&response.bytes().await.unwrap()).unwrap();
+        serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
     assert_eq!(devices.devices.len(), 1);
     assert_eq!(devices.devices[0].name, "renamed device");
     // Test server binds loopback with connect info, no proxy header.
@@ -298,7 +298,7 @@ async fn device_can_be_renamed() {
 async fn login_with_wrong_password_is_rejected() {
     let acc = signup().await;
 
-    let pre: PreloginResponse = post_msgpack(
+    let pre: PreloginResponse = post_json(
         &format!("{}/api/account/prelogin", acc.server.base),
         &PreloginRequest {
             email: acc.email.clone(),
@@ -310,7 +310,7 @@ async fn login_with_wrong_password_is_rejected() {
         derive_password_master(b"wrong password", &pre.master_salt, pre.kdf_params).unwrap();
     let auth = master.auth_secret().unwrap();
 
-    let status = post_msgpack_status(
+    let status = post_json_status(
         &format!("{}/api/account/login", acc.server.base),
         &LoginRequest {
             email: acc.email,
@@ -325,7 +325,7 @@ async fn login_with_wrong_password_is_rejected() {
 #[tokio::test]
 async fn prelogin_unknown_email_is_404() {
     let server = TestServer::start().await;
-    let status = post_msgpack_status(
+    let status = post_json_status(
         &format!("{}/api/account/prelogin", server.base),
         &PreloginRequest {
             email: "nope@nowhere".into(),
@@ -349,7 +349,7 @@ async fn signup_duplicate_email_is_409() {
     let dek = Dek::generate();
     let wrapped = kek.wrap(&dek).unwrap();
 
-    let status = post_msgpack_status(
+    let status = post_json_status(
         &format!("{}/api/account/signup", acc.server.base),
         &SignupRequest {
             email: acc.email,
@@ -403,11 +403,11 @@ async fn signup_adopts_client_chosen_primary_doc_id() {
     let chosen = Uuid::new_v4().to_string();
     let req = signup_request(Some(chosen.clone()));
     let email = req.email.clone();
-    let resp: SignupResponse = post_msgpack(&url, &req, None).await;
+    let resp: SignupResponse = post_json(&url, &req, None).await;
     assert_eq!(resp.primary_doc_id, chosen);
 
     // Login resolves the same doc and its owner membership hangs off it.
-    let pre: PreloginResponse = post_msgpack(
+    let pre: PreloginResponse = post_json(
         &format!("{}/api/account/prelogin", server.base),
         &PreloginRequest {
             email: email.clone(),
@@ -421,7 +421,7 @@ async fn signup_adopts_client_chosen_primary_doc_id() {
         pre.kdf_params,
     )
     .unwrap();
-    let login: LoginResponse = post_msgpack(
+    let login: LoginResponse = post_json(
         &format!("{}/api/account/login", server.base),
         &LoginRequest {
             email,
@@ -442,8 +442,8 @@ async fn signup_with_taken_primary_doc_id_is_409() {
     let server = TestServer::start().await;
     let url = format!("{}/api/account/signup", server.base);
     let chosen = Uuid::new_v4().to_string();
-    let _: SignupResponse = post_msgpack(&url, &signup_request(Some(chosen.clone())), None).await;
-    let status = post_msgpack_status(&url, &signup_request(Some(chosen))).await;
+    let _: SignupResponse = post_json(&url, &signup_request(Some(chosen.clone())), None).await;
+    let status = post_json_status(&url, &signup_request(Some(chosen))).await;
     assert_eq!(status, reqwest::StatusCode::CONFLICT);
 }
 
@@ -451,7 +451,7 @@ async fn signup_with_taken_primary_doc_id_is_409() {
 async fn signup_with_malformed_primary_doc_id_is_400() {
     let server = TestServer::start().await;
     let url = format!("{}/api/account/signup", server.base);
-    let status = post_msgpack_status(&url, &signup_request(Some("not-a-uuid".into()))).await;
+    let status = post_json_status(&url, &signup_request(Some("not-a-uuid".into()))).await;
     assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
 }
 
@@ -462,14 +462,14 @@ async fn signup_without_recovery_material_is_rejected() {
     #[derive(Serialize)]
     struct LegacySignup {
         email: String,
-        #[serde(with = "serde_bytes")]
+        #[serde(with = "monoplan_protocol::auth::serde_b64")]
         master_salt: Vec<u8>,
         kdf_params: KdfParams,
-        #[serde(with = "serde_bytes")]
+        #[serde(with = "monoplan_protocol::auth::serde_b64")]
         auth_secret: Vec<u8>,
-        #[serde(with = "serde_bytes")]
+        #[serde(with = "monoplan_protocol::auth::serde_b64")]
         wrapped_dek: Vec<u8>,
-        #[serde(with = "serde_bytes")]
+        #[serde(with = "monoplan_protocol::auth::serde_b64")]
         wrapped_dek_nonce: Vec<u8>,
         recovery: Option<RecoveryMaterial>,
         device_name: String,
@@ -482,7 +482,7 @@ async fn signup_without_recovery_material_is_rejected() {
     let kek = master.kek().unwrap();
     let dek = Dek::generate();
     let wrapped = kek.wrap(&dek).unwrap();
-    let status = post_msgpack_status(
+    let status = post_json_status(
         &format!("{}/api/account/signup", server.base),
         &LegacySignup {
             email: format!("user-{}@example.com", Uuid::now_v7()),
@@ -508,7 +508,7 @@ async fn email_is_normalised_server_side() {
     let acc = signup().await;
     let variant = format!("  {} ", acc.email.to_uppercase());
 
-    let status = post_msgpack_status(
+    let status = post_json_status(
         &format!("{}/api/account/prelogin", acc.server.base),
         &PreloginRequest {
             email: variant.clone(),
@@ -524,7 +524,7 @@ async fn email_is_normalised_server_side() {
     let auth = master.auth_secret().unwrap();
     let dek = Dek::generate();
     let wrapped = kek.wrap(&dek).unwrap();
-    let status = post_msgpack_status(
+    let status = post_json_status(
         &format!("{}/api/account/signup", acc.server.base),
         &SignupRequest {
             email: variant,
@@ -549,7 +549,7 @@ async fn recovery_session_token_cannot_be_reused() {
     let recovery_code = acc.recovery_code.clone();
     let recovery_salt = acc.recovery_salt.clone();
 
-    let pre: PreloginResponse = post_msgpack(
+    let pre: PreloginResponse = post_json(
         &format!("{}/api/account/prelogin", acc.server.base),
         &PreloginRequest {
             email: acc.email.clone(),
@@ -563,7 +563,7 @@ async fn recovery_session_token_cannot_be_reused() {
     let r_kek = r_master.kek().unwrap();
     let r_auth = r_master.auth_secret().unwrap();
 
-    let recovered: RecoverResponse = post_msgpack(
+    let recovered: RecoverResponse = post_json(
         &format!("{}/api/account/recover", acc.server.base),
         &RecoverRequest {
             email: acc.email.clone(),
@@ -593,7 +593,7 @@ async fn recovery_session_token_cannot_be_reused() {
 
     // A reset that leaves a recovered membership un-rewrapped is a 400
     // and must *not* burn the session.
-    let status = post_msgpack_status(
+    let status = post_json_status(
         &format!("{}/api/account/password/reset", acc.server.base),
         &PasswordResetRequest {
             recovery_session_token: recovered.recovery_session_token.clone(),
@@ -608,7 +608,7 @@ async fn recovery_session_token_cannot_be_reused() {
     .await;
     assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
 
-    let reset: monoplan_protocol::PasswordResetResponse = post_msgpack(
+    let reset: monoplan_protocol::PasswordResetResponse = post_json(
         &format!("{}/api/account/password/reset", acc.server.base),
         &PasswordResetRequest {
             recovery_session_token: recovered.recovery_session_token.clone(),
@@ -625,7 +625,7 @@ async fn recovery_session_token_cannot_be_reused() {
     assert!(!reset.device_token.is_empty());
 
     // Recovery session token cannot be reused.
-    let status = post_msgpack_status(
+    let status = post_json_status(
         &format!("{}/api/account/password/reset", acc.server.base),
         &PasswordResetRequest {
             recovery_session_token: recovered.recovery_session_token,
@@ -677,7 +677,7 @@ fn unwrap_doc_key(kek: &monoplan_core::Kek, key: &DocKey) -> Dek {
 
 /// Prelogin + login (no device registration) with `password`.
 async fn login_with(acc: &Account, password: &str) -> LoginResponse {
-    let pre: PreloginResponse = post_msgpack(
+    let pre: PreloginResponse = post_json(
         &format!("{}/api/account/prelogin", acc.server.base),
         &PreloginRequest {
             email: acc.email.clone(),
@@ -687,7 +687,7 @@ async fn login_with(acc: &Account, password: &str) -> LoginResponse {
     .await;
     let master =
         derive_password_master(password.as_bytes(), &pre.master_salt, pre.kdf_params).unwrap();
-    post_msgpack(
+    post_json(
         &format!("{}/api/account/login", acc.server.base),
         &LoginRequest {
             email: acc.email.clone(),
@@ -812,7 +812,7 @@ async fn password_change_rewraps_only_the_primary_and_other_docs_follow_the_home
 
     // The old "re-wrap every membership" shape is now a mismatch: the
     // second doc's wrap is under the Home DEK and must not be rewritten.
-    let status = post_msgpack_status_authed(
+    let status = post_json_status_authed(
         &url,
         &req(vec![
             wrap_doc_key(&new_kek, &acc.primary_doc_id, &acc.dek),
@@ -823,7 +823,7 @@ async fn password_change_rewraps_only_the_primary_and_other_docs_follow_the_home
     .await;
     assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
     // Only the non-primary → rejected.
-    let status = post_msgpack_status_authed(
+    let status = post_json_status_authed(
         &url,
         &req(vec![wrap_doc_key(&new_kek, &second_doc_id, &second_dek)]),
         &acc.device_token,
@@ -831,13 +831,13 @@ async fn password_change_rewraps_only_the_primary_and_other_docs_follow_the_home
     .await;
     assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
     // Empty → rejected.
-    let status = post_msgpack_status_authed(&url, &req(vec![]), &acc.device_token).await;
+    let status = post_json_status_authed(&url, &req(vec![]), &acc.device_token).await;
     assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
     // Old password still works after the rejected attempts.
     assert_eq!(login_with(&acc, password).await.memberships.len(), 2);
 
     // Exactly the primary → accepted.
-    post_msgpack_no_response(
+    post_json_no_response(
         &url,
         &req(vec![wrap_doc_key(&new_kek, &acc.primary_doc_id, &acc.dek)]),
         Some(&acc.device_token),
@@ -864,7 +864,7 @@ async fn password_change_rewraps_only_the_primary_and_other_docs_follow_the_home
     assert_eq!(reopened.as_bytes(), second_dek.as_bytes());
 }
 
-async fn get_msgpack_authed<Resp: DeserializeOwned>(url: &str, token: &str) -> Resp {
+async fn get_json_authed<Resp: DeserializeOwned>(url: &str, token: &str) -> Resp {
     let resp = http().get(url).bearer_auth(token).send().await.unwrap();
     assert!(
         resp.status().is_success(),
@@ -872,7 +872,7 @@ async fn get_msgpack_authed<Resp: DeserializeOwned>(url: &str, token: &str) -> R
         resp.status(),
         resp.text().await.unwrap_or_default()
     );
-    rmp_serde::from_slice(&resp.bytes().await.unwrap()).unwrap()
+    serde_json::from_slice(&resp.bytes().await.unwrap()).unwrap()
 }
 
 /// `POST /api/docs` with a fresh DEK wrapped under `home` (the
@@ -880,7 +880,7 @@ async fn get_msgpack_authed<Resp: DeserializeOwned>(url: &str, token: &str) -> R
 async fn create_doc(acc: &Account, home: &Dek) -> (String, Dek) {
     let dek = Dek::generate();
     let w = home.wrap_dek(&dek).unwrap();
-    let resp: CreateDocResponse = post_msgpack(
+    let resp: CreateDocResponse = post_json(
         &format!("{}/api/docs", acc.server.base),
         &CreateDocRequest {
             wrapped_dek: w.ciphertext,
@@ -908,7 +908,7 @@ async fn signup_on(base: &str) -> SecondAccount {
     let kek = master.kek().unwrap();
     let dek = Dek::generate();
     let wrapped = kek.wrap(&dek).unwrap();
-    let resp: SignupResponse = post_msgpack(
+    let resp: SignupResponse = post_json(
         &format!("{}/api/account/signup", base),
         &SignupRequest {
             email: format!("second-{}@example.com", uuid::Uuid::now_v7()),
@@ -993,7 +993,7 @@ async fn owner_deletes_created_doc_but_never_the_primary() {
         delete_status(&format!("{}/{}", docs_url, doc_id), &acc.device_token).await,
         reqwest::StatusCode::OK
     );
-    let docs: DocsListResponse = get_msgpack_authed(&docs_url, &acc.device_token).await;
+    let docs: DocsListResponse = get_json_authed(&docs_url, &acc.device_token).await;
     let ids: Vec<&str> = docs.memberships.iter().map(|m| m.doc_id.as_str()).collect();
     assert_eq!(ids, vec![acc.primary_doc_id.as_str()]);
     // Every row under it is gone.
@@ -1073,7 +1073,7 @@ async fn owner_deletes_a_doc_out_from_under_its_other_members() {
         delete_status(&url, &other.device_token).await,
         reqwest::StatusCode::NOT_FOUND
     );
-    let member_docs: DocsListResponse = get_msgpack_authed(
+    let member_docs: DocsListResponse = get_json_authed(
         &format!("{}/api/docs", acc.server.base),
         &other.device_token,
     )
@@ -1083,7 +1083,7 @@ async fn owner_deletes_a_doc_out_from_under_its_other_members() {
     issue_invite(&acc, &doc_id, &dek, None).await;
     assert!(delete_status(&url, &acc.device_token).await.is_success());
 
-    let member_docs: DocsListResponse = get_msgpack_authed(
+    let member_docs: DocsListResponse = get_json_authed(
         &format!("{}/api/docs", acc.server.base),
         &other.device_token,
     )
@@ -1115,7 +1115,7 @@ async fn created_doc_survives_password_change_and_recovery_with_no_per_doc_rewra
 
     // Listed with the primary first, owner role, Home DEK opens the wrap.
     let docs: DocsListResponse =
-        get_msgpack_authed(&format!("{}/api/docs", acc.server.base), &acc.device_token).await;
+        get_json_authed(&format!("{}/api/docs", acc.server.base), &acc.device_token).await;
     assert_eq!(docs.primary_doc_id, acc.primary_doc_id);
     let ids: Vec<&str> = docs.memberships.iter().map(|m| m.doc_id.as_str()).collect();
     assert_eq!(ids, vec![acc.primary_doc_id.as_str(), doc_id.as_str()]);
@@ -1150,7 +1150,7 @@ async fn created_doc_survives_password_change_and_recovery_with_no_per_doc_rewra
         new_doc_keys: keys,
     };
     // Naming the created doc is a mismatch, not a courtesy.
-    let status = post_msgpack_status_authed(
+    let status = post_json_status_authed(
         &url,
         &req(vec![
             wrap_doc_key(&new_kek, &acc.primary_doc_id, &acc.dek),
@@ -1160,7 +1160,7 @@ async fn created_doc_survives_password_change_and_recovery_with_no_per_doc_rewra
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
-    post_msgpack_no_response(
+    post_json_no_response(
         &url,
         &req(vec![wrap_doc_key(&new_kek, &acc.primary_doc_id, &acc.dek)]),
         Some(&acc.device_token),
@@ -1209,7 +1209,7 @@ async fn created_doc_survives_password_change_and_recovery_with_no_per_doc_rewra
     let recovery_salt = acc.recovery_salt.clone();
     let r_master = derive_recovery_master(&recovery_code, &recovery_salt, acc.kdf_params).unwrap();
     let r_kek = r_master.kek().unwrap();
-    let recovered: RecoverResponse = post_msgpack(
+    let recovered: RecoverResponse = post_json(
         &format!("{}/api/account/recover", acc.server.base),
         &RecoverRequest {
             email: acc.email.clone(),
@@ -1242,7 +1242,7 @@ async fn created_doc_survives_password_change_and_recovery_with_no_per_doc_rewra
         device_kind: "linux".into(),
     };
     // Including the created doc is a mismatch and does not burn the session.
-    let status = post_msgpack_status(
+    let status = post_json_status(
         &format!("{}/api/account/password/reset", acc.server.base),
         &reset_req(vec![
             wrap_doc_key(&reset_kek, &acc.primary_doc_id, &recovered_home),
@@ -1251,7 +1251,7 @@ async fn created_doc_survives_password_change_and_recovery_with_no_per_doc_rewra
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
-    let reset: monoplan_protocol::PasswordResetResponse = post_msgpack(
+    let reset: monoplan_protocol::PasswordResetResponse = post_json(
         &format!("{}/api/account/password/reset", acc.server.base),
         &reset_req(vec![wrap_doc_key(
             &reset_kek,
@@ -1265,7 +1265,7 @@ async fn created_doc_survives_password_change_and_recovery_with_no_per_doc_rewra
 
     // The recovering device learns about the other doc from the list
     // endpoint and opens it with the Home DEK it just recovered.
-    let docs: DocsListResponse = get_msgpack_authed(
+    let docs: DocsListResponse = get_json_authed(
         &format!("{}/api/docs", acc.server.base),
         &reset.device_token,
     )
@@ -1317,15 +1317,15 @@ async fn created_doc_survives_password_change_and_recovery_with_no_per_doc_rewra
     );
 }
 
-async fn post_msgpack_status_authed<Req: Serialize>(
+async fn post_json_status_authed<Req: Serialize>(
     url: &str,
     body: &Req,
     token: &str,
 ) -> reqwest::StatusCode {
-    let bytes = rmp_serde::to_vec_named(body).unwrap();
+    let bytes = serde_json::to_vec(body).unwrap();
     http()
         .post(url)
-        .header(CONTENT_TYPE, MSGPACK)
+        .header(CONTENT_TYPE, JSON)
         .bearer_auth(token)
         .body(bytes)
         .send()
@@ -1350,7 +1350,7 @@ async fn signup_sets_device_cookie_with_expected_attributes() {
     let dek = Dek::generate();
     let wrapped = kek.wrap(&dek).unwrap();
 
-    let (status, set_cookies, body): (_, _, Option<SignupResponse>) = post_msgpack_full(
+    let (status, set_cookies, body): (_, _, Option<SignupResponse>) = post_json_full(
         &format!("{}/api/account/signup", server.base),
         &SignupRequest {
             email: email.clone(),
@@ -1397,9 +1397,9 @@ async fn cookie_authenticates_logout_without_bearer() {
     let acc = signup().await;
     // Logout via cookie only (no Authorization header).
     let cookie_header = format!("monoplan_device={}", acc.device_token);
-    let (status, set_cookies, _): (_, _, Option<()>) = post_msgpack_full(
+    let (status, set_cookies, _): (_, _, Option<()>) = post_json_full(
         &format!("{}/api/account/logout", acc.server.base),
-        &serde_bytes::Bytes::new(b""), // empty body; route ignores it
+        &serde_json::json!({}), // empty body; route ignores it
         None,
         Some(&cookie_header),
     )
@@ -1419,9 +1419,9 @@ async fn cookie_authenticates_logout_without_bearer() {
     assert_eq!(cookie_value(cleared, "monoplan_device"), Some(""));
 
     // Subsequent bearer call should now 401 — the device was revoked.
-    let status = post_msgpack_status(
+    let status = post_json_status(
         &format!("{}/api/account/logout", acc.server.base),
-        &serde_bytes::Bytes::new(b""),
+        &serde_json::json!({}),
     )
     .await;
     assert_eq!(status, reqwest::StatusCode::UNAUTHORIZED);
@@ -1430,7 +1430,7 @@ async fn cookie_authenticates_logout_without_bearer() {
 #[tokio::test]
 async fn login_without_register_device_does_not_set_cookie() {
     let acc = signup().await;
-    let pre: PreloginResponse = post_msgpack(
+    let pre: PreloginResponse = post_json(
         &format!("{}/api/account/prelogin", acc.server.base),
         &PreloginRequest {
             email: acc.email.clone(),
@@ -1445,7 +1445,7 @@ async fn login_without_register_device_does_not_set_cookie() {
     )
     .unwrap();
     let auth = master.auth_secret().unwrap();
-    let (status, set_cookies, _): (_, _, Option<LoginResponse>) = post_msgpack_full(
+    let (status, set_cookies, _): (_, _, Option<LoginResponse>) = post_json_full(
         &format!("{}/api/account/login", acc.server.base),
         &LoginRequest {
             email: acc.email,
@@ -1488,7 +1488,7 @@ async fn recover_without_enrollment_is_forbidden() {
         })
         .await
         .unwrap();
-    let status = post_msgpack_status(
+    let status = post_json_status(
         &format!("{}/api/account/recover", acc.server.base),
         &RecoverRequest {
             email: acc.email,
@@ -1519,7 +1519,7 @@ async fn issue_invite(
 ) -> (InviteSecret, CreateInviteResponse) {
     let secret = InviteSecret::generate();
     let w = secret.wrap(doc_dek).unwrap();
-    let resp: CreateInviteResponse = post_msgpack(
+    let resp: CreateInviteResponse = post_json(
         &format!("{}/api/docs/{}/invites", acc.server.base, doc_id),
         &CreateInviteRequest {
             invite_id: hex::encode(secret.id().unwrap()),
@@ -1551,7 +1551,7 @@ async fn accept_invite(
         })
         .unwrap();
     let w = home.wrap_dek(&dek).unwrap();
-    let resp: AcceptInviteResponse = post_msgpack(
+    let resp: AcceptInviteResponse = post_json(
         &format!("{base}/api/invites/{id}/accept"),
         &AcceptInviteRequest {
             wrapped_dek: w.ciphertext,
@@ -1564,7 +1564,7 @@ async fn accept_invite(
     (resp.doc_id, dek)
 }
 
-/// Unauthenticated GET of a msgpack body.
+/// Unauthenticated GET of a JSON body.
 async fn post_free_get<Resp: DeserializeOwned>(url: &str) -> Resp {
     let resp = http().get(url).send().await.unwrap();
     assert!(
@@ -1573,7 +1573,7 @@ async fn post_free_get<Resp: DeserializeOwned>(url: &str) -> Resp {
         resp.status(),
         resp.text().await.unwrap_or_default()
     );
-    rmp_serde::from_slice(&resp.bytes().await.unwrap()).unwrap()
+    serde_json::from_slice(&resp.bytes().await.unwrap()).unwrap()
 }
 
 /// The whole link lifecycle: the owner issues a link for a doc they
@@ -1625,7 +1625,7 @@ async fn invite_link_joins_a_second_account_once() {
     let third = signup_on(&base).await;
     let w = third.dek.wrap_dek(&doc_dek).unwrap();
     assert_eq!(
-        post_msgpack_status_authed(
+        post_json_status_authed(
             &format!("{base}/api/invites/{id}/accept"),
             &AcceptInviteRequest {
                 wrapped_dek: w.ciphertext,
@@ -1640,7 +1640,7 @@ async fn invite_link_joins_a_second_account_once() {
     // The new member's doc list carries the membership with a wrap its
     // Home DEK opens to the same DEK; a later login would do the same.
     let docs: DocsListResponse =
-        get_msgpack_authed(&format!("{base}/api/docs"), &second.device_token).await;
+        get_json_authed(&format!("{base}/api/docs"), &second.device_token).await;
     let m = docs
         .memberships
         .iter()
@@ -1653,7 +1653,7 @@ async fn invite_link_joins_a_second_account_once() {
     );
 
     // The inviter's view: the link is listed as consumed; both members show.
-    let invites: InvitesListResponse = get_msgpack_authed(
+    let invites: InvitesListResponse = get_json_authed(
         &format!("{base}/api/docs/{doc_id}/invites"),
         &acc.device_token,
     )
@@ -1661,7 +1661,7 @@ async fn invite_link_joins_a_second_account_once() {
     assert_eq!(invites.invites.len(), 1);
     assert_eq!(invites.invites[0].invite_id, id);
     assert!(invites.invites[0].consumed_at.is_some());
-    let members: MembersListResponse = get_msgpack_authed(
+    let members: MembersListResponse = get_json_authed(
         &format!("{base}/api/docs/{doc_id}/members"),
         &second.device_token,
     )
@@ -1702,7 +1702,7 @@ async fn invite_issuance_is_owner_only_never_for_home_and_revocable() {
     let secret = InviteSecret::generate();
     let w = secret.wrap(&acc.dek).unwrap();
     assert_eq!(
-        post_msgpack_status_authed(
+        post_json_status_authed(
             &format!("{base}/api/docs/{}/invites", acc.primary_doc_id),
             &CreateInviteRequest {
                 invite_id: hex::encode(secret.id().unwrap()),
@@ -1720,7 +1720,7 @@ async fn invite_issuance_is_owner_only_never_for_home_and_revocable() {
     let stranger = signup_on(&base).await;
     let w = secret.wrap(&doc_dek).unwrap();
     assert_eq!(
-        post_msgpack_status_authed(
+        post_json_status_authed(
             &format!("{base}/api/docs/{doc_id}/invites"),
             &CreateInviteRequest {
                 invite_id: hex::encode(secret.id().unwrap()),
@@ -1749,7 +1749,7 @@ async fn invite_issuance_is_owner_only_never_for_home_and_revocable() {
     let s2 = InviteSecret::generate();
     let w2 = s2.wrap(&doc_dek).unwrap();
     assert_eq!(
-        post_msgpack_status_authed(
+        post_json_status_authed(
             &format!("{base}/api/docs/{doc_id}/invites"),
             &CreateInviteRequest {
                 invite_id: hex::encode(s2.id().unwrap()),
@@ -1788,7 +1788,7 @@ async fn invite_issuance_is_owner_only_never_for_home_and_revocable() {
     );
     let w = stranger.dek.wrap_dek(&doc_dek).unwrap();
     assert_eq!(
-        post_msgpack_status_authed(
+        post_json_status_authed(
             &format!("{base}/api/invites/{id}/accept"),
             &AcceptInviteRequest {
                 wrapped_dek: w.ciphertext,
@@ -1833,7 +1833,7 @@ async fn invite_expires_and_is_not_spent_by_an_existing_member() {
     let second = signup_on(&base).await;
     let w = second.dek.wrap_dek(&doc_dek).unwrap();
     assert_eq!(
-        post_msgpack_status_authed(
+        post_json_status_authed(
             &format!("{base}/api/invites/{id}/accept"),
             &AcceptInviteRequest {
                 wrapped_dek: w.ciphertext,
@@ -1850,7 +1850,7 @@ async fn invite_expires_and_is_not_spent_by_an_existing_member() {
     let id = hex::encode(secret.id().unwrap());
     let w = acc.dek.wrap_dek(&doc_dek).unwrap();
     assert_eq!(
-        post_msgpack_status_authed(
+        post_json_status_authed(
             &format!("{base}/api/invites/{id}/accept"),
             &AcceptInviteRequest {
                 wrapped_dek: w.ciphertext,
@@ -1931,7 +1931,7 @@ async fn member_removal_is_owner_only_never_self_nor_last_owner() {
             .await
             .is_success()
     );
-    let members: MembersListResponse = get_msgpack_authed(
+    let members: MembersListResponse = get_json_authed(
         &format!("{base}/api/docs/{doc_id}/members"),
         &acc.device_token,
     )
@@ -1945,7 +1945,7 @@ async fn member_removal_is_owner_only_never_self_nor_last_owner() {
         vec![acc.account_id.as_str()]
     );
     let docs: DocsListResponse =
-        get_msgpack_authed(&format!("{base}/api/docs"), &second.device_token).await;
+        get_json_authed(&format!("{base}/api/docs"), &second.device_token).await;
     assert!(
         docs.memberships.iter().all(|m| m.doc_id != doc_id),
         "removed member still lists the doc"
@@ -1969,7 +1969,7 @@ async fn member_removal_is_owner_only_never_self_nor_last_owner() {
     let (again, _) = issue_invite(&acc, &doc_id, &doc_dek, None).await;
     let (rejoined, _) = accept_invite(&base, &again, &second.device_token, &second.dek).await;
     assert_eq!(rejoined, doc_id);
-    let members: MembersListResponse = get_msgpack_authed(
+    let members: MembersListResponse = get_json_authed(
         &format!("{base}/api/docs/{doc_id}/members"),
         &second.device_token,
     )

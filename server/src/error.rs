@@ -4,7 +4,7 @@ use monoplan_protocol::ErrorBody;
 use rusqlite::ffi::ErrorCode;
 
 use crate::build_info;
-use crate::http::msgpack::Msgpack;
+use axum::Json;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
@@ -71,7 +71,7 @@ impl IntoResponse for ApiError {
             code: code.to_string(),
             message: self.to_string(),
         };
-        (status, Msgpack(body)).into_response()
+        (status, Json(body)).into_response()
     }
 }
 

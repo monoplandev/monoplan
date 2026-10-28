@@ -21,7 +21,7 @@ use monoplan_server::{AppState, router};
 use reqwest::header::CONTENT_TYPE;
 use uuid::Uuid;
 
-const MSGPACK: &str = "application/msgpack";
+const JSON: &str = "application/json";
 pub const TEST_PASSWORD: &str = "correct horse battery staple";
 
 pub struct SignedUpAccount {
@@ -151,10 +151,10 @@ pub async fn signup_account(server: &TestServer, device_name: &str) -> SignedUpA
         device_kind: "linux".into(),
         primary_doc_id: None,
     };
-    let bytes = rmp_serde::to_vec_named(&req).unwrap();
+    let bytes = serde_json::to_vec(&req).unwrap();
     let resp = http()
         .post(format!("{}/api/account/signup", server.base))
-        .header(CONTENT_TYPE, MSGPACK)
+        .header(CONTENT_TYPE, JSON)
         .body(bytes)
         .send()
         .await
@@ -164,7 +164,7 @@ pub async fn signup_account(server: &TestServer, device_name: &str) -> SignedUpA
         "signup failed: {}",
         resp.status()
     );
-    let signup: SignupResponse = rmp_serde::from_slice(&resp.bytes().await.unwrap()).unwrap();
+    let signup: SignupResponse = serde_json::from_slice(&resp.bytes().await.unwrap()).unwrap();
 
     SignedUpAccount {
         email,
@@ -200,10 +200,10 @@ pub async fn signup_via_http(server: &TestServer, dek: &Dek, device_name: &str) 
         device_kind: "linux".into(),
         primary_doc_id: None,
     };
-    let bytes = rmp_serde::to_vec_named(&req).unwrap();
+    let bytes = serde_json::to_vec(&req).unwrap();
     let resp = http()
         .post(format!("{}/api/account/signup", server.base))
-        .header(CONTENT_TYPE, MSGPACK)
+        .header(CONTENT_TYPE, JSON)
         .body(bytes)
         .send()
         .await
@@ -213,7 +213,7 @@ pub async fn signup_via_http(server: &TestServer, dek: &Dek, device_name: &str) 
         "signup failed: {}",
         resp.status()
     );
-    rmp_serde::from_slice(&resp.bytes().await.unwrap()).unwrap()
+    serde_json::from_slice(&resp.bytes().await.unwrap()).unwrap()
 }
 
 pub async fn login_device(
@@ -432,14 +432,14 @@ pub async fn register_device(
     owner_token: &str,
     name: &str,
 ) -> DeviceCredential {
-    let bytes = rmp_serde::to_vec_named(&DeviceRegistration {
+    let bytes = serde_json::to_vec(&DeviceRegistration {
         name: name.into(),
         kind: "linux".into(),
     })
     .unwrap();
     let resp = http()
         .post(format!("{}/api/devices", server.base))
-        .header(CONTENT_TYPE, MSGPACK)
+        .header(CONTENT_TYPE, JSON)
         .bearer_auth(owner_token)
         .body(bytes)
         .send()
@@ -450,7 +450,7 @@ pub async fn register_device(
         "register_device failed: {}",
         resp.status()
     );
-    rmp_serde::from_slice(&resp.bytes().await.unwrap()).unwrap()
+    serde_json::from_slice(&resp.bytes().await.unwrap()).unwrap()
 }
 
 /// Stand up the on-disk profile a real `monoplan auth signup` would have

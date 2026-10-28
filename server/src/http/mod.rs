@@ -1,4 +1,4 @@
-pub mod msgpack;
+pub mod json;
 pub mod request_id;
 
 mod admin_routes;
@@ -17,8 +17,6 @@ use tower_http::cors::{Any, CorsLayer};
 
 use crate::state::AppState;
 use crate::sync::ws_handler;
-
-pub const MSGPACK_CONTENT_TYPE: &str = "application/msgpack";
 
 pub fn router(state: AppState) -> Router {
     // Permissive CORS for local development: the web client runs on

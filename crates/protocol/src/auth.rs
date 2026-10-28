@@ -1,8 +1,11 @@
 //! Wire types for the auth HTTP surface.
 //!
 //! Conventions:
-//! - Every byte field uses `serde_bytes` so MessagePack emits its native
-//!   `bin` family (round-trips without surprises through other languages).
+//! - Bodies are JSON (`spec/auth.md` §Wire encoding). Every byte field
+//!   uses `serde_b64` and travels as a standard base64 string: these are
+//!   salts, nonces and wrapped keys, a few dozen bytes each, so a readable
+//!   Network tab beats a byte-native encoding here. Encrypted update
+//!   blobs never cross HTTP; they ride the WebSocket as MessagePack.
 //! - Account / device ids are uuid v7 hex strings on the wire (16-byte
 //!   binary internally, but we expose the hex form so logs / `--json`
 //!   output read sensibly without an extra encoding step).
@@ -44,13 +47,13 @@ impl Default for KdfParams {
 /// account. No other membership ever carries a recovery wrap.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoveryMaterial {
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub recovery_salt: Vec<u8>,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub recovery_auth_secret: Vec<u8>,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub recovery_wrapped_dek: Vec<u8>,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub recovery_wrapped_dek_nonce: Vec<u8>,
 }
 
@@ -61,9 +64,9 @@ pub struct RecoveryMaterial {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocKey {
     pub doc_id: String,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub wrapped_dek: Vec<u8>,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub wrapped_dek_nonce: Vec<u8>,
 }
 
@@ -102,9 +105,9 @@ impl MemberRole {
 pub struct Membership {
     pub doc_id: String,
     pub role: MemberRole,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub wrapped_dek: Vec<u8>,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub wrapped_dek_nonce: Vec<u8>,
 }
 
@@ -113,17 +116,17 @@ pub struct Membership {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignupRequest {
     pub email: String,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub master_salt: Vec<u8>,
     pub kdf_params: KdfParams,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub auth_secret: Vec<u8>,
     /// The primary doc's DEK, generated client-side, wrapped under the
     /// password KEK. The server stores this wrap on the account's `owner`
     /// membership of the primary doc.
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub wrapped_dek: Vec<u8>,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub wrapped_dek_nonce: Vec<u8>,
     /// Client-chosen id for the primary doc, or `None` to let the server
     /// mint one. The web client signs up from an anonymous local-only
@@ -163,11 +166,11 @@ pub struct PreloginRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreloginResponse {
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub master_salt: Vec<u8>,
     pub kdf_params: KdfParams,
     /// `Some` iff the account opted into recovery code at signup.
-    #[serde(default, with = "serde_bytes_opt")]
+    #[serde(default, with = "serde_b64_opt")]
     pub recovery_salt: Option<Vec<u8>>,
 }
 
@@ -176,7 +179,7 @@ pub struct PreloginResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginRequest {
     pub email: String,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub auth_secret: Vec<u8>,
     /// If set, atomically register this client as a device and return a
     /// `device_token`. This is the device-2 bootstrap path; subsequent
@@ -204,7 +207,7 @@ pub struct LoginResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoverRequest {
     pub email: String,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub recovery_auth_secret: Vec<u8>,
 }
 
@@ -228,12 +231,12 @@ pub struct RecoverResponse {
 pub struct PasswordChangeRequest {
     /// Re-verify the user's *current* password before accepting the change.
     /// Defends against a hijacked logged-in session changing the password.
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub current_auth_secret: Vec<u8>,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub new_master_salt: Vec<u8>,
     pub new_kdf_params: KdfParams,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub new_auth_secret: Vec<u8>,
     /// The Home DEK re-wrapped under the new KEK, as a one-element
     /// set naming the primary doc. The server rejects the change (400)
@@ -247,10 +250,10 @@ pub struct PasswordChangeRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PasswordResetRequest {
     pub recovery_session_token: String,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub new_master_salt: Vec<u8>,
     pub new_kdf_params: KdfParams,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub new_auth_secret: Vec<u8>,
     /// The recovered Home DEK re-wrapped under the new KEK, as a
     /// one-element set naming the primary doc (400 on mismatch; the
@@ -280,9 +283,9 @@ pub struct PasswordResetResponse {
 /// this wrap; password change, reset and recovery leave it alone.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateDocRequest {
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub wrapped_dek: Vec<u8>,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub wrapped_dek_nonce: Vec<u8>,
 }
 
@@ -316,9 +319,9 @@ pub struct CreateInviteRequest {
     /// secret it came from.
     pub invite_id: String,
     /// The doc's DEK under the invite KEK.
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub wrapped_dek: Vec<u8>,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub wrapped_dek_nonce: Vec<u8>,
     /// Lifetime in seconds. Server default 7 days, clamped to
     /// [60 s, 30 days].
@@ -354,9 +357,9 @@ pub struct InvitesListResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvitePayloadResponse {
     pub doc_id: String,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub wrapped_dek: Vec<u8>,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub wrapped_dek_nonce: Vec<u8>,
     pub expires_at: i64,
     /// The inviter's email, masked (`d…@example.com`), so the invitee
@@ -369,9 +372,9 @@ pub struct InvitePayloadResponse {
 /// `CreateDocRequest` carries it: it becomes the new membership's wrap.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AcceptInviteRequest {
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub wrapped_dek: Vec<u8>,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "serde_b64")]
     pub wrapped_dek_nonce: Vec<u8>,
 }
 
@@ -444,18 +447,97 @@ pub struct ErrorBody {
     pub message: String,
 }
 
-mod serde_bytes_opt {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+/// Byte fields as standard (padded) base64 strings.
+pub mod serde_b64 {
+    use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&STANDARD.encode(v))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let s = <std::borrow::Cow<'de, str>>::deserialize(d)?;
+        STANDARD
+            .decode(s.as_bytes())
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+/// `Option<Vec<u8>>` as base64 or `null`.
+pub mod serde_b64_opt {
+    use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
+    use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S: Serializer>(v: &Option<Vec<u8>>, s: S) -> Result<S::Ok, S::Error> {
         match v {
-            Some(b) => serde_bytes::Bytes::new(b).serialize(s),
+            Some(b) => s.serialize_some(&STANDARD.encode(b)),
             None => s.serialize_none(),
         }
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<u8>>, D::Error> {
-        let v: Option<serde_bytes::ByteBuf> = Option::deserialize(d)?;
-        Ok(v.map(|b| b.into_vec()))
+        let v: Option<std::borrow::Cow<'de, str>> = Option::deserialize(d)?;
+        v.map(|s| {
+            STANDARD
+                .decode(s.as_bytes())
+                .map_err(serde::de::Error::custom)
+        })
+        .transpose()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byte_fields_round_trip_as_base64_json() {
+        let req = CreateDocRequest {
+            wrapped_dek: vec![0, 1, 2, 255],
+            wrapped_dek_nonce: vec![],
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert_eq!(json, r#"{"wrapped_dek":"AAEC/w==","wrapped_dek_nonce":""}"#);
+        let back: CreateDocRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.wrapped_dek, req.wrapped_dek);
+        assert!(back.wrapped_dek_nonce.is_empty());
+    }
+
+    #[test]
+    fn optional_bytes_are_null_or_base64() {
+        let none = PreloginResponse {
+            master_salt: vec![7; 3],
+            kdf_params: KdfParams::DEFAULT,
+            recovery_salt: None,
+        };
+        let json = serde_json::to_string(&none).unwrap();
+        assert!(json.contains(r#""recovery_salt":null"#));
+        let back: PreloginResponse = serde_json::from_str(&json).unwrap();
+        assert!(back.recovery_salt.is_none());
+        // Field absent entirely → `default` kicks in.
+        let back: PreloginResponse =
+            serde_json::from_str(r#"{"master_salt":"BwcH","kdf_params":{"m_kib":8,"t":1,"p":1}}"#)
+                .unwrap();
+        assert_eq!(back.master_salt, vec![7; 3]);
+        assert!(back.recovery_salt.is_none());
+        let some = PreloginResponse {
+            recovery_salt: Some(vec![1, 2]),
+            ..none
+        };
+        let back: PreloginResponse =
+            serde_json::from_str(&serde_json::to_string(&some).unwrap()).unwrap();
+        assert_eq!(back.recovery_salt, Some(vec![1, 2]));
+    }
+
+    #[test]
+    fn malformed_base64_is_rejected() {
+        let err = serde_json::from_str::<CreateDocRequest>(
+            r#"{"wrapped_dek":"not base64!","wrapped_dek_nonce":""}"#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("Invalid"), "{err}");
     }
 }

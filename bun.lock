@@ -5,7 +5,7 @@
     "": {
       "name": "monoplan",
       "devDependencies": {
-        "typescript": "7.0.2",
+        "typescript": "^7.0.2",
       },
     },
     "js/config": {
@@ -41,7 +41,6 @@
         "@corvu/calendar": "^0.1.2",
         "@kobalte/core": "^0.13.14",
         "@monoplan/core": "workspace:*",
-        "@msgpack/msgpack": "^3.1.3",
         "solid-js": "^1.9.17",
       },
       "devDependencies": {
