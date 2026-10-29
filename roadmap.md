@@ -103,3 +103,4 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - calendar views between agenda & full (weekly list? daily agenda?)
 - group done items into temporal groups
 - group list items into lifecycle groups
+- done tick disappearing could be animated
