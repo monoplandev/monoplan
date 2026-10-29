@@ -17,6 +17,7 @@ import { createPopoverTooltipGuard } from "./popoverTooltip.ts";
 import { createSyncStatus } from "./syncFacts.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { SharingDialog } from "./SharingDialog.tsx";
+import type { MemberDirectory } from "./sync/members.ts";
 import { Avatar } from "./Avatar.tsx";
 import { useSession } from "./SessionContext.tsx";
 import type { PresentAccount } from "./sync/runtime.ts";
@@ -33,6 +34,7 @@ import crumpledPaperSvg from "./icons/crumpled-paper.svg?raw";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import dotsVerticalSvg from "./icons/dots-vertical.svg?raw";
 import starSvg from "./icons/star.svg?raw";
+import usersSvg from "./icons/users.svg?raw";
 import externalLinkSvg from "./icons/external-link.svg?raw";
 import fileSvg from "./icons/file.svg?raw";
 import magnifyingGlassSvg from "./icons/magnifying-glass.svg?raw";
@@ -318,6 +320,9 @@ export function Nav(props: {
   /** Who has a doc open on the server right now (`runtime.presence`).
    *  Each heading shows the *other* accounts as avatars. */
   presence: (docId: string) => PresentAccount[];
+  /** Per-doc member lists (`Workspace`'s directory): the member count in
+   *  the shared marker's tooltip on non-Home headings. */
+  members: MemberDirectory;
   /** Chrome pinned to the bottom of the sidebar (app menu + account/sync
    *  widget) — see `.nav-footer` in styles.css. */
   footer?: JSX.Element;
@@ -463,6 +468,7 @@ export function Nav(props: {
             onToggled={() => setSectionTick((n) => n + 1)}
             onDeleteDoc={props.onDeleteDoc}
             presence={props.presence}
+            members={props.members}
           />
         )}
       </For>
@@ -545,6 +551,7 @@ function DocSection(props: {
   onToggled: () => void;
   onDeleteDoc: ((docId: string) => Promise<void>) | null;
   presence: (docId: string) => PresentAccount[];
+  members: MemberDirectory;
 }) {
   const { m } = useAppI18n();
   const session = useSession();
@@ -556,6 +563,10 @@ function DocSection(props: {
   const others = createMemo((): PresentAccount[] =>
     props.presence(docId).filter((p) => p.accountId !== session.session().accountId),
   );
+  // Every non-Home doc is a shared workspace, with one member until
+  // someone is invited; the marker shows on all of them and the tooltip
+  // carries the member count once the directory has loaded it.
+  const sharedTitle = (): string => m().nav.sharedWorkspace(props.members.countOf(docId) ?? null);
   // Delete runs through a confirmation: it is server-side, cross-device
   // and not undoable. Home never offers it (`spec/sharing-plan.md`: the
   // primary doc is non-deletable), nor does an anonymous session.
@@ -786,6 +797,28 @@ function DocSection(props: {
           registerStart={(fn) => (startRename = fn)}
         />
       </Show>
+      {/* Shared marker: a people glyph right after the name on every
+          non-Home workspace, always visible, with the member count in its
+          tooltip; clicking it opens the sharing dialog, the same as the
+          menus' "Sharing…" item. Sits before the presence avatars so the
+          row reads "shared, and these people are here now". Pointer-down
+          and click both stop here so it neither toggles the group nor
+          starts a heading drag. */}
+      <Show when={!props.entry.home}>
+        <button
+          type="button"
+          class="icon-button nav-section-shared"
+          tabIndex={-1}
+          aria-label={sharedTitle()}
+          title={sharedTitle()}
+          innerHTML={usersSvg}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setSharingOpen(true);
+          }}
+        />
+      </Show>
       {/* Who else is here: one avatar per other account with the
           workspace open, capped with a "+N" disc. Hidden when alone. */}
       <Show when={others().length > 0}>
@@ -953,7 +986,12 @@ function DocSection(props: {
       <Show when={!props.entry.home}>
         <SharingDialog
           open={sharingOpen()}
-          onOpenChange={setSharingOpen}
+          onOpenChange={(open) => {
+            setSharingOpen(open);
+            // The dialog is where members are added and removed, so the
+            // directory (and the shared marker) refreshes when it closes.
+            if (!open) void props.members.refresh(docId);
+          }}
           label={label()}
           docId={docId}
         />

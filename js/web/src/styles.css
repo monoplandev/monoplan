@@ -662,7 +662,7 @@ body {
   box-sizing: border-box;
   width: 100%;
   height: 28px;
-  padding: 0 8px;
+  padding: 0 4px;
   border: 0;
   border-radius: 3px;
   background: transparent;
@@ -672,13 +672,18 @@ body {
   user-select: none;
 }
 
-/* The label sizes to its text (shrinking with an ellipsis when the row
-   is tight) so the presence avatars can sit right after the name; the
-   workspace-menu glyph takes the leftover space as its left margin,
-   which keeps the three trailing glyphs at the trailing edge. */
+/* The label sizes to its text so the shared marker and presence avatars
+   sit right after the name, and truncates with an ellipsis rather than
+   wrapping when the row is tight: the heading is a fixed 28px row. The
+   glyphs after it are `flex: none` so a long name can never squeeze
+   them; the workspace-menu glyph takes the leftover space as its left
+   margin, which keeps the three trailing glyphs at the trailing edge. */
 .nav-section-label {
   flex: 0 1 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .nav-section-menu {
@@ -691,6 +696,7 @@ body {
    after it: presence is information, not an affordance. */
 .nav-section-presence {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 2px;
   margin-left: 6px;
@@ -700,6 +706,24 @@ body {
   width: 16px;
   height: 16px;
   font-size: 9px;
+}
+
+/* Shared marker: the people glyph after a shared workspace's name, a
+   button that opens the sharing dialog. Unlike the hover-only glyphs at
+   the trailing edge it stays visible at rest, since it is also
+   information; muted so the name still leads, and sized down to the
+   heading like them. */
+.nav-section-shared {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-left: 2px;
+  color: var(--text-muted);
+}
+
+.nav-section-shared svg {
+  width: 14px;
+  height: 14px;
 }
 
 @media (max-width: 768px) and (pointer: coarse) {
@@ -722,6 +746,7 @@ body {
 .nav-section-caret,
 .nav-section-add,
 .nav-section-menu {
+  flex: none;
   width: 20px;
   height: 20px;
   color: var(--text-faint);

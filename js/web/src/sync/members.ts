@@ -16,6 +16,9 @@ export interface MemberDirectory {
    *  member removed before this session loaded the list). Reactive: a
    *  read inside a memo re-runs when the list lands. */
   emailOf(docId: string, accountId: string): string | undefined;
+  /** Number of active members of `docId`, or undefined while its list is
+   *  not loaded: the count in the nav's shared-marker tooltip. Reactive. */
+  countOf(docId: string): number | undefined;
   /** Fetch the doc's member list if this session has not yet. A failed
    *  fetch is forgotten, so the next `ensure` retries. */
   ensure(docId: string): void;
@@ -50,6 +53,10 @@ export function createMemberDirectory(fetchMembers: FetchMembers = defaultFetch)
   return {
     emailOf(docId, accountId) {
       return byDoc()[docId]?.[accountId];
+    },
+    countOf(docId) {
+      const emails = byDoc()[docId];
+      return emails === undefined ? undefined : Object.keys(emails).length;
     },
     ensure(docId) {
       // Untracked on purpose: `ensure` runs inside effects, and reading

@@ -2615,6 +2615,7 @@ export function Workspace(props: {
         setView={navigateTo}
         onDeleteDoc={session.session().anonymous ? null : props.deleteDoc}
         presence={props.presence}
+        members={members}
         footer={
           <>
             <NavMenu

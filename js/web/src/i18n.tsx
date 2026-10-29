@@ -122,6 +122,9 @@ export type Messages = {
     presenceGroup: string;
     /** Tooltip on one of those avatars. */
     presenceHere: (email: string) => string;
+    /** Tooltip / accessible name of the shared marker by a non-Home
+     *  workspace heading; the member count is null until loaded. */
+    sharedWorkspace: (members: number | null) => string;
     /** "..." menu delete on a non-Home doc heading, its confirmation
      *  (named for the doc) and the failure alert. */
     deleteDoc: string;
@@ -590,6 +593,10 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       docMenu: "Menú del espacio",
       presenceGroup: "Quién está aquí",
       presenceHere: (email) => `${email} está aquí`,
+      sharedWorkspace: (n) =>
+        n === null
+          ? "Espacio compartido"
+          : `Espacio compartido · ${n} ${n === 1 ? "miembro" : "miembros"}`,
       deleteDoc: "Eliminar espacio",
       deleteDocConfirm: (name) =>
         `¿Eliminar «${name}»? Sus listas y elementos se eliminarán de todos los dispositivos y quienes lo compartan perderán el acceso. Esta acción no se puede deshacer.`,
@@ -943,6 +950,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       docMenu: "Workspace menu",
       presenceGroup: "Who's here",
       presenceHere: (email) => `${email} is here`,
+      sharedWorkspace: (n) =>
+        n === null ? "Shared workspace" : `Shared workspace · ${n} ${n === 1 ? "member" : "members"}`,
       deleteDoc: "Delete workspace",
       deleteDocConfirm: (name) =>
         `Delete “${name}”? Its lists and items are removed from every device, and anyone it is shared with loses access. This cannot be undone.`,

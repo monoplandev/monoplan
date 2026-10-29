@@ -59,6 +59,20 @@ describe("member directory", () => {
     });
   });
 
+  test("countOf is undefined until loaded, then the member count", async () => {
+    await createRoot(async (dispose) => {
+      const dir = createMemberDirectory(async () => [
+        { ...member("a1", "ann@example.com"), role: "owner" },
+        member("b2", "bob@example.com"),
+      ]);
+      expect(dir.countOf(DOC)).toBeUndefined();
+      dir.ensure(DOC);
+      await tick();
+      expect(dir.countOf(DOC)).toBe(2);
+      dispose();
+    });
+  });
+
   test("refresh replaces a doc's list and leaves other docs alone", async () => {
     await createRoot(async (dispose) => {
       const OTHER = "00000000-0000-0000-0000-00000000000c";
