@@ -1,7 +1,8 @@
-import { createEffect, createMemo, on, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, on, Show } from "solid-js";
 import { ContextMenu } from "@kobalte/core/context-menu";
 import checkSvg from "./icons/check.svg?raw";
 import crossSvg from "./icons/cross.svg?raw";
+import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import starFilledSvg from "./icons/star-filled.svg?raw";
 import usersSvg from "./icons/users.svg?raw";
 import { DndSelection } from "./dnd/solid";
@@ -187,6 +188,10 @@ export function Row(props: {
               (Boolean(props.item().when) ||
                 Boolean(props.item().deadline) ||
                 Boolean(props.item().place)))))));
+  // Whether this row's context menu is up, so the "…" button that opened
+  // it (or a right-click) stays visible under the menu instead of fading
+  // with the hover (`.row[data-menu-open]`).
+  const [menuOpen, setMenuOpen] = createSignal(false);
   let textRef!: HTMLSpanElement;
   // Set by the Enter keydown handler before it dispatches the synthetic
   // Escape that drives collapse. The collapse effect reads (and resets)
@@ -282,6 +287,7 @@ export function Row(props: {
       onReveal={props.onReveal}
       onMoveToList={props.onMoveToList}
       listLabel={props.listLabel}
+      onMenuOpenChange={setMenuOpen}
     >
       <ContextMenu.Trigger
         class={props.deadlineInFooter ? "row row-card" : "row"}
@@ -289,6 +295,7 @@ export function Row(props: {
         data-cancelled={isCancelled(props.item()) ? "" : undefined}
         data-binned={isBinned(props.item()) ? "" : undefined}
         data-expanded={props.expanded() ? "" : undefined}
+        data-menu-open={menuOpen() ? "" : undefined}
         on:dblclick={(e) => {
           // Double-click opens the detail dialog. Listen at the row level
           // (not the text span) so double-clicks in the row's padding count
@@ -617,6 +624,50 @@ export function Row(props: {
               )}
             </Show>
           </div>
+        </Show>
+        {/* Row menu: a "…" at the trailing edge (top-right on a board
+            card), revealed on hover (`.row-menu` in styles.css), that
+            opens the same context menu a right-click does — the visible
+            route to Move to Bin and the rest for anyone who doesn't
+            think to right-click. Kobalte's trigger opens on `contextmenu`,
+            so a click re-dispatches one from the button's own bottom-left
+            corner and the menu drops down anchored there. All handlers
+            are native (`on:`) so they run before the row's own native
+            dblclick / click listeners and the dnd's listbox handlers:
+            pointerdown / mousedown / click stop here so the press neither
+            starts a drag nor touches the dnd selection (the menu's open
+            hook selects the row itself), mousedown's default is
+            suppressed so focus stays in the listbox (as the checkbox
+            does), and a double-click on the button doesn't fall through
+            to the row's open-dialog handler.
+            Drafts and rows mid-edit have no menu. */}
+        <Show when={!isDraftId(props.item().id) && !props.expanded()}>
+          <button
+            type="button"
+            class="icon-button row-menu"
+            tabIndex={-1}
+            aria-label={m().common.menu}
+            title={m().common.menu}
+            innerHTML={dotsHorizontalSvg}
+            on:pointerdown={(e) => e.stopPropagation()}
+            on:mousedown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            on:dblclick={(e) => e.stopPropagation()}
+            on:click={(e) => {
+              e.stopPropagation();
+              const r = e.currentTarget.getBoundingClientRect();
+              e.currentTarget.dispatchEvent(
+                new MouseEvent("contextmenu", {
+                  bubbles: true,
+                  cancelable: true,
+                  clientX: r.left,
+                  clientY: r.bottom + 2,
+                }),
+              );
+            }}
+          />
         </Show>
       </ContextMenu.Trigger>
     </ItemContextMenu>

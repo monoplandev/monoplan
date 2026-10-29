@@ -1326,6 +1326,49 @@ input.task-check:hover {
   gap: 4px;
 }
 
+/* Row menu: the trailing "…" (Row.tsx) that opens the row's context menu
+   on a left click. Invisible at rest and revealed by hovering the row, or
+   while the menu it opened is up (so the trigger doesn't vanish under its
+   own menu). Its width is reserved either way, so the badges don't shift
+   on hover. A 20px hit box pulled in by a negative vertical margin so it
+   takes only the 16px content line — the virtualizer fixes the row height
+   (Workspace.tsx rowHeight) and a taller child would overflow it. Gone on
+   coarse pointers: there is no hover to reveal it, and touch already has
+   long-press on the row and the dialog's own menu. */
+.row-menu {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: -2px 0;
+  color: var(--text-faint);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.row-menu svg {
+  width: 12px;
+  height: 12px;
+}
+
+.row:hover .row-menu,
+.row[data-menu-open] .row-menu {
+  opacity: 1;
+}
+
+/* While the menu is up the button keeps its hover fill, so it reads as
+   the thing the menu belongs to (the same pressed look `.icon-button
+   [data-expanded]` gives a dropdown trigger). */
+.row[data-menu-open] .row-menu {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+@media (pointer: coarse) {
+  .row-menu {
+    display: none;
+  }
+}
+
 .row-text {
   min-width: 0;
   white-space: nowrap;
@@ -4798,6 +4841,13 @@ input.task-check:hover {
   border-radius: 8px;
   flex-wrap: wrap;
   align-content: space-between;
+}
+
+/* The footer wraps onto the card's last line (full-width basis), but
+   the "…" menu button comes after it in source order; push the footer
+   past it so the button sits at the top-right beside the title. */
+.row.row-card .row-footer {
+  order: 1;
 }
 
 [data-theme="dark"] .row.row-card {

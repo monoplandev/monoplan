@@ -75,6 +75,11 @@ export function ItemContextMenu(props: {
   /** Resolves a list id (in the item's doc) to its display label (see
    *  Workspace `listLabel`). */
   listLabel?: (listId: string, docId?: string) => string;
+  /** Mirrors the menu's open state to the host, which can't read it off
+   *  its own trigger (`Row.tsx` overrides Kobalte's `data-expanded` with
+   *  the row's inline-edit state). The row keeps its "…" button showing
+   *  while the menu it opened is up. */
+  onMenuOpenChange?: (open: boolean) => void;
   /** The host's `<ContextMenu.Trigger>`. */
   children: JSX.Element;
 }) {
@@ -274,6 +279,7 @@ export function ItemContextMenu(props: {
     // while it's open — otherwise pressing Enter to pick a menu item also
     // triggers the list's Enter handler behind it.
     setMenuOpen(open);
+    props.onMenuOpenChange?.(open);
     if (!open) return;
     const id = props.item().id;
     if (!props.selection.isSelected(id)) {
