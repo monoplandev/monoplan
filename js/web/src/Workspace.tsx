@@ -3288,6 +3288,7 @@ export function Workspace(props: {
             groups={upcomingGroups()}
             selection={selection}
             listLabel={listLabel}
+            workspaceLabel={(docId) => (docId === docs.homeDocId ? null : docLabel(docId))}
             onOpen={(id) => setOpenItemId(id)}
             openOnTap={itemsIsMobile}
             ref={(h) => (upcomingHandle = h)}

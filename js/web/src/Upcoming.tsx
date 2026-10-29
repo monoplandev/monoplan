@@ -57,6 +57,7 @@ import {
 } from "./format.tsx";
 import { useAppI18n } from "./i18n.tsx";
 import mapPinSvg from "./icons/map-pin.svg?raw";
+import usersSvg from "./icons/users.svg?raw";
 import {
   isCancelled,
   isClosed,
@@ -86,6 +87,10 @@ export function Upcoming(props: {
   /** Display label for a list id in the row's doc (Inbox is localized,
    *  others by name). */
   listLabel: (listId: string, docId?: string) => string;
+  /** The agenda merges every workspace, so a row from a shared one
+   *  (anything but Home) names it under the title with the shared
+   *  people glyph; null for Home rows, which carry no marker. */
+  workspaceLabel: (docId: string) => string | null;
   onOpen: (id: string) => void;
   /** Touch: a tap opens the row (there is no pane to follow a selection). */
   openOnTap?: () => boolean;
@@ -324,25 +329,42 @@ export function Upcoming(props: {
                       <span class="upcoming-row-title">
                         <span class="upcoming-row-text">{r.item.text}</span>
                       </span>
-                      <Show when={r.item.place}>
-                        {(p) => (
-                          <span
-                            class="upcoming-row-place"
-                            title={p().address ?? p().label}
-                          >
-                            <span
-                              class="upcoming-row-place-icon"
-                              innerHTML={mapPinSvg}
-                            />
-                            <span class="upcoming-row-place-label">
-                              {p().label}
-                            </span>
-                          </span>
-                        )}
+                      {/* Sub line under the title: the shared workspace a
+                          foreign row comes from (people glyph + name),
+                          then the place. Home rows carry no workspace
+                          marker; the task surface names the list. */}
+                      <Show when={props.workspaceLabel(r.item.docId) || r.item.place}>
+                        <span class="upcoming-row-sub">
+                          <Show when={props.workspaceLabel(r.item.docId)}>
+                            {(name) => (
+                              <span class="upcoming-row-place upcoming-row-workspace" title={name()}>
+                                <span
+                                  class="upcoming-row-place-icon"
+                                  innerHTML={usersSvg}
+                                />
+                                <span class="upcoming-row-place-label">{name()}</span>
+                              </span>
+                            )}
+                          </Show>
+                          <Show when={r.item.place}>
+                            {(p) => (
+                              <span
+                                class="upcoming-row-place"
+                                title={p().address ?? p().label}
+                              >
+                                <span
+                                  class="upcoming-row-place-icon"
+                                  innerHTML={mapPinSvg}
+                                />
+                                <span class="upcoming-row-place-label">
+                                  {p().label}
+                                </span>
+                              </span>
+                            )}
+                          </Show>
+                        </span>
                       </Show>
                     </span>
-                    {/* No list badge here: the agenda is about the day,
-                        the task surface names the list. */}
                     <span class="upcoming-row-meta">
                       <Show when={startsIn(r)}>
                         {(label) => (

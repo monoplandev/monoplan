@@ -511,6 +511,17 @@ body {
   white-space: nowrap;
 }
 
+/* Sub line under the title: the shared-workspace mark (people glyph +
+   name, foreign rows only) and the place, side by side, wrapping onto a
+   second line when the two will not fit. */
+.upcoming-row-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 10px;
+  min-width: 0;
+}
+
 /* Place: the pin glyph then the label, the pin sized to the date pills'
    icon slot so the agenda and the task surface draw the same mark. It
    starts at the body's left edge, so under the title. */
@@ -533,6 +544,13 @@ body {
 .upcoming-row-place-icon svg {
   width: 12px;
   height: 12px;
+}
+
+/* The people glyph is drawn wider than the pin; match the nav marker's
+   size so it reads as the same icon. */
+.upcoming-row-workspace .upcoming-row-place-icon svg {
+  width: 13px;
+  height: 13px;
 }
 
 .upcoming-row-meta {
