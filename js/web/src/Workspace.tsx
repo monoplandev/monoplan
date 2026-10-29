@@ -990,9 +990,11 @@ export function Workspace(props: {
   // when clicked. List and Focus views only; boards capture through the
   // dialog. It stands in for the draft while none is open there; a
   // draft started mid-list (Space below a selection) leaves it in place.
+  // Touch viewports skip it: the header Add is the capture affordance
+  // there, and a tap target that reads as a row invites mis-taps.
   const canDraft = () => view().kind === "list" || view().kind === "focus";
   const showTrailer = () => {
-    if (!canDraft()) return false;
+    if (!canDraft() || itemsIsMobile()) return false;
     const d = draft();
     return d === null || d.insertIndex < items().length;
   };
@@ -3216,7 +3218,7 @@ export function Workspace(props: {
           when={boardKey()}
           fallback={
             <Show
-              when={dndItems().length > 0 || canDraft()}
+              when={dndItems().length > 0 || showTrailer()}
               fallback={
                 <div class="dnd-host empty">{m().workspace.emptyState}</div>
               }
