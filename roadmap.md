@@ -101,3 +101,5 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - Consider MANUALLY archiving older items (e.g. by year)
 - mobile could use direct search button
 - calendar views between agenda & full (weekly list? daily agenda?)
+- group done items into temporal groups
+- group list items into lifecycle groups
