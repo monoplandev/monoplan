@@ -2769,7 +2769,11 @@ export function Workspace(props: {
         }
         app={tApp}
         lists={() => activeListsOf(tApp.docId)}
-        docLabel={() => docLabel(tApp.docId)}
+        // Only a shared workspace is named in the list picker: Personal
+        // is the default and goes unsaid, as on the agenda.
+        docLabel={() =>
+          tApp.docId === docs.homeDocId ? null : docLabel(tApp.docId)
+        }
         entered={() => openItemId() !== null}
         whenOpen={itemWhenOpen}
         setWhenOpen={setItemWhenOpen}

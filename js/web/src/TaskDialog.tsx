@@ -125,7 +125,9 @@ export function TaskDialog(props: {
   lists: () => ListView[];
   /** Display name of `app`'s workspace, shown after the list name in
    *  the move-to-list trigger. */
-  docLabel?: () => string;
+  /** Name of the shared workspace the item lives in, shown in the list
+   *  picker; null for Personal, which is the default and goes unsaid. */
+  docLabel?: () => string | null;
   /** True when the user has entered the shown item (Enter on a row, a
    *  row's open control, a Find pick, a link, a click into the pane):
    *  the non-modal shells land the caret. False while the side pane is

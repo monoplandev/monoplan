@@ -2793,11 +2793,25 @@ input.task-check:hover {
   cursor: pointer;
 }
 
-/* Workspace name after the list name in the trigger: muted so the list
-   name leads, with no separator — the colour shift is the boundary. */
+/* Shared-workspace name after the list name in the trigger: the people
+   glyph then the name, muted so the list name leads, with no separator —
+   the colour shift is the boundary. Personal is never shown. */
 .task-dialog-list-workspace {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   flex-shrink: 0;
   color: var(--text-muted);
+}
+
+.task-dialog-list-workspace-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.task-dialog-list-workspace-icon svg {
+  width: 13px;
+  height: 13px;
 }
 
 .task-dialog-list:hover,

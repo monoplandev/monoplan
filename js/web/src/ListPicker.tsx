@@ -28,6 +28,7 @@ import archiveSvg from "./icons/archive.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
 import caretSortSvg from "./icons/caret-sort.svg?raw";
 import fileSvg from "./icons/file.svg?raw";
+import usersSvg from "./icons/users.svg?raw";
 import { useAppI18n } from "./i18n.tsx";
 import { matchesName } from "./search.ts";
 import { LIST_EVENTS } from "./sync/store.ts";
@@ -53,10 +54,12 @@ export function ListPicker(props: {
   options: () => ListOption[];
   /** Currently filed-under list id, or null while a new capture has none. */
   value: () => string | null;
-  /** The workspace the options belong to, shown muted after the list
-   *  name in the trigger ("Groceries  Personal"). Trigger-only: every
-   *  option is in the same workspace, so the rows don't repeat it. */
-  workspace?: () => string;
+  /** The shared workspace the options belong to, shown muted after the
+   *  list name in the trigger behind the people glyph ("Groceries  👥
+   *  Household"). Null for Personal: it is the default and goes unsaid.
+   *  Trigger-only: every option is in the same workspace, so the rows
+   *  don't repeat it. */
+  workspace?: () => string | null;
   onChange: (id: string) => void;
 }) {
   const { m } = useAppI18n();
@@ -267,7 +270,16 @@ export function ListPicker(props: {
         </Show>
         <span class="task-dialog-list-value">{selected()?.name}</span>
         <Show when={selected() && props.workspace?.()}>
-          {(ws) => <span class="task-dialog-list-workspace">{ws()}</span>}
+          {(ws) => (
+            <span class="task-dialog-list-workspace">
+              <span
+                class="task-dialog-list-workspace-icon"
+                aria-hidden="true"
+                innerHTML={usersSvg}
+              />
+              {ws()}
+            </span>
+          )}
         </Show>
         <span
           class="task-dialog-list-caret"
