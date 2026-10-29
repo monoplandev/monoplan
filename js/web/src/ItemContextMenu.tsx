@@ -124,11 +124,6 @@ export function ItemContextMenu(props: {
     if (props.viewKind === "focus") props.app.undoneIntoFocus(ids);
     else props.app.setDoneMany(ids, false);
   };
-  const onCancel = () => {
-    const ids = targetIds();
-    if (ids.length === 0) return;
-    props.app.setLifecycleMany(ids, "cancelled");
-  };
   // Status submenu: move the whole target set to one workflow state in a
   // single commit. Targets already in that state are skipped by the core,
   // so a mixed selection converges without re-stamping the ones in place.
@@ -257,12 +252,6 @@ export function ItemContextMenu(props: {
                   : m().workspace.markNotDone}
               </span>
               <kbd class="menu-shortcut">X</kbd>
-            </ContextMenu.Item>
-          </Show>
-          <Show when={!isClosed(props.item())}>
-            <ContextMenu.Item class="context-menu-item" onSelect={onCancel}>
-              <span>{m().workspace.markCancelled}</span>
-              <kbd class="menu-shortcut">⇧X</kbd>
             </ContextMenu.Item>
           </Show>
           {/* Every workflow state in one place, the tick marking this
