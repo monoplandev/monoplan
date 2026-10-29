@@ -442,8 +442,6 @@ export type Messages = {
     showInList: (list: string) => string;
     /** Context-menu jump from a list / board to the item in the Focus lens. */
     showInFocus: string;
-    /** Empty-state hint shown when the Focus lens has no visible refs. */
-    empty: string;
   };
   settings: {
     general: string;
@@ -798,8 +796,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       badge: "Destacado",
       showInList: (list: string) => `Ver en ${list}`,
       showInFocus: "Ver en Destacados",
-      empty:
-        "Destacados está vacío. Añade un elemento nuevo aquí, o haz clic derecho en uno existente y elige «Destacar», para organizar en qué estás trabajando.",
     },
     settings: {
       general: "General",
@@ -1153,7 +1149,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       badge: "Starred",
       showInList: (list: string) => `Show in ${list}`,
       showInFocus: "Show in Starred",
-      empty: "Nothing starred yet.",
     },
     settings: {
       general: "General",

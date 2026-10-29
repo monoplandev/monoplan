@@ -3221,13 +3221,6 @@ export function Workspace(props: {
                 <div class="dnd-host empty">{m().workspace.emptyState}</div>
               }
             >
-              {/* An empty list's state *is* the capture slot below; Focus
-                  keeps its hint, since the lens needs explaining. The hint
-                  stays through the first draft so it doesn't vanish under
-                  the click that started it. */}
-              <Show when={view().kind === "focus" && items().length === 0}>
-                <div class="empty">{m().focus.empty}</div>
-              </Show>
               <Show keyed when={dndRevision()}>
                 <Dnd
                   class="dnd-host"
