@@ -3267,6 +3267,9 @@ export function Workspace(props: {
                             {m().workspace.newItemPlaceholder}
                           </span>
                         </div>
+                        {/* Reserves the row menu's slot (`.row-menu`) so the
+                            text column lines up with the real rows above. */}
+                        <span class="row-menu row-menu-spacer" aria-hidden="true" />
                       </div>
                     ) : undefined
                   }

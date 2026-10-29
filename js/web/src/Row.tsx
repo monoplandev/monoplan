@@ -617,8 +617,12 @@ export function Row(props: {
             </Show>
           </div>
         </Show>
-        {/* Drafts and rows mid-edit have no menu. */}
-        <Show when={!isDraftId(props.item().id) && !props.expanded()}>
+        {/* Drafts and rows mid-edit have no menu, but keep its slot so
+            their trailing badges stay in line with the rows around them. */}
+        <Show
+          when={!isDraftId(props.item().id) && !props.expanded()}
+          fallback={<span class="row-menu row-menu-spacer" aria-hidden="true" />}
+        >
           <RowMenuButton />
         </Show>
       </ContextMenu.Trigger>

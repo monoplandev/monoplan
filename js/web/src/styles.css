@@ -1562,6 +1562,18 @@ input.task-check:hover {
   color: var(--text-empty);
 }
 
+/* Stand-in for the row menu on rows that have none (the trailer, drafts,
+   rows mid-edit): same width and coarse-pointer rule as `.row-menu` via
+   the shared class, but never revealed on hover. */
+.row-menu-spacer {
+  pointer-events: none;
+}
+
+:is(.row, .upcoming-row):hover .row-menu-spacer,
+:is(.row, .upcoming-row)[data-menu-open] .row-menu-spacer {
+  opacity: 0;
+}
+
 .empty {
   padding: 40px 20px;
   text-align: center;
