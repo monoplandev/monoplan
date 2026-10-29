@@ -16,6 +16,7 @@ import { Tooltip } from "@kobalte/core/tooltip";
 import { createPopoverTooltipGuard } from "./popoverTooltip.ts";
 import { createSyncStatus } from "./syncFacts.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
+import { createArchiveListFlow } from "./ArchiveListDialog.tsx";
 import { SharingDialog } from "./SharingDialog.tsx";
 import type { MemberDirectory } from "./sync/members.ts";
 import { Avatar } from "./Avatar.tsx";
@@ -647,13 +648,20 @@ function DocSection(props: {
     open(id);
   };
   // Archive is non-destructive (globally undoable, trivially reversible
-  // via Unarchive), so there is no confirmation dialog. Archiving the
-  // list currently on screen would leave a stale view; hop to this doc's
-  // Inbox before applying the mutation.
-  const archiveList = (id: string) => {
-    if (isActive(id)) open("inbox");
-    app.setListArchived(id, true);
-  };
+  // via Unarchive), so a list with no open items archives without a
+  // dialog; one with open items asks whether to move them to Inbox
+  // first (`ArchiveListDialog`). Archiving the list currently on screen
+  // would leave a stale view; hop to this doc's Inbox before applying
+  // the mutation.
+  const archive = createArchiveListFlow();
+  const archiveList = (id: string) =>
+    archive.request({
+      app,
+      listId: id,
+      before: () => {
+        if (isActive(id)) open("inbox");
+      },
+    });
 
   const navSelection = new DndSelection();
   // Opening any view — by click, keyboard, URL, or the other doc's nav —
@@ -989,6 +997,7 @@ function DocSection(props: {
           />
         </ConfirmDialog>
       </Show>
+      {archive.dialog()}
       <Show when={!props.entry.home}>
         <SharingDialog
           open={sharingOpen()}

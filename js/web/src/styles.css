@@ -2404,6 +2404,20 @@ input.task-check:hover {
   color: var(--text-muted);
 }
 
+.confirm-dialog-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.confirm-dialog-check input {
+  margin: 2px 0 0;
+}
+
 .auth-prerelease-notice {
   display: flex;
   align-items: flex-start;

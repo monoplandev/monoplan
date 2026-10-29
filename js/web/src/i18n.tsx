@@ -100,6 +100,12 @@ export type Messages = {
     archived: string;
     /** Context-menu / header action that restores an archived list. */
     unarchiveList: string;
+    /** Archive confirmation (shown only when the list has open items):
+     *  title with the list name, body, and the pre-checked "move open
+     *  items to Inbox" box. */
+    archiveListTitle: (name: string) => string;
+    archiveListConfirm: string;
+    archiveListMoveOpen: (n: number) => string;
     renameList: string;
     newList: string;
     /** Heading over the account's Home doc (Inbox + lists). Every other
@@ -584,6 +590,13 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       archiveList: "Archivar",
       archived: "Archivada",
       unarchiveList: "Restaurar",
+      archiveListTitle: (name) => `Archivar «${name}»`,
+      archiveListConfirm:
+        "Los elementos abiertos que queden en una lista archivada permanecen fuera de la vista hasta que la restaures.",
+      archiveListMoveOpen: (n) =>
+        n === 1
+          ? "¿Mover 1 elemento abierto a la bandeja de entrada?"
+          : `¿Mover ${n} elementos abiertos a la bandeja de entrada?`,
       renameList: "Renombrar",
       newList: "Nueva lista",
       personal: "Personal",
@@ -939,6 +952,11 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       archiveList: "Archive",
       archived: "Archived",
       unarchiveList: "Unarchive",
+      archiveListTitle: (name) => `Archive “${name}”`,
+      archiveListConfirm:
+        "Open items left in an archived list stay out of the way until you unarchive it.",
+      archiveListMoveOpen: (n) =>
+        n === 1 ? "Move 1 open item to Inbox?" : `Move ${n} open items to Inbox?`,
       renameList: "Rename",
       newList: "New list",
       personal: "Personal",

@@ -366,6 +366,23 @@ without destroying anything. It is a single-register write on the ListMeta row
 Unarchiving deletes the key and the list reappears in the active projection
 exactly as it was.
 
+**Open items at archive time (web, built 2026-10-29).** Archiving a list
+that still holds open items would hide live work behind the archived section,
+so the web client confirms first: a dialog naming the list, with a
+pre-checked "Move N open items to Inbox?" box. Confirming with the box
+checked moves those items (in list order) to the end of Inbox's open
+projection and then archives, as one action batch — a single undo walks both
+back. Unchecked, it archives only. A list with no open items archives at
+once with no dialog, as before. The move is the user's explicit choice in the
+client; the core primitive stays the pure single-register write above, and
+the CLI's `lists archive` is unchanged. Items that land in the list
+concurrently (another device moving into it while it is archived) stay open
+in the archived list; that state is legitimate and every surface tolerates
+it — search badges such hits "Archived", Starred and the archived board still
+show them. The bin is deliberately *not* used here: it is the pre-delete
+staging area (`empty_bin` hard-deletes), and routing shelved work through it
+would make a reversible archive one `bin empty` away from loss.
+
 **Projections.** `all_lists()` remains the canonical projection: every ListMeta
 row in CRDT order, archived or not — archived lists never disappear from it.
 Clients derive two views from it: the **active** projection (`archived_at`

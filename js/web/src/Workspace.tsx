@@ -38,6 +38,7 @@ import plusSvg from "./icons/plus.svg?raw";
 import trashSvg from "./icons/trash.svg?raw";
 import { Board, type BoardImperative } from "./Board.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
+import { createArchiveListFlow } from "./ArchiveListDialog.tsx";
 import { NewDocDialog } from "./NewDocDialog.tsx";
 import { captureInviteFromLocation } from "./invite.ts";
 import { InviteDialog } from "./InviteDialog.tsx";
@@ -270,6 +271,10 @@ export function Workspace(props: {
   // list rename / icon / archive, the display options) acts on it.
   const viewDocId = createMemo((): string => docs.viewDocId(view()));
   const viewApp = createMemo((): DocApp => docs.appForView(view()));
+  // Header-menu archive shares the nav's flow (dialog when the list has
+  // open items). The view stays put: the header then shows the
+  // Archived badge and the menu flips to Unarchive.
+  const archive = createArchiveListFlow();
   // Display label for a doc: Home is "Personal"; others carry their
   // name, or the untitled fallback.
   const docLabel = (docId: string): string =>
@@ -2772,6 +2777,7 @@ export function Workspace(props: {
         confirmLabel={m().workspace.emptyBin}
         onConfirm={() => docs.emptyBin()}
       />
+      {archive.dialog()}
       <Show keyed when={taskApp()}>
         {(tApp) => (
       <TaskDialog
@@ -2934,12 +2940,13 @@ export function Workspace(props: {
                     <DropdownMenu.Content class="dropdown-menu-content">
                       <DropdownMenu.Item
                         class="dropdown-menu-item"
-                        onSelect={() =>
-                          viewApp().setListArchived(
-                            listId(),
-                            archivedViewListId() === null,
-                          )
-                        }
+                        onSelect={() => {
+                          if (archivedViewListId() !== null) {
+                            viewApp().setListArchived(listId(), false);
+                          } else {
+                            archive.request({ app: viewApp(), listId: listId() });
+                          }
+                        }}
                       >
                         {archivedViewListId() !== null
                           ? m().nav.unarchiveList
