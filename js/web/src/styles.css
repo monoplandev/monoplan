@@ -1341,8 +1341,8 @@ input.task-check:hover {
   height: 20px;
   margin: -2px 0;
   color: var(--text-faint);
+  /* No fade: it appears and goes on the hover edge instantly. */
   opacity: 0;
-  transition: opacity 120ms ease;
 }
 
 .row-menu svg {
