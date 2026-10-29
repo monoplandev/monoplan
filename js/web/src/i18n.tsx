@@ -224,7 +224,6 @@ export type Messages = {
     displayOptions: string;
     /** Switch label (Done / Focus options popover) toggling the origin-list
      *  badge. */
-    showOriginList: string;
     /** Switch label (list display options) toggling the per-row lifecycle
      *  state badge on the flat list view. */
     showState: string;
@@ -676,7 +675,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       noMatchingLists: "No hay listas coincidentes",
       currentList: "Actual",
       displayOptions: "Opciones de visualización",
-      showOriginList: "Mostrar lista",
       showState: "Mostrar estado",
       allDocs: "Todos los espacios",
       log: "Registrar",
@@ -1034,7 +1032,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       noMatchingLists: "No matching lists",
       currentList: "Current",
       displayOptions: "Display options",
-      showOriginList: "Show list",
       showState: "Show state",
       allDocs: "All workspaces",
       log: "Log",

@@ -190,19 +190,6 @@ function loadShowStatePrefs(): Record<string, true> {
   }
 }
 
-// Global (not per-list) "show the origin-list badge on the Done view"
-// preference. The Done view is a single global view, so this is one flag,
-// not a per-list map. Same local-only storage rationale as the board prefs.
-// On by default — only the "off" state is persisted (stored as "0").
-const DONE_SHOW_LIST_PREF_KEY = "monoplan:done-show-list";
-function loadDoneShowListPref(): boolean {
-  try {
-    return localStorage.getItem(DONE_SHOW_LIST_PREF_KEY) !== "0";
-  } catch {
-    return true;
-  }
-}
-
 /** The header's "Display options" popover: tooltip on the trigger, popover
     body from children. The guard keeps the tooltip from showing while the
     popover is open (or when focus returns to the button on close). */
@@ -530,20 +517,6 @@ export function Workspace(props: {
       // Quota/private-mode failures just lose the preference.
     }
   };
-  // Whether the global Done view badges each item with its origin list.
-  const [doneShowList, setDoneShowListSignal] = createSignal<boolean>(
-    loadDoneShowListPref(),
-  );
-  const setDoneShowList = (show: boolean) => {
-    setDoneShowListSignal(show);
-    try {
-      if (show) localStorage.removeItem(DONE_SHOW_LIST_PREF_KEY);
-      else localStorage.setItem(DONE_SHOW_LIST_PREF_KEY, "0");
-    } catch {
-      // Quota/private-mode failures just lose the preference.
-    }
-  };
-
   // Draft state: a transient ItemView injected into dndItems but not into
   // the store. `insertIndex` is captured at draft-start time so collapse
   // commits at the same slot the user originally clicked from (e.g. after
@@ -3066,40 +3039,27 @@ export function Workspace(props: {
                 </Show>
               </DisplayOptionsPopover>
             </Show>
-            <Show when={view().kind === "done"}>
+            {/* The Done view always badges each item with its origin list
+                (like Focus). Its only display option is doc amalgamation:
+                personal by default (Home's closed items); the switch
+                amalgamates every open doc. A synced personal pref on the
+                Home doc (`spec/sharing-plan.md`), so every device agrees.
+                Only offered once there is more than one doc. */}
+            <Show when={view().kind === "done" && docs.docs().length > 1}>
               <DisplayOptionsPopover>
                 <Switch
                   class="done-switch"
-                  checked={doneShowList()}
-                  onChange={(checked) => setDoneShowList(checked)}
+                  checked={docs.doneAmalgamate()}
+                  onChange={(checked) => home.setDoneAmalgamate(checked)}
                 >
                   <Switch.Label class="done-switch-label">
-                    {m().workspace.showOriginList}
+                    {m().workspace.allDocs}
                   </Switch.Label>
                   <Switch.Input class="done-switch-input" />
                   <Switch.Control class="done-switch-control">
                     <Switch.Thumb class="done-switch-thumb" />
                   </Switch.Control>
                 </Switch>
-                {/* Personal by default (Home's closed items); the switch
-                    amalgamates every open doc. A synced personal pref on
-                    the Home doc (`spec/sharing-plan.md`), so every device
-                    agrees. Only offered once there is more than one doc. */}
-                <Show when={docs.docs().length > 1}>
-                  <Switch
-                    class="done-switch"
-                    checked={docs.doneAmalgamate()}
-                    onChange={(checked) => home.setDoneAmalgamate(checked)}
-                  >
-                    <Switch.Label class="done-switch-label">
-                      {m().workspace.allDocs}
-                    </Switch.Label>
-                    <Switch.Input class="done-switch-input" />
-                    <Switch.Control class="done-switch-control">
-                      <Switch.Thumb class="done-switch-thumb" />
-                    </Switch.Control>
-                  </Switch>
-                </Show>
               </DisplayOptionsPopover>
               <Tooltip openDelay={200} closeDelay={0} placement="bottom">
                 <Tooltip.Trigger
@@ -3298,9 +3258,10 @@ export function Workspace(props: {
                         app={routed}
                         selection={selection}
                         viewKind={view().kind}
-                        showList={() =>
-                          view().kind === "focus" || doneShowList()
-                        }
+                        showList={() => {
+                          const k = view().kind;
+                          return k === "focus" || k === "done";
+                        }}
                         listLabel={listLabel}
                         isSharedDoc={(docId) => docId !== docs.homeDocId}
                         showState={() => {
