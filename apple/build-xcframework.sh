@@ -50,6 +50,14 @@ for t in "${TARGETS[@]}"; do
   rustup target add "$t" >/dev/null
 done
 
+# Minimum OS versions, matching `apple/MonoplanCore/Package.swift`. rustc
+# and the C toolchain (aws-lc-sys, reqwest's TLS backend since 0.13)
+# both read these; without them rustc links the iOS slices against iOS
+# 10 and the link fails on `___chkstk_darwin`, which aws-lc's objects
+# need and older runtimes lack.
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-14.0}"
+export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-17.0}"
+
 echo ">> building staticlib (release) for ${#TARGETS[@]} targets"
 for t in "${TARGETS[@]}"; do
   echo "   - $t"
