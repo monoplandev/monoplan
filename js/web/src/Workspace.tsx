@@ -851,10 +851,10 @@ export function Workspace(props: {
   createEffect(() => {
     for (const d of docs.docs()) if (!d.home) members.learn(d.docId, props.presence(d.docId));
   });
-  const creatorOf = (item: ItemView): { email: string | null } | null => {
+  const creatorOf = (item: ItemView): { accountId: string; email: string | null } | null => {
     const who = item.createdBy;
     if (!who || item.docId === docs.homeDocId) return null;
-    return { email: members.emailOf(item.docId, who) ?? null };
+    return { accountId: who, email: members.emailOf(item.docId, who) ?? null };
   };
 
   // The list an item is filed under in its doc, for writes that need a

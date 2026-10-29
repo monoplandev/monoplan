@@ -824,7 +824,13 @@ function DocSection(props: {
       <Show when={others().length > 0}>
         <span class="nav-section-presence" role="group" aria-label={m().nav.presenceGroup}>
           <For each={others().slice(0, PRESENCE_MAX_AVATARS)}>
-            {(p) => <Avatar email={p.email} title={m().nav.presenceHere(p.email)} />}
+            {(p) => (
+              <Avatar
+                accountId={p.accountId}
+                email={p.email}
+                title={m().nav.presenceHere(p.email)}
+              />
+            )}
           </For>
           <Show when={others().length > PRESENCE_MAX_AVATARS}>
             <span

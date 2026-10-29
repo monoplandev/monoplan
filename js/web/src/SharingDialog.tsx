@@ -3,6 +3,7 @@ import { DropdownMenu } from "@kobalte/core/dropdown-menu";
 import { For, Show, createEffect, createSignal, on } from "solid-js";
 import { InviteSecret } from "@monoplan/core/wasm";
 import { api, type Invite, type Member } from "./api.ts";
+import { Avatar } from "./Avatar.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { formatRelative } from "./format.tsx";
 import { useAppI18n } from "./i18n.tsx";
@@ -195,6 +196,10 @@ export function SharingDialog(props: {
                     <For each={list()}>
                       {(mb) => (
                         <li class="sharing-row">
+                          {/* Same disc as the presence row and item
+                              attribution, so the colour is learnable
+                              from the member list. */}
+                          <Avatar accountId={mb.account_id} email={mb.email} />
                           <span class="sharing-row-main">{mb.email}</span>
                           <span class="sharing-tags">
                             <Show when={mb.account_id === me()}>

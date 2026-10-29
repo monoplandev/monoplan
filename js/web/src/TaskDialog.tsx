@@ -90,7 +90,7 @@ export function TaskDialog(props: {
    *  email, `{ email: null }` for a creator no longer in the member
    *  list, or null to show nothing (Home, unstamped items). Resolved by
    *  the workspace (`spec/sharing-plan.md` §Attribution). */
-  creatorOf?: (item: ItemView) => { email: string | null } | null;
+  creatorOf?: (item: ItemView) => { accountId: string; email: string | null } | null;
   /** The open item's id, or null when closed. */
   itemId: () => string | null;
   setItemId: (id: string | null) => void;
@@ -1443,6 +1443,7 @@ export function TaskDialog(props: {
                         <span class="task-dialog-by">
                           {m().workspace.createdBy}
                           <Avatar
+                            accountId={c().accountId}
                             email={c().email}
                             title={c().email ?? m().sharing.formerMember}
                           />

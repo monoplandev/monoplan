@@ -4678,8 +4678,11 @@ input.task-check:hover {
   gap: 4px;
 }
 
-/* Person disc (Avatar.tsx): grayscale on purpose for now. Sized to the
-   badge line. */
+/* Person disc (Avatar.tsx). A known person carries `--avatar-bg`, one of
+   a fixed pastel palette picked from the account id; the ink stays dark
+   in both themes since every swatch is light. Without the variable (the
+   "+N" overflow disc) it falls back to the neutral badge tint. Sized to
+   the badge line. */
 .avatar {
   flex-shrink: 0;
   display: inline-flex;
@@ -4693,8 +4696,12 @@ input.task-check:hover {
   line-height: 1;
   text-transform: uppercase;
   color: var(--text-badge);
-  background: color-mix(in srgb, var(--text-badge) 18%, var(--bg-badge));
+  background: var(--avatar-bg, color-mix(in srgb, var(--text-badge) 18%, var(--bg-badge)));
   user-select: none;
+}
+
+.avatar[data-tinted] {
+  color: rgb(0 0 0 / 0.72);
 }
 
 .avatar[data-unknown] {
@@ -5249,6 +5256,12 @@ input.task-check:hover {
   gap: 12px;
   min-height: 32px;
   padding: 4px 0;
+}
+
+/* The member disc leads the row; the email keeps the flex slack, so the
+   default gap would push the two apart. Tighten it on the avatar only. */
+.sharing-row > .avatar {
+  margin-right: -4px;
 }
 
 .sharing-row:not(:last-child)::after {
