@@ -3253,6 +3253,7 @@ export function Workspace(props: {
                           view().kind === "focus" || doneShowList()
                         }
                         listLabel={listLabel}
+                        isSharedDoc={(docId) => docId !== docs.homeDocId}
                         showState={() => {
                           const v = view();
                           return v.kind === "list" && showState(v.id);

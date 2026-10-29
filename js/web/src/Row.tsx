@@ -3,6 +3,7 @@ import { ContextMenu } from "@kobalte/core/context-menu";
 import checkSvg from "./icons/check.svg?raw";
 import crossSvg from "./icons/cross.svg?raw";
 import starFilledSvg from "./icons/star-filled.svg?raw";
+import usersSvg from "./icons/users.svg?raw";
 import { DndSelection } from "./dnd/solid";
 import { ItemContextMenu, canPinToFocusIn } from "./ItemContextMenu.tsx";
 import { DeadlineBadge } from "./DeadlineBadge.tsx";
@@ -72,6 +73,10 @@ export function Row(props: {
   /** Resolves a list id (in the item's doc) to its display label (see
    *  Workspace `listLabel`). */
   listLabel?: (listId: string, docId?: string) => string;
+  /** Whether a doc id is a shared workspace (anything but Home). The
+   *  origin-list badge then leads with the people glyph, the same mark
+   *  the nav and agenda use for a shared workspace. */
+  isSharedDoc?: (docId: string) => boolean;
   /** Flat list view: when true, badge each open row with its lifecycle
    *  state (client-local per-list display option). The board shows state
    *  as the lane itself, so cards never take it. */
@@ -539,6 +544,13 @@ export function Row(props: {
             <Show when={originList()}>
               {(name) => (
                 <span class="badge row-list" title={name()}>
+                  <Show when={props.isSharedDoc?.(props.item().docId)}>
+                    <span
+                      class="row-list-icon"
+                      aria-hidden="true"
+                      innerHTML={usersSvg}
+                    />
+                  </Show>
                   <span class="row-list-name">{name()}</span>
                 </span>
               )}

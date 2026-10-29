@@ -1391,6 +1391,19 @@ input.task-check:hover {
   white-space: nowrap;
 }
 
+/* People glyph ahead of the list name when the item is in a shared
+   workspace; sized to the deadline badge's icon slot. */
+.row-list-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.row-list-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
 /* Lifecycle-state badge on flat list rows (per-list "Show state" display
    option). Same pill as the origin-list badge. */
 .row-state {
