@@ -1,6 +1,6 @@
 # Daemon plan
 
-Status: phases 1 to 3 built 2026-10-21 (`cli/src/daemon.rs` host + socket server, `cli/src/ipc.rs`, `cli/src/client.rs`, every doc verb ported, `-s` removed, `daemon stop|status`; tests in `cli/tests/daemon.rs` and `cli/tests/cli_bin.rs`). Phase 5's projection tier built 2026-10-26 (`Watch` / `Watching` / `Event`; first watcher is the macOS menubar app in `apple/MonoplanMac`). `daemon install|uninstall` built 2026-10-27 (`cli/src/service.rs`: the headless path for Linux and CLI-only Macs). Amended 2026-10-27 (see "Decision", amendment): on macOS the app hosts the loop in-process (`monoplan-ffi::Host`, `apple/MonoplanMac/Sources/MonoplanMac/HostController.swift`) for its whole life, the headless daemon is the alternative rather than a partner, and login uses the Login Items API; the mirror tier is no longer needed for the macOS window. Not built: the locked state, wake notifications. Written 2026-10-21. The built behaviour is documented in `spec/cli.md` "Process model"; this file keeps the reasoning and the remaining plan. Supersedes the deleted
+Status: phases 1 to 3 built 2026-10-21 (`cli/src/daemon.rs` host + socket server, `cli/src/ipc.rs`, `cli/src/client.rs`, every doc verb ported, `-s` removed, `daemon stop|status`; tests in `cli/tests/daemon.rs` and `cli/tests/cli_bin.rs`). Phase 5's projection tier built 2026-10-26 (`Watch` / `Watching` / `Event`; first watcher is the macOS menubar app in `apple/MonoplanMac`). `daemon install|uninstall` built 2026-10-27 (`cli/src/service.rs`: the headless path for Linux and CLI-only Macs). Amended 2026-10-27 (see "Decision", amendment): on macOS the app hosts the loop in-process (`monoplan-ffi::Host`, `apple/MonoplanMac/Sources/MonoplanMac/HostController.swift`) for its whole life, the headless daemon is the alternative rather than a partner, and login uses the Login Items API; the mirror tier is no longer needed for the macOS window. Amended 2026-10-29 (`spec/mac-window-plan.md`): the mirror is an FFI surface on `Host`, never socket frames; the window is a webview running the web client over a mirror doc with its own peer; the tray moves to the FFI too, so the socket is the CLI's alone. Not built: the locked state, wake notifications. Written 2026-10-21. The built behaviour is documented in `spec/cli.md` "Process model"; this file keeps the reasoning and the remaining plan. Supersedes the deleted
 `spec/tui-plan.md` (its "no daemon" conclusion rested on boot time,
 which is no longer the question) and answers the daemon question that
 `spec/cli.md` "Sync lifecycle" deferred.
@@ -65,11 +65,13 @@ lives in `apple/MonoplanMac/` (`bun run mac`).
 **Amended 2026-10-27: on macOS the normal path is one process.** The
 app hosts the doc in-process: the same Rust host loop, split into
 `daemon::start` / `daemon::serve` and exposed through `monoplan-ffi` as
-`Host` (a background thread with its own tokio runtime). The tray, the
-window and every future view are clients of the app's own socket, so
-the UI code path is the one the tray already had, and the window reads
-the doc through the FFI directly, which is why the mirror tier below is
-no longer needed for macOS. The headless `monoplan daemon` remains the
+`Host` (a background thread with its own tokio runtime). The tray and
+the window are clients of the app's own `Host` through the FFI
+(amended 2026-10-29; until then the tray was a socket client of its own
+process). The socket is served for the CLI only. The window is a
+webview running the web client over a mirror doc that `Host` seeds and
+converges (`spec/mac-window-plan.md`); the mirror tier below is that
+FFI surface and is never carried by the socket. The headless `monoplan daemon` remains the
 host for CLI-only use, Linux and servers (`daemon install` writes the
 systemd unit or launchd agent for that path) and is what the CLI
 auto-spawns when nothing holds the profile. Rules:
@@ -119,8 +121,9 @@ apps share one shape.
 ```
 monoplan item add ──UDS──┐
 monoplan item ls  ──UDS──┤
-monoplan tui      ──UDS──┼──>  monoplan daemon ──WS──> server
-(tray / window)   ──UDS──┘        │
+monoplan tui      ──UDS──┼──>  host loop ──WS──> server
+tray / window     ──FFI──┘        │   (`monoplan daemon`, or the macOS app's
+                  (in-process)    │    `monoplan-ffi::Host`; the FFI edge exists only there)
                                   ├── <profile>/monoplan.sqlite
                                   ├── <profile>/daemon.lock   (held: "a daemon owns this profile")
                                   ├── <profile>/peer-<n>.lock (held: its Loro peer id)
@@ -258,29 +261,37 @@ inside `--json` payloads is not done: every documented `--json` shape in
 `spec/cli.md` is a bare array, and wrapping them is a contract change to
 decide separately.
 
-**Live clients mirror the doc, not projections.** Decided 2026-10-21.
-`Subscribe` returns a full Loro export; every subsequent apply on the
-daemon (local intent or remote frame) fans out as `AppEvent::Update`
-with the update bytes. The subscribed process imports them into a
-read-only `Doc` of its own (via the Swift FFI, `spec/swift-ffi-plan.md`,
-or wasm in a webview) and runs core's own read functions locally:
-board, agenda, focus, search index, place suggestions. It never holds a
-peer id, the DEK, or sqlite, and mutations still go over the socket as
-command intents; the daemon applies them and the resulting `Update`
-converges the mirror. This keeps the protocol view-agnostic (the
-alternative, shipping typed projections plus per-view events, makes the
-protocol the view model and needs incremental-apply code in every GUI)
-and keeps exactly one implementation of every view, in core, shared by
-CLI, web, macOS and iOS. The iOS app must embed core as a full host
-anyway, so the mirror reuses that FFI surface minus sync and storage.
-Cost: a second in-memory `Doc` per live process, and a sub-millisecond
-round trip before a local edit renders. Revisit only when `LoroText`
-notes (`spec/notes-plan.md`) make typing latency matter; a mirror with
-its own peer id is the escape hatch, not the default.
+**Live clients mirror the doc, not projections.** Decided 2026-10-21,
+amended 2026-10-29. A full-view client holds a `Doc` of its own, seeded
+by a snapshot from the host and converged by the plaintext update bytes
+of every later apply (local command, remote frame, another mirror's
+import), and runs core's own read functions locally: board, agenda,
+focus, search index, place suggestions. This keeps the host
+view-agnostic (the alternative, shipping typed projections plus
+per-view events, makes the protocol the view model and needs
+incremental-apply code in every GUI) and keeps exactly one
+implementation of every view, in core, shared by CLI, web, macOS and
+iOS.
+
+Two things changed on 2026-10-29 (`spec/mac-window-plan.md`). The
+mirror is an FFI surface on the in-process `Host` (`subscribe`,
+`import`), never socket frames: the only full-view client is the app's
+own webview, the headless daemon has no such client, and the socket
+stays the CLI's. And the mirror **writes**, under a peer id of its own
+leased from the slot pool: the webview runs the web store, which is
+built on a locally mutated `Doc` (synchronous AppEvents, its own
+`UndoManager`, the notes `LoroText` bridge), so a read-only mirror with
+intents over the boundary would rebuild the store's write half on the
+host. The mirror's ops reach the host on every flush, are imported
+tagged, and are captured, WALed and pushed by the existing VV-based
+capture like anything the CLI committed. The 2026-10-21 text called a
+mirror with its own peer "the escape hatch, not the default"; for a
+webview it is the default. Cost: a second in-memory `Doc` per window,
+one more peer slot, and a snapshot load per window open. The webview
+holds no DEK, no storage and no socket.
 
 The one-shot CLI keeps using projections: a process that prints a list
-and exits should not import a doc to do it. Both shapes coexist (`Ls`
-returns a projection, `Subscribe` returns doc bytes).
+and exits should not import a doc to do it.
 
 Lightweight live clients also use projections (built 2026-10-26). A
 tray that shows today's events, a widget, or a notification scheduler
@@ -294,10 +305,9 @@ daemon sends `Reply::Event(WatchEvent::Changed)` whenever the doc's
 Requests still work on a watching connection; with one in flight at a
 time the client tells replies and events apart by variant. The client
 re-requests its projection, debounced, and on a timer. The mirror
-(`Subscribe` / `Snapshot` / `Update` below) stays the plan for
-full-view clients, and only if projection re-fetch proves too slow for
-a specific view; Tailscale's frontends run on the equivalent of this
-tier (`WatchIPNBus`) and never mirror the backend.
+(below) is the shape for full-view clients and lives on the FFI, not
+here: socket watchers never mirror, as Tailscale's frontends run on the
+equivalent of this tier (`WatchIPNBus`) and never mirror the backend.
 
 Types live in `cli/src/ipc.rs` for now; they move to a `crates/ipc`
 crate when the first non-CLI client (Swift, TUI) needs them.
@@ -436,17 +446,15 @@ about the product.
 4. **Lifecycle** (partly built). `daemon stop|status|install|uninstall`
    exist. Not built: the locked state and `Unlock`, wake
    notifications.
-5. **Subscriptions.** (Mirror tier dropped for macOS 2026-10-27: the
-   app hosts in-process and reads the doc through the FFI.) Projection
-   tier built 2026-10-26: `Watch` and
+5. **Subscriptions.** Projection tier built 2026-10-26: `Watch` and
    `Event` fan-out from the host after local commands and remote
    frames, tested in `cli/tests/daemon.rs`
    (`watcher_hears_sync_local_and_remote_changes`), consumed by the
-   macOS menubar app. The mirror tier (`Subscribe`, `Snapshot`,
-   `Update`) is deferred until a full-view client needs it; its first
-   test is a second `Doc` in the test process importing the stream and
-   asserting it converges with the daemon's after a local intent and a
-   remote frame.
+   macOS menubar app over the socket until it moves to the FFI. The
+   mirror tier is not a socket feature (decided 2026-10-29): it is
+   `Host::subscribe` / `Host::import` on the FFI, planned and tested in
+   `spec/mac-window-plan.md`, reached through an internal `HostCmd`
+   enum the socket handler cannot construct.
 
 Update `spec/cli.md` ("Sync lifecycle", "Status", the `-s` flag) as
 each phase lands rather than in one rewrite.

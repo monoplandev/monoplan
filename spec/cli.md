@@ -135,7 +135,7 @@ Every connection starts with a hello carrying a build id (package version plus t
 - Exits on SIGINT/SIGTERM, on `daemon stop`, or when it notices the profile dir has been purged. The embedded host does the same; the app starts a fresh one as soon as the profile is free again, so `daemon stop` against the app is a restart, not a stop (quit the app to stop syncing on a Mac).
 - There is no idle timeout: background sync is the point.
 - `Watch` turns a connection into a watcher: the daemon replies `Watching` and then sends `Event(Changed)` whenever the doc changes (a local command committed, remote ops applied; a burst is one event) and `Event(Sync(..))` when online/offline or `last_synced_at` moves. Requests still work on a watching connection; replies and events are told apart by variant. The macOS menubar app (`apple/MonoplanMac`) is the first watcher: it re-fetches `agenda --days 0 --json` on `Changed`. No CLI verb exposes `Watch` yet.
-- Not built yet: the locked state (`Unlock` over the socket when the DEK is not readable non-interactively), wake notifications, and the doc-mirror subscription for full-view clients (`spec/daemon-plan.md`).
+- Not built yet: the locked state (`Unlock` over the socket when the DEK is not readable non-interactively), wake notifications, The doc mirror for full-view clients is an FFI surface on the app's in-process host, not a socket feature (`spec/mac-window-plan.md`).
 
 ## Local state
 

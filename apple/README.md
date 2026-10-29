@@ -4,10 +4,14 @@ The Rust↔Swift FFI boundary for the Apple clients. What crosses it today
 is the profile's lifecycle, not the doc: `login` / `logout` (the bodies of
 the CLI commands) and `Host`, the daemon loop embedded in the app's
 process (`spec/daemon-plan.md`, amended 2026-10-27). The macOS menubar app
-reads the doc as a client of its own host's socket. In-process doc access
-for the native clients (typed views, a mutation surface, a change callback
-on `Host`, a host that boots without serving a socket) is the next layer
-and is not built. The offline `MonoplanStore` prototype from
+reads the doc as a client of its own host's socket; moving it onto the
+FFI is phase 1 of [`spec/mac-window-plan.md`](../spec/mac-window-plan.md)
+(decided 2026-10-29). The window is that plan's phases 2 to 4: a webview
+running the web client over a mirror doc that `Host` seeds and converges
+through the FFI (`subscribe` / `import`), with a peer id of its own. The
+socket stays the CLI's; it never carries the mirror. Typed native views
+over the FFI are not planned while the UI is web. The offline
+`MonoplanStore` prototype from
 [`spec/swift-ffi-plan.md`](../spec/swift-ffi-plan.md) was removed on
 2026-10-27; that plan is kept for the build pipeline it set up.
 
@@ -174,4 +178,4 @@ translation is missing, or its placeholders differ from the English.
 Adding a string means adding the key and its Spanish to the catalog in
 the same change; the build will not let it drift.
 
-Next: the window.
+Next: the window, per `spec/mac-window-plan.md`.
