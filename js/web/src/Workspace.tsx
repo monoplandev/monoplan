@@ -839,11 +839,16 @@ export function Workspace(props: {
   // doc, one's own included: on a shared doc, who added what is the
   // point. Home is one person, so nothing is shown there. The member
   // directory turns the stamped account id into an email; it loads once
-  // per shared doc per session.
+  // per shared doc per session, and learns anyone the server announces
+  // as present since (a member who joined after the load opens the doc
+  // and is announced before their first item can arrive).
   const members = createMemberDirectory();
   createEffect(() => {
     if (session.session().anonymous) return;
     for (const d of docs.docs()) if (!d.home) members.ensure(d.docId);
+  });
+  createEffect(() => {
+    for (const d of docs.docs()) if (!d.home) members.learn(d.docId, props.presence(d.docId));
   });
   const creatorOf = (item: ItemView): { email: string | null } | null => {
     const who = item.createdBy;

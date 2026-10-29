@@ -73,6 +73,41 @@ describe("member directory", () => {
     });
   });
 
+  test("learn seeds presence-announced accounts without counting as a load", async () => {
+    await createRoot(async (dispose) => {
+      const calls: string[] = [];
+      const dir = createMemberDirectory(async (docId) => {
+        calls.push(docId);
+        return [member("a1", "ann@example.com")];
+      });
+      // A presence frame lands before the list is fetched: the account
+      // resolves at once, the count stays unknown, and ensure still
+      // fetches.
+      dir.learn(DOC, [{ accountId: "n9", email: "new@example.com" }]);
+      expect(dir.emailOf(DOC, "n9")).toBe("new@example.com");
+      expect(dir.countOf(DOC)).toBeUndefined();
+      dir.ensure(DOC);
+      await tick();
+      expect(calls).toEqual([DOC]);
+      expect(dir.emailOf(DOC, "a1")).toBe("ann@example.com");
+      expect(dir.countOf(DOC)).toBe(1);
+      // The fetched list replaced the seed (the server's list is the
+      // truth); a member who joins after the load is announced again
+      // when they open the doc and is merged in beside it.
+      expect(dir.emailOf(DOC, "n9")).toBeUndefined();
+      dir.learn(DOC, [
+        { accountId: "a1", email: "ann@example.com" },
+        { accountId: "n9", email: "new@example.com" },
+        { accountId: "x0", email: "" }, // no email: skipped
+      ]);
+      expect(dir.emailOf(DOC, "n9")).toBe("new@example.com");
+      expect(dir.emailOf(DOC, "a1")).toBe("ann@example.com");
+      expect(dir.emailOf(DOC, "x0")).toBeUndefined();
+      expect(dir.countOf(DOC)).toBe(2);
+      dispose();
+    });
+  });
+
   test("refresh replaces a doc's list and leaves other docs alone", async () => {
     await createRoot(async (dispose) => {
       const OTHER = "00000000-0000-0000-0000-00000000000c";
