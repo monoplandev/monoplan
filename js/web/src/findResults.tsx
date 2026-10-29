@@ -14,7 +14,7 @@ import { useAppI18n } from "./i18n.tsx";
 import archiveSvg from "./icons/archive.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
 import checkSvg from "./icons/check.svg?raw";
-import crumpledPaperSvg from "./icons/crumpled-paper.svg?raw";
+import crumpledPaperSvg from "./icons/trash.svg?raw";
 import starSvg from "./icons/star.svg?raw";
 import fileSvg from "./icons/file.svg?raw";
 

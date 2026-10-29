@@ -27,7 +27,7 @@ import calendarSvg from "./icons/calendar.svg?raw";
 import cardStackSvg from "./icons/card-stack.svg?raw";
 import caretRightSvg from "./icons/caret-right.svg?raw";
 import checkSvg from "./icons/check.svg?raw";
-import crumpledPaperSvg from "./icons/crumpled-paper.svg?raw";
+import crumpledPaperSvg from "./icons/trash.svg?raw";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import starSvg from "./icons/star.svg?raw";
 import eyeNoneSvg from "./icons/eye-none.svg?raw";

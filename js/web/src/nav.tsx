@@ -30,7 +30,7 @@ import caretDownSvg from "./icons/caret-down.svg?raw";
 import checkSvg from "./icons/check.svg?raw";
 import cloudSvg from "./icons/cloud.svg?raw";
 import cloudOffSvg from "./icons/cloud-off.svg?raw";
-import crumpledPaperSvg from "./icons/crumpled-paper.svg?raw";
+import crumpledPaperSvg from "./icons/trash.svg?raw";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import dotsVerticalSvg from "./icons/dots-vertical.svg?raw";
 import starSvg from "./icons/star.svg?raw";
