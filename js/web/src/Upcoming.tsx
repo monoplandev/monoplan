@@ -40,6 +40,7 @@ import {
 } from "solid-js";
 import { ContextMenu } from "@kobalte/core/context-menu";
 import { ItemContextMenu } from "./ItemContextMenu.tsx";
+import { RowMenuButton } from "./Row.tsx";
 import type { DayGroup, DayRow } from "./dayGroups.ts";
 import {
   applySelectionKeyAction,
@@ -334,6 +335,9 @@ export function Upcoming(props: {
                       selectedSet().has(r.item.id) &&
                       (!r.span || litDay(r.item.id) === g.key),
                   );
+                  // Keeps the "…" button showing while its menu is up
+                  // (`.upcoming-row[data-menu-open]`), as list rows do.
+                  const [menuOpen, setMenuOpen] = createSignal(false);
                   return (
                   <ItemContextMenu
                     item={() => r.item}
@@ -346,12 +350,14 @@ export function Upcoming(props: {
                     onReveal={props.onReveal}
                     onMoveToList={props.onMoveToList}
                     listLabel={props.listLabel}
+                    onMenuOpenChange={setMenuOpen}
                   >
                   <ContextMenu.Trigger
                     class="upcoming-row"
                     role="option"
                     data-key={r.item.id}
                     data-day={g.key}
+                    data-menu-open={menuOpen() ? "" : undefined}
                     aria-selected={selected() ? "true" : "false"}
                     data-tone={r.tone}
                     // `data-done`, not `data-closed`: the menu trigger
@@ -422,6 +428,9 @@ export function Upcoming(props: {
                         )}
                       </Show>
                     </span>
+                    {/* Row menu, past the time lane at the right edge
+                        (CSS `order`), as on list rows. */}
+                    <RowMenuButton />
                   </ContextMenu.Trigger>
                   </ItemContextMenu>
                   );

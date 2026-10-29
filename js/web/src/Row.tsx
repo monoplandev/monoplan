@@ -617,51 +617,57 @@ export function Row(props: {
             </Show>
           </div>
         </Show>
-        {/* Row menu: a "…" at the trailing edge (top-right on a board
-            card), revealed on hover (`.row-menu` in styles.css), that
-            opens the same context menu a right-click does — the visible
-            route to Move to Bin and the rest for anyone who doesn't
-            think to right-click. Kobalte's trigger opens on `contextmenu`,
-            so a click re-dispatches one from the button's own bottom-left
-            corner and the menu drops down anchored there. All handlers
-            are native (`on:`) so they run before the row's own native
-            dblclick / click listeners and the dnd's listbox handlers:
-            pointerdown / mousedown / click stop here so the press neither
-            starts a drag nor touches the dnd selection (the menu's open
-            hook selects the row itself), mousedown's default is
-            suppressed so focus stays in the listbox (as the checkbox
-            does), and a double-click on the button doesn't fall through
-            to the row's open-dialog handler.
-            Drafts and rows mid-edit have no menu. */}
+        {/* Drafts and rows mid-edit have no menu. */}
         <Show when={!isDraftId(props.item().id) && !props.expanded()}>
-          <button
-            type="button"
-            class="icon-button row-menu"
-            tabIndex={-1}
-            aria-label={m().common.menu}
-            title={m().common.menu}
-            innerHTML={dotsHorizontalSvg}
-            on:pointerdown={(e) => e.stopPropagation()}
-            on:mousedown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
-            on:dblclick={(e) => e.stopPropagation()}
-            on:click={(e) => {
-              e.stopPropagation();
-              const r = e.currentTarget.getBoundingClientRect();
-              e.currentTarget.dispatchEvent(
-                new MouseEvent("contextmenu", {
-                  bubbles: true,
-                  cancelable: true,
-                  clientX: r.left,
-                  clientY: r.bottom + 2,
-                }),
-              );
-            }}
-          />
+          <RowMenuButton />
         </Show>
       </ContextMenu.Trigger>
     </ItemContextMenu>
+  );
+}
+
+/** The row menu: a "…" at the trailing edge (top-right on a board card,
+ *  past the time lane on an agenda row), revealed on hover (`.row-menu`
+ *  in styles.css), that opens the same context menu a right-click does —
+ *  the visible route to Move to Bin and the rest for anyone who doesn't
+ *  think to right-click. Rendered inside the host's `<ContextMenu.Trigger>`.
+ *  Kobalte's trigger opens on `contextmenu`, so a click re-dispatches one
+ *  from the button's own bottom-left corner and the menu drops down
+ *  anchored there. All handlers are native (`on:`) so they run before the
+ *  row's own native dblclick / click listeners and the listbox handlers:
+ *  pointerdown / mousedown / click stop here so the press neither starts
+ *  a drag nor touches the selection (the menu's open hook selects the row
+ *  itself), mousedown's default is suppressed so focus stays in the
+ *  listbox (as the checkbox does), and a double-click on the button
+ *  doesn't fall through to the row's open-dialog handler. */
+export function RowMenuButton() {
+  const { m } = useAppI18n();
+  return (
+    <button
+      type="button"
+      class="icon-button row-menu"
+      tabIndex={-1}
+      aria-label={m().common.menu}
+      title={m().common.menu}
+      innerHTML={dotsHorizontalSvg}
+      on:pointerdown={(e) => e.stopPropagation()}
+      on:mousedown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      on:dblclick={(e) => e.stopPropagation()}
+      on:click={(e) => {
+        e.stopPropagation();
+        const r = e.currentTarget.getBoundingClientRect();
+        e.currentTarget.dispatchEvent(
+          new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            clientX: r.left,
+            clientY: r.bottom + 2,
+          }),
+        );
+      }}
+    />
   );
 }

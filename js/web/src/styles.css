@@ -420,9 +420,8 @@ body {
   cursor: default;
 }
 
-.upcoming-row:hover {
-  background: var(--bg-hover);
-}
+/* No hover ground, as on list rows: hovering only reveals the "…" menu
+   button (`.row-menu` below); the selection fill is the only tint. */
 
 /* Selection chrome follows the list view's two tokens (see the listbox
    rules below): live while the keyboard is on the agenda, a quiet neutral
@@ -1350,15 +1349,22 @@ input.task-check:hover {
   height: 12px;
 }
 
-.row:hover .row-menu,
-.row[data-menu-open] .row-menu {
+/* Agenda rows take the same button past the time lane (whose `order: 1`
+   puts it at the right edge), centred on the 24px first-line band. */
+.upcoming-row .row-menu {
+  order: 2;
+  margin: 2px 0;
+}
+
+:is(.row, .upcoming-row):hover .row-menu,
+:is(.row, .upcoming-row)[data-menu-open] .row-menu {
   opacity: 1;
 }
 
 /* While the menu is up the button keeps its hover fill, so it reads as
    the thing the menu belongs to (the same pressed look `.icon-button
    [data-expanded]` gives a dropdown trigger). */
-.row[data-menu-open] .row-menu {
+:is(.row, .upcoming-row)[data-menu-open] .row-menu {
   background: var(--bg-hover);
   color: var(--text);
 }
