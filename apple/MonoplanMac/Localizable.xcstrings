@@ -521,32 +521,12 @@
         }
       }
     },
-    "closed": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "cerrado"
-          }
-        }
-      }
-    },
     "could not read agenda: %@": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
             "value": "no se pudo leer la agenda: %@"
-          }
-        }
-      }
-    },
-    "daemon shutting down": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "el daemon se está cerrando"
           }
         }
       }
@@ -571,6 +551,16 @@
         }
       }
     },
+    "host stopped": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "host detenido"
+          }
+        }
+      }
+    },
     "in %@": {
       "localizations": {
         "es": {
@@ -591,12 +581,12 @@
         }
       }
     },
-    "not connected to the daemon": {
+    "not connected to the host": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "sin conexión con el daemon"
+            "value": "sin conexión con el host"
           }
         }
       }
@@ -691,12 +681,12 @@
         }
       }
     },
-    "the daemon closed the connection": {
+    "the host has stopped": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "el daemon cerró la conexión"
+            "value": "el host se ha detenido"
           }
         }
       }

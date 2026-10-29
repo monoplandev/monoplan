@@ -4,10 +4,10 @@
 // tray-only process should be. When a window is added later, opening it
 // switches to `.regular` and closing it switches back.
 //
-// The tray holds no doc. It watches the daemon (one socket connection,
-// `Watch`) and re-fetches `agenda --days 0 --json` when the daemon says
-// something changed, once a minute (the relative times move), and when
-// the menu opens.
+// The tray holds no doc. It watches its own in-process host (a watch
+// over the FFI, never the socket) and re-fetches `agenda --days 0
+// --json` when the host says something changed, once a minute (the
+// relative times move), and when the menu opens.
 
 import AppKit
 import MonoplanMacKit
@@ -45,7 +45,7 @@ final class TrayController: NSObject, NSMenuDelegate {
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         location = ProfileLocation.resolve()
-        client = DaemonClient(location: location)
+        client = DaemonClient()
         hostController = HostController(location: location, client: client)
         super.init()
 

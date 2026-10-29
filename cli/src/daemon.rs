@@ -18,6 +18,12 @@
 //!   tick and right after remote frames apply (so the Ack goes out
 //!   against durable bytes), threshold fold on the hot path, full fold
 //!   on clean exit.
+//! - **Two client paths, one loop.** Socket connections and in-process
+//!   clients ([`LocalClient`]: the macOS app's tray and window through
+//!   `monoplan-ffi`) feed the same request channel and subscribe to the
+//!   same watch broadcast; the loop never knows which it is serving.
+//!   The socket is the CLI's path; the app only ever uses the local
+//!   one (`spec/mac-window-plan.md`).
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::Path;
@@ -150,6 +156,8 @@ impl DaemonStatus {
 /// GUI hosts that embed the loop instead of spawning it).
 pub struct DaemonHandle {
     pub status: watch::Receiver<DaemonStatus>,
+    /// The in-process client path, as the app uses it.
+    pub client: LocalClient,
     shutdown: Option<oneshot::Sender<()>>,
     task: tokio::task::JoinHandle<Result<(), SyncError>>,
 }
@@ -202,31 +210,166 @@ pub async fn serve(
     shutdown: oneshot::Receiver<()>,
     embedded: bool,
 ) -> anyhow::Result<()> {
-    let Started {
-        lock,
-        listener,
-        session,
-    } = started;
-    if session.is_local_only() {
+    if started.session.is_local_only() {
         eprintln!("monoplan daemon: listening; local-only workspace, no server");
     } else {
         eprintln!("monoplan daemon: listening, connecting to server…");
     }
-    let (status_tx, status_rx) = watch::channel(DaemonStatus::default());
-    let (req_tx, req_rx) = mpsc::channel(16);
-    let (watch_tx, _) = broadcast::channel(WATCH_BUFFER);
-    tokio::spawn(accept_loop(
-        listener,
-        req_tx,
-        status_rx,
-        watch_tx.clone(),
-        embedded,
-    ));
-    let result = Host::new(session, lock, status_tx, req_rx, watch_tx, embedded)
-        .run(shutdown)
-        .await;
+    let (serving, _client) = Serving::new(started, embedded);
+    let result = serving.run(shutdown).await;
     eprintln!("monoplan daemon: stopped");
     Ok(result?)
+}
+
+/// A host wired up and about to run: the loop plus the socket's accept
+/// task. [`Serving::new`] is the one place the channels are made, so
+/// the socket connections and the in-process [`LocalClient`] are
+/// clients of the same loop by construction.
+pub struct Serving {
+    host: Host,
+    accept: tokio::task::JoinHandle<()>,
+}
+
+impl Serving {
+    /// Wire the loop and start accepting socket connections. Must be
+    /// called inside a Tokio runtime (the accept task is spawned here).
+    pub fn new(started: Started, embedded: bool) -> (Serving, LocalClient) {
+        let Started {
+            lock,
+            listener,
+            session,
+        } = started;
+        let (status_tx, status_rx) = watch::channel(DaemonStatus::default());
+        let (req_tx, req_rx) = mpsc::channel(16);
+        let (watch_tx, _) = broadcast::channel(WATCH_BUFFER);
+        let accept = tokio::spawn(accept_loop(
+            listener,
+            req_tx.clone(),
+            status_rx.clone(),
+            watch_tx.subscribe(),
+            embedded,
+        ));
+        let client = LocalClient {
+            requests: req_tx,
+            status: status_rx,
+            watchers: watch_tx.subscribe(),
+            embedded,
+        };
+        let host = Host::new(session, lock, status_tx, req_rx, watch_tx, embedded);
+        (Serving { host, accept }, client)
+    }
+
+    /// Serve until `shutdown` fires or a client asks (`Request::Shutdown`).
+    /// The accept task ends with the loop: the socket file is gone by
+    /// then, and nothing it accepted could be answered.
+    pub async fn run(self, shutdown: oneshot::Receiver<()>) -> Result<(), SyncError> {
+        let result = self.host.run(shutdown).await;
+        self.accept.abort();
+        result
+    }
+}
+
+/// An in-process client of the host: what a socket connection task is,
+/// without the socket. The macOS app's tray and window reach their own
+/// host this way through `monoplan-ffi` (`spec/mac-window-plan.md`),
+/// never over the socket. Cheap to clone; every clone is a client.
+///
+/// `Hello` and `Watch` are answered here, as the connection task
+/// answers them, since they need no doc. Everything else is handed to
+/// the loop and answered when it has run.
+pub struct LocalClient {
+    requests: mpsc::Sender<Pending>,
+    status: watch::Receiver<DaemonStatus>,
+    /// A receiver, never read, to resubscribe from: holding the sender
+    /// would keep the stream open after the loop (its only sender) has
+    /// gone, and a watcher would never hear `Closed`.
+    watchers: broadcast::Receiver<WatchEvent>,
+    embedded: bool,
+}
+
+impl Clone for LocalClient {
+    fn clone(&self) -> Self {
+        LocalClient {
+            requests: self.requests.clone(),
+            status: self.status.clone(),
+            watchers: self.watchers.resubscribe(),
+            embedded: self.embedded,
+        }
+    }
+}
+
+impl LocalClient {
+    /// The loop has ended (shutdown, or a client's `Shutdown`): no
+    /// request will be answered and no event will come.
+    pub fn is_stopped(&self) -> bool {
+        self.requests.is_closed()
+    }
+
+    pub fn sync_status(&self) -> SyncStatus {
+        self.status.borrow().sync()
+    }
+
+    fn hello(&self) -> Reply {
+        Reply::Hello {
+            build_id: ipc::build_id(),
+            pid: std::process::id(),
+            embedded: self.embedded,
+            sync: self.sync_status(),
+        }
+    }
+
+    fn stopped() -> Reply {
+        Reply::Err {
+            message: "the host has stopped".into(),
+        }
+    }
+
+    /// One request, answered in order with the loop's other clients.
+    pub async fn request(&self, req: Request) -> Reply {
+        match req {
+            Request::Hello { .. } => self.hello(),
+            Request::Watch => Reply::Err {
+                message: "watch is a subscription in process: use `LocalClient::watch`".into(),
+            },
+            other => {
+                let (tx, rx) = oneshot::channel();
+                if self.requests.send((other, tx)).await.is_err() {
+                    return Self::stopped();
+                }
+                rx.await.unwrap_or_else(|_| Self::stopped())
+            }
+        }
+    }
+
+    /// [`request`](Self::request) for a thread that is not on the
+    /// runtime (an FFI call from the app's own threads). Must not be
+    /// called from an async context.
+    pub fn request_blocking(&self, req: Request) -> Reply {
+        match req {
+            Request::Hello { .. } => self.hello(),
+            Request::Watch => Reply::Err {
+                message: "watch is a subscription in process: use `LocalClient::watch`".into(),
+            },
+            other => {
+                let (tx, rx) = oneshot::channel();
+                if self.requests.blocking_send((other, tx)).is_err() {
+                    return Self::stopped();
+                }
+                rx.blocking_recv().unwrap_or_else(|_| Self::stopped())
+            }
+        }
+    }
+
+    /// Subscribe to the watch stream: the sync status as of now (what
+    /// `Watching` carries on the socket) and the receiver of every
+    /// later event. Subscribed before the status is read, so nothing
+    /// that happens after the returned status can be missed. A
+    /// receiver that lags `WATCH_BUFFER` events gets `Lagged`, which
+    /// means exactly `Changed`; `Closed` means the loop has ended.
+    pub fn watch(&self) -> (SyncStatus, broadcast::Receiver<WatchEvent>) {
+        let rx = self.watchers.resubscribe();
+        (self.sync_status(), rx)
+    }
 }
 
 /// `monoplan daemon` entry point.
@@ -372,7 +515,7 @@ async fn accept_loop(
     listener: UnixListener,
     req_tx: mpsc::Sender<Pending>,
     status: watch::Receiver<DaemonStatus>,
-    watch_tx: broadcast::Sender<WatchEvent>,
+    watch_rx: broadcast::Receiver<WatchEvent>,
     embedded: bool,
 ) {
     loop {
@@ -389,9 +532,9 @@ async fn accept_loop(
         }
         let req_tx = req_tx.clone();
         let status = status.clone();
-        let watch_tx = watch_tx.clone();
+        let watch_rx = watch_rx.resubscribe();
         tokio::spawn(async move {
-            if let Err(e) = serve_conn(stream, req_tx, status, watch_tx, embedded).await {
+            if let Err(e) = serve_conn(stream, req_tx, status, watch_rx, embedded).await {
                 tracing::debug!("conn: {e}");
             }
         });
@@ -411,12 +554,14 @@ type Pending = (Request, oneshot::Sender<Reply>);
 /// the `select!` below never cancels a half-read frame (a `read_frame`
 /// future dropped between its length prefix and payload would
 /// desynchronise the stream). The loop then interleaves replies with
-/// watch events on the one write half.
+/// watch events on the one write half. `watch_rx` is only resubscribed
+/// from: the host loop is the stream's one sender, so its end closes
+/// the stream for every watcher.
 async fn serve_conn(
     stream: UnixStream,
     req_tx: mpsc::Sender<Pending>,
     status: watch::Receiver<DaemonStatus>,
-    watch_tx: broadcast::Sender<WatchEvent>,
+    watch_rx: broadcast::Receiver<WatchEvent>,
     embedded: bool,
 ) -> anyhow::Result<()> {
     let (mut rd, mut wr) = stream.into_split();
@@ -449,7 +594,7 @@ async fn serve_conn(
                     Request::Watch => {
                         // Subscribe before replying: nothing that
                         // happens after `Watching` can be missed.
-                        events = Some(watch_tx.subscribe());
+                        events = Some(watch_rx.resubscribe());
                         Reply::Watching {
                             sync: status.borrow().sync(),
                         }
@@ -500,21 +645,19 @@ pub async fn spawn_with(profile: Profile, embedded: bool) -> Result<DaemonHandle
     let listener = bind(&profile.dir).map_err(|e| SyncError::Engine(format!("bind: {e}")))?;
     let session = Session::open_resident(profile).await?;
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    let (status_tx, status_rx) = watch::channel(DaemonStatus::default());
-    let (req_tx, req_rx) = mpsc::channel(16);
-    let (watch_tx, _) = broadcast::channel(WATCH_BUFFER);
-    tokio::spawn(accept_loop(
-        listener,
-        req_tx,
-        status_rx.clone(),
-        watch_tx.clone(),
+    let (serving, client) = Serving::new(
+        Started {
+            lock,
+            listener,
+            session,
+        },
         embedded,
-    ));
-    let task = tokio::spawn(
-        Host::new(session, lock, status_tx, req_rx, watch_tx, embedded).run(shutdown_rx),
     );
+    let status = client.status.clone();
+    let task = tokio::spawn(serving.run(shutdown_rx));
     Ok(DaemonHandle {
-        status: status_rx,
+        status,
+        client,
         shutdown: Some(shutdown_tx),
         task,
     })

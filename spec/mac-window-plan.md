@@ -1,6 +1,7 @@
 # macOS window: plan
 
-Status: plan, decided 2026-10-29, not built. The macOS app's window is a
+Status: decided 2026-10-29; phase 1 (tray over the FFI) built the same
+day, phases 2 to 4 not built. The macOS app's window is a
 webview running the web client (`js/web`) over a **mirror**: a second
 Loro doc in the webview, with a peer id of its own, seeded from the
 app's in-process host and kept converged with it by exchanging Loro
@@ -97,9 +98,10 @@ Mac), durable, a key holder, or a second sync engine.
 
 ## Host side (Rust)
 
-- **Internal command enum.** The serve loop today reads `Pending =
-  (Request, oneshot<Reply>)` from an mpsc the socket connections feed.
-  It becomes `HostCmd { Ipc(Request, oneshot<Reply>), Subscribe { .. },
+- **Internal command enum.** The serve loop reads `Pending =
+  (Request, oneshot<Reply>)` from an mpsc that the socket connections
+  and `daemon::LocalClient` (phase 1) both feed. For the mirror it
+  becomes `HostCmd { Ipc(Request, oneshot<Reply>), Subscribe { .. },
   Import { .. }, Unsubscribe { .. } }`. The socket handler can only
   construct `Ipc`, so the mirror is unreachable over the socket by
   construction, not by policy. `Request` and `Reply` (the serde IPC
@@ -121,14 +123,13 @@ Mac), durable, a key holder, or a second sync engine.
 - **Peer lease.** `peer::claim` a second time: the host holds slot 0, the
   flock scan gives the subscriber slot 1 (or the next free one with two
   windows). Lease lives in the subscriber record.
-- **Tray.** Phase 1 gives `Host` `request(bytes) -> bytes` and
-  `watch(sink)`, the socket's msgpack payloads over a function call. The
-  tray's `DaemonClient` keeps its codec and swaps its transport; the
-  connect, backoff, hello and build-id dance leave the app. Liveness
-  comes from `is_running` and the sink's `stopped()` instead of a
-  dropped socket, so `HostController` no longer restarts the host on
-  socket loss. Typed uniffi request and reply enums can replace the
-  bytes later if the Swift side ever wants them.
+- **Tray** (built, phase 1). `Host.request(bytes) -> bytes` and
+  `Host.watch(sink)`, the socket's msgpack payloads over a function
+  call. The tray's `DaemonClient` keeps its codec and swaps its
+  transport; the connect, backoff and build-id dance left the app.
+  Liveness comes from the sink's `stopped()` instead of a dropped
+  socket. Typed uniffi request and reply enums can replace the bytes
+  later if the Swift side ever wants them.
 
 ## Wasm side (`core/web`)
 
@@ -194,9 +195,20 @@ Mac), durable, a key holder, or a second sync engine.
 
 0. **Spec.** This file; amendments to `daemon-plan.md`, `cli.md`,
    `apple/README.md`, `CLAUDE.md`.
-1. **Tray over the FFI.** `HostCmd`, `Host.request` / `watch`,
-   `DaemonClient` transport swap, `HostController` liveness. Socket
-   untouched.
+1. **Tray over the FFI** (built 2026-10-29). `daemon::Serving` wires
+   the loop once and hands out `daemon::LocalClient`, the in-process
+   twin of a socket connection; `monoplan-ffi` exposes it as
+   `Host.request` (msgpack payload in, payload out, blocking) and
+   `Host.watch` (a `HostSink` callback: `Watching`, then `Event`s,
+   `stopped` when the loop ends). `DaemonClient` speaks the same
+   payloads over a `HostTransport` protocol; the app's is
+   `FFITransport`, tests use an in-memory one. The client no longer
+   connects, backs off or hellos a socket: it asks `HostController`
+   for a host (`HostProvision`) and hears the loop end through the
+   watch. Tested in `cli/tests/daemon.rs`
+   (`local_client_shares_the_loop_with_the_socket`) and
+   `DaemonClientTests`. `HostCmd` is deferred to phase 2, where the
+   first variant the socket must not reach appears. Socket untouched.
 2. **Mirror on the host.** `subscribe` / `import` / lease / fan-out,
    `Doc::import_mirror_update`, tests.
 3. **Mirror in wasm and JS.** Mirror mode, `MirrorBridge`, app runtime,

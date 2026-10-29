@@ -1,18 +1,17 @@
-// Client of `monoplan daemon` over its Unix socket (cli/src/ipc.rs,
-// spec/daemon-plan.md "IPC protocol"): length-prefixed MessagePack
-// frames, hello, then `Watch` so the one connection carries both the
-// replies to our requests and the daemon's `Event` frames. Requests are
-// serial (one in flight), so a non-event frame is always the reply to
-// the oldest pending request.
+// Client of the app's own host (cli/src/daemon.rs `LocalClient`, reached
+// through `MonoplanCore.Host`): the same MessagePack `Request` / `Reply`
+// payloads the CLI sends over the Unix socket (cli/src/ipc.rs), as
+// function calls on a `HostTransport`. Hello, then a watch so the
+// host's `Event` frames arrive as they happen; requests are answered
+// one by one with their own completion.
 //
-// Lifecycle: `start()` connects, with a capped backoff while nothing
-// listens. The host is this process: whenever the socket is down the
-// app's host controller is asked to (re)start it (`hostProvider`) and
-// says what the menu should show meanwhile. All callbacks run on
-// `queue`.
+// The socket is the CLI's path. The app never opens it
+// (spec/mac-window-plan.md): the transport is the in-process host, and
+// when there is none the app's host controller is asked for one
+// (`hostProvider`), starts it, and says what the menu should show
+// meanwhile. All callbacks run on `queue`.
 
 import Foundation
-import Network
 
 public struct SyncStatus: Equatable {
     public let online: Bool
@@ -142,18 +141,39 @@ public enum Reply: Equatable {
 
 public enum ClientError: Error, LocalizedError {
     case notConnected
-    case closed
+    case hostStopped
     case daemon(String)
     case protocolError(String)
 
     public var errorDescription: String? {
         switch self {
-        case .notConnected: return String(localized: "not connected to the daemon")
-        case .closed: return String(localized: "the daemon closed the connection")
+        case .notConnected: return String(localized: "not connected to the host")
+        case .hostStopped: return String(localized: "the host has stopped")
         case .daemon(let m): return m
         case .protocolError(let m): return "protocol: \(m)"
         }
     }
+}
+
+/// How the client reaches a host: one msgpack request payload in, one
+/// reply payload out, and a watch whose frames (`Watching`, then
+/// `Event`s) arrive as the host sends them. The app's transport is the
+/// in-process host over the FFI; tests use an in-memory one. Callbacks
+/// may come on any thread; the client hops to its own queue.
+public protocol HostTransport: AnyObject {
+    func request(_ frame: Data, completion: @escaping (Result<Data, Error>) -> Void)
+    /// `onStopped` fires once when the host loop ends; nothing follows.
+    func watch(onFrame: @escaping (Data) -> Void, onStopped: @escaping () -> Void)
+    /// End the watch. The transport delivers nothing after this.
+    func close()
+}
+
+/// What the host controller answers when the client asks for a host:
+/// a transport to a running one, or what to show while it is not
+/// (starting, busy, not signed in), after which the client asks again.
+public enum HostProvision {
+    case transport(HostTransport)
+    case pending(String)
 }
 
 /// Where the profile lives and how to reach its daemon. Same rules as
@@ -239,26 +259,23 @@ public final class DaemonClient {
 
     public var onEvent: ((WatchEvent) -> Void)?
     public var onState: ((State) -> Void)?
-    /// Set on a successful handshake, cleared when the connection drops.
+    /// Set on a successful handshake, cleared when the host goes.
     public private(set) var daemon: DaemonInfo?
     public private(set) var state: State = .connecting(String(localized: "starting")) {
         didSet { if state != oldValue { onState?(state) } }
     }
 
-    private let location: ProfileLocation
     private let queue: DispatchQueue
-    private var connection: NWConnection?
-    private var pending: [(Result<Reply, Error>) -> Void] = []
+    private var transport: HostTransport?
     private var backoff: TimeInterval = 1
     private var stopped = false
-    /// Consulted whenever the socket is down. The app's host controller
-    /// starts the in-process host here and returns what to show while
-    /// that happens; nil means "show the socket error". Without one
-    /// (tests) the client only reconnects.
-    public var hostProvider: (() -> String?)?
+    private var retryScheduled = false
+    /// Consulted whenever there is no transport. The app's host
+    /// controller starts the in-process host here and hands over a
+    /// transport once it runs; nil (tests) means nothing is hosting.
+    public var hostProvider: (() -> HostProvision)?
 
-    public init(location: ProfileLocation, queue: DispatchQueue = .main) {
-        self.location = location
+    public init(queue: DispatchQueue = .main) {
         self.queue = queue
     }
 
@@ -269,181 +286,153 @@ public final class DaemonClient {
 
     public func stop() {
         stopped = true
-        connection?.cancel()
-        connection = nil
-        fail(all: ClientError.closed)
+        detach()
     }
 
-    /// Connect now instead of waiting out the backoff: the host just
-    /// came up, so the socket exists.
+    /// Ask the provider now instead of waiting out the backoff: the
+    /// host just came up.
     public func poke() {
-        guard !stopped, connection == nil else { return }
+        guard !stopped, transport == nil else { return }
         backoff = 1
         connect()
     }
 
-    /// One request, replied to in order. Fails immediately when there
-    /// is no connection rather than queueing: the caller refreshes
-    /// again on reconnect anyway.
+    /// One request with its own reply. Fails immediately when there is
+    /// no host rather than queueing: the caller refreshes again once
+    /// there is one anyway.
     public func send(_ request: Request, completion: @escaping (Result<Reply, Error>) -> Void) {
-        guard let connection, case .connected = state else {
+        guard let transport, case .connected = state else {
             completion(.failure(ClientError.notConnected))
             return
         }
-        pending.append(completion)
-        write(request.value, on: connection)
+        transport.request(MessagePack.encode(request.value)) { [weak self] result in
+            self?.queue.async {
+                guard let self, self.transport === transport else {
+                    completion(.failure(ClientError.hostStopped))
+                    return
+                }
+                completion(self.reply(from: result))
+            }
+        }
     }
 
-    // MARK: Connection
+    // MARK: Host
 
     private func connect() {
         if stopped { return }
-        let path = location.socketPath()
-        let conn = NWConnection(to: .unix(path: path), using: .tcp)
-        connection = conn
-        conn.stateUpdateHandler = { [weak self] st in
-            guard let self, self.connection === conn else { return }
-            switch st {
-            case .ready:
-                self.backoff = 1
-                self.handshake(conn)
-            case .failed(let e):
-                self.dropConnection(reason: Self.describe(e, socket: path))
-            case .cancelled:
-                self.dropConnection(reason: String(localized: "closed"))
-            case .waiting(let e):
-                // No listener: a daemon may need starting.
-                self.dropConnection(reason: e.localizedDescription)
-            default:
-                break
-            }
+        guard let hostProvider else {
+            state = .connecting(String(localized: "nothing hosting the profile"))
+            return
         }
-        conn.start(queue: queue)
+        switch hostProvider() {
+        case .pending(let why):
+            state = .connecting(why)
+            scheduleRetry()
+        case .transport(let t):
+            transport = t
+            backoff = 1
+            handshake(t)
+        }
     }
 
-    private func handshake(_ conn: NWConnection) {
-        // The CLI uses the build id to restart a stale daemon; we are
-        // not built from the daemon's sources, so we cannot judge
-        // staleness and just identify ourselves. The daemon does not
-        // enforce a match.
-        pending.append { [weak self] result in
-            guard let self else { return }
-            guard case .success(.hello(let buildId, let pid, _)) = result else {
-                self.dropConnection(reason: "bad hello")
-                return
-            }
-            self.daemon = DaemonInfo(buildId: buildId, pid: pid)
-            self.pending.append { [weak self] result in
-                guard let self else { return }
-                guard case .success(.watching(let sync)) = result else {
-                    self.dropConnection(reason: "watch refused")
+    private func handshake(_ t: HostTransport) {
+        // The CLI uses the build id to restart a stale daemon; the host
+        // is this process, so we only identify ourselves.
+        t.request(MessagePack.encode(Request.hello(buildId: "monoplan-mac").value)) { [weak self] result in
+            self?.queue.async {
+                guard let self, self.transport === t else { return }
+                guard case .success(.hello(let buildId, let pid, _)) = self.reply(from: result) else {
+                    self.drop(reason: "bad hello")
                     return
                 }
-                self.state = .connected(sync)
+                self.daemon = DaemonInfo(buildId: buildId, pid: pid)
+                t.watch(
+                    onFrame: { [weak self] data in
+                        self?.queue.async {
+                            guard let self, self.transport === t else { return }
+                            self.dispatch(data)
+                        }
+                    },
+                    onStopped: { [weak self] in
+                        self?.queue.async {
+                            guard let self, self.transport === t else { return }
+                            self.drop(reason: String(localized: "host stopped"))
+                        }
+                    })
             }
-            self.write(Request.watch.value, on: conn)
         }
-        write(Request.hello(buildId: "monoplan-mac").value, on: conn)
-        readFrame(conn)
     }
 
-    /// No socket to connect to means nothing is hosting; say that
-    /// rather than quoting the ENOENT the framework wraps it in.
-    private static func describe(_ error: NWError, socket: String) -> String {
-        if case .posix(.ENOENT) = error { return String(localized: "nothing hosting the profile") }
-        return error.localizedDescription
-    }
-
-    private func dropConnection(reason: String) {
-        connection?.cancel()
-        connection = nil
-        daemon = nil
-        fail(all: ClientError.closed)
+    /// The host went (its loop ended, or a frame made no sense): forget
+    /// it and ask the provider, which restarts it if it should run.
+    private func drop(reason: String) {
+        detach()
         if stopped { return }
-        // What the host controller is doing about it is the more
-        // useful headline than the socket error.
-        state = .connecting(hostProvider?() ?? reason)
+        state = .connecting(reason)
+        connect()
+    }
+
+    private func detach() {
+        transport?.close()
+        transport = nil
+        daemon = nil
+    }
+
+    private func scheduleRetry() {
+        if retryScheduled { return }
+        retryScheduled = true
         let delay = backoff
         backoff = min(backoff * 2, 10)
         queue.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self, self.connection == nil else { return }
-            self.connect()
+            guard let self else { return }
+            self.retryScheduled = false
+            if self.transport == nil { self.connect() }
         }
     }
 
-    private func fail(all error: Error) {
-        let waiting = pending
-        pending.removeAll()
-        for cb in waiting { cb(.failure(error)) }
-    }
+    // MARK: Frames
 
-    // MARK: Framing
-
-    private func write(_ value: MPValue, on conn: NWConnection) {
-        let payload = MessagePack.encode(value)
-        var frame = Data()
-        var len = UInt32(payload.count).bigEndian
-        withUnsafeBytes(of: &len) { frame.append(contentsOf: $0) }
-        frame.append(payload)
-        conn.send(content: frame, completion: .contentProcessed { [weak self] error in
-            if let error { self?.dropConnection(reason: error.localizedDescription) }
-        })
-    }
-
-    private func readFrame(_ conn: NWConnection) {
-        conn.receive(minimumIncompleteLength: 4, maximumLength: 4) { [weak self] data, _, complete, error in
-            guard let self, self.connection === conn else { return }
-            if let error { return self.dropConnection(reason: error.localizedDescription) }
-            guard let data, data.count == 4 else {
-                return self.dropConnection(reason: complete ? String(localized: "closed") : "short length prefix")
+    private func reply(from result: Result<Data, Error>) -> Result<Reply, Error> {
+        switch result {
+        case .failure(let e):
+            return .failure(e)
+        case .success(let data):
+            let reply: Reply
+            do {
+                reply = try Reply.parse(try MessagePack.decode(data))
+            } catch {
+                return .failure(ClientError.protocolError("undecodable reply: \(error)"))
             }
-            let len = Int(data.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }.bigEndian)
-            guard len > 0, len <= 64 * 1024 * 1024 else {
-                return self.dropConnection(reason: "bad frame length \(len)")
+            if case .output(_, let sync) = reply, case .connected = state {
+                state = .connected(sync)
             }
-            conn.receive(minimumIncompleteLength: len, maximumLength: len) { [weak self] data, _, _, error in
-                guard let self, self.connection === conn else { return }
-                if let error { return self.dropConnection(reason: error.localizedDescription) }
-                guard let data, data.count == len else {
-                    return self.dropConnection(reason: "closed mid-frame")
-                }
-                self.dispatch(data)
-                self.readFrame(conn)
-            }
+            if case .error(let m) = reply { return .failure(ClientError.daemon(m)) }
+            return .success(reply)
         }
     }
 
+    /// A watch frame: `Watching` first, then events, or the host
+    /// announcing its exit.
     private func dispatch(_ payload: Data) {
         let reply: Reply
         do {
             reply = try Reply.parse(try MessagePack.decode(payload))
         } catch {
-            dropConnection(reason: "undecodable frame: \(error)")
+            drop(reason: "undecodable frame: \(error)")
             return
         }
         switch reply {
+        case .watching(let sync):
+            state = .connected(sync)
         case .event(let ev):
             if case .sync(let sync) = ev, case .connected = state {
                 state = .connected(sync)
             }
             onEvent?(ev)
         case .shuttingDown:
-            dropConnection(reason: String(localized: "daemon shutting down"))
+            drop(reason: String(localized: "host stopped"))
         default:
-            guard !pending.isEmpty else {
-                dropConnection(reason: "unsolicited reply")
-                return
-            }
-            let cb = pending.removeFirst()
-            if case .output(_, let sync) = reply, case .connected = state {
-                state = .connected(sync)
-            }
-            if case .error(let m) = reply {
-                cb(.failure(ClientError.daemon(m)))
-            } else {
-                cb(.success(reply))
-            }
+            drop(reason: "unexpected frame on the watch")
         }
     }
-
 }

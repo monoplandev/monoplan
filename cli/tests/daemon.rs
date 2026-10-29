@@ -335,6 +335,147 @@ async fn embedded_host_serves_commands_and_honours_shutdown() {
     handle.shutdown().await.unwrap();
 }
 
+/// The app's own client path (`spec/mac-window-plan.md`, phase 1): an
+/// in-process `LocalClient` answers `Hello` itself, runs doc commands
+/// through the same loop as the socket, hears the same watch events
+/// as a socket watcher (a local command on either path, in order), and
+/// reports the loop's end instead of hanging.
+#[tokio::test]
+async fn local_client_shares_the_loop_with_the_socket() {
+    let server = TestServer::start().await;
+    let signup = signup_account(&server, "local-a").await;
+    let tmp = tempfile::tempdir().unwrap();
+    let profile = materialize_profile(
+        tmp.path(),
+        &server.base,
+        &signup.account_id,
+        &signup.primary_doc_id,
+        &signup.device_id,
+        &signup.device_token,
+        &signup.dek,
+        &signup.email,
+        true,
+    )
+    .await;
+    let handle = daemon::spawn_with(profile, true).await.unwrap();
+    let local = handle.client.clone();
+
+    // Hello needs no loop and says what the socket's hello says.
+    assert!(matches!(
+        local
+            .request(Request::Hello {
+                build_id: "app".into()
+            })
+            .await,
+        Reply::Hello { embedded: true, .. }
+    ));
+    assert!(!local.is_stopped());
+
+    // Watch in process and over the socket; both hear both paths.
+    let (_sync, mut events) = local.watch();
+    let mut socket_watcher = connect(tmp.path()).await;
+    write_frame(&mut socket_watcher, &Request::Watch)
+        .await
+        .unwrap();
+    expect_frame(&mut socket_watcher, "watching", |r| {
+        matches!(r, Reply::Watching { .. })
+    })
+    .await;
+
+    let add = |text: &str| Request::Doc {
+        workspace: None,
+        cmd: DocCmd::Add {
+            list: LIST_INBOX.to_string(),
+            texts: vec![text.into()],
+        },
+    };
+    assert!(matches!(
+        local.request(add("from-the-app")).await,
+        Reply::Output { .. }
+    ));
+    let ev = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(WatchEvent::Changed) = events.recv().await {
+                return WatchEvent::Changed;
+            }
+        }
+    })
+    .await
+    .expect("local watcher hears the local command");
+    assert_eq!(ev, WatchEvent::Changed);
+    expect_frame(&mut socket_watcher, "changed after app add", |r| {
+        matches!(r, Reply::Event(WatchEvent::Changed))
+    })
+    .await;
+
+    // The other way round: a socket command is seen in process, and a
+    // read in process sees what it committed.
+    write_frame(&mut socket_watcher, &add("from-the-cli"))
+        .await
+        .unwrap();
+    expect_frame(&mut socket_watcher, "add output", |r| {
+        matches!(r, Reply::Output { .. })
+    })
+    .await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(WatchEvent::Changed) = events.recv().await {
+                return;
+            }
+        }
+    })
+    .await
+    .expect("local watcher hears the socket command");
+    let listing = local
+        .request(Request::Doc {
+            workspace: None,
+            cmd: DocCmd::Ls(monoplan_cli::commands::items::LsArgs {
+                list: LIST_INBOX.to_string(),
+                done: false,
+                json: true,
+            }),
+        })
+        .await;
+    match listing {
+        Reply::Output { stdout, .. } => {
+            assert!(stdout.contains("from-the-app"), "{stdout}");
+            assert!(stdout.contains("from-the-cli"), "{stdout}");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+
+    // The blocking form, from a thread that is not on the runtime.
+    let off_runtime = local.clone();
+    let hello = tokio::task::spawn_blocking(move || {
+        off_runtime.request_blocking(Request::Hello {
+            build_id: "app".into(),
+        })
+    })
+    .await
+    .unwrap();
+    assert!(matches!(hello, Reply::Hello { embedded: true, .. }));
+
+    // After the loop ends: stopped, an error reply, a closed stream.
+    handle.shutdown().await.unwrap();
+    assert!(local.is_stopped());
+    assert!(matches!(
+        local.request(add("too late")).await,
+        Reply::Err { .. }
+    ));
+    // Events the exit queued (the sync status flipping) come first;
+    // then the stream closes, which is what tells an FFI watcher
+    // `stopped`.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Err(tokio::sync::broadcast::error::RecvError::Closed) = events.recv().await {
+                return;
+            }
+        }
+    })
+    .await
+    .expect("watch stream closes once the loop has ended");
+}
+
 /// The app's takeover at launch: a headless daemon is stopped and the
 /// profile handed over; another app's host is left alone; a profile
 /// held by a command (`client::claim`) is reported busy, not waited on.

@@ -6,13 +6,15 @@
 // a host. It holds no doc: it watches the daemon's socket and re-fetches
 // the agenda projection (the projection tier in spec/daemon-plan.md).
 // Amended 2026-10-27: the app *hosts* the doc in-process (`Host` from
-// MonoplanCore, the same Rust loop as `monoplan daemon`) and its UI is a
-// client of its own socket, so the UI code path is unchanged. Run
+// MonoplanCore, the same Rust loop as `monoplan daemon`). Its UI is an
+// in-process client of that host through the FFI (2026-10-29,
+// spec/mac-window-plan.md); the socket is for the CLI. Run
 // `bun run build:apple` once before building: MonoplanCore wraps a
 // prebuilt XCFramework.
 //
 // Two targets so the protocol code is testable without AppKit:
-// `MonoplanMacKit` (MessagePack codec, daemon client, agenda model) and
+// `MonoplanMacKit` (MessagePack codec, host client over a transport
+// protocol, agenda model) and
 // the `MonoplanMac` executable (status item, menu). Run from the repo root
 // with `bun run mac`; `swift test --package-path apple/MonoplanMac` runs
 // the codec and model tests.

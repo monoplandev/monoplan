@@ -219,12 +219,24 @@ pub enum FrameError {
     Closed,
 }
 
+/// One frame's payload, without the length prefix: what crosses the
+/// FFI, where the call boundary carries the length (`monoplan-ffi`'s
+/// `Host::request`). Same bytes the socket carries after its prefix.
+pub fn encode_payload<T: Serialize>(value: &T) -> Result<Vec<u8>, FrameError> {
+    Ok(rmp_serde::to_vec_named(value)?)
+}
+
+/// The inverse of [`encode_payload`].
+pub fn decode_payload<T: for<'de> Deserialize<'de>>(payload: &[u8]) -> Result<T, FrameError> {
+    Ok(rmp_serde::from_slice(payload)?)
+}
+
 pub async fn write_frame<W, T>(w: &mut W, value: &T) -> Result<(), FrameError>
 where
     W: AsyncWriteExt + Unpin,
     T: Serialize,
 {
-    let payload = rmp_serde::to_vec_named(value)?;
+    let payload = encode_payload(value)?;
     let len = u32::try_from(payload.len()).map_err(|_| FrameError::TooLarge(u32::MAX))?;
     if len > MAX_FRAME {
         return Err(FrameError::TooLarge(len));

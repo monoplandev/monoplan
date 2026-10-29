@@ -3,10 +3,12 @@
 The Rust↔Swift FFI boundary for the Apple clients. What crosses it today
 is the profile's lifecycle, not the doc: `login` / `logout` (the bodies of
 the CLI commands) and `Host`, the daemon loop embedded in the app's
-process (`spec/daemon-plan.md`, amended 2026-10-27). The macOS menubar app
-reads the doc as a client of its own host's socket; moving it onto the
-FFI is phase 1 of [`spec/mac-window-plan.md`](../spec/mac-window-plan.md)
-(decided 2026-10-29). The window is that plan's phases 2 to 4: a webview
+process (`spec/daemon-plan.md`, amended 2026-10-27), and the app's
+client path into it: `Host.request` and `Host.watch`, the socket's
+request and watch payloads as function calls (phase 1 of
+[`spec/mac-window-plan.md`](../spec/mac-window-plan.md), built
+2026-10-29). The tray never opens the socket. The window is that plan's
+phases 2 to 4: a webview
 running the web client over a mirror doc that `Host` seeds and converges
 through the FFI (`subscribe` / `import`), with a peer id of its own. The
 socket stays the CLI's; it never carries the mirror. Typed native views
@@ -18,7 +20,7 @@ over the FFI are not planned while the UI is web. The offline
 ## Layering
 
 ```
-monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's daemon: Host, login, logout
+monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's daemon: Host (start, request, watch, shutdown), login, logout
    → MonoplanCoreFFI.xcframework        static libs (macOS/iOS/iOS-sim) + C headers
       → MonoplanCore (SwiftPM)          generated Swift bindings + a thin facade
          → MonoplanMac / future iOS app  consume MonoplanCore as a local package
@@ -61,10 +63,13 @@ won't compile without those outputs present.
 on macOS the normal host of the profile (`spec/daemon-plan.md`,
 amendment 2026-10-27). One process: it runs the Rust host loop
 in-process (`Host` from `MonoplanCore`, the same loop as `monoplan
-daemon`) on a background thread, and its tray is a client of its own
-socket, so the UI is exactly the client it was. It connects, sends
-`Watch`, and re-fetches `agenda --days 0 --json` whenever the host
-reports a change, once a minute, and when the menu opens. The menu shows
+daemon`) on a background thread, and its tray is an in-process client
+of that loop: `DaemonClient` (MonoplanMacKit) speaks the socket's
+MessagePack payloads over a `HostTransport`, which in the app is
+`FFITransport` over `Host.request` / `Host.watch`, never the socket. It
+sends hello, opens a watch, and re-fetches `agenda --days 0 --json`
+whenever the host reports a change, once a minute, and when the menu
+opens. The menu shows
 Today's rows (time, title, "in 2h 15m" / "now" / "due today" /
 "overdue"; a row opens the item in the web client), a Starred section
 with the first three rows of the Focus lens (`starred --json`) each with
@@ -75,11 +80,13 @@ release the profile).
 
 Hosting rules (`Sources/MonoplanMac/HostController.swift`): the app
 hosts whenever it runs and only ever talks to its own host. Whenever
-the socket is down and the profile is signed in it starts the host,
+the client has no host and the profile is signed in it starts one,
 which takes a headless `monoplan daemon` over (asks it to exit, then
-claims the profile). It honours `Shutdown`, so `logout`, `login` and
-`password` in the terminal stop it, hold the profile while they
-rewrite it, and the app re-hosts once it is free. The one thing it
+claims the profile), and hands the client a transport to it. It
+honours `Shutdown`, so `logout`, `login` and `password` in the
+terminal stop it, hold the profile while they rewrite it, and the app
+re-hosts once it is free: the client hears the loop end through its
+watch and asks the controller again. The one thing it
 waits out rather than takes over is "busy": another copy of the app, a
 host still starting, or a command holding the profile; the menu says
 "profile in use" and the client's backoff retries. Doc commands from

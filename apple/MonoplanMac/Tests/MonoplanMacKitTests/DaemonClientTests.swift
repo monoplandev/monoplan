@@ -60,6 +60,112 @@ final class DaemonClientTests: XCTestCase {
         XCTAssertThrowsError(try Reply.parse(.map(["Nope": .nil])))
     }
 
+    /// An in-memory host: answers hello and doc requests with canned
+    /// frames, feeds the watch, and can "stop" like a loop ending.
+    final class FakeTransport: HostTransport {
+        var requests: [MPValue] = []
+        var onFrame: ((Data) -> Void)?
+        var onStopped: (() -> Void)?
+        var closed = false
+        var replies: [MPValue] = []
+
+        func request(_ frame: Data, completion: @escaping (Result<Data, Error>) -> Void) {
+            let value = try! MessagePack.decode(frame)
+            requests.append(value)
+            if case .map(let m) = value, m["Hello"] != nil {
+                completion(.success(MessagePack.encode(.map(["Hello": .map([
+                    "build_id": .string("b:1"), "pid": .int(7), "embedded": .bool(true),
+                    "sync": .map(["online": .bool(false)]),
+                ])]))))
+            } else if !replies.isEmpty {
+                completion(.success(MessagePack.encode(replies.removeFirst())))
+            } else {
+                completion(.failure(ClientError.daemon("no canned reply")))
+            }
+        }
+
+        func watch(onFrame: @escaping (Data) -> Void, onStopped: @escaping () -> Void) {
+            self.onFrame = onFrame
+            self.onStopped = onStopped
+            onFrame(MessagePack.encode(.map(["Watching": .map(["sync": .map(["online": .bool(true), "last_synced_at": .int(5)])])])))
+        }
+
+        func close() { closed = true }
+    }
+
+    /// Drain the client's serial queue so every hop has landed.
+    private func settle(_ queue: DispatchQueue) {
+        let done = expectation(description: "settled")
+        queue.async { done.fulfill() }
+        wait(for: [done], timeout: 2)
+    }
+
+    func testClientHandshakesWatchesAndRequestsOverATransport() {
+        let queue = DispatchQueue(label: "test.client")
+        let transport = FakeTransport()
+        let client = DaemonClient(queue: queue)
+        var states: [DaemonClient.State] = []
+        var events: [WatchEvent] = []
+        client.onState = { states.append($0) }
+        client.onEvent = { events.append($0) }
+        client.hostProvider = { .transport(transport) }
+
+        queue.sync { client.start() }
+        settle(queue)
+        // Hello, then the watch's first frame put us online.
+        XCTAssertEqual(client.daemon, DaemonClient.DaemonInfo(buildId: "b:1", pid: 7))
+        XCTAssertEqual(client.state, .connected(SyncStatus(online: true, lastSyncedAt: 5)))
+        XCTAssertEqual(transport.requests.count, 1)
+
+        // A request gets its own reply and refreshes the sync status.
+        transport.replies = [.map(["Output": .map(["stdout": .string("[]"), "sync": .map(["online": .bool(false)])])])]
+        var got: Result<Reply, Error>?
+        queue.sync { client.send(.agenda(days: 0)) { got = $0 } }
+        settle(queue)
+        guard case .success(.output(let out, _)) = got else { return XCTFail("\(String(describing: got))") }
+        XCTAssertEqual(out, "[]")
+        XCTAssertEqual(client.state, .connected(SyncStatus(online: false, lastSyncedAt: nil)))
+
+        // An `Err` reply is a failure to the caller, not a dropped host.
+        transport.replies = [.map(["Err": .map(["message": .string("nope")])])]
+        queue.sync { client.send(.lists) { got = $0 } }
+        settle(queue)
+        guard case .failure(let e) = got, case ClientError.daemon("nope") = e else {
+            return XCTFail("\(String(describing: got))")
+        }
+
+        // Watch frames: a change is an event, a sync flip updates state.
+        transport.onFrame?(MessagePack.encode(.map(["Event": .string("Changed")])))
+        transport.onFrame?(MessagePack.encode(.map(["Event": .map(["Sync": .map(["online": .bool(true)])])])))
+        settle(queue)
+        XCTAssertEqual(events, [.changed, .sync(SyncStatus(online: true, lastSyncedAt: nil))])
+        XCTAssertEqual(client.state, .connected(SyncStatus(online: true, lastSyncedAt: nil)))
+
+        // The loop ends: the transport is closed, the provider is asked
+        // again, and what it says is the new state.
+        var asked = 0
+        client.hostProvider = { asked += 1; return .pending("starting again") }
+        transport.onStopped?()
+        settle(queue)
+        XCTAssertTrue(transport.closed)
+        XCTAssertNil(client.daemon)
+        XCTAssertEqual(asked, 1)
+        XCTAssertEqual(client.state, .connecting("starting again"))
+        queue.sync { client.send(.account) { got = $0 } }
+        guard case .failure(let e2) = got, case ClientError.notConnected = e2 else {
+            return XCTFail("\(String(describing: got))")
+        }
+        XCTAssertEqual(states.last, .connecting("starting again"))
+
+        // A poke asks straight away and reconnects when a host is back.
+        let second = FakeTransport()
+        client.hostProvider = { .transport(second) }
+        queue.sync { client.poke() }
+        settle(queue)
+        XCTAssertEqual(client.state, .connected(SyncStatus(online: true, lastSyncedAt: 5)))
+        XCTAssertEqual(second.requests.count, 1)
+    }
+
     func testConfigTomlStringScan() {
         let text = "# comment\nserver_url = \"http://127.0.0.1:8000\"\nother = 1\n"
         XCTAssertEqual(ProfileLocation.tomlString(key: "server_url", in: text), "http://127.0.0.1:8000")

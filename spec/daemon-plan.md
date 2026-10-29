@@ -1,6 +1,6 @@
 # Daemon plan
 
-Status: phases 1 to 3 built 2026-10-21 (`cli/src/daemon.rs` host + socket server, `cli/src/ipc.rs`, `cli/src/client.rs`, every doc verb ported, `-s` removed, `daemon stop|status`; tests in `cli/tests/daemon.rs` and `cli/tests/cli_bin.rs`). Phase 5's projection tier built 2026-10-26 (`Watch` / `Watching` / `Event`; first watcher is the macOS menubar app in `apple/MonoplanMac`). `daemon install|uninstall` built 2026-10-27 (`cli/src/service.rs`: the headless path for Linux and CLI-only Macs). Amended 2026-10-27 (see "Decision", amendment): on macOS the app hosts the loop in-process (`monoplan-ffi::Host`, `apple/MonoplanMac/Sources/MonoplanMac/HostController.swift`) for its whole life, the headless daemon is the alternative rather than a partner, and login uses the Login Items API; the mirror tier is no longer needed for the macOS window. Amended 2026-10-29 (`spec/mac-window-plan.md`): the mirror is an FFI surface on `Host`, never socket frames; the window is a webview running the web client over a mirror doc with its own peer; the tray moves to the FFI too, so the socket is the CLI's alone. Not built: the locked state, wake notifications. Written 2026-10-21. The built behaviour is documented in `spec/cli.md` "Process model"; this file keeps the reasoning and the remaining plan. Supersedes the deleted
+Status: phases 1 to 3 built 2026-10-21 (`cli/src/daemon.rs` host + socket server, `cli/src/ipc.rs`, `cli/src/client.rs`, every doc verb ported, `-s` removed, `daemon stop|status`; tests in `cli/tests/daemon.rs` and `cli/tests/cli_bin.rs`). Phase 5's projection tier built 2026-10-26 (`Watch` / `Watching` / `Event`; first watcher is the macOS menubar app in `apple/MonoplanMac`). `daemon install|uninstall` built 2026-10-27 (`cli/src/service.rs`: the headless path for Linux and CLI-only Macs). Amended 2026-10-27 (see "Decision", amendment): on macOS the app hosts the loop in-process (`monoplan-ffi::Host`, `apple/MonoplanMac/Sources/MonoplanMac/HostController.swift`) for its whole life, the headless daemon is the alternative rather than a partner, and login uses the Login Items API; the mirror tier is no longer needed for the macOS window. Amended 2026-10-29 (`spec/mac-window-plan.md`): the mirror is an FFI surface on `Host`, never socket frames; the window is a webview running the web client over a mirror doc with its own peer; the tray moved to the FFI the same day (`daemon::LocalClient`, `Host.request` / `Host.watch`), so the socket is the CLI's alone. Not built: the locked state, wake notifications. Written 2026-10-21. The built behaviour is documented in `spec/cli.md` "Process model"; this file keeps the reasoning and the remaining plan. Supersedes the deleted
 `spec/tui-plan.md` (its "no daemon" conclusion rested on boot time,
 which is no longer the question) and answers the daemon question that
 `spec/cli.md` "Sync lifecycle" deferred.
@@ -67,8 +67,9 @@ app hosts the doc in-process: the same Rust host loop, split into
 `daemon::start` / `daemon::serve` and exposed through `monoplan-ffi` as
 `Host` (a background thread with its own tokio runtime). The tray and
 the window are clients of the app's own `Host` through the FFI
-(amended 2026-10-29; until then the tray was a socket client of its own
-process). The socket is served for the CLI only. The window is a
+(`daemon::LocalClient` through `monoplan-ffi`, built 2026-10-29; until
+then the tray was a socket client of its own process). The socket is
+served for the CLI only. The window is a
 webview running the web client over a mirror doc that `Host` seeds and
 converges (`spec/mac-window-plan.md`); the mirror tier below is that
 FFI surface and is never carried by the socket. The headless `monoplan daemon` remains the
@@ -450,7 +451,8 @@ about the product.
    `Event` fan-out from the host after local commands and remote
    frames, tested in `cli/tests/daemon.rs`
    (`watcher_hears_sync_local_and_remote_changes`), consumed by the
-   macOS menubar app over the socket until it moves to the FFI. The
+   macOS menubar app, since 2026-10-29 through `daemon::LocalClient`
+   and the FFI rather than the socket. The
    mirror tier is not a socket feature (decided 2026-10-29): it is
    `Host::subscribe` / `Host::import` on the FFI, planned and tested in
    `spec/mac-window-plan.md`, reached through an internal `HostCmd`

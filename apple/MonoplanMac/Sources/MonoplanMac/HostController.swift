@@ -1,18 +1,21 @@
 // The app as the profile's host (spec/daemon-plan.md, amended
 // 2026-10-27). One process: this controller runs the Rust host loop
 // (`Host` from MonoplanCore, the same loop as `monoplan daemon`) on a
-// background thread, and the tray's `DaemonClient` talks to it over the
-// socket like any other client. The app only ever talks to its own
-// host; it is never a client of some other process.
+// background thread, and the tray's `DaemonClient` talks to it in
+// process through `FFITransport` (spec/mac-window-plan.md, phase 1).
+// The socket the host serves is for the CLI; the app never opens it,
+// and it only ever talks to its own host.
 //
 // The app hosts whenever it runs:
-// - Whenever the socket is down and the profile is signed in, start.
-//   `Host.start` takes a headless `monoplan daemon` over (asks it to
-//   exit, then claims the profile) and blocks while the doc boots, so
-//   it runs off the main thread and the menu says "starting" meanwhile.
+// - Whenever the client has no host and the profile is signed in,
+//   start. `Host.start` takes a headless `monoplan daemon` over (asks
+//   it to exit, then claims the profile) and blocks while the doc
+//   boots, so it runs off the main thread and the menu says "starting"
+//   meanwhile.
 // - A client's `Shutdown` ends our host like any other: `logout`,
 //   `login`, `password` from the terminal stop it, hold the profile
-//   while they rewrite it, and we re-host once it is free again.
+//   while they rewrite it, and we re-host once it is free again. The
+//   client hears the loop end through its watch and asks here again.
 // - "Busy" is the one thing we wait out rather than take over: another
 //   copy of the app, a command holding the profile, or a host still
 //   starting. The menu says so and the client's backoff retries.
@@ -35,28 +38,30 @@ final class HostController {
     init(location: ProfileLocation, client: DaemonClient) {
         self.location = location
         self.client = client
-        client.hostProvider = { [weak self] in self?.ensureHosting() }
+        client.hostProvider = { [weak self] in
+            self?.provision() ?? .pending(String(localized: "not signed in"))
+        }
     }
 
-    /// Called by the client whenever its socket is down. Returns what
-    /// the menu should say about it, or nil for the socket's own error.
-    private func ensureHosting() -> String? {
-        if let host, host.isRunning() { return nil }
+    /// Called by the client whenever it has no host: a transport to the
+    /// running one, else what the menu should say while there is none.
+    private func provision() -> HostProvision {
+        if let host, host.isRunning() { return .transport(FFITransport(host: host)) }
         host = nil
-        if let accountWork { return accountWork }
-        if starting { return String(localized: "starting") }
+        if let accountWork { return .pending(accountWork) }
+        if starting { return .pending(String(localized: "starting")) }
         if let failure {
             self.failure = nil
-            return failure
+            return .pending(failure)
         }
-        guard location.isSignedIn else { return String(localized: "not signed in") }
+        guard location.isSignedIn else { return .pending(String(localized: "not signed in")) }
         starting = true
         let dir = location.dir.path
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = Result { try MonoplanCore.Host.start(profileDir: dir) }
             DispatchQueue.main.async { self?.didStart(result) }
         }
-        return String(localized: "starting")
+        return .pending(String(localized: "starting"))
     }
 
     private func didStart(_ result: Result<MonoplanCore.Host, Error>) {
@@ -85,8 +90,8 @@ final class HostController {
     /// Sign out: stop our host, wipe the profile (what `monoplan
     /// logout` does), and let the client see "not signed in". Off the
     /// main thread, since the host's clean exit persists and folds.
-    /// `accountWork` keeps the socket-down path from starting a fresh
-    /// host between the stop and the wipe.
+    /// `accountWork` keeps the no-host path from starting a fresh host
+    /// between the stop and the wipe.
     func signOut(completion: @escaping (Error?) -> Void) {
         accountWork = String(localized: "signing out")
         let dir = location.dir.path
