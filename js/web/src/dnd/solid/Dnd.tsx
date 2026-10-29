@@ -7,6 +7,7 @@ import {
   on,
   For,
   Show,
+  children,
   type JSX,
 } from "solid-js";
 import { DndSource } from "../core/source";
@@ -85,6 +86,19 @@ export interface DndProps<T> {
   clearOnClickOutside?: boolean;
   /** When true, host fills its parent's height. */
   fillHeight?: boolean;
+  /** Content rendered in a fixed-height slot directly after the last row
+   *  (inside the scrolling listbox, so it follows the list rather than
+   *  pinning to the viewport). Not an option: it has no key, takes no
+   *  part in selection, drag or keyboard nav, and a click on it is a
+   *  blank click as far as the controller is concerned. Pass `undefined`
+   *  to drop the slot. */
+  trailer?: JSX.Element;
+  /** Height of the trailer slot in px; defaults to `itemHeight`. */
+  trailerHeight?: number;
+  /** A plain ArrowDown from the last row (or on an empty list) while a
+   *  trailer is present: the host hands the keyboard on to the trailer.
+   *  Without this the arrow stops at the last row as usual. */
+  onTrailerNavigate?: () => void;
   dragType?: "native" | "overlay";
   /** Optional native-drop-data hook (drag-type="native" only). */
   getNativeDropData?: (
@@ -167,6 +181,11 @@ export function Dnd<T>(props: DndProps<T>): JSX.Element {
       onChange: () => setVersion((v) => v + 1),
       getItemElement: (key) => itemEls.get(key) ?? null,
       getItemInnerElement: (key) => innerEls.get(key) ?? null,
+      onNavigatePastEnd: () => {
+        if (!hasTrailer() || !props.onTrailerNavigate) return false;
+        props.onTrailerNavigate();
+        return true;
+      },
     });
 
     source = new DndSource<T>({
@@ -315,6 +334,7 @@ export function Dnd<T>(props: DndProps<T>): JSX.Element {
       controller?.getRenderState() ?? {
         isDragging: false,
         listboxHeight: 0,
+        contentHeight: 0,
         items: [] as DndRenderItem[],
         keepAlive: [] as DndRenderItem[],
       }
@@ -401,12 +421,26 @@ export function Dnd<T>(props: DndProps<T>): JSX.Element {
     };
   });
 
+  // Resolved once per change so the host reads it in several places
+  // without re-creating the element on each access.
+  const trailer = children(() => props.trailer);
+  const hasTrailer = createMemo(() => trailer() != null);
+  const trailerHeight = createMemo(
+    () => props.trailerHeight ?? props.itemHeight ?? 32,
+  );
+
   const listboxStyle = createMemo<JSX.CSSProperties>(() => {
     const fill = props.fillHeight ?? false;
+    const rs = renderState();
+    // The trailer sits after the rows, so the scroll extent must reach
+    // past it; the fill-height floor still wins when the list is short.
+    const height = hasTrailer()
+      ? Math.max(rs.listboxHeight, rs.contentHeight + trailerHeight())
+      : rs.listboxHeight;
     return {
       position: "relative",
       outline: "none",
-      height: `${renderState().listboxHeight}px`,
+      height: `${height}px`,
       ...(fill ? { "min-height": "100%" } : {}),
       ...(renderState().isDragging ? { overflow: "hidden" } : {}),
     };
@@ -466,6 +500,7 @@ export function Dnd<T>(props: DndProps<T>): JSX.Element {
       ref={hostEl}
       class={props.class}
       data-expanded={expandedKey() != null ? "" : undefined}
+      data-trailer={hasTrailer() ? "" : undefined}
       style={
         typeof props.style === "string"
           ? props.style
@@ -548,6 +583,17 @@ export function Dnd<T>(props: DndProps<T>): JSX.Element {
               );
             }}
           </For>
+          <Show when={hasTrailer()}>
+            <div
+              class="dnd-trailer"
+              style={{
+                top: `${renderState().contentHeight}px`,
+                height: `${trailerHeight()}px`,
+              }}
+            >
+              {trailer()}
+            </div>
+          </Show>
         </div>
       </div>
     </div>

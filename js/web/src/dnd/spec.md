@@ -20,6 +20,9 @@ Name | Type | Default
 | clear-on-blank-click | boolean | false
 | clear-on-click-outside | boolean | false
 | reorder | boolean | true
+| trailer | element | -
+| trailer-height | number | item-height
+| on-trailer-navigate | () => void | -
 
 ## Web Component
 ```
@@ -322,6 +325,9 @@ To recover the user's intent, every `click` snapshots the prior click's target a
 `clear-on-blank-click`: a click on the listbox that hits no row clears the selection. Clicks anywhere else leave it alone — the listbox just loses focus, and the host styles the selection as dormant via `:focus-within` (Finder's model: clicking another window doesn't deselect). Escape still clears. Use this for the main item list, where a side panel acts on the selection and must not dissolve it underfoot.
 
 `clear-on-click-outside`: superset — a click anywhere outside the host element clears too. Use for content-height listboxes whose blank space lies outside the listbox (the nav), where a blank-click rule alone would leave no pointer way to deselect.
+
+### Trailer slot
+`trailer`: an element rendered in a fixed-height slot (`trailer-height`, default `item-height`) directly after the last row, inside the scrolling listbox so it follows the list rather than pinning to the viewport. The listbox's scroll extent grows to cover it (the fill-height floor still wins when the list is short). It is not an option: it has no key, takes no part in selection, drag or keyboard navigation, and a click on it is a blank click as far as the controller is concerned — a consumer that wants a click to do something stops propagation in its own handler so the blank-click clear and the document-level collapse check don't fire. The host sets `data-trailer` while a trailer is present so styling can keep the last row's divider. With `on-trailer-navigate` set, a plain ArrowDown whose selection bottom is already the last row (or on an empty list) calls it instead of stopping, handing the keyboard on to the trailer; shift/modifier arrows are unaffected. The app uses it for the list's trailing "new item" capture slot.
 
 ### Click-outside hit-testing
 Both `clear-on-click-outside` and the expanded-item collapse check use cursor coordinates against the relevant element's bounding rect, not DOM containment. A portaled dismissable layer (e.g. a context menu) commonly sets `pointer-events:none` on `<body>` while open, which routes the click event to `<html>` — DOM containment then reports the click as outside even when the cursor was on top of us, spuriously clearing selection or collapsing.

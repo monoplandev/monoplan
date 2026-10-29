@@ -202,18 +202,6 @@ function loadDoneShowListPref(): boolean {
   }
 }
 
-// Heuristic for "user has a real keyboard + precise pointer" — i.e. the
-// shortcut hints are worth showing. Reactive: an iPad gaining a Magic
-// Keyboard or a laptop docked to a touchscreen will flip live.
-function createKbDeviceSignal(): () => boolean {
-  const mql = window.matchMedia("(hover: hover) and (pointer: fine)");
-  const [matches, setMatches] = createSignal(mql.matches);
-  const onChange = (e: MediaQueryListEvent) => setMatches(e.matches);
-  mql.addEventListener("change", onChange);
-  onCleanup(() => mql.removeEventListener("change", onChange));
-  return matches;
-}
-
 /** The header's "Display options" popover: tooltip on the trigger, popover
     body from children. The guard keeps the tooltip from showing while the
     popover is open (or when focus returns to the button on close). */
@@ -550,7 +538,6 @@ export function Workspace(props: {
       // Quota/private-mode failures just lose the preference.
     }
   };
-  const matchesKbDevice = createKbDeviceSignal();
 
   // Draft state: a transient ItemView injected into dndItems but not into
   // the store. `insertIndex` is captured at draft-start time so collapse
@@ -957,13 +944,13 @@ export function Workspace(props: {
     when: todayStamp(nowMs()),
   });
 
-  // Start a draft row: pseudo-item just below the topmost selected
-  // item (or at the top if nothing is selected). Expanding it via the
-  // controlled `expandedKey` flips the row into edit mode through the
-  // same path used for existing rows. If a draft is already open, no-op
-  // — the natural click-outside collapse on the existing draft will
-  // settle it first.
-  const startDraft = () => {
+  // Start a draft row: pseudo-item at `at`, or (the shortcut path) just
+  // below the topmost selected item, or at the top if nothing is
+  // selected. Expanding it via the controlled `expandedKey` flips the row
+  // into edit mode through the same path used for existing rows. If a
+  // draft is already open, no-op — the natural click-outside collapse on
+  // the existing draft will settle it first.
+  const startDraft = (at?: number) => {
     const v = view();
     // Capture runs in list views and in the Focus lens; a Focus draft
     // creates its item in the inbox and pins it (see settleDraft).
@@ -972,11 +959,15 @@ export function Workspace(props: {
     const isFocus = v.kind === "focus";
     const listId = isFocus ? "inbox" : v.id;
     const ids = items().map((i) => i.id);
-    const top = selection.getSelectionTop();
     let insertIndex = 0;
-    if (top !== null) {
-      const idx = ids.indexOf(String(top));
-      if (idx >= 0) insertIndex = idx + 1;
+    if (at !== undefined) {
+      insertIndex = Math.min(Math.max(at, 0), ids.length);
+    } else {
+      const top = selection.getSelectionTop();
+      if (top !== null) {
+        const idx = ids.indexOf(String(top));
+        if (idx >= 0) insertIndex = idx + 1;
+      }
     }
     const id = `${DRAFT_ID_PREFIX}${crypto.randomUUID()}`;
     const now = Date.now();
@@ -994,16 +985,28 @@ export function Workspace(props: {
     setExpandedKey(id);
   };
 
+  // The list's trailing capture slot: a placeholder row after the last
+  // item that reads as the next item and starts a draft in that slot
+  // when clicked. List and Focus views only; boards capture through the
+  // dialog. It stands in for the draft while none is open there; a
+  // draft started mid-list (Space below a selection) leaves it in place.
+  const canDraft = () => view().kind === "list" || view().kind === "focus";
+  const showTrailer = () => {
+    if (!canDraft()) return false;
+    const d = draft();
+    return d === null || d.insertIndex < items().length;
+  };
+
   // Called by the draft Row from its collapse effect. Empty text → drop;
   // non-empty → real item via addItemAt at the captured slot, then
   // re-anchor selection so the user lands on what they just created.
   // `chain` is true when the user pressed Enter; on a successful save
   // we open a fresh draft below the new item so capture continues. An
   // empty Enter still ends the chain (it falls through to the cancel
-  // path below).
-  const settleDraft = (text: string, chain: boolean) => {
+  // path below). Returns whether a fresh draft follows.
+  const settleDraft = (text: string, chain: boolean): boolean => {
     const d = draft();
-    if (!d) return;
+    if (!d) return false;
     setDraft(null);
     if (!text) {
       // Cancel path. The dnd's applyExpanded(draftId) replaced selection
@@ -1015,11 +1018,11 @@ export function Workspace(props: {
       const rest = items();
       if (rest.length === 0) {
         selection.clear();
-        return;
+        return false;
       }
       const target = rest[Math.max(0, d.insertIndex - 1)];
       selection.selectOnly(target.id);
-      return;
+      return false;
     }
     const newId = d.focus
       ? captureToFocus([text], d.insertIndex)[0]
@@ -1036,6 +1039,7 @@ export function Workspace(props: {
       selection.selectOnly(newId);
       if (chain) startDraft();
     });
+    return chain;
   };
 
   // Paste anywhere in a list view drops the clipboard contents in as items.
@@ -3212,17 +3216,18 @@ export function Workspace(props: {
           when={boardKey()}
           fallback={
             <Show
-              when={dndItems().length > 0}
+              when={dndItems().length > 0 || canDraft()}
               fallback={
-                <div class="dnd-host empty">
-                  {view().kind === "focus"
-                    ? m().focus.empty
-                    : view().kind === "list" && matchesKbDevice()
-                      ? m().workspace.createWithSpace
-                      : m().workspace.emptyState}
-                </div>
+                <div class="dnd-host empty">{m().workspace.emptyState}</div>
               }
             >
+              {/* An empty list's state *is* the capture slot below; Focus
+                  keeps its hint, since the lens needs explaining. The hint
+                  stays through the first draft so it doesn't vanish under
+                  the click that started it. */}
+              <Show when={view().kind === "focus" && items().length === 0}>
+                <div class="empty">{m().focus.empty}</div>
+              </Show>
               <Show keyed when={dndRevision()}>
                 <Dnd
                   class="dnd-host"
@@ -3242,6 +3247,34 @@ export function Workspace(props: {
                   autofocus
                   reorder={view().kind === "list" || view().kind === "focus"}
                   onReorder={onReorder}
+                  onTrailerNavigate={() => startDraft(items().length)}
+                  trailer={
+                    showTrailer() ? (
+                      <div
+                        class="row row-new"
+                        role="button"
+                        tabIndex={-1}
+                        aria-label={m().workspace.newItemPlaceholder}
+                        on:click={(e) => {
+                          // Native + stopPropagation: the listbox's own
+                          // click handler would treat this as a blank
+                          // click, and the controller's document-level
+                          // click-outside would collapse the draft this
+                          // click just opened (its row lands under the
+                          // same point, but don't rely on that).
+                          e.stopPropagation();
+                          startDraft(items().length);
+                        }}
+                      >
+                        <span class="task-check row-new-check" aria-hidden="true" />
+                        <div class="row-body">
+                          <span class="row-text row-new-text">
+                            {m().workspace.newItemPlaceholder}
+                          </span>
+                        </div>
+                      </div>
+                    ) : undefined
+                  }
                 >
                   {(item, expanded) => {
                     // Overlay the dialog's in-progress title onto its row so the
@@ -3272,6 +3305,7 @@ export function Workspace(props: {
                         duplicateBlock={duplicateBlock}
                         copyBlock={copyRows}
                         onDraftSettle={settleDraft}
+                        holdEmptyDraft={() => items().length === 0}
                         onOpen={(id) => setOpenItemId(id)}
                         onSetDeadline={openItemDeadline}
                         onSetWhen={openItemWhen}

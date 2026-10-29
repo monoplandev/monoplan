@@ -71,6 +71,11 @@ export interface DndControllerOpts {
   getItemElement(key: Key): HTMLElement | null;
   /** Lookup the inner content wrapper for a key — used for expansion ResizeObserver. */
   getItemInnerElement(key: Key): HTMLElement | null;
+  /** A plain ArrowDown with nowhere further to go: the selection's bottom
+   *  is already the last row, or the list is empty. Return true to claim
+   *  it (the host moved focus on to whatever follows the rows, e.g. its
+   *  trailer slot); false leaves the selection where it is. */
+  onNavigatePastEnd?: () => boolean;
 }
 
 export interface DndRenderItem {
@@ -93,6 +98,10 @@ export interface DndRenderItem {
 export interface DndRenderState {
   isDragging: boolean;
   listboxHeight: number;
+  /** Height of the rows alone (nudge slot included while dragging), i.e.
+   *  where content after the last row starts — the fill-height floor on
+   *  `listboxHeight` hides this. */
+  contentHeight: number;
   /** Items the host should render normally. */
   items: DndRenderItem[];
   /** Items the host MAY keep mounted hidden (drag set during drag). Empty otherwise.
@@ -399,7 +408,13 @@ export class DndController {
    */
   getRenderState(): DndRenderState {
     if (!this.source) {
-      return { isDragging: false, listboxHeight: 0, items: [], keepAlive: [] };
+      return {
+        isDragging: false,
+        listboxHeight: 0,
+        contentHeight: 0,
+        items: [],
+        keepAlive: [],
+      };
     }
 
     const order = this.source.getOrder();
@@ -476,6 +491,7 @@ export class DndController {
       return {
         isDragging: true,
         listboxHeight,
+        contentHeight,
         items,
         keepAlive: this.keepAliveItems,
       };
@@ -535,7 +551,13 @@ export class DndController {
       });
     }
 
-    return { isDragging: false, listboxHeight, items, keepAlive: [] };
+    return {
+      isDragging: false,
+      listboxHeight,
+      contentHeight,
+      items,
+      keepAlive: [],
+    };
   }
 
   /** Host calls this whenever it has finished mounting/updating items so the
@@ -676,6 +698,15 @@ export class DndController {
     if (action.type === "move-selection") {
       if (this.cfg.reorder) this.handleMoveSelection(action.direction);
       return;
+    }
+    if (
+      action.type === "navigate" &&
+      action.direction === "down" &&
+      this.opts.onNavigatePastEnd &&
+      (order.length === 0 ||
+        this.selection.getSelectionBottom() === order[order.length - 1])
+    ) {
+      if (this.opts.onNavigatePastEnd()) return;
     }
     // Selection-only keys share their logic with the agenda (which runs a
     // DndSelection without this controller); only the scroll is ours.

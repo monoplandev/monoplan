@@ -168,7 +168,9 @@ export type Messages = {
     /** Title of the empty-bin confirmation dialog. */
     emptyBinTitle: string;
     emptyBinConfirm: string;
-    createWithSpace: string;
+    /** Placeholder on the list's trailing capture slot and on an empty
+     *  draft row. */
+    newItemPlaceholder: string;
     emptyState: string;
     notes: string;
     hasNotes: string;
@@ -638,7 +640,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       emptyBin: "Vaciar papelera",
       emptyBinTitle: "Vaciar papelera",
       emptyBinConfirm: "¿Seguro que quieres borrar permanentemente los elementos de la papelera?",
-      createWithSpace: "Pulsa Espacio para crear un elemento nuevo",
+      newItemPlaceholder: "Nuevo elemento",
       emptyState: "Nada aquí.",
       notes: "Notas",
       hasNotes: "Tiene notas",
@@ -994,7 +996,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       emptyBin: "Empty",
       emptyBinTitle: "Empty bin",
       emptyBinConfirm: "Are you sure you want to permanently erase items in the bin?",
-      createWithSpace: "Press Space to create a new item",
+      newItemPlaceholder: "New item",
       emptyState: "Nothing here.",
       notes: "Notes",
       hasNotes: "Has notes",

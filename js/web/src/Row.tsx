@@ -31,6 +31,19 @@ import {
 import { DRAFT_ID_PREFIX, isDraftId } from "./draftId.ts";
 export { DRAFT_ID_PREFIX, isDraftId };
 
+/** Whether the caret sits on the first visual line of `el`, so ArrowUp
+ *  has no line above to move to. A collapsed caret with no client rect
+ *  (empty editable) counts as the first line. */
+function caretOnFirstLine(el: HTMLElement): boolean {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return true;
+  const rect = sel.getRangeAt(0).getClientRects()[0];
+  if (!rect) return true;
+  const top = el.getBoundingClientRect().top;
+  const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || rect.height;
+  return rect.top - top < lineHeight / 2;
+}
+
 // Surface the most recent state-changing timestamp. Binned wins over
 // closed because it's the later transition: a done-then-binned item shows
 // when it was binned in the Bin view; a plain done or cancelled item shows
@@ -55,8 +68,14 @@ export function Row(props: {
    *  the draft; non-empty means the workspace should commit it as a
    *  real item. `chain` is true when the collapse was driven by Enter —
    *  the workspace re-opens a fresh draft so capture continues until
-   *  Escape / blur / empty-Enter. */
-  onDraftSettle?: (text: string, chain: boolean) => void;
+   *  Escape / blur / empty-Enter. Returns true when it did chain, i.e. a
+   *  fresh draft is about to take focus. */
+  onDraftSettle?: (text: string, chain: boolean) => boolean;
+  /** When true, Enter on an empty draft is a no-op (the draft stays open
+   *  and focused) instead of ending the chain — for an otherwise empty
+   *  list, where there is no row to land on and the draft is all there
+   *  is. */
+  holdEmptyDraft?: () => boolean;
   /** Open this item in the detail dialog. `focus` picks which field the
    *  dialog lands the caret in — the note badge opens straight to notes. */
   onOpen?: (id: string) => void;
@@ -212,12 +231,14 @@ export function Row(props: {
           // workspace, which decides commit (addItemAt) vs drop. Skip the
           // editItemText path — there's no item to edit.
           if (isDraftId(props.item().id)) {
-            props.onDraftSettle?.(next, chain);
+            const chained = props.onDraftSettle?.(next, chain) ?? false;
             // When chaining, the workspace will open a fresh draft and
             // its expand effect will steal focus to the new row's
             // contentEditable; bouncing focus to the listbox here would
-            // race that. Skip the listbox refocus on the chain path.
-            if (!chain) {
+            // race that. Skip the listbox refocus only when a draft
+            // really follows — an empty Enter ends the chain, and must
+            // land the keyboard back on the list like Escape does.
+            if (!chained) {
               const listbox = textRef.closest<HTMLElement>('[role="listbox"]');
               listbox?.focus();
             }
@@ -332,6 +353,7 @@ export function Row(props: {
             ref={textRef}
             class="row-text"
             contentEditable={props.expanded()}
+            data-placeholder={m().workspace.newItemPlaceholder}
             onClick={(e) => {
               if (!props.expanded()) return;
               // Plain clicks on links open them (a new tab, or an in-app
@@ -396,6 +418,16 @@ export function Row(props: {
               // hit the dnd's select-all).
               if (!props.expanded()) return;
               if (e.key === "Enter" && !e.shiftKey) {
+                if (
+                  isDraftId(props.item().id) &&
+                  (textRef.textContent ?? "").trim() === "" &&
+                  props.holdEmptyDraft?.()
+                ) {
+                  // Nothing to commit and nowhere to go: stay put.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  return;
+                }
                 // Suppress the newline; bounce off the dnd's Escape
                 // handler (bound on its listbox) to drive collapse, which
                 // triggers the save effect above. Stop propagation so the
@@ -411,6 +443,26 @@ export function Row(props: {
                 // Escape and blur reach the same collapse without setting
                 // this flag, so they end the chain.
                 chainOnSettle = true;
+                (e.currentTarget as HTMLElement).dispatchEvent(
+                  new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+                );
+                return;
+              }
+              if (
+                e.key === "ArrowUp" &&
+                !e.shiftKey &&
+                !e.metaKey &&
+                !e.ctrlKey &&
+                !e.altKey &&
+                isDraftId(props.item().id) &&
+                caretOnFirstLine(textRef)
+              ) {
+                // Arrowing up out of a draft leaves it the way Escape
+                // does: text kept as a new item, nothing dropped. The
+                // settle path then selects the row above (or the item
+                // just made), so the keyboard carries on from there.
+                e.preventDefault();
+                e.stopPropagation();
                 (e.currentTarget as HTMLElement).dispatchEvent(
                   new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
                 );

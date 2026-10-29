@@ -1477,9 +1477,40 @@ input.task-check:hover {
 }
 
 .row[data-expanded] .row-text:empty::before {
-  content: "New item";
+  content: attr(data-placeholder);
   color: var(--text-empty);
   pointer-events: none;
+}
+
+/* The capture slot the dnd host renders after the last row (`trailer`):
+   positioned like a row inside the listbox so it scrolls with the list.
+   With it present the last real row keeps its divider (the slot is what
+   has nothing beneath it) and the slot drops its own. */
+.dnd-trailer {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+.dnd-host[data-trailer] .dnd-item[data-last] .row:not(.row-card) {
+  border-bottom-color: var(--row-divider);
+}
+
+/* Reads as the next item: a faint box and placeholder text in the same
+   geometry as a real row, so the draft that replaces it on click lands
+   in the same place with the same placeholder. */
+.row-new {
+  cursor: text;
+  border-bottom-color: transparent;
+}
+
+.row-new-check {
+  opacity: 0.45;
+}
+
+.row-new-text {
+  flex: 1;
+  color: var(--text-empty);
 }
 
 .empty {
