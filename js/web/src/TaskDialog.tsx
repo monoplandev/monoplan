@@ -123,11 +123,19 @@ export function TaskDialog(props: {
   app: DocApp;
   /** Active (non-archived) user lists — the move/capture destinations. */
   lists: () => ListView[];
-  /** Display name of `app`'s workspace, shown after the list name in
-   *  the move-to-list trigger. */
   /** Name of the shared workspace the item lives in, shown in the list
    *  picker; null for Personal, which is the default and goes unsaid. */
   docLabel?: () => string | null;
+  /** The star. Focus lives in the Home doc for every workspace
+   *  (spec/focus.md: a shared doc's item is a foreign ref), so neither
+   *  the read nor the writes can go through `app` when it is not Home.
+   *  `add` takes the id of an item of `app`, including one created in
+   *  the same batch, which the routed layer could not yet place. */
+  focus: {
+    isFocused: (id: string) => boolean;
+    add: (id: string) => void;
+    remove: (id: string) => void;
+  };
   /** True when the user has entered the shown item (Enter on a row, a
    *  row's open control, a Find pick, a link, a click into the pane):
    *  the non-modal shells land the caret. False while the side pane is
@@ -210,16 +218,17 @@ export function TaskDialog(props: {
     return id ? props.app.state.itemsById[id] : undefined;
   });
 
-  // Whether the open item currently has a visible Focus ref (spec/focus.md).
+  // Whether the open item currently has a Focus ref (spec/focus.md),
+  // local or foreign — read from Home, not `app`.
   const focused = createMemo(() => {
     const id = props.itemId();
-    return id ? props.app.state.focusOrder.includes(id) : false;
+    return id ? props.focus.isFocused(id) : false;
   });
   const toggleFocus = () => {
     const id = props.itemId();
     if (!id) return;
-    if (focused()) props.app.removeFromFocus(id);
-    else props.app.addToFocus(id);
+    if (focused()) props.focus.remove(id);
+    else props.focus.add(id);
   };
 
   // If the open item vanishes (deleted here or by a peer), close.
@@ -744,7 +753,7 @@ export function TaskDialog(props: {
       if (pl) props.app.setItemPlace(id, pl);
       // A Done capture can't hold a Focus ref (auto-remove-on-Done,
       // spec/focus.md), so the pin buffer only applies to open captures.
-      if (newFocus() && !nw.done) props.app.addToFocus(id);
+      if (newFocus() && !nw.done) props.focus.add(id);
       // Logged-as-done capture: create open, then mark done in a second
       // op (mirrors a drag-into-Done). Stamps doneAt = now.
       if (nw.done) props.app.setDone(id, true);

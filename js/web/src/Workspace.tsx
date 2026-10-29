@@ -2774,6 +2774,19 @@ export function Workspace(props: {
         docLabel={() =>
           tApp.docId === docs.homeDocId ? null : docLabel(tApp.docId)
         }
+        // Focus is Home's regardless of the item's doc: a shared doc's
+        // item is pinned as a foreign ref, and the star reads Home's
+        // entries so it lights for both. Written through Home directly
+        // rather than `routed`, which cannot place an id the store has
+        // not seen yet (a capture pinned inside its creating batch).
+        focus={{
+          isFocused: docs.isFocused,
+          add: (id) =>
+            tApp === home
+              ? home.addToFocus(id)
+              : home.addForeignToFocus(tApp.docId, id, 0),
+          remove: (id) => home.removeFromFocus(id),
+        }}
         entered={() => openItemId() !== null}
         whenOpen={itemWhenOpen}
         setWhenOpen={setItemWhenOpen}
