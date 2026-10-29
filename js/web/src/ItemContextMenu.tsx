@@ -11,13 +11,6 @@ import { ContextMenu } from "@kobalte/core/context-menu";
 import checkSvg from "./icons/check.svg?raw";
 import type { DndSelection } from "./dnd/solid";
 import { trackOverlay } from "./overlay.ts";
-import {
-  addDaysToStamp,
-  nowMs,
-  todayStamp,
-  whenFromParts,
-  whenTime,
-} from "./format.tsx";
 import { statusLabel, useAppI18n } from "./i18n.tsx";
 import { itemUrl } from "./url.ts";
 import type { ViewKey } from "./prefs.ts";
@@ -60,11 +53,6 @@ export function ItemContextMenu(props: {
   duplicateBlock: (sourceIds: readonly string[]) => void;
   copyBlock: (sourceIds: readonly string[]) => void;
   onOpen?: (id: string) => void;
-  /** Open this item's task surface with its deadline / planned-date
-   *  popover showing. Single-item only: the entries hide for a multi-row
-   *  target, which keeps the Today / Tomorrow / Remove quick actions. */
-  onSetDeadline?: (id: string) => void;
-  onSetWhen?: (id: string) => void;
   /** Jump to the item's other appearance and select it there: from the
    *  Focus lens to its home list, or from a list / board to the Focus
    *  lens. Only offered for items that appear in both (`spec/focus.md`). */
@@ -228,51 +216,6 @@ export function ItemContextMenu(props: {
   const onCopyLink = () => {
     void navigator.clipboard.writeText(targetIds().map(itemUrl).join("\n"));
   };
-  // Deadline actions apply to the whole target set (the selection when the
-  // row is part of it, else this row alone), matching the done/bin actions.
-  const onDeadlineToday = () => {
-    const stamp = todayStamp(nowMs());
-    props.app.withActionBatch(() => {
-      for (const id of targetIds()) props.app.setItemDeadline(id, stamp);
-    });
-  };
-  const onDeadlineTomorrow = () => {
-    const stamp = addDaysToStamp(todayStamp(nowMs()), 1);
-    props.app.withActionBatch(() => {
-      for (const id of targetIds()) props.app.setItemDeadline(id, stamp);
-    });
-  };
-  const onDeadlineRemove = () => {
-    props.app.withActionBatch(() => {
-      for (const id of targetIds()) props.app.setItemDeadline(id, null);
-    });
-  };
-  const onSetDate = () => {
-    props.onSetDeadline?.(props.item().id);
-  };
-  // Planned-date actions, same target-set rule. Today / Tomorrow keep
-  // this row's time part, if any, so a timed item moves days intact.
-  const keepTime = (day: string) => whenFromParts(day, whenTime(props.item().when ?? ""));
-  const onWhenToday = () => {
-    const stamp = keepTime(todayStamp(nowMs()));
-    props.app.withActionBatch(() => {
-      for (const id of targetIds()) props.app.setItemWhen(id, stamp);
-    });
-  };
-  const onWhenTomorrow = () => {
-    const stamp = keepTime(addDaysToStamp(todayStamp(nowMs()), 1));
-    props.app.withActionBatch(() => {
-      for (const id of targetIds()) props.app.setItemWhen(id, stamp);
-    });
-  };
-  const onWhenRemove = () => {
-    props.app.withActionBatch(() => {
-      for (const id of targetIds()) props.app.setItemWhen(id, null);
-    });
-  };
-  const onSetWhenDate = () => {
-    props.onSetWhen?.(props.item().id);
-  };
   const onOpenChange = (open: boolean) => {
     // Register the menu in the shared overlay count so the workspace's
     // document-level shortcuts (Enter → open dialog, x → done, …) go inert
@@ -412,93 +355,6 @@ export function ItemContextMenu(props: {
             >
               <span>{m().focus.showInFocus}</span>
             </ContextMenu.Item>
-          </Show>
-          {/* Dates only matter while the item is open (the badges hide
-              for done/binned rows too, see above). When leads Deadline,
-              as the badges do. */}
-          <Show when={isOpen(props.item())}>
-            <ContextMenu.Sub gutter={4}>
-              <ContextMenu.SubTrigger class="context-menu-item">
-                <span>{m().when.label}</span>
-                <span class="menu-sub-arrow" aria-hidden="true">
-                  ›
-                </span>
-              </ContextMenu.SubTrigger>
-              <ContextMenu.Portal>
-                <ContextMenu.SubContent class="context-menu-content">
-                  <Show when={props.item().when}>
-                    <ContextMenu.Item
-                      class="context-menu-item"
-                      onSelect={onWhenRemove}
-                    >
-                      <span>{m().when.remove}</span>
-                    </ContextMenu.Item>
-                  </Show>
-                  <Show when={props.onSetWhen && targetIds().length === 1}>
-                    <ContextMenu.Item
-                      class="context-menu-item"
-                      onSelect={onSetWhenDate}
-                    >
-                      <span>{m().when.setDate}</span>
-                    </ContextMenu.Item>
-                  </Show>
-                  <ContextMenu.Item
-                    class="context-menu-item"
-                    onSelect={onWhenToday}
-                  >
-                    <span>{m().when.today}</span>
-                  </ContextMenu.Item>
-                  <ContextMenu.Item
-                    class="context-menu-item"
-                    onSelect={onWhenTomorrow}
-                  >
-                    <span>{m().when.tomorrow}</span>
-                  </ContextMenu.Item>
-                </ContextMenu.SubContent>
-              </ContextMenu.Portal>
-            </ContextMenu.Sub>
-          </Show>
-          <Show when={isOpen(props.item())}>
-            <ContextMenu.Sub gutter={4}>
-              <ContextMenu.SubTrigger class="context-menu-item">
-                <span>{m().deadline.label}</span>
-                <span class="menu-sub-arrow" aria-hidden="true">
-                  ›
-                </span>
-              </ContextMenu.SubTrigger>
-              <ContextMenu.Portal>
-                <ContextMenu.SubContent class="context-menu-content">
-                  <Show when={props.item().deadline}>
-                    <ContextMenu.Item
-                      class="context-menu-item"
-                      onSelect={onDeadlineRemove}
-                    >
-                      <span>{m().deadline.remove}</span>
-                    </ContextMenu.Item>
-                  </Show>
-                  <Show when={props.onSetDeadline && targetIds().length === 1}>
-                    <ContextMenu.Item
-                      class="context-menu-item"
-                      onSelect={onSetDate}
-                    >
-                      <span>{m().deadline.setDate}</span>
-                    </ContextMenu.Item>
-                  </Show>
-                  <ContextMenu.Item
-                    class="context-menu-item"
-                    onSelect={onDeadlineToday}
-                  >
-                    <span>{m().deadline.today}</span>
-                  </ContextMenu.Item>
-                  <ContextMenu.Item
-                    class="context-menu-item"
-                    onSelect={onDeadlineTomorrow}
-                  >
-                    <span>{m().deadline.tomorrow}</span>
-                  </ContextMenu.Item>
-                </ContextMenu.SubContent>
-              </ContextMenu.Portal>
-            </ContextMenu.Sub>
           </Show>
           <Show when={props.onMoveToList}>
             <ContextMenu.Item

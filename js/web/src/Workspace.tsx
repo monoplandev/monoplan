@@ -3307,8 +3307,6 @@ export function Workspace(props: {
                         onDraftSettle={settleDraft}
                         holdEmptyDraft={() => items().length === 0}
                         onOpen={(id) => setOpenItemId(id)}
-                        onSetDeadline={openItemDeadline}
-                        onSetWhen={openItemWhen}
                         onReveal={revealItemIn}
                         onMoveToList={openMovePalette}
                         openOnTap={itemsIsMobile}
@@ -3325,8 +3323,6 @@ export function Workspace(props: {
               app={viewApp()}
               listId={boardListId()!}
               onOpen={(id) => setOpenItemId(id)}
-              onSetDeadline={openItemDeadline}
-              onSetWhen={openItemWhen}
               onReveal={revealItemIn}
               onMoveToList={openMovePalette}
               openOnTap={itemsIsMobile}
@@ -3357,8 +3353,6 @@ export function Workspace(props: {
             ref={(h) => (upcomingHandle = h)}
             duplicateBlock={duplicateBlock}
             copyBlock={copyRows}
-            onSetDeadline={openItemDeadline}
-            onSetWhen={openItemWhen}
             onReveal={revealItemIn}
             onMoveToList={openMovePalette}
           />

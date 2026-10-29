@@ -77,8 +77,6 @@ export function Board(props: {
   app: DocApp;
   listId: string;
   onOpen: (id: string) => void;
-  onSetDeadline: (id: string) => void;
-  onSetWhen: (id: string) => void;
   /** Row context-menu jump to the item's other appearance (the Focus
    *  lens). Forwarded to each card. */
   onReveal?: (id: string, where: "list" | "focus") => void;
@@ -648,8 +646,6 @@ export function Board(props: {
             registerHandle={registerHandle}
             autofocus={i() === 0}
             onOpen={props.onOpen}
-            onSetDeadline={props.onSetDeadline}
-            onSetWhen={props.onSetWhen}
             onReveal={props.onReveal}
             onMoveToList={props.onMoveToList}
             openOnTap={props.openOnTap}
@@ -675,8 +671,6 @@ export function Board(props: {
           onAddItem={() => props.onAddItem(props.listId, "backlog", true)}
           registerHandle={registerHandle}
           onOpen={props.onOpen}
-          onSetDeadline={props.onSetDeadline}
-          onSetWhen={props.onSetWhen}
           onReveal={props.onReveal}
           onMoveToList={props.onMoveToList}
           openOnTap={props.openOnTap}
@@ -700,8 +694,6 @@ function BoardColumn(props: {
   /** Open the new-item dialog targeting this lane. */
   onAddItem: () => void;
   onOpen: (id: string) => void;
-  onSetDeadline: (id: string) => void;
-  onSetWhen: (id: string) => void;
   onReveal?: (id: string, where: "list" | "focus") => void;
   onMoveToList?: (ids: readonly string[]) => void;
   openOnTap: () => boolean;
@@ -781,8 +773,6 @@ function BoardColumn(props: {
               duplicateBlock={props.duplicateBlock}
               copyBlock={props.copyBlock}
               onOpen={props.onOpen}
-              onSetDeadline={props.onSetDeadline}
-              onSetWhen={props.onSetWhen}
               onReveal={props.onReveal}
               onMoveToList={props.onMoveToList}
               openOnTap={props.openOnTap}

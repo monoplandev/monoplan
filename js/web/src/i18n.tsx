@@ -334,7 +334,6 @@ export type Messages = {
     /** Quick action / context-menu action that removes the planned date. */
     remove: string;
     /** Context-menu action that opens the item onto its date popover. */
-    setDate: string;
     /** Label of the time field in the task surface's dates band. */
     time: string;
     /** ✕ beside the time field and the Remove row in its panel: blanks
@@ -733,7 +732,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       today: "Hoy",
       tomorrow: "Mañana",
       remove: "Quitar fecha",
-      setDate: "Elegir fecha…",
       time: "Hora",
       clearTime: "Quitar hora",
       end: "Fin",
@@ -1089,7 +1087,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       today: "Today",
       tomorrow: "Tomorrow",
       remove: "Remove date",
-      setDate: "Set date…",
       time: "Time",
       clearTime: "Remove time",
       end: "End",

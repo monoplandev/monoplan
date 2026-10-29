@@ -98,8 +98,6 @@ export function Upcoming(props: {
   /** Context menu wiring, as the list rows take it (`ItemContextMenu`). */
   duplicateBlock: (sourceIds: readonly string[]) => void;
   copyBlock: (sourceIds: readonly string[]) => void;
-  onSetDeadline?: (id: string) => void;
-  onSetWhen?: (id: string) => void;
   onReveal?: (id: string, where: "list" | "focus") => void;
   onMoveToList?: (ids: readonly string[]) => void;
 }) {
@@ -345,8 +343,6 @@ export function Upcoming(props: {
                     duplicateBlock={props.duplicateBlock}
                     copyBlock={props.copyBlock}
                     onOpen={props.onOpen}
-                    onSetDeadline={props.onSetDeadline}
-                    onSetWhen={props.onSetWhen}
                     onReveal={props.onReveal}
                     onMoveToList={props.onMoveToList}
                     listLabel={props.listLabel}

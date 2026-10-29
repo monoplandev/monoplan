@@ -101,12 +101,6 @@ export function Row(props: {
    *  state (client-local per-list display option). The board shows state
    *  as the lane itself, so cards never take it. */
   showState?: () => boolean;
-  /** Open this item's task surface with its deadline / planned-date
-   *  popover showing. Single-item only: the menu entries hide for a
-   *  multi-row target, which keeps the Today / Tomorrow / Remove quick
-   *  actions. */
-  onSetDeadline?: (id: string) => void;
-  onSetWhen?: (id: string) => void;
   /** Jump to the item's other appearance and select it there: from the
    *  Focus lens to its home list, or from a list / board to the Focus
    *  lens. Only offered for items that appear in both (`spec/focus.md`). */
@@ -282,8 +276,6 @@ export function Row(props: {
       duplicateBlock={props.duplicateBlock}
       copyBlock={props.copyBlock}
       onOpen={props.onOpen}
-      onSetDeadline={props.onSetDeadline}
-      onSetWhen={props.onSetWhen}
       onReveal={props.onReveal}
       onMoveToList={props.onMoveToList}
       listLabel={props.listLabel}
