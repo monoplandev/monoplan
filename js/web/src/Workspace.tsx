@@ -39,6 +39,7 @@ import trashSvg from "./icons/trash.svg?raw";
 import { Board, type BoardImperative } from "./Board.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { NewDocDialog } from "./NewDocDialog.tsx";
+import { captureInviteFromLocation } from "./invite.ts";
 import { InviteDialog } from "./InviteDialog.tsx";
 import type { Dek } from "@monoplan/core/wasm";
 import { FindPalette } from "./FindPalette.tsx";
@@ -2333,7 +2334,13 @@ export function Workspace(props: {
 
   // Address bar → state: Back / Forward, a hand-edited hash, an internal
   // link click. An unrecognised hash is rewritten to the current state.
+  // A sharing link pasted into this tab's address bar is a fragment-only
+  // navigation (no page load, so `index.tsx`'s capture never ran): park
+  // its secret here, exactly as at boot, before the router can see it.
+  // The capture strips the fragment, so the rewrite below restores the
+  // view on screen and the dialog opens off the parked secret.
   const onPopState = () => {
+    captureInviteFromLocation();
     const route = parseHash(location.hash);
     if (route && applyRoute(route)) return;
     history.replaceState(history.state, "", stateHash(view(), openItemId(), menuOpen()));

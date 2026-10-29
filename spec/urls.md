@@ -26,8 +26,11 @@ One further token is a credential, not a route: `#invite_<secret>`
 §Invites). It is consumed at the very start of the page load (parked in
 `sessionStorage`, fragment stripped with `history.replaceState`) before
 the router runs, so it is never mirrored into the address bar or
-history and the secret never reaches the server. `parseHash` does not
-recognise it; `parseInviteHash` does.
+history and the secret never reaches the server. A link pasted into a
+tab already running the app is a fragment-only navigation with no page
+load, so the workspace's `popstate` handler runs the same capture before
+routing and the address bar is rewritten to the view on screen.
+`parseHash` does not recognise it; `parseInviteHash` does.
 
 `#list_inbox` is accepted as an alias and canonicalised to `#inbox`.
 Reserved, not yet parsed (`calendar-plan.md`): `calendar` for a month-grid

@@ -4,12 +4,16 @@
 // server, the address bar's history, or the router, so it is captured
 // at the very start of the page load (`captureInviteFromLocation` in
 // `index.tsx`), parked in sessionStorage and stripped from the URL
-// before anything renders. Parking it survives the sign-in or sign-up
-// the invitee may need first (the app remounts on a session swap) and
-// dies with the tab. Once an authenticated session is up,
-// `InviteDialog` picks the pending secret up, fetches the wrap behind
-// its id, opens it with the secret and joins.
+// before anything renders. A link pasted into a tab that already has
+// the app open changes only the fragment, so no page load happens: the
+// workspace's popstate handler runs the same capture before routing, and
+// `pendingInvite` is reactive so the dialog opens on the spot. Parking
+// the secret survives the sign-in or sign-up the invitee may need first
+// (the app remounts on a session swap) and dies with the tab. Once an
+// authenticated session is up, `InviteDialog` picks the pending secret
+// up, fetches the wrap behind its id, opens it with the secret and joins.
 
+import { createSignal } from "solid-js";
 import { InviteSecret, wrapDekWithDek, type Dek } from "@monoplan/core/wasm";
 import { api, ApiError, type InvitePayload } from "./api.ts";
 import type { Session } from "./Login.tsx";
@@ -67,13 +71,24 @@ export function captureInviteFromLocation(
     memoryPending = secret;
   }
   address.replace(address.pathname + address.search);
+  bump();
   return true;
 }
 
 let memoryPending: string | null = null;
 
-/** The parked secret, if any. */
+// Bumped by every capture and clear so reactive readers of
+// `pendingInvite` (the dialog, the first-run prompts) re-run; the value
+// itself stays in storage so it outlives the session-swap remount.
+const [version, setVersion] = createSignal(0);
+const bump = (): void => {
+  setVersion((v) => v + 1);
+};
+
+/** The parked secret, if any. Reactive: a read inside a computation
+ *  re-runs when a link is captured or the secret is cleared. */
 export function pendingInvite(store: KeyStore | null = sessionStore()): string | null {
+  version();
   try {
     return store?.getItem(PENDING_KEY) ?? memoryPending;
   } catch {
@@ -88,6 +103,7 @@ export function clearPendingInvite(store: KeyStore | null = sessionStore()): voi
   } catch {
     // nothing to clear
   }
+  bump();
 }
 
 export type InviteLookup = { secret: InviteSecret; payload: InvitePayload };

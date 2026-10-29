@@ -1,5 +1,5 @@
 import { Dialog } from "@kobalte/core/dialog";
-import { Match, Show, Switch, createSignal, onMount } from "solid-js";
+import { Match, Show, Switch, createEffect, createSignal, on } from "solid-js";
 import type { Dek } from "@monoplan/core/wasm";
 import { ApiError } from "./api.ts";
 import { useAppI18n } from "./i18n.tsx";
@@ -21,9 +21,10 @@ type Stage =
   | { kind: "error"; message: "invalid" | "gone" | "failed" };
 
 /** The receiving end of a sharing link (`spec/sharing-plan.md`
- *  §Invites). Mounts with the workspace; opens iff a secret was parked by
- *  `captureInviteFromLocation`, resolves it to the wrap behind it and
- *  offers to join. An anonymous session is sent through the usual
+ *  §Invites). Mounts with the workspace; opens whenever a secret is
+ *  parked by `captureInviteFromLocation` (at page load, or when a link is
+ *  pasted into this tab's address bar), resolves it to the wrap behind it
+ *  and offers to join. An anonymous session is sent through the usual
  *  sign-in / sign-up dialog first: the parked secret survives the
  *  session swap (the whole tree remounts) and this dialog comes back
  *  authenticated. "Not now" forgets the link for this tab; the link
@@ -34,21 +35,29 @@ export function InviteDialog(props: {
 }) {
   const { m } = useAppI18n();
   const session = useSession();
-  const [open, setOpen] = createSignal(pendingInvite() !== null);
+  const [open, setOpen] = createSignal(false);
   const [stage, setStage] = createSignal<Stage>({ kind: "loading" });
   const [authOpen, setAuthOpen] = createSignal(false);
   trackOverlay(() => open());
 
-  onMount(async () => {
-    const secret = pendingInvite();
-    if (secret === null) return;
-    try {
-      setStage({ kind: "ready", lookup: await lookupInvite(secret) });
-    } catch (e) {
-      console.warn("invite lookup failed:", e);
-      setStage({ kind: "error", message: errorKind(e) });
-    }
-  });
+  // Every parked secret (re)opens the dialog from the loading stage; a
+  // lookup that lands after a newer secret was parked is dropped.
+  createEffect(
+    on(pendingInvite, (secret) => {
+      if (secret === null) return;
+      setStage({ kind: "loading" });
+      setOpen(true);
+      void (async () => {
+        try {
+          const lookup = await lookupInvite(secret);
+          if (pendingInvite() === secret) setStage({ kind: "ready", lookup });
+        } catch (e) {
+          console.warn("invite lookup failed:", e);
+          if (pendingInvite() === secret) setStage({ kind: "error", message: errorKind(e) });
+        }
+      })();
+    }),
+  );
 
   const dismiss = (): void => {
     clearPendingInvite();
