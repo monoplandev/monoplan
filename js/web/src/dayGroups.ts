@@ -11,10 +11,18 @@
 // items never appear. Events
 // (`spec/events-plan.md`) place by the same rules; an Open event with no
 // date at all has no day, and no list view to fall back on, so it gets an
-// Unscheduled group between Overdue and Today. Pure so it can be
-// unit-tested without a DOM (`test/dayGroups.test.ts`).
+// Unscheduled group between Overdue and Today. A `when` that runs for
+// days (`duration` beside it, `spec/calendar-plan.md` "Field:
+// `duration`") puts the item on every day it covers, from today onward,
+// so a span that started yesterday is still on today's page. Pure so it
+// can be unit-tested without a DOM (`test/dayGroups.test.ts`).
 
-import { formatDeadlineBadge, whenDay } from "./format.tsx";
+import {
+  addDaysToStamp,
+  formatDeadlineBadge,
+  spanEndOffset,
+  whenDay,
+} from "./format.tsx";
 import {
   isBinned,
   isClosed,
@@ -31,6 +39,31 @@ export interface DayRow {
   /** Which field put the row on this day; `none` in Unscheduled. */
   placedBy: "when" | "deadline" | "none";
   tone: DayTone;
+  /** Set on every row of a `when` that covers more than one day: which
+   *  day of the span this row is (1-based) and how many there are. The
+   *  same item then appears on several consecutive days; `day` tells a
+   *  continuation row from the first. Absent on single-day rows. */
+  span?: { day: number; total: number };
+}
+
+/** The days a `when` covers, as `YYYY-MM-DD` stamps: the start day and
+ *  the last day, with `total` the count between them inclusive. One day
+ *  without a `duration`; otherwise the end lands `spanEndOffset` days
+ *  past the start (whole days beside an all-day start, the clock end
+ *  beside a timed one, so an overnight 23:00 + 2h covers two days). The
+ *  one place the span is derived from the registers, for every surface
+ *  that lays items out on days to share. */
+export function whenSpan(
+  when: string,
+  duration: number | null | undefined,
+): { start: string; end: string; total: number } {
+  const start = whenDay(when);
+  const offset = spanEndOffset(when, duration);
+  return {
+    start,
+    end: offset > 0 ? addDaysToStamp(start, offset) : start,
+    total: offset + 1,
+  };
 }
 
 /** Group key of the Overdue group, which has no day of its own. */
@@ -68,7 +101,13 @@ const isUnscheduledEvent = (it: ItemView): boolean =>
  *
  *  Within a day, rows order by the raw string of the placing field
  *  (all-day ahead of timed), then `createdAt`; ticking a row does not
- *  move it. */
+ *  move it.
+ *
+ *  A row placed by a `when` that covers several days is repeated on each
+ *  day of the span from today onward (`span` on every copy), so the
+ *  same id can occur more than once down the groups; a flat reading of
+ *  the rows dedupes by id. A row placed by its deadline is never
+ *  repeated: the deadline is one day. */
 export function groupByDay(
   items: Iterable<ItemView>,
   today: string,
@@ -84,20 +123,39 @@ export function groupByDay(
       continue;
     }
     if (isBinned(it) || (!it.when && !it.deadline)) continue;
-    // Past days are not rendered here, so a past `when` places nothing,
-    // done or not.
-    const wDay = it.when && whenDay(it.when) >= today ? whenDay(it.when) : null;
+    // Past days are not rendered here, so a `when` that is over places
+    // nothing, done or not. A span still running is placed from today:
+    // `wDay` is its first day on the page, the start or today, whichever
+    // is later.
+    const span = it.when ? whenSpan(it.when, it.duration) : null;
+    const wDay =
+      span && span.end >= today
+        ? span.start >= today
+          ? span.start
+          : today
+        : null;
     const dDay = it.deadline ?? null;
+    // Every day of the span from `wDay` to its end, each row carrying its
+    // position in the span when there is more than one day.
+    const placeWhen = (tone: DayTone) => {
+      const first = span!.start;
+      for (let day = wDay!; day <= span!.end; day = addDaysToStamp(day, 1)) {
+        const row: DayRow = { item: it, placedBy: "when", tone };
+        if (span!.total > 1) {
+          // Days since the start, +1 for the 1-based label.
+          let n = 1;
+          for (let d = first; d < day; d = addDaysToStamp(d, 1)) n++;
+          row.span = { day: n, total: span!.total };
+        }
+        placed.push({ day, raw: it.when!, row });
+      }
+    };
     if (isClosed(it)) {
       // A ticked or crossed item stays put on its `when` day, unjudged:
       // the day still records what happened, or what was called off. Its
       // deadline is settled and places nothing; Overdue is Open-only.
       if (wDay === null) continue;
-      placed.push({
-        day: wDay,
-        raw: it.when!,
-        row: { item: it, placedBy: "when", tone: "neutral" },
-      });
+      placeWhen("neutral");
       continue;
     }
     // An overdue deadline is owed now whatever `when` says: it leaves the
@@ -115,11 +173,7 @@ export function groupByDay(
     // tie: it is the "happens on" date and renders first.
     const tone: DayTone = dDay === today ? "warning" : "neutral";
     if (wDay && (!dDay || wDay <= dDay)) {
-      placed.push({
-        day: wDay,
-        raw: it.when!,
-        row: { item: it, placedBy: "when", tone },
-      });
+      placeWhen(tone);
     } else {
       placed.push({
         day: dDay!,
@@ -188,11 +242,12 @@ export interface AttentionBadge {
 }
 
 /** Count what is owed or on today: Open items with an overdue deadline, a
- *  deadline today, or a `when` today. Tone is the most urgent counted:
- *  overdue, else warning (a deadline today), else neutral. A past `when`
- *  has gone by like an event and counts for nothing; future days are the
- *  view's business, not the badge's. Unscheduled events count too, at
- *  neutral tone: the calendar is the only place they show. */
+ *  deadline today, or a `when` on today, a span covering it included.
+ *  Tone is the most urgent counted: overdue, else warning (a deadline
+ *  today), else neutral. A past `when` has gone by like an event and
+ *  counts for nothing; future days are the view's business, not the
+ *  badge's. Unscheduled events count too, at neutral tone: the calendar
+ *  is the only place they show. */
 export function attentionBadge(
   items: Iterable<ItemView>,
   today: string,
@@ -209,7 +264,7 @@ export function attentionBadge(
     } else if (dDay === today) {
       count++;
       warning = true;
-    } else if (it.when && whenDay(it.when) === today) {
+    } else if (it.when && coversToday(it.when, it.duration, today)) {
       count++;
     } else if (isUnscheduledEvent(it)) {
       count++;
@@ -217,3 +272,12 @@ export function attentionBadge(
   }
   return { count, tone: overdue ? "overdue" : warning ? "warning" : "neutral" };
 }
+
+const coversToday = (
+  when: string,
+  duration: number | null | undefined,
+  today: string,
+): boolean => {
+  const span = whenSpan(when, duration);
+  return span.start <= today && today <= span.end;
+};

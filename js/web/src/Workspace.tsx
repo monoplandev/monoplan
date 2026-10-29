@@ -755,7 +755,18 @@ export function Workspace(props: {
     // the flat listbox; its rows in agenda order are what the list
     // selection runs over there, so they are the view's rows here too.
     if (v.kind === "upcoming") {
-      return upcomingGroups().flatMap((g) => g.rows.map((r) => r.item));
+      // Each item once, at its first row: a multi-day span repeats its
+      // item down the days it covers, and the selection is by id.
+      const seen = new Set<string>();
+      const out: ItemView[] = [];
+      for (const g of upcomingGroups()) {
+        for (const r of g.rows) {
+          if (seen.has(r.item.id)) continue;
+          seen.add(r.item.id);
+          out.push(r.item);
+        }
+      }
+      return out;
     }
     // The Bin spans every doc: a binned row must stay reachable.
     return docs.binnedItems();

@@ -106,14 +106,24 @@ export function Upcoming(props: {
   const { m, locale } = useAppI18n();
 
   let hostEl!: HTMLDivElement;
-  const rowEls = new Map<string, HTMLElement>();
 
-  // The selection's order is every day's rows in display order. An item
-  // is placed on one day only, so ids are unique down the agenda. Fresh
-  // array per change: `updateOrder` is identity-guarded.
-  const order = createMemo<string[]>(() =>
-    props.groups.flatMap((g) => g.rows.map((r) => r.item.id)),
-  );
+  // The selection's order is every day's rows in display order, each id
+  // once: a multi-day span repeats its item on each day it covers
+  // (`DayRow.span`), and selecting any of those rows selects the item,
+  // so every copy lights. Fresh array per change: `updateOrder` is
+  // identity-guarded.
+  const order = createMemo<string[]>(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const g of props.groups) {
+      for (const r of g.rows) {
+        if (seen.has(r.item.id)) continue;
+        seen.add(r.item.id);
+        out.push(r.item.id);
+      }
+    }
+    return out;
+  });
   createEffect(() => props.selection.updateOrder(order()));
 
   // Selected set as a signal so only rows whose membership flips re-render
@@ -125,8 +135,41 @@ export function Upcoming(props: {
     return props.selection.getSelectedKeySet();
   });
 
+  // Which copy of a multi-day span draws the selection: the one the
+  // pointer picked, else the span's earliest day on the page. The
+  // selection itself is by item id (one item, however many days it
+  // covers), so this is chrome only; a copy is lit when its item is
+  // selected and it is that item's chosen day.
+  const [pickedDay, setPickedDay] = createSignal<Map<string, string>>(
+    new Map(),
+  );
+  const firstDayOf = createMemo(() => {
+    const out = new Map<string, string>();
+    for (const g of props.groups) {
+      for (const r of g.rows) {
+        if (!out.has(r.item.id)) out.set(r.item.id, g.key);
+      }
+    }
+    return out;
+  });
+  const litDay = (id: string): string | undefined =>
+    pickedDay().get(id) ?? firstDayOf().get(id);
+  // A pointer pick only lives while its item stays selected; keyboard
+  // and other paths fall back to the first copy.
+  createEffect(() => {
+    const sel = selectedSet();
+    const picked = pickedDay();
+    if ([...picked.keys()].every((id) => sel.has(id))) return;
+    const next = new Map(picked);
+    for (const id of picked.keys()) if (!sel.has(id)) next.delete(id);
+    setPickedDay(next);
+  });
+
+  // The first row carrying the id in DOM order: a span's earliest day.
   const scrollToKey = (id: string) => {
-    rowEls.get(id)?.scrollIntoView({ block: "nearest" });
+    hostEl
+      .querySelector(`[data-key="${CSS.escape(id)}"]`)
+      ?.scrollIntoView({ block: "nearest" });
   };
 
   props.ref?.({
@@ -169,15 +212,18 @@ export function Upcoming(props: {
   // Mouse mirrors the listbox: click selects, shift extends, ⌘/Ctrl
   // toggles, a click on no row clears (the list's `clearOnBlankClick`).
   // The checkbox is its own control. On touch a tap opens instead.
-  const rowIdFromEvent = (e: MouseEvent): string | null => {
+  const rowFromEvent = (e: MouseEvent): HTMLElement | null => {
     const t = e.target as HTMLElement | null;
     const row = t?.closest<HTMLElement>("[data-key]");
-    return row && hostEl.contains(row) ? (row.dataset.key ?? null) : null;
+    return row && hostEl.contains(row) ? row : null;
   };
+  const rowIdFromEvent = (e: MouseEvent): string | null =>
+    rowFromEvent(e)?.dataset.key ?? null;
   const onClick = (e: MouseEvent) => {
     const t = e.target as HTMLElement | null;
     if (t?.closest("input")) return;
-    const id = rowIdFromEvent(e);
+    const row = rowFromEvent(e);
+    const id = row?.dataset.key ?? null;
     if (id === null) {
       if (props.selection.hasSelection()) props.selection.clear();
       return;
@@ -190,6 +236,10 @@ export function Upcoming(props: {
     if (e.shiftKey) props.selection.extendActive(id);
     else if (mod) props.selection.toggleItem(id);
     else props.selection.selectOnly(id);
+    const day = row?.dataset.day;
+    if (day && props.selection.getSelectedKeySet().has(id)) {
+      setPickedDay((prev) => new Map(prev).set(id, day));
+    }
   };
   const onDblClick = (e: MouseEvent) => {
     const t = e.target as HTMLElement | null;
@@ -222,11 +272,16 @@ export function Upcoming(props: {
 
   // Start time only: the agenda is a glance at the day, the end sits on
   // the task surface. An all-day item says so in the lane, and a row
-  // here on its deadline says "Due".
+  // here on its deadline says "Due". A multi-day span counts its days
+  // instead ("Day 2/3"): on the first day too when it is all-day, since
+  // the count says "all day" and more; a timed start keeps its clock.
   const timeLabel = (r: DayRow): string => {
     if (r.placedBy === "deadline") return m().upcoming.due;
     if (r.placedBy !== "when") return "";
     const start = whenTime(r.item.when!);
+    if (r.span && (!start || r.span.day > 1)) {
+      return m().upcoming.spanDay(r.span.day, r.span.total);
+    }
     if (!start) return m().when.allDay;
     return formatClockTime(start, locale());
   };
@@ -276,7 +331,11 @@ export function Upcoming(props: {
             >
               <For each={g.rows}>
                 {(r) => {
-                  const selected = createMemo(() => selectedSet().has(r.item.id));
+                  const selected = createMemo(
+                    () =>
+                      selectedSet().has(r.item.id) &&
+                      (!r.span || litDay(r.item.id) === g.key),
+                  );
                   return (
                   <ItemContextMenu
                     item={() => r.item}
@@ -293,15 +352,10 @@ export function Upcoming(props: {
                     listLabel={props.listLabel}
                   >
                   <ContextMenu.Trigger
-                    ref={(el: HTMLElement) => {
-                      rowEls.set(r.item.id, el);
-                      onCleanup(() => {
-                        if (rowEls.get(r.item.id) === el) rowEls.delete(r.item.id);
-                      });
-                    }}
                     class="upcoming-row"
                     role="option"
                     data-key={r.item.id}
+                    data-day={g.key}
                     aria-selected={selected() ? "true" : "false"}
                     data-tone={r.tone}
                     // `data-done`, not `data-closed`: the menu trigger

@@ -386,6 +386,9 @@ export type Messages = {
     /** Beside a timed row later today: how long until it starts,
      *  `span` already formatted ("2h 15m"). */
     startsIn: (span: string) => string;
+    /** Time-lane label of a row of a multi-day span: which day of how
+     *  many ("Day 2/3"). Kept short: the lane is clock-time wide. */
+    spanDay: (day: number, total: number) => string;
   };
   sidePanel: {
     /** Accessible name of the desktop side panel. */
@@ -754,6 +757,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       event: "Evento",
       due: "Vence",
       startsIn: (span) => `en ${span}`,
+      spanDay: (day, total) => `Día ${day}/${total}`,
     },
     sidePanel: {
       title: "Barra de contexto",
@@ -1109,6 +1113,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       event: "Event",
       due: "Due",
       startsIn: (span) => `in ${span}`,
+      spanDay: (day, total) => `Day ${day}/${total}`,
     },
     sidePanel: {
       title: "Context sidebar",

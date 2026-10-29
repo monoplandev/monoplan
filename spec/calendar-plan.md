@@ -146,8 +146,10 @@ Item register, integer minutes, optional. `1..=10080` (one week).
   concurrent edit. Import writes the register directly and does not
   default. The task dialog's new-item buffer mirrors the rule so the end
   field appears as soon as a start time is typed.
-- **Agenda placement is unchanged.** Day granularity on the start; an
-  overnight span appears on its start day only.
+- **Agenda placement** (changed 2026-10-29): a span is placed on every
+  day it covers, from today onward, so an overnight span is on both its
+  days and a three-day one on three (see "Agenda", Placement). Before
+  that it sat on its start day only.
 - **Multi-day all-day spans (added 2026-10-07).** A Tuesday-to-Thursday
   conference is an all-day `when` of Tuesday with a `duration` of three
   days in minutes (`3 × 1440`): the span covers `ceil(duration / 1440)`
@@ -223,7 +225,8 @@ for the month grid). `groupByDeadline` becomes
 - **Rows** are Open items with a `deadline` or a `when` of today or later
   (or both), plus closed (Done or Cancelled) items with a `when` of today
   or later (see "`when` survives Done" above). A `when` before today places
-  nothing, closed or not. Binned items never appear.
+  nothing, closed or not, unless its span (below) still reaches today.
+  Binned items never appear.
 - **Closed rows** place by `when` only, on that day, neutral tone, in the
   same within-day order as everything else, so ticking never moves a row.
   Their deadline places nothing and badges muted. A done item whose `when` is past drops out:
@@ -234,9 +237,23 @@ for the month grid). `groupByDeadline` becomes
   to an Overdue section above Today, placed by the deadline whatever `when`
   says (it is owed now), oldest first, then `created_at`. Rendered only
   when non-empty. The CLI `agenda` still folds these into Today.
-- **Placement** of every other row: an item appears exactly once, on its
-  *placement day*, the earlier of its `when` day and its `deadline` day,
-  ignoring a `when` before today.
+- **Placement** of every other row: an item is placed on its *placement
+  day*, the earlier of its `when` day and its `deadline` day, ignoring a
+  `when` whose span is over.
+- **Spans** (web, built 2026-10-29): a `when` with a `duration` covers
+  `whenSpan` days (`dayGroups.ts`: whole days beside an all-day start,
+  the clock end beside a timed one, so 23:00 + 2h is two days). A row
+  placed by such a `when` is repeated on every day of the span from
+  today onward, each copy stamped with its position (`DayRow.span`, "Day
+  2/3" in the time lane; the first day of an all-day span reads the same
+  way, a timed first day keeps its start clock). A span already under
+  way starts on Today with its count intact. A row placed by its
+  deadline, or sent to Overdue, is one row: the deadline is one day. The
+  same id therefore appears down several days; the selection order and
+  the view's flat item list keep each id once, at its first row. A
+  selected span draws its highlight on one copy only: the one the pointer
+  picked, else its earliest day on the page. The CLI `agenda` still places on
+  the start day only.
 - **Tone** of a row is the most urgent of: overdue (deadline day < today),
   today-warning (deadline day = today), neutral.
 - **Within a day**, order by the raw string of the field that placed the row,
@@ -249,7 +266,7 @@ for the month grid). `groupByDeadline` becomes
   nothing is due, so the surface anchors on the current day.
 - **Nav badge** (web, built): the Upcoming entry carries a count of Open
   items owed or on today: an overdue deadline, a deadline today, or a `when`
-  today. Its tone is the most urgent counted (overdue red, deadline-today
+  on today, a span covering today included. Its tone is the most urgent counted (overdue red, deadline-today
   warning, otherwise the ordinary faint count); hidden at zero and not gated
   by `showListCounts`. Future days and done rows do not count, and neither
   does a past `when`: it has gone by like an event (`attentionBadge` in

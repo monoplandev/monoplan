@@ -225,8 +225,8 @@ does.
 - **Multi-day all-day events.** Expressible since 2026-10-07: `duration`
   beside an all-day `when` counts whole days (`calendar-plan.md` "Field:
   `duration`"), set from the task dialog's end-date field. The agenda
-  still places the item on its start day only; showing it on each day it
-  covers is open.
+  places the item on each day it covers (built 2026-10-29;
+  `calendar-plan.md` "Agenda", Spans).
 - **Export.** An event maps to a `VEVENT` with no caveat; the "Due:"
   prefix workaround in the iCalendar mapping applies to tasks only.
 

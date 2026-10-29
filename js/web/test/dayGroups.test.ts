@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { attentionBadge, groupByDay } from "../src/dayGroups.ts";
+import { attentionBadge, groupByDay, whenSpan } from "../src/dayGroups.ts";
 import type { ItemView } from "../src/sync/store.ts";
 
 const LABELS = {
@@ -292,7 +292,126 @@ describe("groupByDay: events", () => {
   });
 });
 
+describe("whenSpan", () => {
+  test("one day without a duration, whole days beside an all-day start", () => {
+    expect(whenSpan("2026-09-10", null)).toEqual({
+      start: "2026-09-10",
+      end: "2026-09-10",
+      total: 1,
+    });
+    expect(whenSpan("2026-09-10", 3 * 1440)).toEqual({
+      start: "2026-09-10",
+      end: "2026-09-12",
+      total: 3,
+    });
+    // Under a day beside an all-day start is a single day.
+    expect(whenSpan("2026-09-10", 90).total).toBe(1);
+  });
+
+  test("a timed start spans by its clock end: overnight crosses into the next day", () => {
+    expect(whenSpan("2026-09-10T23:00", 120)).toEqual({
+      start: "2026-09-10",
+      end: "2026-09-11",
+      total: 2,
+    });
+    expect(whenSpan("2026-09-10T09:00", 120).total).toBe(1);
+  });
+});
+
+describe("groupByDay: multi-day spans", () => {
+  const spanRows = (g: { rows: { item: ItemView; span?: unknown }[] }) =>
+    g.rows.map((r) => [r.item.id, r.span]);
+
+  test("an all-day span appears on each day it covers, counting its days", () => {
+    const groups = groupByDay(
+      [item("conf", { when: "2026-09-10" }, { duration: 3 * 1440 })],
+      TODAY,
+      LABELS,
+      "en",
+    );
+    expect(groups.map((g) => [g.key, spanRows(g)])).toEqual([
+      [TODAY, []],
+      ["2026-09-10", [["conf", { day: 1, total: 3 }]]],
+      ["2026-09-11", [["conf", { day: 2, total: 3 }]]],
+      ["2026-09-12", [["conf", { day: 3, total: 3 }]]],
+    ]);
+  });
+
+  test("a span already under way is placed from today, with its day count intact", () => {
+    const groups = groupByDay(
+      [item("conf", { when: "2026-09-08" }, { duration: 3 * 1440 })],
+      TODAY,
+      LABELS,
+      "en",
+    );
+    expect(groups.map((g) => [g.key, spanRows(g)])).toEqual([
+      [TODAY, [["conf", { day: 2, total: 3 }]]],
+      ["2026-09-10", [["conf", { day: 3, total: 3 }]]],
+    ]);
+  });
+
+  test("a span that ended before today places nothing; a single day carries no span", () => {
+    const groups = groupByDay(
+      [
+        item("over", { when: "2026-09-05" }, { duration: 3 * 1440 }),
+        item("single", { when: TODAY }, { duration: 60 }),
+      ],
+      TODAY,
+      LABELS,
+      "en",
+    );
+    expect(groups.map((g) => [g.key, spanRows(g)])).toEqual([
+      [TODAY, [["single", undefined]]],
+    ]);
+  });
+
+  test("an overnight timed start is on both days; closed spans keep every day", () => {
+    const groups = groupByDay(
+      [
+        item("late", { when: `${TODAY}T23:00` }, { duration: 120 }),
+        item("done-conf", { when: TODAY }, { duration: 2 * 1440, state: "done" }),
+      ],
+      TODAY,
+      LABELS,
+      "en",
+    );
+    expect(groups.map((g) => [g.key, ids(g)])).toEqual([
+      [TODAY, ["done-conf", "late"]],
+      ["2026-09-10", ["done-conf", "late"]],
+    ]);
+  });
+
+  test("a deadline that places the row ahead of its when is one day only; an overdue one wins outright", () => {
+    const groups = groupByDay(
+      [
+        item("dl-first", { when: "2026-09-12", deadline: "2026-09-11" }, { duration: 3 * 1440 }),
+        item("owed", { when: "2026-09-10", deadline: "2026-09-01" }, { duration: 3 * 1440 }),
+      ],
+      TODAY,
+      LABELS,
+      "en",
+    );
+    expect(groups.map((g) => [g.key, ids(g)])).toEqual([
+      ["overdue", ["owed"]],
+      [TODAY, []],
+      ["2026-09-11", ["dl-first"]],
+    ]);
+  });
+});
+
 describe("attentionBadge", () => {
+  test("a span covering today counts once; one that ended yesterday does not", () => {
+    const badge = attentionBadge(
+      [
+        item("running", { when: "2026-09-08" }, { duration: 3 * 1440 }),
+        item("ended", { when: "2026-09-07" }, { duration: 2 * 1440 }),
+        item("ahead", { when: "2026-09-10" }, { duration: 2 * 1440 }),
+      ],
+      TODAY,
+    );
+    expect(badge).toEqual({ count: 1, tone: "neutral" });
+  });
+
   test("counts overdue deadlines and today's open rows; past whens and future days count for nothing", () => {
     const badge = attentionBadge(
       [
