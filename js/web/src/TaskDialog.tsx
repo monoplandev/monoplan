@@ -241,7 +241,12 @@ export function TaskDialog(props: {
   );
   const panelMode = () => panelHost() !== null;
 
-  const newItemTarget = createMemo(() => props.newItem?.() ?? null);
+  // A plain read, not a memo: the cleanup `settle` (the surface remounting
+  // per doc, see the owner's `taskApp`) runs after Solid has disposed this
+  // component's memos, which then hand back their last value. A capture
+  // the owner has just committed and cleared would read as still pending
+  // and be created again; the live signal reads null.
+  const newItemTarget = () => props.newItem?.() ?? null;
   const isNew = createMemo(
     () => props.itemId() === null && newItemTarget() !== null,
   );
