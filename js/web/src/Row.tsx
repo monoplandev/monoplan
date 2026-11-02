@@ -69,10 +69,15 @@ export function Row(props: {
    *  the draft; non-empty means the workspace should commit it as a
    *  real item. `chain` is true when the collapse was driven by Enter —
    *  the workspace re-opens a fresh draft so capture continues until
-   *  Escape / blur / empty-Enter. Returns true when focus is spoken for:
-   *  a fresh draft is about to take it, or the draft was handed over to
-   *  the side pane's capture surface, which the user is pointing into. */
-  onDraftSettle?: (text: string, chain: boolean) => boolean;
+   *  Escape / blur / empty-Enter. `blur` is true when focus leaving the
+   *  row drove the collapse (a pointer landing elsewhere): a dropped draft
+   *  then clears the selection rather than re-anchoring it on the row
+   *  above, which the landing click would only overwrite (a flash of the
+   *  row above between mousedown and click). Returns true when focus is
+   *  spoken for: a fresh draft is about to take it, or the draft was
+   *  handed over to the side pane's capture surface, which the user is
+   *  pointing into. */
+  onDraftSettle?: (text: string, chain: boolean, blur: boolean) => boolean;
   /** Called by a draft row on every edit with its current text, so the
    *  side pane's capture surface can mirror the title as it is typed. */
   onDraftInput?: (text: string) => void;
@@ -200,6 +205,9 @@ export function Row(props: {
   // it so the workspace can tell Enter-commit from Escape/blur and chain
   // a fresh draft only on Enter.
   let chainOnSettle = false;
+  // Set around the blur handler's synthetic Escape so the collapse effect
+  // can tell a pointer-driven settle from Escape / Enter.
+  let blurSettle = false;
 
   // Order matters: this effect must run *before* the model-mirror effect
   // below. On collapse, both fire in the same tick — if the mirror runs
@@ -238,7 +246,8 @@ export function Row(props: {
           // workspace, which decides commit (addItemAt) vs drop. Skip the
           // editItemText path — there's no item to edit.
           if (isDraftId(props.item().id)) {
-            const chained = props.onDraftSettle?.(next, chain) ?? false;
+            const chained =
+              props.onDraftSettle?.(next, chain, blurSettle) ?? false;
             // When chaining, the workspace will open a fresh draft and
             // its expand effect will steal focus to the new row's
             // contentEditable; bouncing focus to the listbox here would
@@ -403,20 +412,27 @@ export function Row(props: {
               const next = e.relatedTarget as Node | null;
               const row = (e.currentTarget as HTMLElement).closest(".row");
               if (next && row?.contains(next)) return;
-              // First Escape: dnd is expanded → collapse. Second Escape:
-              // dnd is now collapsed → clears selection. Without the
-              // second one the row's pre-expand selection chrome flashes
-              // visible on desktop until the next click selects another
-              // row on mouseup; the dnd bails on mousedown while expanded
-              // so selection only updates on the click. The Enter path
-              // doesn't hit this because there's no follow-up click.
+              // The Escape collapses the row through the dnd. Flagged as a
+              // blur settle: the collapse effect runs inside this dispatch
+              // (the dnd pushes the expanded key straight into the
+              // workspace's signal), and a dropped draft then leaves the
+              // selection empty instead of re-anchored on the row above.
+              // The dnd bails on mousedown while expanded, so selection
+              // otherwise only updates on the click that follows — a
+              // re-anchor would show as a flash of the row above until
+              // then. (A second Escape to clear it used to do this, but
+              // the settled draft row is already out of the DOM by then,
+              // so it never reached the listbox.) The Enter path doesn't
+              // come through here: there's no follow-up click.
               const target = e.currentTarget as HTMLElement;
-              target.dispatchEvent(
-                new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-              );
-              target.dispatchEvent(
-                new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-              );
+              blurSettle = true;
+              try {
+                target.dispatchEvent(
+                  new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+                );
+              } finally {
+                blurSettle = false;
+              }
             }}
             on:keydown={(e) => {
               // Native (non-delegated) so the bubble order is span → dnd

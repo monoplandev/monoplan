@@ -1051,8 +1051,16 @@ export function Workspace(props: {
   // `chain` is true when the user pressed Enter; on a successful save
   // we open a fresh draft below the new item so capture continues. An
   // empty Enter still ends the chain (it falls through to the cancel
-  // path below). Returns whether a fresh draft follows.
-  const settleDraft = (text: string, chain: boolean): boolean => {
+  // path below). `blur` marks a pointer-driven collapse (focus left the
+  // row): a dropped draft then clears the selection instead of
+  // re-anchoring it, since the click that is landing decides the
+  // selection next and a re-anchor would only flash the row above until
+  // it does. Returns whether a fresh draft follows.
+  const settleDraft = (
+    text: string,
+    chain: boolean,
+    blur = false,
+  ): boolean => {
     const d = draft();
     if (!d) return false;
     const nw = newItemTarget();
@@ -1103,10 +1111,12 @@ export function Workspace(props: {
       // Cancel path. The dnd's applyExpanded(draftId) replaced selection
       // with the draft id; once setDraft(null) drops it from the order,
       // the leftover block's anchor stops resolving and the selection
-      // chrome snaps to the first item. Re-anchor on the row immediately
-      // above the captured slot (or the slot itself when nothing is above)
-      // so cancel lands the user back near where they were.
-      reanchor();
+      // chrome snaps to the first item. Escape re-anchors on the row
+      // immediately above the captured slot (or the slot itself when
+      // nothing is above) so cancel lands the user back near where they
+      // were; a blur just clears, the landing click selects what it hit.
+      if (blur) selection.clear();
+      else reanchor();
       return false;
     }
     // Through the pane's capture when it mirrors this draft, so the fields
