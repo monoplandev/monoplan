@@ -31,7 +31,7 @@
 //! Binned is a lifecycle & items keep their location. Two well-known
 //! list ids are *reserved*: [`LIST_INBOX`] and [`LIST_EVENTS`]. They have
 //! **no ListMeta row** — items reference them by string id and clients
-//! render them with hardcoded labels ("Inbox", "Events"). `events` has no
+//! render them with hardcoded labels ("Inbox", "Calendar"). `events` has no
 //! list or board view: its items surface only on the calendar
 //! (`spec/events-plan.md`).
 //!
@@ -70,7 +70,7 @@ pub const INBOX_NAME: &str = "Inbox";
 /// is an event. Same shape as `inbox` (no ListMeta row), but no list or
 /// board view projects it.
 pub const LIST_EVENTS: &str = "events";
-pub const EVENTS_NAME: &str = "Events";
+pub const EVENTS_NAME: &str = "Calendar";
 
 const ROOT_ITEMS: &str = "items";
 const ROOT_LISTS: &str = "lists";

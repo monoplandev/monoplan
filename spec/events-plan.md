@@ -92,7 +92,7 @@ for an event (a dinner with the date to be confirmed).
 
 ## Core
 
-- Constants `LIST_EVENTS = "events"` and `EVENTS_NAME = "Events"` beside
+- Constants `LIST_EVENTS = "events"` and `EVENTS_NAME = "Calendar"` beside
   `LIST_INBOX` / `INBOX_NAME`. Like `inbox`, it is addressable by items, is
   not a `ListMeta` row, and orders through `order/events`. Its label is
   client-defined and localized.
@@ -151,7 +151,7 @@ The agenda in `calendar-plan.md` is unchanged for tasks. Additions:
   it is a task. A capture left untouched lands on Today, never out of
   sight. Re-filing any capture to Events in the picker prefills today the
   same way when no date is set, and drops a board lane back to Backlog.
-- **Move.** "Events" appears as a destination in the move palette and the
+- **Move.** "Calendar" appears as a destination in the move palette and the
   task dialog's list picker, after Inbox, with the calendar glyph. Moving
   a single Open item with no `when` into Events opens it with its date
   popover showing, as Set date… does. A multi-selection just moves;
@@ -174,7 +174,7 @@ The agenda in `calendar-plan.md` is unchanged for tasks. Additions:
   status badge reading "Event" while the event is Open. All other fields
   are unchanged.
 - **Elsewhere.** Search indexes events like any item; the owning-list
-  column reads "Events".
+  column reads "Calendar".
   Picking an Open event in Find goes to the calendar and opens the item
   (there is no row to select, and a past event has no day). The Done view
   and the Bin list closed and binned events with that same label. In Focus

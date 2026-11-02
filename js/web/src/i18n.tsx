@@ -581,7 +581,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     nav: {
       inbox: "Bandeja de entrada",
-      events: "Eventos",
+      events: "Calendario",
       focus: "Destacados",
       upcoming: "Calendario",
       done: "Hecho",
@@ -942,7 +942,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     nav: {
       inbox: "Inbox",
-      events: "Events",
+      events: "Calendar",
       focus: "Starred",
       upcoming: "Calendar",
       done: "Done",

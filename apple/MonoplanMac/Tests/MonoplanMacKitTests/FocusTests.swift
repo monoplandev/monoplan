@@ -28,7 +28,7 @@ final class FocusTests: XCTestCase {
         [{"id":"work","name":"Work","archived_at":null,"created_at":1},
          {"id":"inbox","name":"should not shadow","archived_at":null,"created_at":1}]
         """))
-        XCTAssertEqual(names, ["work": "Work", "inbox": "Inbox", "events": "Events"])
+        XCTAssertEqual(names, ["work": "Work", "inbox": "Inbox", "events": "Calendar"])
         let lines = StarredMenu.lines(from: try Focus.parse(sample), listNames: names)
         XCTAssertEqual(lines.map(\.note), ["Work", "Inbox", "Inbox"])
         // Unknown ids show nothing rather than a uuid.

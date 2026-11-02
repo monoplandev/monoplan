@@ -97,9 +97,9 @@ describe("store events", () => {
     expect(
       findResultListLabel(
         layer,
-        { inbox: "Inbox", events: "Events" },
+        { inbox: "Inbox", events: "Calendar" },
         { kind: "item", id, title: it.text, score: 0, listId: it.listId },
       ),
-    ).toBe("Events");
+    ).toBe("Calendar");
   });
 });

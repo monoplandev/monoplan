@@ -425,7 +425,7 @@ of events.
   built-in) and it is non-renamable, non-movable, and non-deletable — there is
   no display-name override. Doc-level settings for it live in `settings`.
 
-- `events`: rendered as "Events" (`events-plan.md`, built 2026-10-02).
+- `events`: rendered as "Calendar" (`events-plan.md`, built 2026-10-02).
   Same shape as `inbox`: no `ListMeta` row, order container
   `order/events`, client-defined label, non-renamable, non-movable,
   non-archivable, non-deletable. One difference: no list view or board

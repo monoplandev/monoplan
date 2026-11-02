@@ -17,9 +17,9 @@ public enum Lists {
     }
 
     /// Reserved ids first, so a user-created list can never shadow them
-    /// and an empty or failed fetch still names Inbox and Events.
+    /// and an empty or failed fetch still names Inbox and Calendar.
     public static func names(from rows: [ListRow]) -> [String: String] {
-        var names = ["inbox": "Inbox", "events": "Events"]
+        var names = ["inbox": "Inbox", "events": "Calendar"]
         for row in rows where names[row.id] == nil {
             names[row.id] = row.name
         }
