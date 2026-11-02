@@ -428,6 +428,28 @@ export function Dnd<T>(props: DndProps<T>): JSX.Element {
   const trailerHeight = createMemo(
     () => props.trailerHeight ?? props.itemHeight ?? 32,
   );
+  // The trailer's `top` transitions like the rows' so it moves with them
+  // on add / remove / expand / drag — but only when there were rows for
+  // it to move with. Rows mount fresh with no prior `top` and so never
+  // animate in; when items land in an empty host (initial load after a
+  // refresh) the trailer, already mounted at the top, would otherwise
+  // slide down across every freshly mounted row and read as a flicker.
+  // The previous item count is captured inside the memo so the decision
+  // is written in the same style flush as the new `top`: the browser
+  // starts a transition from the after-change `transition` value, so a
+  // later toggle would not retroactively suppress it.
+  let trailerPrevCount = 0;
+  const trailerStyle = createMemo<JSX.CSSProperties>(() => {
+    const rs = renderState();
+    const count = props.items.length;
+    const animate = trailerPrevCount > 0;
+    trailerPrevCount = count;
+    return {
+      top: `${rs.contentHeight}px`,
+      height: `${trailerHeight()}px`,
+      transition: animate ? "top 0.15s ease, height 0.15s ease" : "none",
+    };
+  });
 
   const listboxStyle = createMemo<JSX.CSSProperties>(() => {
     const fill = props.fillHeight ?? false;
@@ -584,13 +606,7 @@ export function Dnd<T>(props: DndProps<T>): JSX.Element {
             }}
           </For>
           <Show when={hasTrailer()}>
-            <div
-              class="dnd-trailer"
-              style={{
-                top: `${renderState().contentHeight}px`,
-                height: `${trailerHeight()}px`,
-              }}
-            >
+            <div class="dnd-trailer" style={trailerStyle()}>
               {trailer()}
             </div>
           </Show>
