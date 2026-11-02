@@ -279,7 +279,7 @@ export function Upcoming(props: {
     if (r.placedBy !== "when") return "";
     const start = whenTime(r.item.when!);
     if (r.span && (!start || r.span.day > 1)) {
-      return m().upcoming.spanDay(r.span.day, r.span.total);
+      return m().upcoming.spanDay(r.span.day);
     }
     if (!start) return m().when.allDay;
     return formatClockTime(start, locale());
