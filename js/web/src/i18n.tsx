@@ -107,6 +107,8 @@ export type Messages = {
     archiveListConfirm: string;
     archiveListMoveOpen: (n: number) => string;
     renameList: string;
+    /** Context-menu item on a user list: opens the emoji picker for its icon. */
+    changeListIcon: string;
     newList: string;
     /** Heading over the account's Home doc (Inbox + lists). Every other
      *  open doc gets a sibling heading carrying its own name. */
@@ -599,6 +601,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
           ? "¿Mover 1 elemento abierto a la bandeja de entrada?"
           : `¿Mover ${n} elementos abiertos a la bandeja de entrada?`,
       renameList: "Renombrar",
+      changeListIcon: "Cambiar icono",
       newList: "Nueva lista",
       personal: "Personal",
       untitledDoc: "Espacio sin nombre",
@@ -959,6 +962,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       archiveListMoveOpen: (n) =>
         n === 1 ? "Move 1 open item to Inbox?" : `Move ${n} open items to Inbox?`,
       renameList: "Rename",
+      changeListIcon: "Change icon",
       newList: "New list",
       personal: "Personal",
       untitledDoc: "Untitled workspace",

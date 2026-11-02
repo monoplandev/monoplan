@@ -25,6 +25,7 @@ import type { PresentAccount } from "./sync/runtime.ts";
 import { pendingInvite } from "./invite.ts";
 import type { AttentionBadge } from "./dayGroups.ts";
 import { Dnd, DndSelection, type DndOp } from "./dnd/solid";
+import { EmojiPicker } from "./EmojiPicker.tsx";
 import archiveSvg from "./icons/archive.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
 import caretDownSvg from "./icons/caret-down.svg?raw";
@@ -1084,7 +1085,21 @@ function DocSection(props: {
             let startListRename: (() => void) | undefined;
             const selectedIds = (): string[] => selectedNavIds(l().id);
             const isMultiMenu = (): boolean => selectedIds().length > 1;
+            // "Change icon" opens the same emoji picker the list header
+            // carries, as a Popover anchored to this row (via `anchorRef`:
+            // the row stays the ContextMenu's trigger, so the Dnd markup
+            // is untouched). Opened from the menu item after the menu's
+            // close + focus-restore, like Rename.
+            const [iconOpen, setIconOpen] = createSignal(false);
+            let rowEl: HTMLButtonElement | undefined;
             return (
+              <Popover
+                open={iconOpen()}
+                onOpenChange={setIconOpen}
+                anchorRef={() => rowEl}
+                placement="right-start"
+                gutter={6}
+              >
               <ContextMenu
                 onOpenChange={(isOpen) => {
                   if (isOpen && !navSelection.isSelected(l().id)) {
@@ -1095,12 +1110,13 @@ function DocSection(props: {
                 <ContextMenu.Trigger
                   as="button"
                   type="button"
+                  ref={rowEl}
                   class="nav-item"
                   data-active={isActive(l().id) ? "" : undefined}
                   data-drop-list-id={l().id}
                   data-drop-doc-id={docId}
                   tabIndex={-1}
-                  onClick={(e) => onNavItemClick(e, l().id)}
+                  onClick={(e: MouseEvent) => onNavItemClick(e, l().id)}
                 >
                   <Show
                     when={l().icon}
@@ -1143,6 +1159,14 @@ function DocSection(props: {
                       <ContextMenu.Item
                         class="context-menu-item"
                         onSelect={() => {
+                          requestAnimationFrame(() => setIconOpen(true));
+                        }}
+                      >
+                        {m().nav.changeListIcon}
+                      </ContextMenu.Item>
+                      <ContextMenu.Item
+                        class="context-menu-item"
+                        onSelect={() => {
                           void navigator.clipboard.writeText(listUrl(l().id));
                         }}
                       >
@@ -1158,6 +1182,26 @@ function DocSection(props: {
                   </ContextMenu.Portal>
                 </Show>
               </ContextMenu>
+              <Popover.Portal>
+                {/* The picker focuses its own search field on open. */}
+                <Popover.Content
+                  class="list-icon-popover"
+                  onOpenAutoFocus={(e) => e.preventDefault()}
+                >
+                  <EmojiPicker
+                    selected={l().icon}
+                    onPick={(icon) => {
+                      app.setListIcon(l().id, icon);
+                      setIconOpen(false);
+                    }}
+                    onClear={() => {
+                      app.setListIcon(l().id, "");
+                      setIconOpen(false);
+                    }}
+                  />
+                </Popover.Content>
+              </Popover.Portal>
+              </Popover>
             );
           }}
         </Dnd>
