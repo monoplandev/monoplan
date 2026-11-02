@@ -429,25 +429,46 @@ export function Dnd<T>(props: DndProps<T>): JSX.Element {
     () => props.trailerHeight ?? props.itemHeight ?? 32,
   );
   // The trailer's `top` transitions like the rows' so it moves with them
-  // on add / remove / expand / drag — but only when there were rows for
-  // it to move with. Rows mount fresh with no prior `top` and so never
-  // animate in; when items land in an empty host (initial load after a
-  // refresh) the trailer, already mounted at the top, would otherwise
-  // slide down across every freshly mounted row and read as a flicker.
-  // The previous item count is captured inside the memo so the decision
-  // is written in the same style flush as the new `top`: the browser
-  // starts a transition from the after-change `transition` value, so a
-  // later toggle would not retroactively suppress it.
-  let trailerPrevCount = 0;
+  // — and only when they move. A row animates when it was already
+  // mounted and its `top` or `height` changes; a freshly mounted row
+  // has nothing to animate from. The trailer follows the same rule: it
+  // animates iff some row from the previous render is still present
+  // with a different `top` or `height`. Otherwise (first paint, items
+  // landing in an empty host, a row appended or removed at the very
+  // end) the rows pop and so does the trailer, instead of sliding across
+  // rows that did not move.
+  //
+  // The decision is made only on a render pass where the trailer's own
+  // `top` changes, and kept until the next such pass. The browser starts
+  // a transition from the after-change `transition` value, so the value
+  // must be in place in the same style flush as the new `top` — and the
+  // render state recomputes on every controller change (selection
+  // updates right after an item change, scroll, …), so a second pass in
+  // the same task with nothing moved would otherwise write `none` over
+  // the decision before styles were ever computed.
+  let trailerPrevRows = new Map<Key, { top: number; height: number }>();
+  let trailerPrevTop = -1;
+  let trailerTransition = "none";
   const trailerStyle = createMemo<JSX.CSSProperties>(() => {
     const rs = renderState();
-    const count = props.items.length;
-    const animate = trailerPrevCount > 0;
-    trailerPrevCount = count;
+    const rows = new Map<Key, { top: number; height: number }>();
+    let moved = false;
+    for (const it of rs.items) {
+      rows.set(it.key, { top: it.top, height: it.height });
+      const prev = trailerPrevRows.get(it.key);
+      if (prev && (prev.top !== it.top || prev.height !== it.height)) {
+        moved = true;
+      }
+    }
+    trailerPrevRows = rows;
+    if (rs.contentHeight !== trailerPrevTop) {
+      trailerPrevTop = rs.contentHeight;
+      trailerTransition = moved ? "top 0.15s ease, height 0.15s ease" : "none";
+    }
     return {
       top: `${rs.contentHeight}px`,
       height: `${trailerHeight()}px`,
-      transition: animate ? "top 0.15s ease, height 0.15s ease" : "none",
+      transition: trailerTransition,
     };
   });
 

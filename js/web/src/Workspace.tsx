@@ -1,5 +1,6 @@
 import {
   batch,
+  createComputed,
   createEffect,
   createMemo,
   createSignal,
@@ -842,7 +843,13 @@ export function Workspace(props: {
       ? listId
       : "inbox";
 
-  createEffect(() => {
+  // `createComputed`, not `createEffect`: effects run after the first
+  // render, so the dnd host would mount with an empty list and receive
+  // the real one a beat later. Rows don't show that (they mount fresh),
+  // but anything positioned after them — the trailer — would be laid
+  // out at the top and then moved. Computed runs before render, so the
+  // host's first render already has the rows.
+  createComputed(() => {
     const next = items();
     const d = draft();
     if (!d) {
