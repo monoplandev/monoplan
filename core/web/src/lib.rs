@@ -271,7 +271,7 @@ impl Doc {
             .map_err(js_err)
     }
 
-    /// Set (`Some`, whole minutes in `1..=10080`) or clear (`None`) an
+    /// Set (`Some`, whole minutes in `1..=525600`) or clear (`None`) an
     /// item's duration. Only meaningful beside a timed `when`.
     #[wasm_bindgen(js_name = setItemDuration)]
     pub fn set_item_duration(&self, item_id: &str, duration: Option<u32>) -> Result<(), JsError> {
@@ -1861,7 +1861,7 @@ impl SyncEngine {
             .map_err(js_err)
     }
 
-    /// Set (`Some`, whole minutes in `1..=10080`) or clear (`None`) an
+    /// Set (`Some`, whole minutes in `1..=525600`) or clear (`None`) an
     /// item's duration. Only meaningful beside a timed `when`.
     #[wasm_bindgen(js_name = setItemDuration)]
     pub fn set_item_duration(&self, item_id: &str, duration: Option<u32>) -> Result<(), JsError> {

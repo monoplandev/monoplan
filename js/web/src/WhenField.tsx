@@ -26,7 +26,7 @@
 // register cannot reach are dimmed and inert: before the start day; with
 // a timed start, the start day itself while the end is not past the start
 // on the clock (that end would be a day later, not earlier); and past the
-// one-week ceiling.
+// one-year ceiling.
 
 import { Popover } from "@kobalte/core/popover";
 import { createMemo, createSignal, Show } from "solid-js";

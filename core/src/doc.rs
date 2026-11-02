@@ -128,8 +128,10 @@ const KEY_WHEN: &str = "when";
 /// it otherwise. Absent ≡ unset; the mutation deletes the key when
 /// cleared. Validated in `set_item_duration`; see `spec/calendar-plan.md`.
 const KEY_DURATION: &str = "duration";
-/// Upper bound on `duration`: one week of minutes.
-pub const MAX_DURATION_MINUTES: u32 = 7 * 24 * 60;
+/// Upper bound on `duration`: one year of minutes (365 days). A typo
+/// guard, not a model limit; raised from a week on 2026-11-02 once
+/// all-day spans read the same register as days.
+pub const MAX_DURATION_MINUTES: u32 = 365 * 24 * 60;
 /// Length written beside a timed `when` that lands on an item with no
 /// duration yet: a start implies an end, and an hour is the calendar
 /// default. See `set_item_when`.
@@ -9936,7 +9938,7 @@ mod tests {
             }]
         );
 
-        // Bounds are inclusive; zero and over-a-week are rejected and
+        // Bounds are inclusive; zero and over-a-year are rejected and
         // leave the doc untouched.
         doc.set_item_duration(&id, Some(1)).unwrap();
         doc.set_item_duration(&id, Some(MAX_DURATION_MINUTES))

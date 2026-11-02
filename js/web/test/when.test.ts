@@ -123,17 +123,17 @@ describe("duration ⇄ end-time bridge", () => {
     expect(durationBetween({ hour: 9, minute: 0 }, { hour: 9, minute: 0 })).toBe(24 * 60);
   });
 
-  test("durationBetween on a later day keeps that day, capped at a week", () => {
+  test("durationBetween on a later day keeps that day, capped at a year", () => {
     expect(durationBetween({ hour: 9, minute: 0 }, { hour: 8, minute: 0 }, 2)).toBe(2 * 1440 - 60);
     expect(durationBetween({ hour: 9, minute: 0 }, { hour: 10, minute: 0 }, 2)).toBe(2 * 1440 + 60);
-    expect(durationBetween({ hour: 9, minute: 0 }, { hour: 10, minute: 0 }, 7)).toBe(MAX_DURATION_MINUTES);
+    expect(durationBetween({ hour: 9, minute: 0 }, { hour: 10, minute: 0 }, 365)).toBe(MAX_DURATION_MINUTES);
   });
 
   test("endDayOffset counts the days the span runs past the start day", () => {
     expect(endDayOffset({ hour: 9, minute: 0 }, 60)).toBe(0);
     expect(endDayOffset({ hour: 23, minute: 0 }, 120)).toBe(1);
     expect(endDayOffset({ hour: 9, minute: 0 }, 1440)).toBe(1);
-    expect(endDayOffset({ hour: 9, minute: 0 }, MAX_DURATION_MINUTES)).toBe(7);
+    expect(endDayOffset({ hour: 9, minute: 0 }, MAX_DURATION_MINUTES)).toBe(365);
   });
 
   test("end time + end day round-trip to the stored length", () => {
@@ -151,11 +151,11 @@ describe("duration ⇄ end-time bridge", () => {
     expect(isValidEndDayOffset(start, { hour: 10, minute: 0 }, 0)).toBe(true);
     expect(isValidEndDayOffset(start, { hour: 9, minute: 0 }, 0)).toBe(false);
     expect(isValidEndDayOffset(start, { hour: 8, minute: 0 }, 0)).toBe(false);
-    // The week ceiling.
-    expect(isValidEndDayOffset(start, { hour: 9, minute: 0 }, 7)).toBe(true);
-    expect(isValidEndDayOffset(start, { hour: 9, minute: 1 }, 7)).toBe(false);
-    expect(isValidEndDayOffset(start, { hour: 8, minute: 0 }, 7)).toBe(true);
-    expect(isValidEndDayOffset(start, { hour: 10, minute: 0 }, 8)).toBe(false);
+    // The year ceiling.
+    expect(isValidEndDayOffset(start, { hour: 9, minute: 0 }, 365)).toBe(true);
+    expect(isValidEndDayOffset(start, { hour: 9, minute: 1 }, 365)).toBe(false);
+    expect(isValidEndDayOffset(start, { hour: 8, minute: 0 }, 365)).toBe(true);
+    expect(isValidEndDayOffset(start, { hour: 10, minute: 0 }, 366)).toBe(false);
   });
 });
 

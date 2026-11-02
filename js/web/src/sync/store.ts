@@ -431,7 +431,7 @@ export interface DocApp extends ItemActions {
    *  item's planned date. Floating; malformed values are rejected by the
    *  core. */
   setItemWhen(id: string, when: string | null): void;
-  /** Set (whole minutes, 1..=10080) or clear (`null`) an item's duration.
+  /** Set (whole minutes, 1..=525600) or clear (`null`) an item's duration.
    *  Clearing `when` clears it in the core as well. */
   setItemDuration(id: string, minutes: number | null): void;
   /** Set or clear (`null`) an item's place. A label-only place is
@@ -1400,7 +1400,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       mutate(() => engine.setItemWhen(id, when ?? undefined));
     },
     setItemDuration(id, minutes) {
-      // The core rejects zero, negative, and over-a-week values; refuse
+      // The core rejects zero, negative, and over-a-year values; refuse
       // anything that is not a positive whole number here so a bad value
       // never reaches the engine (where it would throw).
       if (minutes != null && (!Number.isInteger(minutes) || minutes <= 0)) return;

@@ -268,8 +268,8 @@ export function isCompleteTime(t: TimeParts): t is Required<TimeParts> {
 /** Minutes in a day, the wrap for end-time arithmetic. */
 const DAY_MINUTES = 24 * 60;
 
-/** The core's ceiling on `duration`: one week (`spec/data-model.md`). */
-export const MAX_DURATION_MINUTES = 7 * DAY_MINUTES;
+/** The core's ceiling on `duration`: one year of days (`spec/data-model.md`). */
+export const MAX_DURATION_MINUTES = 365 * DAY_MINUTES;
 
 /** Wall-clock end of a timed `when` that runs for `minutes`: the start
  *  plus the length, wrapped past midnight. A span longer than a day still
@@ -296,7 +296,7 @@ export function allDayEndOffset(minutes: number | null | undefined): number {
   return Math.ceil(minutes / DAY_MINUTES) - 1;
 }
 
-/** The last day an all-day span can reach: a week of days, so six past
+/** The last day an all-day span can reach: a year of days, so 364 past
  *  the start. */
 export const MAX_ALL_DAY_OFFSET = MAX_DURATION_MINUTES / DAY_MINUTES - 1;
 
@@ -345,7 +345,7 @@ export function formatDurationShort(minutes: number): string {
  *  end at or before the start on the clock means the next day, so 23:00
  *  to 01:00 is two hours and 09:00 to 09:00 is a full day; on a later day
  *  the clock reading is taken as is, so the day holds when the time is
- *  retyped. Capped at the core's one-week ceiling. */
+ *  retyped. Capped at the core's one-year ceiling. */
 export function durationBetween(
   start: Required<TimeParts>,
   end: Required<TimeParts>,

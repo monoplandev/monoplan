@@ -119,7 +119,7 @@ Fixed     = DateTime "[" IanaZone "]"           ; RFC 9557, e.g. 2026-07-13T14:0
 
 ## Field: `duration` (added 2026-09-16)
 
-Item register, integer minutes, optional. `1..=10080` (one week).
+Item register, integer minutes, optional. `1..=525600` (one year of days).
 
 - **Why a length and not an end.** The tearing argument that put date and
   time in one register applies again. If device A moves the start while
@@ -130,6 +130,16 @@ Item register, integer minutes, optional. `1..=10080` (one week).
   overnight spans need no disambiguation: 23:00 for 120 minutes ends at
   01:00 next day. iCalendar allows `DURATION` in place of `DTEND`, so the
   export mapping is unchanged.
+- **Ceiling (raised 2026-11-02).** `MAX_DURATION_MINUTES` is one year of
+  days (`365 × 1440`). It is a typo guard against a stray digit in the
+  CLI's `--duration 3d` form, not a model limit: mainstream calendars
+  put no bound on a single event's span, and iCalendar's `DURATION` has
+  none. The original week was chosen on 2026-09-16 when the register was
+  a timed length only; when all-day spans began reading it as days
+  (2026-10-07) the week quietly became a seven-day cap on trips and
+  conferences, which is what the raise undoes. Recurrence is a separate
+  question (`events-plan.md` "Deferred"): a span is one continuous thing,
+  a repeat is many short ones, and the two compose rather than substitute.
 - **Read against the shape of `when`.** The core never cross-checks the
   two registers (a check would reintroduce invalid states under
   concurrent edit). Beside a timed `when` the length is minutes from the
@@ -158,9 +168,8 @@ Item register, integer minutes, optional. `1..=10080` (one week).
   under a day beside an all-day `when` (left behind when a timed value's
   time is stripped) is a single day; so is no length at all, which is
   what a single-day item stores (picking the start day as the end drops
-  the register). The week ceiling bounds a span at seven days. The
-  register is the same one, so no core change: only the reading differs
-  by the shape of `when`. Crossing shapes in the UI: timed → all-day
+  the register). The register is the same one, so no core change: only
+  the reading differs by the shape of `when`. Crossing shapes in the UI: timed → all-day
   reads the minutes as days by the rule above (Tue 09:00 → Thu 10:00 is
   `2 × 1440 + 60`, which rounds up to three days, Tue–Thu); all-day →
   timed reshapes a whole-day span of two or more days to end on the same
@@ -184,7 +193,7 @@ Item register, integer minutes, optional. `1..=10080` (one week).
   Beside a timed start, picking a day keeps the end's clock time and
   writes the length up to it; days the register cannot hold are dimmed
   and inert (before the start day, the start day while the end is not
-  past the start on the clock, and anything past the one-week ceiling).
+  past the start on the clock, and anything past the one-year ceiling).
   Once the end is on a later day, retyping the end time keeps that day
   rather than snapping back to the start day's next-day rule. Beside an
   all-day date, picking a day writes whole days (the start day drops the
