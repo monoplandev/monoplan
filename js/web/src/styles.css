@@ -1419,8 +1419,8 @@ input.task-check:hover {
   height: 12px;
 }
 
-/* Origin-list badge on the Done view (spec/board.md — the global Done view
-   is cross-list). Plain text, no pill background, so it reads as a
+/* Origin-list badge on the Done and Bin views (spec/board.md — both are
+   global, cross-list views). Plain text, no pill background, so it reads as a
    quiet origin label rather than a tag. */
 .row-list {
   background: none;

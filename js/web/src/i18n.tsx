@@ -180,6 +180,8 @@ export type Messages = {
     emptyState: string;
     notes: string;
     hasNotes: string;
+    /** Hover text on a Bin row's stamp; `when` is the full local date-time. */
+    binnedAt: (when: string) => string;
     markDone: string;
     markNotDone: string;
     /** Cancel: the closed-but-not-completed sibling of Done
@@ -653,6 +655,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       emptyState: "Nada aquí.",
       notes: "Notas",
       hasNotes: "Tiene notas",
+      binnedAt: (when) => `Eliminado ${when}`,
       markDone: "Marcar como hecho",
       markNotDone: "Marcar como no hecho",
       markCancelled: "Cancelar",
@@ -1010,6 +1013,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       emptyState: "Nothing here.",
       notes: "Notes",
       hasNotes: "Has notes",
+      binnedAt: (when) => `Binned ${when}`,
       markDone: "Mark as done",
       markNotDone: "Mark as not done",
       markCancelled: "Cancel",

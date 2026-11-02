@@ -86,9 +86,8 @@ export function Row(props: {
   /** Board cards pin the deadline badge to a footer at the bottom of the card;
    *  list rows show it inline after the title instead. */
   deadlineInFooter?: boolean;
-  /** Done / Focus views: when true, badge the row with its origin list name
-   *  (always on for Focus; a display option on Done). Resolved via
-   *  `listLabel` so `main` shows the Home label. */
+  /** Done / Bin / Focus views: when true, badge the row with its origin
+   *  list name. Resolved via `listLabel` so `main` shows the Home label. */
   showList?: () => boolean;
   /** Resolves a list id (in the item's doc) to its display label (see
    *  Workspace `listLabel`). */
@@ -111,12 +110,11 @@ export function Row(props: {
   onMoveToList?: (ids: readonly string[]) => void;
 }) {
   const { m, locale } = useAppI18n();
-  // Origin-list badge text for the flat cross-list views (Focus and Done):
-  // always on Focus, behind the Done view's "show list" toggle. Null
-  // otherwise, or when no label resolves.
+  // Origin-list badge text for the flat cross-list views (Focus, Done and
+  // Bin). Null otherwise, or when no label resolves.
   const originList = createMemo(() => {
-    return (props.viewKind === "focus" || props.viewKind === "done") &&
-      props.showList?.()
+    const k = props.viewKind;
+    return (k === "focus" || k === "done" || k === "bin") && props.showList?.()
       ? (props.listLabel?.(props.item().listId, props.item().docId) || null)
       : null;
   });
@@ -143,6 +141,12 @@ export function Row(props: {
   // and without the check glyph (the ticked box already says done). Bin
   // rows and board Done cards keep it trailing with the other badges.
   const leadingStamp = () => props.viewKind === "done" && !props.deadlineInFooter;
+  // Hover text on the stamp: the full local date-time, prefixed on Bin
+  // rows so it names the transition ("Binned …").
+  const stampTitle = (ts: number): string => {
+    const when = formatDateTime(ts, locale());
+    return props.viewKind === "bin" ? m().workspace.binnedAt(when) : when;
+  };
   // Whether the item carries any notes text. Whitespace-only notes don't
   // count — the dialog would open to an empty-looking editor.
   const hasNotes = () => props.item().notes.trim().length > 0;
@@ -339,10 +343,7 @@ export function Row(props: {
         />
         <Show when={leadingStamp() && rowStamp()}>
           {(ts) => (
-            <span
-              class="row-timestamp row-timestamp-lead"
-              title={formatDateTime(ts(), locale())}
-            >
+            <span class="row-timestamp row-timestamp-lead" title={stampTitle(ts())}>
               {formatDoneStamp(ts(), nowMs(), locale())}
             </span>
           )}
@@ -520,10 +521,7 @@ export function Row(props: {
             </Show>
             <Show when={rowStamp()}>
               {(ts) => (
-                <span
-                  class="badge row-timestamp"
-                  title={formatDateTime(ts(), locale())}
-                >
+                <span class="badge row-timestamp" title={stampTitle(ts())}>
                   <Show when={props.viewKind === "done"}>
                     <span
                       class="row-timestamp-icon"
@@ -610,7 +608,7 @@ export function Row(props: {
                 its stamp next to the checkbox, board cards use the footer). */}
             <Show when={!props.deadlineInFooter && !leadingStamp() && rowStamp()}>
               {(ts) => (
-                <span class="badge row-timestamp" title={formatDateTime(ts(), locale())}>
+                <span class="badge row-timestamp" title={stampTitle(ts())}>
                   {formatRelative(ts(), nowMs(), locale())}
                 </span>
               )}

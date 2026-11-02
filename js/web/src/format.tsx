@@ -92,14 +92,12 @@ export function calendarDayDiff(later: Date, earlier: Date): number {
 }
 
 const relativeEs = {
-  justNow: "ahora mismo",
   minutesAgo: (n: number) => `hace ${n} min`,
   hoursAgo: (n: number) => `hace ${n} h`,
   yesterdayAt: (time: string) => `Ayer ${time}`,
 };
 
 const relativeEn = {
-  justNow: "just now",
   minutesAgo: (n: number) => `${n}m ago`,
   hoursAgo: (n: number) => `${n}h ago`,
   yesterdayAt: (time: string) => `Yesterday ${time}`,
@@ -119,8 +117,9 @@ export function formatRelative(ts: number, now: number, locale: string): string 
     day: "numeric",
     year: "numeric",
   });
-  if (diffMs < 60_000) return m.justNow;
-  if (diffMs < 3_600_000) return m.minutesAgo(Math.floor(diffMs / 60_000));
+  // Under a minute reads "0m ago": `nowMs` ticks once a minute, so a
+  // seconds figure would sit stale, and "just now" said nothing.
+  if (diffMs < 3_600_000) return m.minutesAgo(Math.max(0, Math.floor(diffMs / 60_000)));
   if (diffMs < 86_400_000) return m.hoursAgo(Math.floor(diffMs / 3_600_000));
   const tsDate = new Date(ts);
   const nowDate = new Date(now);

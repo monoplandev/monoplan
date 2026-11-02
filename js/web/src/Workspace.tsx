@@ -802,8 +802,8 @@ export function Workspace(props: {
   // Display label for any list id, matching the header/nav rules: the
   // reserved `inbox` and `events` carry localized built-in labels, others
   // use the stored name, looked up in the item's doc (`docId`, else the
-  // view's). Used by Done-view rows to badge each item with its origin
-  // list.
+  // view's). Used by Done- and Bin-view rows to badge each item with its
+  // origin list.
   const listLabel = (listId: string, docId?: string): string =>
     listId === "inbox"
       ? m().nav.inbox
@@ -3260,7 +3260,7 @@ export function Workspace(props: {
                         viewKind={view().kind}
                         showList={() => {
                           const k = view().kind;
-                          return k === "focus" || k === "done";
+                          return k === "focus" || k === "done" || k === "bin";
                         }}
                         listLabel={listLabel}
                         isSharedDoc={(docId) => docId !== docs.homeDocId}
