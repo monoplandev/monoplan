@@ -69,9 +69,13 @@ export function Row(props: {
    *  the draft; non-empty means the workspace should commit it as a
    *  real item. `chain` is true when the collapse was driven by Enter —
    *  the workspace re-opens a fresh draft so capture continues until
-   *  Escape / blur / empty-Enter. Returns true when it did chain, i.e. a
-   *  fresh draft is about to take focus. */
+   *  Escape / blur / empty-Enter. Returns true when focus is spoken for:
+   *  a fresh draft is about to take it, or the draft was handed over to
+   *  the side pane's capture surface, which the user is pointing into. */
   onDraftSettle?: (text: string, chain: boolean) => boolean;
+  /** Called by a draft row on every edit with its current text, so the
+   *  side pane's capture surface can mirror the title as it is typed. */
+  onDraftInput?: (text: string) => void;
   /** When true, Enter on an empty draft is a no-op (the draft stays open
    *  and focused) instead of ending the chain — for an otherwise empty
    *  list, where there is no row to land on and the draft is all there
@@ -238,9 +242,10 @@ export function Row(props: {
             // When chaining, the workspace will open a fresh draft and
             // its expand effect will steal focus to the new row's
             // contentEditable; bouncing focus to the listbox here would
-            // race that. Skip the listbox refocus only when a draft
-            // really follows — an empty Enter ends the chain, and must
-            // land the keyboard back on the list like Escape does.
+            // race that (and a handoff to the pane is the user's click
+            // landing focus there). Skip the listbox refocus only when
+            // focus is spoken for — an empty Enter ends the chain, and
+            // must land the keyboard back on the list like Escape does.
             if (!chained) {
               const listbox = textRef.closest<HTMLElement>('[role="listbox"]');
               listbox?.focus();
@@ -380,6 +385,9 @@ export function Row(props: {
               // when the visible text is empty so the placeholder returns.
               if (textRef.textContent === "" && textRef.firstChild) {
                 textRef.replaceChildren();
+              }
+              if (isDraftId(props.item().id)) {
+                props.onDraftInput?.(textRef.textContent ?? "");
               }
             }}
             on:blur={(e) => {

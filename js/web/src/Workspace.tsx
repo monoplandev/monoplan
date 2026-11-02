@@ -71,7 +71,11 @@ import { planReorderMoves } from "./reorder.ts";
 import { SelectionPanel, type SelectionAction } from "./SelectionPanel.tsx";
 import { Settings } from "./Settings.tsx";
 import { ShortcutsDialog } from "./ShortcutsDialog.tsx";
-import { TaskDialog } from "./TaskDialog.tsx";
+import {
+  TaskDialog,
+  type CaptureHandle,
+  type NewItemTarget,
+} from "./TaskDialog.tsx";
 import { Upcoming, type UpcomingImperative } from "./Upcoming.tsx";
 import { useSession } from "./SessionContext.tsx";
 import { createMemberDirectory } from "./sync/members.ts";
@@ -330,26 +334,13 @@ export function Workspace(props: {
   // or a row context menu's target set) so the pick acts on what the user
   // saw, not on whatever the selection is by commit time.
   const [moveIds, setMoveIds] = createSignal<string[] | null>(null);
-  // New-item capture target for the detail dialog (board "+" buttons), or
-  // null when not capturing. Mutually exclusive with `openItemId`.
-  const [newItemTarget, setNewItemTarget] = createSignal<{
-    listId: string;
-    /** The doc the target list lives in. */
-    docId: string;
-    /** Which open board lane to capture into (`backlog` is also the list
-     *  view's default). */
-    state: WorkflowState;
-    /** Open-projection index to insert at (Space capture below a selected
-     *  board card, or at the top). Omitted for "+" captures, which append
-     *  to the lane. */
-    index?: number;
-    /** Log a directly-completed item: created open, then marked done on
-     *  commit (the Done lane "+" and the Done view's "Log" button). The
-     *  modal shows a checked box the user can flip back off. */
-    done?: boolean;
-    /** Planned date the capture opens with (the calendar's Add). */
-    when?: string;
-  } | null>(null);
+  // New-item capture target for the task surface (board "+" buttons, the
+  // calendar's Add, the Done view's Log, and the list view's draft mirror
+  // — see `startDraft`), or null when not capturing. Mutually exclusive
+  // with `openItemId`. `docId` is the doc the target list lives in.
+  const [newItemTarget, setNewItemTarget] = createSignal<
+    (NewItemTarget & { docId: string }) | null
+  >(null);
   // Ids to select + scroll into view in the board once they land in their
   // column (a "+" capture, a duplicated block, or a find-palette pick that
   // lands on a board list). A list so a multi-item duplicate selects the
@@ -535,6 +526,20 @@ export function Workspace(props: {
     focus?: boolean;
   } | null>(null);
   const [expandedKey, setExpandedKey] = createSignal<string | null>(null);
+  // Draft mirror. With the side pane showing, a draft also opens the
+  // pane's capture surface on the same slot (`newItemTarget.draft`), so
+  // the date, deadline, place, notes, list and pin are a click away while
+  // the row is still being typed — the board's capture, with the row as
+  // its title editor. `draftText` is the row's text as typed, which the
+  // pane follows; `captureHandle` is how the row's settle commits through
+  // the pane, so the fields picked there land on the item. A pointerdown
+  // in the pane ends the row (`draftHandoff` marks the collapse that
+  // drives, so `settleDraft` knows): a named draft becomes its item on
+  // the spot and the pane follows it, an unnamed one leaves the pane as
+  // an ordinary capture at the slot.
+  const [draftText, setDraftText] = createSignal("");
+  let captureHandle: CaptureHandle | null = null;
+  let draftHandoff = false;
 
   // Touch viewports get taller rows so each item's a comfortable tap
   // target (the desktop height is too tight for a thumb). Dnd's cfg()
@@ -559,9 +564,12 @@ export function Workspace(props: {
       (v) => {
         selection.clear();
         // A draft is scoped to the list it was started in; switching
-        // away discards it (no save) and collapses.
+        // away discards it (no save) and collapses — its mirrored
+        // capture with it (dropped, not committed: the target is cleared
+        // before the surface settles, so nothing is created).
         setDraft(null);
         setExpandedKey(null);
+        if (untrack(newItemTarget)?.draft) setNewItemTarget(null);
         // Moving on abandons an unresolved item link.
         setPendingItemId(null);
         // Navigating away closes the entered item, so the address bar
@@ -968,7 +976,60 @@ export function Workspace(props: {
     };
     setDraft({ item: draftItem, insertIndex, listId, focus: isFocus });
     setExpandedKey(id);
+    // The pane's capture surface on the same slot (see the draft mirror
+    // note by `draftText`). A Focus draft creates in the inbox and pins
+    // at its Focus slot, which the surface's default add cannot do, so
+    // it creates through `captureToFocus`; unpinned, it files in the
+    // inbox the way the pin-less half of that does.
+    if (sidePanelShown()) {
+      setDraftText("");
+      setNewItemTarget({
+        listId,
+        docId: draftItem.docId,
+        state: "backlog",
+        index: insertIndex,
+        draft: "row",
+        focus: isFocus,
+        create: isFocus
+          ? (text, pin) =>
+              pin
+                ? captureToFocus([text], insertIndex)[0]
+                : home.addItemAt(
+                    "inbox",
+                    text,
+                    home.state.listOpen["inbox"]?.length ?? 0,
+                  )
+          : undefined,
+      });
+    }
   };
+
+  // A pointerdown in the side pane while a draft row has the caret: end
+  // the row here, before the browser moves focus, so the collapse reaches
+  // `settleDraft` with `draftHandoff` set (the row's own blur then finds it
+  // already collapsed and does nothing) and the pane shows the item, or
+  // the capture, by the time the click lands. Capture phase, so a control
+  // in the pane that swallows the event still gets this first.
+  const onPanePointerDown = () => {
+    const d = draft();
+    if (!d || newItemTarget()?.draft !== "row") return;
+    if (expandedKey() !== d.item.id) return;
+    draftHandoff = true;
+    try {
+      setExpandedKey(null);
+    } finally {
+      draftHandoff = false;
+    }
+  };
+
+  // The pane losing its room (a narrow window) takes the mirror with it:
+  // the row carries on as a plain draft, and a pane-phase capture is
+  // dropped rather than reopened as the modal.
+  createEffect(() => {
+    if (!sidePanelShown() && untrack(newItemTarget)?.draft) {
+      setNewItemTarget(null);
+    }
+  });
 
   // The list's trailing capture slot: a placeholder row after the last
   // item that reads as the next item and starts a draft in that slot
@@ -994,26 +1055,61 @@ export function Workspace(props: {
   const settleDraft = (text: string, chain: boolean): boolean => {
     const d = draft();
     if (!d) return false;
+    const nw = newItemTarget();
+    const mirrored = nw?.draft !== undefined;
+    // The plain add, for a draft with no pane capture to commit through.
+    const createPlain = (t: string): string =>
+      d.focus
+        ? captureToFocus([t], d.insertIndex)[0]
+        : viewApp().addItemAt(d.listId, t, d.insertIndex);
+    // Re-anchor the selection on the row above the slot (or the slot
+    // itself when nothing is above), so a dropped draft lands the user
+    // back near where they were.
+    const reanchor = () => {
+      const rest = items();
+      if (rest.length === 0) selection.clear();
+      else selection.selectOnly(rest[Math.max(0, d.insertIndex - 1)].id);
+    };
     setDraft(null);
+    if (draftHandoff && nw?.draft === "row") {
+      // Pointed into the pane. A named draft is its item from here: made
+      // now, in one pass with the row leaving (this runs inside the row's
+      // collapse effect, so the list sees one update), and selected once
+      // the list has it, which the pane then follows — the click that
+      // took the user there enters it, with the caret where they put it.
+      // An unnamed draft leaves the pane as a capture on the slot; the
+      // selection falls back to the row above, and `onCreated` moves it
+      // to the item should the capture commit. Focus is the click's.
+      if (text) {
+        const id = captureHandle?.commit(text) ?? createPlain(text);
+        setNewItemTarget(null);
+        queueMicrotask(() => selection.selectOnly(id));
+      } else {
+        setNewItemTarget({ ...nw, draft: "pane" });
+        queueMicrotask(reanchor);
+      }
+      return true;
+    }
     if (!text) {
+      if (mirrored) setNewItemTarget(null);
       // Cancel path. The dnd's applyExpanded(draftId) replaced selection
       // with the draft id; once setDraft(null) drops it from the order,
       // the leftover block's anchor stops resolving and the selection
       // chrome snaps to the first item. Re-anchor on the row immediately
       // above the captured slot (or the slot itself when nothing is above)
       // so cancel lands the user back near where they were.
-      const rest = items();
-      if (rest.length === 0) {
-        selection.clear();
-        return false;
-      }
-      const target = rest[Math.max(0, d.insertIndex - 1)];
-      selection.selectOnly(target.id);
+      reanchor();
       return false;
     }
-    const newId = d.focus
-      ? captureToFocus([text], d.insertIndex)[0]
-      : viewApp().addItemAt(d.listId, text, d.insertIndex);
+    // Through the pane's capture when it mirrors this draft, so the fields
+    // picked there land on the item (the handle is the pane's; it is null
+    // only between the surface remounting, when the plain add stands in).
+    const newId =
+      (mirrored ? captureHandle?.commit(text) : null) ?? createPlain(text);
+    // The target clears after the commit: the surface's settle on a
+    // cleared target creates nothing, and the pane goes back to following
+    // the selection, which lands on the new item below.
+    if (mirrored) setNewItemTarget(null);
     // Notes are no longer captured inline — a new item starts noteless and
     // the user adds notes later by opening it in the detail dialog.
     // The store dispatch that adds the new item runs before this
@@ -2807,14 +2903,29 @@ export function Workspace(props: {
           const id = shownItemId();
           if (id !== null) setOpenItemId(id);
         }}
+        draftText={draftText}
+        captureRef={(h) => {
+          // The surface remounts per doc (keyed on `taskApp`): the outgoing
+          // instance nulls this on dispose before the incoming one mounts.
+          captureHandle = h;
+        }}
         onLiveText={(text) => {
           const id = shownItemId();
           if (id) setLiveEdit({ id, text });
         }}
         onCreated={(id) => {
-          // Only board view has a card to reveal; list-view capture keeps
-          // its own draft/focus flow.
+          // Board view has a card to reveal. In a list or Focus view the
+          // only capture is a draft's: one left unnamed for the pane and
+          // committed there lands the selection on its item once the
+          // store has it, as the row path does; a row-committed one was
+          // selected by the row path, which clears the target first.
+          const v = view();
           if (boardListId() !== null) setBoardRevealIds([id]);
+          else if (v.kind === "list" || v.kind === "focus") {
+            queueMicrotask(() => {
+              if (docs.getItem(id)) selection.selectOnly(id);
+            });
+          }
         }}
         onReveal={revealItemIn}
         panelMount={() => (sidePanelShown() ? panelMount() : null)}
@@ -3278,6 +3389,7 @@ export function Workspace(props: {
                         duplicateBlock={duplicateBlock}
                         copyBlock={copyRows}
                         onDraftSettle={settleDraft}
+                        onDraftInput={setDraftText}
                         holdEmptyDraft={() => items().length === 0}
                         onOpen={(id) => setOpenItemId(id)}
                         onReveal={revealItemIn}
@@ -3333,7 +3445,16 @@ export function Workspace(props: {
       </main>
       </div>
       <Show when={sidePanelShown()}>
-        <aside class="side-panel" aria-label={m().sidePanel.title}>
+        <aside
+          class="side-panel"
+          aria-label={m().sidePanel.title}
+          ref={(el) => {
+            // Capture phase (see `onPanePointerDown`); Solid's `on:` is
+            // bubble-only. The listener goes with the element, which the
+            // enclosing Show remounts with the pane.
+            el.addEventListener("pointerdown", onPanePointerDown, true);
+          }}
+        >
           {/* Blank state: nothing while a single row (or no row) is
               selected and no item is open. A multi-row selection shows
               its count where the task surface's header would sit, and

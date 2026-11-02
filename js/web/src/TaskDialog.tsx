@@ -85,6 +85,49 @@ import {
  *  parse per open. */
 const KNOWN_PLACES_LIMIT = 200;
 
+/** A new-item capture target (`TaskDialog.newItem`): a target open lane
+ *  to capture into, plus what the capture opens with. */
+export type NewItemTarget = {
+  listId: string;
+  /** Which open lane to capture into (`backlog` is also the list view's
+   *  default). */
+  state: WorkflowState;
+  /** Open-projection index to insert at (Space capture below a board
+   *  card, a list draft's slot). Omitted lands at the top of the lane. */
+  index?: number;
+  /** Log an already-completed item: created open, marked done on commit. */
+  done?: boolean;
+  /** Planned date the capture opens with (the calendar's Add prefills
+   *  today so a new event is never out of sight). */
+  when?: string;
+  /** Whether the capture opens pinned to Focus (a Focus-lens draft). */
+  focus?: boolean;
+  /** List-view draft mirror. The owner's inline draft row is the
+   *  capture's title editor while `"row"`: the surface follows the row's
+   *  text (`draftText`), holds the fields the row has no room for, and
+   *  commits through `captureRef` when the row settles. Pointing into
+   *  the pane ends the row: a named draft is committed there and then,
+   *  and the pane follows the item; an unnamed one leaves the pane as an
+   *  ordinary capture at the row's slot (`"pane"`), with the usual rules
+   *  (promote on title blur, click-away commit). The surface never takes
+   *  focus on its own for a draft capture: the row has the caret, or the
+   *  user's click has placed it. */
+  draft?: "row" | "pane";
+  /** Owner-supplied creation in place of the default add, returning the
+   *  new id. Owns the Focus pin when `pin` is set (a Focus-lens draft
+   *  pins at its slot as it creates, which the default add cannot). */
+  create?: (text: string, pin: boolean) => string;
+};
+
+/** What a draft-mirrored capture's owner commits through (`captureRef`). */
+export type CaptureHandle = {
+  /** Create the capture's item from `text` (the row's title) and the
+   *  surface's field buffers; null when `text` is blank. The owner
+   *  selects what it made and clears the target itself, so no
+   *  `onCreated` follows. */
+  commit: (text: string) => string | null;
+};
+
 export function TaskDialog(props: {
   /** Who to attribute the item to in the activity log: the creator's
    *  email, `{ email: null }` for a creator no longer in the member
@@ -98,28 +141,18 @@ export function TaskDialog(props: {
    *  list view's default). Mutually exclusive with `itemId`; nothing is
    *  written until the title editor blurs (or the capture closes) with a
    *  non-empty title, at which point the item is created and the surface
-   *  switches to editing it (`setNewItem(null)` + `setItemId(id)`). `index`,
-   *  when set, inserts at that position in the list's Open projection
-   *  (Space capture below a board card); omitted appends. */
-  newItem?: () => {
-    listId: string;
-    state: WorkflowState;
-    index?: number;
-    /** Log an already-completed item: created open, marked done on commit. */
-    done?: boolean;
-    /** Planned date the capture opens with (the calendar's Add prefills
-     *  today so a new event is never out of sight). */
-    when?: string;
-  } | null;
-  setNewItem?: (
-    v: {
-      listId: string;
-      state: WorkflowState;
-      index?: number;
-      done?: boolean;
-      when?: string;
-    } | null,
-  ) => void;
+   *  switches to editing it (`setNewItem(null)` + `setItemId(id)`). See
+   *  `NewItemTarget` for the slot, prefills and the list-view draft
+   *  mirror. */
+  newItem?: () => NewItemTarget | null;
+  setNewItem?: (v: NewItemTarget | null) => void;
+  /** Draft mirror, row phase (`newItem().draft === "row"`): the draft
+   *  row's title as typed, followed into the capture's title. */
+  draftText?: () => string;
+  /** Draft mirror: hands the owner the handle it commits a row-phase
+   *  capture through (Enter / Escape / blur on the draft row). Called
+   *  with null on unmount. */
+  captureRef?: (h: CaptureHandle | null) => void;
   app: DocApp;
   /** Active (non-archived) user lists — the move/capture destinations. */
   lists: () => ListView[];
@@ -293,6 +326,11 @@ export function TaskDialog(props: {
       listId: targetId,
       state: toEvents ? "backlog" : nw.state,
       done: nw.done,
+      // A draft capture stays one (row phase: the row keeps mirroring
+      // and settles it; pane phase: the caret stays the user's). The
+      // owner's `create` goes with the slot: it placed the item in the
+      // old list.
+      draft: nw.draft,
     });
   };
   // Toggle whether a new capture is logged as already-done.
@@ -675,7 +713,7 @@ export function TaskDialog(props: {
     setNewWhen(id ? null : (nw?.when ?? null));
     setNewDuration(null);
     setNewPlace(null);
-    setNewFocus(false);
+    setNewFocus(id ? false : (nw?.focus ?? false));
     // The editors mount when the surface opens; defer so their refs exist,
     // then push — but only if this target is still the one showing.
     queueMicrotask(() => {
@@ -715,6 +753,20 @@ export function TaskDialog(props: {
     }
   });
 
+  // Draft mirror, row phase: the title follows the owner's draft row as
+  // it is typed, so the pane reads as the same item the row is
+  // capturing. The row is the editor, so the caret is never here; the
+  // DOM is simply re-rendered. Ends with the row: a named draft is its
+  // item by then, an unnamed one leaves this as the title editor.
+  createEffect(() => {
+    const nw = newItemTarget();
+    if (!nw || nw.draft !== "row" || !props.draftText) return;
+    const t = props.draftText();
+    if (loadedId !== "new") return;
+    setText(t);
+    if (titleRef && document.activeElement !== titleRef) loadEditor(titleRef, t);
+  });
+
   // Unmounting mid-edit (the shell swapping, the workspace tearing down)
   // must not drop buffered edits.
   onCleanup(() => {
@@ -736,11 +788,18 @@ export function TaskDialog(props: {
     const t = text().trim();
     if (!t) return null;
     const at = nw.index ?? 0;
+    // A Done capture can't hold a Focus ref (auto-remove-on-Done,
+    // spec/focus.md), so the pin buffer only applies to open captures.
+    const pin = newFocus() && !nw.done;
     const id = props.app.withActionBatch(() => {
-      const id =
-        nw.state !== "backlog"
+      const id = nw.create
+        ? nw.create(t, pin)
+        : nw.state !== "backlog"
           ? props.app.addItemInStateAt(nw.listId, t, nw.state, at)
           : props.app.addItemAt(nw.listId, t, at);
+      // An owner's `create` files as Backlog; a lane picked here still
+      // applies (same undo step, keeps the slot: spec/board.md).
+      if (nw.create && nw.state !== "backlog") props.app.setLifecycle(id, nw.state);
       const n = notes();
       if (n) props.app.setItemNotes(id, n);
       const d = newDeadline();
@@ -751,9 +810,8 @@ export function TaskDialog(props: {
       if (w && dur) props.app.setItemDuration(id, dur);
       const pl = newPlace();
       if (pl) props.app.setItemPlace(id, pl);
-      // A Done capture can't hold a Focus ref (auto-remove-on-Done,
-      // spec/focus.md), so the pin buffer only applies to open captures.
-      if (newFocus() && !nw.done) props.focus.add(id);
+      // An owner-supplied `create` pinned as it placed the item.
+      if (pin && !nw.create) props.focus.add(id);
       // Logged-as-done capture: create open, then mark done in a second
       // op (mirrors a drag-into-Done). Stamps doneAt = now.
       if (nw.done) props.app.setDone(id, true);
@@ -771,28 +829,30 @@ export function TaskDialog(props: {
   // buffers carry across rather than reloading: pre-setting `loadedId`
   // makes the load effect treat the new target as already loaded, so the
   // editors (and the caret, mid-ArrowDown into the notes) are left alone.
-  const promote = (): string | null => {
-    const id = createFromBuffers();
-    if (!id) return null;
-    loadedId = id;
-    syncedText = text().trim();
-    subscribeNotes(id, notes());
-    setNewDeadline(null);
-    setNewWhen(null);
-    setNewDuration(null);
-    setNewPlace(null);
-    setNewFocus(false);
-    promoting = true;
-    try {
-      batch(() => {
+  // One batch from the create to the target switch, so the owner sees
+  // the new item and the surface's change of target as one update (the
+  // list lays the item out once at its slot, with nothing to re-run).
+  const promote = (): string | null =>
+    batch(() => {
+      const id = createFromBuffers();
+      if (!id) return null;
+      loadedId = id;
+      syncedText = text().trim();
+      subscribeNotes(id, notes());
+      setNewDeadline(null);
+      setNewWhen(null);
+      setNewDuration(null);
+      setNewPlace(null);
+      setNewFocus(false);
+      promoting = true;
+      try {
         props.setNewItem?.(null);
         props.setItemId(id);
-      });
-    } finally {
-      promoting = false;
-    }
-    return id;
-  };
+      } finally {
+        promoting = false;
+      }
+      return id;
+    });
 
   // Hand a capture's id to the owner once the surface is done with it.
   const announceCreated = () => {
@@ -800,6 +860,21 @@ export function TaskDialog(props: {
     createdId = null;
     if (id) props.onCreated?.(id);
   };
+
+  // Draft mirror: the owner commits a row-phase capture from its row's
+  // settle (Enter / Escape / blur there). The row's text is the title,
+  // the buffers supply the rest. The owner then clears the target and
+  // selects the item itself, so the deferred `onCreated` is cancelled
+  // (and the load effect's settle on the cleared target finds nothing:
+  // `createFromBuffers` reads the target, which is gone by then).
+  const commitFromRow = (text: string): string | null => {
+    setText(text);
+    const id = createFromBuffers();
+    createdId = null;
+    return id;
+  };
+  props.captureRef?.({ commit: commitFromRow });
+  onCleanup(() => props.captureRef?.(null));
 
   // Leaving the title editor saves it: a capture is promoted to its
   // item, an open item's rename is written. Moving on to the notes, a
@@ -810,12 +885,16 @@ export function TaskDialog(props: {
   };
 
   // Save and close. A still-unpromoted capture (its title never blurred)
-  // is created on the way out; an untitled one is dropped.
+  // is created on the way out; an untitled one is dropped. Batched for
+  // the same reason as `promote`: the create and the target clearing
+  // reach the owner as one update.
   const close = () => {
-    if (isNew()) createFromBuffers();
-    else flush(loadedId);
-    props.setNewItem?.(null);
-    if (props.itemId() !== null) props.setItemId(null);
+    batch(() => {
+      if (isNew()) createFromBuffers();
+      else flush(loadedId);
+      props.setNewItem?.(null);
+      if (props.itemId() !== null) props.setItemId(null);
+    });
     announceCreated();
   };
 
@@ -837,9 +916,14 @@ export function TaskDialog(props: {
   // entered item, which the selection moving away closes. Portaled layers
   // (the lifecycle / deadline menus, the list picker) live outside the
   // app root, so opening or clicking inside them doesn't count as leaving.
+  // A row-phase draft capture is the row's to settle: the row has the
+  // caret, and its blur (which any outside click causes) commits through
+  // the owner, so pointing at the row itself, or anywhere else, must not
+  // commit from here too.
   let shellRef: HTMLElement | undefined;
   createEffect(() => {
     if (!panelMode() || !isNew()) return;
+    if (newItemTarget()?.draft === "row") return;
     const root = document.getElementById("root");
     const onPointerDown = (e: PointerEvent) => {
       const target = e.target as Node | null;
@@ -1512,6 +1596,10 @@ export function TaskDialog(props: {
     // A promotion is a target change in name only: the caret has just
     // left the title on purpose.
     if (promoting) return;
+    // A list draft's capture mirrors a row that has the caret (row
+    // phase), or was entered by the user's own click (pane phase):
+    // neither wants the caret moved to the title.
+    if (isNew() && newItemTarget()?.draft) return;
     // A capture has no row to follow: it is always entered, whatever the
     // owner's entered flag (keyed on an open item id, which a new item
     // doesn't have yet) says.
