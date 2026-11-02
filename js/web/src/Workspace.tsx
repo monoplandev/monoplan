@@ -1074,16 +1074,24 @@ export function Workspace(props: {
     if (draftHandoff && nw?.draft === "row") {
       // Pointed into the pane. A named draft is its item from here: made
       // now, in one pass with the row leaving (this runs inside the row's
-      // collapse effect, so the list sees one update), and selected once
-      // the list has it, which the pane then follows — the click that
-      // took the user there enters it, with the caret where they put it.
-      // An unnamed draft leaves the pane as a capture on the slot; the
-      // selection falls back to the row above, and `onCreated` moves it
-      // to the item should the capture commit. Focus is the click's.
+      // collapse effect, so the list sees one update), and the pane
+      // promoted onto it in place — same elements, buffers kept — so the
+      // click that is landing still finds the chip it aimed at (a date
+      // picker opens on this very click) and the caret goes where it was
+      // put. The item is entered by that; the selection catches up once
+      // the list has it. An unnamed draft leaves the pane as a capture
+      // on the slot; the selection falls back to the row above, and
+      // `onCreated` moves it to the item should the capture commit.
       if (text) {
-        const id = captureHandle?.commit(text) ?? createPlain(text);
-        setNewItemTarget(null);
-        queueMicrotask(() => selection.selectOnly(id));
+        let id = captureHandle?.promote(text) ?? null;
+        if (id === null) {
+          // No pane handle (the surface mid-remount): plain add, and the
+          // pane follows the selection to it.
+          id = createPlain(text);
+          setNewItemTarget(null);
+        }
+        const newId = id;
+        queueMicrotask(() => selection.selectOnly(newId));
       } else {
         setNewItemTarget({ ...nw, draft: "pane" });
         queueMicrotask(reanchor);

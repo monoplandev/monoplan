@@ -119,13 +119,20 @@ export type NewItemTarget = {
   create?: (text: string, pin: boolean) => string;
 };
 
-/** What a draft-mirrored capture's owner commits through (`captureRef`). */
+/** What a draft-mirrored capture's owner commits through (`captureRef`).
+ *  Both create the item from `text` (the row's title) and the surface's
+ *  field buffers, and return null when `text` is blank. The owner selects
+ *  what it made, so no `onCreated` follows either. */
 export type CaptureHandle = {
-  /** Create the capture's item from `text` (the row's title) and the
-   *  surface's field buffers; null when `text` is blank. The owner
-   *  selects what it made and clears the target itself, so no
-   *  `onCreated` follows. */
+  /** The row settled (Enter / Escape / blur): create and hand back; the
+   *  owner clears the target and the surface follows its selection. */
   commit: (text: string) => string | null;
+  /** The user pointed into the pane: create and switch the surface to
+   *  the item in place, under the same elements with the buffers kept
+   *  (the surface's own promote-on-blur path), so the click that is
+   *  landing finds the control it aimed at and the caret stays its. The
+   *  item is entered. */
+  promote: (text: string) => string | null;
 };
 
 export function TaskDialog(props: {
@@ -381,10 +388,13 @@ export function TaskDialog(props: {
   // The id a capture was promoted to, held until the surface is done
   // with it so `onCreated` fires at the old time (see the prop's doc).
   let createdId: string | null = null;
-  // True while `promote` flips the target from the capture to its item:
-  // the non-modal focus effect re-runs on the target change and must not
-  // yank the caret (which just left the title) back to it.
-  let promoting = false;
+  // The id `promote` flipped the target to, until the non-modal focus
+  // effect has seen that target: it re-runs on the change and must not
+  // yank the caret (which just left the title, or is being placed by the
+  // click that caused the promotion) back to it. An id rather than a
+  // flag timed around the flip, since effects flush after the flip,
+  // and later still when the flip runs inside another computation.
+  let promotedId: string | null = null;
 
   // Notes delta bridge. `synced` is the notes text the core holds for the
   // subscribed item (what the editor last sent or received); `notes()`
@@ -688,6 +698,10 @@ export function TaskDialog(props: {
     const id = props.itemId();
     const nw = newItemTarget();
     const key = id ?? (nw ? "new" : null);
+    // Only the promoted target itself is exempt from the caret landing;
+    // anything after it is an ordinary change (the modal shell, whose
+    // focus effect never consumes the id, would otherwise carry it).
+    if (key !== promotedId) promotedId = null;
     if (key === loadedId) return;
     untrack(settle);
     unsubscribeNotes();
@@ -844,13 +858,9 @@ export function TaskDialog(props: {
       setNewDuration(null);
       setNewPlace(null);
       setNewFocus(false);
-      promoting = true;
-      try {
-        props.setNewItem?.(null);
-        props.setItemId(id);
-      } finally {
-        promoting = false;
-      }
+      promotedId = id;
+      props.setNewItem?.(null);
+      props.setItemId(id);
       return id;
     });
 
@@ -873,7 +883,13 @@ export function TaskDialog(props: {
     createdId = null;
     return id;
   };
-  props.captureRef?.({ commit: commitFromRow });
+  const promoteFromRow = (text: string): string | null => {
+    setText(text);
+    const id = promote();
+    createdId = null;
+    return id;
+  };
+  props.captureRef?.({ commit: commitFromRow, promote: promoteFromRow });
   onCleanup(() => props.captureRef?.(null));
 
   // Leaving the title editor saves it: a capture is promoted to its
@@ -1591,11 +1607,14 @@ export function TaskDialog(props: {
     // Re-run per target, not just per open: a row click while the pane
     // shows another item lands the caret in the new title. Also re-runs
     // when the same item is re-entered (`entered` notifies).
-    props.itemId();
+    const id = props.itemId();
     newItemTarget();
     // A promotion is a target change in name only: the caret has just
-    // left the title on purpose.
-    if (promoting) return;
+    // left the title on purpose, or is the click's to place.
+    if (promotedId !== null && id === promotedId) {
+      promotedId = null;
+      return;
+    }
     // A list draft's capture mirrors a row that has the caret (row
     // phase), or was entered by the user's own click (pane phase):
     // neither wants the caret moved to the title.
