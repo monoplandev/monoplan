@@ -1375,11 +1375,14 @@ function NewListForm(props: {
         placeholder={m().nav.newList}
         value={props.name}
         onInput={(e) => props.setName(e.currentTarget.value)}
-        onBlur={() => {
-          if (!props.name.trim()) props.onDismiss();
+        // Blur and Escape both commit a typed name (same as Enter) and
+        // dismiss an empty input, so clicking away never strands the
+        // field in entry mode.
+        onBlur={(e) => {
+          if (props.name.trim()) props.onSubmit(e);
+          else props.onDismiss();
         }}
-        // Escape commits a typed name (same as Enter) and dismisses an
-        // empty input. Native listener + stopPropagation so the
+        // Escape uses a native listener + stopPropagation so the
         // document-level Escape handlers (side panel close, dnd selection
         // clear) don't also fire on the same keystroke.
         on:keydown={(e) => {
