@@ -97,7 +97,7 @@ Binning and restoring an item are `monoplan item bin` / `item restore` (see "Ite
 ### Status
 
 ### Db
-- `monoplan db status` — profile directory and `monoplan.sqlite` size. Read-only; never opens a WS.
+- `monoplan db status` — profile directory, path and size of `monoplan.sqlite` (the whole local database: every open doc, not just Home). Read-only; never opens a WS.
 - `monoplan db clear [--force]` — truncate the doc store (`wal` + `snapshots`) and reset the per-doc sync cursor to 0, **keeping** account identity (so it does not log you out); the next command starts a daemon that rehydrates from the server. Refuses while a daemon is running. If there are unsynced local ops, prompts for confirmation (TTY) or refuses with an error (non-TTY) unless `--force` is passed. On a local-only workspace everything is unsynced, so it always asks, and afterwards re-seeds the onboarding doc under the same id and key rather than leaving an empty one.
 
 ### Daemon

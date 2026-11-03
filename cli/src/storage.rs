@@ -350,5 +350,5 @@ fn ensure_doc(conn: &Connection, id: &[u8]) -> Result<(), StorageError> {
 
 /// Open the profile's `SqliteStorage`.
 pub fn open_storage(profile: &Profile) -> Result<SqliteStorage, DbError> {
-    SqliteStorage::open(&profile.doc_path())
+    SqliteStorage::open(&profile.db_path())
 }

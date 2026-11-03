@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 const ROOT_DIR: &str = "monoplan";
 const CONFIG_FILE: &str = "config.toml";
 const SECRETS_FILE: &str = "secrets.toml";
-const DOC_DB_FILE: &str = "monoplan.sqlite";
+const DB_FILE: &str = "monoplan.sqlite";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -117,7 +117,7 @@ impl Secrets {
 /// ```text
 ///   <root>/config.toml    — server_url (once there is an account)
 ///   <root>/secrets.toml   — DEKs + device token ("profile exists" marker)
-///   <root>/monoplan.sqlite  — doc store + identity + sync cursor
+///   <root>/monoplan.sqlite — all docs (wal + snapshots) + identity + sync cursors
 /// ```
 pub struct Profile {
     pub dir: PathBuf,
@@ -199,8 +199,8 @@ impl Profile {
     /// through `crate::storage::SqliteStorage` (opened against this
     /// path); `Profile` only owns the TOML config/secrets files and the
     /// directory layout.
-    pub fn doc_path(&self) -> PathBuf {
-        self.dir.join(DOC_DB_FILE)
+    pub fn db_path(&self) -> PathBuf {
+        self.dir.join(DB_FILE)
     }
 
     /// Wipe local state. Used by `monoplan auth logout`.

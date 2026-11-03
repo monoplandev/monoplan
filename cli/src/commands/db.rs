@@ -44,27 +44,27 @@ pub async fn run(args: DbArgs) -> anyhow::Result<()> {
 #[derive(Serialize)]
 struct DbStatusJson<'a> {
     profile_dir: &'a str,
-    doc_path: &'a str,
-    doc_bytes: Option<u64>,
+    db_path: &'a str,
+    db_bytes: Option<u64>,
 }
 
 async fn status(json: bool) -> anyhow::Result<()> {
     let profile = Profile::require_active()?;
-    let doc_path = profile.doc_path();
-    let doc_bytes = std::fs::metadata(&doc_path).ok().map(|m| m.len());
+    let db_path = profile.db_path();
+    let db_bytes = std::fs::metadata(&db_path).ok().map(|m| m.len());
 
     if json {
         print_json(&DbStatusJson {
             profile_dir: profile.dir.to_string_lossy().as_ref(),
-            doc_path: doc_path.to_string_lossy().as_ref(),
-            doc_bytes,
+            db_path: db_path.to_string_lossy().as_ref(),
+            db_bytes,
         })?;
     } else {
-        println!("Profile dir: {}", profile.dir.display());
-        println!("Doc file:    {}", doc_path.display());
+        println!("Profile dir:  {}", profile.dir.display());
+        println!("Database:     {}", db_path.display());
         println!(
-            "Doc size:    {}",
-            doc_bytes.map(format_bytes).unwrap_or_else(|| "—".into())
+            "Size:         {}",
+            db_bytes.map(format_bytes).unwrap_or_else(|| "—".into())
         );
     }
     Ok(())
