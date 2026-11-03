@@ -4,10 +4,12 @@ import {
   createContext,
   createMemo,
   createSignal,
+  onCleanup,
   useContext,
   type Accessor,
   type JSX,
 } from "solid-js";
+import { hasHostSettings, hostSetting, onHostSettings } from "./hostSettings.ts";
 
 export type AppLanguage = "es" | "en";
 
@@ -19,10 +21,13 @@ function cookieAttrs(maxAge: number): string {
   return `path=/;max-age=${maxAge};SameSite=Lax`;
 }
 
-// A cookie, like the theme (`theme.ts`), with `localStorage` beside it
-// for the macOS app's window, whose custom-scheme origin keeps no
-// cookies; the cookie wins where both exist.
+// A cookie, like the theme (`theme.ts`), with `localStorage` beside it;
+// the cookie wins where both exist. In the macOS app's window the
+// language is the app's own (`hostSettings.ts`): read from there,
+// followed live, never written.
 function readLanguage(): AppLanguage {
+  const host = hostSetting("language");
+  if (host) return host;
   try {
     const m = document.cookie.match(/(?:^|; )locale=(es|en)/);
     if (m?.[1] === "es" || m?.[1] === "en") return m[1];
@@ -35,6 +40,7 @@ function readLanguage(): AppLanguage {
 }
 
 function writeLanguage(language: AppLanguage) {
+  if (hasHostSettings()) return;
   try {
     document.cookie = `${COOKIE_NAME}=${language};${cookieAttrs(MAX_AGE)}`;
   } catch {}
@@ -1347,6 +1353,11 @@ const AppI18nContext = createContext<AppI18nContextValue>();
 
 export function AppI18nProvider(props: { children: JSX.Element }) {
   const [language, setLanguageSignal] = createSignal<AppLanguage>(readLanguage());
+  onCleanup(
+    onHostSettings((s) => {
+      if (s.language) setLanguageSignal(s.language);
+    }),
+  );
   const localeCode = createMemo(() => localeByLanguage[language()]);
   const messages = createMemo(() => messagesByLanguage[language()]);
 

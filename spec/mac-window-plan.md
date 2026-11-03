@@ -357,10 +357,13 @@ lives, and where it goes:
 | Advanced: per-workspace sync facts | engine state | Stays in the page (diagnostic). |
 | Open at login, CLI link, profile, host, build | — | Native only, as now. |
 
-**Transport** (built 2026-11-04 with typed dates as its first
-passenger: `WindowSettings` in `MonoplanMacKit`, the `typedDates`
-default, `HostInbound.settings`, the General pane's toggle;
-`hostSettings.ts` on the page, read by `whenToken.ts`). One
+**Transport** (built 2026-11-04: `WindowSettings` in
+`MonoplanMacKit`, the `typedDates` default, the app's language from
+`Bundle.main.preferredLocalizations`, the hour cycle from
+`Locale.current`, re-read on `UserDefaults.didChangeNotification` and
+`NSLocale.currentLocaleDidChangeNotification`; `HostInbound.settings`;
+the General pane's toggle; `hostSettings.ts` on the page, read by
+`whenToken.ts`, `i18n.tsx` and `format.tsx`). One
 `WindowSettings` value, built in Swift from `UserDefaults` and the
 locale and shaped like `{language, hourCycle, typedDates}` (whatever
 the page cannot read for itself), delivered two ways:
@@ -399,8 +402,8 @@ to "auto" under the mac shell, whose marker `mirror.html`'s inline
 script sets before any module runs, and which reads the system query
 alone; the dialog's controls are left alone until the section goes
 wholesale), then the transport with typed dates as its first
-passenger (built 2026-11-04, above), then language and time format
-(system values, same transport), then show-list-counts' new home,
+passenger, then language and time format from system values (both
+built 2026-11-04, above), then show-list-counts' new home,
 then the dialog's General section wholesale, with the
 `openSettings` request behind its one remaining row.
 

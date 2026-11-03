@@ -3,8 +3,8 @@
 // side). The app owns these; the page reads them and never persists
 // its own. Two deliveries: a document-start user script sets
 // `window.__monoplanSettings` before any module runs, so the
-// module-level readers (`whenToken.ts`, later `i18n.tsx` and
-// `format.tsx`) see the app's values on first paint; and
+// readers (`whenToken.ts`, `format.tsx`, `i18n.tsx`) see the app's
+// values on first paint; and
 // `window.__monoplanHost.settings(...)` (`mirrorHost.ts`) pushes a
 // change live, which `applyHostSettings` fans out to the readers.
 // Outside the app the global is absent, nothing here fires, and the
@@ -13,6 +13,10 @@
 export interface HostSettings {
   /** `whenToken.ts`: recognise a date typed into an item. */
   typedDates?: boolean;
+  /** `i18n.tsx`: the app's own language. */
+  language?: "es" | "en";
+  /** `format.tsx`: the system's hour cycle. */
+  hourCycle?: "12h" | "24h";
 }
 
 export const SETTINGS_GLOBAL = "__monoplanSettings";

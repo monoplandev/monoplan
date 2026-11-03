@@ -53,7 +53,7 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// as a document-start user script, so a load or reload starts
     /// with them, and pushed live when `UserDefaults` changes.
     private var settings = WindowSettings.load()
-    private var defaultsObserver: NSObjectProtocol?
+    private var settingsObservers: [NSObjectProtocol] = []
 
     init(hostProvider: @escaping () -> MonoplanCore.Host?, onVisibility: @escaping (Bool) -> Void) {
         self.hostProvider = hostProvider
@@ -65,14 +65,18 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         self.devURL = ProcessInfo.processInfo.environment["MONOPLAN_MIRROR_URL"].flatMap(URL.init(string:))
         super.init(window: nil)
         // Any defaults write (the window's own frame autosave included)
-        // posts this; only a change to the settings themselves goes on.
-        defaultsObserver = NotificationCenter.default.addObserver(
-            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
-        ) { [weak self] _ in self?.settingsChanged() }
+        // posts the first; the locale one is the 24-Hour Time switch
+        // (a language change relaunches the app). Only a change to the
+        // settings themselves goes on.
+        for name in [UserDefaults.didChangeNotification, NSLocale.currentLocaleDidChangeNotification] {
+            settingsObservers.append(NotificationCenter.default.addObserver(
+                forName: name, object: nil, queue: .main
+            ) { [weak self] _ in self?.settingsChanged() })
+        }
     }
 
     deinit {
-        if let defaultsObserver { NotificationCenter.default.removeObserver(defaultsObserver) }
+        for o in settingsObservers { NotificationCenter.default.removeObserver(o) }
     }
 
     @available(*, unavailable)
