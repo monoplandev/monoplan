@@ -61,26 +61,26 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
-    /// Manage account and login.
-    #[command(subcommand)]
-    Auth(AuthCmd),
     /// Items: add, ls, set (every field as a flag), bin, restore.
     #[command(subcommand)]
     Item(ItemCmd),
-    /// The bin: show, empty, rm.
-    Bin(bin::BinArgs),
-    /// Open items by day: Today (with overdue and past-dated folded in), then the coming days.
-    Agenda(agenda::AgendaArgs),
-    /// Starred items in curated order; `starred mv` reorders, `item set --star` / `--unstar` add and remove.
-    Starred(focus::FocusArgs),
     /// Manage lists: ls, add, rename, archive, unarchive. `lists` is a hidden alias.
     #[command(alias = "lists")]
     List(lists::ListsArgs),
-    /// Inspect the local database.
-    Db(db::DbArgs),
+    /// Starred items in curated order; `starred mv` reorders, `item set --star` / `--unstar` add and remove.
+    Starred(focus::FocusArgs),
+    /// Open items by day: Today (with overdue and past-dated folded in), then the coming days.
+    Agenda(agenda::AgendaArgs),
+    /// The bin: show, empty, rm.
+    Bin(bin::BinArgs),
+    /// Manage account and login.
+    #[command(subcommand)]
+    Auth(AuthCmd),
     /// Workspaces: sync status, sharing (invite links, members), JSON export.
     #[command(subcommand)]
     Workspace(WorkspaceCmd),
+    /// Inspect the local database.
+    Db(db::DbArgs),
     /// The resident sync process for this profile.
     Daemon(crate::daemon::DaemonArgs),
 }
