@@ -4,6 +4,8 @@
 //! `Doc` through a storage adapter and (b) drive the sans-IO
 //! `SyncEngine` from a browser-owned `WebSocket`, (c) password/recovery derivation.
 
+use std::collections::VecDeque;
+
 use wasm_bindgen::prelude::*;
 
 use monoplan_core::{
@@ -13,9 +15,10 @@ use monoplan_core::{
     InviteSecret as CoreInviteSecret, ItemLifecycle as CoreItemLifecycle, Kek as CoreKek,
     LocalSeq as CoreLocalSeq, LocalStorage as CoreLocalStorage, NotesDeltaOp, PushId as CorePushId,
     RemoteWalRow as CoreRemoteWalRow, ServerSeq as CoreServerSeq, StorageError as CoreStorageError,
-    SyncEngine as CoreSyncEngine, WrappedDek as CoreWrappedDek, derive_password_master,
-    derive_recovery_master, generate_recovery_code, hello_frame as core_hello_frame,
-    kek_from_master, parse_hello_response as core_parse_hello_response, parse_recovery_code,
+    SyncEngine as CoreSyncEngine, VersionVector, WrappedDek as CoreWrappedDek,
+    derive_password_master, derive_recovery_master, generate_recovery_code,
+    hello_frame as core_hello_frame, kek_from_master,
+    parse_hello_response as core_parse_hello_response, parse_recovery_code,
     server_frame_doc_id as core_server_frame_doc_id,
 };
 use monoplan_protocol::{EncryptedBlob as CoreEncryptedBlob, KdfParams as CoreKdfParams};
@@ -34,6 +37,23 @@ fn parse_notes_delta(delta_json: &str) -> Result<Vec<NotesDeltaOp>, JsError> {
 
 fn js_err<E: std::fmt::Display>(e: E) -> JsError {
     JsError::new(&e.to_string())
+}
+
+fn parse_doc_id(doc_id: &str) -> Result<CoreDocId, JsError> {
+    uuid::Uuid::parse_str(doc_id)
+        .map(CoreDocId)
+        .map_err(|e| JsError::new(&format!("invalid doc_id: {e}")))
+}
+
+/// Log from a method that has no error channel to JS (`flush`).
+fn console_error(msg: &str) {
+    let f = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("console"))
+        .ok()
+        .and_then(|c| js_sys::Reflect::get(&c, &JsValue::from_str("error")).ok())
+        .and_then(|f| f.dyn_into::<js_sys::Function>().ok());
+    if let Some(f) = f {
+        let _ = f.call1(&JsValue::NULL, &JsValue::from_str(msg));
+    }
 }
 
 /// Search tokenizer (`spec/search.md` "Normalization"), exported so JS
@@ -173,6 +193,21 @@ impl Doc {
         Ok(Doc {
             inner: CoreDoc::load(bytes).map_err(js_err)?,
         })
+    }
+
+    /// The mirror's seed (`spec/mac-window-plan.md` "Seed"): a plaintext
+    /// Loro snapshot from the in-process host, loaded under the peer id
+    /// the host leased for this doc. The peer is bound before the import
+    /// so Loro resumes its counter from any history that peer already
+    /// has (a reused slot), and every later local op carries it. The
+    /// snapshot's ops are history, not undo steps and not uncaptured
+    /// local work. `peer` is a BigInt in JS.
+    #[wasm_bindgen(js_name = loadWithPeer)]
+    pub fn load_with_peer(bytes: &[u8], peer: u64) -> Result<Doc, JsError> {
+        let mut inner = CoreDoc::empty_with_peer(peer).map_err(js_err)?;
+        inner.import_oplog_updates(bytes).map_err(js_err)?;
+        inner.mark_persisted();
+        Ok(Doc { inner })
     }
 
     /// Snapshot + last-pushed VV envelope. Persist this verbatim.
@@ -1432,9 +1467,54 @@ pub fn server_frame_doc_id(bytes: &[u8]) -> Option<String> {
 
 // ---------- SyncEngine ----------
 
+/// What a [`SyncEngine`] wraps. `Synced` is the sans-IO engine the
+/// browser drives over a WebSocket with a DEK and an `EngineStorage`.
+/// `Mirror` is the macOS app's webview (`spec/mac-window-plan.md`): a
+/// doc with no DEK, no storage and no server, seeded by the in-process
+/// host and converged with it by exchanging plaintext Loro updates. The
+/// store's mutation and read surface is identical over both; only the
+/// sync verbs differ, and in mirror mode the WebSocket ones are inert.
+enum Engine {
+    Synced(CoreSyncEngine),
+    Mirror(MirrorEngine),
+}
+
+struct MirrorEngine {
+    doc: CoreDoc,
+    doc_id: CoreDocId,
+    /// The oplog frontier as of the last `flush`: the base of the next
+    /// outbound export. One VV is the whole mirror-to-host state.
+    last_sent: VersionVector,
+    /// Updates `flush` exported and the bridge has not taken yet.
+    outbox: VecDeque<Vec<u8>>,
+}
+
 #[wasm_bindgen]
 pub struct SyncEngine {
-    inner: CoreSyncEngine,
+    inner: Engine,
+}
+
+impl SyncEngine {
+    fn doc(&self) -> &CoreDoc {
+        match &self.inner {
+            Engine::Synced(e) => e.doc(),
+            Engine::Mirror(m) => &m.doc,
+        }
+    }
+
+    fn synced(&self) -> Option<&CoreSyncEngine> {
+        match &self.inner {
+            Engine::Synced(e) => Some(e),
+            Engine::Mirror(_) => None,
+        }
+    }
+
+    fn synced_mut(&mut self) -> Option<&mut CoreSyncEngine> {
+        match &mut self.inner {
+            Engine::Synced(e) => Some(e),
+            Engine::Mirror(_) => None,
+        }
+    }
 }
 
 #[wasm_bindgen]
@@ -1453,33 +1533,60 @@ impl SyncEngine {
         last_acked_seq: u64,
         storage: EngineStorage,
     ) -> Result<SyncEngine, JsError> {
-        let parsed = uuid::Uuid::parse_str(&doc_id)
-            .map_err(|e| JsError::new(&format!("invalid doc_id: {e}")))?;
+        let parsed = parse_doc_id(&doc_id)?;
         // The host always passes a JS `EngineStorage` (the `IdbStorage`
         // mirror): capture, ack, and remote-apply all flow through it.
         let dyn_storage: Box<dyn CoreLocalStorage> = Box::new(WebStorage { js: storage });
         Ok(SyncEngine {
-            inner: CoreSyncEngine::new(
+            inner: Engine::Synced(CoreSyncEngine::new(
                 doc.inner,
-                CoreDocId(parsed),
+                parsed,
                 dek.inner,
                 last_acked_seq,
                 dyn_storage,
-            ),
+            )),
         })
+    }
+
+    /// A mirror engine (`spec/mac-window-plan.md` "Wasm side"): the
+    /// doc came from `Doc.loadWithPeer` on the host's seed. No DEK, no
+    /// storage, no WebSocket; `flush` exports the doc's ops since the
+    /// last flush for `takeMirrorOutbox`, and `applyMirrorUpdate` takes
+    /// the host's. Everything the store calls works unchanged; the
+    /// WebSocket verbs (`handleConnected`, `handleServerBytes`,
+    /// `popOutbox`, ...) and the persistence verbs (`captureLocalOps`,
+    /// the snapshot folds, the seeds) are no-ops here.
+    #[wasm_bindgen(js_name = mirror)]
+    pub fn mirror(doc: Doc, doc_id: String) -> Result<SyncEngine, JsError> {
+        let doc_id = parse_doc_id(&doc_id)?;
+        let last_sent = doc.inner.oplog_vv();
+        Ok(SyncEngine {
+            inner: Engine::Mirror(MirrorEngine {
+                doc: doc.inner,
+                doc_id,
+                last_sent,
+                outbox: VecDeque::new(),
+            }),
+        })
+    }
+
+    /// True for an engine built by [`SyncEngine::mirror`].
+    #[wasm_bindgen(js_name = isMirror)]
+    pub fn is_mirror(&self) -> bool {
+        matches!(self.inner, Engine::Mirror(_))
     }
 
     /// Persist any locally-committed mutations as a durable WAL row
     /// (and advance the capture cursor). Returns the assigned `localSeq`
     /// or `undefined` when nothing was pending. Call **before**
-    /// `flush()` so pushed bytes are always disk-bound first.
+    /// `flush()` so pushed bytes are always disk-bound first. A mirror
+    /// has no WAL: `undefined`, always.
     #[wasm_bindgen(js_name = captureLocalOps)]
     pub fn capture_local_ops(&mut self) -> Result<Option<f64>, JsError> {
-        Ok(self
-            .inner
-            .capture_local_ops()
-            .map_err(js_err)?
-            .map(|s| s.0 as f64))
+        let Some(e) = self.synced_mut() else {
+            return Ok(None);
+        };
+        Ok(e.capture_local_ops().map_err(js_err)?.map(|s| s.0 as f64))
     }
 
     /// Fold the WAL into a fresh full-history snapshot when it has at
@@ -1488,44 +1595,56 @@ impl SyncEngine {
     /// folding (the push derives them from `server_known_vv`).
     /// Snapshot export is O(doc) — pass a real row threshold on hot
     /// pulses (per-ack) and `1` from idle hooks. Returns whether a
-    /// snapshot was written.
+    /// snapshot was written (never, for a mirror).
     #[wasm_bindgen(js_name = snapshotIfWalExceeds)]
     pub fn snapshot_if_wal_exceeds(
         &mut self,
         max_rows: u32,
         max_bytes: f64,
     ) -> Result<bool, JsError> {
-        self.inner
-            .snapshot_if_wal_exceeds(u64::from(max_rows), max_bytes as u64)
+        let Some(e) = self.synced_mut() else {
+            return Ok(false);
+        };
+        e.snapshot_if_wal_exceeds(u64::from(max_rows), max_bytes as u64)
             .map_err(js_err)
     }
 
     /// Unconditionally fold any non-empty WAL into a snapshot — the
-    /// exit/hide hook. `false` when the WAL was already empty.
+    /// exit/hide hook. `false` when the WAL was already empty (and for
+    /// a mirror).
     #[wasm_bindgen(js_name = forceSnapshot)]
     pub fn force_snapshot(&mut self) -> Result<bool, JsError> {
-        self.inner.force_snapshot().map_err(js_err)
+        let Some(e) = self.synced_mut() else {
+            return Ok(false);
+        };
+        e.force_snapshot().map_err(js_err)
     }
 
     /// Seed the highest `localSeq` the storage has assigned for this
     /// doc (from the JS boot). Call once right after construction.
     #[wasm_bindgen(js_name = setLastLocalSeq)]
     pub fn set_last_local_seq(&mut self, seq: f64) {
-        self.inner.set_last_local_seq(CoreLocalSeq(seq as u64));
+        if let Some(e) = self.synced_mut() {
+            e.set_last_local_seq(CoreLocalSeq(seq as u64));
+        }
     }
 
     /// Seed the WAL statistics (surviving rows / payload bytes past
     /// the last snapshot) from the JS boot.
     #[wasm_bindgen(js_name = seedWalStats)]
     pub fn seed_wal_stats(&mut self, rows: f64, bytes: f64) {
-        self.inner.seed_wal_stats(rows as u64, bytes as u64);
+        if let Some(e) = self.synced_mut() {
+            e.seed_wal_stats(rows as u64, bytes as u64);
+        }
     }
 
     /// Seed `server_known_vv` from its persisted encoding (empty array
     /// = never synced). Call once right after construction.
     #[wasm_bindgen(js_name = seedServerKnownVv)]
     pub fn seed_server_known_vv(&mut self, encoded: &[u8]) {
-        self.inner.seed_server_known_vv(encoded);
+        if let Some(e) = self.synced_mut() {
+            e.seed_server_known_vv(encoded);
+        }
     }
 
     /// Seed the durable in-flight push from a previous session; the
@@ -1541,7 +1660,7 @@ impl SyncEngine {
         to_vv: &[u8],
     ) -> Result<(), JsError> {
         let push_id = uuid::Uuid::from_slice(push_id).map_err(js_err)?;
-        self.inner.seed_in_flight_push(CoreInFlightPush {
+        let push = CoreInFlightPush {
             push_id: CorePushId(push_id),
             payload: CoreEncryptedBlob {
                 nonce: nonce.to_vec(),
@@ -1549,15 +1668,22 @@ impl SyncEngine {
             },
             from_vv: from_vv.to_vec(),
             to_vv: to_vv.to_vec(),
-        });
+        };
+        if let Some(e) = self.synced_mut() {
+            e.seed_in_flight_push(push);
+        }
         Ok(())
     }
 
     /// The doc this engine syncs (uuid string) — the routing key the
-    /// host matches `serverFrameDocId` against.
+    /// host matches `serverFrameDocId` against, and the one a mirror
+    /// bridge routes host updates by.
     #[wasm_bindgen(js_name = docId)]
     pub fn doc_id(&self) -> String {
-        self.inner.doc_id().0.to_string()
+        match &self.inner {
+            Engine::Synced(e) => e.doc_id().0.to_string(),
+            Engine::Mirror(m) => m.doc_id.0.to_string(),
+        }
     }
 
     // -- transport callbacks --
@@ -1566,14 +1692,18 @@ impl SyncEngine {
     /// Engine queues `OpenDoc` for its doc.
     #[wasm_bindgen(js_name = handleConnected)]
     pub fn handle_connected(&mut self) {
-        self.inner.handle_connected();
+        if let Some(e) = self.synced_mut() {
+            e.handle_connected();
+        }
     }
 
     /// Caller's WebSocket dropped. Engine returns to `Disconnected` and
     /// clears the outbox; reconnect re-derives any pending frames.
     #[wasm_bindgen(js_name = handleDisconnected)]
     pub fn handle_disconnected(&mut self) {
-        self.inner.handle_disconnected();
+        if let Some(e) = self.synced_mut() {
+            e.handle_disconnected();
+        }
     }
 
     /// Caller-driven tick: escalates the `OpenDoc` watchdog (no-op
@@ -1581,35 +1711,96 @@ impl SyncEngine {
     /// via `setInterval`).
     #[wasm_bindgen(js_name = handleTimeout)]
     pub fn handle_timeout(&mut self) {
-        self.inner.handle_timeout();
+        if let Some(e) = self.synced_mut() {
+            e.handle_timeout();
+        }
     }
 
     /// Hand one binary WebSocket frame to the engine.
     #[wasm_bindgen(js_name = handleServerBytes)]
     pub fn handle_server_bytes(&mut self, bytes: &[u8]) {
-        self.inner.handle_server_bytes(bytes);
+        if let Some(e) = self.synced_mut() {
+            e.handle_server_bytes(bytes);
+        }
     }
 
     // -- caller drives --
 
-    /// Signal that the user just committed local mutations. Triggers a
-    /// push when idle; queues the intent otherwise.
+    /// Signal that the user just committed local mutations. Synced:
+    /// triggers a push when idle; queues the intent otherwise. Mirror:
+    /// exports the doc's ops since the previous flush into the mirror
+    /// outbox (`takeMirrorOutbox`), the same cadence that reaches the
+    /// WAL in the browser.
     pub fn flush(&mut self) {
-        self.inner.flush();
+        match &mut self.inner {
+            Engine::Synced(e) => e.flush(),
+            Engine::Mirror(m) => {
+                let now = m.doc.oplog_vv();
+                if m.last_sent.includes_vv(&now) {
+                    return;
+                }
+                match m.doc.export_updates_after(&m.last_sent) {
+                    Ok(bytes) => {
+                        if !bytes.is_empty() {
+                            m.outbox.push_back(bytes);
+                        }
+                        m.last_sent = now;
+                    }
+                    Err(e) => console_error(&format!("mirror export failed: {e}")),
+                }
+            }
+        }
     }
 
     /// Drain the next frame to ship to the server. Returns `undefined`
-    /// when the outbox is empty.
+    /// when the outbox is empty (always, for a mirror: its bytes come
+    /// out of `takeMirrorOutbox`).
     #[wasm_bindgen(js_name = popOutbox)]
     pub fn pop_outbox(&mut self) -> Option<Vec<u8>> {
-        self.inner.pop_outbox()
+        self.synced_mut().and_then(|e| e.pop_outbox())
+    }
+
+    /// Mirror only: the next plaintext Loro update `flush` exported for
+    /// the host, or `undefined` when there is none (and always on a
+    /// synced engine). The bridge drains to empty after every flush
+    /// and hands each one to `Host.import`.
+    #[wasm_bindgen(js_name = takeMirrorOutbox)]
+    pub fn take_mirror_outbox(&mut self) -> Option<Vec<u8>> {
+        match &mut self.inner {
+            Engine::Synced(_) => None,
+            Engine::Mirror(m) => m.outbox.pop_front(),
+        }
+    }
+
+    /// Mirror only: apply a plaintext Loro update from the host (what
+    /// it exported since it last sent this mirror). Imported tagged
+    /// `remote`, so it never enters this doc's undo stack, and queued as
+    /// AppEvents the way `apply_remote` queues a server frame's: the
+    /// bridge drains them into the store afterwards. Ops the mirror
+    /// already has (its own, echoing back) are skipped. Errors on a
+    /// synced engine, and when Loro refuses the bytes.
+    #[wasm_bindgen(js_name = applyMirrorUpdate)]
+    pub fn apply_mirror_update(&mut self, bytes: &[u8]) -> Result<(), JsError> {
+        match &mut self.inner {
+            Engine::Synced(_) => Err(JsError::new("applyMirrorUpdate: not a mirror engine")),
+            Engine::Mirror(m) => {
+                let range = m.doc.import_host_update(bytes).map_err(js_err)?;
+                // The host's ops are not ours to send back: fold them
+                // into the send base so the next flush exports only
+                // what this mirror committed since.
+                m.last_sent.merge(&range);
+                Ok(())
+            }
+        }
     }
 
     /// Drain the next engine event. Returns `undefined` when the queue
-    /// is empty.
+    /// is empty. A mirror has no connection and emits none.
     #[wasm_bindgen(js_name = popEvent)]
     pub fn pop_event(&mut self) -> Option<EngineEvent> {
-        self.inner.pop_event().map(EngineEvent::from)
+        self.synced_mut()
+            .and_then(|e| e.pop_event())
+            .map(EngineEvent::from)
     }
 
     /// Drain the next domain-level change event. Pair with `popEvent`
@@ -1617,7 +1808,7 @@ impl SyncEngine {
     /// item / list lifecycle deltas the UI store mirrors.
     #[wasm_bindgen(js_name = popAppEvent)]
     pub fn pop_app_event(&self) -> Option<AppEventJs> {
-        self.inner.pop_app_event().map(AppEventJs::from)
+        self.doc().pop_event().map(AppEventJs::from)
     }
 
     /// Synthetic event burst describing current doc state — `ListAdded`
@@ -1627,8 +1818,7 @@ impl SyncEngine {
     /// separate "load initial" path.
     #[wasm_bindgen(js_name = snapshotEvents)]
     pub fn snapshot_events(&self) -> Vec<AppEventJs> {
-        self.inner
-            .doc()
+        self.doc()
             .snapshot_events()
             .into_iter()
             .map(AppEventJs::from)
@@ -1640,19 +1830,24 @@ impl SyncEngine {
     /// thousands of heap-allocated `AppEventJs` wrappers and cloned getters.
     #[wasm_bindgen(js_name = workspaceSnapshotJson)]
     pub fn workspace_snapshot_json(&self) -> String {
-        workspace_snapshot_json(self.inner.doc())
+        workspace_snapshot_json(self.doc())
     }
 
     // -- introspection --
+    //
+    // A mirror has no connection of its own: the link state and the
+    // server cursors below are the synced engine's and read as
+    // offline / zero / unknown on a mirror. The window's status comes
+    // from the host (`spec/mac-window-plan.md`).
 
     #[wasm_bindgen(js_name = isOnline)]
     pub fn is_online(&self) -> bool {
-        self.inner.is_online()
+        self.synced().is_some_and(|e| e.is_online())
     }
 
     #[wasm_bindgen(js_name = isIdle)]
     pub fn is_idle(&self) -> bool {
-        self.inner.is_idle()
+        self.synced().is_none_or(|e| e.is_idle())
     }
 
     /// Contiguous-prefix seq the engine has applied **in memory**.
@@ -1661,14 +1856,14 @@ impl SyncEngine {
     /// seq the local oplog doesn't cover.
     #[wasm_bindgen(js_name = lastContiguousSeq)]
     pub fn last_contiguous_seq(&self) -> u64 {
-        self.inner.last_contiguous_seq()
+        self.synced().map_or(0, |e| e.last_contiguous_seq())
     }
 
     /// The doc's history epoch from the last `DocOpened`, or
     /// `undefined` before the first successful handshake.
     #[wasm_bindgen(js_name = serverEpoch)]
     pub fn server_epoch(&self) -> Option<u64> {
-        self.inner.server_epoch()
+        self.synced().and_then(|e| e.server_epoch())
     }
 
     /// Contiguous-prefix seq the host has confirmed locally durable.
@@ -1676,7 +1871,7 @@ impl SyncEngine {
     /// will ship) in `Ack` frames. Persist this between sessions.
     #[wasm_bindgen(js_name = lastDurableSeq)]
     pub fn last_durable_seq(&self) -> u64 {
-        self.inner.last_durable_seq()
+        self.synced().map_or(0, |e| e.last_durable_seq())
     }
 
     /// Host signal: bytes covering up to `seq` are now durable in
@@ -1686,7 +1881,9 @@ impl SyncEngine {
     /// drain the queued frame onto the wire.
     #[wasm_bindgen(js_name = notifyOplogDurable)]
     pub fn notify_oplog_durable(&mut self, seq: u64) {
-        self.inner.notify_oplog_durable(seq);
+        if let Some(e) = self.synced_mut() {
+            e.notify_oplog_durable(seq);
+        }
     }
 
     // -- doc passthrough --
@@ -1698,25 +1895,30 @@ impl SyncEngine {
 
     /// Snapshot envelope to persist (loro snapshot + last-pushed VV).
     pub fn save(&self) -> Result<Vec<u8>, JsError> {
-        self.inner.doc().save().map_err(js_err)
+        self.doc().save().map_err(js_err)
     }
 
     /// 32-byte logical-state hash. Stable across replicas.
     pub fn fingerprint(&self) -> Vec<u8> {
-        self.inner.doc().fingerprint().to_vec()
+        self.doc().fingerprint().to_vec()
     }
 
     #[wasm_bindgen(js_name = hasUncapturedOps)]
     pub fn has_uncaptured_ops(&self) -> bool {
-        self.inner.doc().has_uncaptured_ops()
+        self.doc().has_uncaptured_ops()
     }
 
     /// True when local operations lack server proof (commits beyond
     /// `server_known_vv`, or an outstanding in-flight push) — the UI's
-    /// "pending changes" indicator.
+    /// "pending changes" indicator. On a mirror: commits the host has
+    /// not been handed yet (between a commit and its flush); whether
+    /// the host has pushed them is the host's to say.
     #[wasm_bindgen(js_name = hasUnsyncedOps)]
     pub fn has_unsynced_ops(&self) -> bool {
-        self.inner.has_unsynced_ops()
+        match &self.inner {
+            Engine::Synced(e) => e.has_unsynced_ops(),
+            Engine::Mirror(m) => !m.last_sent.includes_vv(&m.doc.oplog_vv()),
+        }
     }
 
     // -- oplog passthrough --
@@ -1729,13 +1931,12 @@ impl SyncEngine {
 
     #[wasm_bindgen(js_name = oplogVvBytes)]
     pub fn oplog_vv_bytes(&self) -> Vec<u8> {
-        self.inner.doc().oplog_vv_bytes()
+        self.doc().oplog_vv_bytes()
     }
 
     #[wasm_bindgen(js_name = exportUpdatesAfter)]
     pub fn export_updates_after(&self, from_vv: &[u8]) -> Result<Vec<u8>, JsError> {
-        self.inner
-            .doc()
+        self.doc()
             .export_updates_after_bytes(from_vv)
             .map_err(js_err)
     }
@@ -1746,13 +1947,13 @@ impl SyncEngine {
     /// doesn't touch `last_persisted_vv` or the oplog frontier.
     #[wasm_bindgen(js_name = exportSnapshot)]
     pub fn export_snapshot(&self) -> Result<Vec<u8>, JsError> {
-        self.inner.doc().export_snapshot_bytes().map_err(js_err)
+        self.doc().export_snapshot_bytes().map_err(js_err)
     }
 
     /// Pretty-printed JSON dump — powers the "Export JSON" menu item.
     #[wasm_bindgen(js_name = exportJson)]
     pub fn export_json(&self) -> String {
-        self.inner.doc().export_json_string()
+        self.doc().export_json_string()
     }
 
     /// Additive JSON import — counterpart of `exportJson` on the engine
@@ -1762,7 +1963,7 @@ impl SyncEngine {
     /// like any other local commit.
     #[wasm_bindgen(js_name = importJson)]
     pub fn import_json(&self, json: &str) -> Result<String, JsError> {
-        let summary = self.inner.doc().import_json_str(json).map_err(js_err)?;
+        let summary = self.doc().import_json_str(json).map_err(js_err)?;
         Ok(summary_to_json(&summary))
     }
 
@@ -1770,7 +1971,7 @@ impl SyncEngine {
 
     #[wasm_bindgen(js_name = addItem)]
     pub fn add_item(&self, list_id: &str, text: &str) -> Result<String, JsError> {
-        self.inner.doc().add_item(list_id, text).map_err(js_err)
+        self.doc().add_item(list_id, text).map_err(js_err)
     }
 
     #[wasm_bindgen(js_name = addItemAt)]
@@ -1780,8 +1981,7 @@ impl SyncEngine {
         text: &str,
         target_index: usize,
     ) -> Result<String, JsError> {
-        self.inner
-            .doc()
+        self.doc()
             .add_item_at(list_id, text, target_index)
             .map_err(js_err)
     }
@@ -1794,18 +1994,14 @@ impl SyncEngine {
         target_index: usize,
     ) -> Result<Vec<String>, JsError> {
         let refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
-        self.inner
-            .doc()
+        self.doc()
             .add_items_at(list_id, &refs, target_index)
             .map_err(js_err)
     }
 
     #[wasm_bindgen(js_name = editItemText)]
     pub fn edit_item_text(&self, item_id: &str, text: &str) -> Result<(), JsError> {
-        self.inner
-            .doc()
-            .edit_item_text(item_id, text)
-            .map_err(js_err)
+        self.doc().edit_item_text(item_id, text).map_err(js_err)
     }
 
     /// Start streaming an item's notes as `itemNotesDelta` events; returns
@@ -1813,12 +2009,12 @@ impl SyncEngine {
     /// `Doc::subscribe_notes`.
     #[wasm_bindgen(js_name = subscribeNotes)]
     pub fn subscribe_notes(&self, item_id: &str) -> Result<String, JsError> {
-        self.inner.doc().subscribe_notes(item_id).map_err(js_err)
+        self.doc().subscribe_notes(item_id).map_err(js_err)
     }
 
     #[wasm_bindgen(js_name = unsubscribeNotes)]
     pub fn unsubscribe_notes(&self, item_id: &str) {
-        self.inner.doc().unsubscribe_notes(item_id);
+        self.doc().unsubscribe_notes(item_id);
     }
 
     /// Apply an editor delta to an item's notes. `delta_json` is a JSON
@@ -1830,8 +2026,7 @@ impl SyncEngine {
     #[wasm_bindgen(js_name = applyNotesDelta)]
     pub fn apply_notes_delta(&self, item_id: &str, delta_json: &str) -> Result<(), JsError> {
         let delta = parse_notes_delta(delta_json)?;
-        self.inner
-            .doc()
+        self.doc()
             .apply_notes_delta(item_id, &delta)
             .map_err(js_err)
     }
@@ -1844,8 +2039,7 @@ impl SyncEngine {
         item_id: &str,
         deadline: Option<String>,
     ) -> Result<(), JsError> {
-        self.inner
-            .doc()
+        self.doc()
             .set_item_deadline(item_id, deadline.as_deref())
             .map_err(js_err)
     }
@@ -1855,8 +2049,7 @@ impl SyncEngine {
     /// the call rejects.
     #[wasm_bindgen(js_name = setItemWhen)]
     pub fn set_item_when(&self, item_id: &str, when: Option<String>) -> Result<(), JsError> {
-        self.inner
-            .doc()
+        self.doc()
             .set_item_when(item_id, when.as_deref())
             .map_err(js_err)
     }
@@ -1865,8 +2058,7 @@ impl SyncEngine {
     /// item's duration. Only meaningful beside a timed `when`.
     #[wasm_bindgen(js_name = setItemDuration)]
     pub fn set_item_duration(&self, item_id: &str, duration: Option<u32>) -> Result<(), JsError> {
-        self.inner
-            .doc()
+        self.doc()
             .set_item_duration(item_id, duration)
             .map_err(js_err)
     }
@@ -1876,8 +2068,7 @@ impl SyncEngine {
     #[wasm_bindgen(js_name = setItemPlace)]
     pub fn set_item_place(&self, item_id: &str, place_json: Option<String>) -> Result<(), JsError> {
         let place = parse_place_json(place_json.as_deref())?;
-        self.inner
-            .doc()
+        self.doc()
             .set_item_place(item_id, place.as_ref())
             .map_err(js_err)
     }
@@ -1889,85 +2080,72 @@ impl SyncEngine {
         target_list_id: &str,
         target_index: usize,
     ) -> Result<(), JsError> {
-        self.inner
-            .doc()
+        self.doc()
             .move_item(item_id, target_list_id, target_index)
             .map_err(js_err)
     }
 
     #[wasm_bindgen(js_name = setItemDone)]
     pub fn set_item_done(&self, item_id: &str, done: bool) -> Result<(), JsError> {
-        self.inner
-            .doc()
-            .set_item_done(item_id, done)
-            .map_err(js_err)
+        self.doc().set_item_done(item_id, done).map_err(js_err)
     }
 
     #[wasm_bindgen(js_name = setItemsDone)]
     pub fn set_items_done(&self, item_ids: Vec<String>, done: bool) -> Result<(), JsError> {
         let refs: Vec<&str> = item_ids.iter().map(|s| s.as_str()).collect();
-        self.inner.doc().set_items_done(&refs, done).map_err(js_err)
+        self.doc().set_items_done(&refs, done).map_err(js_err)
     }
 
     #[wasm_bindgen(js_name = setItemBinned)]
     pub fn set_item_binned(&self, item_id: &str, binned: bool) -> Result<(), JsError> {
-        self.inner
-            .doc()
-            .set_item_binned(item_id, binned)
-            .map_err(js_err)
+        self.doc().set_item_binned(item_id, binned).map_err(js_err)
     }
 
     #[wasm_bindgen(js_name = setItemsBinned)]
     pub fn set_items_binned(&self, item_ids: Vec<String>, binned: bool) -> Result<(), JsError> {
         let refs: Vec<&str> = item_ids.iter().map(|s| s.as_str()).collect();
-        self.inner
-            .doc()
-            .set_items_binned(&refs, binned)
-            .map_err(js_err)
+        self.doc().set_items_binned(&refs, binned).map_err(js_err)
     }
 
     #[wasm_bindgen(js_name = deleteBinned)]
     pub fn delete_binned(&self, item_id: &str) -> Result<(), JsError> {
-        self.inner.doc().delete_binned(item_id).map_err(js_err)
+        self.doc().delete_binned(item_id).map_err(js_err)
     }
 
     #[wasm_bindgen(js_name = deleteBinnedItems)]
     pub fn delete_binned_items(&self, item_ids: Vec<String>) -> Result<(), JsError> {
         let refs: Vec<&str> = item_ids.iter().map(|s| s.as_str()).collect();
-        self.inner.doc().delete_binned_items(&refs).map_err(js_err)
+        self.doc().delete_binned_items(&refs).map_err(js_err)
     }
 
     #[wasm_bindgen(js_name = emptyBin)]
     pub fn empty_bin(&self) -> Result<usize, JsError> {
-        self.inner.doc().empty_bin().map_err(js_err)
+        self.doc().empty_bin().map_err(js_err)
     }
 
     /// Explicit stale/duplicate/missing order-entry repair. Returns the
     /// number of repairs (0 = doc was clean, nothing committed).
     pub fn reconcile(&self) -> Result<usize, JsError> {
-        self.inner.doc().reconcile().map_err(js_err)
+        self.doc().reconcile().map_err(js_err)
     }
 
     // -- mutations: lists --
 
     #[wasm_bindgen(js_name = addList)]
     pub fn add_list(&self, name: &str) -> Result<String, JsError> {
-        self.inner.doc().add_list(name).map_err(js_err)
+        self.doc().add_list(name).map_err(js_err)
     }
 
     #[wasm_bindgen(js_name = renameList)]
     pub fn rename_list(&self, list_id: &str, name: &str) -> Result<(), JsError> {
-        self.inner.doc().rename_list(list_id, name).map_err(js_err)
+        self.doc().rename_list(list_id, name).map_err(js_err)
     }
 
     /// Set (`icon` = emoji grapheme) or clear (`icon` = "") a list's
     /// display icon. See `monoplan_core::Doc::set_list_icon`.
     #[wasm_bindgen(js_name = setListIcon)]
     pub fn set_list_icon(&self, list_id: &str, icon: &str) -> Result<(), JsError> {
-        self.inner
-            .doc()
-            .set_list_icon(list_id, icon)
-            .map_err(js_err)
+        self.doc().set_list_icon(list_id, icon).map_err(js_err)
     }
 
     /// Save (`view` = `"list"` / `"board"` / `"board:<lanes>"`) or clear
@@ -1975,18 +2153,14 @@ impl SyncEngine {
     /// too. See `monoplan_core::Doc::set_default_view`.
     #[wasm_bindgen(js_name = setDefaultView)]
     pub fn set_default_view(&self, list_id: &str, view: &str) -> Result<(), JsError> {
-        self.inner
-            .doc()
+        self.doc()
             .set_default_view(list_id, parse_default_view_arg(view)?)
             .map_err(js_err)
     }
 
     #[wasm_bindgen(js_name = moveList)]
     pub fn move_list(&self, list_id: &str, target_index: usize) -> Result<(), JsError> {
-        self.inner
-            .doc()
-            .move_list(list_id, target_index)
-            .map_err(js_err)
+        self.doc().move_list(list_id, target_index).map_err(js_err)
     }
 
     /// Archive (`true`) or unarchive (`false`) a user-created list.
@@ -1994,8 +2168,7 @@ impl SyncEngine {
     /// `monoplan_core::Doc::set_list_archived`.
     #[wasm_bindgen(js_name = setListArchived)]
     pub fn set_list_archived(&self, list_id: &str, archived: bool) -> Result<(), JsError> {
-        self.inner
-            .doc()
+        self.doc()
             .set_list_archived(list_id, archived)
             .map_err(js_err)
     }
@@ -2005,25 +2178,24 @@ impl SyncEngine {
     /// permanent-deletion work.
     #[wasm_bindgen(js_name = deleteList)]
     pub fn delete_list(&self, list_id: &str) -> Result<(), JsError> {
-        self.inner.doc().delete_list(list_id).map_err(js_err)
+        self.doc().delete_list(list_id).map_err(js_err)
     }
 
     #[wasm_bindgen(js_name = setShowListCounts)]
     pub fn set_show_list_counts(&self, show: bool) -> Result<(), JsError> {
-        self.inner.doc().set_show_list_counts(show).map_err(js_err)
+        self.doc().set_show_list_counts(show).map_err(js_err)
     }
 
     /// See [`Doc::set_doc_name`].
     #[wasm_bindgen(js_name = setDocName)]
     pub fn set_doc_name(&self, name: &str) -> Result<(), JsError> {
-        self.inner.doc().set_doc_name(Some(name)).map_err(js_err)
+        self.doc().set_doc_name(Some(name)).map_err(js_err)
     }
 
     /// See [`Doc::set_calendar_doc_hidden`].
     #[wasm_bindgen(js_name = setCalendarDocHidden)]
     pub fn set_calendar_doc_hidden(&self, doc_id: &str, hidden: bool) -> Result<(), JsError> {
-        self.inner
-            .doc()
+        self.doc()
             .set_calendar_doc_hidden(doc_id, hidden)
             .map_err(js_err)
     }
@@ -2031,10 +2203,7 @@ impl SyncEngine {
     /// See [`Doc::set_done_amalgamate`].
     #[wasm_bindgen(js_name = setDoneAmalgamate)]
     pub fn set_done_amalgamate(&self, amalgamate: bool) -> Result<(), JsError> {
-        self.inner
-            .doc()
-            .set_done_amalgamate(amalgamate)
-            .map_err(js_err)
+        self.doc().set_done_amalgamate(amalgamate).map_err(js_err)
     }
 
     // ---------- lifecycle (spec/board.md, spec/data-model.md) ----------
@@ -2047,8 +2216,7 @@ impl SyncEngine {
         item_id: &str,
         lifecycle: ItemLifecycle,
     ) -> Result<(), JsError> {
-        self.inner
-            .doc()
+        self.doc()
             .set_item_lifecycle(item_id, lifecycle.into())
             .map_err(js_err)
     }
@@ -2062,8 +2230,7 @@ impl SyncEngine {
         lifecycle: ItemLifecycle,
     ) -> Result<(), JsError> {
         let refs: Vec<&str> = item_ids.iter().map(|s| s.as_str()).collect();
-        self.inner
-            .doc()
+        self.doc()
             .set_items_lifecycle(&refs, lifecycle.into())
             .map_err(js_err)
     }
@@ -2077,8 +2244,7 @@ impl SyncEngine {
         text: &str,
         state: ItemLifecycle,
     ) -> Result<String, JsError> {
-        self.inner
-            .doc()
+        self.doc()
             .add_item_in_state(list_id, text, open_state_arg(state)?)
             .map_err(js_err)
     }
@@ -2094,8 +2260,7 @@ impl SyncEngine {
         state: ItemLifecycle,
         target_index: usize,
     ) -> Result<String, JsError> {
-        self.inner
-            .doc()
+        self.doc()
             .add_item_in_state_at(list_id, text, open_state_arg(state)?, target_index)
             .map_err(js_err)
     }
@@ -2108,10 +2273,7 @@ impl SyncEngine {
     /// dead-ref sweep into the same commit.
     #[wasm_bindgen(js_name = addToFocus)]
     pub fn add_to_focus(&self, item_id: &str, index: usize) -> Result<(), JsError> {
-        self.inner
-            .doc()
-            .add_to_focus(item_id, index)
-            .map_err(js_err)
+        self.doc().add_to_focus(item_id, index).map_err(js_err)
     }
 
     /// Batch add: append a FocusRef for each of `item_ids` (in order) to
@@ -2120,14 +2282,14 @@ impl SyncEngine {
     #[wasm_bindgen(js_name = addToFocusMany)]
     pub fn add_to_focus_many(&self, item_ids: Vec<String>) -> Result<(), JsError> {
         let refs: Vec<&str> = item_ids.iter().map(|s| s.as_str()).collect();
-        self.inner.doc().add_to_focus_many(&refs).map_err(js_err)
+        self.doc().add_to_focus_many(&refs).map_err(js_err)
     }
 
     /// Remove `item_id`'s FocusRef(s) from the Focus lens, one commit.
     /// The item itself is untouched.
     #[wasm_bindgen(js_name = removeFromFocus)]
     pub fn remove_from_focus(&self, item_id: &str) -> Result<(), JsError> {
-        self.inner.doc().remove_from_focus(item_id).map_err(js_err)
+        self.doc().remove_from_focus(item_id).map_err(js_err)
     }
 
     /// Batch remove: drop each id's FocusRef(s) from the Focus lens in one
@@ -2135,27 +2297,21 @@ impl SyncEngine {
     #[wasm_bindgen(js_name = removeFromFocusMany)]
     pub fn remove_from_focus_many(&self, item_ids: Vec<String>) -> Result<(), JsError> {
         let refs: Vec<&str> = item_ids.iter().map(|s| s.as_str()).collect();
-        self.inner
-            .doc()
-            .remove_from_focus_many(&refs)
-            .map_err(js_err)
+        self.doc().remove_from_focus_many(&refs).map_err(js_err)
     }
 
     /// Reorder `item_id`'s FocusRef to visible position `index` within the
     /// Focus lens, one commit.
     #[wasm_bindgen(js_name = moveInFocus)]
     pub fn move_in_focus(&self, item_id: &str, index: usize) -> Result<(), JsError> {
-        self.inner
-            .doc()
-            .move_in_focus(item_id, index)
-            .map_err(js_err)
+        self.doc().move_in_focus(item_id, index).map_err(js_err)
     }
 
     /// Visible **local** Focus item ids in curated order (Open, deduped).
     /// Foreign entries are skipped; `focusEntriesJson` has the full lens.
     #[wasm_bindgen(js_name = focusRefIds)]
     pub fn focus_ref_ids(&self) -> Vec<String> {
-        self.inner.doc().focus_refs()
+        self.doc().focus_refs()
     }
 
     /// See [`Doc::focus_entries_json`]: every live Focus entry in curated
@@ -2163,7 +2319,6 @@ impl SyncEngine {
     #[wasm_bindgen(js_name = focusEntriesJson)]
     pub fn focus_entries_json(&self) -> String {
         let rows: Vec<serde_json::Value> = self
-            .inner
             .doc()
             .focus_entries()
             .into_iter()
@@ -2180,8 +2335,7 @@ impl SyncEngine {
         item_id: &str,
         index: usize,
     ) -> Result<(), JsError> {
-        self.inner
-            .doc()
+        self.doc()
             .add_foreign_to_focus(doc_id, item_id, index)
             .map_err(js_err)
     }
@@ -2190,7 +2344,7 @@ impl SyncEngine {
     /// array of `{id, kind, title, body?, listId?, lifecycle?, score}`.
     #[wasm_bindgen(js_name = searchJson)]
     pub fn search_json(&self, query: &str, limit: usize) -> String {
-        search_to_json(&self.inner.doc().search(query, limit))
+        search_to_json(&self.doc().search(query, limit))
     }
 
     /// Places already on items, deduped and ranked newest use first
@@ -2198,84 +2352,81 @@ impl SyncEngine {
     /// `{place, count, lastUsed}`; `limit` 0 = unlimited.
     #[wasm_bindgen(js_name = placeSuggestionsJson)]
     pub fn place_suggestions_json(&self, query: &str, limit: usize) -> String {
-        suggestions_to_json(&self.inner.doc().place_suggestions(query, limit))
+        suggestions_to_json(&self.doc().place_suggestions(query, limit))
     }
 
     /// The Focus lens as a JSON array of `ItemView`s in curated order —
     /// same element shape as `itemsInListJson`.
     #[wasm_bindgen(js_name = focusViewJson)]
     pub fn focus_view_json(&self) -> String {
-        items_to_json(&self.inner.doc().focus_view())
+        items_to_json(&self.doc().focus_view())
     }
 
     // -- undo / redo --
 
     pub fn undo(&self) -> Result<bool, JsError> {
-        self.inner.doc().undo().map_err(js_err)
+        self.doc().undo().map_err(js_err)
     }
 
     pub fn redo(&self) -> Result<bool, JsError> {
-        self.inner.doc().redo().map_err(js_err)
+        self.doc().redo().map_err(js_err)
     }
 
     #[wasm_bindgen(js_name = canUndo)]
     pub fn can_undo(&self) -> bool {
-        self.inner.doc().can_undo()
+        self.doc().can_undo()
     }
 
     #[wasm_bindgen(js_name = canRedo)]
     pub fn can_redo(&self) -> bool {
-        self.inner.doc().can_redo()
+        self.doc().can_redo()
     }
 
     // -- reads --
 
     #[wasm_bindgen(js_name = itemsInListJson)]
     pub fn items_in_list_json(&self, list_id: &str, include_binned: bool) -> String {
-        items_to_json(&self.inner.doc().items_in_list(list_id, include_binned))
+        items_to_json(&self.doc().items_in_list(list_id, include_binned))
     }
 
     #[wasm_bindgen(js_name = binnedItemsJson)]
     pub fn binned_items_json(&self) -> String {
-        items_to_json(&self.inner.doc().binned_items())
+        items_to_json(&self.doc().binned_items())
     }
 
     #[wasm_bindgen(js_name = allListsJson)]
     pub fn all_lists_json(&self) -> String {
-        lists_to_json(&self.inner.doc().all_lists())
+        lists_to_json(&self.doc().all_lists())
     }
 
     #[wasm_bindgen(js_name = getSettingsJson)]
     pub fn get_settings_json(&self) -> String {
-        settings_to_json(&self.inner.doc().get_settings())
+        settings_to_json(&self.doc().get_settings())
     }
 
     #[wasm_bindgen(js_name = openItemIds)]
     pub fn open_item_ids(&self, list_id: &str) -> Vec<String> {
-        self.inner.doc().open_item_ids(list_id)
+        self.doc().open_item_ids(list_id)
     }
 
     #[wasm_bindgen(js_name = doneItemIds)]
     pub fn done_item_ids(&self) -> Vec<String> {
-        self.inner.doc().done_item_ids()
+        self.doc().done_item_ids()
     }
 
     #[wasm_bindgen(js_name = binnedItemIds)]
     pub fn binned_item_ids(&self) -> Vec<String> {
-        self.inner.doc().binned_item_ids()
+        self.doc().binned_item_ids()
     }
 
     #[wasm_bindgen(js_name = getItemJson)]
     pub fn get_item_json(&self, item_id: &str) -> Option<String> {
-        self.inner.doc().get_item(item_id).map(|i| item_to_json(&i))
+        self.doc().get_item(item_id).map(|i| item_to_json(&i))
     }
 
     #[wasm_bindgen(js_name = getListMetaJson)]
     pub fn get_list_meta_json(&self, list_id: &str) -> Option<String> {
-        self.inner
-            .doc()
-            .get_list_meta(list_id)
-            .map(|l| list_to_json(&l))
+        self.doc().get_list_meta(list_id).map(|l| list_to_json(&l))
     }
 }
 

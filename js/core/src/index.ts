@@ -25,3 +25,9 @@ export {
   type ReconnectBackoff,
   type SyncBridgeOpts,
 } from "./sync-bridge.ts";
+export {
+  MirrorBridge,
+  type MirrorBridgeOpts,
+  type MirrorSeed,
+  type MirrorTransport,
+} from "./mirror-bridge.ts";

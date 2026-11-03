@@ -125,6 +125,7 @@ export async function acceptInvite(
   lookup: InviteLookup,
 ): Promise<{ docId: string; dek: Dek; alreadyMember: boolean }> {
   const { secret, payload } = lookup;
+  if (!session.dek) throw new Error("this session holds no key to join a workspace with");
   const dek = secret.unwrap(payload.wrapped_dek, payload.wrapped_dek_nonce);
   const wrapped = wrapDekWithDek(session.dek, dek);
   try {

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>Monoplan</title>
+    <!-- The macOS app's window (`spec/mac-window-plan.md`): the same
+         client as `index.html` over a mirror doc, entered through
+         `src/mirror.tsx`. No manifest or icons: this page is served to a
+         WKWebView from the app bundle, never installed or bookmarked. -->
+  </head>
+  <body>
+    <script>
+      try {
+        var m = document.cookie.match(/(?:^|; )theme=([01])/);
+        if (m) {
+          document.documentElement.dataset.theme = m[1] === "1" ? "dark" : "light";
+        } else {
+          document.documentElement.dataset.theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+      } catch (e) {}
+    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/mirror.tsx"></script>
+  </body>
+</html>

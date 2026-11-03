@@ -11,19 +11,19 @@ import {
   createEffect,
   createSignal,
   getOwner,
-  on,
   onCleanup,
   runWithOwner,
 } from "solid-js";
 import { Dek, Doc, SyncEngine, wrapDekWithDek } from "@monoplan/core/wasm";
 import { IdbStorage, type InFlightPushJs, putDevice } from "@monoplan/core";
 import { api } from "../api.ts";
-import { savePrefs, type Prefs, type ViewKey } from "../prefs.ts";
+import { type Prefs } from "../prefs.ts";
 import { type Session } from "../Login.tsx";
 import { dekVault } from "./dekVault.ts";
 import { createDocsLayer, type DocsLayer } from "./docs.ts";
 import { createSyncedApp, type DocApp } from "./store.ts";
 import { createSyncBridge, SyncBridge } from "./sync.ts";
+import { createViewState } from "./viewState.ts";
 
 // The single onboarding item a brand-new doc's Inbox opens with. Kept
 // literal (user-list content is user-authored plain text, not localized).
@@ -331,32 +331,9 @@ export function createWorkspaceRuntime(props: {
     });
   }
 
-  // Workspace view lives at this level so the prefs-save effect
-  // below can persist it independently of the device-frontier write.
-  // Seed from the prefs row; a `kind:"list"` pointing at a
-  // since-deleted list falls back to Inbox silently. `focus`/`done`/`bin`
-  // are global views and always resolvable.
-  // A list view names its doc (`ViewKey.docId`, absent ≡ Home); the
-  // canonical form drops a Home doc id so equality, prefs and URLs
-  // agree. Every write goes through `setView`, which normalises.
-  const normalizeView = (v: ViewKey): ViewKey =>
-    v.kind === "list" ? docs.listView(docs.viewDocId(v), v.id) : v;
-  const initialView: ViewKey = (() => {
-    const v = props.boot.prefs?.currentView;
-    if (!v) return { kind: "list", id: "inbox" };
-    if (v.kind === "list") {
-      const target = docs.appForView(v);
-      if (v.id !== "inbox" && !target.state.listsById[v.id]) {
-        return { kind: "list", id: "inbox" };
-      }
-      return normalizeView(v);
-    }
-    return v;
-  })();
-  const [view, setViewRaw] = createSignal<ViewKey>(initialView);
-  const setView = (v: ViewKey): void => {
-    setViewRaw(normalizeView(v));
-  };
+  // Workspace view lives at this level so it persists independently of
+  // the device-frontier write (`viewState.ts`).
+  const { view, setView } = createViewState(docs, props.boot.prefs, props.session.accountId);
 
   // Persist the device row — identity + the "last synced" stamp
   // (observability only). The resume cursor is no longer stored here:
@@ -540,8 +517,10 @@ export function createWorkspaceRuntime(props: {
     if (props.session.anonymous) {
       throw new Error("sign in to create a workspace");
     }
+    const homeDek = props.session.dek;
+    if (!homeDek) throw new Error("this session holds no key to create a workspace with");
     const dek = Dek.generate();
-    const wrapped = wrapDekWithDek(props.session.dek, dek);
+    const wrapped = wrapDekWithDek(homeDek, dek);
     const { doc_id: docId } = await api.createDoc({
       wrapped_dek: wrapped.ciphertext,
       wrapped_dek_nonce: wrapped.nonce,
@@ -611,31 +590,6 @@ export function createWorkspaceRuntime(props: {
     await api.deleteDoc(docId);
     await forgetOpenDoc(docId, r);
   };
-
-  // ---------- Prefs: separate store, write-through ----------
-  //
-  // View state ("which list / Done / Bin am I on?") lives in its own
-  // IDB store keyed per account. Decoupled from `device` so a burst
-  // of typing doesn't rewrite the view, and switching lists doesn't
-  // rewrite the sync frontier. Anonymous sessions persist too — the
-  // device row gate above is about identity, not local-only UI state.
-  //
-  // No debounce: view changes are user-initiated (click / keyboard
-  // nav) and rare on the timescale of an IDB write. Coalescing them
-  // would only buy us dropped saves when the tab closes mid-window.
-  createEffect(
-    on(
-      view,
-      () => {
-        void savePrefs(props.session.accountId, {
-          currentView: view(),
-        }).catch((e) => {
-          console.error("prefs save failed:", e);
-        });
-      },
-      { defer: true },
-    ),
-  );
 
   // Freshly-created Home doc (signup, or a brand-new anonymous doc): drop
   // a single welcome item into Inbox and persist as the first op row so a

@@ -2,8 +2,10 @@
 
 Status: decided 2026-10-29; phase 1 (tray over the FFI) built the same
 day, phase 2 (the mirror on the host: `Host.subscribe` / `Host.import`,
-`Doc::import_mirror_update`, `HostCmd`) built 2026-11-03, phases 3 and 4
-not built. The macOS app's window is a
+`Doc::import_mirror_update`, `HostCmd`) built 2026-11-03, phase 3 (the
+mirror in wasm and JS: `SyncEngine.mirror`, `MirrorBridge`, the app
+runtime and its Vite entry) built 2026-11-04, phase 4 (the window
+itself, in Swift) not built. The macOS app's window is a
 webview running the web client (`js/web`) over a **mirror**: a second
 Loro doc in the webview, with a peer id of its own, seeded from the
 app's in-process host and kept converged with it by exchanging Loro
@@ -161,43 +163,109 @@ Built 2026-11-03 (phase 2). `cli/src/daemon.rs`, `core/ffi/src/lib.rs`,
 
 ## Wasm side (`core/web`)
 
-- `SyncEngine::mirror(doc, doc_id)`: no DEK, no `EngineStorage`.
-  Internally the class holds an enum of the synced engine or a mirror
-  engine with one shared doc accessor, so the forwarded mutation methods
-  stay single.
-- In mirror mode `flush()` exports updates since the last send into an
-  outbox read by `takeMirrorOutbox(): Uint8Array | undefined`;
-  `persistLocal()` is a no-op; `applyMirrorUpdate(bytes)` imports tagged
-  `remote` and queues AppEvents the way `apply_remote` does.
-- `Doc.loadWithPeer(bytes, peer)`: load the snapshot, then set the peer
-  id before any local op.
+Built 2026-11-04 (phase 3). `core/web/src/lib.rs`;
+`Doc::import_host_update` in `core/src/doc.rs`.
 
-## JS side (`js/web`)
+- `SyncEngine.mirror(doc, docId)`: no DEK, no `EngineStorage`. The
+  class holds an enum (`Synced(CoreSyncEngine)` or `Mirror { doc,
+  doc_id, last_sent: VersionVector, outbox }`) behind one `doc()`
+  accessor, so the sixty forwarded mutation and read methods stay
+  single. `isMirror()` tells them apart.
+- In mirror mode `flush()` exports `updates(last_sent)` into the mirror
+  outbox and advances `last_sent`; `takeMirrorOutbox(): Uint8Array |
+  undefined` pops it, oldest first. `applyMirrorUpdate(bytes)` is
+  `Doc::import_host_update`: `import_with(bytes, "remote")` under the
+  same diff capture and translation as `apply_remote` (shared
+  `import_translated`), so it queues the same AppEvents, never lands
+  on the mirror's undo stack, and advances `last_persisted_vv` like a
+  server frame; the engine then folds the update's declared range into
+  `last_sent`, so the host's ops are never exported back to it.
+  `hasUnsyncedOps()` on a mirror is "committed but not yet flushed".
+- The WebSocket verbs (`handleConnected`, `handleServerBytes`,
+  `popOutbox`, `popEvent`, ...) and the persistence verbs
+  (`captureLocalOps`, the snapshot folds, the seeds) are no-ops in
+  mirror mode; the cursors read as zero / unknown and `isOnline()` as
+  false (the window's status is the host's to report).
+- `Doc.loadWithPeer(bytes, peer)`: `empty_with_peer` then
+  `import_oplog_updates` (the boot replay path: tagged remote, index
+  rebuilt once, events cleared) then `mark_persisted`, so the seed is
+  history, not undo steps and not uncaptured work, and every later
+  local op carries the leased peer.
 
-- `MirrorBridge` beside `SyncBridge`, same callbacks (`onServerFrame`,
-  `onChange`, `pumpOutbox`), over a transport interface: `subscribe(docId)
-  → {snapshot, peer}`, `send(docId, bytes)`, `onUpdate(cb)`. The app
-  implementation posts to a WebKit message handler and receives through
-  a global the Swift side calls. Bytes cross as base64.
-- `runtime.ts` picks the browser stack (IndexedDB, DEK vault, WebSocket
-  bridge, login) or the app stack (mirror) from the presence of the
-  message handler. The app stack skips the IDB boot gate entirely: the
-  snapshot is the boot.
-- Session comes from the host (account id, email, device id, the doc
-  list), not from `Login.tsx`.
-- Same source, a second Vite entry for the app, so the browser bundle is
-  untouched.
+## JS side (`js/core`, `js/web`)
+
+Built 2026-11-04 (phase 3).
+
+- `MirrorBridge` (`js/core/src/mirror-bridge.ts`, beside `SyncBridge`)
+  over a `MirrorTransport`: `subscribe(docId) → {snapshot, peer}`,
+  `unsubscribe(docId)`, `send(docId, bytes)`, `onUpdate(cb)`,
+  `onStopped(cb)`. `open(docId)` subscribes, builds the engine through
+  the injected `createEngine(seed)` and routes it; updates that land
+  while a subscribe is in flight wait and apply once the engine exists.
+  Host updates apply tagged remote and pulse `onServerFrame(docId)`;
+  `pumpOutbox()` drains every engine's mirror outbox to `send`, one
+  import at a time, in order; `onChange` is `online` on the first open,
+  `offline` once the host has stopped every doc, `drain` after each
+  pump; `onStopped(docId)` relays the host's end-of-stream. No wasm
+  import at load time, as for `SyncBridge`.
+- `js/web/src/sync/mirrorHost.ts`: the app's transport over the WebKit
+  message handler, and the host's session (`HostSessionInfo`:
+  account id, email, device id, primary doc id, server URL, doc list).
+  `detectAppHost()` is the presence of the handler. The contract the
+  Swift side implements is in the file header and under "Swift side".
+- `js/web/src/sync/mirrorRuntime.ts` (`createMirrorRuntime`): the twin
+  of `createWorkspaceRuntime` with the IO removed. Same
+  `createSyncedApp`, docs layer and view state (`viewState.ts`, now
+  shared with the browser runtime); `setOnFlush` pumps the bridge,
+  there is no `setBeforeFlush` (no capture); `drain(docId)` is what
+  the bridge's frame pulse routes to; `handOff()` flushes notes bursts
+  and every engine to the host when the window hides or unloads.
+  `createDoc` / `joinDoc` / `deleteDoc` reject with a message (the
+  DEK-touching flows, hidden in phase 4); `presence` is empty.
+- `Session` gained `mirror: boolean` and `dek: Dek | null` (null only
+  on a mirror session; the five browser-side uses guard it).
+  `sessionFromHost(info)` builds the window's session: not anonymous,
+  mirror, no key, empty `docKeys`.
+- `MirrorApp.tsx` replaces `BrowserTabGate` → `App` → `BootGate`: ask
+  the host for the session, `bridge.open` Home then every other doc (a
+  non-Home doc that will not open is skipped, not fatal), read the
+  prefs row, then `createMirrorRuntime` and `Workspace` under a
+  `SessionProvider` whose `online` is the bridge's, `lastSyncAt` null
+  (the host's sync status is phase 4), `logout` a console warning (the
+  tray signs out).
+- Entry: `js/web/mirror.html` + `src/mirror.tsx`, a second Vite input
+  beside `index.html`; the browser bundle imports nothing of it. (Not
+  `app.tsx`: that name collides with `App.tsx` on a case-insensitive
+  filesystem.)
 
 ## Swift side (`apple/MonoplanMac`)
+
+Phase 4, not built.
 
 - A window controller owning the `WKWebView`, one `Host.subscribe` per
   open doc, and the bridge: sink updates go in with `evaluateJavaScript`,
   message-handler bytes go out to `Host.import`.
+- The JS contract (`mirrorHost.ts`): a `WKScriptMessageHandlerWithReply`
+  named `monoplan`, so `postMessage` resolves with the reply or rejects
+  with the error text. Requests and replies, bytes as base64, the peer
+  as a decimal string (a u64 does not fit a JSON number), the doc id
+  as the `workspace` selector `Host.subscribe` resolves:
+  - `{kind: "session"}` → `{accountId, email, deviceId, primaryDocId,
+    serverUrl, docs: [{docId, name}]}`
+  - `{kind: "subscribe", docId}` → `{snapshot, peer}`
+  - `{kind: "unsubscribe", docId}` → `null`
+  - `{kind: "import", docId, bytes}` → `null` (`Host.import`)
+  - inbound, on `window.__monoplanHost`: `update(docId, bytes)` for
+    `MirrorSink.update`, `stopped(docId)` for `MirrorSink.stopped`.
+  The sink contract holds: deliver `update` to the webview
+  asynchronously and never call `Host.import` from inside it.
 - A `WKURLSchemeHandler` serving the Vite build out of the app bundle
-  with correct MIME types, so wasm streams, `localStorage` prefs have a
-  stable origin, and no `file://` sandbox rules apply.
-- `api.ts` gets the server URL and the session credential at boot from
-  the host.
+  with correct MIME types, loading `mirror.html`, so wasm streams,
+  `localStorage` prefs have a stable origin, and no `file://` sandbox
+  rules apply.
+- `api.ts` gets the server URL (`HostSessionInfo.serverUrl`) and the
+  session credential at boot from the host; the host's sync status
+  (online, last synced) over the same handler for the footer.
 
 ## Deferred
 
@@ -223,10 +291,31 @@ Built 2026-11-03 (phase 2). `cli/src/daemon.rs`, `core/ffi/src/lib.rs`,
   built): the import emits the remote-style `AppEvent`s, leaves
   `last_persisted_vv` behind so the next capture exports exactly the
   mirror's op, never lands on the host's undo stack, and is idempotent.
-- `core/web` under Bun: mirror-mode `flush` yields bytes a second Doc
-  imports to equality; `applyMirrorUpdate` emits the same AppEvents as
-  `apply_remote`; imported ops are excluded from undo.
-- `MonoplanMacKit`: the bridge framing and the scheme handler's MIME map.
+- `core/src/doc.rs` (`host_update_into_mirror_is_remote_for_undo_and_events`,
+  built): the mirror side; a host update is remote for events and undo,
+  not uncaptured work, idempotent, and the mirror's own echo is a no-op.
+- `js/core/test/mirror-engine.test.ts` (built): `Doc.loadWithPeer`
+  binds the peer and seeds as history; mirror-mode `flush` yields bytes
+  a host doc imports to fingerprint equality, one update per flush,
+  queued oldest first; `applyMirrorUpdate` emits exactly the AppEvents
+  `applyRemote` does for the same op and is idempotent; host updates
+  and the echo never enter the mirror's undo; the WebSocket and
+  persistence verbs are inert.
+- `js/core/test/mirror-bridge.test.ts` (built), over
+  `test/fake-mirror-host.ts` (an in-memory host that leases peers, fans
+  out and deliberately echoes): both directions converge through the
+  bridge, an update during an in-flight subscribe is not lost, two
+  docs route independently and `close` releases one, a stopped host
+  ends routing and refused imports are reported.
+- `js/web/test/mirrorRuntime.test.ts` (built): `createMirrorRuntime`
+  renders the host's docs, a store mutation reaches the host on the
+  flush pump with no capture, a host change reaches the store through
+  the frame pulse, undo reverses only the window's op, notes on the
+  idle timer reach the host on hand-off, an update queued before the
+  store existed is not dispatched twice; the WebKit transport's
+  framing (base64 both ways, a u64 peer as `BigInt`, request order).
+- `MonoplanMacKit` (phase 4): the bridge framing and the scheme
+  handler's MIME map.
 - Browser or app smoke only when asked.
 
 ## Phases
@@ -253,9 +342,16 @@ Built 2026-11-03 (phase 2). `cli/src/daemon.rs`, `core/ffi/src/lib.rs`,
    `MIRROR_ORIGIN` in core; `Host.subscribe` / `Host.import`,
    `MirrorSink` and `Subscription` on the FFI; tests above. No Swift
    consumer yet; the generated bindings carry the new surface.
-3. **Mirror in wasm and JS.** Mirror mode, `MirrorBridge`, app runtime,
-   Bun tests.
-4. **The window.** Scheme handler, bridge, session injection, hidden
-   flows.
+3. **Mirror in wasm and JS** (built 2026-11-04). `SyncEngine.mirror`,
+   `takeMirrorOutbox`, `applyMirrorUpdate`, `Doc.loadWithPeer` and
+   `Doc::import_host_update`; `MirrorBridge` in `js/core`; the WebKit
+   transport, `createMirrorRuntime`, `MirrorApp` and the `mirror.html`
+   entry in `js/web`; the Bun tests above. `Session.mirror` /
+   `dek: Dek | null`; `createViewState` shared with the browser
+   runtime. No Swift consumer yet; the browser bundle is unchanged.
+4. **The window.** Window controller, scheme handler, the message
+   handler and inbound global per the contract above, session and
+   credential injection into `api.ts`, the host's sync status in the
+   footer, hidden DEK-touching flows (`Session.mirror`).
 5. Amend `daemon-plan.md` "Process topology" and `apple/README.md` as
    each lands.

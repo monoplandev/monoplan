@@ -12,7 +12,8 @@
     },
     "./storage/dek-vault": "./src/storage/dek-vault.ts",
     "./storage/web-db": "./src/storage/web-db.ts",
-    "./sync-bridge": "./src/sync-bridge.ts"
+    "./sync-bridge": "./src/sync-bridge.ts",
+    "./mirror-bridge": "./src/mirror-bridge.ts"
   },
   "scripts": {
     "test": "bun test",

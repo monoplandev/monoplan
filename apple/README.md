@@ -14,7 +14,14 @@ change as Loro update bytes through a `MirrorSink`) and `Host.import`
 Swift consumer yet. The tray never opens the socket. The window is that
 plan's phases 3 and 4: a webview running the web client over a mirror
 doc that `Host` seeds and converges through that surface, with a peer
-id of its own. The socket stays the CLI's; it never carries the mirror. Typed native views
+id of its own. Phase 3, the webview's side, is built (2026-11-04):
+`js/web/mirror.html` runs the client over `SyncEngine.mirror` and talks
+to the app through a WebKit message handler named `monoplan` and the
+`window.__monoplanHost` global; the exact requests, replies and base64
+framing are in that spec's "Swift side" and in
+`js/web/src/sync/mirrorHost.ts`. Phase 4, the window controller, the
+handler and the scheme handler serving the Vite build, is not built.
+The socket stays the CLI's; it never carries the mirror. Typed native views
 over the FFI are not planned while the UI is web. The offline
 `MonoplanStore` prototype from
 [`spec/swift-ffi-plan.md`](../spec/swift-ffi-plan.md) was removed on

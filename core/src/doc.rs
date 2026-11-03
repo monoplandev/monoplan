@@ -4548,6 +4548,25 @@ impl Doc {
         })
     }
 
+    /// The mirror's side of host → mirror (`spec/mac-window-plan.md`
+    /// "Host to mirror"): plaintext Loro updates the host exported since
+    /// what it last sent this doc. Imported tagged `remote`, so the
+    /// window's own undo never reverses a host-side change (a CLI
+    /// command, a remote device, another window), and translated to
+    /// `AppEvent`s exactly as a server frame is. Ops the mirror already
+    /// holds (its own, echoing back) are skipped by Loro. Advances
+    /// `last_persisted_vv` by the declared range like a remote frame:
+    /// nothing here is local work awaiting capture. Returns that range.
+    pub fn import_host_update(&mut self, bytes: &[u8]) -> Result<VersionVector, DocError> {
+        self.import_translated(|doc| {
+            let meta = LoroDoc::decode_import_blob_meta(bytes, false)
+                .map_err(|e| DocError::Loro(e.to_string()))?;
+            doc.inner.import_with(bytes, "remote")?;
+            doc.last_persisted_vv.merge(&meta.partial_end_vv);
+            Ok(meta.partial_end_vv)
+        })
+    }
+
     /// Run `import` under diff capture and translate what it changed
     /// into `AppEvent`s. Shared by the remote and mirror import paths:
     /// the capture / undo-rearm / fallback choreography is the same,
@@ -8554,6 +8573,62 @@ mod tests {
         // Idempotent.
         host.import_mirror_update(&ops).unwrap();
         assert_eq!(host.items_in_list(LIST_INBOX, false).len(), 1);
+    }
+
+    /// The mirror's side (`import_host_update`): a host update is
+    /// translated to remote-style events, never lands on the window's
+    /// undo stack, is not uncaptured local work, and is idempotent; the
+    /// window's own ops echoing back through it are a no-op.
+    #[test]
+    fn host_update_into_mirror_is_remote_for_undo_and_events() {
+        let mut host = Doc::new_with_peer(1).unwrap();
+        let seed = host.export_snapshot_bytes().unwrap();
+        let mut mirror = Doc::empty_with_peer(2).unwrap();
+        mirror.import_oplog_updates(&seed).unwrap();
+        mirror.mark_persisted();
+        assert_eq!(mirror.peer_id(), 2);
+
+        // Host to mirror.
+        let since = host.oplog_vv();
+        let host_item = host.add_item(LIST_INBOX, "host").unwrap();
+        let update = host.export_updates_after(&since).unwrap();
+        let range = mirror.import_host_update(&update).unwrap();
+        assert!(range.get(&1).copied() > Some(0));
+        assert_eq!(mirror.get_item(&host_item).unwrap().text, "host");
+        let events = mirror.drain_events();
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AppEvent::ItemAdded { id, .. } if *id == host_item)),
+            "{events:?}"
+        );
+        assert!(
+            !mirror.has_uncaptured_ops(),
+            "a host update is not local work"
+        );
+
+        // The window's own edit, echoed back inside a later host update,
+        // is skipped; its undo step is still the window's.
+        let since = mirror.oplog_vv();
+        let window_item = mirror.add_item(LIST_INBOX, "window").unwrap();
+        let ops = mirror.export_updates_after(&since).unwrap();
+        let host_since = host.oplog_vv();
+        host.import_mirror_update(&ops).unwrap();
+        let echo = host.export_updates_after(&host_since).unwrap();
+        let _ = mirror.drain_events();
+        mirror.import_host_update(&echo).unwrap();
+        assert!(mirror.drain_events().is_empty(), "echo changes nothing");
+        assert_eq!(mirror.items_in_list(LIST_INBOX, false).len(), 2);
+
+        // Undo reverses only the window's add; the host's item stays.
+        assert!(mirror.undo().unwrap());
+        assert!(mirror.get_item(&window_item).is_none());
+        assert!(mirror.get_item(&host_item).is_some());
+        assert!(!mirror.can_undo());
+
+        // Idempotent.
+        mirror.import_host_update(&update).unwrap();
+        assert_eq!(mirror.items_in_list(LIST_INBOX, false).len(), 1);
     }
 
     /// The aged sweep drops a long-closed item's entry without moving
