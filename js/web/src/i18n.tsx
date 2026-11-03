@@ -496,7 +496,6 @@ export type Messages = {
     localOnlyAccount: string;
     /** The macOS app's window: sign-out and account deletion are the
      *  menu bar's (`Session.mirror`). */
-    managedByApp: string;
     loginToSeeDevices: string;
     email: string;
     thisDevice: string;
@@ -867,8 +866,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       timeFormat24: "24 h",
       localOnlyAccount:
         "Estás usando una cuenta solo local. Usa Iniciar sesión o Crear cuenta desde el menú de la cuenta para hacer copia de seguridad de tus datos y sincronizar entre dispositivos.",
-      managedByApp:
-        "Cerrar sesión y eliminar la cuenta se hacen desde la app de la barra de menús.",
       loginToSeeDevices: "Inicia sesión para ver los dispositivos vinculados a tu cuenta.",
       email: "Correo",
       thisDevice: "Este dispositivo",
@@ -1235,7 +1232,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       timeFormat24: "24h",
       localOnlyAccount:
         "You're using a local-only account. Use Sign in or Sign up from the account menu to back up your data and sync across devices.",
-      managedByApp: "Signing out and deleting the account are done from the menu bar app.",
       loginToSeeDevices: "Log in to see devices linked to your account.",
       email: "Email",
       thisDevice: "This device",

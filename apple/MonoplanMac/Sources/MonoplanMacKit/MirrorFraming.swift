@@ -21,9 +21,6 @@ public enum HostRequest: Equatable {
     /// A title-bar gesture on the page's own strip (the window has no
     /// title bar of its own; `.nav-titlebar` stands in for it).
     case window(WindowGesture)
-    /// The page's Settings entry: the window has no Settings dialog of
-    /// its own, the app's Settings window opens instead.
-    case openSettings
     /// Whether Edit › Undo / Redo should be enabled: the doc's undo
     /// state, or a text field with focus (its own undo). Pushed by the
     /// page whenever either changes.
@@ -77,8 +74,6 @@ public enum HostRequest: Equatable {
         case "window":
             guard let gesture = WindowGesture(rawValue: try string("action")) else { throw ParseError.badValue("action") }
             self = .window(gesture)
-        case "openSettings":
-            self = .openSettings
         case "undoState":
             func bool(_ key: String) throws -> Bool {
                 guard let v = body[key] as? Bool else { throw ParseError.missing(key) }

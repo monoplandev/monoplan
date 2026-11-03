@@ -44,8 +44,7 @@ final class TrayController: NSObject, NSMenuDelegate {
     /// controller's running host.
     private lazy var webWindow = WebWindowController(
         hostProvider: { [weak self] in self?.hostController.runningHost },
-        onVisibility: { visible in NSApp.setActivationPolicy(visible ? .regular : .accessory) },
-        onOpenSettings: { [weak self] in self?.settings().show() })
+        onVisibility: { visible in NSApp.setActivationPolicy(visible ? .regular : .accessory) })
     /// Whether the last client state was connected, to tell a host
     /// coming (back) up from a status refresh.
     private var hadHost = false

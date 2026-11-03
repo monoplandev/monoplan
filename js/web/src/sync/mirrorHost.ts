@@ -14,8 +14,6 @@
 //   { kind: "import", docId, bytes: b64 }     → null   (`Host.import`)
 //   { kind: "window", action }                → null   (a title-bar gesture,
 //                                                       see `postWindowGesture`)
-//   { kind: "openSettings" }                  → null   (the app's Settings
-//                                                       window; the page has none)
 //   { kind: "undoState", canUndo, canRedo }   → null   (enables Edit › Undo / Redo)
 //
 // Inbound (Swift → JS, by `evaluateJavaScript`), on `window.__monoplanHost`:
@@ -74,7 +72,6 @@ export type HostRequest =
   | { kind: "unsubscribe"; docId: string }
   | { kind: "import"; docId: string; bytes: string }
   | { kind: "window"; action: WindowGesture }
-  | { kind: "openSettings" }
   | { kind: "undoState"; canUndo: boolean; canRedo: boolean };
 
 /** What the sidebar's title strip (`.nav-titlebar`) forwards: the
@@ -159,13 +156,6 @@ export function onTitlebarMouseDown(e: MouseEvent): void {
  *  forget: the app acts on the mouse event it is already holding. */
 export function postWindowGesture(action: WindowGesture): void {
   post({ kind: "window", action });
-}
-
-/** Open the app's Settings window: in the app the page has no Settings
- *  dialog (every device preference is the app's, spec/mac-window-plan.md
- *  "Settings"). */
-export function postOpenSettings(): void {
-  post({ kind: "openSettings" });
 }
 
 /** What Edit › Undo / Redo in the app's menu bar run: the window's one

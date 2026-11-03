@@ -274,7 +274,7 @@ first, backed by the in-process `HostCmd::Session` /
   - `{kind: "import", docId, bytes}` → `null` (`Host.import`)
   - `{kind: "undoState", canUndo, canRedo}` → `null`: enables Edit ›
     Undo / Redo. In the window the menu bar's Edit menu is the one undo
-    surface (the page's sidebar menu hides its Undo / Redo rows there):
+    surface (the page's sidebar app menu is not rendered there):
     the two items target the app, which evaluates
     `__monoplanHost.undo()` / `.redo()`; the page undoes a focused text
     field's own history first (`execCommand`), else the doc's, under
@@ -399,13 +399,16 @@ the module-level readers (the global when present, else the cookie /
 localStorage path), and a signal fed by the inbound call that the
 same modules' setters consume. Under `[data-shell="mac"]` the page's
 setters do not persist (the app's store is the truth). **The window
-has no Settings dialog at all** (built 2026-11-04): with General the
-app's, Devices native, Account's email on the Account pane and the
-Advanced facts in the console everywhere, nothing was left for it, so
-`Workspace.tsx` does not render it in the mirror and the sidebar app
-menu's Settings item posts `{kind: "openSettings"}`, which the app
-answers by showing its Settings window (⌘, in the main menu does the
-same). The browser keeps the full dialog untouched. `openSettings`,
+has no Settings dialog and no sidebar app menu** (built 2026-11-04):
+with General the app's, Devices native, Account's email on the
+Account pane and the Advanced facts in the console everywhere,
+nothing was left for the dialog; and with Settings and Edit › Undo /
+Redo in the menu bar and sign-out in the tray, nothing was left for
+the sidebar's app menu either. `Workspace.tsx` renders neither in the
+mirror, and both keep no per-row conditions for it (the earlier
+`Session.mirror` guards inside them are gone). Casualties, accepted
+for now: the keyboard-shortcuts dialog and the website link are not
+reachable in the window. The browser keeps both untouched.
 `HostInbound.settings` and `WindowSettings` are framed in
 `MirrorFraming.swift` and `mirrorHost.ts` and tested there like the
 rest of the contract.

@@ -61,7 +61,6 @@ import { MobileBars } from "./MobileShell.tsx";
 import {
   isMacShell,
   onTitlebarMouseDown,
-  postOpenSettings,
   postUndoState,
   setUndoRedoHandler,
 } from "./sync/mirrorHost.ts";
@@ -2821,21 +2820,23 @@ export function Workspace(props: {
         members={members}
         footer={
           <>
+            {/* Not in the app's window (spec/mac-window-plan.md
+                "Settings"): the menu bar has Settings and Undo / Redo,
+                the tray signs out; the shortcuts dialog is not reachable
+                there for now. */}
+            <Show when={!session.session().mirror}>
             <NavMenu
               docs={docs}
               session={session.session()}
               logout={() => setLogoutConfirmOpen(true)}
-              // In the app's window every setting is the app's: its
-              // Settings window opens, the page's dialog never does.
-              onOpenSettings={() =>
-                session.session().mirror ? postOpenSettings() : setSettingsOpen(true)
-              }
+              onOpenSettings={() => setSettingsOpen(true)}
               onOpenShortcuts={() => setShortcutsOpen(true)}
               onSession={session.swapSession}
               // One workspace per accountless install (`auth.md`); signup
               // is the gate to more.
               onNewDoc={canManageDocs() ? () => setNewDocOpen(true) : null}
             />
+            </Show>
             <StatusSlot
               docs={docs}
               online={session.online()}
@@ -2907,8 +2908,8 @@ export function Workspace(props: {
         }}
       />
       {/* Not in the app's window (spec/mac-window-plan.md "Settings"):
-          General is the app's, Devices is its Devices pane and Account's
-          email is on its Account pane. */}
+          the app's Settings window has every pane; the dialog is not
+          reachable there and keeps no conditions for it. */}
       <Show when={!session.session().mirror}>
       <Settings
         open={settingsOpen()}

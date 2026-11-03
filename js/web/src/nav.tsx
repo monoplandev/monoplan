@@ -1259,7 +1259,9 @@ export function NavFindButton(props: { onClick: () => void }) {
 /** The app-menu dropdown (undo/redo | new workspace, settings | website,
  *  shortcuts, auth) plus the auth dialog the Sign in / Sign up items
  *  open. Import / export live on each workspace heading's "..." menu. Lives in the
- *  sidebar footer (see `Nav`'s `footer` prop). */
+ *  sidebar footer (see `Nav`'s `footer` prop). Not rendered in the macOS
+ *  app's window (spec/mac-window-plan.md "Settings"): the menu bar has
+ *  Settings and Edit › Undo / Redo, the tray signs out. */
 export function NavMenu(props: {
   /** Undo / redo go through the layer (the doc that acted last). */
   docs: DocsLayer;
@@ -1319,9 +1321,6 @@ export function NavMenu(props: {
         </Tooltip>
         <DropdownMenu.Portal>
           <DropdownMenu.Content class="dropdown-menu-content">
-            {/* Not in the app's window: the menu bar's Edit › Undo / Redo
-                is the one undo surface there (spec/mac-window-plan.md). */}
-            <Show when={!props.session.mirror}>
             <DropdownMenu.Item
               class="dropdown-menu-item"
               disabled={!canUndo()}
@@ -1343,7 +1342,6 @@ export function NavMenu(props: {
               <kbd class="menu-shortcut">⌘⇧Z</kbd>
             </DropdownMenu.Item>
             <DropdownMenu.Separator class="dropdown-menu-separator" />
-            </Show>
             <Show when={props.onNewDoc}>
               {(onNewDoc) => (
                 <DropdownMenu.Item
@@ -1392,9 +1390,7 @@ export function NavMenu(props: {
                 {m().auth.signUp}
               </DropdownMenu.Item>
             </Show>
-            {/* Not in the app window: the tray signs out
-                (`Session.mirror`). */}
-            <Show when={!props.session.anonymous && !props.session.mirror}>
+            <Show when={!props.session.anonymous}>
               <DropdownMenu.Item
                 class="dropdown-menu-item"
                 onSelect={() => props.logout()}
