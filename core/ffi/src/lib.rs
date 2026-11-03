@@ -5,10 +5,12 @@
 //! loop embedded in the app's process (`spec/daemon-plan.md`, amended
 //! 2026-10-27), and the app's client path into it: `Host::request`
 //! and `Host::watch`, the socket's request and watch frames as
-//! function calls (`spec/mac-window-plan.md`, phase 1). The app is a
-//! client of its own host here and never over the socket, which stays
-//! the CLI's. The mirror for the window (`subscribe` / `import`) is the
-//! next layer on this object. The earlier offline `MonoplanStore`
+//! function calls (`spec/mac-window-plan.md`, phase 1), and the mirror
+//! for the window: `Host::subscribe` (a snapshot, a leased peer id, and
+//! updates streamed to a `MirrorSink`) and `Host::import` (the
+//! window's ops applied as local), phase 2 of the same plan. The app
+//! is a client of its own host here and never over the socket, which
+//! stays the CLI's. The earlier offline `MonoplanStore`
 //! prototype (`spec/swift-ffi-plan.md`) was removed on 2026-10-27: it
 //! booted a second doc under a fake doc id with a caller-held DEK, and
 //! nothing but its smoke test used it.
@@ -195,6 +197,80 @@ impl Drop for Watcher {
     }
 }
 
+/// Where a mirror's updates go (`spec/mac-window-plan.md` "Host to
+/// mirror"): the app's object, called on the host loop's thread, so the
+/// app hops to the webview's queue inside and never calls back into
+/// `Host` synchronously (the loop is busy delivering; an `import` from
+/// inside `update` would wait on itself). Each `update` is Loro update
+/// bytes since the previous one (or since the snapshot), to import into
+/// the mirror doc tagged `remote`.
+#[uniffi::export(with_foreign)]
+pub trait MirrorSink: Send + Sync {
+    fn update(&self, bytes: Vec<u8>);
+    /// The host loop has ended, or the doc was closed under the mirror.
+    /// No update follows; subscribe again once there is a host.
+    fn stopped(&self);
+}
+
+/// Adapts the uniffi callback to the daemon's sink trait.
+struct ForeignSink(Arc<dyn MirrorSink>);
+
+impl monoplan_cli::daemon::MirrorSink for ForeignSink {
+    fn update(&self, bytes: Vec<u8>) {
+        self.0.update(bytes);
+    }
+    fn stopped(&self) {
+        self.0.stopped();
+    }
+}
+
+/// One live mirror of one doc (`spec/mac-window-plan.md`): the seed the
+/// webview loads and the handle its ops go back through
+/// (`Host::import`). Dropping it, or `close`, ends the subscription and
+/// releases the peer slot; the sink hears nothing more.
+#[derive(uniffi::Object)]
+pub struct Subscription {
+    inner: Mutex<Option<monoplan_cli::daemon::Subscription>>,
+    doc_id: String,
+    peer_id: u64,
+    snapshot: Vec<u8>,
+}
+
+#[uniffi::export]
+impl Subscription {
+    /// The doc being mirrored, as its UUID string.
+    pub fn doc_id(&self) -> String {
+        self.doc_id.clone()
+    }
+
+    /// The peer the mirror doc must write under for the life of this
+    /// subscription (`Doc.loadWithPeer` on the wasm side).
+    pub fn peer_id(&self) -> u64 {
+        self.peer_id
+    }
+
+    /// Plaintext Loro snapshot of the doc at subscribe time; the sink's
+    /// updates continue from exactly here.
+    pub fn snapshot(&self) -> Vec<u8> {
+        self.snapshot.clone()
+    }
+
+    /// End the subscription now rather than on release.
+    pub fn close(&self) {
+        self.inner.lock().unwrap().take();
+    }
+}
+
+impl From<monoplan_cli::daemon::MirrorError> for HostError {
+    fn from(e: monoplan_cli::daemon::MirrorError) -> Self {
+        use monoplan_cli::daemon::MirrorError;
+        match e {
+            MirrorError::Stopped => HostError::Stopped,
+            MirrorError::Failed(message) => HostError::Failed { message },
+        }
+    }
+}
+
 fn encode(reply: &monoplan_cli::ipc::Reply) -> Vec<u8> {
     // `Reply` is plain data over serde; the only failure is a
     // msgpack bug, which the socket path would hit identically.
@@ -343,6 +419,49 @@ impl Host {
         Ok(Arc::new(Watcher {
             task: Mutex::new(Some(task)),
         }))
+    }
+
+    /// Mirror a doc in the window (`spec/mac-window-plan.md`, phase 2):
+    /// `workspace` is a `-w` selector or nil for Home. The returned
+    /// subscription carries the snapshot and the leased peer id; from
+    /// then on `sink.update` gets every change the host applies (a CLI
+    /// command, a remote frame, another window's import) until the
+    /// subscription is closed or released. Blocks for the snapshot
+    /// export, so call it off the main thread.
+    pub fn subscribe(
+        &self,
+        workspace: Option<String>,
+        sink: Arc<dyn MirrorSink>,
+    ) -> Result<Arc<Subscription>, HostError> {
+        if self.client.is_stopped() {
+            return Err(HostError::Stopped);
+        }
+        let sub = self
+            .client
+            .subscribe_blocking(workspace, Box::new(ForeignSink(sink)))?;
+        Ok(Arc::new(Subscription {
+            doc_id: sub.doc_id.0.to_string(),
+            peer_id: sub.peer_id,
+            snapshot: sub.snapshot.clone(),
+            inner: Mutex::new(Some(sub)),
+        }))
+    }
+
+    /// Apply the window's ops (Loro update bytes since its last send)
+    /// to the host's doc: local from here, WALed on the next capture,
+    /// pushed, and fanned out to any other mirror. Blocks until they
+    /// are durable, so call it off the main thread. `Failed` after
+    /// `close`, or for bytes Loro will not import.
+    pub fn import(&self, subscription: Arc<Subscription>, bytes: Vec<u8>) -> Result<(), HostError> {
+        // Held for the call, so a concurrent `close` waits for the
+        // import to land rather than racing it.
+        let guard = subscription.inner.lock().unwrap();
+        let Some(sub) = guard.as_ref() else {
+            return Err(HostError::Failed {
+                message: "subscription closed".into(),
+            });
+        };
+        Ok(sub.import_blocking(bytes)?)
     }
 
     /// Still serving? False once a client's `Shutdown` ended the loop.

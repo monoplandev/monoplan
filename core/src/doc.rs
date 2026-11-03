@@ -101,6 +101,12 @@ pub const NOTES_ORIGIN_PREFIX: &str = "notes:";
 /// `UndoManager` so a background sweep never becomes the user's next
 /// undo step (`spec/sync-protocol.md` "Commit origin tagging").
 pub const SWEEP_ORIGIN: &str = "sweep";
+/// Commit origin for updates imported from an in-process mirror doc
+/// (`spec/mac-window-plan.md`): the macOS window's own doc, writing
+/// under a peer the host leased for it. Excluded from the host's
+/// `UndoManager` so `monoplan undo` never reverses a window edit, as it
+/// never reverses another device's; the window's undo is its own doc's.
+pub const MIRROR_ORIGIN: &str = "mirror";
 /// Atomic location register: `"<list_id>:<placement_id>"`. Written as
 /// one scalar so list membership and placement can never be torn apart
 /// by concurrent edits. See `Location`.
@@ -1675,6 +1681,7 @@ pub struct Doc {
 fn make_undo_manager(inner: &LoroDoc) -> UndoManager {
     let mut um = UndoManager::new(inner);
     um.add_exclude_origin_prefix("remote");
+    um.add_exclude_origin_prefix(MIRROR_ORIGIN);
     um.add_exclude_origin_prefix(NOTES_ORIGIN_PREFIX);
     um.add_exclude_origin_prefix(SWEEP_ORIGIN);
     um
@@ -4412,7 +4419,19 @@ impl Doc {
         } else {
             VersionVector::decode(from_vv_bytes).map_err(|e| DocError::Loro(e.to_string()))?
         };
-        Ok(self.inner.export(ExportMode::updates(&vv))?)
+        self.export_updates_after(&vv)
+    }
+
+    /// Plaintext Loro updates strictly after `from`: the typed form of
+    /// [`Doc::export_updates_after_bytes`], for in-process consumers
+    /// that keep a `VersionVector` rather than its encoding (the host's
+    /// mirror fan-out, `spec/mac-window-plan.md`). Empty when `from`
+    /// already covers the oplog.
+    pub fn export_updates_after(&self, from: &VersionVector) -> Result<Vec<u8>, DocError> {
+        if from.includes_vv(&self.inner.oplog_vv()) {
+            return Ok(Vec::new());
+        }
+        Ok(self.inner.export(ExportMode::updates(from))?)
     }
 
     /// Apply one oplog replay blob without rebuilding disposable indexes.
@@ -4500,17 +4519,49 @@ impl Doc {
     where
         I: IntoIterator<Item = &'a EncryptedBlob>,
     {
+        self.import_translated(|doc| {
+            let mut imported_vv = VersionVector::new();
+            for blob in blobs {
+                imported_vv.merge(&doc.import_remote_blob(dek, blob)?);
+            }
+            Ok(imported_vv)
+        })
+    }
+
+    /// Apply a plaintext Loro update from an in-process mirror
+    /// (`spec/mac-window-plan.md`): the webview's doc, writing under a
+    /// peer the host leased for it. Imported tagged [`MIRROR_ORIGIN`],
+    /// so the host's own undo never reverses a window edit, exactly as
+    /// it never reverses another device's. Unlike [`Doc::apply_remote`]
+    /// this leaves `last_persisted_vv` alone: the ops are *local* to this
+    /// device as far as durability and sync go, so the next WAL capture
+    /// and push pick them up like anything a command committed here.
+    /// Returns the update's declared range (what the mirror provably
+    /// holds), which a host uses to avoid echoing it straight back.
+    /// AppEvents are translated as for a remote frame.
+    pub fn import_mirror_update(&mut self, bytes: &[u8]) -> Result<VersionVector, DocError> {
+        self.import_translated(|doc| {
+            let meta = LoroDoc::decode_import_blob_meta(bytes, false)
+                .map_err(|e| DocError::Loro(e.to_string()))?;
+            doc.inner.import_with(bytes, MIRROR_ORIGIN)?;
+            Ok(meta.partial_end_vv)
+        })
+    }
+
+    /// Run `import` under diff capture and translate what it changed
+    /// into `AppEvent`s. Shared by the remote and mirror import paths:
+    /// the capture / undo-rearm / fallback choreography is the same,
+    /// only the source of the bytes differs.
+    fn import_translated(
+        &mut self,
+        import: impl FnOnce(&mut Self) -> Result<VersionVector, DocError>,
+    ) -> Result<VersionVector, DocError> {
         let pre_lists: Vec<ListView> = self.all_lists();
         let pre_settings = self.get_settings();
         let pre_peer_counter = self.local_peer_counter();
         self.begin_diff_capture(DiffCaptureMode::Import);
 
-        let mut imported_vv = VersionVector::new();
-        let result = blobs.into_iter().try_for_each(|blob| {
-            let vv = self.import_remote_blob(dek, blob)?;
-            imported_vv.merge(&vv);
-            Ok::<(), DocError>(())
-        });
+        let result = import(self);
         let diffs = self.finish_diff_capture();
         // A blob advancing the *local* peer's counter is this device's
         // own history arriving by import (boot replay, reused peer
@@ -4520,13 +4571,16 @@ impl Doc {
         if self.local_peer_counter() != pre_peer_counter {
             self.rearm_undo();
         }
-        if let Err(e) = result {
-            // A batch may have applied earlier blobs before a later one
-            // failed — resync events for whatever landed, then surface
-            // the error.
-            self.emit_diff_fallback();
-            return Err(e);
-        }
+        let imported_vv = match result {
+            Ok(vv) => vv,
+            Err(e) => {
+                // A batch may have applied earlier blobs before a later
+                // one failed — resync events for whatever landed, then
+                // surface the error.
+                self.emit_diff_fallback();
+                return Err(e);
+            }
+        };
         if self
             .translate_captured_diffs(diffs, &pre_lists, &pre_settings)
             .is_err()
@@ -8444,6 +8498,62 @@ mod tests {
         assert!(doc.get_item(&a).is_none());
         assert_eq!(doc.order_list(LIST_INBOX).len(), 0);
         assert!(!doc.can_undo());
+    }
+
+    /// A mirror's ops (`import_mirror_update`, `spec/mac-window-plan.md`)
+    /// land like a remote frame for events and undo (translated
+    /// `AppEvent`s; never on the host's undo stack) but like a local
+    /// commit for durability: `last_persisted_vv` is untouched, so the
+    /// next WAL capture / push export carries them. Re-importing is a
+    /// no-op, and the returned range is what the mirror sent.
+    #[test]
+    fn mirror_import_is_uncaptured_local_and_excluded_from_undo() {
+        let dek = Dek::generate();
+        let mut host = Doc::new_with_peer(1).unwrap();
+        let host_item = host.add_item(LIST_INBOX, "host").unwrap();
+        let seed = host.pending_export(&dek).unwrap().unwrap();
+        host.mark_persisted();
+        assert!(!host.has_uncaptured_ops());
+        let _ = host.drain_events();
+
+        let mut mirror = Doc::empty_with_peer(2).unwrap();
+        mirror.apply_remote(&dek, &seed).unwrap();
+        let since = mirror.oplog_vv();
+        let mirror_item = mirror.add_item(LIST_INBOX, "window").unwrap();
+        let ops = mirror.export_updates_after(&since).unwrap();
+
+        let range = host.import_mirror_update(&ops).unwrap();
+        assert!(range.get(&2).copied() > Some(0), "the mirror's own ops");
+        assert!(range.get(&1).is_none(), "nothing of the host's own");
+        assert_eq!(host.get_item(&mirror_item).unwrap().text, "window");
+        // Translated to events like a remote frame.
+        let events = host.drain_events();
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AppEvent::ItemAdded { id, .. } if *id == mirror_item)),
+            "{events:?}"
+        );
+        // Local for durability: uncaptured until the next WAL capture,
+        // which exports exactly the mirror's op.
+        assert!(host.has_uncaptured_ops());
+        let captured = host.pending_export(&dek).unwrap().unwrap();
+        let mut replica = Doc::empty();
+        replica.apply_remote(&dek, &seed).unwrap();
+        replica.apply_remote(&dek, &captured).unwrap();
+        assert_eq!(replica.get_item(&mirror_item).unwrap().text, "window");
+        host.mark_persisted();
+
+        // Never the host's undo step: undoing reverses the host's own
+        // add and leaves the window's item alone.
+        assert!(host.undo().unwrap());
+        assert!(host.get_item(&host_item).is_none());
+        assert!(host.get_item(&mirror_item).is_some());
+        assert!(!host.can_undo());
+
+        // Idempotent.
+        host.import_mirror_update(&ops).unwrap();
+        assert_eq!(host.items_in_list(LIST_INBOX, false).len(), 1);
     }
 
     /// The aged sweep drops a long-closed item's entry without moving

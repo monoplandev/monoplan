@@ -58,6 +58,16 @@ done
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-14.0}"
 export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-17.0}"
 
+# Don't strip the release build. Cargo's release default (`strip =
+# "debuginfo"`) also strips the proc-macro dylibs it builds for the host,
+# and on macOS 27.2 with rustc 1.96 dyld refuses to load the result
+# ("mis-aligned LINKEDIT string pool"), which rustc then reports as
+# `error[E0463]: can't find crate for uniffi_internal_macros` while
+# compiling `uniffi_pipeline` (seen 2026-11-03). Nothing we ship is
+# affected: the static libs carry no strip step of their own and the
+# app's own build decides what to strip. Honour an explicit override.
+export CARGO_PROFILE_RELEASE_STRIP="${CARGO_PROFILE_RELEASE_STRIP:-none}"
+
 echo ">> building staticlib (release) for ${#TARGETS[@]} targets"
 for t in "${TARGETS[@]}"; do
   echo "   - $t"

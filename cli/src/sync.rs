@@ -232,6 +232,21 @@ impl Session {
         self.docs.get(&doc_id).map(|d| d.engine.doc())
     }
 
+    /// Mutable form of [`doc_for`](Self::doc_for), for the import paths
+    /// that are `&mut` on `Doc` (the host's mirror import).
+    pub(crate) fn doc_mut_for(&mut self, doc_id: DocId) -> Option<&mut Doc> {
+        self.docs.get_mut(&doc_id).map(|d| d.engine.doc_mut())
+    }
+
+    /// Lease a further peer slot in this profile, beside the session's
+    /// own: what the host hands an in-process mirror so it writes under
+    /// a peer of its own (`spec/mac-window-plan.md`, `spec/peer-id-plan.md`).
+    /// The session holds slot 0 (or the lowest it got), so the first
+    /// call here takes the next free one.
+    pub(crate) fn claim_peer(&self) -> Result<crate::peer::PeerLease, crate::peer::PeerError> {
+        crate::peer::claim(&self.profile.dir, &self.store)
+    }
+
     /// Every open doc, Home first.
     pub fn doc_ids(&self) -> Vec<DocId> {
         let mut ids = vec![self.primary];

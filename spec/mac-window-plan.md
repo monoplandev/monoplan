@@ -1,7 +1,9 @@
 # macOS window: plan
 
 Status: decided 2026-10-29; phase 1 (tray over the FFI) built the same
-day, phases 2 to 4 not built. The macOS app's window is a
+day, phase 2 (the mirror on the host: `Host.subscribe` / `Host.import`,
+`Doc::import_mirror_update`, `HostCmd`) built 2026-11-03, phases 3 and 4
+not built. The macOS app's window is a
 webview running the web client (`js/web`) over a **mirror**: a second
 Loro doc in the webview, with a peer id of its own, seeded from the
 app's in-process host and kept converged with it by exchanging Loro
@@ -98,31 +100,57 @@ Mac), durable, a key holder, or a second sync engine.
 
 ## Host side (Rust)
 
-- **Internal command enum.** The serve loop reads `Pending =
-  (Request, oneshot<Reply>)` from an mpsc that the socket connections
-  and `daemon::LocalClient` (phase 1) both feed. For the mirror it
-  becomes `HostCmd { Ipc(Request, oneshot<Reply>), Subscribe { .. },
-  Import { .. }, Unsubscribe { .. } }`. The socket handler can only
-  construct `Ipc`, so the mirror is unreachable over the socket by
-  construction, not by policy. `Request` and `Reply` (the serde IPC
-  types) do not change.
-- **`Host::subscribe(workspace, sink) -> Subscription`** (uniffi object).
-  `sink` is a uniffi callback interface with `update(bytes)` and
-  `stopped()`. The reply carries the snapshot bytes and the peer id.
-  Dropping the `Subscription` (or `Host` shutting down) releases the
-  slot lease and removes the subscriber.
-- **`Host::import(subscription, bytes)`.** Applies a plaintext update
-  from the mirror's peer. New `Doc` method, `import_mirror_update`:
-  `import_with(bytes, "mirror")`, no change to `last_persisted_vv`, then
-  the usual AppEvent drain so socket watchers get `Changed` and other
-  subscribers get the update.
-- **Fan-out.** Where the loop sends `WatchEvent::Changed` today (after a
-  local command, after a remote frame), it also walks the subscribers:
+Built 2026-11-03 (phase 2). `cli/src/daemon.rs`, `core/ffi/src/lib.rs`,
+`Doc::import_mirror_update` in `core/src/doc.rs`.
+
+- **Internal command enum.** The serve loop reads `HostCmd { Ipc(Request,
+  oneshot<Reply>), Subscribe { workspace, sink, reply }, Import { id,
+  bytes, reply }, Unsubscribe { id } }` from one unbounded mpsc that the
+  socket connections and `daemon::LocalClient` (phase 1) both feed. The
+  socket's connection task deserialises `Request`s and builds only
+  `Ipc`, so the mirror is unreachable over the socket by construction,
+  not by policy. `Request` and `Reply` (the serde IPC types) did not
+  change. The channel went unbounded (it was bounded at 16) so a
+  `Subscription`'s `Drop` can send `Unsubscribe` from any thread without
+  a runtime; every client awaits its reply before its next command, so
+  the queue depth is bounded by the client count anyway.
+- **`LocalClient::subscribe(workspace, sink) -> Subscription`**, and on
+  the FFI **`Host.subscribe(workspace, sink) -> Subscription`** (uniffi
+  object with `docId()`, `peerId()`, `snapshot()`, `close()`). `sink` is
+  `MirrorSink { update(bytes), stopped() }`, a uniffi callback interface
+  on the FFI, a plain trait in the daemon. The seed carries the
+  plaintext snapshot and the leased peer id. Dropping the
+  `Subscription` (or `close`) sends `Unsubscribe`, which drops the
+  subscriber record and with it the lease; the loop ending calls
+  `stopped()` on every live sink first, and a doc forgotten under a
+  mirror (`DocClosed`) does the same for that doc's sinks.
+- **`Subscription::import(bytes)`**, on the FFI **`Host.import(subscription,
+  bytes)`**. `Doc::import_mirror_update`: `import_with(bytes, "mirror")`
+  under the same diff capture and translation as `apply_remote` (shared
+  `import_translated`), no change to `last_persisted_vv`, returns the
+  blob's declared range. The host then persists (WAL capture picks the
+  ops up as uncaptured local), flushes the engines, pumps, and runs the
+  usual `notify_if_changed`: socket watchers get `Changed`, mirrors get
+  the update. `MIRROR_ORIGIN` is an undo-excluded prefix beside
+  `remote`, `notes:` and `sweep`.
+- **Fan-out.** `notify_if_changed` (after a local command, a remote
+  frame, a mirror import, and on the persist tick) walks the
+  subscribers: skip if `last_sent` already includes `oplog_vv()`, else
   `export(updates(&last_sent))`, deliver if non-empty, `last_sent =
-  oplog_vv()`. One VV per subscriber is the whole state.
-- **Peer lease.** `peer::claim` a second time: the host holds slot 0, the
-  flock scan gives the subscriber slot 1 (or the next free one with two
-  windows). Lease lives in the subscriber record.
+  oplog_vv()`. One VV per subscriber is the whole state. After an import
+  the importing subscriber's `last_sent` is merged with the blob's
+  declared range, so a mirror's own ops are not echoed back to it (the
+  echo would have been harmless; this just saves the bytes). A blob
+  that also carries host ops the mirror had imported is fine too: the
+  import is idempotent and the merge is still truthful.
+- **Peer lease.** `Session::claim_peer` is `peer::claim` a second time:
+  the host holds slot 0, the flock scan gives the subscriber slot 1 (or
+  the next free one with two windows). The lease lives in the
+  subscriber record.
+- **Sink contract.** `update` and `stopped` run on the host loop's
+  thread while it is delivering; a sink hands the bytes off and never
+  calls `Host.import` synchronously from inside `update` (it would wait
+  on the loop that is calling it).
 - **Tray** (built, phase 1). `Host.request(bytes) -> bytes` and
   `Host.watch(sink)`, the socket's msgpack payloads over a function
   call. The tray's `DaemonClient` keeps its codec and swaps its
@@ -180,11 +208,21 @@ Mac), durable, a key holder, or a second sync engine.
 
 ## Testing
 
-- `cli/tests/daemon.rs`: a second `Doc` subscribing through the internal
-  channel converges after a CLI command and after a remote frame; an
-  import from the subscriber's peer is WALed and pushed (the harness
-  server sees the blob); the subscriber's own ops echoing back are a
-  no-op; the slot lease is released on drop; the socket cannot subscribe.
+- `cli/tests/daemon.rs` (`mirror_converges_both_ways_through_the_host`,
+  built): a second `Doc` subscribing through the internal channel is
+  seeded under slot 1 and converges after a CLI command on the socket
+  and after a remote device's push; an op it commits and imports is
+  visible to a CLI command, pushed (the harness server gets the blob and
+  a second device pulls it), and not echoed back; a duplicate import is
+  a no-op; a second mirror takes slot 2 and is seeded with everything
+  so far; the slot is released when the subscription drops; a mirror
+  outliving the loop hears `stopped` and its import fails `Stopped`.
+  The socket cannot subscribe by construction (`Request` has no such
+  frame), so there is nothing to test there.
+- `core/src/doc.rs` (`mirror_import_is_uncaptured_local_and_excluded_from_undo`,
+  built): the import emits the remote-style `AppEvent`s, leaves
+  `last_persisted_vv` behind so the next capture exports exactly the
+  mirror's op, never lands on the host's undo stack, and is idempotent.
 - `core/web` under Bun: mirror-mode `flush` yields bytes a second Doc
   imports to equality; `applyMirrorUpdate` emits the same AppEvents as
   `apply_remote`; imported ops are excluded from undo.
@@ -209,8 +247,12 @@ Mac), durable, a key holder, or a second sync engine.
    (`local_client_shares_the_loop_with_the_socket`) and
    `DaemonClientTests`. `HostCmd` is deferred to phase 2, where the
    first variant the socket must not reach appears. Socket untouched.
-2. **Mirror on the host.** `subscribe` / `import` / lease / fan-out,
-   `Doc::import_mirror_update`, tests.
+2. **Mirror on the host** (built 2026-11-03). `HostCmd`,
+   `LocalClient::subscribe` / `Subscription::import` / lease / fan-out
+   in `cli/src/daemon.rs`; `Doc::import_mirror_update` and
+   `MIRROR_ORIGIN` in core; `Host.subscribe` / `Host.import`,
+   `MirrorSink` and `Subscription` on the FFI; tests above. No Swift
+   consumer yet; the generated bindings carry the new surface.
 3. **Mirror in wasm and JS.** Mirror mode, `MirrorBridge`, app runtime,
    Bun tests.
 4. **The window.** Scheme handler, bridge, session injection, hidden

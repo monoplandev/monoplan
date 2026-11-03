@@ -7,11 +7,14 @@ process (`spec/daemon-plan.md`, amended 2026-10-27), and the app's
 client path into it: `Host.request` and `Host.watch`, the socket's
 request and watch payloads as function calls (phase 1 of
 [`spec/mac-window-plan.md`](../spec/mac-window-plan.md), built
-2026-10-29). The tray never opens the socket. The window is that plan's
-phases 2 to 4: a webview
-running the web client over a mirror doc that `Host` seeds and converges
-through the FFI (`subscribe` / `import`), with a peer id of its own. The
-socket stays the CLI's; it never carries the mirror. Typed native views
+2026-10-29), and the host side of the window's mirror: `Host.subscribe`
+(a plaintext snapshot, a peer id leased for the mirror, and every later
+change as Loro update bytes through a `MirrorSink`) and `Host.import`
+(the mirror's ops applied as local), phase 2, built 2026-11-03 with no
+Swift consumer yet. The tray never opens the socket. The window is that
+plan's phases 3 and 4: a webview running the web client over a mirror
+doc that `Host` seeds and converges through that surface, with a peer
+id of its own. The socket stays the CLI's; it never carries the mirror. Typed native views
 over the FFI are not planned while the UI is web. The offline
 `MonoplanStore` prototype from
 [`spec/swift-ffi-plan.md`](../spec/swift-ffi-plan.md) was removed on
@@ -20,7 +23,7 @@ over the FFI are not planned while the UI is web. The offline
 ## Layering
 
 ```
-monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's daemon: Host (start, request, watch, shutdown), login, logout
+monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's daemon: Host (start, request, watch, subscribe, import, shutdown), login, logout
    → MonoplanCoreFFI.xcframework        static libs (macOS/iOS/iOS-sim) + C headers
       → MonoplanCore (SwiftPM)          generated Swift bindings + a thin facade
          → MonoplanMac / future iOS app  consume MonoplanCore as a local package
