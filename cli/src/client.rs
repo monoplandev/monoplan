@@ -241,7 +241,7 @@ async fn connect(profile: &Profile, spawn: Spawn) -> anyhow::Result<UnixStream> 
                 }
                 if spawn == Spawn::Never {
                     anyhow::bail!(
-                        "monoplan daemon is not running (start it with `monoplan daemon`)"
+                        "monoplan daemon is not running (start it with `monoplan daemon start`)"
                     );
                 }
                 spawn_daemon(profile)?;
@@ -264,6 +264,7 @@ fn spawn_daemon(profile: &Profile) -> anyhow::Result<()> {
         .open(profile.dir.join("daemon.log"))?;
     let mut cmd = Command::new(exe);
     cmd.arg("daemon")
+        .arg("start")
         .arg("--detach")
         .env("MONOPLAN_DATA_DIR", &profile.dir)
         .stdin(Stdio::null())

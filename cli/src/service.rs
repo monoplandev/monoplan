@@ -3,7 +3,7 @@
 //! A launchd agent on macOS (`~/Library/LaunchAgents/<label>.plist`,
 //! loaded into the `gui/<uid>` domain) or a systemd user unit on Linux
 //! (`~/.config/systemd/user/monoplan.service`). Both run a plain
-//! `monoplan daemon` from *this* executable's resolved path, pinned to
+//! `monoplan daemon start` from *this* executable's resolved path, pinned to
 //! the profile active at install time via `MONOPLAN_DATA_DIR`, with
 //! stderr appended to the profile's `daemon.log`.
 //!
@@ -91,7 +91,7 @@ pub async fn install() -> anyhow::Result<()> {
     }
     println!("installed  {}", path.display());
     println!(
-        "runs `{} daemon` at login for {}",
+        "runs `{} daemon start` at login for {}",
         exe.display(),
         profile.dir.display()
     );
@@ -181,6 +181,7 @@ pub fn launchd_plist(exe: &Path, profile_dir: &Path) -> String {
   <array>
     <string>{exe}</string>
     <string>daemon</string>
+    <string>start</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -216,7 +217,7 @@ pub fn systemd_unit(exe: &Path, profile_dir: &Path) -> String {
          After=network-online.target\n\
          \n\
          [Service]\n\
-         ExecStart=\"{exe}\" daemon\n\
+         ExecStart=\"{exe}\" daemon start\n\
          Environment=MONOPLAN_DATA_DIR={dir}\n\
          StandardError=append:{dir}/daemon.log\n\
          Restart=on-failure\n\
@@ -244,7 +245,7 @@ mod tests {
         );
         assert!(plist.contains("<string>app.monoplan.daemon</string>"));
         assert!(plist.contains(
-            "<string>/Applications/Monoplan.app/Contents/MacOS/monoplan</string>\n    <string>daemon</string>"
+            "<string>/Applications/Monoplan.app/Contents/MacOS/monoplan</string>\n    <string>daemon</string>\n    <string>start</string>"
         ));
         assert!(plist.contains("<string>/Users/d/Library/Application Support/monoplan</string>"));
         assert!(plist.contains("<key>SuccessfulExit</key>\n    <false/>"));
@@ -267,7 +268,7 @@ mod tests {
             Path::new("/usr/local/bin/monoplan"),
             Path::new("/home/d/.local/share/monoplan"),
         );
-        assert!(unit.contains("ExecStart=\"/usr/local/bin/monoplan\" daemon\n"));
+        assert!(unit.contains("ExecStart=\"/usr/local/bin/monoplan\" daemon start\n"));
         assert!(unit.contains("Environment=MONOPLAN_DATA_DIR=/home/d/.local/share/monoplan\n"));
         assert!(unit.contains("Restart=on-failure\n"));
     }

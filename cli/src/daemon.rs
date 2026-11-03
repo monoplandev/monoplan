@@ -1,4 +1,4 @@
-//! `monoplan daemon` — the resident host (`spec/daemon-plan.md`).
+//! `monoplan daemon start` — the resident host (`spec/daemon-plan.md`).
 //!
 //! Hold a [`Session`] open for the life of the process and drive its
 //! sans-IO engines (one per doc) from one `select!` loop over the WebSocket, client
@@ -64,19 +64,24 @@ const WATCH_BUFFER: usize = 64;
 
 const LOCK_FILE: &str = "daemon.lock";
 
-#[derive(Parser, Debug, Default)]
+#[derive(Parser, Debug)]
+#[command(subcommand_required = true, arg_required_else_help = true)]
 pub struct DaemonArgs {
     #[command(subcommand)]
-    pub sub: Option<DaemonSub>,
-    /// Started by a client: report readiness as one line on stdout
-    /// (`ready`, `already-running`, or `error: …`) and keep running.
-    /// Without it the daemon stays attached to the terminal.
-    #[arg(long)]
-    pub detach: bool,
+    pub sub: DaemonSub,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum DaemonSub {
+    /// Run the resident process attached to the terminal. Refuses if
+    /// one already holds the profile.
+    Start {
+        /// Started by a client: report readiness as one line on stdout
+        /// (`ready`, `already-running`, or `error: …`) and keep running.
+        /// Without it the daemon stays attached to the terminal.
+        #[arg(long)]
+        detach: bool,
+    },
     /// Ask the running daemon to exit and wait until it has.
     Stop,
     /// Is a daemon running for this profile?
@@ -372,16 +377,15 @@ impl LocalClient {
     }
 }
 
-/// `monoplan daemon` entry point.
+/// `monoplan daemon …` entry point.
 pub async fn run(args: DaemonArgs) -> anyhow::Result<()> {
-    match args.sub {
-        Some(DaemonSub::Stop) => return stop().await,
-        Some(DaemonSub::Status) => return status().await,
-        Some(DaemonSub::Install) => return crate::service::install().await,
-        Some(DaemonSub::Uninstall) => return crate::service::uninstall().await,
-        None => {}
-    }
-    let detach = args.detach;
+    let detach = match args.sub {
+        DaemonSub::Stop => return stop().await,
+        DaemonSub::Status => return status().await,
+        DaemonSub::Install => return crate::service::install().await,
+        DaemonSub::Uninstall => return crate::service::uninstall().await,
+        DaemonSub::Start { detach } => detach,
+    };
     // Everything up to "listening" is startup; in detach mode its
     // outcome is the one line the spawning client reads from stdout.
     // A fresh install gets its local-only workspace here, as it would

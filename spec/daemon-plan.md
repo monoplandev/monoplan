@@ -330,11 +330,11 @@ exists so the keychain move is not a protocol change.
 
 ## Daemon host
 
-`monoplan daemon [--detach]` (attached to the terminal without the
-flag), plus `daemon stop`, `daemon status`, and `daemon install` /
+`monoplan daemon start [--detach]` (attached to the terminal without the
+flag; bare `monoplan daemon` only prints help), plus `daemon stop`, `daemon status`, and `daemon install` /
 `daemon uninstall` (built 2026-10-27, `cli/src/service.rs`), which
 write or remove the launchd agent plist on macOS or the systemd user
-unit on Linux; both run a plain `monoplan daemon` from the installing
+unit on Linux; both run `monoplan daemon start` from the installing
 executable's resolved path. Restart is on failure only, so `stop`
 sticks until login. The agent and the CLI should be one file on disk
 (the app bundle's copy, symlinked into `PATH`): the build-id check
