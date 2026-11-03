@@ -837,6 +837,13 @@ export function Workspace(props: {
   // as present since (a member who joined after the load opens the doc
   // and is announced before their first item can arrive).
   const members = createMemberDirectory();
+  // Creating and deleting docs wrap or unwrap a DEK: one workspace per
+  // accountless install (`auth.md`), and the macOS app's window holds
+  // no key (`Session.mirror`), so both hide the verbs.
+  const canManageDocs = (): boolean => {
+    const s = session.session();
+    return !s.anonymous && !s.mirror;
+  };
   createEffect(() => {
     if (session.session().anonymous) return;
     for (const d of docs.docs()) if (!d.home) members.ensure(d.docId);
@@ -2758,7 +2765,7 @@ export function Workspace(props: {
         showListCounts={home.state.settings.showListCounts}
         view={view()}
         setView={navigateTo}
-        onDeleteDoc={session.session().anonymous ? null : props.deleteDoc}
+        onDeleteDoc={canManageDocs() ? props.deleteDoc : null}
         presence={props.presence}
         members={members}
         footer={
@@ -2772,7 +2779,7 @@ export function Workspace(props: {
               onSession={session.swapSession}
               // One workspace per accountless install (`auth.md`); signup
               // is the gate to more.
-              onNewDoc={session.session().anonymous ? null : () => setNewDocOpen(true)}
+              onNewDoc={canManageDocs() ? () => setNewDocOpen(true) : null}
             />
             <StatusSlot
               docs={docs}

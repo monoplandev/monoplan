@@ -434,6 +434,28 @@ impl LocalClient {
         }
     }
 
+    /// The profile as the window should see it: identity, server, and
+    /// the open docs, Home first (`spec/mac-window-plan.md` "Swift
+    /// side"). `Failed` for a local-only workspace, which has no
+    /// identity to report and nothing to mirror an account for.
+    pub async fn session(&self) -> Result<SessionInfo, MirrorError> {
+        let (tx, rx) = oneshot::channel();
+        self.requests
+            .send(HostCmd::Session { reply: tx })
+            .map_err(|_| MirrorError::Stopped)?;
+        rx.await.map_err(|_| MirrorError::Stopped)?
+    }
+
+    /// [`session`](Self::session) for a thread that is not on the
+    /// runtime (an FFI call from the app's own threads).
+    pub fn session_blocking(&self) -> Result<SessionInfo, MirrorError> {
+        let (tx, rx) = oneshot::channel();
+        self.requests
+            .send(HostCmd::Session { reply: tx })
+            .map_err(|_| MirrorError::Stopped)?;
+        rx.blocking_recv().map_err(|_| MirrorError::Stopped)?
+    }
+
     /// Subscribe to the watch stream: the sync status as of now (what
     /// `Watching` carries on the socket) and the receiver of every
     /// later event. Subscribed before the status is read, so nothing
@@ -710,6 +732,29 @@ pub(crate) struct Seed {
     snapshot: Vec<u8>,
 }
 
+/// What the window needs to know about the profile before it mirrors
+/// anything (`spec/mac-window-plan.md` "Swift side", the `session`
+/// request): the identity the loop booted with, the server it syncs
+/// with, and every doc it has open, Home first. In-process only, like
+/// the mirror: the socket has no frame for it.
+#[derive(Debug, Clone)]
+pub struct SessionInfo {
+    pub account_id: String,
+    pub email: String,
+    pub device_id: String,
+    pub primary_doc_id: DocId,
+    pub server_url: String,
+    pub docs: Vec<SessionDoc>,
+}
+
+/// One open doc as the `-w` resolver sees it.
+#[derive(Debug, Clone)]
+pub struct SessionDoc {
+    pub doc_id: DocId,
+    /// `doc_name`; `None` for Home and for an unnamed doc.
+    pub name: Option<String>,
+}
+
 /// Everything the loop is asked to do, from either client path. The
 /// socket's connection task deserialises `Request`s and can only build
 /// `Ipc`; the mirror variants exist for in-process clients alone
@@ -728,6 +773,10 @@ pub(crate) enum HostCmd {
     },
     Unsubscribe {
         id: u64,
+    },
+    /// The profile as the window should see it (`SessionInfo`).
+    Session {
+        reply: oneshot::Sender<Result<SessionInfo, MirrorError>>,
     },
 }
 
@@ -1058,11 +1107,48 @@ impl Host {
                 self.subscribers.remove(&id);
                 Ok(false)
             }
+            HostCmd::Session { reply } => {
+                let _ = reply.send(self.on_session());
+                Ok(false)
+            }
         }
     }
 
     /// Seed a mirror: lease it a peer slot, snapshot the doc, and
     /// remember where this subscriber's deliveries start.
+    fn on_session(&self) -> Result<SessionInfo, MirrorError> {
+        let account = self
+            .session
+            .account()
+            .map_err(|e| MirrorError::Failed(format!("read account: {e}")))?;
+        let Some(identity) = account.identity else {
+            return Err(MirrorError::Failed(
+                "no account: this workspace is local-only".into(),
+            ));
+        };
+        let Some((_, server_url)) = self.session.connect_params() else {
+            return Err(MirrorError::Failed(
+                "no account: this workspace is local-only".into(),
+            ));
+        };
+        Ok(SessionInfo {
+            account_id: identity.account_id,
+            email: identity.email,
+            device_id: identity.device_id,
+            primary_doc_id: account.primary_doc_id,
+            server_url: server_url.to_string(),
+            docs: self
+                .session
+                .candidates()
+                .into_iter()
+                .map(|c| SessionDoc {
+                    doc_id: c.doc_id,
+                    name: c.name,
+                })
+                .collect(),
+        })
+    }
+
     fn on_subscribe(
         &mut self,
         workspace: Option<String>,

@@ -438,15 +438,24 @@ export function Settings(props: {
                           {props.session.email}
                         </div>
                       </div>
-                      <div class="settings-row">
-                        <button
-                          type="button"
-                          class="settings-logout"
-                          onClick={() => props.logout()}
-                        >
-                          {m().nav.logOut}
-                        </button>
-                      </div>
+                      <Show
+                        when={!props.session.mirror}
+                        fallback={
+                          <div class="settings-row">
+                            <div class="settings-row-value">{m().settings.managedByApp}</div>
+                          </div>
+                        }
+                      >
+                        <div class="settings-row">
+                          <button
+                            type="button"
+                            class="settings-logout"
+                            onClick={() => props.logout()}
+                          >
+                            {m().nav.logOut}
+                          </button>
+                        </div>
+                      </Show>
                     </div>
                   }
                 >
@@ -457,8 +466,10 @@ export function Settings(props: {
                   </div>
                 </Show>
                 {/* Danger zone: its own heading and group under Account,
-                    so the destructive action never sits beside Log out. */}
-                <Show when={!props.session.anonymous}>
+                    so the destructive action never sits beside Log out.
+                    Not in the app window: the tray and the CLI delete
+                    accounts (`Session.mirror`). */}
+                <Show when={!props.session.anonymous && !props.session.mirror}>
                   <h2 class="settings-section-title settings-danger-title">
                     {m().settings.dangerZone}
                   </h2>

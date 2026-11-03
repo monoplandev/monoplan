@@ -484,6 +484,9 @@ export type Messages = {
     timeFormat12: string;
     timeFormat24: string;
     localOnlyAccount: string;
+    /** The macOS app's window: sign-out and account deletion are the
+     *  menu bar's (`Session.mirror`). */
+    managedByApp: string;
     loginToSeeDevices: string;
     email: string;
     thisDevice: string;
@@ -528,6 +531,8 @@ export type Messages = {
     createdAgo: (rel: string) => string;
     revoke: string;
     ownerOnly: string;
+    /** The macOS app's window holds no key, so it cannot mint a link. */
+    appWindowNoInvites: string;
     loadFailed: string;
     createFailed: string;
     revokeFailed: string;
@@ -861,6 +866,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       timeFormat24: "24 h",
       localOnlyAccount:
         "Estás usando una cuenta solo local. Usa Iniciar sesión o Crear cuenta desde el menú de la cuenta para hacer copia de seguridad de tus datos y sincronizar entre dispositivos.",
+      managedByApp:
+        "Cerrar sesión y eliminar la cuenta se hacen desde la app de la barra de menús.",
       loginToSeeDevices: "Inicia sesión para ver los dispositivos vinculados a tu cuenta.",
       email: "Correo",
       thisDevice: "Este dispositivo",
@@ -904,6 +911,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       createdAgo: (rel) => `Creado ${rel}`,
       revoke: "Revocar",
       ownerOnly: "Solo el propietario del espacio puede invitar.",
+      appWindowNoInvites: "Crea enlaces de invitación desde el navegador o con `monoplan workspace share`.",
       loadFailed: "No se pudieron cargar los detalles",
       createFailed: "No se pudo crear el enlace",
       revokeFailed: "No se pudo revocar el enlace",
@@ -1235,6 +1243,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       timeFormat24: "24h",
       localOnlyAccount:
         "You're using a local-only account. Use Sign in or Sign up from the account menu to back up your data and sync across devices.",
+      managedByApp: "Signing out and deleting the account are done from the menu bar app.",
       loginToSeeDevices: "Log in to see devices linked to your account.",
       email: "Email",
       thisDevice: "This device",
@@ -1278,6 +1287,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       createdAgo: (rel) => `Created ${rel}`,
       revoke: "Revoke",
       ownerOnly: "Only the workspace owner can invite people.",
+      appWindowNoInvites: "Create invite links from the browser or with `monoplan workspace share`.",
       loadFailed: "Could not load sharing details",
       createFailed: "Could not create the link",
       revokeFailed: "Could not revoke the link",

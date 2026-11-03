@@ -10,17 +10,19 @@ request and watch payloads as function calls (phase 1 of
 2026-10-29), and the host side of the window's mirror: `Host.subscribe`
 (a plaintext snapshot, a peer id leased for the mirror, and every later
 change as Loro update bytes through a `MirrorSink`) and `Host.import`
-(the mirror's ops applied as local), phase 2, built 2026-11-03 with no
-Swift consumer yet. The tray never opens the socket. The window is that
-plan's phases 3 and 4: a webview running the web client over a mirror
-doc that `Host` seeds and converges through that surface, with a peer
-id of its own. Phase 3, the webview's side, is built (2026-11-04):
-`js/web/mirror.html` runs the client over `SyncEngine.mirror` and talks
-to the app through a WebKit message handler named `monoplan` and the
+(the mirror's ops applied as local), phase 2, built 2026-11-03, plus
+`Host.session` (the signed-in identity, server and open docs the
+window boots from) and `Host.device_token` (what the app puts on the
+window's HTTP calls), phase 4. The tray never opens the socket. The
+window is that plan's phases 3 and 4, both built 2026-11-04: a webview
+running the web client (`js/web/mirror.html`, over `SyncEngine.mirror`)
+over a mirror doc that `Host` seeds and converges through that
+surface, with a peer id of its own. The page talks to the app through
+a WebKit message handler named `monoplan` and the
 `window.__monoplanHost` global; the exact requests, replies and base64
 framing are in that spec's "Swift side" and in
-`js/web/src/sync/mirrorHost.ts`. Phase 4, the window controller, the
-handler and the scheme handler serving the Vite build, is not built.
+`js/web/src/sync/mirrorHost.ts`, the Swift side in
+`MonoplanMac/Sources/MonoplanMac/WebWindow.swift`.
 The socket stays the CLI's; it never carries the mirror. Typed native views
 over the FFI are not planned while the UI is web. The offline
 `MonoplanStore` prototype from
@@ -30,7 +32,7 @@ over the FFI are not planned while the UI is web. The offline
 ## Layering
 
 ```
-monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's daemon: Host (start, request, watch, subscribe, import, shutdown), login, logout
+monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's daemon: Host (start, request, watch, subscribe, import, session, device_token, shutdown), login, logout
    → MonoplanCoreFFI.xcframework        static libs (macOS/iOS/iOS-sim) + C headers
       → MonoplanCore (SwiftPM)          generated Swift bindings + a thin facade
          → MonoplanMac / future iOS app  consume MonoplanCore as a local package
@@ -84,9 +86,9 @@ Today's rows (time, title, "in 2h 15m" / "now" / "due today" /
 "overdue"; a row opens the item in the web client), a Starred section
 with the first three rows of the Focus lens (`starred --json`) each with
 its list's name muted on the right (`list ls --json --all`), an offline
-notice when there is no server, "Open Monoplan" (alpha.monoplan.app),
+notice when there is no server, "Open Monoplan" (the window, below),
 "Settings…" and "Quit Monoplan" (which stops the host: persist, fold,
-release the profile).
+release the profile). An item row opens the window on that item.
 
 Hosting rules (`Sources/MonoplanMac/HostController.swift`): the app
 hosts whenever it runs and only ever talks to its own host. Whenever
@@ -105,11 +107,45 @@ its hello only has to match the app's package version, which the
 bundled CLI symlinked onto `PATH` guarantees.
 
 Three targets: `MonoplanMacKit` (MessagePack codec for the subset
-`rmp_serde::to_vec_named` emits, the socket client, the agenda model;
-unit-tested, no MonoplanCore dependency), the `MonoplanMac` executable
-(AppKit, the host controller) and `MonoplanCore` (the prebuilt
+`rmp_serde::to_vec_named` emits, the socket client, the agenda model,
+the window's message framing and scheme routes; unit-tested, no
+MonoplanCore dependency), the `MonoplanMac` executable (AppKit, the
+host controller, the window) and `MonoplanCore` (the prebuilt
 XCFramework). The wire shape it hand-encodes is pinned on the Rust side
 by `wire_shape_is_named_maps_and_bare_unit_variants` in `cli/src/ipc.rs`.
+
+### The window
+
+`Sources/MonoplanMac/WebWindow.swift`, per
+[`spec/mac-window-plan.md`](../spec/mac-window-plan.md) "Swift side". A
+`WKWebView` loads `monoplan://app/mirror.html`: the web client, built
+by Vite and copied into `Contents/Resources/web` by `build-app.sh`,
+served by the app's own URL scheme handler (right MIME types so the
+wasm streams, a stable origin for `localStorage`, no `file://` rules).
+The page asks the app for the session (`Host.session`), subscribes to
+each open doc (`Host.subscribe`: a plaintext snapshot and a leased
+peer id), imports the host's later updates as they arrive and hands
+its own edits back on every store flush (`Host.import`); the web store
+is the browser's, unchanged, over a mirror doc. `/api/*` requests from
+the page are forwarded by the same scheme handler to the host's server
+with the device token (`Authorization: Bearer`), so the page never
+holds a credential and never logs in; it holds no DEK either, so the
+flows that wrap or unwrap one (new / delete workspace, invite links,
+log out, delete account) are hidden there and stay with the tray, the
+browser and the CLI. The host's sync status is pushed into the page
+for its footer. Closing or quitting first asks the page to hand
+everything to the host and waits for it (bounded), then drops the
+subscriptions, which releases the peer slots.
+
+While the window is open the app is a regular app (Dock icon, a main
+menu whose Edit items route ⌘Z / ⌘C / ⌘V to the webview; the page
+sees each key first, so its own shortcuts win); closed, it goes back
+to a bare status item. Clicking the Dock icon or launching the app
+again reopens it. `MONOPLAN_MIRROR_URL=http://localhost:5176/mirror.html`
+loads the Vite dev server instead of the bundle for UI work (the doc
+still mirrors the host; `/api` then goes through Vite's proxy without
+the token). `MONOPLAN_MAC_DEBUG=1` also enables Inspect Element and
+logs the page's security context on load.
 
 ```sh
 bun run build:apple                                   # once, and after core changes: the XCFramework the app links
@@ -117,7 +153,8 @@ bun run mac                                           # build Monoplan.app (debu
 bun run mac:app                                       # build Monoplan.app (release) and `open` it
 bun run mac:install                                   # build release, quit a running Monoplan, install to /Applications (`-d ~/Applications`, `--no-open`) and launch
 swift test --package-path apple/MonoplanMac           # codec / model tests, no host needed
-MONOPLAN_WEB_URL=http://localhost:5176 bun run mac    # point links at the dev stack
+MONOPLAN_MIRROR_URL=http://localhost:5176/mirror.html bun run mac   # the window over the Vite dev server
+MONOPLAN_WEB_URL=http://localhost:5176 bun run mac    # the sign-in sheet's "Create an account…" link at the dev stack
 MONOPLAN_DATA_DIR=local/cli bun run mac               # a different profile, same rule as the CLI
 MONOPLAN_MAC_DEBUG=1 bun run mac                      # log state and rows to stderr
 ```
@@ -134,7 +171,11 @@ log: `log show --predicate 'process == "MonoplanMac"' --last 1h`.
 (gitignored): the SwiftPM binary (which links MonoplanCore; the script
 runs `build-xcframework.sh` when the XCFramework is missing), the
 `monoplan` CLI beside it in `Contents/MacOS` (built by cargo in the same
-configuration, for the terminal), an Info.plist (`app.monoplan.mac`,
+configuration, for the terminal), the web client in
+`Contents/Resources/web` (`vite build` of `js/web`, which needs
+`js/core/wasm-web`; built when missing, refreshed by hand with `bun run
+build:wasm:web` after core changes, like the XCFramework), an
+Info.plist (`app.monoplan.mac`,
 `LSUIElement`, version from the workspace `Cargo.toml`), ad-hoc
 signatures, and the app icon. The icon is the Icon Composer document
 `apple/icon.icon`; `actool` compiles it straight from that file into
@@ -195,4 +236,6 @@ translation is missing, or its placeholders differ from the English.
 Adding a string means adding the key and its Spanish to the catalog in
 the same change; the build will not let it drift.
 
-Next: the window, per `spec/mac-window-plan.md`.
+Next: the window's deferred items in `spec/mac-window-plan.md`
+(DEK-touching flows in the window, several windows, typed uniffi
+request and reply for the tray), and iOS.

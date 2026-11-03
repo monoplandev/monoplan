@@ -5,7 +5,8 @@ day, phase 2 (the mirror on the host: `Host.subscribe` / `Host.import`,
 `Doc::import_mirror_update`, `HostCmd`) built 2026-11-03, phase 3 (the
 mirror in wasm and JS: `SyncEngine.mirror`, `MirrorBridge`, the app
 runtime and its Vite entry) built 2026-11-04, phase 4 (the window
-itself, in Swift) not built. The macOS app's window is a
+itself, in Swift: `WebWindow.swift`, the scheme handler, `Host.session`)
+built 2026-11-04. The macOS app's window is a
 webview running the web client (`js/web`) over a **mirror**: a second
 Loro doc in the webview, with a peer id of its own, seeded from the
 app's in-process host and kept converged with it by exchanging Loro
@@ -36,7 +37,7 @@ internal request channel the socket handler already sits on),
 | Durability of a window edit | The mirror hands its ops to the host on every store flush, the same cadence that reaches IndexedDB in the browser. The host WALs them on its capture tick. The window is lost between a flush and the host's import only if the process dies in that microsecond, which is the same window the browser has between a commit and its IDB write. |
 | Engine surface | **One wasm class.** `SyncEngine` gains a mirror constructor (no DEK, no storage). The store's sixty engine calls and `createSyncedApp` are untouched; `runtime.ts` picks a bridge. |
 | Host-side undo | Mirror ops are imported tagged, like remote ops, so `monoplan undo` in the terminal never undoes a window edit, as it never undoes another device's. The window's undo is its own Doc's `UndoManager`, as in the browser. |
-| HTTP | The non-doc surface (`api.ts`: devices, members, invites, doc list) keeps calling the server. The app injects the session credential the CLI already holds; the webview never logs in. |
+| HTTP | The non-doc surface (`api.ts`: devices, members, invites, doc list) keeps calling the server, unchanged: the app's URL scheme handler forwards `/api/*` to the host's server with the device token the CLI already holds (`Authorization: Bearer`, `spec/auth.md`), so the page's same-origin fetches just work and the credential never enters the webview, which never logs in. |
 | DEK-touching flows | **Hidden in the window on the first pass**: password change, recovery, doc creation, invite accept (each wraps or unwraps a key the webview does not hold). The tray, Settings and the CLI keep them. |
 | iOS | Same shape when it comes: the iOS app embeds core as a host (`daemon-plan.md` "Mobile hosts") and a webview mirrors it through the same FFI. The FFI surface stays small for as long as the UI is web. |
 
@@ -240,32 +241,86 @@ Built 2026-11-04 (phase 3).
 
 ## Swift side (`apple/MonoplanMac`)
 
-Phase 4, not built.
+Built 2026-11-04 (phase 4). `Sources/MonoplanMac/WebWindow.swift`
+(`WebWindowController`, `MirrorHostBridge`, `AppSchemeHandler`),
+`MainMenu.swift`; the pure framing in
+`Sources/MonoplanMacKit/MirrorFraming.swift` (`HostRequest`,
+`WindowSession`, `HostReply`, `HostInbound`, `AppScheme`), tested
+without WebKit. On the FFI, `Host.session()` (`HostSession`: account
+id, email, device id, primary doc id, server URL, the open docs Home
+first, backed by the in-process `HostCmd::Session` /
+`LocalClient::session`; the socket has no such frame) and
+`Host.device_token()`.
 
-- A window controller owning the `WKWebView`, one `Host.subscribe` per
-  open doc, and the bridge: sink updates go in with `evaluateJavaScript`,
-  message-handler bytes go out to `Host.import`.
-- The JS contract (`mirrorHost.ts`): a `WKScriptMessageHandlerWithReply`
-  named `monoplan`, so `postMessage` resolves with the reply or rejects
-  with the error text. Requests and replies, bytes as base64, the peer
-  as a decimal string (a u64 does not fit a JSON number), the doc id
-  as the `workspace` selector `Host.subscribe` resolves:
+- `WebWindowController` owns the `NSWindow` and the `WKWebView`, made
+  on first open and torn down on close; the tray's "Open Monoplan" and
+  its item rows open it (an item row as the `#item_<id>` fragment,
+  `spec/urls.md`), as does the Dock icon's reopen. While it is open the
+  app is `.regular` (Dock icon, the main menu in `MainMenu.swift`,
+  whose Edit items are what let ⌘Z / ⌘C / ⌘V reach the webview; the
+  page sees every key first, so the client's own shortcuts keep
+  winning); closed, it is a bare status item again.
+- `MirrorHostBridge` is the `WKScriptMessageHandlerWithReply` named
+  `monoplan`, so `postMessage` resolves with the reply or rejects with
+  the error text. Requests and replies, bytes as base64, the peer as a
+  decimal string (a u64 does not fit a JSON number), the doc id as the
+  `workspace` selector `Host.subscribe` resolves:
   - `{kind: "session"}` → `{accountId, email, deviceId, primaryDocId,
-    serverUrl, docs: [{docId, name}]}`
-  - `{kind: "subscribe", docId}` → `{snapshot, peer}`
+    serverUrl, docs: [{docId, name}]}` (`Host.session`; binds the page
+    to the host running now)
+  - `{kind: "subscribe", docId}` → `{snapshot, peer}` (one
+    `Host.subscribe` per open doc, a `MirrorSink` each)
   - `{kind: "unsubscribe", docId}` → `null`
   - `{kind: "import", docId, bytes}` → `null` (`Host.import`)
   - inbound, on `window.__monoplanHost`: `update(docId, bytes)` for
-    `MirrorSink.update`, `stopped(docId)` for `MirrorSink.stopped`.
-  The sink contract holds: deliver `update` to the webview
-  asynchronously and never call `Host.import` from inside it.
-- A `WKURLSchemeHandler` serving the Vite build out of the app bundle
-  with correct MIME types, loading `mirror.html`, so wasm streams,
-  `localStorage` prefs have a stable origin, and no `file://` sandbox
-  rules apply.
-- `api.ts` gets the server URL (`HostSessionInfo.serverUrl`) and the
-  session credential at boot from the host; the host's sync status
-  (online, last synced) over the same handler for the footer.
+    `MirrorSink.update`, `stopped(docId)` for `MirrorSink.stopped`,
+    `sync({online, lastSyncedAt})` with the host's `SyncStatus` (sent
+    once the page is up and on every change, from the tray's watch;
+    the footer shows "serving and online"), and `handOff()`, which
+    flushes everything committed to the host and resolves once the
+    host has answered the imports it caused.
+  Calls that block in Rust (`session`, `subscribe`, `import`) run on
+  one serial work queue, in order, off the main thread. The sink
+  contract holds: a sink hops to the main queue and evaluates the
+  update into the page; nothing calls `Host.import` from inside
+  `update`. A new page load (reload, a host coming back) closes the
+  previous page's subscriptions and silences its sinks, so the peer
+  slots are released and nothing is evaluated into a page that lacks
+  the global.
+- Closing hands off first: `windowShouldClose` refuses once, awaits
+  `handOff()` through `callAsyncJavaScript` (bounded at three seconds),
+  then closes for real and drops the subscriptions; quit does the same
+  (`.terminateLater`) before the host persists and releases the
+  profile. So the window's last notes burst or flush reaches the host
+  before the mirror goes, which the browser's `pagehide` cannot
+  promise on its own.
+- `AppSchemeHandler` serves `monoplan://app/*` out of
+  `Contents/Resources/web` (the Vite build, copied by `build-app.sh`)
+  with an explicit MIME map (wasm streams only under
+  `application/wasm`), `mirror.html` at the root, no traversal; and
+  forwards `/api/*` to the host's server with `Authorization: Bearer
+  <device token>` (`Host.device_token`, cached per page session),
+  passing `Content-Type`, `Accept` and `X-Request-Id` each way and
+  answering a proxy failure in the API's own `{code, message}` shape.
+  `localStorage` prefs get a stable origin; no `file://` rules apply.
+  Links to anything else open in the default browser; `alert` and
+  `confirm` from the page are `NSAlert` sheets.
+- Host comes and goes: when the tray's client sees a host after none
+  (sign-in, a CLI `login` or `password` that stopped and re-hosted),
+  the open page is reloaded against it; when the host stops, every doc
+  hears `stopped` and the page shows offline until then.
+- `MONOPLAN_MIRROR_URL=http://localhost:5176/mirror.html` loads the
+  Vite dev server instead of the bundle (HMR for the UI; the doc still
+  mirrors the host through the handler, but `/api` then goes through
+  Vite's proxy without the token, so the HTTP surface is
+  unauthenticated there).
+- Hidden in the window (`Session.mirror`, phase 4): the New workspace
+  and Delete workspace items, Log out (the nav menu and Settings ›
+  Account, which says the menu bar does it), the Danger zone (account
+  deletion), and invite-link creation in the sharing dialog (members
+  and pending links still list and revoke); the sign-in sheet's
+  "Create an account…" still goes to the browser. Each wraps or
+  unwraps a key the webview does not hold.
 
 ## Deferred
 
@@ -314,9 +369,21 @@ Phase 4, not built.
   idle timer reach the host on hand-off, an update queued before the
   store existed is not dispatched twice; the WebKit transport's
   framing (base64 both ways, a u64 peer as `BigInt`, request order).
-- `MonoplanMacKit` (phase 4): the bridge framing and the scheme
-  handler's MIME map.
-- Browser or app smoke only when asked.
+- `MonoplanMacKit` (`MirrorFramingTests`, built): request parsing and
+  its refusals, the subscribe and session reply shapes (base64,
+  decimal peer, JSON-serialisable), the inbound scripts' quoting, the
+  scheme's routes (entry at the root, `/api` forwarded with its query,
+  traversal and foreign hosts refused) and MIME map.
+- `cli/tests/daemon.rs` (`local_client_shares_the_loop_with_the_socket`,
+  extended): `LocalClient::session` reports the booted identity, the
+  server and the open docs, Home first.
+- Browser or app smoke only when asked. Not yet exercised in a running
+  window: whether WebKit grants the custom scheme a secure context
+  (`crypto.randomUUID`, which the client's draft ids and request ids
+  use) and cookies (the theme and locale prefs); the debug build logs
+  both on load (`MONOPLAN_MAC_DEBUG=1`). The fallbacks if not are the
+  `WKProcessPool` secure-scheme SPI or a loopback HTTP origin, and the
+  prefs moving to `localStorage` in the window.
 
 ## Phases
 
@@ -349,9 +416,15 @@ Phase 4, not built.
    entry in `js/web`; the Bun tests above. `Session.mirror` /
    `dek: Dek | null`; `createViewState` shared with the browser
    runtime. No Swift consumer yet; the browser bundle is unchanged.
-4. **The window.** Window controller, scheme handler, the message
-   handler and inbound global per the contract above, session and
-   credential injection into `api.ts`, the host's sync status in the
-   footer, hidden DEK-touching flows (`Session.mirror`).
+4. **The window** (built 2026-11-04). `WebWindowController`,
+   `MirrorHostBridge`, `AppSchemeHandler`, `MainMenu` and the Kit's
+   `MirrorFraming`; `Host.session` / `Host.device_token` and the
+   in-process `HostCmd::Session` on the FFI; the `sync` and `handOff`
+   inbound calls and the awaitable `handOff` in `mirrorRuntime.ts`;
+   `api.ts` untouched (the scheme handler proxies `/api` with the
+   token rather than injecting a credential into the page); the
+   DEK-touching flows hidden under `Session.mirror`; `build-app.sh`
+   copies the Vite build into the bundle. The tray's "Open Monoplan"
+   and item rows open the window.
 5. Amend `daemon-plan.md` "Process topology" and `apple/README.md` as
-   each lands.
+   each lands (done through phase 4).

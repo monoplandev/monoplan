@@ -6,7 +6,7 @@
 // IndexedDB boot gate (the snapshot is the boot), no single-tab lock
 // (the host leases the peer), and no login (the host is signed in).
 
-import { createEffect, createSignal, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, onMount, Show } from "solid-js";
 import { Doc, SyncEngine } from "@monoplan/core/wasm";
 import { MirrorBridge, type MirrorSeed } from "@monoplan/core/mirror-bridge";
 import { useAppI18n } from "./i18n.tsx";
@@ -30,11 +30,15 @@ export function MirrorApp(props: {
     document.documentElement.dir = direction();
   });
   const [boot, setBoot] = createSignal<MirrorBoot | null>(null);
+  const [host, setHost] = createSignal<AppHost | null>(null);
   const [error, setError] = createSignal<string | null>(null);
-  // "Online" here is the host: true from the first seeded doc until the
-  // host stops serving them. Whether the host itself reaches the server
-  // is a later addition (its sync status over the same handler).
-  const [online, setOnline] = createSignal(false);
+  // "Online" is two facts: the host is serving the mirrors (the bridge,
+  // from the first seeded doc until the host stops them) and the host
+  // itself reaches the server (its sync status, pushed by the app). The
+  // footer shows the conjunction, as the tray does.
+  const [serving, setServing] = createSignal(false);
+  const [hostOnline, setHostOnline] = createSignal(false);
+  const online = createMemo(() => serving() && hostOnline());
   const [lastSyncAt, setLastSyncAt] = createSignal<number | null>(null);
   // The bridge is built before the runtime exists (it seeds the engines
   // the runtime is built from); its frame pulse is bound here once the
@@ -47,6 +51,10 @@ export function MirrorApp(props: {
       setError("This page only runs inside the Monoplan app.");
       return;
     }
+    host.onSync((status) => {
+      setHostOnline(status.online);
+      setLastSyncAt(status.lastSyncedAt);
+    });
     try {
       const info = await host.session();
       const bridge = new MirrorBridge({
@@ -60,8 +68,8 @@ export function MirrorApp(props: {
         },
         onServerFrame: (docId) => drainFor(docId),
         onChange: (kind) => {
-          if (kind === "online") setOnline(true);
-          if (kind === "offline") setOnline(false);
+          if (kind === "online") setServing(true);
+          if (kind === "offline") setServing(false);
         },
         onStopped: (docId) => {
           console.warn(`mirror: the host stopped serving doc ${docId}`);
@@ -83,6 +91,7 @@ export function MirrorApp(props: {
         }
       }
       const prefs = await loadPrefs(info.accountId).catch(() => null);
+      setHost(host);
       setBoot({ session: sessionFromHost(info), engines, bridge, prefs });
     } catch (e) {
       console.error("[mirror boot] FAILED:", e);
@@ -98,7 +107,9 @@ export function MirrorApp(props: {
             value={{
               session: () => b().session,
               online,
-              setOnline,
+              // The runtime never sets these on a mirror (no WebSocket
+              // of its own); the app's status pushes do.
+              setOnline: setHostOnline,
               lastSyncAt,
               setLastSyncAt,
               // Signing out is the tray's; the window cannot revoke the
@@ -111,6 +122,7 @@ export function MirrorApp(props: {
           >
             <MirrorMain
               boot={b()}
+              host={host()!}
               bind={(drain) => {
                 drainFor = drain;
               }}
@@ -124,6 +136,7 @@ export function MirrorApp(props: {
 
 function MirrorMain(props: {
   boot: MirrorBoot;
+  host: AppHost;
   /** Hand the parent the runtime's drain so the bridge's frame pulse
    *  reaches the stores. Called synchronously during setup, before any
    *  frame can arrive after the runtime materialised its stores. */
@@ -131,6 +144,9 @@ function MirrorMain(props: {
 }) {
   const runtime = createMirrorRuntime(props.boot);
   props.bind(runtime.drain);
+  // The app calls `handOff` before closing the window or quitting, then
+  // waits for the imports it caused before it drops the subscriptions.
+  props.host.onHandOff(runtime.handOff);
   return (
     <Workspace
       docs={runtime.docs}

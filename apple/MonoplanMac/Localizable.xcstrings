@@ -61,6 +61,16 @@
         }
       }
     },
+    "About Monoplan": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Acerca de Monoplan"
+          }
+        }
+      }
+    },
     "Account": {
       "localizations": {
         "es": {
@@ -101,12 +111,32 @@
         }
       }
     },
+    "Close": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cerrar"
+          }
+        }
+      }
+    },
     "Command line": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
             "value": "Línea de comandos"
+          }
+        }
+      }
+    },
+    "Copy": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copiar"
           }
         }
       }
@@ -121,6 +151,16 @@
         }
       }
     },
+    "Cut": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cortar"
+          }
+        }
+      }
+    },
     "Device name": {
       "localizations": {
         "es": {
@@ -131,12 +171,42 @@
         }
       }
     },
+    "Edit": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edición"
+          }
+        }
+      }
+    },
     "Email": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
             "value": "Correo"
+          }
+        }
+      }
+    },
+    "Hide Monoplan": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ocultar Monoplan"
+          }
+        }
+      }
+    },
+    "Hide Others": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ocultar otros"
           }
         }
       }
@@ -167,6 +237,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Instalado · %@"
+          }
+        }
+      }
+    },
+    "Minimize": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Minimizar"
           }
         }
       }
@@ -241,6 +321,16 @@
         }
       }
     },
+    "OK": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aceptar"
+          }
+        }
+      }
+    },
     "Offline": {
       "localizations": {
         "es": {
@@ -311,6 +401,16 @@
         }
       }
     },
+    "Paste": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pegar"
+          }
+        }
+      }
+    },
     "Profile": {
       "localizations": {
         "es": {
@@ -327,6 +427,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Salir de Monoplan"
+          }
+        }
+      }
+    },
+    "Redo": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rehacer"
+          }
+        }
+      }
+    },
+    "Reload": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recargar"
           }
         }
       }
@@ -351,6 +471,16 @@
         }
       }
     },
+    "Select All": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seleccionar todo"
+          }
+        }
+      }
+    },
     "Server": {
       "localizations": {
         "es": {
@@ -367,6 +497,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ajustes…"
+          }
+        }
+      }
+    },
+    "Show All": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar todo"
           }
         }
       }
@@ -507,6 +647,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "Hoy · %@"
+          }
+        }
+      }
+    },
+    "Undo": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deshacer"
+          }
+        }
+      }
+    },
+    "View": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visualización"
+          }
+        }
+      }
+    },
+    "Window": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ventana"
+          }
+        }
+      }
+    },
+    "Zoom": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zoom"
           }
         }
       }

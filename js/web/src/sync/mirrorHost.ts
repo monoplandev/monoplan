@@ -17,10 +17,20 @@
 //
 //   .update(docId, b64)   one host → mirror update (`MirrorSink.update`)
 //   .stopped(docId)       no update follows (`MirrorSink.stopped`)
+//   .sync(status)         the host's sync status, for the footer: sent
+//                         once the page is up and on every change
+//   .handOff()            flush everything committed to the host now;
+//                         resolves once the host has answered the
+//                         imports it caused. The app awaits it before
+//                         it closes the window or quits.
 //
 // The doc id is the `workspace` selector the host resolves (`-w` accepts
 // a doc uuid, `spec/cli.md`). The peer id travels as a decimal string
-// because a u64 does not fit a JSON number.
+// because a u64 does not fit a JSON number. HTTP (`api.ts`) is not
+// here: the app serves the page from its own scheme and proxies `/api`
+// to the host's server with the device token, so the client's
+// same-origin fetches work unchanged and the credential never enters
+// the page.
 
 import type { MirrorSeed, MirrorTransport } from "@monoplan/core/mirror-bridge";
 
@@ -64,15 +74,31 @@ export interface HostMessageHandler {
   postMessage(request: HostRequest): Promise<unknown>;
 }
 
+/** The host's view of the server link, as `ipc::SyncStatus` has it. */
+export interface HostSyncStatus {
+  online: boolean;
+  /** Unix millis of the last completed exchange, on any run of the
+   *  host, or null if it never synced. */
+  lastSyncedAt: number | null;
+}
+
 /** What the app calls on `window.__monoplanHost`. */
 export interface HostInbound {
   update(docId: string, bytes: string): void;
   stopped(docId: string): void;
+  sync(status: HostSyncStatus): void;
+  handOff(): Promise<void>;
 }
 
 export interface AppHost {
   session(): Promise<HostSessionInfo>;
   transport: MirrorTransport;
+  /** The host's sync status, whenever the app reports it. The last one
+   *  is replayed to a late subscriber, so the footer never misses the
+   *  status the app pushed while the page was still booting. */
+  onSync(cb: (status: HostSyncStatus) => void): void;
+  /** What `handOff()` runs; the runtime binds its own once it exists. */
+  onHandOff(cb: () => Promise<void>): void;
 }
 
 /** The app host behind this page, or null outside the app: the
@@ -92,12 +118,22 @@ export function detectAppHost(): AppHost | null {
 export function createAppHost(handler: HostMessageHandler, target: object): AppHost {
   let onUpdate: ((docId: string, bytes: Uint8Array) => void) | null = null;
   let onStopped: ((docId: string) => void) | null = null;
+  let onSync: ((status: HostSyncStatus) => void) | null = null;
+  let lastSync: HostSyncStatus | null = null;
+  let onHandOff: (() => Promise<void>) | null = null;
   const inbound: HostInbound = {
     update(docId, bytes) {
       onUpdate?.(docId, decodeBytes(bytes));
     },
     stopped(docId) {
       onStopped?.(docId);
+    },
+    sync(status) {
+      lastSync = status;
+      onSync?.(status);
+    },
+    handOff() {
+      return onHandOff?.() ?? Promise.resolve();
     },
   };
   (target as Record<string, unknown>)[HOST_GLOBAL] = inbound;
@@ -132,6 +168,13 @@ export function createAppHost(handler: HostMessageHandler, target: object): AppH
   return {
     transport,
     session: async () => (await post({ kind: "session" })) as HostSessionInfo,
+    onSync(cb) {
+      onSync = cb;
+      if (lastSync) cb(lastSync);
+    },
+    onHandOff(cb) {
+      onHandOff = cb;
+    },
   };
 }
 

@@ -246,6 +246,28 @@ describe("the WebKit host transport", () => {
     expect(updates).toEqual([{ docId: HOME, bytes: new Uint8Array([1, 2, 3]) }]);
     expect(stopped).toEqual([HOME]);
 
+    // The host's sync status: a push before anyone listens is replayed
+    // to the first listener (the app sends it as soon as the page is
+    // up, before the runtime exists), later ones arrive live.
+    inbound.sync({ online: false, lastSyncedAt: null });
+    const statuses: Array<{ online: boolean; lastSyncedAt: number | null }> = [];
+    appHost.onSync((st) => statuses.push(st));
+    inbound.sync({ online: true, lastSyncedAt: 1700000000000 });
+    expect(statuses).toEqual([
+      { online: false, lastSyncedAt: null },
+      { online: true, lastSyncedAt: 1700000000000 },
+    ]);
+
+    // Hand-off: resolved at once until the runtime binds its own, then
+    // that, awaited.
+    await inbound.handOff();
+    let handedOff = 0;
+    appHost.onHandOff(async () => {
+      handedOff++;
+    });
+    await inbound.handOff();
+    expect(handedOff).toBe(1);
+
     appHost.transport.unsubscribe(HOME);
     await Promise.resolve();
     expect(requests.map((r) => r.kind)).toEqual(["session", "subscribe", "import", "unsubscribe"]);

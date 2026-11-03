@@ -162,6 +162,8 @@ pub struct Host {
     client: monoplan_cli::daemon::LocalClient,
     /// The host thread's runtime, for the watch forwarding tasks.
     rt: tokio::runtime::Handle,
+    /// The profile being hosted, for `device_token`.
+    profile_dir: PathBuf,
 }
 
 /// Where a watch's frames go: the app's object, called from the host's
@@ -271,6 +273,29 @@ impl From<monoplan_cli::daemon::MirrorError> for HostError {
     }
 }
 
+/// The profile as the window should see it (`spec/mac-window-plan.md`
+/// "Swift side", the `session` request): what `Host::session` answers.
+/// No credential: the device token stays with the app
+/// (`Host::device_token`) and never reaches the webview.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct HostSession {
+    pub account_id: String,
+    pub email: String,
+    pub device_id: String,
+    pub primary_doc_id: String,
+    /// The server the host syncs with: where the window's HTTP calls go.
+    pub server_url: String,
+    /// Every doc the host has open, Home first.
+    pub docs: Vec<HostDoc>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct HostDoc {
+    pub doc_id: String,
+    /// The doc's name; nil for Home and for an unnamed doc.
+    pub name: Option<String>,
+}
+
 fn encode(reply: &monoplan_cli::ipc::Reply) -> Vec<u8> {
     // `Reply` is plain data over serde; the only failure is a
     // msgpack bug, which the socket path would hit identically.
@@ -289,6 +314,7 @@ impl Host {
         let profile =
             Profile::active_at(PathBuf::from(profile_dir)).ok_or(HostError::NotLoggedIn)?;
         init_log(&profile.dir);
+        let profile_dir = profile.dir.clone();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         type Ready = Result<(daemon::LocalClient, tokio::runtime::Handle), HostError>;
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Ready>();
@@ -352,6 +378,7 @@ impl Host {
                 thread: Mutex::new(Some(thread)),
                 client,
                 rt,
+                profile_dir,
             })),
             Ok(Err(e)) => {
                 let _ = thread.join();
@@ -462,6 +489,45 @@ impl Host {
             });
         };
         Ok(sub.import_blocking(bytes)?)
+    }
+
+    /// The profile as the window should see it (`spec/mac-window-plan.md`
+    /// "Swift side"): identity, server, and the open docs, Home first.
+    /// Blocks for the loop's turn, so call it off the main thread.
+    /// `Failed` for a local-only workspace.
+    pub fn session(&self) -> Result<HostSession, HostError> {
+        if self.client.is_stopped() {
+            return Err(HostError::Stopped);
+        }
+        let info = self.client.session_blocking()?;
+        Ok(HostSession {
+            account_id: info.account_id,
+            email: info.email,
+            device_id: info.device_id,
+            primary_doc_id: info.primary_doc_id.0.to_string(),
+            server_url: info.server_url,
+            docs: info
+                .docs
+                .into_iter()
+                .map(|d| HostDoc {
+                    doc_id: d.doc_id.0.to_string(),
+                    name: d.name,
+                })
+                .collect(),
+        })
+    }
+
+    /// This device's server token, for the app to put on the window's
+    /// HTTP calls (`Authorization: Bearer`, `spec/auth.md`). Read from
+    /// the profile on each call; nil for a local-only workspace. The
+    /// webview never sees it: the app's scheme handler adds it on the
+    /// way out.
+    pub fn device_token(&self) -> Option<String> {
+        use monoplan_cli::config::Profile;
+        Profile::active_at(self.profile_dir.clone())?
+            .read_secrets()
+            .ok()?
+            .device_token
     }
 
     /// Still serving? False once a client's `Shutdown` ended the loop.

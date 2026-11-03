@@ -1,20 +1,26 @@
 // The menubar app's entry point. Top-level code rather than `@main` so the
 // activation policy is set before the run loop starts: `.accessory` gives a
 // status item with no Dock icon or menu bar of its own, which is what a
-// tray-only process should be. When a window is added later, opening it
-// switches to `.regular` and closing it switches back.
+// tray-only process should be. Opening the window (`WebWindow.swift`)
+// switches to `.regular`, with a Dock icon and the main menu, and
+// closing it switches back.
 //
 // The tray holds no doc. It watches its own in-process host (a watch
 // over the FFI, never the socket) and re-fetches `agenda --days 0
 // --json` when the host says something changed, once a minute (the
-// relative times move), and when the menu opens.
+// relative times move), and when the menu opens. "Open Monoplan" and
+// the item rows open the window, which mirrors the host's docs
+// (spec/mac-window-plan.md).
 
 import AppKit
 import MonoplanMacKit
 
-/// Where "Open Monoplan" and item rows go. The dev stack serves the web
-/// client on 5176 (see `local/process-compose.yaml`), so
-/// `MONOPLAN_WEB_URL=http://localhost:5176 bun run mac` points it there.
+/// The web client in the browser, for what the window does not do:
+/// creating an account (the sign-in sheet's link). Signup wraps a DEK
+/// the app would then have to hold, so it stays in the browser
+/// (spec/mac-window-plan.md "DEK-touching flows"). The dev stack serves
+/// the client on 5176, so `MONOPLAN_WEB_URL=http://localhost:5176 bun
+/// run mac` points the link there.
 let webURL: URL = {
     if let raw = ProcessInfo.processInfo.environment["MONOPLAN_WEB_URL"],
        let url = URL(string: raw) {
@@ -34,6 +40,14 @@ final class TrayController: NSObject, NSMenuDelegate {
     private let location: ProfileLocation
     private let hostController: HostController
     private var settingsWindow: SettingsWindowController?
+    /// The window: one per process, made on first open, mirrors the
+    /// controller's running host.
+    private lazy var webWindow = WebWindowController(
+        hostProvider: { [weak self] in self?.hostController.runningHost },
+        onVisibility: { visible in NSApp.setActivationPolicy(visible ? .regular : .accessory) })
+    /// Whether the last client state was connected, to tell a host
+    /// coming (back) up from a status refresh.
+    private var hadHost = false
     private var lines: [MenuLine] = []
     private var starred: [MenuLine] = []
     private var starredRows: [FocusRow] = []
@@ -58,13 +72,26 @@ final class TrayController: NSObject, NSMenuDelegate {
         rebuildMenu()
 
         client.onState = { [weak self] state in
-            if case .connected = state { self?.refresh() } else { self?.rebuildMenu() }
-            self?.settingsWindow?.refresh()
+            guard let self else { return }
+            if case .connected(let sync) = state {
+                self.refresh()
+                self.webWindow.pushSync(sync)
+                // A host after none: the window's page booted against
+                // the old one (or showed its error); reload it.
+                if !self.hadHost { self.webWindow.hostAvailable() }
+                self.hadHost = true
+            } else {
+                self.hadHost = false
+                self.rebuildMenu()
+            }
+            self.settingsWindow?.refresh()
         }
         client.onEvent = { [weak self] event in
             switch event {
             case .changed: self?.scheduleRefresh()
-            case .sync: self?.rebuildMenu()
+            case .sync(let sync):
+                self?.rebuildMenu()
+                self?.webWindow.pushSync(sync)
             }
             self?.settingsWindow?.refresh()
         }
@@ -189,7 +216,7 @@ final class TrayController: NSObject, NSMenuDelegate {
             addAction(String(localized: "Sign In…"), #selector(signIn))
         }
         addAction(String(localized: "Settings…"), #selector(openSettings))
-        addAction(String(localized: "Open Monoplan"), #selector(openWebsite))
+        addAction(String(localized: "Open Monoplan"), #selector(openWindow))
         menu.addItem(.separator())
         addAction(String(localized: "Quit Monoplan"), #selector(quit))
     }
@@ -311,13 +338,19 @@ final class TrayController: NSObject, NSMenuDelegate {
 
     // MARK: Actions
 
-    @objc private func openWebsite() {
-        NSWorkspace.shared.open(webURL)
+    /// The window over the host's docs; also the Dock icon's reopen.
+    @objc func openWindow() {
+        webWindow.show()
+    }
+
+    /// The View menu's Reload.
+    @objc func reloadWindow(_ sender: Any?) {
+        webWindow.reload(sender)
     }
 
     /// One window controller for the process; reopening brings the
     /// same window forward rather than stacking a second.
-    @objc private func openSettings() {
+    @objc func openSettings() {
         settings().show()
     }
 
@@ -335,13 +368,11 @@ final class TrayController: NSObject, NSMenuDelegate {
         return w
     }
 
-    /// Item links are `#item_<id>` (spec/urls.md "Item URLs name only the item").
+    /// Item links are `#item_<id>` (spec/urls.md "Item URLs name only
+    /// the item"), opened in the window.
     @objc private func openItem(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String,
-              var comps = URLComponents(url: webURL, resolvingAgainstBaseURL: false)
-        else { return }
-        comps.fragment = "item_\(id)"
-        if let url = comps.url { NSWorkspace.shared.open(url) }
+        guard let id = sender.representedObject as? String else { return }
+        webWindow.show(fragment: "item_\(id)")
     }
 
     /// Quitting ends the host too (`applicationShouldTerminate`), which
@@ -351,10 +382,15 @@ final class TrayController: NSObject, NSMenuDelegate {
         NSApp.terminate(nil)
     }
 
-    /// Persist, fold and release the profile before the process goes.
-    func shutdown() {
-        client.stop()
-        hostController.stop()
+    /// Before the process goes: the window hands its last edits to the
+    /// host, then the host persists, folds and releases the profile.
+    func shutdown(completion: @escaping () -> Void) {
+        webWindow.handOff { [self] in
+            webWindow.tearDown()
+            client.stop()
+            hostController.stop()
+            completion()
+        }
     }
 }
 
@@ -362,12 +398,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var tray: TrayController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        tray = TrayController()
+        let tray = TrayController()
+        self.tray = tray
+        NSApp.mainMenu = MainMenu.build(
+            settings: #selector(TrayController.openSettings),
+            reload: #selector(TrayController.reloadWindow(_:)),
+            target: tray)
+    }
+
+    /// The Dock icon (while the window is open) or a second launch.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        tray?.openWindow()
+        return false
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        tray?.shutdown()
-        return .terminateNow
+        guard let tray else { return .terminateNow }
+        tray.shutdown { NSApp.reply(toApplicationShouldTerminate: true) }
+        return .terminateLater
     }
 }
 

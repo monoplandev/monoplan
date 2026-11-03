@@ -78,6 +78,24 @@ if [ ! -d "$ROOT/apple/MonoplanCore/MonoplanCoreFFI.xcframework" ]; then
   "$ROOT/apple/build-xcframework.sh"
 fi
 
+# The window is the web client, built by Vite into js/web/dist and
+# copied into the bundle (Contents/Resources/web), where the app's
+# scheme handler serves it (spec/mac-window-plan.md "Swift side"). The
+# wasm it bundles comes from js/core/wasm-web; like the XCFramework it
+# is built when missing and refreshed by hand after core changes
+# (`bun run build:wasm:web`).
+if [ ! -f "$ROOT/js/core/wasm-web/monoplan_core_web_bg.wasm" ]; then
+  echo ">> wasm-web missing; running build:wasm:web"
+  (cd "$ROOT" && bun run build:wasm:web)
+fi
+echo ">> vite build (js/web)"
+(cd "$ROOT" && bun run --cwd js/web build >/dev/null)
+WEB="$ROOT/js/web/dist"
+if [ ! -f "$WEB/mirror.html" ]; then
+  echo "error: $WEB has no mirror.html; the vite build did not produce the window's entry" >&2
+  exit 1
+fi
+
 # The String Catalog is the one source of UI text in both languages
 # (apple/README.md "Localisation"). check-strings.ts refuses a source
 # string that is missing from it or has no Spanish, before anything
@@ -95,6 +113,9 @@ rm -rf "$APP"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 cp "$BIN" "$CONTENTS/MacOS/MonoplanMac"
 cp "$CLI" "$CONTENTS/MacOS/monoplan"
+# The web client for the window; index.html and the PWA files come
+# along but are never requested.
+cp -R "$WEB" "$CONTENTS/Resources/web"
 
 # SwiftPM cannot put the catalog in Bundle.main, so compile it here:
 # xcstringstool emits one <lang>.lproj/Localizable.strings per

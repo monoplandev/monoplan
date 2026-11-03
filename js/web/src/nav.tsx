@@ -1378,7 +1378,9 @@ export function NavMenu(props: {
                 {m().auth.signUp}
               </DropdownMenu.Item>
             </Show>
-            <Show when={!props.session.anonymous}>
+            {/* Not in the app window: the tray signs out
+                (`Session.mirror`). */}
+            <Show when={!props.session.anonymous && !props.session.mirror}>
               <DropdownMenu.Item
                 class="dropdown-menu-item"
                 onSelect={() => props.logout()}

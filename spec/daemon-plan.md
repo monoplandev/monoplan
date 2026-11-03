@@ -124,7 +124,9 @@ monoplan item add ──UDS──┐
 monoplan item ls  ──UDS──┤
 monoplan tui      ──UDS──┼──>  host loop ──WS──> server
 tray / window     ──FFI──┘        │   (`monoplan daemon`, or the macOS app's
-                  (in-process)    │    `monoplan-ffi::Host`; the FFI edge exists only there)
+                  (in-process)    │    `monoplan-ffi::Host`; the FFI edge exists only there:
+                                  │    request / watch for the tray, subscribe / import /
+                                  │    session for the window's mirror, spec/mac-window-plan.md)
                                   ├── <profile>/monoplan.sqlite
                                   ├── <profile>/daemon.lock   (held: "a daemon owns this profile")
                                   ├── <profile>/peer-<n>.lock (held: its Loro peer id)

@@ -43,6 +43,13 @@ final class HostController {
         }
     }
 
+    /// The host while it serves; what the window mirrors
+    /// (spec/mac-window-plan.md). Nil between hosts.
+    var runningHost: MonoplanCore.Host? {
+        if let host, host.isRunning() { return host }
+        return nil
+    }
+
     /// Called by the client whenever it has no host: a transport to the
     /// running one, else what the menu should say while there is none.
     private func provision() -> HostProvision {

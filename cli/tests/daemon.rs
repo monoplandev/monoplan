@@ -372,6 +372,19 @@ async fn local_client_shares_the_loop_with_the_socket() {
     ));
     assert!(!local.is_stopped());
 
+    // The window's `session` request (spec/mac-window-plan.md "Swift
+    // side"): the identity the loop booted with, the server, and the
+    // open docs, Home first. In process only; the socket has no frame.
+    let info = local.session().await.unwrap();
+    assert_eq!(info.account_id, signup.account_id);
+    assert_eq!(info.email, signup.email);
+    assert_eq!(info.device_id, signup.device_id);
+    assert_eq!(info.primary_doc_id.0.to_string(), signup.primary_doc_id);
+    assert_eq!(info.server_url, server.base);
+    assert_eq!(info.docs.len(), 1);
+    assert_eq!(info.docs[0].doc_id, info.primary_doc_id);
+    assert_eq!(info.docs[0].name, None);
+
     // Watch in process and over the socket; both hear both paths.
     let (_sync, mut events) = local.watch();
     let mut socket_watcher = connect(tmp.path()).await;

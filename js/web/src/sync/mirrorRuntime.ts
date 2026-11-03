@@ -92,11 +92,14 @@ export function createMirrorRuntime(boot: MirrorBoot) {
 
   /** Pump every doc to the host: a flush of whatever is committed but
    *  not yet exported (a notes burst still on its idle timer), then the
-   *  outbox. */
-  const handOff = (): void => {
+   *  outbox. Resolves once the host has answered every import this
+   *  caused, which is what the app waits for before it drops the
+   *  subscriptions on close or quit. */
+  const handOff = (): Promise<void> => {
     for (const a of docApps.values()) a.flushNotes();
     for (const engine of boot.engines) engine.flush();
     boot.bridge.pumpOutbox();
+    return boot.bridge.flushed();
   };
 
   // The window going away or to the background is the moment the
@@ -104,17 +107,20 @@ export function createMirrorRuntime(boot: MirrorBoot) {
   // holds everything the window committed.
   if (typeof document !== "undefined") {
     const onVisibility = (): void => {
-      if (document.visibilityState === "hidden") handOff();
+      if (document.visibilityState === "hidden") void handOff();
+    };
+    const onPageHide = (): void => {
+      void handOff();
     };
     document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("pagehide", handOff);
+    window.addEventListener("pagehide", onPageHide);
     onCleanup(() => {
       document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("pagehide", handOff);
+      window.removeEventListener("pagehide", onPageHide);
     });
   }
   onCleanup(() => {
-    handOff();
+    void handOff();
     boot.bridge.stop();
   });
 
