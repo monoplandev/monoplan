@@ -45,17 +45,14 @@ const VERSION: &str = concat!(
 pub struct Cli {
     /// Fail instead of starting the daemon when none is running
     /// (scripts, CI). Equivalent to `MONOPLAN_NO_SPAWN=1`.
-    #[arg(long, global = true)]
+    #[arg(long)]
     no_spawn: bool,
 
     /// The workspace to act in: its name or doc id. Omitted means the
-    /// Personal workspace (`personal` and `home` name it too).
-    #[arg(
-        short = 'w',
-        long = "workspace",
-        global = true,
-        value_name = "WORKSPACE"
-    )]
+    /// Personal workspace (`personal` and `home` name it too). Root-only,
+    /// like `--no-spawn`: it comes before the verb (`monoplan -w Work item
+    /// ls`), so `auth` / `db` / `daemon` help never lists it.
+    #[arg(short = 'w', long = "workspace", value_name = "WORKSPACE")]
     workspace: Option<String>,
 
     #[command(subcommand)]

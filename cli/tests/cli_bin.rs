@@ -328,7 +328,7 @@ async fn workspace_flag_selects_a_second_doc() {
         .to_string();
     let ls = ok(monoplan(dir, &["-w", "work", "item", "ls"]).await);
     assert!(ls.contains(&work_item) && !ls.contains(&home_item), "{ls}");
-    let ls = ok(monoplan(dir, &["item", "ls", "-w", &work_id]).await);
+    let ls = ok(monoplan(dir, &["-w", &work_id, "item", "ls"]).await);
     assert!(ls.contains(&work_item), "{ls}");
     let ls = ok(monoplan(dir, &["-w", "home", "item", "ls"]).await);
     assert!(ls.contains(&home_item) && !ls.contains(&work_item), "{ls}");

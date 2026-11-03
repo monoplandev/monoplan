@@ -7,7 +7,7 @@
 //! Accepting stores the recovered DEK in `secrets.toml` under the doc
 //! id, exactly where login would have put it, and stops a running
 //! daemon so the next command boots the joined doc (`spec/cli.md`
-//! §Workspaces). The doc the other verbs act on is the global `-w`
+//! §Workspaces). The doc the other verbs act on is the root-level `-w`
 //! selector, resolved without a daemon (`workspace::resolve_offline`).
 
 use anyhow::{Context, bail};
