@@ -331,7 +331,9 @@ Every mutation below forms **one Loro commit** (one undo step, one op group).
 ### Reconciliation
 
 `reconcile()` is an explicit, idempotent maintenance mutation (never run
-implicitly by reads): for every list it removes stale/duplicate entries and
+implicitly by reads; today its only caller is `monoplan workspace reconcile`,
+and it commits with origin `"sweep"`, excluded from undo — `sync-protocol.md`
+"Commit origin tagging"): for every list it removes stale/duplicate entries and
 appends real entries for fallback-tail items (using each item's existing
 placement id), and it deletes ListMeta rows that repeat an earlier row's id
 (keeping the first). It also prunes **focus** refs that are missing / closed / binned /

@@ -121,6 +121,8 @@ enum WorkspaceCmd {
     Share(share::ShareArgs),
     /// Export the workspace as semantic JSON.
     ExportJson(export::ExportArgs),
+    /// Repair order and focus entries: drop stale and duplicate entries, materialise missing ones. Idempotent; changes nothing visible.
+    Reconcile,
 }
 
 /// `monoplan item …`: everything about one item except capturing it.
@@ -159,6 +161,8 @@ pub enum DocCmd {
     Focus(focus::FocusArgs),
     Lists(lists::ListsArgs),
     ExportJson,
+    /// `Doc::reconcile`: explicit maintenance sweep, never scheduled.
+    Reconcile,
 }
 
 /// Execute a doc command. Pure over `doc` + `out`: no I/O of its own,
@@ -178,6 +182,15 @@ pub fn run_doc(cmd: DocCmd, doc: &Doc, out: &mut dyn Write) -> anyhow::Result<()
         DocCmd::Lists(a) => lists::run(doc, a, out),
         DocCmd::ExportJson => {
             out.write_all(export::render(doc)?.as_bytes())?;
+            Ok(())
+        }
+        DocCmd::Reconcile => {
+            let repairs = doc.reconcile()?;
+            if repairs == 0 {
+                writeln!(out, "Nothing to repair.")?;
+            } else {
+                writeln!(out, "Repaired {repairs} entries.")?;
+            }
             Ok(())
         }
     }
@@ -231,6 +244,7 @@ impl Cli {
                 offline_notice(sync);
                 return Ok(());
             }
+            Cmd::Workspace(WorkspaceCmd::Reconcile) => DocCmd::Reconcile,
             Cmd::Item(ItemCmd::Add(a)) => DocCmd::Add {
                 texts: items::collect_texts(&a.text)?,
                 list: a.list,

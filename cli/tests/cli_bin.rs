@@ -227,6 +227,12 @@ async fn fresh_install_works_without_an_account() {
     assert!(!stderr.contains("offline"), "{stderr}");
     let lists = ok(monoplan(&dir, &["lists", "ls"]).await);
     assert!(lists.contains("Welcome"), "{lists}");
+    // The maintenance sweep goes over the same IPC and finds a fresh
+    // doc clean; a second run is equally a no-op.
+    let swept = ok(monoplan(&dir, &["workspace", "reconcile"]).await);
+    assert_eq!(swept.trim(), "Nothing to repair.", "{swept}");
+    let swept = ok(monoplan(&dir, &["workspace", "reconcile"]).await);
+    assert_eq!(swept.trim(), "Nothing to repair.", "{swept}");
 
     let status = ok(monoplan(&dir, &["daemon", "status"]).await);
     assert!(status.contains("local only"), "{status}");

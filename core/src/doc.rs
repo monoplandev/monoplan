@@ -96,6 +96,11 @@ const KEY_NOTES: &str = "notes";
 /// client records one session-level step of its own at blur (the web
 /// store's `endNotesSession`).
 pub const NOTES_ORIGIN_PREFIX: &str = "notes:";
+/// Commit origin for maintenance sweeps (`reconcile`): repairs that
+/// change no visible projection. Excluded from the workspace
+/// `UndoManager` so a background sweep never becomes the user's next
+/// undo step (`spec/sync-protocol.md` "Commit origin tagging").
+pub const SWEEP_ORIGIN: &str = "sweep";
 /// Atomic location register: `"<list_id>:<placement_id>"`. Written as
 /// one scalar so list membership and placement can never be torn apart
 /// by concurrent edits. See `Location`.
@@ -1600,6 +1605,7 @@ fn make_undo_manager(inner: &LoroDoc) -> UndoManager {
     let mut um = UndoManager::new(inner);
     um.add_exclude_origin_prefix("remote");
     um.add_exclude_origin_prefix(NOTES_ORIGIN_PREFIX);
+    um.add_exclude_origin_prefix(SWEEP_ORIGIN);
     um
 }
 
@@ -3422,7 +3428,9 @@ impl Doc {
     /// ListMeta rows that repeat an earlier row's id (see
     /// [`Self::all_lists`]). Returns the number of repairs; `0` means the
     /// doc was clean and nothing was committed. Visible projections are
-    /// unchanged by construction, so no events are emitted.
+    /// unchanged by construction, so no events are emitted, and the
+    /// commit carries [`SWEEP_ORIGIN`] so it never lands on the undo
+    /// stack.
     pub fn reconcile(&self) -> Result<usize, DocError> {
         struct ListPlan {
             stale: Vec<usize>,
@@ -3539,7 +3547,8 @@ impl Doc {
             focus.delete(*p, 1)?;
             repairs += 1;
         }
-        self.inner.commit();
+        self.inner
+            .commit_with(CommitOptions::new().origin(SWEEP_ORIGIN));
         self.rebuild_index();
         Ok(repairs)
     }
@@ -8295,6 +8304,31 @@ mod tests {
         assert_eq!(doc.open_item_ids(LIST_INBOX), vec![a]);
         assert_eq!(doc.reconcile().unwrap(), 0);
         assert_open_projection_matches_doc(&doc);
+    }
+
+    /// A sweep commit is maintenance, not a user edit: Ctrl-Z after one
+    /// reverses the user's last change, never the sweep.
+    #[test]
+    fn reconcile_commits_are_excluded_from_workspace_undo() {
+        let doc = Doc::new().unwrap();
+        let a = doc.add_item(LIST_INBOX, "a").unwrap();
+        // Plant a stale entry outside the undo stack (origin `remote`,
+        // as if another device had left it) so the only undoable step
+        // is the add.
+        doc.order_list(LIST_INBOX).push("ghost:stale").unwrap();
+        doc.inner.commit_with(CommitOptions::new().origin("remote"));
+        doc.rebuild_index();
+        assert_eq!(doc.order_list(LIST_INBOX).len(), 2);
+
+        assert_eq!(doc.reconcile().unwrap(), 1);
+        assert_eq!(doc.order_list(LIST_INBOX).len(), 1);
+
+        // Were the sweep on the stack, this undo would resurrect the
+        // ghost and leave `a` in place.
+        assert!(doc.undo().unwrap());
+        assert!(doc.get_item(&a).is_none());
+        assert_eq!(doc.order_list(LIST_INBOX).len(), 0);
+        assert!(!doc.can_undo());
     }
 
     // ---------- AppEvent tests ----------

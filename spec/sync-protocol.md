@@ -126,13 +126,14 @@ Every pushed blob carries a client-minted **`push_id`** (uuid, 16 raw bytes unde
 
 ## Commit origin tagging
 
-**Status:** Implemented. `apply_remote` and oplog replay set origin `"remote"`; notes delta writes set `"notes:<item id>"`; `UndoManager` excludes both prefixes.
+**Status:** Implemented. `apply_remote` and oplog replay set origin `"remote"`; notes delta writes set `"notes:<item id>"`; `reconcile` sets `"sweep"`; `UndoManager` excludes all three prefixes.
 
-Every Loro commit carries an origin string. The engine uses three values:
+Every Loro commit carries an origin string. The engine uses four values:
 
 - **`""`** (Loro default) — local mutations from the user. No explicit tag needed; `LoroDoc::commit()` already passes empty.
 - **`"remote"`** — updates applied via `apply_remote()` after decrypting an inbound `UpdatesBatch`/`UpdatesBroadcast`. Set with `LoroDoc::import_with(bytes, "remote")`.
 - **`"notes:<item id>"`** — `Doc::apply_notes_delta`, the open notes editor's per-keystroke writes (`spec/notes-plan.md` Phase 2). Excluded from workspace undo so typing never lands on the undo stack; the editor's own history owns notes undo while it is focused, and the web store records one session-level step at blur (`spec/notes-plan.md` "Undo consequence"). Clients write all notes this way, whole-value writes included, so no notes commit carries the default origin.
+- **`"sweep"`** — `Doc::reconcile`, the explicit maintenance sweep (`data-model.md` "Reconciliation"). It changes no visible projection, so it is excluded from workspace undo: Ctrl-Z after a sweep reverses the user's last edit, never the sweep. Local and pushed like any user commit; only the undo policy differs. Today it runs only on demand (`monoplan workspace reconcile`); a scheduled sweep would carry the same origin.
 
 This exists so a future `UndoManager` can `exclude_origin_prefixes(["remote"])` and undo only the local user's edits, not concurrent remote ones. Origins are not synced; they're a local-only event filter (cf. Loro `set_next_commit_origin` docs). New non-local sources (snapshot bootstrap replay, schema migrations, etc.) get their own prefix as they appear — keep them disjoint from `"remote"` so undo policy can target them independently.
 
