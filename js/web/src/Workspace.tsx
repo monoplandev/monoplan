@@ -1060,6 +1060,7 @@ export function Workspace(props: {
     text: string,
     chain: boolean,
     blur = false,
+    when: string | null = null,
   ): boolean => {
     const d = draft();
     if (!d) return false;
@@ -1070,6 +1071,12 @@ export function Workspace(props: {
       d.focus
         ? captureToFocus([t], d.insertIndex)[0]
         : viewApp().addItemAt(d.listId, t, d.insertIndex);
+    // The date a phrase in the row's text resolved to (`whenToken.ts`):
+    // set on the item once it exists, whichever path made it. A Focus
+    // draft's item lives in Home.
+    const applyWhen = (id: string) => {
+      if (when) (d.focus ? home : viewApp()).setItemWhen(id, when);
+    };
     // Re-anchor the selection on the row above the slot (or the slot
     // itself when nothing is above), so a dropped draft lands the user
     // back near where they were.
@@ -1099,6 +1106,7 @@ export function Workspace(props: {
           setNewItemTarget(null);
         }
         const newId = id;
+        applyWhen(newId);
         queueMicrotask(() => selection.selectOnly(newId));
       } else {
         setNewItemTarget({ ...nw, draft: "pane" });
@@ -1124,6 +1132,7 @@ export function Workspace(props: {
     // only between the surface remounting, when the plain add stands in).
     const newId =
       (mirrored ? captureHandle?.commit(text) : null) ?? createPlain(text);
+    applyWhen(newId);
     // The target clears after the commit: the surface's settle on a
     // cleared target creates nothing, and the pane goes back to following
     // the selection, which lands on the new item below.

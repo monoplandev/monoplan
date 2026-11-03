@@ -19,6 +19,7 @@ import {
 import { laneLabel, useAppI18n } from "./i18n.tsx";
 import { pasteAsPlainText } from "./plainTextPaste.ts";
 import { openLinkOnClick, setLinkifiedText } from "./linkify.ts";
+import { createWhenTokens, whenTokenTitle, type WhenTokens } from "./whenToken.ts";
 import type { ViewKey } from "./prefs.ts";
 import {
   isBinned,
@@ -76,8 +77,15 @@ export function Row(props: {
    *  row above between mousedown and click). Returns true when focus is
    *  spoken for: a fresh draft is about to take it, or the draft was
    *  handed over to the side pane's capture surface, which the user is
-   *  pointing into. */
-  onDraftSettle?: (text: string, chain: boolean, blur: boolean) => boolean;
+   *  pointing into. `when` is the date a phrase in the text resolved to
+   *  (`whenToken.ts`), for the workspace to set on the item it creates;
+   *  the text already has the phrase cut out. */
+  onDraftSettle?: (
+    text: string,
+    chain: boolean,
+    blur: boolean,
+    when: string | null,
+  ) => boolean;
   /** Called by a draft row on every edit with its current text, so the
    *  side pane's capture surface can mirror the title as it is typed. */
   onDraftInput?: (text: string) => void;
@@ -208,6 +216,17 @@ export function Row(props: {
   // Set around the blur handler's synthetic Escape so the collapse effect
   // can tell a pointer-driven settle from Escape / Enter.
   let blurSettle = false;
+  // The date token in the text being edited (`whenToken.ts`), made on
+  // first use: the span exists by the time anything below runs.
+  let tokens: WhenTokens | undefined;
+  const whenTokens = (): WhenTokens =>
+    (tokens ??= createWhenTokens(textRef, {
+      now: nowMs,
+      locale,
+      title: (v) => whenTokenTitle(v, nowMs(), locale(), m().when),
+      // A closed row takes no plan from its title.
+      enabled: () => !isClosed(props.item()),
+    }));
 
   // Order matters: this effect must run *before* the model-mirror effect
   // below. On collapse, both fire in the same tick — if the mirror runs
@@ -226,6 +245,7 @@ export function Row(props: {
           // while the row is editable. The collapse path & mirror effect
           // restore plain text, so anchors only exist in expanded rows.
           setLinkifiedText(textRef, props.item().text);
+          whenTokens().reset();
           queueMicrotask(() => {
             textRef.focus();
             const sel = window.getSelection();
@@ -240,14 +260,20 @@ export function Row(props: {
         if (prev && !now) {
           const chain = chainOnSettle;
           chainOnSettle = false;
-          const next = (textRef.textContent ?? "").trim();
+          // The title is the text less any date token's words; the
+          // token's value travels beside it. The mirror effect below is
+          // about to replace the DOM, so the helper forgets the token.
+          const read = whenTokens().read();
+          const next = read.text.trim();
+          const when = read.token?.when ?? null;
+          whenTokens().reset();
           // Draft path: the row is a transient pseudo-item that has no
           // engine-side record yet. Hand the trimmed text back to the
           // workspace, which decides commit (addItemAt) vs drop. Skip the
           // editItemText path — there's no item to edit.
           if (isDraftId(props.item().id)) {
             const chained =
-              props.onDraftSettle?.(next, chain, blurSettle) ?? false;
+              props.onDraftSettle?.(next, chain, blurSettle, when) ?? false;
             // When chaining, the workspace will open a fresh draft and
             // its expand effect will steal focus to the new row's
             // contentEditable; bouncing focus to the listbox here would
@@ -267,6 +293,7 @@ export function Row(props: {
           } else if (next !== current) {
             props.app.editItemText(props.item().id, next);
           }
+          if (next && when) props.app.setItemWhen(props.item().id, when);
           // Focus is still on the now-non-editable span; bounce it back
           // to the dnd listbox so arrow-key nav works without a click.
           const listbox = textRef.closest<HTMLElement>('[role="listbox"]');
@@ -395,9 +422,15 @@ export function Row(props: {
               if (textRef.textContent === "" && textRef.firstChild) {
                 textRef.replaceChildren();
               }
+              // Take a date phrase the caret has moved past; the pane's
+              // mirror then shows the title without it.
+              whenTokens().scan();
               if (isDraftId(props.item().id)) {
-                props.onDraftInput?.(textRef.textContent ?? "");
+                props.onDraftInput?.(whenTokens().read().text);
               }
+            }}
+            on:focus={() => {
+              if (props.expanded()) whenTokens().onFocus();
             }}
             on:blur={(e) => {
               // iOS Safari's form-assistant bar (the prev/next/Done strip
@@ -441,10 +474,16 @@ export function Row(props: {
               // stopPropagation here would be too late (Cmd+A would still
               // hit the dnd's select-all).
               if (!props.expanded()) return;
+              // Backspace onto the date token removes it whole; the dnd
+              // must not see the key either way.
+              if (whenTokens().onKeyDown(e)) {
+                e.stopPropagation();
+                return;
+              }
               if (e.key === "Enter" && !e.shiftKey) {
                 if (
                   isDraftId(props.item().id) &&
-                  (textRef.textContent ?? "").trim() === "" &&
+                  whenTokens().read().text.trim() === "" &&
                   props.holdEmptyDraft?.()
                 ) {
                   // Nothing to commit and nowhere to go: stay put.

@@ -341,6 +341,53 @@ for the month grid). `groupByDeadline` becomes
 - i18n: a `when` message group mirroring `deadline` (label, unset, today,
   tomorrow; time-of-day formatting defers to the existing
   preference).
+- **Typed date phrases** (built 2026-11-03). A date phrase typed into a
+  title ("friday night", "tomorrow at 5pm", "14 nov") becomes a `when`.
+  One helper (`whenToken.ts`) serves the draft row and the task surface's
+  title; the grammar is `whenParse.ts` over chrono-node's casual parser,
+  English or Spanish by locale (about 14 KB gzipped per language).
+  - The text is scanned on every input. The moment a phrase parses it is
+    wrapped in place as a non-editable token that still shows the words
+    typed; the resolved date is its hover text. chrono matches whole
+    words only, so a half-typed "frida" or a suffixed "tomorrows" is
+    never a phrase. The token is a live reading of the words around it:
+    typing on after it grows it ("friday" → "friday night" → "friday
+    night at 9"), typing ahead of it can grow it too ("next friday"), and
+    words that stop parsing dissolve back into plain text. One token at
+    most; another phrase elsewhere is left alone while one stands.
+  - Backspace just after the token (Delete just before it, or either key
+    from inside it) removes it whole, words included, and rejects that
+    phrase: retyped the same way it stays plain text, while a different
+    or longer phrase is taken as usual. Deleting the token any other way
+    rejects the same. Rejections clear when the editor is next focused.
+  - Only a phrase that pins a day (explicit day, weekday, relative day)
+    or a clock time is taken. A bare month, "next month", and a
+    three-letter weekday on its own ("sun", "wed") are not. Of several
+    phrases the one ending last wins.
+  - A clock time gives a timed `when`; a bare 1–6 with no am/pm reads as
+    afternoon, as the time picker orders it. A time-of-day word gives an
+    **estimated** time (morning 09:00, afternoon 15:00, evening 18:00,
+    night / tonight 20:00; Spanish "por la mañana", "tarde", "noche"),
+    stored as a timed `when` and shown with a tilde. The word is matched
+    in the phrase itself, since chrono implies an hour on phrases that
+    said nothing about time. A phrase with neither is all-day. A phrase
+    that is only a time ("at 3", "3pm") is today if that time is still
+    ahead, else tomorrow. The value is built from the parsed components,
+    never a `Date`, so it stays floating.
+  - The value is held in the token, not applied, while the title is being
+    typed, so a date the item already has is not overridden mid-thought.
+    Leaving the title commits it: the draft row sets `when` on the item
+    it creates (Enter, Escape, blur); the task surface, on blur, Enter,
+    close or the target changing, applies it to the When field (the
+    buffer for a capture, the item otherwise) and strips the words from
+    the editor, leaving the plain title with the date beside it. The
+    saved title is always the text without the token's words.
+  - Off for a closed item and for a log-a-completion capture: a date is a
+    plan, and a done item has none to make. A standing token still
+    commits. Off everywhere under Settings › General › "Recognise dates
+    as you type", a device preference in a cookie beside the time format.
+  - Not built: typing a phrase into the When / Deadline fields themselves
+    (both are read-only popover anchors), and any client outside the web.
 
 ## URLs
 

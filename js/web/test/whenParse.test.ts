@@ -1,0 +1,158 @@
+// The typed-date grammar behind title tokens (`src/whenParse.ts`): which
+// phrases are taken, what register value they become, how a standing
+// token's phrase is re-read, and which phrases a rejection keeps out.
+// "Now" is Tue 2026-11-03 12:00.
+
+import { describe, expect, test } from "bun:test";
+
+import {
+  findWhenPhrase,
+  phraseKey,
+  titleWithoutPhrase,
+  type FindWhenOptions,
+} from "../src/whenParse.ts";
+
+const now = new Date(2026, 10, 3, 12, 0, 0);
+const find = (text: string, extra: Partial<FindWhenOptions> = {}) =>
+  findWhenPhrase(text, { now, locale: "en-AU", ...extra });
+
+describe("findWhenPhrase", () => {
+  test("a weekday with a time-of-day word is an estimated time", () => {
+    const p = find("friday night");
+    expect(p).toMatchObject({ start: 0, end: 12, text: "friday night" });
+    expect(p?.when).toBe("2026-11-06T20:00");
+    expect(p?.estimated).toBe(true);
+  });
+
+  test("morning estimates mid-morning rather than dawn", () => {
+    expect(find("saturday morning")?.when).toBe("2026-11-07T09:00");
+    expect(find("tonight")?.when).toBe("2026-11-03T20:00");
+  });
+
+  test("a clock time is explicit", () => {
+    const p = find("tomorrow at 5pm");
+    expect(p?.when).toBe("2026-11-04T17:00");
+    expect(p?.estimated).toBe(false);
+    expect(find("sat 3pm")?.when).toBe("2026-11-07T15:00");
+    expect(find("tomorrow 17:00")?.when).toBe("2026-11-04T17:00");
+    expect(find("friday night at 9")?.when).toBe("2026-11-06T21:00");
+  });
+
+  test("a bare small hour reads as afternoon, a large one as morning", () => {
+    expect(find("meet at 3")?.when).toBe("2026-11-03T15:00");
+    // 09:00 is behind a noon reference, so the time-only phrase lands
+    // on tomorrow; the same phrase before nine would be today.
+    expect(find("meet at 9")?.when).toBe("2026-11-04T09:00");
+    expect(find("meet at 9", { now: new Date(2026, 10, 3, 8, 0) })?.when).toBe(
+      "2026-11-03T09:00",
+    );
+    expect(find("noon")?.when).toBe("2026-11-03T12:00");
+    expect(find("3pm")?.when).toBe("2026-11-03T15:00");
+  });
+
+  test("a day without a time is all-day", () => {
+    expect(find("call mum friday")).toMatchObject({
+      start: 9,
+      end: 15,
+      when: "2026-11-06",
+      estimated: false,
+    });
+    expect(find("this weekend")?.when).toBe("2026-11-07");
+    expect(find("in 3 days")?.when).toBe("2026-11-06");
+    expect(find("14 nov")?.when).toBe("2026-11-14");
+    expect(find("14/11")?.when).toBe("2026-11-14");
+    expect(find("next friday")?.when).toBe("2026-11-13");
+    expect(find("end of month")?.when).toBe("2026-11-30");
+  });
+
+  test("a phrase that pins no day is not taken", () => {
+    expect(find("march")).toBeNull();
+    expect(find("next month")).toBeNull();
+    expect(find("buy 10 eggs")).toBeNull();
+    expect(find("call may about the report")).toBeNull();
+  });
+
+  test("a three-letter weekday alone is a word, qualified it is a date", () => {
+    expect(find("sun cream")).toBeNull();
+    expect(find("wed")).toBeNull();
+    // chrono's "next <weekday>" is that day of next week ("next friday"
+    // above is the 13th on the same rule).
+    expect(find("next sat")?.when).toBe("2026-11-14");
+    expect(find("saturday")?.when).toBe("2026-11-07");
+  });
+
+  test("a half-typed word or a suffixed one is nothing yet", () => {
+    expect(find("call mum frida")).toBeNull();
+    expect(find("tomorrows meeting")).toBeNull();
+    expect(find("tonights")).toBeNull();
+    expect(find("friday repo")?.text).toBe("friday");
+  });
+
+  test("free of an anchor, the phrase ending last wins", () => {
+    const p = find("tomorrow or friday");
+    expect(p?.text).toBe("friday");
+    expect(p?.when).toBe("2026-11-06");
+  });
+
+  test("against an anchor the phrase is re-read where the token stands", () => {
+    const token = { start: 0, end: 6 }; // "friday"
+    // Grown at the end, and at the front.
+    expect(find("friday night", { anchor: token })).toMatchObject({
+      start: 0,
+      end: 12,
+      when: "2026-11-06T20:00",
+    });
+    expect(find("next friday", { anchor: { start: 5, end: 11 } })).toMatchObject({
+      start: 0,
+      end: 11,
+      when: "2026-11-13",
+    });
+    // Shrunk while a time is mid-typing, then grown again.
+    expect(find("tomorrow at 5p", { anchor: { start: 0, end: 13 } })?.text).toBe("tomorrow");
+    expect(find("tomorrow at 5pm", { anchor: { start: 0, end: 8 } })?.text).toBe(
+      "tomorrow at 5pm",
+    );
+    // Gone: the words no longer parse, and a phrase elsewhere does not
+    // stand in for them.
+    expect(find("fridays or saturday", { anchor: token })).toBeNull();
+  });
+
+  test("a rejected phrase stays out; a longer one that extends it is taken", () => {
+    const exclude = new Set([phraseKey("friday")]);
+    expect(find("call mum friday", { exclude })).toBeNull();
+    expect(find("call mum  Friday", { exclude })).toBeNull();
+    expect(find("call mum friday night", { exclude })?.when).toBe("2026-11-06T20:00");
+    expect(find("call mum saturday", { exclude })?.when).toBe("2026-11-07");
+  });
+
+  test("spanish follows the locale", () => {
+    expect(find("comprar pan mañana", { locale: "es" })).toMatchObject({
+      start: 12,
+      end: 18,
+      when: "2026-11-04",
+    });
+    expect(find("viernes noche", { locale: "es-ES" })).toMatchObject({
+      when: "2026-11-06T20:00",
+      estimated: true,
+    });
+    expect(find("mañana a las 5", { locale: "es" })?.when).toBe("2026-11-04T17:00");
+  });
+
+  test("blank text has no phrase", () => {
+    expect(find("")).toBeNull();
+    expect(find("   ")).toBeNull();
+  });
+});
+
+describe("titleWithoutPhrase", () => {
+  test("cuts the phrase out and closes the seam", () => {
+    const text = "call mum friday night about dinner";
+    const p = find(text)!;
+    expect(titleWithoutPhrase(text, p)).toBe("call mum about dinner");
+  });
+
+  test("a trailing phrase leaves a trimmed title", () => {
+    const text = "dentist tomorrow at 5pm";
+    expect(titleWithoutPhrase(text, find(text)!)).toBe("dentist");
+  });
+});

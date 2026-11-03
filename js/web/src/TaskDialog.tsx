@@ -46,6 +46,7 @@ import {
   todayStamp,
   whenTime,
 } from "./format.tsx";
+import { createWhenTokens, whenTokenTitle, type WhenTokens } from "./whenToken.ts";
 import { useAppI18n, statusLabel } from "./i18n.tsx";
 import {
   collapsedCaretOffset,
@@ -380,6 +381,12 @@ export function TaskDialog(props: {
   // is never value-bound, so reactive updates can't clobber a live caret.
   let titleRef: HTMLDivElement | undefined;
   let notesRef: HTMLDivElement | undefined;
+  // The date token in the title (`whenToken.ts`), made with the editor.
+  // Its date is held in the token until the title is left (blur, Enter,
+  // close, the target changing), when `commitTitleToken` applies it and
+  // strips the words: nothing is written while the user is still typing,
+  // so a date the item already has is not overridden mid-thought.
+  let titleTokens: WhenTokens | undefined;
 
   // Which id the buffers currently hold. A plain var (not a signal): it's
   // written from the load effect, never read reactively.
@@ -610,6 +617,8 @@ export function TaskDialog(props: {
     if (!el) return;
     setLinkifiedText(el, value);
     ensureTrailingBreak(el);
+    // A reload drops any token's element; the helper forgets it too.
+    if (el === titleRef) titleTokens?.reset();
   };
 
   // A "\n" at the very end of a pre-wrap block doesn't get its own line
@@ -652,7 +661,19 @@ export function TaskDialog(props: {
   // their input handlers) rather than the DOM: by the time a target switch
   // reaches the load effect below, the editors may already show the next
   // target — or, across the new-item / edit forms, be different elements.
+  // Apply a date token's value to the When field (the capture buffer or
+  // the item, via `onWhenChange`) and strip its words from the editor,
+  // leaving the plain title. The `text` buffer already reads without
+  // the words, so the save that follows writes title and date apart.
+  const commitTitleToken = () => {
+    const v = titleTokens?.token();
+    if (!v) return;
+    loadEditor(titleRef, text());
+    onWhenChange(v.when);
+  };
+
   const flushTitle = (id: string | null) => {
+    commitTitleToken();
     if (!id) return;
     const it = props.app.state.itemsById[id];
     if (!it) return;
@@ -804,6 +825,7 @@ export function TaskDialog(props: {
   const createFromBuffers = (): string | null => {
     const nw = newItemTarget();
     if (!nw) return null;
+    commitTitleToken();
     const t = text().trim();
     if (!t) return null;
     const at = nw.index ?? 0;
@@ -962,6 +984,8 @@ export function TaskDialog(props: {
   // editors are contenteditable, so "caret at start/end" is derived from
   // the collapsed selection offset rather than textarea selection props.
   const onTitleKeyDown = (e: KeyboardEvent) => {
+    // Backspace onto the date token removes it whole.
+    if (titleTokens?.onKeyDown(e)) return;
     // Enter commits (the title is one line); Shift+Enter is left to the
     // browser, but the title never wraps to multiple lines in use. The
     // modal / mobile shells close on commit. The side pane stays open on
@@ -1395,6 +1419,14 @@ export function TaskDialog(props: {
                 // `[contenteditable="true"]` shortcut guard matches.
                 el.setAttribute("contenteditable", "true");
                 setLinkifiedText(el, text());
+                titleTokens = createWhenTokens(el, {
+                  now: nowMs,
+                  locale,
+                  title: (v) => whenTokenTitle(v, nowMs(), locale(), m().when),
+                  // A done item (or a log-a-completion capture) takes no
+                  // plan from its title.
+                  enabled: () => !vDone(),
+                });
               }}
               class="task-dialog-title"
               role="textbox"
@@ -1407,13 +1439,18 @@ export function TaskDialog(props: {
                     : m().board.addItem
               }
               onInput={() => {
-                const v = editorText(titleRef);
+                editorText(titleRef);
+                // Take a date phrase the caret has moved past; the buffer
+                // holds the title without it.
+                titleTokens?.scan();
+                const v = titleTokens?.read().text ?? editorText(titleRef);
                 setText(v);
                 // The row overlay mirrors an open item's edit live; a
                 // capture has no row yet.
                 if (!isNew()) props.onLiveText?.(v);
               }}
               onBlur={onTitleBlur}
+              onFocus={() => titleTokens?.onFocus()}
               onKeyDown={onTitleKeyDown}
               onPaste={pasteAsPlainText}
               onClick={(e) => openLinkOnClick(e, titleRef)}

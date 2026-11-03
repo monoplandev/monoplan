@@ -11,9 +11,10 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@monoplan/core": "workspace:*",
     "@corvu/calendar": "^0.1.2",
     "@kobalte/core": "^0.13.14",
+    "@monoplan/core": "workspace:*",
+    "chrono-node": "2.10.3",
     "solid-js": "^1.9.17"
   },
   "devDependencies": {

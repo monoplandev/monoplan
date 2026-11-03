@@ -3150,6 +3150,20 @@ input.task-check:hover {
   cursor: pointer;
 }
 
+/* A date phrase recognised in a title while typing (`whenToken.ts`): the
+   user's own words, set off as one non-editable unit that Backspace
+   removes whole. Badge palette, so it reads as metadata rather than
+   title text, in the draft row and the task surface alike. */
+.when-token {
+  padding: 0 4px;
+  border-radius: 5px;
+  background: var(--bg-badge);
+  color: var(--text-badge);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  cursor: default;
+}
+
 /* Control row under the title: list picker, then the "more" menu. In the
    780px modal they run inline at their natural widths; the narrow shells
    below rearrange them. */
