@@ -90,12 +90,23 @@ final class SettingsWindowController: NSWindowController {
         window?.makeKeyAndOrderFront(nil)
     }
 
-    /// Open on the Account pane with the sign-in sheet up (the tray's
-    /// "Sign In…").
-    func showSignIn() {
+    /// Open on the Account pane (the window's account button).
+    func showAccount() {
         (contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = Self.accountPaneIndex
         show()
+    }
+
+    /// Open on the Account pane with the sign-in sheet up (the tray's
+    /// and the window's "Sign In…").
+    func showSignIn() {
+        showAccount()
         model.showSignIn = true
+    }
+
+    /// The Account pane's confirm-then-sign-out, for the window's
+    /// account button; the pane shows the outcome if it is open.
+    func signOut() {
+        model.signOut()
     }
 }
 

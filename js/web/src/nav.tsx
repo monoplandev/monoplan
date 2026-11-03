@@ -327,7 +327,8 @@ export function Nav(props: {
    *  the shared marker's tooltip on non-Home headings. */
   members: MemberDirectory;
   /** Chrome pinned to the bottom of the sidebar (app menu + account/sync
-   *  widget) — see `.nav-footer` in styles.css. */
+   *  widget) — see `.nav-footer` in styles.css. Absent (no footer row at
+   *  all) in the macOS app's window. */
   footer?: JSX.Element;
 }) {
   const { m } = useAppI18n();
@@ -485,7 +486,9 @@ export function Nav(props: {
         )}
       </For>
       </div>
-      <div class="nav-footer">{props.footer}</div>
+      <Show when={props.footer}>
+        <div class="nav-footer">{props.footer}</div>
+      </Show>
       <ConfirmDialog
         open={emptyBinConfirmOpen()}
         onOpenChange={setEmptyBinConfirmOpen}

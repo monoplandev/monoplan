@@ -302,7 +302,9 @@ first, backed by the in-process `HostCmd::Session` /
     `MirrorSink.update`, `stopped(docId)` for `MirrorSink.stopped`,
     `sync({online, lastSyncedAt})` with the host's `SyncStatus` (sent
     once the page is up and on every change, from the tray's watch;
-    the footer shows "serving and online"), and `handOff()`, which
+    the page keeps it for `session.online()`, though the window's
+    sidebar has no footer to show it in since 2026-11-04, the tray's
+    offline notice being the surface), and `handOff()`, which
     flushes everything committed to the host and resolves once the
     host has answered the imports it caused.
   Calls that block in Rust (`session`, `subscribe`, `import`) run on
@@ -409,6 +411,42 @@ mirror, and both keep no per-row conditions for it (the earlier
 `Session.mirror` guards inside them are gone). Casualties, accepted
 for now: the keyboard-shortcuts dialog and the website link are not
 reachable in the window. The browser keeps both untouched.
+
+**The bubbles** (built 2026-11-04): the native controls over the
+page, two 28px round buttons floating over the page's top-right
+corner, level with the traffic lights: search, then account. On macOS
+26 and later each is an `NSGlassEffectView` (Liquid Glass, corner
+radius half its size, `effectIsInteractive` on 27) holding a
+borderless SF Symbol button, so it refracts whatever the page draws
+under it, and the pair sits in an `NSGlassEffectContainerView` whose
+`spacing` exceeds their gap, so the two melt into one piece of glass
+pinched in the middle (that merging is the container's native
+behaviour, tuned by `bubbleGap` / `bubbleMerge` in `WebWindow.swift`).
+Before 26 they are plain circular bezels in a row. The window's
+content view is a container with the webview edge to edge and the
+bubbles added above it; the toolbar stays empty.
+
+- Search evaluates `HostInbound.find` → `window.__monoplanHost.find()`;
+  `Workspace.tsx` binds it under `isMacShell()` (`setFindHandler` in
+  `mirrorHost.ts`) to open the Find palette, as the sidebar's Find
+  button does.
+- Account pops a menu under itself, built on open: the email the
+  page's session booted with (the bridge's `onSession`), else "Signed
+  in" / "Not signed in" by `ProfileLocation.isSignedIn`; then Account…,
+  which opens the Settings window on its Account pane
+  (`SettingsWindowController.showAccount`); then Sign Out… (the pane's
+  own confirm-then-`HostController.signOut`) or Sign In… (the pane with
+  its sheet up). The actions reach the window as `AccountActions`
+  closures from the tray, so it knows neither the Settings window nor
+  the host controller.
+
+With both bubbles up, the window's sidebar has **no footer row at
+all** (2026-11-04): `Workspace.tsx` passes no `footer` under
+`Session.mirror`, and `Nav` renders the `.nav-footer` row only when
+given one. The sync widget goes with it; the tray menu's offline
+notice is the window's sync surface. The page's `.main-header` starts
+below the title bar already.
+
 `HostInbound.settings` and `WindowSettings` are framed in
 `MirrorFraming.swift` and `mirrorHost.ts` and tested there like the
 rest of the contract.

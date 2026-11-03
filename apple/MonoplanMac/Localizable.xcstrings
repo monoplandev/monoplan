@@ -81,6 +81,16 @@
         }
       }
     },
+    "Account…": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cuenta…"
+          }
+        }
+      }
+    },
     "Advanced": {
       "localizations": {
         "es": {
@@ -227,6 +237,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Correo"
+          }
+        }
+      }
+    },
+    "Find": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buscar"
           }
         }
       }

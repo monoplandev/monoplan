@@ -31,6 +31,8 @@
 //                         by a document-start script, not here)
 //   .undo() / .redo()     Edit › Undo / Redo: the window's one undo
 //                         surface (`setUndoRedoHandler`)
+//   .find()               the window's search bubble: open the Find
+//                         palette (`setFindHandler`)
 //
 // The doc id is the `workspace` selector the host resolves (`-w` accepts
 // a doc uuid, `spec/cli.md`). The peer id travels as a decimal string
@@ -108,6 +110,7 @@ export interface HostInbound {
   settings(settings: HostSettings): void;
   undo(): void;
   redo(): void;
+  find(): void;
 }
 
 export interface AppHost {
@@ -166,6 +169,13 @@ export function setUndoRedoHandler(cb: ((kind: "undo" | "redo") => void) | null)
   undoRedoHandler = cb;
 }
 
+/** What the app's search bubble runs: open the Find palette.
+ *  `Workspace` binds it; null unbinds. */
+let openFindHandler: (() => void) | null = null;
+export function setFindHandler(cb: (() => void) | null): void {
+  openFindHandler = cb;
+}
+
 /** Tell the app whether its Undo / Redo items should be enabled. */
 export function postUndoState(canUndo: boolean, canRedo: boolean): void {
   post({ kind: "undoState", canUndo, canRedo });
@@ -210,6 +220,9 @@ export function createAppHost(handler: HostMessageHandler, target: object): AppH
     },
     redo() {
       undoRedoHandler?.("redo");
+    },
+    find() {
+      openFindHandler?.();
     },
   };
   (target as Record<string, unknown>)[HOST_GLOBAL] = inbound;

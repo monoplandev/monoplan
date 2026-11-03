@@ -44,7 +44,14 @@ final class TrayController: NSObject, NSMenuDelegate {
     /// controller's running host.
     private lazy var webWindow = WebWindowController(
         hostProvider: { [weak self] in self?.hostController.runningHost },
-        onVisibility: { visible in NSApp.setActivationPolicy(visible ? .regular : .accessory) })
+        onVisibility: { visible in NSApp.setActivationPolicy(visible ? .regular : .accessory) },
+        // The title bar's account button: the Settings window's Account
+        // pane and its sign-in / sign-out flows.
+        account: AccountActions(
+            isSignedIn: { [weak self] in self?.location.isSignedIn ?? false },
+            openAccount: { [weak self] in self?.settings().showAccount() },
+            signIn: { [weak self] in self?.settings().showSignIn() },
+            signOut: { [weak self] in self?.settings().signOut() }))
     /// Whether the last client state was connected, to tell a host
     /// coming (back) up from a status refresh.
     private var hadHost = false

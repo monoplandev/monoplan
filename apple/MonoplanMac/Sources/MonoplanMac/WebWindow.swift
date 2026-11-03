@@ -4,12 +4,19 @@
 //
 // - `WebWindowController`: the NSWindow and the webview, its lifecycle
 //   (open from the tray, hand everything off to the host before it
-//   closes or the app quits), activation policy via `onVisibility`.
+//   closes or the app quits), activation policy via `onVisibility`,
+//   and the native controls over the page: two round Liquid Glass
+//   bubbles floating in the top-right corner, search (the page's Find
+//   palette, by `HostInbound.find`) and account (`AccountActions`: a
+//   menu of the signed-in email, the Settings window's Account pane
+//   and sign out / sign in). The page's own account menu is not
+//   rendered in the window (`Session.mirror`), so this is where a
+//   user looks.
 // - `MirrorHostBridge`: the `monoplan` message handler the page posts
 //   to (`session`, `subscribe`, `unsubscribe`, `import`, `window`,
 //   `undoState`) and the calls
 //   back into `window.__monoplanHost` (`update`, `stopped`, `sync`,
-//   `handOff`, `settings`, `undo`, `redo`). One `Host.subscribe` per open doc; a `MirrorSink` per
+//   `handOff`, `settings`, `undo`, `redo`, `find`). One `Host.subscribe` per open doc; a `MirrorSink` per
 //   subscription hops to the main queue and evaluates the update into
 //   the page, never calling `Host.import` from inside `update` (the
 //   loop is busy delivering). Requests that block in Rust (`subscribe`
@@ -33,7 +40,24 @@ import MonoplanCore
 import MonoplanMacKit
 import WebKit
 
-final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate {
+/// What the window's account button can do; all of it is the tray's
+/// (the Settings window and the host controller), handed in as
+/// closures so the window stays ignorant of both.
+struct AccountActions {
+    /// Whether the profile is signed in (`ProfileLocation.isSignedIn`):
+    /// decides between Sign Out… and Sign In… and whether the cached
+    /// email is still current.
+    let isSignedIn: () -> Bool
+    /// Settings on the Account pane.
+    let openAccount: () -> Void
+    /// Settings on the Account pane with the sign-in sheet up.
+    let signIn: () -> Void
+    /// Confirm and sign out (the Account pane's own flow).
+    let signOut: () -> Void
+}
+
+final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate,
+                                 NSMenuDelegate {
     /// Where the host comes from at request time: the running one, or
     /// nil while there is none (the page then shows its boot error and
     /// is reloaded when a host is back, see `hostAvailable`).
@@ -42,7 +66,13 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// with a Dock icon and menu bar while the window is up, a bare
     /// status item otherwise.
     private let onVisibility: (Bool) -> Void
+    private let account: AccountActions
     private let bridge: MirrorHostBridge
+    /// The email the page's session came back with, for the account
+    /// menu's header; nil until a page has booted against a host.
+    private var accountEmail: String?
+    /// The account bubble's menu, filled in on open (`menuNeedsUpdate`).
+    private let accountMenu = NSMenu()
     private let schemeHandler: AppSchemeHandler
     private var webView: WKWebView?
     /// Set once a hand-off has run for the pending close; the second
@@ -60,9 +90,11 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     private(set) var canUndo = false
     private(set) var canRedo = false
 
-    init(hostProvider: @escaping () -> MonoplanCore.Host?, onVisibility: @escaping (Bool) -> Void) {
+    init(hostProvider: @escaping () -> MonoplanCore.Host?, onVisibility: @escaping (Bool) -> Void,
+         account: AccountActions) {
         self.hostProvider = hostProvider
         self.onVisibility = onVisibility
+        self.account = account
         self.bridge = MirrorHostBridge(hostProvider: hostProvider)
         self.schemeHandler = AppSchemeHandler(
             webRoot: Bundle.main.resourceURL?.appendingPathComponent("web", isDirectory: true),
@@ -73,6 +105,8 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
             self?.canUndo = canUndo
             self?.canRedo = canRedo
         }
+        bridge.onSession = { [weak self] email in self?.accountEmail = email }
+        accountMenu.delegate = self
         // Any defaults write (the window's own frame autosave included)
         // posts the first; the locale one is the 24-Hour Time switch
         // (a language change relaunches the app). Only a change to the
@@ -222,7 +256,7 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         window.minSize = NSSize(width: 520, height: 360)
         window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
-        window.contentView = webView
+        window.contentView = Self.content(over: webView, bubbles: makeBubbles())
         window.delegate = self
         // Remembered across launches; centred the first time.
         if !window.setFrameUsingName("MonoplanWindow") { window.center() }
@@ -256,6 +290,148 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         tearDown()
         onVisibility(false)
     }
+
+    // MARK: The bubbles
+
+    /// A bubble's diameter, the gap between the two, and where the pair
+    /// sits: level with the traffic lights (their centre is 19px down
+    /// in the 38px bar) and a little in from the right edge, over
+    /// whatever the page draws there.
+    private static let bubbleSize: CGFloat = 28
+    private static let bubbleGap: CGFloat = 6
+    private static let bubbleTop: CGFloat = 5
+    private static let bubbleTrailing: CGFloat = 10
+    /// How close two glass bubbles have to be before the container
+    /// melts them together (`NSGlassEffectContainerView.spacing`): more
+    /// than the gap, so the pair reads as one piece of glass pinched in
+    /// the middle rather than two discs.
+    private static let bubbleMerge: CGFloat = 10
+
+    /// The webview edge to edge with the bubbles floating over its
+    /// top-right corner. They are added last so they draw (and
+    /// hit-test) above the page.
+    private static func content(over webView: WKWebView, bubbles: NSView) -> NSView {
+        let container = NSView()
+        for v in [webView, bubbles] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(v)
+        }
+        NSLayoutConstraint.activate([
+            webView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            webView.topAnchor.constraint(equalTo: container.topAnchor),
+            webView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            bubbles.heightAnchor.constraint(equalToConstant: bubbleSize),
+            bubbles.topAnchor.constraint(equalTo: container.topAnchor, constant: bubbleTop),
+            bubbles.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -bubbleTrailing),
+        ])
+        return container
+    }
+
+    /// Search then account, left to right. On macOS 26 and later each
+    /// is a round `NSGlassEffectView` (Liquid Glass, refracting the page
+    /// under it; the press response is macOS 27's `effectIsInteractive`)
+    /// and the pair sits in an `NSGlassEffectContainerView`, which is
+    /// what melts neighbouring glass together. Before 26 they are plain
+    /// circular bezels in a row.
+    private func makeBubbles() -> NSView {
+        let search = bubbleButton(
+            symbol: "magnifyingglass", label: String(localized: "Find"), action: #selector(find(_:)))
+        let account = bubbleButton(
+            symbol: "person.crop.circle", label: String(localized: "Account"), action: #selector(showAccountMenu(_:)))
+        let row = NSView()
+        let items: [NSView]
+        if #available(macOS 26, *) {
+            items = [search, account].map { button in
+                button.isBordered = false
+                let glass = NSGlassEffectView()
+                glass.cornerRadius = Self.bubbleSize / 2
+                glass.contentView = button
+                if #available(macOS 27, *) { glass.effectIsInteractive = true }
+                return glass
+            }
+        } else {
+            for b in [search, account] { b.bezelStyle = .circular }
+            items = [search, account]
+        }
+        var constraints: [NSLayoutConstraint] = []
+        var leading = row.leadingAnchor
+        for (i, v) in items.enumerated() {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            row.addSubview(v)
+            constraints += [
+                v.widthAnchor.constraint(equalToConstant: Self.bubbleSize),
+                v.topAnchor.constraint(equalTo: row.topAnchor),
+                v.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+                v.leadingAnchor.constraint(equalTo: leading, constant: i == 0 ? 0 : Self.bubbleGap),
+            ]
+            leading = v.trailingAnchor
+        }
+        constraints.append(row.trailingAnchor.constraint(equalTo: leading))
+        NSLayoutConstraint.activate(constraints)
+        if #available(macOS 26, *) {
+            let group = NSGlassEffectContainerView()
+            group.spacing = Self.bubbleMerge
+            group.contentView = row
+            return group
+        }
+        return row
+    }
+
+    private func bubbleButton(symbol: String, label: String, action: Selector) -> NSButton {
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)?
+            .withSymbolConfiguration(.init(pointSize: 15, weight: .regular))
+        let button = NSButton(image: image ?? NSImage(), target: self, action: action)
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleNone
+        button.toolTip = label
+        button.setAccessibilityLabel(label)
+        button.contentTintColor = .labelColor
+        return button
+    }
+
+    /// The search bubble: the page's Find palette.
+    @objc private func find(_ sender: Any?) {
+        webView?.evaluateJavaScript(HostInbound.find.script)
+    }
+
+    /// The menu hangs off the bubble's bottom-left, as a pull-down's
+    /// would.
+    @objc private func showAccountMenu(_ sender: NSButton) {
+        accountMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: -4), in: sender)
+    }
+
+    /// Built on every open: who is signed in, the Account pane, and
+    /// sign out or sign in. The email is the one the page booted with,
+    /// dropped once the profile is signed out.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === accountMenu else { return }
+        menu.removeAllItems()
+        let signedIn = account.isSignedIn()
+        let header = NSMenuItem(
+            title: signedIn ? (accountEmail ?? String(localized: "Signed in")) : String(localized: "Not signed in"),
+            action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        menu.addItem(.separator())
+        func add(_ title: String, _ action: Selector) {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            if #available(macOS 27, *) { item.preferredImageVisibility = .hidden }
+            menu.addItem(item)
+        }
+        add(String(localized: "Account…"), #selector(openAccountPane))
+        menu.addItem(.separator())
+        if signedIn {
+            add(String(localized: "Sign Out…"), #selector(signOut))
+        } else {
+            add(String(localized: "Sign In…"), #selector(signIn))
+        }
+    }
+
+    @objc private func openAccountPane() { account.openAccount() }
+    @objc private func signIn() { account.signIn() }
+    @objc private func signOut() { account.signOut() }
 
     // MARK: Navigation
 
@@ -377,6 +553,8 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
 
     /// The page's latest `undoState`; set on the main thread.
     var onUndoState: ((Bool, Bool) -> Void)?
+    /// The email of the session a page booted with; on the main thread.
+    var onSession: ((String) -> Void)?
 
     /// A new page is loading (or the old one is going): close every
     /// subscription so the host releases the peer slots, and let the
@@ -461,6 +639,7 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
                     self?.credentialLock.lock()
                     self?.credential = token.map { AppSchemeHandler.Credential(serverURL: s.serverUrl, token: $0) }
                     self?.credentialLock.unlock()
+                    DispatchQueue.main.async { self?.onSession?(s.email) }
                 }
                 reply(result.map { s in
                     WindowSession(

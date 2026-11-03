@@ -71,6 +71,7 @@ final class MirrorFramingTests: XCTestCase {
         XCTAssertEqual(HostInbound.handOff.script, "window.__monoplanHost.handOff()")
         XCTAssertEqual(HostInbound.undo.script, "window.__monoplanHost.undo()")
         XCTAssertEqual(HostInbound.redo.script, "window.__monoplanHost.redo()")
+        XCTAssertEqual(HostInbound.find.script, "window.__monoplanHost.find()")
     }
 
     func testSchemeRoutes() {

@@ -153,6 +153,8 @@ public enum HostInbound: Equatable {
     /// undo surface there.
     case undo
     case redo
+    /// The window's search bubble: open the page's Find palette.
+    case find
 
     public static let global = "window.__monoplanHost"
 
@@ -173,6 +175,8 @@ public enum HostInbound: Equatable {
             return "\(Self.global).undo()"
         case .redo:
             return "\(Self.global).redo()"
+        case .find:
+            return "\(Self.global).find()"
         }
     }
 

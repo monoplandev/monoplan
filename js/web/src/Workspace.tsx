@@ -62,6 +62,7 @@ import {
   isMacShell,
   onTitlebarMouseDown,
   postUndoState,
+  setFindHandler,
   setUndoRedoHandler,
 } from "./sync/mirrorHost.ts";
 import { installConsoleApi } from "./consoleApi.ts";
@@ -1918,8 +1919,11 @@ export function Workspace(props: {
     const onFocusChange = () => setEditing(editableFocused());
     document.addEventListener("focusin", onFocusChange);
     document.addEventListener("focusout", onFocusChange);
+    // The window's search bubble, as the sidebar's Find button.
+    setFindHandler(() => setFindOpen(true));
     onCleanup(() => {
       setUndoRedoHandler(null);
+      setFindHandler(null);
       document.removeEventListener("focusin", onFocusChange);
       document.removeEventListener("focusout", onFocusChange);
     });
@@ -2818,34 +2822,35 @@ export function Workspace(props: {
         onDeleteDoc={canManageDocs() ? props.deleteDoc : null}
         presence={props.presence}
         members={members}
+        // No footer at all in the app's window (spec/mac-window-plan.md
+        // "Settings"): the menu bar has Settings and Undo / Redo, the
+        // account and search bubbles over the page have the account
+        // menu and Find, and the tray shows the sync state; the
+        // shortcuts dialog is not reachable there for now.
         footer={
-          <>
-            {/* Not in the app's window (spec/mac-window-plan.md
-                "Settings"): the menu bar has Settings and Undo / Redo,
-                the tray signs out; the shortcuts dialog is not reachable
-                there for now. */}
-            <Show when={!session.session().mirror}>
-            <NavMenu
-              docs={docs}
-              session={session.session()}
-              logout={() => setLogoutConfirmOpen(true)}
-              onOpenSettings={() => setSettingsOpen(true)}
-              onOpenShortcuts={() => setShortcutsOpen(true)}
-              onSession={session.swapSession}
-              // One workspace per accountless install (`auth.md`); signup
-              // is the gate to more.
-              onNewDoc={canManageDocs() ? () => setNewDocOpen(true) : null}
-            />
-            </Show>
-            <StatusSlot
-              docs={docs}
-              online={session.online()}
-              lastSyncAt={session.lastSyncAt()}
-              session={session.session()}
-              onSession={session.swapSession}
-            />
-            <NavFindButton onClick={() => setFindOpen(true)} />
-          </>
+          session.session().mirror ? undefined : (
+            <>
+              <NavMenu
+                docs={docs}
+                session={session.session()}
+                logout={() => setLogoutConfirmOpen(true)}
+                onOpenSettings={() => setSettingsOpen(true)}
+                onOpenShortcuts={() => setShortcutsOpen(true)}
+                onSession={session.swapSession}
+                // One workspace per accountless install (`auth.md`); signup
+                // is the gate to more.
+                onNewDoc={canManageDocs() ? () => setNewDocOpen(true) : null}
+              />
+              <StatusSlot
+                docs={docs}
+                online={session.online()}
+                lastSyncAt={session.lastSyncAt()}
+                session={session.session()}
+                onSession={session.swapSession}
+              />
+              <NavFindButton onClick={() => setFindOpen(true)} />
+            </>
+          )
         }
       />
       </Show>
