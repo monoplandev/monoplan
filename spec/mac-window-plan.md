@@ -357,10 +357,13 @@ lives, and where it goes:
 | Advanced: per-workspace sync facts | engine state | Stays in the page (diagnostic). |
 | Open at login, CLI link, profile, host, build | — | Native only, as now. |
 
-**Transport.** One `WindowSettings` value, built in Swift from
-`UserDefaults` and the locale and shaped like `{language, hourCycle,
-typedDates}` (whatever the page cannot read for itself), delivered two
-ways:
+**Transport** (built 2026-11-04 with typed dates as its first
+passenger: `WindowSettings` in `MonoplanMacKit`, the `typedDates`
+default, `HostInbound.settings`, the General pane's toggle;
+`hostSettings.ts` on the page, read by `whenToken.ts`). One
+`WindowSettings` value, built in Swift from `UserDefaults` and the
+locale and shaped like `{language, hourCycle, typedDates}` (whatever
+the page cannot read for itself), delivered two ways:
 
 1. **At document start**, as a `WKUserScript` (`.atDocumentStart`,
    main frame) that sets `window.__monoplanSettings`. The page's
@@ -395,11 +398,11 @@ General pane's System / Light / Dark picker, `AppearancePreference` in
 to "auto" under the mac shell, whose marker `mirror.html`'s inline
 script sets before any module runs, and which reads the system query
 alone; the dialog's controls are left alone until the section goes
-wholesale), then the transport with typed
-dates as its first passenger, then language and time format (system
-values, same transport), then show-list-counts' new home, then the
-dialog's General section and `mirror.html`'s inline theme script
-(which can drop its localStorage read once the app owns appearance).
+wholesale), then the transport with typed dates as its first
+passenger (built 2026-11-04, above), then language and time format
+(system values, same transport), then show-list-counts' new home,
+then the dialog's General section wholesale, with the
+`openSettings` request behind its one remaining row.
 
 ## Deferred
 

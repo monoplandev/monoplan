@@ -106,6 +106,9 @@ final class SettingsModel: ObservableObject {
     @Published var syncLine: String = "—"
     /// Settings › General. Saved and applied app-wide on change.
     @Published var appearance: AppearancePreference = .load()
+    /// Settings › General, delivered to the window's page
+    /// (`WindowSettings`).
+    @Published var typedDates: Bool = WindowSettings.load().typedDates
     @Published var openAtLogin = false
     @Published var loginError: String?
     @Published var signingOut = false
@@ -236,6 +239,13 @@ final class SettingsModel: ObservableObject {
         pref.activate()
     }
 
+    func setTypedDates(_ on: Bool) {
+        typedDates = on
+        var s = WindowSettings.load()
+        s.typedDates = on
+        s.save()
+    }
+
     func revealProfile() {
         NSWorkspace.shared.activateFileViewerSelecting([location.dir])
     }
@@ -270,6 +280,7 @@ final class SettingsModel: ObservableObject {
 /// (spec/mac-window-plan.md "Settings"). Appearance drives
 /// `NSApp.appearance`, which the webview follows through
 /// `prefers-color-scheme`; the page itself holds no theme in the app.
+/// The rest reach the page as `WindowSettings`.
 struct GeneralPane: View {
     @ObservedObject var model: SettingsModel
 
@@ -284,6 +295,10 @@ struct GeneralPane: View {
                 Text("Dark").tag(AppearancePreference.dark)
             }
             .pickerStyle(.segmented)
+            Toggle("Recognise dates as you type", isOn: Binding(
+                get: { model.typedDates },
+                set: { model.setTypedDates($0) }
+            ))
         }
         .formStyle(.grouped)
         .frame(width: 460)

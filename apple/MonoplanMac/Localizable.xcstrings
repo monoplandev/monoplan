@@ -471,6 +471,16 @@
         }
       }
     },
+    "Recognise dates as you type": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reconocer fechas al escribir"
+          }
+        }
+      }
+    },
     "Redo": {
       "localizations": {
         "es": {

@@ -8,7 +8,7 @@
 // - `MirrorHostBridge`: the `monoplan` message handler the page posts
 //   to (`session`, `subscribe`, `unsubscribe`, `import`, `window`) and the calls
 //   back into `window.__monoplanHost` (`update`, `stopped`, `sync`,
-//   `handOff`). One `Host.subscribe` per open doc; a `MirrorSink` per
+//   `handOff`, `settings`). One `Host.subscribe` per open doc; a `MirrorSink` per
 //   subscription hops to the main queue and evaluates the update into
 //   the page, never calling `Host.import` from inside `update` (the
 //   loop is busy delivering). Requests that block in Rust (`subscribe`
@@ -49,6 +49,11 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     private var handedOff = false
     /// The dev-server override, if any.
     private let devURL: URL?
+    /// The device settings the page was last given (`WindowSettings`):
+    /// as a document-start user script, so a load or reload starts
+    /// with them, and pushed live when `UserDefaults` changes.
+    private var settings = WindowSettings.load()
+    private var defaultsObserver: NSObjectProtocol?
 
     init(hostProvider: @escaping () -> MonoplanCore.Host?, onVisibility: @escaping (Bool) -> Void) {
         self.hostProvider = hostProvider
@@ -59,12 +64,38 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
             credential: { [bridge] in bridge.apiCredential })
         self.devURL = ProcessInfo.processInfo.environment["MONOPLAN_MIRROR_URL"].flatMap(URL.init(string:))
         super.init(window: nil)
+        // Any defaults write (the window's own frame autosave included)
+        // posts this; only a change to the settings themselves goes on.
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.settingsChanged() }
+    }
+
+    deinit {
+        if let defaultsObserver { NotificationCenter.default.removeObserver(defaultsObserver) }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
     var isOpen: Bool { window != nil }
+
+    private func settingsChanged() {
+        let now = WindowSettings.load()
+        guard now != settings else { return }
+        settings = now
+        guard let webView else { return }
+        installSettingsScript(into: webView.configuration.userContentController)
+        if webView.url != nil { webView.evaluateJavaScript(HostInbound.settings(now).script) }
+    }
+
+    /// The document-start script that sets `window.__monoplanSettings`,
+    /// replacing the previous one (the only user script there is).
+    private func installSettingsScript(into controller: WKUserContentController) {
+        controller.removeAllUserScripts()
+        controller.addUserScript(WKUserScript(
+            source: settings.userScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+    }
 
     /// Open (or bring forward) the window, on `fragment` (`item_<id>`
     /// and the other `spec/urls.md` fragments) when given.
@@ -128,6 +159,7 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(schemeHandler, forURLScheme: AppScheme.scheme)
         config.userContentController.addScriptMessageHandler(bridge, contentWorld: .page, name: MirrorHostBridge.handlerName)
+        installSettingsScript(into: config.userContentController)
         config.websiteDataStore = .default()
         if debug {
             // Inspect Element in the context menu.

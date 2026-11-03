@@ -43,14 +43,18 @@ import {
   todayStamp,
   whenDay,
 } from "./format.tsx";
+import { hasHostSettings, hostSetting, onHostSettings } from "./hostSettings.ts";
 
 // Whether typed dates are recognised at all: a device preference like
 // the time format, so it lives in a cookie beside it (`format.tsx`), on
-// by default. Off, the editors never scan; a token already standing
-// still commits.
+// by default. In the macOS app's window the app owns it
+// (`hostSettings.ts`): read from there, followed live, never written.
+// Off, the editors never scan; a token already standing still commits.
 const TYPED_DATES_COOKIE = "typeddates";
 
 function readTypedDatesPref(): boolean {
+  const host = hostSetting("typedDates");
+  if (host !== undefined) return host;
   try {
     return !/(?:^|; )typeddates=0(?:;|$)/.test(document.cookie);
   } catch {
@@ -60,9 +64,13 @@ function readTypedDatesPref(): boolean {
 
 const [typedDatesPref, setTypedDatesSignal] = createSignal(readTypedDatesPref());
 export { typedDatesPref };
+onHostSettings((s) => {
+  if (s.typedDates !== undefined) setTypedDatesSignal(s.typedDates);
+});
 
 export function setTypedDatesPref(on: boolean): void {
   setTypedDatesSignal(on);
+  if (hasHostSettings()) return;
   try {
     document.cookie = on
       ? `${TYPED_DATES_COOKIE}=;path=/;max-age=0;SameSite=Lax`

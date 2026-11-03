@@ -25,6 +25,9 @@
 //                         resolves once the host has answered the
 //                         imports it caused. The app awaits it before
 //                         it closes the window or quits.
+//   .settings(obj)        the app's device settings changed
+//                         (`hostSettings.ts`; the first values arrive
+//                         by a document-start script, not here)
 //
 // The doc id is the `workspace` selector the host resolves (`-w` accepts
 // a doc uuid, `spec/cli.md`). The peer id travels as a decimal string
@@ -35,6 +38,7 @@
 // the page.
 
 import type { MirrorSeed, MirrorTransport } from "@monoplan/core/mirror-bridge";
+import { applyHostSettings, type HostSettings } from "../hostSettings.ts";
 
 /** Name of the WebKit message handler the app registers. */
 export const HOST_HANDLER = "monoplan";
@@ -97,6 +101,7 @@ export interface HostInbound {
   stopped(docId: string): void;
   sync(status: HostSyncStatus): void;
   handOff(): Promise<void>;
+  settings(settings: HostSettings): void;
 }
 
 export interface AppHost {
@@ -173,6 +178,9 @@ export function createAppHost(handler: HostMessageHandler, target: object): AppH
     },
     handOff() {
       return onHandOff?.() ?? Promise.resolve();
+    },
+    settings(settings) {
+      applyHostSettings(settings);
     },
   };
   (target as Record<string, unknown>)[HOST_GLOBAL] = inbound;

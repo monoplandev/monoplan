@@ -136,6 +136,8 @@ public enum HostInbound: Equatable {
     case stopped(docId: String)
     case sync(online: Bool, lastSyncedAt: Int64?)
     case handOff
+    /// The app's device settings changed (`WindowSettings`).
+    case settings(WindowSettings)
 
     public static let global = "window.__monoplanHost"
 
@@ -150,6 +152,8 @@ public enum HostInbound: Equatable {
             return "\(Self.global).sync({online: \(online ? "true" : "false"), lastSyncedAt: \(last)})"
         case .handOff:
             return "\(Self.global).handOff()"
+        case .settings(let settings):
+            return "\(Self.global).settings(\(settings.json))"
         }
     }
 
