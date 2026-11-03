@@ -10,6 +10,8 @@ final class MirrorFramingTests: XCTestCase {
         XCTAssertEqual(
             try HostRequest(message: ["kind": "import", "docId": "d1", "bytes": bytes.base64EncodedString()]),
             .import(docId: "d1", bytes: bytes))
+        XCTAssertEqual(try HostRequest(message: ["kind": "window", "action": "drag"]), .window(.drag))
+        XCTAssertEqual(try HostRequest(message: ["kind": "window", "action": "doubleClick"]), .window(.doubleClick))
     }
 
     func testRejectsMalformedRequests() {
@@ -18,6 +20,10 @@ final class MirrorFramingTests: XCTestCase {
         XCTAssertThrowsError(try HostRequest(message: ["kind": "subscribe"])) { XCTAssertEqual($0 as? HostRequest.ParseError, .missing("docId")) }
         XCTAssertThrowsError(try HostRequest(message: ["kind": "import", "docId": "d", "bytes": "%%%"])) {
             XCTAssertEqual($0 as? HostRequest.ParseError, .badBase64("bytes"))
+        }
+        XCTAssertThrowsError(try HostRequest(message: ["kind": "window"])) { XCTAssertEqual($0 as? HostRequest.ParseError, .missing("action")) }
+        XCTAssertThrowsError(try HostRequest(message: ["kind": "window", "action": "wiggle"])) {
+            XCTAssertEqual($0 as? HostRequest.ParseError, .badValue("action"))
         }
     }
 

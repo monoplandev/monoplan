@@ -162,6 +162,37 @@ body {
   border-right: 0.5px solid var(--border-surface);
 }
 
+/* The macOS app's window has no title bar (`[data-shell="mac"]`,
+   mirror.tsx): the traffic lights sit over this strip at the top of the
+   sidebar, which replaces the nav's top padding and drags the window
+   (nav.tsx). Tall enough that the lights (13px to 27px from the top,
+   in the app's compact unified title bar) clear the first row. */
+.nav-titlebar {
+  flex-shrink: 0;
+  height: 42px;
+}
+
+[data-shell="mac"] .nav {
+  padding-top: 0;
+}
+
+/* The same window's thin drag strip across the top of every pane
+   (Workspace.tsx), over the content but under dialogs and palettes
+   (z-index 100+); the main surface and side panel start below it. */
+.app-titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 24px;
+  z-index: 30;
+}
+
+[data-shell="mac"] .content,
+[data-shell="mac"] .side-panel {
+  padding-top: 24px;
+}
+
 /* Sidebar-scoped footer: app menu at the left, account/sync widget
    beside it. Left padding lines the menu up with the nav's scroll-region
    gutter. */

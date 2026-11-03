@@ -18,12 +18,24 @@ public enum HostRequest: Equatable {
     case subscribe(docId: String)
     case unsubscribe(docId: String)
     case `import`(docId: String, bytes: Data)
+    /// A title-bar gesture on the page's own strip (the window has no
+    /// title bar of its own; `.nav-titlebar` stands in for it).
+    case window(WindowGesture)
+
+    public enum WindowGesture: String, Equatable {
+        /// A mouse-down: move the window with it.
+        case drag
+        /// A double-click: what the system's "double-click a window's
+        /// title bar to" setting says.
+        case doubleClick
+    }
 
     public enum ParseError: Error, Equatable, LocalizedError {
         case notAnObject
         case unknownKind(String)
         case missing(String)
         case badBase64(String)
+        case badValue(String)
 
         public var errorDescription: String? {
             switch self {
@@ -31,6 +43,7 @@ public enum HostRequest: Equatable {
             case .unknownKind(let k): return "unknown request kind \(k)"
             case .missing(let f): return "request is missing \(f)"
             case .badBase64(let f): return "request field \(f) is not base64"
+            case .badValue(let f): return "request field \(f) has an unknown value"
             }
         }
     }
@@ -54,6 +67,9 @@ public enum HostRequest: Equatable {
             let b64 = try string("bytes")
             guard let data = Data(base64Encoded: b64) else { throw ParseError.badBase64("bytes") }
             self = .import(docId: try string("docId"), bytes: data)
+        case "window":
+            guard let gesture = WindowGesture(rawValue: try string("action")) else { throw ParseError.badValue("action") }
+            self = .window(gesture)
         default:
             throw ParseError.unknownKind(kind)
         }

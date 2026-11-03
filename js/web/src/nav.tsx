@@ -23,6 +23,7 @@ import { Avatar } from "./Avatar.tsx";
 import { useSession } from "./SessionContext.tsx";
 import type { PresentAccount } from "./sync/runtime.ts";
 import { pendingInvite } from "./invite.ts";
+import { isMacShell, onTitlebarMouseDown } from "./sync/mirrorHost.ts";
 import type { AttentionBadge } from "./dayGroups.ts";
 import { Dnd, DndSelection, type DndOp } from "./dnd/solid";
 import { EmojiPicker } from "./EmojiPicker.tsx";
@@ -378,6 +379,15 @@ export function Nav(props: {
 
   return (
     <nav class="nav">
+      {/* The macOS app's window (mirror.tsx) has no title bar: its traffic
+          lights sit over this strip, which stands in for the bar it
+          replaced, so a drag moves the window and a double-click does
+          what the title bar's would. The thinner `.app-titlebar` in
+          Workspace.tsx does the same across the other panes. Hidden
+          everywhere else. */}
+      <Show when={isMacShell()}>
+        <div class="nav-titlebar" onMouseDown={onTitlebarMouseDown} />
+      </Show>
       <div class="nav-scroll" tabIndex={-1} ref={navScrollEl}>
       <div class="nav-group">
         {/* Focus: a reserved lens (spec/focus.md), not a `ListMeta` row, so

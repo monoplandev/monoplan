@@ -12,6 +12,8 @@
 //   { kind: "subscribe", docId }              → { snapshot: b64, peer: "u64 decimal" }
 //   { kind: "unsubscribe", docId }            → null
 //   { kind: "import", docId, bytes: b64 }     → null   (`Host.import`)
+//   { kind: "window", action }                → null   (a title-bar gesture,
+//                                                       see `postWindowGesture`)
 //
 // Inbound (Swift → JS, by `evaluateJavaScript`), on `window.__monoplanHost`:
 //
@@ -61,7 +63,14 @@ export type HostRequest =
   | { kind: "session" }
   | { kind: "subscribe"; docId: string }
   | { kind: "unsubscribe"; docId: string }
-  | { kind: "import"; docId: string; bytes: string };
+  | { kind: "import"; docId: string; bytes: string }
+  | { kind: "window"; action: WindowGesture };
+
+/** What the sidebar's title strip (`.nav-titlebar`) forwards: the
+ *  window has no title bar of its own (the traffic lights sit over the
+ *  strip), and the webview takes every mouse event, so a drag or a
+ *  double-click on the strip has to be handed back to the app. */
+export type WindowGesture = "drag" | "doubleClick";
 
 /** The handler's reply to `subscribe`. */
 export interface SubscribeReply {
@@ -104,12 +113,42 @@ export interface AppHost {
 /** The app host behind this page, or null outside the app: the
  *  presence of the message handler is the whole test. */
 export function detectAppHost(): AppHost | null {
+  const handler = findHandler();
+  if (!handler) return null;
+  return createAppHost(handler, window);
+}
+
+function findHandler(): HostMessageHandler | null {
   const w = window as unknown as {
     webkit?: { messageHandlers?: Record<string, HostMessageHandler | undefined> };
   };
-  const handler = w.webkit?.messageHandlers?.[HOST_HANDLER];
-  if (!handler) return null;
-  return createAppHost(handler, window);
+  return w.webkit?.messageHandlers?.[HOST_HANDLER] ?? null;
+}
+
+/** Whether this page is the app's window (`mirror.tsx` marks it), so
+ *  the title-bar strips render only there. */
+export function isMacShell(): boolean {
+  return document.documentElement.dataset.shell === "mac";
+}
+
+/** The mouse-down handler of a title-bar strip: a press drags, the
+ *  second press of a double-click (by click count: the app's drag takes
+ *  the mouse, so the page never sees a `dblclick`) does what the title
+ *  bar's double-click would. */
+export function onTitlebarMouseDown(e: MouseEvent): void {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  postWindowGesture(e.detail >= 2 ? "doubleClick" : "drag");
+}
+
+/** Hand a title-bar gesture to the app; nothing outside it. Fire and
+ *  forget: the app acts on the mouse event it is already holding. */
+export function postWindowGesture(action: WindowGesture): void {
+  const handler = findHandler();
+  if (!handler) return;
+  void handler.postMessage({ kind: "window", action }).catch((e) => {
+    console.warn("mirror: window gesture failed:", e);
+  });
 }
 
 /** Build the host over a message handler, installing the inbound global

@@ -58,6 +58,7 @@ import type { ListOption } from "./ListPicker.tsx";
 import { MovePalette } from "./MovePalette.tsx";
 import { EditableNavLabel, Nav, NavFindButton, NavMenu, FirstRunAuthPrompt, StatusSlot } from "./nav.tsx";
 import { MobileBars } from "./MobileShell.tsx";
+import { isMacShell, onTitlebarMouseDown } from "./sync/mirrorHost.ts";
 import { digitNavTarget } from "./navShortcuts.ts";
 import {
   focusItems,
@@ -2756,6 +2757,13 @@ export function Workspace(props: {
         "side-panel-open": sidePanelShown(),
       }}
     >
+      {/* The macOS app's window has no title bar: a thin strip across the
+          top of every pane drags it (the sidebar's own `.nav-titlebar`
+          is the tall one under the traffic lights). The main surface and
+          side panel are nudged down under it (`[data-shell="mac"]`). */}
+      <Show when={isMacShell()}>
+        <div class="app-titlebar" onMouseDown={onTitlebarMouseDown} />
+      </Show>
       <Show when={!isMobile()}>
       <Nav
         docs={docs}

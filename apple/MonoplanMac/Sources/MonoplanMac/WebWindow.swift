@@ -6,7 +6,7 @@
 //   (open from the tray, hand everything off to the host before it
 //   closes or the app quits), activation policy via `onVisibility`.
 // - `MirrorHostBridge`: the `monoplan` message handler the page posts
-//   to (`session`, `subscribe`, `unsubscribe`, `import`) and the calls
+//   to (`session`, `subscribe`, `unsubscribe`, `import`, `window`) and the calls
 //   back into `window.__monoplanHost` (`update`, `stopped`, `sync`,
 //   `handOff`). One `Host.subscribe` per open doc; a `MirrorSink` per
 //   subscription hops to the main queue and evaluates the update into
@@ -142,11 +142,27 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         }
         self.webView = webView
 
+        // No title bar of its own: the page runs edge to edge and the
+        // traffic lights sit over the top of its sidebar, which pads
+        // itself below them (`.nav-titlebar`) and forwards drags and
+        // double-clicks as `window` requests, since the webview takes
+        // every mouse event itself.
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false)
         window.title = "Monoplan"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        // An empty toolbar in the compact unified style is the public
+        // way to a taller title bar: the traffic lights move from 9px
+        // to 13px below the top edge (and 3px in), and hit testing still
+        // reaches the webview under the whole bar, so nothing is dead.
+        let toolbar = NSToolbar(identifier: "MonoplanWindowToolbar")
+        toolbar.allowsUserCustomization = false
+        window.toolbar = toolbar
+        window.toolbarStyle = .unifiedCompact
+        window.titlebarSeparatorStyle = .none
         window.minSize = NSSize(width: 520, height: 360)
         window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
@@ -442,6 +458,31 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
             }
             work.async {
                 reply(Result { try host.import(subscription: sub, bytes: bytes) }.map { NSNull() })
+            }
+
+        case .window(let gesture):
+            // On the main thread, in the mouse-down's run-loop turn or
+            // the next; `currentEvent` is that mouse-down (or the first
+            // drag after it), which is what the window drag wants.
+            if let window = message.webView?.window { Self.perform(gesture, on: window) }
+            replyHandler(NSNull(), nil)
+        }
+    }
+
+    /// What the title bar would have done with the gesture.
+    private static func perform(_ gesture: HostRequest.WindowGesture, on window: NSWindow) {
+        switch gesture {
+        case .drag:
+            guard let event = NSApp.currentEvent,
+                  event.type == .leftMouseDown || event.type == .leftMouseDragged
+            else { return }
+            window.performDrag(with: event)
+        case .doubleClick:
+            // Desktop & Dock → "Double-click a window's title bar to".
+            switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+            case "None": break
+            case "Minimize": window.performMiniaturize(nil)
+            default: window.performZoom(nil)
             }
         }
     }

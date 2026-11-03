@@ -272,6 +272,20 @@ first, backed by the in-process `HostCmd::Session` /
     `Host.subscribe` per open doc, a `MirrorSink` each)
   - `{kind: "unsubscribe", docId}` → `null`
   - `{kind: "import", docId, bytes}` → `null` (`Host.import`)
+  - `{kind: "window", action: "drag" | "doubleClick"}` → `null`. The
+    window has no title bar (`.fullSizeContentView`, transparent,
+    title hidden, an empty `.unifiedCompact` toolbar so the bar is
+    taller and the traffic lights sit lower, over the top of the
+    page's sidebar; hit testing under the bar still reaches the
+    webview). The webview takes every mouse event, so the sidebar's
+    `.nav-titlebar` strip and the 24px `.app-titlebar` across the top
+    of the other panes (both shown under `[data-shell="mac"]`, which
+    `mirror.tsx` sets; the main surface and side panel are padded down
+    under the thin one) post their mouse-downs: `drag` is
+    `performDrag(with: NSApp.currentEvent)`, `doubleClick` (the second
+    press, by click count, since the drag swallows the `dblclick`)
+    follows the system's "double-click a window's title bar to"
+    setting (zoom, minimise or nothing).
   - inbound, on `window.__monoplanHost`: `update(docId, bytes)` for
     `MirrorSink.update`, `stopped(docId)` for `MirrorSink.stopped`,
     `sync({online, lastSyncedAt})` with the host's `SyncStatus` (sent
@@ -321,6 +335,65 @@ first, backed by the in-process `HostCmd::Session` /
   and pending links still list and revoke); the sign-in sheet's
   "Create an account…" still goes to the browser. Each wraps or
   unwraps a key the webview does not hold.
+
+## Settings (plan, decided 2026-11-04, not built)
+
+In the window the app owns every device preference; the page's
+Settings dialog stops offering them. Workspace data that happens to
+be shown there stays with the page.
+
+**Inventory.** What the page's Settings dialog holds today, where it
+lives, and where it goes:
+
+| Setting | Lives in (browser) | In the app |
+|---|---|---|
+| Language (es / en) | `locale` cookie + localStorage (`i18n.tsx`) | The app's own localisation: `Bundle.main.preferredLocalizations` (System Settings › Language & Region › Applications). No app setting of its own. |
+| Theme (auto / light / dark) | `theme` cookie + localStorage (`theme.ts`) | An Appearance picker (System / Light / Dark) in a new General pane, `UserDefaults`. The app sets `NSApp.appearance`; the webview's `prefers-color-scheme` follows its effective appearance, so the page stays on `auto` and no value crosses. Sheets, alerts and the traffic lights match for free. |
+| Time format (auto / 12h / 24h) | `hourcycle` cookie (`format.tsx`) | The system's: `Locale.current.hourCycle`. No app setting. |
+| Typed dates (on / off) | `typeddates` cookie (`whenToken.ts`) | A toggle in the General pane, `UserDefaults`. |
+| Show list counts | **The doc** (`settings.show_list_counts`, synced to every device, `spec/data-model.md`) | Not a device preference; stays with the page (moved out of the dialog to where the other workspace toggles are, or a View menu item that tells the page). Decided when its turn comes. |
+| Account: email, log out, delete | — | Already hidden in the mirror (`Session.mirror`); the Account pane and the tray own sign-in / sign-out. |
+| Devices: list, rename, revoke | `/api` through the proxy | Stays in the page: it works in the window and the native panes do not list devices. |
+| Advanced: per-workspace sync facts | engine state | Stays in the page (diagnostic). |
+| Open at login, CLI link, profile, host, build | — | Native only, as now. |
+
+**Transport.** One `WindowSettings` value, built in Swift from
+`UserDefaults` and the locale and shaped like `{language, hourCycle,
+typedDates}` (whatever the page cannot read for itself), delivered two
+ways:
+
+1. **At document start**, as a `WKUserScript` (`.atDocumentStart`,
+   main frame) that sets `window.__monoplanSettings`. The page's
+   readers are synchronous module-level reads (`readLanguage`,
+   `timeFormatPref`, the typed-dates cookie), so a synchronous
+   global is what lets them pick the app's values up on first paint
+   with no flash and no async boot step. The script is rebuilt
+   (`removeAllUserScripts` + add) whenever the value changes, so a
+   reload also starts right.
+2. **Live**, as `HostInbound.settings(...)` →
+   `window.__monoplanHost.settings({...})` whenever `UserDefaults` or
+   the locale changes (`UserDefaults.didChangeNotification`,
+   `NSLocale.currentLocaleDidChangeNotification`), so a change in the
+   Settings window applies to the open page at once.
+
+On the page, `src/hostSettings.ts` wraps both: `hostSetting(key)` for
+the module-level readers (the global when present, else the cookie /
+localStorage path), and a signal fed by the inbound call that the
+same modules' setters consume. Under `[data-shell="mac"]` the page's
+setters do not persist (the app's store is the truth) and the
+dialog's General section collapses to one row, "Managed in Monoplan ›
+Settings…", whose button posts `{kind: "openSettings"}` so the app
+shows its Settings window (⌘, in the main menu already does). The
+`settings` request, `HostInbound.settings` and `WindowSettings` are
+framed in `MirrorFraming.swift` and `mirrorHost.ts` and tested there
+like the rest of the contract.
+
+**Order.** One setting at a time: Appearance (the General pane and
+`NSApp.appearance`; no transport yet), then the transport with typed
+dates as its first passenger, then language and time format (system
+values, same transport), then show-list-counts' new home, then the
+dialog's General section and `mirror.html`'s inline theme script
+(which can drop its localStorage read once the app owns appearance).
 
 ## Deferred
 
