@@ -3326,7 +3326,6 @@ input.task-check:hover {
   border-radius: 4px;
   background: transparent;
   font: inherit;
-  font-size: 14px;
   color: var(--text);
   outline: none;
 }
