@@ -14,6 +14,8 @@
 //   { kind: "import", docId, bytes: b64 }     → null   (`Host.import`)
 //   { kind: "window", action }                → null   (a title-bar gesture,
 //                                                       see `postWindowGesture`)
+//   { kind: "openSettings" }                  → null   (the app's Settings
+//                                                       window; the page has none)
 //
 // Inbound (Swift → JS, by `evaluateJavaScript`), on `window.__monoplanHost`:
 //
@@ -68,7 +70,8 @@ export type HostRequest =
   | { kind: "subscribe"; docId: string }
   | { kind: "unsubscribe"; docId: string }
   | { kind: "import"; docId: string; bytes: string }
-  | { kind: "window"; action: WindowGesture };
+  | { kind: "window"; action: WindowGesture }
+  | { kind: "openSettings" };
 
 /** What the sidebar's title strip (`.nav-titlebar`) forwards: the
  *  window has no title bar of its own (the traffic lights sit over the
@@ -149,10 +152,21 @@ export function onTitlebarMouseDown(e: MouseEvent): void {
 /** Hand a title-bar gesture to the app; nothing outside it. Fire and
  *  forget: the app acts on the mouse event it is already holding. */
 export function postWindowGesture(action: WindowGesture): void {
+  post({ kind: "window", action });
+}
+
+/** Open the app's Settings window: in the app the page has no Settings
+ *  dialog (every device preference is the app's, spec/mac-window-plan.md
+ *  "Settings"). */
+export function postOpenSettings(): void {
+  post({ kind: "openSettings" });
+}
+
+function post(request: HostRequest): void {
   const handler = findHandler();
   if (!handler) return;
-  void handler.postMessage({ kind: "window", action }).catch((e) => {
-    console.warn("mirror: window gesture failed:", e);
+  void handler.postMessage(request).catch((e) => {
+    console.warn(`mirror: ${request.kind} failed:`, e);
   });
 }
 

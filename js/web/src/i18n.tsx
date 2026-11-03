@@ -169,7 +169,6 @@ export type Messages = {
     lastSynced: (rel: string) => string;
     seqLabel: (n: string) => string;
     epochLabel: (n: string) => string;
-    itemsListsCount: (items: number, lists: number) => string;
     /** Footer popover: how many docs this session has open. */
     docsCount: (n: number) => string;
     undo: string;
@@ -479,13 +478,6 @@ export type Messages = {
     account: string;
     devices: string;
     /** Advanced section: one group per open workspace with its sync facts. */
-    advanced: string;
-    syncStatus: string;
-    seq: string;
-    epoch: string;
-    fingerprint: string;
-    contents: string;
-    workspaceId: string;
     language: string;
     languageSpanish: string;
     languageEnglish: string;
@@ -675,8 +667,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       lastSynced: (rel) => `Sincronizado ${rel}`,
       seqLabel: (n) => `seq #${n}`,
       epochLabel: (n) => `epoch ${n}`,
-      itemsListsCount: (items, lists) =>
-        `${items} elemento${items === 1 ? "" : "s"}, ${lists} lista${lists === 1 ? "" : "s"}`,
       docsCount: (n) => `${n} espacio${n === 1 ? "" : "s"}`,
       undo: "Deshacer",
       redo: "Rehacer",
@@ -863,13 +853,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       general: "General",
       account: "Cuenta",
       devices: "Dispositivos",
-      advanced: "Avanzado",
-      syncStatus: "Estado",
-      seq: "Secuencia",
-      epoch: "Epoch",
-      fingerprint: "Huella",
-      contents: "Contenido",
-      workspaceId: "ID del espacio",
       language: "Idioma",
       languageSpanish: "Español",
       languageEnglish: "English",
@@ -1052,8 +1035,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       lastSynced: (rel) => `Synced ${rel}`,
       seqLabel: (n) => `seq #${n}`,
       epochLabel: (n) => `epoch ${n}`,
-      itemsListsCount: (items, lists) =>
-        `${items} item${items === 1 ? "" : "s"}, ${lists} list${lists === 1 ? "" : "s"}`,
       docsCount: (n) => `${n} workspace${n === 1 ? "" : "s"}`,
       undo: "Undo",
       redo: "Redo",
@@ -1240,13 +1221,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       general: "General",
       account: "Account",
       devices: "Devices",
-      advanced: "Advanced",
-      syncStatus: "Status",
-      seq: "Sequence",
-      epoch: "Epoch",
-      fingerprint: "Fingerprint",
-      contents: "Contents",
-      workspaceId: "Workspace id",
       language: "Language",
       languageSpanish: "Español",
       languageEnglish: "English",

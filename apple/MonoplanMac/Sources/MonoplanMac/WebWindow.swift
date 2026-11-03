@@ -6,7 +6,8 @@
 //   (open from the tray, hand everything off to the host before it
 //   closes or the app quits), activation policy via `onVisibility`.
 // - `MirrorHostBridge`: the `monoplan` message handler the page posts
-//   to (`session`, `subscribe`, `unsubscribe`, `import`, `window`) and the calls
+//   to (`session`, `subscribe`, `unsubscribe`, `import`, `window`,
+//   `openSettings`) and the calls
 //   back into `window.__monoplanHost` (`update`, `stopped`, `sync`,
 //   `handOff`, `settings`). One `Host.subscribe` per open doc; a `MirrorSink` per
 //   subscription hops to the main queue and evaluates the update into
@@ -55,10 +56,11 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     private var settings = WindowSettings.load()
     private var settingsObservers: [NSObjectProtocol] = []
 
-    init(hostProvider: @escaping () -> MonoplanCore.Host?, onVisibility: @escaping (Bool) -> Void) {
+    init(hostProvider: @escaping () -> MonoplanCore.Host?, onVisibility: @escaping (Bool) -> Void,
+         onOpenSettings: @escaping () -> Void) {
         self.hostProvider = hostProvider
         self.onVisibility = onVisibility
-        self.bridge = MirrorHostBridge(hostProvider: hostProvider)
+        self.bridge = MirrorHostBridge(hostProvider: hostProvider, onOpenSettings: onOpenSettings)
         self.schemeHandler = AppSchemeHandler(
             webRoot: Bundle.main.resourceURL?.appendingPathComponent("web", isDirectory: true),
             credential: { [bridge] in bridge.apiCredential })
@@ -329,6 +331,8 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     static let handlerName = "monoplan"
 
     private let hostProvider: () -> MonoplanCore.Host?
+    /// The page asked for Settings: the app's window (the tray's).
+    private let onOpenSettings: () -> Void
     /// Blocking host calls, one at a time, in request order.
     private let work = DispatchQueue(label: "app.monoplan.mac.mirror", qos: .userInitiated)
     /// Main-queue state: the live subscriptions of the current page.
@@ -345,8 +349,9 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     private let credentialLock = NSLock()
     private var credential: AppSchemeHandler.Credential?
 
-    init(hostProvider: @escaping () -> MonoplanCore.Host?) {
+    init(hostProvider: @escaping () -> MonoplanCore.Host?, onOpenSettings: @escaping () -> Void) {
         self.hostProvider = hostProvider
+        self.onOpenSettings = onOpenSettings
     }
 
     var apiCredential: AppSchemeHandler.Credential? {
@@ -501,6 +506,10 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
             // the next; `currentEvent` is that mouse-down (or the first
             // drag after it), which is what the window drag wants.
             if let window = message.webView?.window { Self.perform(gesture, on: window) }
+            replyHandler(NSNull(), nil)
+
+        case .openSettings:
+            onOpenSettings()
             replyHandler(NSNull(), nil)
         }
     }

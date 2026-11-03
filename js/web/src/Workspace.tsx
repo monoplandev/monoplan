@@ -58,7 +58,8 @@ import type { ListOption } from "./ListPicker.tsx";
 import { MovePalette } from "./MovePalette.tsx";
 import { EditableNavLabel, Nav, NavFindButton, NavMenu, FirstRunAuthPrompt, StatusSlot } from "./nav.tsx";
 import { MobileBars } from "./MobileShell.tsx";
-import { isMacShell, onTitlebarMouseDown } from "./sync/mirrorHost.ts";
+import { isMacShell, onTitlebarMouseDown, postOpenSettings } from "./sync/mirrorHost.ts";
+import { installConsoleApi } from "./consoleApi.ts";
 import { digitNavTarget } from "./navShortcuts.ts";
 import {
   focusItems,
@@ -285,6 +286,8 @@ export function Workspace(props: {
   const [dndItems, setDndItems] = createSignal<ItemView[]>([]);
   const [themePref, setThemePref] = createSignal<ThemePreference>(theme.get());
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  // The sync facts are a console call, `monoplan.sync()` (consoleApi.ts).
+  installConsoleApi(docs, session.online);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = createSignal(false);
   // The "New workspace" dialog; opened from the nav footer's app menu.
   const [newDocOpen, setNewDocOpen] = createSignal(false);
@@ -2782,7 +2785,11 @@ export function Workspace(props: {
               docs={docs}
               session={session.session()}
               logout={() => setLogoutConfirmOpen(true)}
-              onOpenSettings={() => setSettingsOpen(true)}
+              // In the app's window every setting is the app's: its
+              // Settings window opens, the page's dialog never does.
+              onOpenSettings={() =>
+                session.session().mirror ? postOpenSettings() : setSettingsOpen(true)
+              }
               onOpenShortcuts={() => setShortcutsOpen(true)}
               onSession={session.swapSession}
               // One workspace per accountless install (`auth.md`); signup
@@ -2859,6 +2866,10 @@ export function Workspace(props: {
           if (ids) moveBlockToList(ids, listId);
         }}
       />
+      {/* Not in the app's window (spec/mac-window-plan.md "Settings"):
+          General is the app's, Devices is its Devices pane and Account's
+          email is on its Account pane. */}
+      <Show when={!session.session().mirror}>
       <Settings
         open={settingsOpen()}
         onOpenChange={setSettingsOpen}
@@ -2877,8 +2888,8 @@ export function Workspace(props: {
           void session.logout({ wipeLocal: true, serverGone: true })
         }
         docs={docs}
-        online={session.online()}
       />
+      </Show>
       {/* Sign-out confirmation, same wording as the macOS app's alert:
           the local copy goes, unsynced changes with it, synced data
           comes back on the next sign-in. Confirming is what wipes. */}

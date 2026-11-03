@@ -12,6 +12,7 @@ final class MirrorFramingTests: XCTestCase {
             .import(docId: "d1", bytes: bytes))
         XCTAssertEqual(try HostRequest(message: ["kind": "window", "action": "drag"]), .window(.drag))
         XCTAssertEqual(try HostRequest(message: ["kind": "window", "action": "doubleClick"]), .window(.doubleClick))
+        XCTAssertEqual(try HostRequest(message: ["kind": "openSettings"]), .openSettings)
     }
 
     func testRejectsMalformedRequests() {

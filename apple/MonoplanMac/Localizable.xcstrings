@@ -151,6 +151,16 @@
         }
       }
     },
+    "Could not load devices: %@": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudieron cargar los dispositivos: %@"
+          }
+        }
+      }
+    },
     "Create an account…": {
       "localizations": {
         "es": {
@@ -187,6 +197,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nombre del dispositivo"
+          }
+        }
+      }
+    },
+    "Devices": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dispositivos"
           }
         }
       }
@@ -271,6 +291,26 @@
         }
       }
     },
+    "It will be signed out and will have to sign in again to reach your account.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se cerrará su sesión y tendrá que iniciarla de nuevo para acceder a tu cuenta."
+          }
+        }
+      }
+    },
+    "Last seen %@": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visto por última vez %@"
+          }
+        }
+      }
+    },
     "Light": {
       "localizations": {
         "es": {
@@ -281,12 +321,32 @@
         }
       }
     },
+    "Loading…": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cargando…"
+          }
+        }
+      }
+    },
     "Minimize": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
             "value": "Minimizar"
+          }
+        }
+      }
+    },
+    "Name": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nombre"
           }
         }
       }
@@ -501,6 +561,26 @@
         }
       }
     },
+    "Rename device": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Renombrar dispositivo"
+          }
+        }
+      }
+    },
+    "Rename…": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Renombrar…"
+          }
+        }
+      }
+    },
     "Reveal": {
       "localizations": {
         "es": {
@@ -511,12 +591,52 @@
         }
       }
     },
+    "Revoke": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revocar"
+          }
+        }
+      }
+    },
+    "Revoke “%@”?": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Revocar “%@”?"
+          }
+        }
+      }
+    },
+    "Revoke…": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revocar…"
+          }
+        }
+      }
+    },
     "Running": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
             "value": "En ejecución"
+          }
+        }
+      }
+    },
+    "Save": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Guardar"
           }
         }
       }
@@ -701,6 +821,26 @@
         }
       }
     },
+    "The server address is not a URL": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La dirección del servidor no es una URL"
+          }
+        }
+      }
+    },
+    "This Mac": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este Mac"
+          }
+        }
+      }
+    },
     "This removes the local copy of your data from this Mac. Your data stays on the server and comes back when you sign in again.": {
       "localizations": {
         "es": {
@@ -817,6 +957,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "en %@"
+          }
+        }
+      }
+    },
+    "just now": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ahora mismo"
           }
         }
       }

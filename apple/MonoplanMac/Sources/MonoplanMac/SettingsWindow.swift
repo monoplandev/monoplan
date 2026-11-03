@@ -1,9 +1,10 @@
 // The Settings window: the standard macOS preferences layout, a
 // toolbar of icon-over-label panes (a sidebar is for System
-// Settings-scale catalogues). Three panes: General (the device
+// Settings-scale catalogues). Four panes: General (the device
 // preferences the app owns for its window, spec/mac-window-plan.md
-// "Settings"), Account (what a user looks at) and Advanced (the host
-// process, the command line, the profile on disk). Panes are SwiftUI
+// "Settings"), Account (what a user looks at), Devices (the account's
+// devices over the server API) and Advanced (the host process, the
+// command line, the profile on disk). Panes are SwiftUI
 // views hosted in an AppKit tab view controller, so adding one is a
 // view, a label and an SF Symbol.
 //
@@ -17,15 +18,25 @@ import ServiceManagement
 import SwiftUI
 import MonoplanMacKit
 
+/// What the Devices pane calls the server with: the host's session and
+/// device token (never shown, never stored here).
+struct APICredential {
+    let serverURL: String
+    let token: String
+    /// This Mac's device id, to mark its row and keep it unrevokable.
+    let deviceId: String
+}
+
 final class SettingsWindowController: NSWindowController {
     private let model: SettingsModel
 
     init(
         location: ProfileLocation, client: DaemonClient,
         signIn: @escaping (SignInCredentials, @escaping (Error?) -> Void) -> Void,
-        signOut: @escaping (@escaping (Error?) -> Void) -> Void
+        signOut: @escaping (@escaping (Error?) -> Void) -> Void,
+        credential: @escaping () -> APICredential?
     ) {
-        model = SettingsModel(location: location, client: client, signIn: signIn, signOut: signOut)
+        model = SettingsModel(location: location, client: client, signIn: signIn, signOut: signOut, credential: credential)
         // The toolbar tab style: AppKit builds the toolbar from the tab
         // items (one icon + label each) and, with the `.preference`
         // toolbar style, draws it as the full-height icon surface every
@@ -46,6 +57,7 @@ final class SettingsWindowController: NSWindowController {
         }
         tabs.addTabViewItem(pane(String(localized: "General"), symbol: "gearshape", GeneralPane(model: model)))
         tabs.addTabViewItem(pane(String(localized: "Account"), symbol: "person.crop.circle", AccountPane(model: model)))
+        tabs.addTabViewItem(pane(String(localized: "Devices"), symbol: "laptopcomputer.and.iphone", DevicesPane(model: model)))
         tabs.addTabViewItem(pane(String(localized: "Advanced"), symbol: "gearshape.2", AdvancedPane(model: model)))
 
         let window = NSWindow(contentViewController: tabs)
@@ -124,6 +136,15 @@ final class SettingsModel: ObservableObject {
     @Published var signInError: String?
     @Published var cliLine: String = "—"
     @Published var cliError: String?
+    /// Settings › Devices. Nil until the first load (or without a
+    /// signed-in host); reloaded when the pane appears and after every
+    /// rename or revoke, never on doc events (it is server state).
+    @Published var devices: [DeviceRow]?
+    @Published var devicesError: String?
+    @Published var devicesBusy = false
+    @Published var thisDeviceId: String?
+    /// The row the rename sheet is up for.
+    @Published var renaming: DeviceRow?
     /// nil when there is no bundled binary to link to (a `swift run`).
     let cli: CommandLineLink? = bundledBinary().map { CommandLineLink(target: $0) }
 
@@ -131,16 +152,25 @@ final class SettingsModel: ObservableObject {
     private let client: DaemonClient
     private let signInAction: (SignInCredentials, @escaping (Error?) -> Void) -> Void
     private let signOutAction: (@escaping (Error?) -> Void) -> Void
+    private let credential: () -> APICredential?
+    private let api: URLSession = {
+        let c = URLSessionConfiguration.ephemeral
+        c.httpCookieAcceptPolicy = .never
+        c.httpShouldSetCookies = false
+        return URLSession(configuration: c)
+    }()
 
     init(
         location: ProfileLocation, client: DaemonClient,
         signIn: @escaping (SignInCredentials, @escaping (Error?) -> Void) -> Void,
-        signOut: @escaping (@escaping (Error?) -> Void) -> Void
+        signOut: @escaping (@escaping (Error?) -> Void) -> Void,
+        credential: @escaping () -> APICredential?
     ) {
         self.location = location
         self.client = client
         self.signInAction = signIn
         self.signOutAction = signOut
+        self.credential = credential
         profilePath = location.dir.path
         refresh()
     }
@@ -284,6 +314,94 @@ final class SettingsModel: ObservableObject {
             } else {
                 self.showListCounts = nil
             }
+        }
+    }
+
+    // MARK: Devices
+
+    func loadDevices() {
+        request({ cred in Devices.list(server: cred.serverURL, token: cred.token) }) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let data):
+                do {
+                    self.devices = try Devices.parse(data)
+                    self.devicesError = nil
+                } catch {
+                    self.devicesError = String(localized: "Could not load devices: \(error.localizedDescription)")
+                }
+            case .failure(let error):
+                self.devices = nil
+                self.devicesError = String(localized: "Could not load devices: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func renameDevice(_ device: DeviceRow, to name: String) {
+        let name = name.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, name != device.name else { return }
+        request({ cred in Devices.rename(server: cred.serverURL, token: cred.token, id: device.id, name: name) }) { [weak self] result in
+            guard let self else { return }
+            if case .failure(let error) = result { self.devicesError = error.localizedDescription }
+            self.loadDevices()
+        }
+    }
+
+    /// Confirm, then revoke. Never this Mac: that is Sign Out.
+    func revokeDevice(_ device: DeviceRow) {
+        guard device.id != thisDeviceId else { return }
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Revoke “\(device.name)”?")
+        alert.informativeText = String(localized: "It will be signed out and will have to sign in again to reach your account.")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: String(localized: "Revoke"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        request({ cred in Devices.revoke(server: cred.serverURL, token: cred.token, id: device.id) }) { [weak self] result in
+            guard let self else { return }
+            if case .failure(let error) = result { self.devicesError = error.localizedDescription }
+            self.loadDevices()
+        }
+    }
+
+    private enum DevicesError: LocalizedError {
+        case notSignedIn
+        case badRequest
+        case server(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .notSignedIn: return String(localized: "Not signed in")
+            case .badRequest: return String(localized: "The server address is not a URL")
+            case .server(let message): return message
+            }
+        }
+    }
+
+    /// One API call: the credential off the main thread (the host's
+    /// `session()` blocks briefly), the request, the reply on main.
+    private func request(_ build: @escaping (APICredential) -> URLRequest?,
+                         completion: @escaping (Result<Data, Error>) -> Void) {
+        devicesBusy = true
+        let finish = { [weak self] (result: Result<Data, Error>) in
+            DispatchQueue.main.async {
+                self?.devicesBusy = false
+                completion(result)
+            }
+        }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self, credential, api] in
+            guard let cred = credential() else { return finish(.failure(DevicesError.notSignedIn)) }
+            DispatchQueue.main.async { self?.thisDeviceId = cred.deviceId }
+            guard let req = build(cred) else { return finish(.failure(DevicesError.badRequest)) }
+            api.dataTask(with: req) { data, response, error in
+                if let error { return finish(.failure(error)) }
+                let data = data ?? Data()
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard (200..<300).contains(status) else {
+                    return finish(.failure(DevicesError.server(Devices.errorMessage(status: status, body: data))))
+                }
+                finish(.success(data))
+            }.resume()
         }
     }
 
@@ -466,6 +584,131 @@ struct SignInSheet: View {
         if !s.contains("://") { s = "https://" + s }
         while s.hasSuffix("/") { s.removeLast() }
         return s
+    }
+}
+
+/// The account's devices (spec/auth.md "Devices"), as the browser's
+/// Settings › Devices shows them: name, kind, last seen; rename any,
+/// revoke any but this Mac. Loaded when the pane appears.
+struct DevicesPane: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        Form {
+            if let devices = model.devices {
+                ForEach(devices) { device in
+                    DeviceRowView(model: model, device: device, isThisMac: device.id == model.thisDeviceId)
+                }
+            } else if model.devicesError == nil {
+                if model.devicesBusy {
+                    Text("Loading…").foregroundStyle(.secondary)
+                } else {
+                    Text("Not signed in").foregroundStyle(.secondary)
+                }
+            }
+            if let error = model.devicesError {
+                Text(error).font(.footnote).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 460)
+        .onAppear { model.loadDevices() }
+        .sheet(item: $model.renaming) { device in
+            RenameDeviceSheet(model: model, device: device)
+        }
+    }
+}
+
+struct DeviceRowView: View {
+    @ObservedObject var model: SettingsModel
+    let device: DeviceRow
+    let isThisMac: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: Devices.symbol(forKind: device.kind))
+                .frame(width: 20)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(device.name).lineLimit(1).truncationMode(.middle)
+                    if isThisMac {
+                        Text("This Mac")
+                            .font(.caption2)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.accentColor.opacity(0.15), in: Capsule())
+                    }
+                }
+                Text("Last seen \(Self.relative(device.lastSeenAt))")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Menu {
+                Button("Rename…") { model.renaming = device }
+                if !isThisMac {
+                    Button("Revoke…", role: .destructive) { model.revokeDevice(device) }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .disabled(model.devicesBusy)
+        }
+    }
+
+    static func relative(_ millis: Int64) -> String {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .short
+        let date = Date(timeIntervalSince1970: TimeInterval(millis) / 1000)
+        // "now" for anything within the last minute (this Mac is always
+        // fresh: the list call itself bumps it).
+        if Date().timeIntervalSince(date) < 60 { return String(localized: "just now") }
+        return f.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+struct RenameDeviceSheet: View {
+    @ObservedObject var model: SettingsModel
+    let device: DeviceRow
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+
+    init(model: SettingsModel, device: DeviceRow) {
+        self.model = model
+        self.device = device
+        _name = State(initialValue: device.name)
+    }
+
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Rename device").font(.headline)
+            TextField("Name", text: $name)
+                .onSubmit { if canSave { save() } }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") { save() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canSave)
+            }
+        }
+        .padding(20)
+        .frame(width: 360)
+    }
+
+    private func save() {
+        model.renameDevice(device, to: name)
+        dismiss()
     }
 }
 

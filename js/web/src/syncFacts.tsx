@@ -1,66 +1,11 @@
 import { createSignal, onCleanup, type Accessor } from "solid-js";
 import { useAppI18n } from "./i18n.tsx";
-import type { DocApp } from "./sync/store.ts";
 
 export type SyncStatus = "offline" | "disconnected" | "syncing" | "synced";
 
-/** Per-doc sync facts read off one `DocApp`'s engine, shared by the
- *  footer connection popover (Home) and each workspace's Advanced dialog.
- *  Every accessor keys on `app.version()`, which bumps on each dispatched
- *  event, so consumers re-run exactly when the numbers can change. The
- *  reads themselves are cheap — the engine forwards into the doc.
- *
- *  `online` is the WebSocket link, which is per connection (one for all
- *  open docs), so it comes from the caller rather than the doc. */
-export function createDocSyncFacts(app: DocApp, online: Accessor<boolean>) {
-  const pending = (): boolean => {
-    app.version();
-    return app.engine.hasUnsyncedOps();
-  };
-  const seqLabel = (): string => {
-    app.version();
-    return String(app.engine.lastContiguousSeq());
-  };
-  // Epoch arrives on HelloAck, which dispatches no event of its own,
-  // so also key on the link state: it flips to online right after.
-  const epochLabel = (): string | null => {
-    app.version();
-    online();
-    const epoch = app.engine.serverEpoch();
-    return epoch === undefined ? null : String(epoch);
-  };
-  const fingerprintHex = (): string => {
-    app.version();
-    const buf = app.engine.fingerprint();
-    // Full 64-char hex; the row CSS-truncates with text-overflow so the
-    // visible width tracks the container, while copy-paste yields the
-    // entire hash.
-    let s = "";
-    for (let i = 0; i < buf.length; i++) {
-      s += buf[i].toString(16).padStart(2, "0");
-    }
-    return s;
-  };
-  const itemsCount = (): number => Object.keys(app.state.itemsById).length;
-  const listsCount = (): number => app.state.listsOrder.length;
-
-  const { status, statusLabel } = createSyncStatus(pending, online);
-
-  return {
-    pending,
-    seqLabel,
-    epochLabel,
-    fingerprintHex,
-    itemsCount,
-    listsCount,
-    status,
-    statusLabel,
-  };
-}
-
 /** Fold link state and local pending work into the four-way status shown
- *  by the dot + label. `pending` is whatever scope the caller cares about:
- *  one doc (the Advanced dialog) or every open doc (the footer popover). */
+ *  by the dot + label. `pending` is whatever scope the caller cares about
+ *  (the footer popover: every open doc). */
 export function createSyncStatus(pending: Accessor<boolean>, online: Accessor<boolean>) {
   const { m } = useAppI18n();
 

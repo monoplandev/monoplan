@@ -353,8 +353,8 @@ lives, and where it goes:
 | Typed dates (on / off) | `typeddates` cookie (`whenToken.ts`) | A toggle in the General pane, `UserDefaults`. |
 | Show list counts | **The doc** (`settings.show_list_counts`, synced to every device, `spec/data-model.md`) | Not a device preference, but it sits in the General pane anyway, because that is where a user looks for it (decided 2026-11-04). The pane reads and sets it through the host, as the tray reads the agenda: `DocCmd::Settings {show_list_counts?}`, an IPC-only frame with no CLI verb (the flag is read from the Home doc alone and gates every workspace, so a `-w`-taking verb would misstate it; `Request.settings` / `.setShowListCounts`, `WorkspaceSettings`), sent without a workspace and so on Home. The page learns of a change through the mirror like any doc change; the pane re-fetches on every `Changed` event, so a toggle from the page or another device shows there. Nothing crosses `WindowSettings`. |
 | Account: email, log out, delete | — | Already hidden in the mirror (`Session.mirror`); the Account pane and the tray own sign-in / sign-out. |
-| Devices: list, rename, revoke | `/api` through the proxy | Stays in the page: it works in the window and the native panes do not list devices. |
-| Advanced: per-workspace sync facts | engine state | Stays in the page (diagnostic). |
+| Devices: list, rename, revoke | `/api` through the proxy | A native Devices pane (built 2026-11-04): `GET` / `PATCH` / `DELETE /api/devices` with the host's token, straight from the app (`Devices` in `MonoplanMacKit`, tested; `APICredential` from `Host.session` + `Host.device_token`, fetched off the main thread). Loaded when the pane appears and after every change, never on doc events. This Mac is marked and cannot be revoked there (that is Sign Out). |
+| Advanced: per-workspace sync facts | engine state | Gone from the dialog in both clients (decided 2026-11-04): `monoplan.sync()` in the devtools console (`consoleApi.ts`, installed by `Workspace`) tables the same facts, status, seq, epoch, fingerprint, counts, doc id, and reads better for comparing two devices. The CLI's `workspace status --json` has the seq and pending state; the fingerprint joins it only when a cross-device comparison needs it. |
 | Open at login, CLI link, profile, host, build | — | Native only, as now. |
 
 **Transport** (built 2026-11-04: `WindowSettings` in
@@ -386,13 +386,17 @@ On the page, `src/hostSettings.ts` wraps both: `hostSetting(key)` for
 the module-level readers (the global when present, else the cookie /
 localStorage path), and a signal fed by the inbound call that the
 same modules' setters consume. Under `[data-shell="mac"]` the page's
-setters do not persist (the app's store is the truth) and the
-dialog's General section collapses to one row, "Managed in Monoplan ›
-Settings…", whose button posts `{kind: "openSettings"}` so the app
-shows its Settings window (⌘, in the main menu already does). The
-`settings` request, `HostInbound.settings` and `WindowSettings` are
-framed in `MirrorFraming.swift` and `mirrorHost.ts` and tested there
-like the rest of the contract.
+setters do not persist (the app's store is the truth). **The window
+has no Settings dialog at all** (built 2026-11-04): with General the
+app's, Devices native, Account's email on the Account pane and the
+Advanced facts in the console everywhere, nothing was left for it, so
+`Workspace.tsx` does not render it in the mirror and the sidebar app
+menu's Settings item posts `{kind: "openSettings"}`, which the app
+answers by showing its Settings window (⌘, in the main menu does the
+same). The browser keeps the full dialog untouched. `openSettings`,
+`HostInbound.settings` and `WindowSettings` are framed in
+`MirrorFraming.swift` and `mirrorHost.ts` and tested there like the
+rest of the contract.
 
 **Order.** One setting at a time: Appearance (built 2026-11-04: the
 General pane's System / Light / Dark picker, `AppearancePreference` in
@@ -405,8 +409,8 @@ wholesale), then the transport with typed dates as its first
 passenger, then language and time format from system values (both
 built 2026-11-04, above), then show list counts in the General pane
 through the host (built 2026-11-04, the table above), then the
-dialog's General section wholesale, with the `openSettings` request
-behind its one remaining row.
+Devices pane, the console facts and the dialog's removal from the
+window (all built 2026-11-04, above). Done.
 
 ## Deferred
 

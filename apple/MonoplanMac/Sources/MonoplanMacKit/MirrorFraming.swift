@@ -21,6 +21,9 @@ public enum HostRequest: Equatable {
     /// A title-bar gesture on the page's own strip (the window has no
     /// title bar of its own; `.nav-titlebar` stands in for it).
     case window(WindowGesture)
+    /// The page's Settings entry: the window has no Settings dialog of
+    /// its own, the app's Settings window opens instead.
+    case openSettings
 
     public enum WindowGesture: String, Equatable {
         /// A mouse-down: move the window with it.
@@ -70,6 +73,8 @@ public enum HostRequest: Equatable {
         case "window":
             guard let gesture = WindowGesture(rawValue: try string("action")) else { throw ParseError.badValue("action") }
             self = .window(gesture)
+        case "openSettings":
+            self = .openSettings
         default:
             throw ParseError.unknownKind(kind)
         }

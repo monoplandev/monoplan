@@ -44,7 +44,8 @@ final class TrayController: NSObject, NSMenuDelegate {
     /// controller's running host.
     private lazy var webWindow = WebWindowController(
         hostProvider: { [weak self] in self?.hostController.runningHost },
-        onVisibility: { visible in NSApp.setActivationPolicy(visible ? .regular : .accessory) })
+        onVisibility: { visible in NSApp.setActivationPolicy(visible ? .regular : .accessory) },
+        onOpenSettings: { [weak self] in self?.settings().show() })
     /// Whether the last client state was connected, to tell a host
     /// coming (back) up from a status refresh.
     private var hadHost = false
@@ -363,7 +364,16 @@ final class TrayController: NSObject, NSMenuDelegate {
         let w = SettingsWindowController(
             location: location, client: client,
             signIn: { [weak self] creds, done in self?.hostController.signIn(creds, completion: done) },
-            signOut: { [weak self] done in self?.hostController.signOut(completion: done) })
+            signOut: { [weak self] done in self?.hostController.signOut(completion: done) },
+            // The Devices pane's server access: the host's session and
+            // token. `session()` blocks briefly; the pane asks off the
+            // main thread.
+            credential: { [weak self] in
+                guard let host = self?.hostController.runningHost, let token = host.deviceToken(),
+                      let session = try? host.session()
+                else { return nil }
+                return APICredential(serverURL: session.serverUrl, token: token, deviceId: session.deviceId)
+            })
         settingsWindow = w
         return w
     }

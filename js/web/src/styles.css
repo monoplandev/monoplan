@@ -4244,37 +4244,6 @@ input.task-check:hover {
   color: var(--text-muted);
 }
 
-/* Advanced section: a titled group per open workspace. Read-only debug
-   surface, so re-enable text selection (the global #root rule kills it)
-   for copying fingerprints / ids. Long mono values (64-char fingerprint)
-   truncate against the row rather than widening the dialog. */
-.settings-advanced {
-  user-select: text;
-  -webkit-user-select: text;
-}
-
-.settings-group-title {
-  margin: 0 0 8px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-muted);
-}
-
-.settings-group + .settings-group-title {
-  margin-top: 20px;
-}
-
-.settings-row-mono {
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
-  font-size: 12px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .settings-logout {
   padding: 6px 12px;
   border: 1px solid var(--border-input);
