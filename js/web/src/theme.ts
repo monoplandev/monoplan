@@ -1,7 +1,10 @@
 // Theme preference manager. Stores "auto" | "light" | "dark" in a
 // cookie so the inline pre-render script in index.html can pick it up
 // before Solid mounts (no FOUC). Single-origin cookie — monoplan's
-// bundle is served from the API origin
+// bundle is served from the API origin. The macOS app's window
+// (`mirror.html`, a custom-scheme origin) gets no cookie jar from
+// WebKit, so the same value also goes to `localStorage`, which that
+// origin does keep; the cookie wins where both exist.
 
 export type ThemePreference = "auto" | "light" | "dark";
 export type ResolvedTheme = "light" | "dark";
@@ -18,15 +21,26 @@ function readCookie(): ThemePreference {
     const m = document.cookie.match(/(?:^|; )theme=([01])/);
     if (m) return m[1] === "1" ? "dark" : "light";
   } catch {}
+  try {
+    const v = localStorage.getItem(COOKIE_NAME);
+    if (v === "1" || v === "0") return v === "1" ? "dark" : "light";
+  } catch {}
   return "auto";
 }
 
 function writeCookie(pref: ThemePreference) {
-  if (pref === "auto") {
-    document.cookie = `${COOKIE_NAME}=;${cookieAttrs(0)}`;
-  } else {
-    document.cookie = `${COOKIE_NAME}=${pref === "dark" ? "1" : "0"};${cookieAttrs(MAX_AGE)}`;
-  }
+  const value = pref === "auto" ? null : pref === "dark" ? "1" : "0";
+  try {
+    if (value === null) {
+      document.cookie = `${COOKIE_NAME}=;${cookieAttrs(0)}`;
+    } else {
+      document.cookie = `${COOKIE_NAME}=${value};${cookieAttrs(MAX_AGE)}`;
+    }
+  } catch {}
+  try {
+    if (value === null) localStorage.removeItem(COOKIE_NAME);
+    else localStorage.setItem(COOKIE_NAME, value);
+  } catch {}
 }
 
 export function resolveTheme(pref: ThemePreference): ResolvedTheme {

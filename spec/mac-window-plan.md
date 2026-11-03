@@ -377,13 +377,15 @@ first, backed by the in-process `HostCmd::Session` /
 - `cli/tests/daemon.rs` (`local_client_shares_the_loop_with_the_socket`,
   extended): `LocalClient::session` reports the booted identity, the
   server and the open docs, Home first.
-- Browser or app smoke only when asked. Not yet exercised in a running
-  window: whether WebKit grants the custom scheme a secure context
-  (`crypto.randomUUID`, which the client's draft ids and request ids
-  use) and cookies (the theme and locale prefs); the debug build logs
-  both on load (`MONOPLAN_MAC_DEBUG=1`). The fallbacks if not are the
-  `WKProcessPool` secure-scheme SPI or a loopback HTTP origin, and the
-  prefs moving to `localStorage` in the window.
+- Browser or app smoke only when asked. Probed offscreen 2026-11-04
+  (a bare `WKWebView` over a `WKURLSchemeHandler`): the custom-scheme
+  origin is a secure context (`crypto.randomUUID` and `crypto.subtle`
+  present), `localStorage` persists, a `fetch` POST body reaches the
+  handler; `document.cookie` does not stick. So the theme and locale
+  prefs (`theme.ts`, `i18n.tsx`) write `localStorage` beside their
+  cookie and read either, and `mirror.html`'s pre-render script reads
+  `localStorage`. The debug build logs the page's context on load
+  (`MONOPLAN_MAC_DEBUG=1`).
 
 ## Phases
 

@@ -13,11 +13,14 @@
          WKWebView from the app bundle, never installed or bookmarked. -->
   </head>
   <body>
+    <!-- The theme before Solid mounts, as index.html does, but from
+         localStorage: the app's custom-scheme origin keeps no cookies
+         (theme.ts writes both). -->
     <script>
       try {
-        var m = document.cookie.match(/(?:^|; )theme=([01])/);
-        if (m) {
-          document.documentElement.dataset.theme = m[1] === "1" ? "dark" : "light";
+        var v = localStorage.getItem("theme");
+        if (v === "1" || v === "0") {
+          document.documentElement.dataset.theme = v === "1" ? "dark" : "light";
         } else {
           document.documentElement.dataset.theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
         }

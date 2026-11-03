@@ -19,16 +19,28 @@ function cookieAttrs(maxAge: number): string {
   return `path=/;max-age=${maxAge};SameSite=Lax`;
 }
 
+// A cookie, like the theme (`theme.ts`), with `localStorage` beside it
+// for the macOS app's window, whose custom-scheme origin keeps no
+// cookies; the cookie wins where both exist.
 function readLanguage(): AppLanguage {
   try {
     const m = document.cookie.match(/(?:^|; )locale=(es|en)/);
     if (m?.[1] === "es" || m?.[1] === "en") return m[1];
   } catch {}
+  try {
+    const v = localStorage.getItem(COOKIE_NAME);
+    if (v === "es" || v === "en") return v;
+  } catch {}
   return DEFAULT_LANGUAGE;
 }
 
 function writeLanguage(language: AppLanguage) {
-  document.cookie = `${COOKIE_NAME}=${language};${cookieAttrs(MAX_AGE)}`;
+  try {
+    document.cookie = `${COOKIE_NAME}=${language};${cookieAttrs(MAX_AGE)}`;
+  } catch {}
+  try {
+    localStorage.setItem(COOKIE_NAME, language);
+  } catch {}
 }
 
 const localeByLanguage: Record<AppLanguage, string> = {
