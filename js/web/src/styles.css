@@ -5270,18 +5270,32 @@ input.task-check:hover {
   padding: 16px 16px var(--mobile-bar-clearance);
 }
 
-/* iOS inset-grouped cards: each group (the fixed views; Inbox + the
-   lists; a query's results) is a rounded surface lifted off the page
-   background, rows stacked edge to edge inside it with a hairline
-   between them inset to the text's left edge. */
+/* iOS inset-grouped cards: each group (the fixed views; one per
+   workspace holding its Inbox + lists; a query's results) is a rounded
+   surface lifted off the page background, rows stacked edge to edge
+   inside it with a hairline between them inset to the text's left edge.
+   Cards and captioned sections alike sit 20px apart. */
 .find-sheet__group {
   overflow: hidden;
   border-radius: 12px;
   background: var(--surface);
 }
 
-.find-sheet__group + .find-sheet__group {
+.find-sheet__results > * + * {
   margin-top: 20px;
+}
+
+/* Workspace caption over its card: the sidebar's section label at the
+   iOS grouped-table caption's size and inset, aligned to the rows' text. */
+.find-sheet__section-title {
+  margin: 0 0 6px;
+  padding: 0 16px;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Home page link, a row in its own card under the lists: an anchor

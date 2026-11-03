@@ -6,8 +6,9 @@
 // top group, minus Done / Bin), then Menu (FindSheet.tsx: a page of its
 // own, with a `#menu` route and history entry, that doubles as the list
 // switcher and item search: on an empty query it lists Done, Bin and the
-// user lists (the views this pill already reaches are left out), marks
-// the current one, and carries the account/sync indicator and Settings;
+// user lists, one card per workspace (the views this pill already reaches
+// are left out), marks the current one, and carries the account/sync
+// indicator and Settings;
 // the page sits under these pills and the Menu button opens it, marked
 // active while it's up like any view's pill); the right pill is Add, which the menu page
 // hides (nothing there to capture into). No custom drawer: the DOM can't

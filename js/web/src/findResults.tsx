@@ -176,8 +176,13 @@ export function findResultLifecycle(item: FindResult): string {
  *  whatever selection / current-view state it has. The slot is always
  *  rendered so titles stay aligned across mixed result kinds: a checkbox
  *  mirror for items, the list's icon for lists, the fixed nav icon for
- *  built-in views. */
-export function FindResultBody(props: { docs: DocsLayer; item: FindResult }) {
+ *  built-in views. `hideDoc` drops the trailing workspace column for a
+ *  surface that already groups rows under their workspace's heading. */
+export function FindResultBody(props: {
+  docs: DocsLayer;
+  item: FindResult;
+  hideDoc?: boolean;
+}) {
   const { m } = useAppI18n();
   const lifecycle = () => findResultLifecycle(props.item);
   // Chosen icon for a list result (a literal emoji grapheme), or
@@ -196,6 +201,7 @@ export function FindResultBody(props: { docs: DocsLayer; item: FindResult }) {
   const listLabel = () => findResultListLabel(props.docs, m().nav, props.item);
   // Which doc a non-Home result lives in, as a trailing column.
   const docLabel = (): string => {
+    if (props.hideDoc) return "";
     const docId = props.item.kind === "view" ? undefined : props.item.docId;
     if (!docId || docId === props.docs.homeDocId) return "";
     return props.docs.appOf(docId)?.state.settings.docName ?? m().nav.untitledDoc;

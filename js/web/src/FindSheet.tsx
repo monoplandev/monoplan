@@ -6,6 +6,9 @@
 // shows what's already chosen, and the search input is deliberately not
 // autofocused: switching lists is the common case on a phone, and popping
 // the keyboard on open would cover half the list before a tap lands.
+// The default menu files lists under their workspace, one card per open
+// doc with the doc's name as its caption, mirroring the sidebar's
+// sections; a query flattens everything into one ranked card again.
 //
 // The top line carries the account/sync indicator (left) and a Settings
 // icon (right): the bottom pill carries neither, so this is the phone's
@@ -20,7 +23,7 @@
 // row pick, a pill jump or Back leaves it, and a hardware Escape still
 // closes it.
 
-import { batch, createEffect, For, onCleanup, Show, type JSX } from "solid-js";
+import { batch, createEffect, createMemo, For, onCleanup, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import type { AttentionBadge } from "./dayGroups.ts";
 import type { DocsLayer } from "./sync/docs.ts";
@@ -154,7 +157,26 @@ export function FindSheet(props: {
     });
   }
 
-  const row = (item: FindResult) => (
+  // Default menu, one card per open workspace: Home ("Personal") first,
+  // then the rest in nav order, each holding that workspace's active
+  // lists (and, for a shared workspace, its Inbox; Home's Inbox is on
+  // the pill). The sidebar draws the same sections. A workspace with no
+  // rows (Home before any list is made) draws no card.
+  const workspaceGroups = createMemo(() => {
+    const rows = find.items().filter((i) => !isFixedView(i) && !onPill(i));
+    return props.docs
+      .docs()
+      .map((d) => ({
+        docId: d.docId,
+        label: d.home
+          ? m().nav.personal
+          : (d.app.state.settings.docName ?? m().nav.untitledDoc),
+        rows: rows.filter((i) => (i.kind === "view" ? props.docs.homeDocId : i.docId) === d.docId),
+      }))
+      .filter((g) => g.rows.length > 0);
+  });
+
+  const row = (item: FindResult, hideDoc = false) => (
     <button
       type="button"
       class="palette__item find-sheet__row"
@@ -164,7 +186,7 @@ export function FindSheet(props: {
       aria-current={isCurrent(item, props.view, props.docs.homeDocId) ? "true" : undefined}
       onClick={() => selectItem(item)}
     >
-      <FindResultBody docs={props.docs} item={item} />
+      <FindResultBody docs={props.docs} item={item} hideDoc={hideDoc} />
       <Show when={countLabel(item)}>
         {(count) => (
           <span class="find-sheet__count" data-tone={countTone(item)}>
@@ -207,24 +229,31 @@ export function FindSheet(props: {
             />
           </div>
           <div ref={listRef} class="find-sheet__results">
-            {/* Default menu (empty query): two inset-grouped cards, iOS
-                style, one for the fixed views the pill doesn't reach
-                (Done, Bin) and one for the user lists. Query results are
-                one ranked run in a single card. */}
+            {/* Default menu (empty query): inset-grouped cards, iOS
+                style: one for the fixed views the pill doesn't reach
+                (Done, Bin), then one per workspace under its name, so
+                lists from different workspaces never share a card (the
+                heading says which, so rows drop their workspace column).
+                Query results are one ranked run in a single card. */}
             <Show
               when={find.input().trim()}
               fallback={
                 <>
                   <div class="find-sheet__group">
                     <For each={find.items().filter((i) => isFixedView(i) && !onPill(i))}>
-                      {row}
+                      {(item) => row(item)}
                     </For>
                   </div>
-                  <div class="find-sheet__group">
-                    <For each={find.items().filter((i) => !isFixedView(i) && !onPill(i))}>
-                      {row}
-                    </For>
-                  </div>
+                  <For each={workspaceGroups()}>
+                    {(group) => (
+                      <section class="find-sheet__section" aria-label={group.label}>
+                        <h2 class="find-sheet__section-title">{group.label}</h2>
+                        <div class="find-sheet__group">
+                          <For each={group.rows}>{(item) => row(item, true)}</For>
+                        </div>
+                      </section>
+                    )}
+                  </For>
                   {/* A third card closing the default menu: the link out
                       to the home page, in the rows' anatomy with the
                       external-link arrow in the glyph slot. */}
@@ -254,7 +283,7 @@ export function FindSheet(props: {
                 fallback={<div class="palette__empty">{m().find.noMatches}</div>}
               >
                 <div class="find-sheet__group">
-                  <For each={find.items()}>{row}</For>
+                  <For each={find.items()}>{(item) => row(item)}</For>
                 </div>
               </Show>
             </Show>
