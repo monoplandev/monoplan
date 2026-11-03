@@ -399,7 +399,7 @@ projection and then archives, as one action batch — a single undo walks both
 back. Unchecked, it archives only. A list with no open items archives at
 once with no dialog, as before. The move is the user's explicit choice in the
 client; the core primitive stays the pure single-register write above, and
-the CLI's `lists archive` is unchanged. Items that land in the list
+the CLI's `list archive` is unchanged. Items that land in the list
 concurrently (another device moving into it while it is archived) stay open
 in the archived list; that state is legitimate and every surface tolerates
 it — search badges such hits "Archived", Starred and the archived board still

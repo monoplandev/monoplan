@@ -59,7 +59,7 @@ public enum Request {
     case agenda(days: Int)
     /// `monoplan focus --json`: the Starred lens (spec/focus.md).
     case focus
-    /// `monoplan lists ls --json --all`: id → name, archived included so
+    /// `monoplan list ls --json --all`: id → name, archived included so
     /// every list id an item can carry resolves.
     case lists
     /// Who is logged in, from the daemon's account row.

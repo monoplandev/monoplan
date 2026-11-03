@@ -25,8 +25,8 @@ No account is needed to use the CLI. The first doc command on a fresh install cr
 - `monoplan auth status [--json]` — account email + id, device id, server URL. Read-only against local state; never opens a WS and never starts the daemon. On a local-only workspace: `Account: none — local-only workspace`; `--json` has `local_only: true` and null identity / server fields.
 
 ### Devices
-- `monoplan auth devices` — list
-- `monoplan auth devices revoke <device_id>`
+- `monoplan auth device ls` — list (not built in the CLI yet)
+- `monoplan auth device revoke <device_id>` (not built in the CLI yet)
 
 ### Workspaces
 `monoplan workspace …` groups the verbs that act on a workspace as a whole: `status`, `share`, `export-json` and `reconcile` (an accountless install has one workspace and cannot create another, `auth.md` §One workspace per accountless install).
@@ -76,11 +76,13 @@ The curated single-tier Focus lens (`spec/focus.md`), named "Starred" on every u
 Marking a starred item `done` removes it from Starred automatically; binning/deleting drops it from the view.
 
 ### Lists
-- `monoplan lists ls` — active lists only by default; `--archived` shows only archived lists, `--all` shows both. `--json` output includes `archived_at` (null for active lists).
-- `monoplan lists add <name>`
-- `monoplan lists rename <list> <name>`
-- `monoplan lists archive <list>` — remove a list from the active workspace without touching its items, ordering, or metadata (`spec/data-model.md` "Archived lists"). Refuses for `inbox` and `events`.
-- `monoplan lists unarchive <list>` — restore an archived list to the active workspace.
+- `monoplan list ls` — active lists only by default; `--archived` shows only archived lists, `--all` shows both. `--json` output includes `archived_at` (null for active lists).
+- `monoplan list add <name>`
+- `monoplan list rename <list> <name>`
+- `monoplan list archive <list>` — remove a list from the active workspace without touching its items, ordering, or metadata (`spec/data-model.md` "Archived lists"). Refuses for `inbox` and `events`.
+- `monoplan list unarchive <list>` — restore an archived list to the active workspace.
+
+Noun groups are singular (`item`, `list`, `workspace`, `daemon`, `bin`, `db`); `monoplan lists …` is a hidden alias of `list`. Views that return a collection and carry no verbs (`places`, `agenda`, `starred`) keep their plural names.
 
 There is deliberately **no user-facing list delete**: archive is the only way to
 remove a list from the workspace. The core's `delete_list` stays internal

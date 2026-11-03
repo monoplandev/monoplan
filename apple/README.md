@@ -73,7 +73,7 @@ opens. The menu shows
 Today's rows (time, title, "in 2h 15m" / "now" / "due today" /
 "overdue"; a row opens the item in the web client), a Starred section
 with the first three rows of the Focus lens (`starred --json`) each with
-its list's name muted on the right (`lists ls --json --all`), an offline
+its list's name muted on the right (`list ls --json --all`), an offline
 notice when there is no server, "Open Monoplan" (alpha.monoplan.app),
 "Settings…" and "Quit Monoplan" (which stops the host: persist, fold,
 release the profile).

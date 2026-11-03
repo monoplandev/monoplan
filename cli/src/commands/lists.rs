@@ -1,4 +1,6 @@
-//! List management: list (default action), add, rename, archive/unarchive.
+//! List management (`monoplan list …`): ls, add, rename, archive/unarchive.
+//! `monoplan lists …` is a hidden alias; the IPC frame is still
+//! `DocCmd::Lists`.
 //!
 //! There is deliberately no user-facing delete (`spec/cli.md`): archive
 //! is the only way to remove a list from the active workspace. The

@@ -78,8 +78,9 @@ enum Cmd {
     Agenda(agenda::AgendaArgs),
     /// Starred items in curated order; `starred mv` reorders, `item set --star` / `--unstar` add and remove.
     Starred(focus::FocusArgs),
-    /// Manage lists.
-    Lists(lists::ListsArgs),
+    /// Manage lists: ls, add, rename, archive, unarchive. `lists` is a hidden alias.
+    #[command(alias = "lists")]
+    List(lists::ListsArgs),
     /// Inspect the local database.
     Db(db::DbArgs),
     /// Workspaces: sync status, sharing (invite links, members), JSON export.
@@ -282,7 +283,7 @@ impl Cli {
             Cmd::Places(a) => DocCmd::Places(a),
             Cmd::Agenda(a) => DocCmd::Agenda(a),
             Cmd::Starred(a) => DocCmd::Focus(a),
-            Cmd::Lists(a) => DocCmd::Lists(a),
+            Cmd::List(a) => DocCmd::Lists(a),
         };
         // A fresh install gets a local-only workspace here; no account
         // needed to capture (`crate::bootstrap`).

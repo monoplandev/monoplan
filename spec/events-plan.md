@@ -203,7 +203,7 @@ does.
   prints after Today when non-empty. `--json` rows already carry
   `list_id`; the Unscheduled group is `{ day: null, today: false, rows }`
   in second position, and its rows omit `placed_by`.
-- `lists ls` is unchanged: reserved lists are not `ListMeta` rows.
+- `list ls` is unchanged: reserved lists are not `ListMeta` rows.
 - An event added without a `when` is unscheduled until `item set --when`
   sets one.
 
