@@ -1090,8 +1090,16 @@ struct TargetPlan {
 struct ProjectionIndex {
     /// item id → location/lifecycle slice.
     meta: HashMap<String, ItemMeta>,
-    /// list id → item ids located there (authoritative membership).
+    /// list id → item ids located there (authoritative membership, all
+    /// lifecycles). Walked only by the all-lifecycle `resolved` order
+    /// (hidden-item placement, list delete, whole-doc iteration).
     members: HashMap<String, HashSet<String>>,
+    /// list id → the open subset of `members`. The open projection's
+    /// fallback tail and its fast-path gate read this, never `members`,
+    /// so closed items cost the open projection nothing whether or not
+    /// they still hold an order entry (`reconcile_with` sweeps old
+    /// ones). Lists with no open items carry no key.
+    open_members: HashMap<String, HashSet<String>>,
     /// list id → positional mirror of `order/<list-id>`. `None` slots
     /// keep unparseable entries position-aligned with the container.
     raw_orders: HashMap<String, Vec<Option<OrderEntry>>>,
@@ -1099,13 +1107,15 @@ struct ProjectionIndex {
     /// items, then the deterministic fallback tail). Lists with no open
     /// items carry no key.
     open_by_list: HashMap<String, Vec<String>>,
-    /// list id → number of *visible* entries in that list's order
-    /// container (any lifecycle). `members(list).len() == visible` ⟺ the
-    /// list has no fallback tail — the precondition for the O(open)
-    /// splice fast paths; anything tail-adjacent falls back to a full
-    /// `refresh_open` walk. Lists with zero visible entries carry no
-    /// key.
-    visible_counts: HashMap<String, usize>,
+    /// list id → number of visible entries in that list's order
+    /// container whose item is **open**. `open_members(list).len() ==
+    /// open_visible` ⟺ no open item sits in the fallback tail — the
+    /// precondition for the O(open) splice fast paths; anything
+    /// tail-adjacent falls back to a full `refresh_open` walk. Closed
+    /// items are deliberately outside this accounting: a swept Done
+    /// entry must not demote its list to the walk path. Lists with
+    /// zero open visible entries carry no key.
+    open_visible_counts: HashMap<String, usize>,
 }
 
 impl ProjectionIndex {
@@ -1156,6 +1166,27 @@ impl ProjectionIndex {
         tail
     }
 
+    /// The open projection's fallback tail: open items located in
+    /// `list_id` with no visible entry, in the same `(created_at, id)`
+    /// order as [`tail`](Self::tail) — the open filter of that tail,
+    /// computed over `open_members` so the walk is O(open), not
+    /// O(lifetime).
+    fn open_tail<'a>(&'a self, list_id: &str, seen: &HashSet<&str>) -> Vec<&'a str> {
+        let mut tail: Vec<&'a str> = self
+            .open_members
+            .get(list_id)
+            .into_iter()
+            .flatten()
+            .filter(|id| !seen.contains(id.as_str()))
+            .map(String::as_str)
+            .collect();
+        tail.sort_by(|a, b| {
+            let (ma, mb) = (&self.meta[*a], &self.meta[*b]);
+            ma.created_at.cmp(&mb.created_at).then_with(|| a.cmp(b))
+        });
+        tail
+    }
+
     /// Resolved order of one list — visible entries in container order,
     /// then the fallback tail; all lifecyclees. Pure — reads only the
     /// in-memory mirrors.
@@ -1165,32 +1196,33 @@ impl ProjectionIndex {
         ids.into_iter().map(str::to_string).collect()
     }
 
-    /// Recompute and store `list_id`'s open projection (and visible
-    /// count); returns the projection. One walk covers both; only the
-    /// open ids are cloned, so a 13k-lifetime list with 200 open items
-    /// allocates 200 strings, not 2×13k.
+    /// Recompute and store `list_id`'s open projection (and open
+    /// visible count); returns the projection. One walk over the
+    /// entries plus one over the open members; only the open ids are
+    /// cloned, so a 13k-lifetime list with 200 open items allocates 200
+    /// strings, not 2×13k.
     fn refresh_open(&mut self, list_id: &str) -> Vec<String> {
         let (open, visible) = {
             let (ids, seen) = self.visible_ids(list_id);
-            let visible = ids.len();
             let is_open = |id: &str| self.meta.get(id).is_some_and(|m| m.open);
             let mut open: Vec<String> = ids
                 .into_iter()
                 .filter(|id| is_open(id))
                 .map(str::to_string)
                 .collect();
+            let visible = open.len();
             open.extend(
-                self.tail(list_id, &seen)
+                self.open_tail(list_id, &seen)
                     .into_iter()
-                    .filter(|id| is_open(id))
                     .map(str::to_string),
             );
             (open, visible)
         };
         if visible == 0 {
-            self.visible_counts.remove(list_id);
+            self.open_visible_counts.remove(list_id);
         } else {
-            self.visible_counts.insert(list_id.to_string(), visible);
+            self.open_visible_counts
+                .insert(list_id.to_string(), visible);
         }
         if open.is_empty() {
             self.open_by_list.remove(list_id);
@@ -1200,22 +1232,29 @@ impl ProjectionIndex {
         open
     }
 
-    /// True when every item located in `list_id` is entry-backed — no
-    /// fallback tail exists, so append positions are exact without a
-    /// walk.
+    /// True when every **open** item located in `list_id` is
+    /// entry-backed — the open projection has no fallback tail, so
+    /// append positions are exact without a walk. Closed items without
+    /// an entry (swept, or lost) do not count against it.
     fn tail_is_empty(&self, list_id: &str) -> bool {
-        let members = self.members.get(list_id).map(HashSet::len).unwrap_or(0);
-        let visible = self.visible_counts.get(list_id).copied().unwrap_or(0);
-        members == visible
+        let open = self
+            .open_members
+            .get(list_id)
+            .map(HashSet::len)
+            .unwrap_or(0);
+        let visible = self.open_visible_counts.get(list_id).copied().unwrap_or(0);
+        open == visible
     }
 
+    /// Adjust the open-visible count. Callers pass a delta only for an
+    /// entry whose item is open; a closed item's entry is never counted.
     fn bump_visible(&mut self, list_id: &str, delta: isize) {
-        let cur = self.visible_counts.get(list_id).copied().unwrap_or(0) as isize;
+        let cur = self.open_visible_counts.get(list_id).copied().unwrap_or(0) as isize;
         let next = (cur + delta).max(0) as usize;
         if next == 0 {
-            self.visible_counts.remove(list_id);
+            self.open_visible_counts.remove(list_id);
         } else {
-            self.visible_counts.insert(list_id.to_string(), next);
+            self.open_visible_counts.insert(list_id.to_string(), next);
         }
     }
 
@@ -1336,29 +1375,61 @@ impl ProjectionIndex {
     }
 
     fn set_meta(&mut self, id: &str, meta: ItemMeta) {
-        if let Some(old) = self.meta.get(id)
-            && old.list_id != meta.list_id
-            && let Some(s) = self.members.get_mut(&old.list_id)
-        {
-            s.remove(id);
-            if s.is_empty() {
-                self.members.remove(&old.list_id);
+        if let Some(old) = self.meta.get(id) {
+            if old.list_id != meta.list_id {
+                Self::unset_member(&mut self.members, &old.list_id, id);
+            }
+            if old.open && (!meta.open || old.list_id != meta.list_id) {
+                Self::unset_member(&mut self.open_members, &old.list_id, id);
             }
         }
         self.members
             .entry(meta.list_id.clone())
             .or_default()
             .insert(id.to_string());
+        if meta.open {
+            self.open_members
+                .entry(meta.list_id.clone())
+                .or_default()
+                .insert(id.to_string());
+        }
         self.meta.insert(id.to_string(), meta);
     }
 
-    fn remove_item(&mut self, id: &str) {
-        if let Some(old) = self.meta.remove(id)
-            && let Some(s) = self.members.get_mut(&old.list_id)
-        {
+    /// Flip the open flag of an item already in the index, keeping
+    /// `open_members` in step. Returns `(list_id, was_open)`.
+    fn set_open(&mut self, id: &str, open: bool) -> Option<(String, bool)> {
+        let (list_id, was_open) = {
+            let m = self.meta.get_mut(id)?;
+            let was = m.open;
+            m.open = open;
+            (m.list_id.clone(), was)
+        };
+        if open && !was_open {
+            self.open_members
+                .entry(list_id.clone())
+                .or_default()
+                .insert(id.to_string());
+        } else if !open && was_open {
+            Self::unset_member(&mut self.open_members, &list_id, id);
+        }
+        Some((list_id, was_open))
+    }
+
+    fn unset_member(sets: &mut HashMap<String, HashSet<String>>, list_id: &str, id: &str) {
+        if let Some(s) = sets.get_mut(list_id) {
             s.remove(id);
             if s.is_empty() {
-                self.members.remove(&old.list_id);
+                sets.remove(list_id);
+            }
+        }
+    }
+
+    fn remove_item(&mut self, id: &str) {
+        if let Some(old) = self.meta.remove(id) {
+            Self::unset_member(&mut self.members, &old.list_id, id);
+            if old.open {
+                Self::unset_member(&mut self.open_members, &old.list_id, id);
             }
         }
     }
@@ -1771,12 +1842,7 @@ impl Doc {
             let Some(map) = item_map_of(&items, &id) else {
                 continue;
             };
-            let meta = item_meta(&map);
-            idx.members
-                .entry(meta.list_id.clone())
-                .or_default()
-                .insert(id.clone());
-            idx.meta.insert(id, meta);
+            idx.set_meta(&id, item_meta(&map));
         }
         let mut candidates: HashSet<String> = idx.members.keys().cloned().collect();
         candidates.insert(LIST_INBOX.to_string());
@@ -2521,7 +2587,7 @@ impl Doc {
                     }
                 }
             }
-            if was_visible {
+            if was_visible && is_open {
                 guard.bump_visible(cur_list, -1);
             }
             let raw = guard
@@ -2530,7 +2596,9 @@ impl Doc {
                 .or_default();
             let at = raw_pos.min(raw.len());
             raw.insert(at, Some(entry));
-            guard.bump_visible(target_list_id, 1);
+            if is_open {
+                guard.bump_visible(target_list_id, 1);
+            }
             if !is_open {
                 None
             } else {
@@ -2936,13 +3004,13 @@ impl Doc {
     fn sync_item_openness(&self, item_id: &str, map: &LoroMap) -> Option<usize> {
         let open_now = is_open(map);
         let mut guard = self.item_index.lock().expect("item index mutex poisoned");
-        let (list_id, was_open) = {
-            let m = guard.meta.get_mut(item_id)?;
-            let was = m.open;
-            m.open = open_now;
-            (m.list_id.clone(), was)
-        };
+        let (list_id, was_open) = guard.set_open(item_id, open_now)?;
         if !open_now {
+            // Its entry (if any) stays put but stops counting as an
+            // open visible entry.
+            if was_open && guard.canonical_raw_pos(&list_id, item_id).is_some() {
+                guard.bump_visible(&list_id, -1);
+            }
             guard.splice_open_out(&list_id, item_id);
             return None;
         }
@@ -3015,7 +3083,7 @@ impl Doc {
                 per_item.push((
                     (*item_id).to_string(),
                     m.list_id.clone(),
-                    guard.canonical_raw_pos(&m.list_id, item_id).is_some(),
+                    m.open && guard.canonical_raw_pos(&m.list_id, item_id).is_some(),
                 ));
             }
             for positions in acc.values_mut() {
@@ -3424,14 +3492,34 @@ impl Doc {
 
     /// Explicit, idempotent order-entry repair (never run implicitly by
     /// reads): removes stale and duplicate entries and materializes
-    /// real entries for fallback-tail items, in one commit. Also deletes
-    /// ListMeta rows that repeat an earlier row's id (see
-    /// [`Self::all_lists`]). Returns the number of repairs; `0` means the
-    /// doc was clean and nothing was committed. Visible projections are
-    /// unchanged by construction, so no events are emitted, and the
-    /// commit carries [`SWEEP_ORIGIN`] so it never lands on the undo
-    /// stack.
+    /// real entries for **open** fallback-tail items, in one commit.
+    /// Closed tail items are left entry-less: their position only
+    /// matters again once they reopen, and the next pass materializes
+    /// them then. Also deletes ListMeta rows that repeat an earlier
+    /// row's id (see [`Self::all_lists`]). Returns the number of
+    /// repairs; `0` means the doc was clean and nothing was committed.
+    /// Visible projections are unchanged by construction, so no events
+    /// are emitted, and the commit carries [`SWEEP_ORIGIN`] so it never
+    /// lands on the undo stack. Never sweeps; see
+    /// [`reconcile_with`](Self::reconcile_with).
     pub fn reconcile(&self) -> Result<usize, DocError> {
+        self.reconcile_with(None)
+    }
+
+    /// [`reconcile`](Self::reconcile) plus the aged sweep. With
+    /// `sweep_closed_before = Some(cutoff)` (unix millis) the order
+    /// entries of items closed since before `cutoff` — binned by
+    /// `binned_at`, else Done / Cancelled by the register's `at` — are
+    /// removed as well, so an order container stops growing with the
+    /// list's lifetime. Nothing visible changes: a closed item is
+    /// outside the open projection and its accounting
+    /// (`ProjectionIndex::open_members`), so the list keeps its O(open)
+    /// fast paths. The cost is restore position: a swept item that
+    /// reopens lands at the fallback tail (`spec/data-model.md`
+    /// "Reconciliation"). Deterministic and idempotent for a fixed
+    /// `cutoff`; concurrent with a reopen on another device it
+    /// converges to that tail placement.
+    pub fn reconcile_with(&self, sweep_closed_before: Option<i64>) -> Result<usize, DocError> {
         struct ListPlan {
             stale: Vec<usize>,
             /// (item_id, placement_id) entries to append for
@@ -3442,6 +3530,23 @@ impl Doc {
         // written (main + new placement) plus a matching entry.
         let mut fix_location: Vec<(String, String)> = Vec::new();
         let mut plans: HashMap<String, ListPlan> = HashMap::new();
+        // Items whose entries the sweep drops, decided off the item maps
+        // before the index lock is taken.
+        let sweep: HashSet<String> = match sweep_closed_before {
+            None => HashSet::new(),
+            Some(cutoff) => self
+                .iter_items()
+                .filter(|i| {
+                    let closed_since = match i.binned_at {
+                        Some(at) => Some(at),
+                        None if i.is_closed() => Some(i.lifecycle_at),
+                        None => None,
+                    };
+                    closed_since.is_some_and(|at| at < cutoff)
+                })
+                .map(|i| i.id)
+                .collect(),
+        };
         {
             let guard = self.item_index.lock().expect("item index mutex poisoned");
             let mut lists: HashSet<&String> = guard.raw_orders.keys().collect();
@@ -3460,19 +3565,21 @@ impl Doc {
                     let visible = entry.as_ref().is_some_and(|e| {
                         guard.meta.get(&e.item_id).is_some_and(|m| {
                             m.list_id == *list_id && m.placement_id == e.placement_id
-                        }) && seen.insert(e.item_id.clone())
+                        }) && !sweep.contains(&e.item_id)
+                            && seen.insert(e.item_id.clone())
                     });
                     if !visible {
                         stale.push(i);
                     }
                 }
-                // Fallback tail in its deterministic order.
+                // Open fallback tail in its deterministic order. Closed
+                // tail items (swept or lost) stay entry-less.
                 let mut tail: Vec<&String> = guard
                     .members
                     .get(list_id)
                     .into_iter()
                     .flatten()
-                    .filter(|id| !seen.contains(*id))
+                    .filter(|id| !seen.contains(*id) && guard.meta[*id].open)
                     .collect();
                 tail.sort_by(|a, b| {
                     let (ma, mb) = (&guard.meta[*a], &guard.meta[*b]);
@@ -6439,8 +6546,16 @@ mod tests {
         );
         assert_eq!(guard.meta, fresh.meta, "item meta out of sync with doc");
         assert_eq!(
-            guard.visible_counts, fresh.visible_counts,
-            "visible-entry counts out of sync with doc"
+            guard.members, fresh.members,
+            "list membership out of sync with doc"
+        );
+        assert_eq!(
+            guard.open_members, fresh.open_members,
+            "open membership out of sync with doc"
+        );
+        assert_eq!(
+            guard.open_visible_counts, fresh.open_visible_counts,
+            "open visible-entry counts out of sync with doc"
         );
     }
 
@@ -8329,6 +8444,125 @@ mod tests {
         assert!(doc.get_item(&a).is_none());
         assert_eq!(doc.order_list(LIST_INBOX).len(), 0);
         assert!(!doc.can_undo());
+    }
+
+    /// The aged sweep drops a long-closed item's entry without moving
+    /// anything visible, the list keeps its O(open) fast path (a closed
+    /// entry-less item is not an open-tail member), later passes never
+    /// resurrect the entry, and a reopen lands at the fallback tail
+    /// until the next pass gives it a real entry there.
+    #[test]
+    fn reconcile_sweep_removes_old_closed_entries_and_keeps_fast_path() {
+        let doc = Doc::new().unwrap();
+        let a = doc.add_item(LIST_INBOX, "a").unwrap();
+        let b = doc.add_item(LIST_INBOX, "b").unwrap();
+        let c = doc.add_item(LIST_INBOX, "c").unwrap();
+        doc.set_item_done(&b, true).unwrap();
+        assert_eq!(doc.order_list(LIST_INBOX).len(), 3);
+        assert_open_projection_matches_doc(&doc);
+
+        // Cutoff in the past: nothing has been closed long enough. The
+        // structural pass never sweeps at all.
+        assert_eq!(doc.reconcile_with(Some(0)).unwrap(), 0);
+        assert_eq!(doc.reconcile().unwrap(), 0);
+        assert_eq!(doc.order_list(LIST_INBOX).len(), 3);
+
+        let future = now_millis() + 60_000;
+        assert_eq!(doc.reconcile_with(Some(future)).unwrap(), 1);
+        assert_eq!(doc.order_list(LIST_INBOX).len(), 2);
+        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![a.clone(), c.clone()]);
+        assert_open_projection_matches_doc(&doc);
+        {
+            let guard = doc.item_index.lock().unwrap();
+            assert!(
+                guard.members[LIST_INBOX].contains(&b),
+                "still located there"
+            );
+            assert!(
+                guard.tail_is_empty(LIST_INBOX),
+                "a swept closed item must not demote the list to the walk path"
+            );
+        }
+        assert_eq!(doc.reconcile_with(Some(future)).unwrap(), 0);
+        assert_eq!(
+            doc.reconcile().unwrap(),
+            0,
+            "closed tail items are not materialized"
+        );
+
+        doc.set_item_done(&b, false).unwrap();
+        assert_eq!(
+            doc.open_item_ids(LIST_INBOX),
+            vec![a.clone(), c.clone(), b.clone()]
+        );
+        assert_open_projection_matches_doc(&doc);
+        {
+            let guard = doc.item_index.lock().unwrap();
+            assert!(
+                !guard.tail_is_empty(LIST_INBOX),
+                "reopened item sits in the tail"
+            );
+        }
+        assert_eq!(doc.reconcile().unwrap(), 1);
+        assert_eq!(doc.order_list(LIST_INBOX).len(), 3);
+        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![a, c, b]);
+        assert_open_projection_matches_doc(&doc);
+        assert!(doc.item_index.lock().unwrap().tail_is_empty(LIST_INBOX));
+    }
+
+    /// Binned items age by `binned_at`; a swept item can still be
+    /// restored (tail), re-binned and hard-deleted.
+    #[test]
+    fn reconcile_sweep_covers_binned_and_hard_delete_tolerates_it() {
+        let doc = Doc::new().unwrap();
+        let a = doc.add_item(LIST_INBOX, "a").unwrap();
+        let b = doc.add_item(LIST_INBOX, "b").unwrap();
+        doc.set_item_binned(&b, true).unwrap();
+        let future = now_millis() + 60_000;
+        assert_eq!(doc.reconcile_with(Some(future)).unwrap(), 1);
+        assert_eq!(doc.order_list(LIST_INBOX).len(), 1);
+        assert_open_projection_matches_doc(&doc);
+
+        doc.set_item_binned(&b, false).unwrap();
+        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![a.clone(), b.clone()]);
+        assert_open_projection_matches_doc(&doc);
+
+        doc.set_item_binned(&b, true).unwrap();
+        doc.delete_binned(&b).unwrap();
+        assert!(doc.get_item(&b).is_none());
+        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![a]);
+        assert_open_projection_matches_doc(&doc);
+    }
+
+    /// A sweep on one device racing a reopen on another converges on
+    /// both: the item is open, at the fallback tail, same fingerprint.
+    #[test]
+    fn concurrent_sweep_and_reopen_converge() {
+        let dek = Dek::generate();
+        let mut a = Doc::new().unwrap();
+        let x = a.add_item(LIST_INBOX, "x").unwrap();
+        let y = a.add_item(LIST_INBOX, "y").unwrap();
+        let z = a.add_item(LIST_INBOX, "z").unwrap();
+        a.set_item_done(&y, true).unwrap();
+        let mut b = sync_fresh_peer(&mut a, &dek);
+
+        assert_eq!(a.reconcile_with(Some(now_millis() + 60_000)).unwrap(), 1);
+        b.set_item_done(&y, false).unwrap();
+        exchange(&mut a, &mut b, &dek);
+
+        let want = vec![x, z, y];
+        assert_eq!(a.open_item_ids(LIST_INBOX), want);
+        assert_eq!(b.open_item_ids(LIST_INBOX), want);
+        assert_eq!(a.fingerprint(), b.fingerprint());
+        assert_open_projection_matches_doc(&a);
+        assert_open_projection_matches_doc(&b);
+        // Either side's next structural pass gives it a real entry; the
+        // other converges onto it with nothing visible moving.
+        assert_eq!(b.reconcile().unwrap(), 1);
+        exchange(&mut a, &mut b, &dek);
+        assert_eq!(a.open_item_ids(LIST_INBOX), want);
+        assert_eq!(a.fingerprint(), b.fingerprint());
+        assert_open_projection_matches_doc(&a);
     }
 
     // ---------- AppEvent tests ----------

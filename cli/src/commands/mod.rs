@@ -121,8 +121,25 @@ enum WorkspaceCmd {
     Share(share::ShareArgs),
     /// Export the workspace as semantic JSON.
     ExportJson(export::ExportArgs),
-    /// Repair order and focus entries: drop stale and duplicate entries, materialise missing ones. Idempotent; changes nothing visible.
-    Reconcile,
+    /// Repair order and focus entries, and sweep the entries of items closed longer than --keep-days. Idempotent; changes nothing visible.
+    Reconcile(ReconcileArgs),
+}
+
+#[derive(clap::Args, Debug, Clone, Serialize, Deserialize)]
+pub struct ReconcileArgs {
+    /// Keep the order entries of items done, cancelled or binned within this many days; older ones are swept (a swept item that reopens lands at the end of its list).
+    #[arg(long, default_value_t = 30, conflicts_with = "no_sweep")]
+    pub keep_days: u32,
+    /// Structural repair only: never sweep, whatever the age.
+    #[arg(long)]
+    pub no_sweep: bool,
+}
+
+impl ReconcileArgs {
+    /// The sweep cutoff in unix millis, or `None` for `--no-sweep`.
+    fn sweep_closed_before(&self, now_millis: i64) -> Option<i64> {
+        (!self.no_sweep).then(|| now_millis - i64::from(self.keep_days) * 86_400_000)
+    }
 }
 
 /// `monoplan item …`: everything about one item except capturing it.
@@ -161,8 +178,12 @@ pub enum DocCmd {
     Focus(focus::FocusArgs),
     Lists(lists::ListsArgs),
     ExportJson,
-    /// `Doc::reconcile`: explicit maintenance sweep, never scheduled.
-    Reconcile,
+    /// `Doc::reconcile_with`: explicit maintenance sweep, never
+    /// scheduled. `sweep_closed_before` is resolved in the client so the
+    /// daemon's clock never enters into it.
+    Reconcile {
+        sweep_closed_before: Option<i64>,
+    },
 }
 
 /// Execute a doc command. Pure over `doc` + `out`: no I/O of its own,
@@ -184,8 +205,10 @@ pub fn run_doc(cmd: DocCmd, doc: &Doc, out: &mut dyn Write) -> anyhow::Result<()
             out.write_all(export::render(doc)?.as_bytes())?;
             Ok(())
         }
-        DocCmd::Reconcile => {
-            let repairs = doc.reconcile()?;
+        DocCmd::Reconcile {
+            sweep_closed_before,
+        } => {
+            let repairs = doc.reconcile_with(sweep_closed_before)?;
             if repairs == 0 {
                 writeln!(out, "Nothing to repair.")?;
             } else {
@@ -244,7 +267,9 @@ impl Cli {
                 offline_notice(sync);
                 return Ok(());
             }
-            Cmd::Workspace(WorkspaceCmd::Reconcile) => DocCmd::Reconcile,
+            Cmd::Workspace(WorkspaceCmd::Reconcile(a)) => DocCmd::Reconcile {
+                sweep_closed_before: a.sweep_closed_before(crate::sync::now_millis()),
+            },
             Cmd::Item(ItemCmd::Add(a)) => DocCmd::Add {
                 texts: items::collect_texts(&a.text)?,
                 list: a.list,

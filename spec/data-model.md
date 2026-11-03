@@ -248,8 +248,9 @@ Tradeoffs considered:
   *lifetime* item count, so projecting a list is O(lifetime items in that
   list). At the 13k-lifetime-items yardstick this matches today's cost for
   `inbox` while making every *other* list's projection proportional to its own
-  history — and hard delete (bin emptying) is the natural pruning mechanism:
-  deleting a binned item removes its entry.
+  history — hard delete (bin emptying) prunes binned entries, and the explicit
+  aged sweep (`reconcile_with`, "Reconciliation" below) prunes the rest after a
+  grace window.
 - *Remove entries + restoration anchors (rejected)*: keeps order containers
   live-only (faster projection) but restore needs anchor bookkeeping that is
   itself concurrency-prone (anchor deleted/moved/hidden), turns every done/
@@ -334,9 +335,30 @@ Every mutation below forms **one Loro commit** (one undo step, one op group).
 implicitly by reads; today its only caller is `monoplan workspace reconcile`,
 and it commits with origin `"sweep"`, excluded from undo — `sync-protocol.md`
 "Commit origin tagging"): for every list it removes stale/duplicate entries and
-appends real entries for fallback-tail items (using each item's existing
-placement id), and it deletes ListMeta rows that repeat an earlier row's id
-(keeping the first). It also prunes **focus** refs that are missing / closed / binned /
+appends real entries for **open** fallback-tail items (using each item's existing
+placement id; closed tail items stay entry-less until they reopen), and it
+deletes ListMeta rows that repeat an earlier row's id (keeping the first).
+
+**Aged sweep (built 2026-11-03).** `reconcile_with(Some(cutoff))` additionally
+removes the order entries of items that have been closed since before `cutoff`
+— binned by `binned_at`, else Done / Cancelled by the workflow register's `at`.
+This is the bound on the "order containers grow with lifetime" cost accepted
+under "Done / binned items stay in the order container": entries stay for a
+grace window (the CLI's `--keep-days`, default 30), long enough that restore
+and un-done are exact where it matters, then go. After the sweep a reopened
+item lands at the **fallback tail** (already the rule for a lost entry) and the
+next structural pass gives it a real entry there. The sweep is deterministic
+for a fixed cutoff, idempotent, and converges with a concurrent reopen on
+another device (both end with the item open at the tail). Lifecycle writes
+remain single-register writes; only the sweep touches order containers.
+
+The projection index makes the swept state free: list membership is kept both
+whole (`members`, walked only by the all-lifecycle resolved order) and as its
+open subset (`open_members`), and the fast-path gate counts visible entries of
+*open* items only. So a closed item without an entry is not an open-tail member
+and never demotes its list to the full projection walk — which is why the sweep
+removes entries rather than relocating items, and why it is not a data-model
+change. It also prunes **focus** refs that are missing / closed / binned /
 foreign and dedups them (`spec/focus.md`). One commit; a no-op when the doc is
 clean. Clients may run it opportunistically (e.g. after bootstrap); nothing
 depends on it running — Focus stays bounded via auto-remove-on-close and the
