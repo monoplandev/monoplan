@@ -16,13 +16,16 @@
 //     nothing was deleted). One token at most; another phrase elsewhere
 //     in the text is left alone while one stands.
 //   - Backspace with the caret just after the token (or Delete just
-//     before it, or either key from inside it) removes the whole token,
-//     words included, and rejects that phrase: typed again the same way
-//     it stays plain text, while anything else, a different phrase or a
-//     longer one, is taken as usual. A token deleted any other way (a
-//     selection across it, select-all) is rejected the same, as soon as
-//     the next input notices it gone. Rejections clear when the editor
-//     is next focused.
+//     before it, or either key from inside it) dissolves the token into
+//     its plain words and rejects that phrase: the words stay in the
+//     title, the next Backspace eats a character of them as usual, and
+//     the same wording is not taken again while it stands, while a
+//     different phrase or a longer one still is. A rejection lasts only
+//     as long as its exact wording is in the text: edit the words (a
+//     letter off, a letter back) and the phrase is eligible again. A
+//     token deleted any other way (a selection across it, select-all) is
+//     rejected the same, as soon as the next input notices it gone.
+//     Rejections also clear when the editor is next focused.
 //   - `read()` is the title without the token's words, and the token's
 //     value. The editors save and mirror that, never the raw text.
 //
@@ -95,7 +98,7 @@ export interface WhenTokens {
   read(): WhenTokenRead;
   token(): WhenTokenValue | null;
   /** Handle a keydown; true when it consumed the key (the token was
-   *  removed), in which case the host stops there. */
+   *  dissolved into plain words), in which case the host stops there. */
   onKeyDown(e: KeyboardEvent): boolean;
   /** The editor took focus: rejected phrases are forgotten. */
   onFocus(): void;
@@ -236,6 +239,11 @@ export function createWhenTokens(
       noticeRemoved();
       if (!typedDatesPref() || opts.enabled?.() === false) return;
       const text = el.textContent ?? "";
+      // A rejection holds while its exact wording is still in the text.
+      // Edit the words (a letter off, a letter back) and it is forgotten,
+      // so the phrase can be taken again.
+      const key = phraseKey(text);
+      for (const r of rejected) if (!key.includes(r)) rejected.delete(r);
       const caret = collapsedCaretOffset(el);
       const prev = value();
       const anchor = tokenRange();
@@ -311,8 +319,10 @@ export function createWhenTokens(
       const prev = value();
       const r = tokenRange();
       rejected.add(phraseKey(prev?.phrase ?? ""));
-      takeOut(false);
-      if (r) placeCaret(r.start);
+      // The words stay, as plain text now; the next Backspace eats a
+      // character of them like any other.
+      takeOut(true);
+      if (r) placeCaret(e.key === "Backspace" ? r.end : r.start);
       opts.onChange?.(null, prev);
       return true;
     },

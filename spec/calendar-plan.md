@@ -356,10 +356,14 @@ for the month grid). `groupByDeadline` becomes
     words that stop parsing dissolve back into plain text. One token at
     most; another phrase elsewhere is left alone while one stands.
   - Backspace just after the token (Delete just before it, or either key
-    from inside it) removes it whole, words included, and rejects that
-    phrase: retyped the same way it stays plain text, while a different
-    or longer phrase is taken as usual. Deleting the token any other way
-    rejects the same. Rejections clear when the editor is next focused.
+    from inside it) dissolves it into its plain words and rejects that
+    phrase: the words stay in the title, the next Backspace eats a
+    character of them as usual, and the same wording is not taken again
+    while it stands, while a different or longer phrase is. A rejection
+    lasts only as long as its exact wording is in the text: edit the
+    words (a letter off, a letter back) and the phrase is eligible again.
+    Deleting the token any other way rejects the same. Rejections also
+    clear when the editor is next focused.
   - Only a phrase that pins a day (explicit day, weekday, relative day)
     or a clock time is taken. A bare month, "next month", and a
     three-letter weekday on its own ("sun", "wed") are not. Of several
