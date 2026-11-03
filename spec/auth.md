@@ -10,6 +10,7 @@ POST   /api/account/recover            (recovery-code path; gated by recovery_au
 POST   /api/account/logout             (authed; revokes calling device + clears cookie)
 POST   /api/account/password/change    (change password, authed by device token + current_auth_secret; `new_doc_keys` names exactly the primary doc)
 POST   /api/account/password/reset     (set new password, authed by recovery_session_token)
+DELETE /api/account                    (delete the account; authed by device token + `current_auth_secret`; see §Account deletion)
 GET    /api/devices                    (list current account's devices: name, kind, last_seen_at, last_seen_ip)
 POST   /api/devices                    (register a new device: `{ name, kind }`)
 PATCH  /api/devices/:device_id         (rename a device)
@@ -124,6 +125,26 @@ Client cannot derive `auth_secret` without the salt. Standard pattern:
 7. GET `/api/docs` with the new device token; unwrap every non-primary membership with the Home DEK.
 8. WS connect, `PullSnapshot` if present, then `PullUpdates`.
 
+## Account deletion (built 2026-11-03)
+
+`DELETE /api/account { current_auth_secret }`, authed by the device token. The token says which account; the password says the person at the keyboard may erase it, the same re-auth boundary as `/password/change` (a left-open browser or an unlocked laptop must not be enough). A wrong password is the login's 401 `invalid_credentials` and nothing changes. There is no other path: someone who has lost the password recovers and resets first, then deletes.
+
+**No email confirmation.** The address is an unverified identifier and self-hosters run without SMTP (§Account model), so a confirmation mail proves nothing and could land with a stranger. A logged-in device already holds the DEK and could sync away every item anyway; the password gate is the only check that adds something.
+
+**Immediate and final.** No soft-delete or grace period: the server holds only ciphertext it cannot read, the password gate covers the fat-finger case, and for a single-user self-hosted tool "delete" should mean delete. A hosted deployment that wants a cooling-off window layers it on top the way email verification is planned, without changing this flow.
+
+**What goes, in one transaction** (`auth::queries::delete_account`):
+- Every doc the account **owns** — Home and every doc it created — is purged for everyone, exactly as `DELETE /api/docs/:id` does it (`sharing-plan.md` §Deletion): updates, snapshots, frontiers, sequence counter, invites, memberships, then the `docs` row (after the account row, which references Home). Unilateral by necessity: ownership transfer is not built, so every doc has exactly one owner and a doc never outlives its last owner. Other members keep what they already synced.
+- Memberships in other people's docs are deleted outright, not tombstoned: `removed_at` exists so a later invite can reactivate the row, and there is no account left to reactivate. Those docs are untouched.
+- Devices (their `device_doc_frontiers` cascade, so no compaction horizon stays pinned), recovery sessions, and invites the account issued. Invites it *consumed* keep `consumed_at` and lose the dangling `consumed_by_account_id`.
+- The `accounts` row last, which frees the email for a fresh signup. `created_by` attribution inside other people's docs is an opaque id in ciphertext and stays.
+
+Then the route tells live sessions: `close_doc` on every purged doc (every other member and the account's other devices get `DocClosed { reason: "account deleted" }`; the deleting device gets a silent unbind and tears its docs down itself on the reply) and `close_for_account` on every doc the account merely belonged to. The reply carries the clear-cookie `Set-Cookie`. The account's other devices fail their next authed call with 401; the web runtime's auth-failure path only forgets keys (`pwa-plan.md`), so their local unsynced work is not destroyed, merely unreadable.
+
+**Clients.** The web dialog (Settings → Account → Danger zone → Delete account) says what goes, lists every open workspace with an Export JSON button (offered, never forced: the export is the semantic dump, not a history backup), and gates confirm on the typed email plus the password; on success it runs the sign-out wipe without the server call (`logout({ wipeLocal, serverGone })`) and drops to a fresh anonymous session. The CLI is `monoplan auth delete-account` (`cli.md`): the same warning and export hint, the email typed back, the password prompted, then the `logout` purge. The macOS app has no entry point yet; it gets the CLI's when its Settings grow a danger zone.
+
+**Not built:** an operator-side delete in the admin API for someone who has lost every credential and asks by email; "delete the account but keep my data on this device" (signup adoption in reverse: Home stays as the local anonymous doc under its DEK, which is possible, unlike after sign-out).
+
 ## Rate limiting
 
-All three credential endpoints (`/prelogin`, `/login`, `/recover`) rate-limit per-IP and per-email with exponential backoff. `/recover` gets the strictest limits — it gates the recovery wrap, so a successful brute-force is account takeover, not just a login. `/prelogin` is the most lenient (legitimate clients hit it on every login).
+All three credential endpoints (`/prelogin`, `/login`, `/recover`) rate-limit per-IP and per-email with exponential backoff. `DELETE /api/account` verifies a password too and shares `/login`'s limits. `/recover` gets the strictest limits — it gates the recovery wrap, so a successful brute-force is account takeover, not just a login. `/prelogin` is the most lenient (legitimate clients hit it on every login).

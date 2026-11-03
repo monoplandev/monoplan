@@ -305,6 +305,19 @@ export const api = {
     await post<unknown>("/api/account/logout", {});
   },
 
+  /** `DELETE /api/account` (spec/auth.md §Account deletion): the device
+   *  cookie names the account, `current_auth_secret` (from `deriveLogin`
+   *  over the typed password and the prelogin salt) proves the person
+   *  may erase it. 401 `invalid_credentials` on a wrong password. On
+   *  success the account, its devices, every doc it owned and its
+   *  memberships are gone and the cookie is cleared; the caller then
+   *  wipes local state as sign-out does. */
+  async deleteAccount(args: { current_auth_secret: Uint8Array }): Promise<void> {
+    await del<unknown>("/api/account", {
+      current_auth_secret: args.current_auth_secret,
+    });
+  },
+
   async listDevices(): Promise<DevicesListResponse> {
     return get("/api/devices");
   },
@@ -426,8 +439,11 @@ async function patch<T>(path: string, body: unknown): Promise<T> {
   return request<T>(path, { method: "PATCH", body: encodeBody(body) });
 }
 
-async function del<T>(path: string): Promise<T> {
-  return request<T>(path, { method: "DELETE" });
+async function del<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, {
+    method: "DELETE",
+    body: body === undefined ? undefined : encodeBody(body),
+  });
 }
 
 async function request<T>(

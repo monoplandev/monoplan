@@ -245,6 +245,20 @@ pub struct PasswordChangeRequest {
     pub new_doc_keys: Vec<DocKey>,
 }
 
+// ---------- DELETE /api/account ----------
+
+/// Delete the calling account (`spec/auth.md` §Account deletion). Authed
+/// by the device token *and* the current password: a left-open device
+/// alone must not be able to erase the account, the same re-auth
+/// boundary as `/password/change`. There is no email round-trip (the
+/// address is unverified and self-hosters run without SMTP) and no
+/// grace period: the deletion is immediate and final.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteAccountRequest {
+    #[serde(with = "serde_b64")]
+    pub current_auth_secret: Vec<u8>,
+}
+
 // ---------- /api/account/password/reset ----------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

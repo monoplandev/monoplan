@@ -13,6 +13,7 @@ pub const MIN_PASSWORD_LEN: usize = 10;
 pub mod agenda;
 pub mod bin;
 pub mod db;
+mod delete_account;
 pub mod export;
 pub mod focus;
 pub mod items;
@@ -100,6 +101,8 @@ enum AuthCmd {
     Recover(recover::Args),
     /// Change the password on the active account.
     Password,
+    /// Delete the account on the server (asks for the email and password), then wipe local state.
+    DeleteAccount,
     /// Show the account, device and server behind this install (local; never connects).
     Status(status::StatusArgs),
 }
@@ -238,6 +241,7 @@ impl Cli {
                     AuthCmd::Logout => logout::run().await,
                     AuthCmd::Recover(a) => recover::run(a, spawn).await,
                     AuthCmd::Password => password::run().await,
+                    AuthCmd::DeleteAccount => delete_account::run().await,
                     AuthCmd::Status(a) => status::run_auth(a).await,
                 };
             }

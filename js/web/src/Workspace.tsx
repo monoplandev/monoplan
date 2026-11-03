@@ -2848,6 +2848,11 @@ export function Workspace(props: {
         onShowListCountsChange={(show) => home.setShowListCounts(show)}
         session={session.session()}
         logout={() => setLogoutConfirmOpen(true)}
+        onAccountDeleted={() =>
+          // The server has already forgotten the account and every
+          // device, so this is the local half of sign-out only.
+          void session.logout({ wipeLocal: true, serverGone: true })
+        }
         docs={docs}
         online={session.online()}
       />

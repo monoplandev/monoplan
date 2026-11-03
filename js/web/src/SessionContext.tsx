@@ -30,8 +30,9 @@ export interface SessionContextValue {
    *  snapshot, device row, prefs): the user-initiated sign-out, taken
    *  after a confirmation that names unsynced changes. The sync
    *  runtime's auth-failure path calls this without it, so an expired
-   *  cookie never destroys data. */
-  logout: (opts?: { wipeLocal?: boolean }) => void;
+   *  cookie never destroys data. `serverGone` skips the server call:
+   *  the account was just deleted, so there is no device to revoke. */
+  logout: (opts?: { wipeLocal?: boolean; serverGone?: boolean }) => void;
   /** Replace the current session (e.g. anonymous → authenticated). */
   swapSession: (s: Session) => void;
 }

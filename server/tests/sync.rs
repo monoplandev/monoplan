@@ -12,10 +12,10 @@ use monoplan_core::{
     Dek, derive_password_master, derive_recovery_master, generate_recovery_code, random_bytes,
 };
 use monoplan_protocol::{
-    ClientFrame, CreateDocRequest, CreateDocResponse, DeviceCredential, DeviceRegistration,
-    EncryptedBlob, Hello, HelloAck, HelloRejected, KdfParams, PROTOCOL_VERSION, PresentAccount,
-    PushBlob, RecoveryMaterial, ServerFrame, SignupRequest, SignupResponse, SnapshotBase,
-    StoredBlob,
+    ClientFrame, CreateDocRequest, CreateDocResponse, DeleteAccountRequest, DeviceCredential,
+    DeviceRegistration, EncryptedBlob, Hello, HelloAck, HelloRejected, KdfParams, PROTOCOL_VERSION,
+    PresentAccount, PushBlob, RecoveryMaterial, ServerFrame, SignupRequest, SignupResponse,
+    SnapshotBase, StoredBlob,
 };
 use monoplan_server::sync::{SnapshotCoordinator, queries};
 use monoplan_server::{AppState, router};
@@ -143,7 +143,12 @@ struct Account {
     device_id: Uuid,
     account_id: Uuid,
     primary_doc_id: Uuid,
+    /// Password material, for the calls that re-verify the password.
+    master_salt: Vec<u8>,
+    kdf_params: KdfParams,
 }
+
+const PASSWORD: &[u8] = b"correct horse battery staple";
 
 struct ExtraDevice {
     device_token: String,
@@ -268,8 +273,7 @@ async fn signup_into(server: TestServer) -> Account {
     let email = format!("user-{}@example.com", Uuid::now_v7());
     let kdf_params = weak_params();
     let master_salt: [u8; 16] = random_bytes();
-    let master =
-        derive_password_master(b"correct horse battery staple", &master_salt, kdf_params).unwrap();
+    let master = derive_password_master(PASSWORD, &master_salt, kdf_params).unwrap();
     let kek = master.kek().unwrap();
     let auth_secret = master.auth_secret().unwrap();
     let dek = Dek::generate();
@@ -297,6 +301,8 @@ async fn signup_into(server: TestServer) -> Account {
         primary_doc_id: Uuid::parse_str(&resp.primary_doc_id).unwrap(),
         device_token: resp.device_token,
         server,
+        master_salt: master_salt.to_vec(),
+        kdf_params,
     }
 }
 
@@ -2216,4 +2222,82 @@ async fn presence_lists_the_accounts_with_the_doc_open() {
         account_ids(&owner.server.state.sync_sessions.present_accounts(shared)),
         vec![owner.account_id]
     );
+}
+
+/// Account deletion (`spec/auth.md` §Account deletion) on live
+/// connections: the owner of a shared doc deletes their account from one
+/// device while a member has the shared doc open and the owner's other
+/// device has Home open. The member gets `DocClosed` for the shared doc
+/// (it was purged with the account), the other device gets `DocClosed`
+/// for Home, the device that asked hears nothing, and nobody stays
+/// subscribed to either doc.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deleting_an_account_closes_its_docs_on_live_connections() {
+    let owner = signup_account().await;
+    let shared = create_doc(&owner).await;
+    let (member_id, member_token) = signup_second(&owner).await;
+    seed_member_row(&owner, shared, member_id).await;
+    let extra = register_second_device(&owner, "laptop").await;
+
+    let mut ws_owner = connect_ws(&owner.server, &owner.device_token).await;
+    handshake(&mut ws_owner, shared).await;
+    let mut ws_member = connect_ws(&owner.server, &member_token).await;
+    hello(&mut ws_member).await;
+    open_doc(&mut ws_member, shared).await;
+    expect_presence(&mut ws_member, shared).await;
+    expect_presence(&mut ws_owner, shared).await;
+    let mut ws_extra = connect_ws(&owner.server, &extra.device_token).await;
+    hello(&mut ws_extra).await;
+    open_doc(&mut ws_extra, owner.primary_doc_id).await;
+    wait_for_subscribers_on(&owner, shared, 2).await;
+    wait_for_subscribers_on(&owner, owner.primary_doc_id, 1).await;
+
+    let master = derive_password_master(PASSWORD, &owner.master_salt, owner.kdf_params).unwrap();
+    let body = serde_json::to_vec(&DeleteAccountRequest {
+        current_auth_secret: master.auth_secret().unwrap().as_bytes().to_vec(),
+    })
+    .unwrap();
+    let status = http()
+        .delete(format!("{}/api/account", owner.server.base))
+        .bearer_auth(&owner.device_token)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(body)
+        .send()
+        .await
+        .unwrap()
+        .status();
+    assert!(status.is_success(), "delete account: {status}");
+
+    match recv_msgpack::<ServerFrame>(&mut ws_member).await {
+        ServerFrame::DocClosed { doc_id, reason } => {
+            assert_eq!(doc_id, shared);
+            assert!(reason.contains("account deleted"), "reason: {reason}");
+        }
+        other => panic!("expected DocClosed on the member, got {other:?}"),
+    }
+    match recv_msgpack::<ServerFrame>(&mut ws_extra).await {
+        ServerFrame::DocClosed { doc_id, reason } => {
+            assert_eq!(doc_id, owner.primary_doc_id);
+            assert!(reason.contains("account deleted"), "reason: {reason}");
+        }
+        other => panic!("expected DocClosed on the other device, got {other:?}"),
+    }
+    assert_no_frame(&mut ws_owner, std::time::Duration::from_millis(200)).await;
+    assert_eq!(owner.server.state.sync_sessions.subscriber_count(shared), 0);
+    assert_eq!(
+        owner
+            .server
+            .state
+            .sync_sessions
+            .subscriber_count(owner.primary_doc_id),
+        0
+    );
+    // The deleted account's tokens are dead for any new connection.
+    let resp = http()
+        .get(format!("{}/api/devices", owner.server.base))
+        .bearer_auth(&extra.device_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
 }

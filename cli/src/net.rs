@@ -100,6 +100,23 @@ impl Client {
         Ok(())
     }
 
+    /// `DELETE` carrying a JSON body (`DELETE /api/account`, which
+    /// re-verifies the password).
+    pub async fn delete_authed_with_body<Req>(
+        &self,
+        path: &str,
+        token: &str,
+        body: &Req,
+    ) -> Result<(), NetError>
+    where
+        Req: Serialize,
+    {
+        let _: Empty = self
+            .send(Method::DELETE, path, Some(body), Some(token))
+            .await?;
+        Ok(())
+    }
+
     async fn send<Req, Resp>(
         &self,
         method: Method,

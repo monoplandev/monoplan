@@ -323,22 +323,119 @@ pub async fn delete_doc(
         if owner == 0 {
             return Ok(DeleteDocOutcome::NotOwner);
         }
-        for sql in [
-            "DELETE FROM updates WHERE doc_id = ?",
-            "DELETE FROM snapshots WHERE doc_id = ?",
-            "DELETE FROM device_doc_frontiers WHERE doc_id = ?",
-            "DELETE FROM doc_sequences WHERE doc_id = ?",
-            "DELETE FROM doc_invites WHERE doc_id = ?",
-            "DELETE FROM doc_members WHERE doc_id = ?",
-            "DELETE FROM docs WHERE id = ?",
-        ] {
-            tx.execute(sql, params![doc_bytes])?;
-        }
+        purge_doc_rows(&tx, &doc_bytes)?;
         tx.commit()?;
         Ok(DeleteDocOutcome::Deleted)
     })
     .await
     .context("auth.queries delete_doc")
+}
+
+/// Every row that hangs off a doc, then the doc itself. Shared by
+/// [`delete_doc`] and [`delete_account`]; the caller owns the
+/// transaction and has already decided the doc may go.
+fn purge_doc_rows(tx: &Transaction<'_>, doc_bytes: &[u8]) -> rusqlite::Result<()> {
+    purge_rows_under_doc(tx, doc_bytes)?;
+    tx.execute("DELETE FROM docs WHERE id = ?", params![doc_bytes])?;
+    Ok(())
+}
+
+/// [`purge_doc_rows`] without the final `docs` delete, for a caller
+/// that must drop a row referencing the doc (`accounts.primary_doc_id`)
+/// before the doc itself can go.
+fn purge_rows_under_doc(tx: &Transaction<'_>, doc_bytes: &[u8]) -> rusqlite::Result<()> {
+    for sql in [
+        "DELETE FROM updates WHERE doc_id = ?",
+        "DELETE FROM snapshots WHERE doc_id = ?",
+        "DELETE FROM device_doc_frontiers WHERE doc_id = ?",
+        "DELETE FROM doc_sequences WHERE doc_id = ?",
+        "DELETE FROM doc_invites WHERE doc_id = ?",
+        "DELETE FROM doc_members WHERE doc_id = ?",
+    ] {
+        tx.execute(sql, params![doc_bytes])?;
+    }
+    Ok(())
+}
+
+/// What [`delete_account`] removed, so the route can tell live sessions.
+#[derive(Debug, Clone, Default)]
+pub struct DeletedAccount {
+    /// Docs the account owned (Home included): purged for every member.
+    pub purged_docs: Vec<Uuid>,
+    /// Docs the account was a plain member of: its membership ended,
+    /// the doc stays for everyone else.
+    pub left_docs: Vec<Uuid>,
+}
+
+/// Delete an account and everything the server holds for it, in one
+/// transaction (`spec/auth.md` §Account deletion). The route has already
+/// re-verified the password.
+///
+/// Every doc the account owns is purged the way `DELETE /api/docs/:id`
+/// does it — Home included, and unilaterally for shared docs, since
+/// ownership transfer is not built and a doc never outlives its last
+/// owner (`spec/sharing-plan.md` §Invariants). Memberships in other
+/// people's docs are deleted outright: a removal tombstone (`removed_at`)
+/// exists so a later invite can reactivate the row, and there is no
+/// account left to reactivate. Devices go (their frontiers cascade, so
+/// no horizon stays pinned), recovery sessions go, and invites the
+/// account consumed keep their `consumed_at` but lose the dangling
+/// `consumed_by_account_id`. Last the account row itself, which frees
+/// the email for a fresh signup.
+pub async fn delete_account(db: &Db, account_id: Uuid) -> anyhow::Result<DeletedAccount> {
+    let acc_bytes = account_id.as_bytes().to_vec();
+    db.call(move |c| {
+        let tx = c.transaction()?;
+        let mut out = DeletedAccount::default();
+        {
+            let mut stmt = tx.prepare(
+                "SELECT doc_id, role FROM doc_members
+                 WHERE account_id = ? AND removed_at IS NULL",
+            )?;
+            let rows = stmt
+                .query_map(params![acc_bytes], |r| {
+                    Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            for (doc_bytes, role) in rows {
+                let doc_id = Uuid::from_slice(&doc_bytes)
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                if role == MemberRole::Owner.as_str() {
+                    out.purged_docs.push(doc_id);
+                } else {
+                    out.left_docs.push(doc_id);
+                }
+            }
+        }
+        // Everything under the owned docs first, the `docs` rows last:
+        // `accounts.primary_doc_id` references the Home doc, so the
+        // account row has to go before it.
+        for doc_id in &out.purged_docs {
+            purge_rows_under_doc(&tx, doc_id.as_bytes())?;
+        }
+        for sql in [
+            // Active and tombstoned memberships alike: nothing is left
+            // to reactivate.
+            "DELETE FROM doc_members WHERE account_id = ?",
+            // Only an owner issues invites and every owned doc is gone
+            // by now; kept for the FK, not for effect.
+            "DELETE FROM doc_invites WHERE issued_by_account_id = ?",
+            "UPDATE doc_invites SET consumed_by_account_id = NULL WHERE consumed_by_account_id = ?",
+            "DELETE FROM recovery_sessions WHERE account_id = ?",
+            // `device_doc_frontiers` cascades from `devices`.
+            "DELETE FROM devices WHERE account_id = ?",
+            "DELETE FROM accounts WHERE id = ?",
+        ] {
+            tx.execute(sql, params![acc_bytes])?;
+        }
+        for doc_id in &out.purged_docs {
+            tx.execute("DELETE FROM docs WHERE id = ?", params![doc_id.as_bytes()])?;
+        }
+        tx.commit()?;
+        Ok(out)
+    })
+    .await
+    .context("auth.queries delete_account")
 }
 
 /// Does `account_id` hold an active membership on `doc_id`? The single

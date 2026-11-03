@@ -87,10 +87,10 @@ export function App(props: {
   // The sync runtime's `onAuthFailed` (expired or revoked cookie) calls
   // this bare, so it only forgets keys and never destroys unsynced work
   // (see spec/pwa-plan.md "Non-destructive auth failure").
-  const logout = async (opts?: { wipeLocal?: boolean }) => {
+  const logout = async (opts?: { wipeLocal?: boolean; serverGone?: boolean }) => {
     const current = session();
     const storages = (boot()?.docs ?? []).map((d) => d.storage);
-    if (current && !current.anonymous) {
+    if (current && !current.anonymous && !opts?.serverGone) {
       try {
         await api.logout();
       } catch (e) {

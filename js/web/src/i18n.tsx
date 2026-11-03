@@ -496,6 +496,20 @@ export type Messages = {
     failedToRenameDevice: string;
     failedToRevokeDevice: string;
     failedToLoadDevices: string;
+    /** Account deletion (spec/auth.md §Account deletion): the row in
+     *  the Account section and the confirmation that gates it on the
+     *  typed email plus the password. */
+    dangerZone: string;
+    deleteAccount: string;
+    deleteAccountHint: string;
+    deleteAccountTitle: string;
+    deleteAccountConfirm: string;
+    deleteAccountExportHint: string;
+    deleteAccountTypeEmail: (email: string) => string;
+    deleteAccountPassword: string;
+    deletingAccount: string;
+    deleteAccountWrongPassword: string;
+    deleteAccountFailed: string;
   };
   /** `SharingDialog` (members, invite links) and `InviteDialog` (the
    *  receiving end of a link); `spec/sharing-plan.md` §Invites. */
@@ -860,6 +874,19 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       failedToRenameDevice: "No se pudo renombrar el dispositivo",
       failedToRevokeDevice: "No se pudo revocar el dispositivo",
       failedToLoadDevices: "No se pudieron cargar los dispositivos",
+      dangerZone: "Zona de peligro",
+      deleteAccount: "Eliminar cuenta",
+      deleteAccountHint: "Borra la cuenta y todos sus datos del servidor.",
+      deleteAccountTitle: "¿Eliminar tu cuenta?",
+      deleteAccountConfirm:
+        "Tu espacio Personal y todos los espacios que te pertenecen se borran del servidor para todo el mundo, incluidas las personas con quienes los compartes. Sales de los espacios compartidos contigo. Se cierra la sesión en todos tus dispositivos y la copia local de este navegador se elimina. No se puede deshacer.",
+      deleteAccountExportHint:
+        "Para conservar una copia, exporta cada espacio antes de continuar:",
+      deleteAccountTypeEmail: (email) => `Escribe ${email} para confirmar.`,
+      deleteAccountPassword: "Contraseña",
+      deletingAccount: "Eliminando…",
+      deleteAccountWrongPassword: "Contraseña incorrecta. No se ha eliminado nada.",
+      deleteAccountFailed: "No se pudo eliminar la cuenta. No se ha eliminado nada.",
     },
     sharing: {
       title: (name) => `Compartir «${name}»`,
@@ -1221,6 +1248,19 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       failedToRenameDevice: "Failed to rename device",
       failedToRevokeDevice: "Failed to revoke device",
       failedToLoadDevices: "Failed to load devices",
+      dangerZone: "Danger zone",
+      deleteAccount: "Delete account",
+      deleteAccountHint: "Erase the account and all of its data from the server.",
+      deleteAccountTitle: "Delete your account?",
+      deleteAccountConfirm:
+        "Your Personal workspace and every workspace you own are erased from the server for everyone, including anyone you share them with. You leave the workspaces shared with you. All your devices are signed out and the local copy in this browser is removed. This cannot be undone.",
+      deleteAccountExportHint:
+        "To keep a copy, export each workspace before you continue:",
+      deleteAccountTypeEmail: (email) => `Type ${email} to confirm.`,
+      deleteAccountPassword: "Password",
+      deletingAccount: "Deleting…",
+      deleteAccountWrongPassword: "Wrong password. Nothing was deleted.",
+      deleteAccountFailed: "Could not delete the account. Nothing was deleted.",
     },
     sharing: {
       title: (name) => `Share “${name}”`,

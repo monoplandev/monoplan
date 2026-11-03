@@ -10,7 +10,10 @@ import {
   Show,
   untrack,
 } from "solid-js";
-import { api, type Device } from "./api.ts";
+import { deriveLogin } from "@monoplan/core/wasm";
+import { api, ApiError, type Device } from "./api.ts";
+import { ConfirmDialog } from "./ConfirmDialog.tsx";
+import { exportDocJson, exportSlug } from "./nav.tsx";
 import { createDocSyncFacts } from "./syncFacts.tsx";
 import type { DocEntry, DocsLayer } from "./sync/docs.ts";
 import dotsVerticalSvg from "./icons/dots-vertical.svg?raw";
@@ -101,6 +104,9 @@ export function Settings(props: {
   onShowListCountsChange: (show: boolean) => void;
   session: Session;
   logout: () => void;
+  /** The server has deleted the account (`DELETE /api/account`); the
+   *  owner drops to a fresh anonymous session and wipes local state. */
+  onAccountDeleted: () => void;
   /** Every open doc, for the Advanced section's per-workspace facts. */
   docs: DocsLayer;
   /** WebSocket link state, shared by every open doc. */
@@ -114,6 +120,66 @@ export function Settings(props: {
   const [devicesLoading, setDevicesLoading] = createSignal(false);
   const [revoking, setRevoking] = createSignal<ReadonlySet<string>>(new Set());
   const [editingDeviceId, setEditingDeviceId] = createSignal<string | null>(null);
+
+  // Account deletion (spec/auth.md §Account deletion): gated on the
+  // typed email and the password, which the server re-verifies. The
+  // dialog lists every open workspace with an export button, so a copy
+  // can be taken before confirming; nothing is forced.
+  const [deleteOpen, setDeleteOpenRaw] = createSignal(false);
+  const [deleteEmail, setDeleteEmail] = createSignal("");
+  const [deletePassword, setDeletePassword] = createSignal("");
+  const [deleteBusy, setDeleteBusy] = createSignal(false);
+  const [deleteError, setDeleteError] = createSignal<string | null>(null);
+  let deleteEmailRef: HTMLInputElement | undefined;
+  const setDeleteOpen = (open: boolean) => {
+    if (deleteBusy()) return;
+    if (open) {
+      setDeleteEmail("");
+      setDeletePassword("");
+      setDeleteError(null);
+    }
+    setDeleteOpenRaw(open);
+  };
+  const accountEmail = (): string =>
+    props.session.anonymous ? "" : (props.session.email ?? "");
+  const deleteEmailMatches = () =>
+    deleteEmail().trim().toLowerCase() === accountEmail().trim().toLowerCase();
+  const deleteReady = () =>
+    deleteEmailMatches() && deletePassword().length > 0 && !deleteBusy();
+  const docLabel = (entry: DocEntry): string =>
+    entry.home
+      ? m().nav.personal
+      : (entry.app.state.settings.docName ?? m().nav.untitledDoc);
+
+  async function deleteAccount() {
+    if (!deleteReady()) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      const email = accountEmail();
+      const pre = await api.prelogin(email);
+      const derived = deriveLogin(
+        deletePassword(),
+        pre.master_salt,
+        pre.kdf_params.m_kib,
+        pre.kdf_params.t,
+        pre.kdf_params.p,
+      );
+      await api.deleteAccount({ current_auth_secret: derived.authSecret });
+    } catch (e) {
+      setDeleteBusy(false);
+      if (e instanceof ApiError && e.status === 401) {
+        setDeleteError(m().settings.deleteAccountWrongPassword);
+      } else {
+        console.error("delete account failed:", e);
+        setDeleteError(m().settings.deleteAccountFailed);
+      }
+      return;
+    }
+    setDeleteBusy(false);
+    setDeleteOpenRaw(false);
+    props.onAccountDeleted();
+  }
 
   async function renameDevice(id: string, name: string): Promise<boolean> {
     setDevicesError(null);
@@ -178,6 +244,7 @@ export function Settings(props: {
   });
 
   return (
+    <>
     <Dialog open={props.open} onOpenChange={props.onOpenChange} modal>
       <Dialog.Portal>
         <Dialog.Overlay class="dialog-overlay" />
@@ -389,6 +456,27 @@ export function Settings(props: {
                     </div>
                   </div>
                 </Show>
+                {/* Danger zone: its own heading and group under Account,
+                    so the destructive action never sits beside Log out. */}
+                <Show when={!props.session.anonymous}>
+                  <h2 class="settings-section-title settings-danger-title">
+                    {m().settings.dangerZone}
+                  </h2>
+                  <div class="settings-group settings-danger-group">
+                    <div class="settings-row settings-row-danger">
+                      <div class="settings-row-label">
+                        {m().settings.deleteAccountHint}
+                      </div>
+                      <button
+                        type="button"
+                        class="settings-logout settings-danger"
+                        onClick={() => setDeleteOpen(true)}
+                      >
+                        {m().settings.deleteAccount}
+                      </button>
+                    </div>
+                  </div>
+                </Show>
               </Show>
               <Show when={section() === "devices"}>
                 <h2 class="settings-section-title">{m().settings.devices}</h2>
@@ -513,6 +601,74 @@ export function Settings(props: {
         </div>
       </Dialog.Portal>
     </Dialog>
+      <ConfirmDialog
+        open={deleteOpen()}
+        onOpenChange={setDeleteOpen}
+        title={m().settings.deleteAccountTitle}
+        message={m().settings.deleteAccountConfirm}
+        confirmLabel={
+          deleteBusy() ? m().settings.deletingAccount : m().settings.deleteAccount
+        }
+        confirmDisabled={!deleteReady()}
+        initialFocus={() => deleteEmailRef}
+        onConfirm={() => void deleteAccount()}
+      >
+        <p class="confirm-dialog-prompt">{m().settings.deleteAccountExportHint}</p>
+        <ul class="delete-account-docs">
+          <For each={props.docs.docs()}>
+            {(entry) => (
+              <li class="delete-account-doc">
+                <span class="delete-account-doc-name">{docLabel(entry)}</span>
+                <button
+                  type="button"
+                  class="settings-logout delete-account-export"
+                  onClick={() => {
+                    if (!exportDocJson(entry.app, exportSlug(docLabel(entry)))) {
+                      setDeleteError(m().nav.exportFailed);
+                    }
+                  }}
+                >
+                  {m().nav.exportJson}
+                </button>
+              </li>
+            )}
+          </For>
+        </ul>
+        <label class="confirm-dialog-prompt" for="delete-account-email">
+          {m().settings.deleteAccountTypeEmail(accountEmail())}
+        </label>
+        <input
+          ref={deleteEmailRef}
+          id="delete-account-email"
+          class="name-dialog-input"
+          type="email"
+          autocomplete="off"
+          spellcheck={false}
+          value={deleteEmail()}
+          onInput={(e) => setDeleteEmail(e.currentTarget.value)}
+        />
+        <label class="confirm-dialog-prompt delete-account-password-label" for="delete-account-password">
+          {m().settings.deleteAccountPassword}
+        </label>
+        <input
+          id="delete-account-password"
+          class="name-dialog-input"
+          type="password"
+          autocomplete="current-password"
+          value={deletePassword()}
+          onInput={(e) => setDeletePassword(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && deleteReady()) {
+              e.preventDefault();
+              void deleteAccount();
+            }
+          }}
+        />
+        <Show when={deleteError()}>
+          <p class="name-dialog-error">{deleteError()}</p>
+        </Show>
+      </ConfirmDialog>
+    </>
   );
 }
 

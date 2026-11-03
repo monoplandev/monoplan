@@ -4249,6 +4249,65 @@ input.task-check:hover {
   background: var(--bg-hover);
 }
 
+/* Account deletion: the row sits apart from Log out and its button reads
+   as destructive; the dialog lists each workspace with an export button
+   above the email + password gate. */
+.settings-danger-title {
+  margin-top: 28px;
+  color: var(--error-text);
+}
+
+.settings-danger-group {
+  border: 1px solid var(--error-text);
+}
+
+.settings-row-danger {
+  gap: 12px;
+}
+
+.settings-danger {
+  color: var(--error-text);
+  border-color: var(--error-text);
+}
+
+.settings-danger:hover {
+  background: var(--error-bg);
+}
+
+.delete-account-docs {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.delete-account-doc {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.delete-account-doc-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.delete-account-export {
+  flex: none;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.delete-account-password-label {
+  margin-top: 10px;
+}
+
 .device-list {
   list-style: none;
   margin: 0;

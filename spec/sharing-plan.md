@@ -306,6 +306,8 @@ Plus: the rest of the sharing UI (member removal, presence, conflict UX) is **se
 
 - **Forward-only revocation.** Removing a member or revoking ownership stops the server from giving them new updates, but they retain their local copy of the doc's DEK and any updates they previously synced. They cannot decrypt *future* updates they don't already have, but they *can* decrypt anything they already pulled. True revocation requires DEK rotation (generate fresh DEK, distribute new wraps to every remaining member, encrypt all future updates with new key, optionally re-encrypt history). Distributed coordination problem; not solved here. Document loudly in product UI.
 
+- **Account deletion cascades to owned docs** (built 2026-11-03, `auth.md` §Account deletion). Deleting an account purges every doc it owns for every member, since there is no transfer yet and a doc never outlives its last owner; its memberships elsewhere end like a removal. Transfer-before-delete becomes possible once ownership transfer lands.
+
 - **No history fence on join.** A new member receives the full doc snapshot + op history from the moment they join. No "shared only going forward" mode.
 
 - **No per-doc role granularity beyond owner/member.** Read-only roles, time-bound access, etc. are future work.

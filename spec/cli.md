@@ -22,6 +22,7 @@ No account is needed to use the CLI. The first doc command on a fresh install cr
 - `monoplan auth logout`
 - `monoplan auth recover` — interactive: email, recovery code, set new password
 - `monoplan auth password` — change password (logged in)
+- `monoplan auth delete-account` — delete the account on the server (`auth.md` §Account deletion). Prints what goes (every owned workspace for everyone, membership in shared ones, every device) and the `workspace export-json` hint, asks for the email typed back and the password, re-verifies the password with the server, then wipes the profile like `logout`. A wrong password or a mismatched email changes nothing.
 - `monoplan auth status [--json]` — account email + id, device id, server URL. Read-only against local state; never opens a WS and never starts the daemon. On a local-only workspace: `Account: none — local-only workspace`; `--json` has `local_only: true` and null identity / server fields.
 
 ### Devices

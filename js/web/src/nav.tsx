@@ -509,7 +509,7 @@ function triggerDownload(blob: Blob, filename: string): void {
  *  plaintext-snapshot export exists in the core — `exportSnapshot` —
  *  but stays unexposed until a matching import lands.) Returns false
  *  on failure so the caller can surface its own alert. */
-function exportDocJson(app: DocApp, slug: string): boolean {
+export function exportDocJson(app: DocApp, slug: string): boolean {
   try {
     const json = app.engine.exportJson();
     const blob = new Blob([json], { type: "application/json" });
@@ -524,7 +524,7 @@ function exportDocJson(app: DocApp, slug: string): boolean {
 
 /** File-name slug for a workspace export: the heading label lowercased,
  *  non-alphanumerics collapsed to hyphens, falling back to "monoplan". */
-function exportSlug(label: string): string {
+export function exportSlug(label: string): string {
   const slug = label
     .toLowerCase()
     .normalize("NFKD")

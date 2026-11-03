@@ -11,11 +11,11 @@ use monoplan_core::{
 };
 use monoplan_protocol::{
     AcceptInviteRequest, AcceptInviteResponse, CreateDocRequest, CreateDocResponse,
-    CreateInviteRequest, CreateInviteResponse, DeviceRenameRequest, DevicesListResponse, DocKey,
-    DocsListResponse, InvitePayloadResponse, InvitesListResponse, KdfParams, LoginRequest,
-    LoginResponse, MemberRole, MembersListResponse, PasswordChangeRequest, PasswordResetRequest,
-    PreloginRequest, PreloginResponse, RecoverRequest, RecoverResponse, RecoveryMaterial,
-    SignupRequest, SignupResponse,
+    CreateInviteRequest, CreateInviteResponse, DeleteAccountRequest, DeviceRenameRequest,
+    DevicesListResponse, DocKey, DocsListResponse, InvitePayloadResponse, InvitesListResponse,
+    KdfParams, LoginRequest, LoginResponse, MemberRole, MembersListResponse, PasswordChangeRequest,
+    PasswordResetRequest, PreloginRequest, PreloginResponse, RecoverRequest, RecoverResponse,
+    RecoveryMaterial, SignupRequest, SignupResponse,
 };
 use monoplan_server::{AppState, router};
 use reqwest::header::CONTENT_TYPE;
@@ -878,15 +878,19 @@ async fn get_json_authed<Resp: DeserializeOwned>(url: &str, token: &str) -> Resp
 /// `POST /api/docs` with a fresh DEK wrapped under `home` (the
 /// account's Home DEK). Returns the doc id and its DEK.
 async fn create_doc(acc: &Account, home: &Dek) -> (String, Dek) {
+    create_doc_as(&acc.server.base, &acc.device_token, home).await
+}
+
+async fn create_doc_as(base: &str, token: &str, home: &Dek) -> (String, Dek) {
     let dek = Dek::generate();
     let w = home.wrap_dek(&dek).unwrap();
     let resp: CreateDocResponse = post_json(
-        &format!("{}/api/docs", acc.server.base),
+        &format!("{base}/api/docs"),
         &CreateDocRequest {
             wrapped_dek: w.ciphertext,
             wrapped_dek_nonce: w.nonce.to_vec(),
         },
-        Some(&acc.device_token),
+        Some(token),
     )
     .await;
     (resp.doc_id, dek)
@@ -901,6 +905,10 @@ struct SecondAccount {
 }
 
 async fn signup_on(base: &str) -> SecondAccount {
+    signup_on_as(base, format!("second-{}@example.com", uuid::Uuid::now_v7())).await
+}
+
+async fn signup_on_as(base: &str, email: String) -> SecondAccount {
     let kdf_params = weak_params();
     let master_salt: [u8; 16] = random_bytes();
     let master =
@@ -911,7 +919,7 @@ async fn signup_on(base: &str) -> SecondAccount {
     let resp: SignupResponse = post_json(
         &format!("{}/api/account/signup", base),
         &SignupRequest {
-            email: format!("second-{}@example.com", uuid::Uuid::now_v7()),
+            email,
             master_salt: master_salt.to_vec(),
             kdf_params,
             auth_secret: master.auth_secret().unwrap().as_bytes().to_vec(),
@@ -1517,17 +1525,34 @@ async fn issue_invite(
     doc_dek: &Dek,
     expires_in_secs: Option<u64>,
 ) -> (InviteSecret, CreateInviteResponse) {
+    issue_invite_as(
+        &acc.server.base,
+        &acc.device_token,
+        doc_id,
+        doc_dek,
+        expires_in_secs,
+    )
+    .await
+}
+
+async fn issue_invite_as(
+    base: &str,
+    token: &str,
+    doc_id: &str,
+    doc_dek: &Dek,
+    expires_in_secs: Option<u64>,
+) -> (InviteSecret, CreateInviteResponse) {
     let secret = InviteSecret::generate();
     let w = secret.wrap(doc_dek).unwrap();
     let resp: CreateInviteResponse = post_json(
-        &format!("{}/api/docs/{}/invites", acc.server.base, doc_id),
+        &format!("{base}/api/docs/{doc_id}/invites"),
         &CreateInviteRequest {
             invite_id: hex::encode(secret.id().unwrap()),
             wrapped_dek: w.ciphertext,
             wrapped_dek_nonce: w.nonce.to_vec(),
             expires_in_secs,
         },
-        Some(&acc.device_token),
+        Some(token),
     )
     .await;
     (secret, resp)
@@ -1975,4 +2000,198 @@ async fn member_removal_is_owner_only_never_self_nor_last_owner() {
     )
     .await;
     assert_eq!(members.members.len(), 2);
+}
+
+/// `DELETE /api/account` with the account's current `auth_secret`.
+async fn delete_account_response(acc: &Account, password: &str) -> reqwest::Response {
+    let master =
+        derive_password_master(password.as_bytes(), &acc.master_salt, acc.kdf_params).unwrap();
+    let body = serde_json::to_vec(&DeleteAccountRequest {
+        current_auth_secret: master.auth_secret().unwrap().as_bytes().to_vec(),
+    })
+    .unwrap();
+    http()
+        .delete(format!("{}/api/account", acc.server.base))
+        .bearer_auth(&acc.device_token)
+        .header(CONTENT_TYPE, JSON)
+        .body(body)
+        .send()
+        .await
+        .unwrap()
+}
+
+/// Rows in `table` whose `column` is the given uuid (string form).
+async fn count_rows(acc: &Account, table: &str, column: &str, id: &str) -> i64 {
+    let bytes = Uuid::parse_str(id).unwrap().as_bytes().to_vec();
+    let sql = format!("SELECT COUNT(*) FROM {table} WHERE {column} = ?");
+    acc.server
+        .state
+        .db
+        .call(move |c| c.query_row(&sql, params![bytes], |r| r.get::<_, i64>(0)))
+        .await
+        .unwrap()
+}
+
+/// Account deletion re-verifies the password (`spec/auth.md` §Account
+/// deletion): a device token alone, or the wrong password, changes
+/// nothing — the device keeps working and the account still logs in.
+#[tokio::test]
+async fn account_deletion_requires_the_current_password() {
+    let acc = signup().await;
+    let resp = delete_account_response(&acc, "not the password").await;
+    assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let devices: DevicesListResponse = get_json_authed(
+        &format!("{}/api/devices", acc.server.base),
+        &acc.device_token,
+    )
+    .await;
+    assert_eq!(devices.devices.len(), 1);
+    let login = login_with(&acc, "correct horse battery staple").await;
+    assert_eq!(login.account_id, acc.account_id);
+    // Without a token there is no account to delete from.
+    let status = http()
+        .delete(format!("{}/api/account", acc.server.base))
+        .header(CONTENT_TYPE, JSON)
+        .body(
+            serde_json::to_vec(&DeleteAccountRequest {
+                current_auth_secret: vec![0; 32],
+            })
+            .unwrap(),
+        )
+        .send()
+        .await
+        .unwrap()
+        .status();
+    assert_eq!(status, reqwest::StatusCode::UNAUTHORIZED);
+}
+
+/// The whole account goes in one call: Home and every doc it owned are
+/// purged for everyone (a member of an owned shared doc loses it), its
+/// membership in someone else's doc ends while that doc stays, its
+/// devices are revoked, the invite it consumed loses the dangling
+/// account reference, the cookie is cleared, and the email is free for
+/// a fresh signup.
+#[tokio::test]
+async fn account_deletion_purges_owned_docs_ends_memberships_and_frees_the_email() {
+    let acc = signup().await;
+    let base = acc.server.base.clone();
+    let other = signup_on(&base).await;
+
+    // A doc `acc` owns and shares with `other`.
+    let (owned, owned_dek) = create_doc(&acc, &acc.dek).await;
+    let (secret, _) = issue_invite(&acc, &owned, &owned_dek, None).await;
+    accept_invite(&base, &secret, &other.device_token, &other.dek).await;
+    // A doc `other` owns that `acc` joined through a link.
+    let (theirs, theirs_dek) = create_doc_as(&base, &other.device_token, &other.dek).await;
+    let (secret, issued) =
+        issue_invite_as(&base, &other.device_token, &theirs, &theirs_dek, None).await;
+    accept_invite(&base, &secret, &acc.device_token, &acc.dek).await;
+    // A second device, so the device purge is not the single-row case.
+    let _: monoplan_protocol::DeviceCredential = post_json(
+        &format!("{base}/api/devices"),
+        &monoplan_protocol::DeviceRegistration {
+            name: "laptop".into(),
+            kind: "macos".into(),
+        },
+        Some(&acc.device_token),
+    )
+    .await;
+
+    let resp = delete_account_response(&acc, "correct horse battery staple").await;
+    assert!(
+        resp.status().is_success(),
+        "delete account: {}",
+        resp.status()
+    );
+    let cleared = resp
+        .headers()
+        .get_all(reqwest::header::SET_COOKIE)
+        .iter()
+        .any(|v| v.to_str().unwrap().starts_with("monoplan_device=;"));
+    assert!(cleared, "the device cookie is cleared on the reply");
+
+    // The token is dead and the email unknown.
+    assert_eq!(
+        get_status(&format!("{base}/api/devices"), Some(&acc.device_token)).await,
+        reqwest::StatusCode::UNAUTHORIZED
+    );
+    let status = post_json_status(
+        &format!("{base}/api/account/prelogin"),
+        &PreloginRequest {
+            email: acc.email.clone(),
+        },
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::NOT_FOUND);
+
+    // `other` lost the doc `acc` owned and kept their own, alone in it.
+    let docs: DocsListResponse =
+        get_json_authed(&format!("{base}/api/docs"), &other.device_token).await;
+    let ids: Vec<&str> = docs.memberships.iter().map(|m| m.doc_id.as_str()).collect();
+    assert!(
+        !ids.contains(&owned.as_str()),
+        "owned shared doc survived: {ids:?}"
+    );
+    assert!(
+        ids.contains(&theirs.as_str()),
+        "other's own doc is gone: {ids:?}"
+    );
+    let members: MembersListResponse = get_json_authed(
+        &format!("{base}/api/docs/{theirs}/members"),
+        &other.device_token,
+    )
+    .await;
+    assert_eq!(
+        members
+            .members
+            .iter()
+            .map(|m| m.account_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![other.account_id.as_str()]
+    );
+
+    // Nothing of the account remains in the store.
+    assert_eq!(count_rows(&acc, "accounts", "id", &acc.account_id).await, 0);
+    assert_eq!(
+        count_rows(&acc, "devices", "account_id", &acc.account_id).await,
+        0
+    );
+    assert_eq!(
+        count_rows(&acc, "doc_members", "account_id", &acc.account_id).await,
+        0
+    );
+    for doc in [&acc.primary_doc_id, &owned] {
+        assert_eq!(
+            count_rows(&acc, "docs", "id", doc).await,
+            0,
+            "doc {doc} survived"
+        );
+        assert_eq!(count_rows(&acc, "doc_members", "doc_id", doc).await, 0);
+        assert_eq!(count_rows(&acc, "doc_sequences", "doc_id", doc).await, 0);
+    }
+    assert_eq!(count_rows(&acc, "docs", "id", &theirs).await, 1);
+    // The invite `acc` accepted stays spent, with no account to point at.
+    let invite_id = hex::decode(&issued.invite_id).unwrap();
+    let (consumed_at, consumed_by): (Option<i64>, Option<Vec<u8>>) = acc
+        .server
+        .state
+        .db
+        .call(move |c| {
+            c.query_row(
+                "SELECT consumed_at, consumed_by_account_id FROM doc_invites WHERE id = ?",
+                params![invite_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+        })
+        .await
+        .unwrap();
+    assert!(consumed_at.is_some());
+    assert!(consumed_by.is_none());
+
+    // The email is free again, and the new account starts from nothing.
+    let again = signup_on_as(&base, acc.email.clone()).await;
+    assert_ne!(again.account_id, acc.account_id);
+    let docs: DocsListResponse =
+        get_json_authed(&format!("{base}/api/docs"), &again.device_token).await;
+    assert_eq!(docs.memberships.len(), 1);
 }

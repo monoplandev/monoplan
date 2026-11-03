@@ -4,9 +4,9 @@ use anyhow::Context;
 use axum::extract::State;
 use axum::http::{HeaderMap, header};
 use monoplan_protocol::{
-    DeviceCredential, DocKey, LoginRequest, LoginResponse, Membership, PasswordChangeRequest,
-    PasswordResetRequest, PasswordResetResponse, PreloginRequest, PreloginResponse, RecoverRequest,
-    RecoverResponse, SignupRequest, SignupResponse,
+    DeleteAccountRequest, DeviceCredential, DocKey, LoginRequest, LoginResponse, Membership,
+    PasswordChangeRequest, PasswordResetRequest, PasswordResetResponse, PreloginRequest,
+    PreloginResponse, RecoverRequest, RecoverResponse, SignupRequest, SignupResponse,
 };
 use uuid::Uuid;
 
@@ -14,7 +14,7 @@ use super::json::Json;
 use crate::auth::cookie;
 use crate::auth::queries::{
     DocKeyUpdate, NewAccount, PasswordResetOutcome, PasswordUpdate, PasswordUpdateOutcome,
-    create_account, create_device, create_recovery_session, find_account_by_email,
+    create_account, create_device, create_recovery_session, delete_account, find_account_by_email,
     find_account_by_id, list_memberships, reset_password_with_recovery_session, revoke_device,
     update_password,
 };
@@ -320,6 +320,55 @@ pub async fn logout(State(state): State<AppState>, auth: DeviceAuth) -> ApiResul
     let _ = revoke_device(&state.db, auth.account_id, auth.device_id)
         .await
         .context("auth.logout revoke_device")?;
+    Ok((
+        cookie_headers(cookie::clear_cookie(state.secure_cookies)),
+        (),
+    ))
+}
+
+/// `DELETE /api/account` (`spec/auth.md` §Account deletion). The device
+/// token says which account; the current password says the person at
+/// the keyboard may erase it. Wrong password is the same 401 as a bad
+/// login, and like `/login` this is a password oracle for the rate
+/// limiter. On success the account, its devices, its owned docs and its
+/// memberships are gone in one transaction; live sessions on the
+/// affected docs are told, and the web cookie is cleared.
+pub async fn delete(
+    State(state): State<AppState>,
+    auth: DeviceAuth,
+    Json(req): Json<DeleteAccountRequest>,
+) -> ApiResult<(HeaderMap, ())> {
+    let account = find_account_by_id(&state.db, auth.account_id)
+        .await?
+        .ok_or(ApiError::Unauthorized)?;
+    let presented = sha256(&req.current_auth_secret);
+    if !constant_time_eq(presented.as_slice(), &account.password_hash) {
+        return Err(ApiError::InvalidCredentials);
+    }
+    let deleted = delete_account(&state.db, account.id).await?;
+    // Owned docs are gone for everyone: every other member's session
+    // gets `DocClosed`, and so do the account's own other devices, whose
+    // next authed call fails anyway. The deleting device tears its docs
+    // down itself on this reply, so it gets a silent unbind. Docs the
+    // account merely belonged to close for the account only.
+    let mut told = 0;
+    for doc_id in &deleted.purged_docs {
+        told += state
+            .sync_sessions
+            .close_doc(*doc_id, Some(auth.device_id), "account deleted");
+    }
+    for doc_id in &deleted.left_docs {
+        told += state
+            .sync_sessions
+            .close_for_account(*doc_id, account.id, "account deleted");
+    }
+    tracing::info!(
+        account_id = %account.id,
+        purged_docs = deleted.purged_docs.len(),
+        left_docs = deleted.left_docs.len(),
+        live_sessions_closed = told,
+        "account deleted"
+    );
     Ok((
         cookie_headers(cookie::clear_cookie(state.secure_cookies)),
         (),
