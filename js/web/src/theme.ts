@@ -1,10 +1,17 @@
 // Theme preference manager. Stores "auto" | "light" | "dark" in a
 // cookie so the inline pre-render script in index.html can pick it up
 // before Solid mounts (no FOUC). Single-origin cookie — monoplan's
-// bundle is served from the API origin. The macOS app's window
-// (`mirror.html`, a custom-scheme origin) gets no cookie jar from
-// WebKit, so the same value also goes to `localStorage`, which that
-// origin does keep; the cookie wins where both exist.
+// bundle is served from the API origin. The same value also goes to
+// `localStorage`; the cookie wins where both exist.
+//
+// The macOS app's window (`mirror.html`) has no theme of its own: the
+// app owns Appearance (Settings › General, spec/mac-window-plan.md
+// "Settings") and sets the whole app's appearance, which the webview's
+// `prefers-color-scheme` follows. There the preference is always
+// "auto", nothing is stored, and a value left by an earlier build is
+// ignored.
+
+import { isMacShell } from "./sync/mirrorHost.ts";
 
 export type ThemePreference = "auto" | "light" | "dark";
 export type ResolvedTheme = "light" | "dark";
@@ -17,6 +24,7 @@ function cookieAttrs(maxAge: number): string {
 }
 
 function readCookie(): ThemePreference {
+  if (isMacShell()) return "auto";
   try {
     const m = document.cookie.match(/(?:^|; )theme=([01])/);
     if (m) return m[1] === "1" ? "dark" : "light";
@@ -29,6 +37,7 @@ function readCookie(): ThemePreference {
 }
 
 function writeCookie(pref: ThemePreference) {
+  if (isMacShell()) return;
   const value = pref === "auto" ? null : pref === "dark" ? "1" : "0";
   try {
     if (value === null) {

@@ -13,17 +13,18 @@
          WKWebView from the app bundle, never installed or bookmarked. -->
   </head>
   <body>
-    <!-- The theme before Solid mounts, as index.html does, but from
-         localStorage: the app's custom-scheme origin keeps no cookies
-         (theme.ts writes both). -->
+    <!-- Two things before any module runs. The mac-shell marker
+         (`[data-shell="mac"]`): the app's window has no title bar, so
+         the page draws its own drag strips, and module-level readers
+         such as theme.ts consult it, which is why it cannot wait for
+         mirror.tsx (imports evaluate first). And the theme before Solid
+         mounts, as index.html does, but from the system query alone:
+         the app owns Appearance (Settings › General) and the webview's
+         prefers-color-scheme follows it (theme.ts). -->
     <script>
+      document.documentElement.dataset.shell = "mac";
       try {
-        var v = localStorage.getItem("theme");
-        if (v === "1" || v === "0") {
-          document.documentElement.dataset.theme = v === "1" ? "dark" : "light";
-        } else {
-          document.documentElement.dataset.theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-        }
+        document.documentElement.dataset.theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
       } catch (e) {}
     </script>
     <div id="root"></div>

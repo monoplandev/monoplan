@@ -10,10 +10,8 @@ import { AppI18nProvider } from "./i18n.tsx";
 import { MirrorApp } from "./MirrorApp.tsx";
 import "./styles.css";
 
-// The app's window has no title bar: the traffic lights sit over the
-// top of the sidebar, which `[data-shell="mac"]` pads for them
-// (`.nav-titlebar`, nav.tsx / styles.css).
-document.documentElement.dataset.shell = "mac";
+// `[data-shell="mac"]` is set by mirror.html's inline script, not here:
+// module-level readers (theme.ts) run before this file's body.
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");

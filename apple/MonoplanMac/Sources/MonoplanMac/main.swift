@@ -420,6 +420,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 let app = NSApplication.shared
+// Before any window or menu exists, so nothing flashes the system
+// appearance first (Settings › General › Appearance).
+AppearancePreference.applySaved()
 let delegate = AppDelegate()
 app.delegate = delegate
 app.setActivationPolicy(.accessory)

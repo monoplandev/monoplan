@@ -1,9 +1,11 @@
 // The Settings window: the standard macOS preferences layout, a
 // toolbar of icon-over-label panes (a sidebar is for System
-// Settings-scale catalogues). Two panes: Account (what a user looks
-// at) and Advanced (the host process, the command line, the profile on
-// disk). Panes are SwiftUI views hosted in an AppKit tab view
-// controller, so adding one is a view, a label and an SF Symbol.
+// Settings-scale catalogues). Three panes: General (the device
+// preferences the app owns for its window, spec/mac-window-plan.md
+// "Settings"), Account (what a user looks at) and Advanced (the host
+// process, the command line, the profile on disk). Panes are SwiftUI
+// views hosted in an AppKit tab view controller, so adding one is a
+// view, a label and an SF Symbol.
 //
 // The app stays an accessory (no Dock icon) even while this window is
 // open: an accessory app can activate and give a window key focus, and
@@ -42,11 +44,12 @@ final class SettingsWindowController: NSWindowController {
             item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
             return item
         }
+        tabs.addTabViewItem(pane(String(localized: "General"), symbol: "gearshape", GeneralPane(model: model)))
         tabs.addTabViewItem(pane(String(localized: "Account"), symbol: "person.crop.circle", AccountPane(model: model)))
         tabs.addTabViewItem(pane(String(localized: "Advanced"), symbol: "gearshape.2", AdvancedPane(model: model)))
 
         let window = NSWindow(contentViewController: tabs)
-        window.title = String(localized: "Account")
+        window.title = String(localized: "General")
         window.styleMask = [.titled, .closable]
         window.toolbarStyle = .preference
         window.isReleasedWhenClosed = false
@@ -57,6 +60,9 @@ final class SettingsWindowController: NSWindowController {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    /// The Account pane's position among the tabs, for `showSignIn`.
+    private static let accountPaneIndex = 1
 
     /// The tray forwards host state and sync events here; the window
     /// does not hook the client itself, so the tray's own callbacks
@@ -75,7 +81,7 @@ final class SettingsWindowController: NSWindowController {
     /// Open on the Account pane with the sign-in sheet up (the tray's
     /// "Sign In…").
     func showSignIn() {
-        (contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = 0
+        (contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = Self.accountPaneIndex
         show()
         model.showSignIn = true
     }
@@ -98,6 +104,8 @@ final class SettingsModel: ObservableObject {
     /// recorded one.
     @Published var buildLine: String = SettingsModel.withCommit(SettingsModel.bundleVersion)
     @Published var syncLine: String = "—"
+    /// Settings › General. Saved and applied app-wide on change.
+    @Published var appearance: AppearancePreference = .load()
     @Published var openAtLogin = false
     @Published var loginError: String?
     @Published var signingOut = false
@@ -223,6 +231,11 @@ final class SettingsModel: ObservableObject {
         return String(localized: "Signed in")
     }
 
+    func setAppearance(_ pref: AppearancePreference) {
+        appearance = pref
+        pref.activate()
+    }
+
     func revealProfile() {
         NSWorkspace.shared.activateFileViewerSelecting([location.dir])
     }
@@ -250,6 +263,30 @@ final class SettingsModel: ObservableObject {
             cliError = error.localizedDescription
         }
         refresh()
+    }
+}
+
+/// The device preferences the app owns for its window
+/// (spec/mac-window-plan.md "Settings"). Appearance drives
+/// `NSApp.appearance`, which the webview follows through
+/// `prefers-color-scheme`; the page itself holds no theme in the app.
+struct GeneralPane: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        Form {
+            Picker("Appearance", selection: Binding(
+                get: { model.appearance },
+                set: { model.setAppearance($0) }
+            )) {
+                Text("System").tag(AppearancePreference.system)
+                Text("Light").tag(AppearancePreference.light)
+                Text("Dark").tag(AppearancePreference.dark)
+            }
+            .pickerStyle(.segmented)
+        }
+        .formStyle(.grouped)
+        .frame(width: 460)
     }
 }
 

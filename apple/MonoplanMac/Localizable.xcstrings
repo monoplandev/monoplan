@@ -91,6 +91,16 @@
         }
       }
     },
+    "Appearance": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apariencia"
+          }
+        }
+      }
+    },
     "Build": {
       "localizations": {
         "es": {
@@ -161,6 +171,16 @@
         }
       }
     },
+    "Dark": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oscuro"
+          }
+        }
+      }
+    },
     "Device name": {
       "localizations": {
         "es": {
@@ -187,6 +207,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Correo"
+          }
+        }
+      }
+    },
+    "General": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "General"
           }
         }
       }
@@ -237,6 +267,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Instalado · %@"
+          }
+        }
+      }
+    },
+    "Light": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claro"
           }
         }
       }
@@ -627,6 +667,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Sincronización"
+          }
+        }
+      }
+    },
+    "System": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sistema"
           }
         }
       }

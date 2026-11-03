@@ -8,7 +8,7 @@
 //
 // A call site is `String(localized: "…")` (AppKit and model strings, in
 // both targets) or a SwiftUI literal title: Text("…"), Button("…"),
-// Toggle, LabeledContent, TextField, SecureField, DisclosureGroup, Link,
+// Toggle, Picker, LabeledContent, TextField, SecureField, DisclosureGroup, Link,
 // Section, Label. Those literals are LocalizedStringKeys, so they look
 // up the same catalog with no call. A `\(…)` interpolation stands for
 // one `%…` placeholder in the key (`%@` for strings, `%lld` for Int).
@@ -20,7 +20,7 @@ import { join } from "node:path";
 const root = import.meta.dir;
 const catalogPath = join(root, "Localizable.xcstrings");
 const sourceRoot = join(root, "Sources");
-const SWIFTUI = /\b(?:Text|Button|Toggle|LabeledContent|TextField|SecureField|DisclosureGroup|Link|Section|Label)\(\s*"/g;
+const SWIFTUI = /\b(?:Text|Button|Toggle|Picker|LabeledContent|TextField|SecureField|DisclosureGroup|Link|Section|Label)\(\s*"/g;
 const LOCALIZED = /\bString\(localized:\s*"/g;
 const PLACEHOLDER = /%(?:\d+\$)?(?:lld|llu|ld|lu|d|u|lf|f|@)/g;
 

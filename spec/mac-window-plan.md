@@ -388,8 +388,14 @@ shows its Settings window (⌘, in the main menu already does). The
 framed in `MirrorFraming.swift` and `mirrorHost.ts` and tested there
 like the rest of the contract.
 
-**Order.** One setting at a time: Appearance (the General pane and
-`NSApp.appearance`; no transport yet), then the transport with typed
+**Order.** One setting at a time: Appearance (built 2026-11-04: the
+General pane's System / Light / Dark picker, `AppearancePreference` in
+`MonoplanMacKit` under the `appearance` default, applied to
+`NSApp.appearance` at launch and on change; the page's theme is pinned
+to "auto" under the mac shell, whose marker `mirror.html`'s inline
+script sets before any module runs, and which reads the system query
+alone; the dialog's controls are left alone until the section goes
+wholesale), then the transport with typed
 dates as its first passenger, then language and time format (system
 values, same transport), then show-list-counts' new home, then the
 dialog's General section and `mirror.html`'s inline theme script
