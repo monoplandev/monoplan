@@ -13,6 +13,7 @@ import type { DndSelection } from "./dnd/solid";
 import { trackOverlay } from "./overlay.ts";
 import { statusLabel, useAppI18n } from "./i18n.tsx";
 import { itemUrl } from "./url.ts";
+import { useCanCopyLink } from "./SessionContext.tsx";
 import type { ViewKey } from "./prefs.ts";
 import { isDraftId } from "./draftId.ts";
 import {
@@ -208,6 +209,7 @@ export function ItemContextMenu(props: {
     props.copyBlock(targetIds());
   };
   // One shareable `#item_` URL per targeted row (`spec/urls.md`).
+  const canCopyLink = useCanCopyLink();
   const onCopyLink = () => {
     void navigator.clipboard.writeText(targetIds().map(itemUrl).join("\n"));
   };
@@ -359,7 +361,11 @@ export function ItemContextMenu(props: {
             <kbd class="menu-shortcut">⌘C</kbd>
           </ContextMenu.Item>
           <Show when={targetIds().length === 1}>
-            <ContextMenu.Item class="context-menu-item" onSelect={onCopyLink}>
+            <ContextMenu.Item
+              class="context-menu-item"
+              disabled={!canCopyLink()}
+              onSelect={onCopyLink}
+            >
               <span>{m().common.copyLink}</span>
             </ContextMenu.Item>
           </Show>

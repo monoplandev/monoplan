@@ -20,7 +20,7 @@ import { createArchiveListFlow } from "./ArchiveListDialog.tsx";
 import { SharingDialog } from "./SharingDialog.tsx";
 import type { MemberDirectory } from "./sync/members.ts";
 import { Avatar } from "./Avatar.tsx";
-import { useSession } from "./SessionContext.tsx";
+import { useCanCopyLink, useSession } from "./SessionContext.tsx";
 import type { PresentAccount } from "./sync/runtime.ts";
 import { pendingInvite } from "./invite.ts";
 import { isMacShell, onTitlebarMouseDown } from "./sync/mirrorHost.ts";
@@ -570,6 +570,7 @@ function DocSection(props: {
 }) {
   const { m } = useAppI18n();
   const session = useSession();
+  const canCopyLink = useCanCopyLink();
   const app = props.entry.app;
   const docId = props.entry.docId;
   // Who else has this workspace open right now: the server's present
@@ -1049,6 +1050,7 @@ function DocSection(props: {
               </ContextMenu.Item>
               <ContextMenu.Item
                 class="context-menu-item"
+                disabled={!canCopyLink()}
                 onSelect={() => {
                   void navigator.clipboard.writeText(listUrl("inbox", docId));
                 }}
@@ -1179,6 +1181,7 @@ function DocSection(props: {
                       </ContextMenu.Item>
                       <ContextMenu.Item
                         class="context-menu-item"
+                        disabled={!canCopyLink()}
                         onSelect={() => {
                           void navigator.clipboard.writeText(listUrl(l().id));
                         }}

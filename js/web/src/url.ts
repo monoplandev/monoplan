@@ -122,9 +122,28 @@ export function stateHash(view: ViewKey, openItemId: string | null, menu = false
 }
 
 /** Origin + path of the running app, the base every shareable URL is
- *  built on. The hash is the only part that varies. */
+ *  built on. The hash is the only part that varies. In the browser that
+ *  is the page's own address; the macOS app's window overrides it with
+ *  the server's (`setLinkBase`), since a `monoplan://app/mirror.html`
+ *  address opens nowhere but that window. */
 export function appBase(): string {
-  return `${location.origin}${location.pathname}`;
+  return linkBase ?? `${location.origin}${location.pathname}`;
+}
+
+let linkBase: string | null = null;
+
+/** Make every shareable link (and the internal-link test) use `base`
+ *  instead of the page's address. `base` is an origin + path, e.g.
+ *  `https://alpha.monoplan.app/`; null restores the page's own. */
+export function setLinkBase(base: string | null): void {
+  linkBase = base;
+}
+
+/** The link base for a server the web client is served from: its
+ *  origin with the root path, whatever the configured URL's trailing
+ *  slash or path. */
+export function serverLinkBase(serverUrl: string): string {
+  return `${new URL(serverUrl).origin}/`;
 }
 
 export function itemUrl(id: string): string {

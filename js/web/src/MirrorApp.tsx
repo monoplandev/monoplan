@@ -14,6 +14,7 @@ import { loadPrefs } from "./prefs.ts";
 import { SessionProvider } from "./SessionContext.tsx";
 import { Workspace } from "./Workspace.tsx";
 import { detectAppHost, type AppHost } from "./sync/mirrorHost.ts";
+import { serverLinkBase, setLinkBase } from "./url.ts";
 import {
   createMirrorRuntime,
   sessionFromHost,
@@ -57,6 +58,9 @@ export function MirrorApp(props: {
     });
     try {
       const info = await host.session();
+      // Shareable links name the server's web client, not this window
+      // (`spec/urls.md` "Affordances").
+      setLinkBase(serverLinkBase(info.serverUrl));
       const bridge = new MirrorBridge({
         transport: host.transport,
         createEngine: (seed: MirrorSeed) => {

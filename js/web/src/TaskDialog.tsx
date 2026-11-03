@@ -64,6 +64,7 @@ import {
 } from "./notesDelta.ts";
 import { pasteAsPlainText } from "./plainTextPaste.ts";
 import { itemUrl } from "./url.ts";
+import { useCanCopyLink } from "./SessionContext.tsx";
 import { trackOverlay } from "./overlay.ts";
 import {
   isBinned,
@@ -227,6 +228,7 @@ export function TaskDialog(props: {
   onReveal?: (id: string, where: "list" | "focus") => void;
 }) {
   const { m, locale } = useAppI18n();
+  const canCopyLink = useCanCopyLink();
 
   // Shell selection, by viewport alone (never a preference). Mobile: a
   // plain full-screen page under the floating pills. Desktop with room
@@ -1341,6 +1343,7 @@ export function TaskDialog(props: {
                   <DropdownMenu.Content class="dropdown-menu-content task-dialog-menu-content">
                     <DropdownMenu.Item
                       class="dropdown-menu-item"
+                      disabled={!canCopyLink()}
                       onSelect={() => {
                         void navigator.clipboard.writeText(itemUrl(it().id));
                       }}

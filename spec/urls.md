@@ -151,7 +151,13 @@ pasted link does.
 
 - "Copy link" in the item dialog menu (available for binned items too),
   the row context menu (one link per line for a multi-selection), and
-  the list context menu in the nav.
+  the list context menu in the nav. In the browser the link's origin and
+  path are the page's own. In the macOS app's window (`mac-window-plan.md`)
+  they are the server's (`https://<server>/`), the canonical address the
+  web client lives at, never the window's `monoplan://app/mirror.html`,
+  which opens nowhere else. "Copy link" is disabled on an accountless
+  (anonymous) session only; being offline does not hide it, the link is
+  the same either way.
 - Notes and titles linkify http(s) URLs. A link to this app's own
   origin and path whose hash parses is rendered as an internal link:
   a plain click applies the route in place instead of opening a tab.

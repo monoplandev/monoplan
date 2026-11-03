@@ -266,7 +266,8 @@ first, backed by the in-process `HostCmd::Session` /
   decimal string (a u64 does not fit a JSON number), the doc id as the
   `workspace` selector `Host.subscribe` resolves:
   - `{kind: "session"}` → `{accountId, email, deviceId, primaryDocId,
-    serverUrl, docs: [{docId, name}]}` (`Host.session`; binds the page
+    serverUrl, docs: [{docId, name}]}` (`Host.session`; `serverUrl` is
+    also the base of every "Copy link" URL, `spec/urls.md`; binds the page
     to the host running now)
   - `{kind: "subscribe", docId}` → `{snapshot, peer}` (one
     `Host.subscribe` per open doc, a `MirrorSink` each)

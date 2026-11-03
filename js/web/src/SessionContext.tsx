@@ -57,3 +57,14 @@ export function useSession(): SessionContextValue {
   }
   return ctx;
 }
+
+/** Whether "Copy link" is offered (`spec/urls.md` "Affordances"): on any
+ *  session with an account behind it, online or not, since the link
+ *  names the server's web client and stays valid. An accountless
+ *  (anonymous) session has nowhere a link would resolve for anyone else,
+ *  so the item is disabled. The macOS app's window is always signed in.
+ *  Returns a plain function so a consumer tracks it where it reads it. */
+export function useCanCopyLink(): Accessor<boolean> {
+  const { session } = useSession();
+  return () => !session().anonymous;
+}
