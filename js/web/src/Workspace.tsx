@@ -273,6 +273,14 @@ export function Workspace(props: {
     docId === docs.homeDocId
       ? m().nav.personal
       : (docs.appOf(docId)?.state.settings.docName ?? m().nav.untitledDoc);
+  // Open-item count for the list view's header, read off the projection
+  // array like the nav's per-list count (not `items()`, whose linger
+  // overlay briefly keeps a just-completed row). Zero off a list.
+  const headerOpenCount = createMemo((): number => {
+    const v = view();
+    if (v.kind !== "list") return 0;
+    return viewApp().state.listOpen[v.id]?.length ?? 0;
+  });
   const [dndItems, setDndItems] = createSignal<ItemView[]>([]);
   const [themePref, setThemePref] = createSignal<ThemePreference>(theme.get());
   const [settingsOpen, setSettingsOpen] = createSignal(false);
@@ -2994,10 +3002,12 @@ export function Workspace(props: {
             <h1>
             {/* A list (Inbox included) lives in one workspace; prefix its
                 name with the workspace's so the title reads
-                "Personal › Groceries" and the same list name across two
+                "Household › Groceries" and the same list name across two
                 docs stays distinguishable. Muted so the list name leads.
-                The lenses span docs, so they carry no prefix. */}
-            <Show when={view().kind === "list"}>
+                Home's lists carry no prefix: Personal is the default and
+                goes unsaid. The lenses span docs, so they carry none
+                either. */}
+            <Show when={view().kind === "list" && viewDocId() !== docs.homeDocId}>
               <span class="title-doc-prefix">
                 {docLabel(viewDocId())}
                 <span
@@ -3021,6 +3031,12 @@ export function Workspace(props: {
               )}
             </Show>
           </h1>
+            {/* Open-item count beside a list title: the same number the
+                nav shows per list, hidden at zero so an empty list reads
+                clean. */}
+            <Show when={headerOpenCount() > 0}>
+              <span class="main-header-count">{headerOpenCount()}</span>
+            </Show>
             <Show when={archivedViewListId()}>
               <span class="badge archived-badge">{m().nav.archived}</span>
             </Show>

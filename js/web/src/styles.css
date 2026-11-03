@@ -996,6 +996,15 @@ body {
   margin-left: 2px;
 }
 
+/* Open-item count after a list title, in the nav count's faint tabular
+   style. */
+.main-header-count {
+  margin-left: 6px;
+  color: var(--text-faint);
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Workspace name ahead of a list title ("Personal › Groceries"): muted
    so the list name leads, with a faint right caret between. */
 .title-doc-prefix {
