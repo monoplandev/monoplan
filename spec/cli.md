@@ -59,7 +59,6 @@ The set of workspaces the CLI can open is `secrets.toml`'s `[docs]` table: one e
   - `--unstar` — remove the Starred reference (item untouched)
 - `monoplan item bin <item_id>` — set the bin mask (`binned_at`); the workflow register is preserved
 - `monoplan item restore <item_id>` — clear the bin mask only; reveals the preserved workflow state (Backlog / Todo / In Progress / Review / Done / Cancelled)
-- `monoplan places [query] [--limit N] [--json]` — the places already on items (not binned), deduped and newest use first (`spec/place-plan.md` "Reuse"): `<label>  <address | @lat,lon>  (<count>)`, the address and count only when there is one to show; `query` keeps rows whose label or address words start with its words; `--json` emits `[{ place, count, last_used }]`.
 - `monoplan agenda [--days N] [--today YYYY-MM-DD] [--json]` — Open dated items by day: Today first (always shown, with overdue deadlines folded in, oldest first), then each non-empty day up to `N` days out (default 14). Rows carry the same `@` / `!` / `at:` tags as `ls` plus a trailing `(overdue)` / `(due today)` tone; a `when` before today places nothing, so an item with only a past `when` is not listed. Events place by the same rules; Open events with neither date print in an `Unscheduled` group after Today (in `--json`, a group with `day: null` whose rows omit `placed_by`). `--today` overrides the local date, for scripts and tests. `--json` emits `[{ day, today, rows: [{ id, text, list_id, state, when?, duration?, deadline?, place?, placed_by, tone }] }]`.
 
 Lifecycle is the atomic `lifecycle` workflow register (`[state, at]`, states Backlog | Todo | In Progress | Review | Done | Cancelled) masked by the orthogonal `binned_at` bin flag — see `spec/data-model.md` "Lifecycle". `item set --lifecycle` writes the register `[state, now]` (and clears any bin mask) in a single commit; re-applying the current resolved state is a no-op. `ls` boxes carry a one-character state mark (` ` backlog, `-` todo, `>` in progress, `?` review, `x` done, `/` cancelled, `~` binned). `ls` hides closed items (Done and Cancelled) unless `--done`; `agenda` never shows cancelled items.
@@ -82,7 +81,7 @@ Marking a starred item `done` removes it from Starred automatically; binning/del
 - `monoplan list archive <list>` — remove a list from the active workspace without touching its items, ordering, or metadata (`spec/data-model.md` "Archived lists"). Refuses for `inbox` and `events`.
 - `monoplan list unarchive <list>` — restore an archived list to the active workspace.
 
-Noun groups are singular (`item`, `list`, `workspace`, `daemon`, `bin`, `db`); `monoplan lists …` is a hidden alias of `list`. Views that return a collection and carry no verbs (`places`, `agenda`, `starred`) keep their plural names.
+Noun groups are singular (`item`, `list`, `workspace`, `daemon`, `bin`, `db`); `monoplan lists …` is a hidden alias of `list`. Views that return a collection and carry no verbs (`agenda`, `starred`) keep their plural names.
 
 There is deliberately **no user-facing list delete**: archive is the only way to
 remove a list from the workspace. The core's `delete_list` stays internal
@@ -114,7 +113,7 @@ One binary, two roles; and on macOS a third host, the app, which runs the same l
 
 Dispatch, at the top of `Cli::run`:
 
-- Doc commands (`item …`, `places`, `agenda`, `starred`, `lists`, `bin`, `workspace export-json`, `workspace reconcile`) open the profile through `bootstrap::open_or_init`, which creates the local-only workspace on a fresh install (holding `daemon.lock` while it writes, so a racing second command waits and finds it), then are forwarded as a `DocCmd` and their output comes back as text. `item add -` reads stdin in the client; `workspace export-json --out` writes the file in the client. A hand-run `monoplan daemon start` on a fresh install creates the workspace the same way.
+- Doc commands (`item …`, `agenda`, `starred`, `list`, `bin`, `workspace export-json`, `workspace reconcile`) open the profile through `bootstrap::open_or_init`, which creates the local-only workspace on a fresh install (holding `daemon.lock` while it writes, so a racing second command waits and finds it), then are forwarded as a `DocCmd` and their output comes back as text. `item add -` reads stdin in the client; `workspace export-json --out` writes the file in the client. A hand-run `monoplan daemon start` on a fresh install creates the workspace the same way.
 - `status` and `db status` are direct, read-only sqlite reads and never contact or start the daemon. `db clear` refuses while a daemon is running.
 - `signup`, `login`, `recover`, `password` and `logout` work on the profile files, so each first stops a running host and holds `daemon.lock` until the files are written (`client::claim`), keeping the app and any auto-spawn out meanwhile; `login` and `recover` then sync through a fresh host, which is what starts it (or the app, if it re-hosted first).
 - `share` is HTTP against the server and runs in the client.

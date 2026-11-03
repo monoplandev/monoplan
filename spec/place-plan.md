@@ -163,7 +163,7 @@ and `SyncEngine`, JSON out.
 - **Order.** Newest use first, then most used, then label.
 - **Query.** Every query token must prefix a token of the label or the
   address (`matches_name`), so "geo" finds a place at "1 George St".
-  Empty matches all. Shared by `monoplan places <query>` and the web
+  Empty matches all. Used by the web
   field's narrowing (the web calls once per popover open with an empty
   query and narrows the result with the same `matchesName`).
 
@@ -186,9 +186,9 @@ OpenStreetMap credit only with lookup rows.
   known place's label reused that place whole). A known place with the
   same label is a separate row with its coordinates; arrow down picks it.
 
-**CLI.** `monoplan places [query] [--limit N] [--json]` lists the known
-places newest first, `<label>  <address | @lat,lon>  (<count>)`. `place
-<id> <label>` with no `--at` / `--address` and a label that folds equal
+**CLI.** (`monoplan places`, which listed the known places, was removed
+2026-11-03 as unused; label resolution stays.) `item set <id> --place
+<label>` with no `--at` / `--address` and a label that folds equal
 to a known place's writes that place whole; `--new` writes the label as
 given. So the CLI, which has no geocoder, still gets coordinates for
 anything the web client has looked up once.
@@ -219,7 +219,6 @@ anything the web client has looked up once.
 ## CLI
 
 - `monoplan item set <item_id> --place <label | -> [--coords <lat>,<lon>] [--address <text>] [--new-place]`
-- `monoplan places [query] [--limit N] [--json]`
 - `ls` / `agenda` / `focus` rows append ` at:<label>`; `--json` adds a
   `place` object when set.
 - No lookup from the CLI. The CLI sets a label and, if the user has
@@ -250,8 +249,7 @@ anything the web client has looked up once.
   label folding, label-only folding into the coordinated bucket,
   distinct coordinates kept apart, bin skipped, query on label or
   address; a doc-level check through `set_item_place` / `set_item_when`.
-- CLI: `parse_coords`; `known_place` needs a whole-label match; `places`
-  row formatting.
+- CLI: `parse_coords`; `known_place` needs a whole-label match.
 - Web: `photonToPlace` mapping; clip round-trip; store event handling
   via the wasm doc test; `placeSuggestionsJson` round trip; the field's
   narrowing and lookup dedup (`placeSuggest.test.ts`).
@@ -262,7 +260,8 @@ anything the web client has looked up once.
 - **Phase 1 (web)** — built 2026-10-07: field, Photon lookup, badge,
   clip.
 - **Phase 2** — reuse of known places built 2026-10-08 (core query, CLI
-  `places` + label resolution, web two-tier field). Current location
+  label resolution, web two-tier field; the CLI `places` listing was
+  removed 2026-11-03). Current location
   still open.
 - **Phase 3** — server-configured provider; platform geocoder on native
   clients.

@@ -1,5 +1,5 @@
 //! Item commands: `item add`, `item ls`, `item set` (every per-item
-//! field as a flag), `item bin`, `item restore`, and `places`.
+//! field as a flag), `item bin` and `item restore`.
 //!
 //! Every action is a pure function of the doc and its args that writes
 //! its output to `out`: the daemon runs it against the resident doc
@@ -504,56 +504,6 @@ pub fn known_place(suggestions: &[PlaceSuggestion], label: &str) -> Option<Place
         .map(|s| s.place.clone())
 }
 
-// ---------- places ----------
-
-#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
-pub struct PlacesArgs {
-    /// Narrow to places whose label or address starts with these words.
-    pub query: Option<String>,
-    /// At most this many rows (0 = all).
-    #[arg(long, default_value_t = 0)]
-    pub limit: usize,
-    #[arg(long)]
-    pub json: bool,
-}
-
-/// The places already on items, newest use first (`spec/place-plan.md`
-/// "Reuse"): one row per distinct place, with its address and how many
-/// items carry it.
-pub fn places(doc: &Doc, args: PlacesArgs, out: &mut dyn Write) -> anyhow::Result<()> {
-    let rows = doc.place_suggestions(args.query.as_deref().unwrap_or(""), args.limit);
-    if args.json {
-        write_json(out, &rows)?;
-    } else {
-        for row in &rows {
-            writeln!(out, "{}", format_place_row(row))?;
-        }
-    }
-    Ok(())
-}
-
-/// `<label>  <address>  (<count>)`: address only when set, count only
-/// past one, and `@<lat>,<lon>` instead of an address when there are
-/// coordinates but no address to show for them.
-pub fn format_place_row(row: &PlaceSuggestion) -> String {
-    let p = &row.place;
-    let mut s = p.label.clone();
-    match (&p.address, p.lat, p.lon) {
-        (Some(addr), _, _) => {
-            s.push_str("  ");
-            s.push_str(addr);
-        }
-        (None, Some(lat), Some(lon)) => {
-            s.push_str(&format!("  @{lat},{lon}"));
-        }
-        _ => {}
-    }
-    if row.count > 1 {
-        s.push_str(&format!("  ({})", row.count));
-    }
-    s
-}
-
 // ---------- edit ----------
 
 #[cfg(test)]
@@ -681,24 +631,6 @@ mod tests {
         assert_eq!(known_place(&rows, "GYM ").unwrap().lat, Some(1.0));
         assert!(known_place(&rows, "gy").is_none());
         assert!(known_place(&rows, "home").is_none());
-    }
-
-    #[test]
-    fn place_rows_show_address_or_coords_and_count() {
-        assert_eq!(format_place_row(&suggestion("Home", None, None, 1)), "Home");
-        assert_eq!(
-            format_place_row(&suggestion("Gym", Some((1.5, -2.0)), None, 2)),
-            "Gym  @1.5,-2  (2)"
-        );
-        assert_eq!(
-            format_place_row(&suggestion(
-                "Work",
-                Some((1.5, -2.0)),
-                Some("1 George St"),
-                1
-            )),
-            "Work  1 George St"
-        );
     }
 
     #[test]

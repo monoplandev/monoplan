@@ -69,8 +69,6 @@ enum Cmd {
     Item(ItemCmd),
     /// The bin: show, empty, rm.
     Bin(bin::BinArgs),
-    /// Places already on items, newest use first; an optional query narrows them.
-    Places(items::PlacesArgs),
     /// Open items by day: Today (with overdue and past-dated folded in), then the coming days.
     Agenda(agenda::AgendaArgs),
     /// Starred items in curated order; `starred mv` reorders, `item set --star` / `--unstar` add and remove.
@@ -171,7 +169,6 @@ pub enum DocCmd {
     Restore(items::IdArg),
     /// The bin namespace (`bin show` / `empty` / `rm`).
     Bin(bin::BinArgs),
-    Places(items::PlacesArgs),
     Agenda(agenda::AgendaArgs),
     Focus(focus::FocusArgs),
     Lists(lists::ListsArgs),
@@ -195,7 +192,6 @@ pub fn run_doc(cmd: DocCmd, doc: &Doc, out: &mut dyn Write) -> anyhow::Result<()
         DocCmd::ItemBin(a) => items::bin(doc, a, out),
         DocCmd::Restore(a) => items::restore(doc, a, out),
         DocCmd::Bin(a) => bin::run(doc, a, out),
-        DocCmd::Places(a) => items::places(doc, a, out),
         DocCmd::Agenda(a) => agenda::run(doc, a, out),
         DocCmd::Focus(a) => focus::run(doc, a, out),
         DocCmd::Lists(a) => lists::run(doc, a, out),
@@ -277,7 +273,6 @@ impl Cli {
             Cmd::Item(ItemCmd::Bin(a)) => DocCmd::ItemBin(a),
             Cmd::Item(ItemCmd::Restore(a)) => DocCmd::Restore(a),
             Cmd::Bin(a) => DocCmd::Bin(a),
-            Cmd::Places(a) => DocCmd::Places(a),
             Cmd::Agenda(a) => DocCmd::Agenda(a),
             Cmd::Starred(a) => DocCmd::Focus(a),
             Cmd::List(a) => DocCmd::Lists(a),
