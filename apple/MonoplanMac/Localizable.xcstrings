@@ -561,6 +561,16 @@
         }
       }
     },
+    "Show list counts": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar contadores de listas"
+          }
+        }
+      }
+    },
     "Sign In": {
       "localizations": {
         "es": {

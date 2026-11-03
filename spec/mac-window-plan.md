@@ -351,7 +351,7 @@ lives, and where it goes:
 | Theme (auto / light / dark) | `theme` cookie + localStorage (`theme.ts`) | An Appearance picker (System / Light / Dark) in a new General pane, `UserDefaults`. The app sets `NSApp.appearance`; the webview's `prefers-color-scheme` follows its effective appearance, so the page stays on `auto` and no value crosses. Sheets, alerts and the traffic lights match for free. |
 | Time format (auto / 12h / 24h) | `hourcycle` cookie (`format.tsx`) | The system's: `Locale.current.hourCycle`. No app setting. |
 | Typed dates (on / off) | `typeddates` cookie (`whenToken.ts`) | A toggle in the General pane, `UserDefaults`. |
-| Show list counts | **The doc** (`settings.show_list_counts`, synced to every device, `spec/data-model.md`) | Not a device preference; stays with the page (moved out of the dialog to where the other workspace toggles are, or a View menu item that tells the page). Decided when its turn comes. |
+| Show list counts | **The doc** (`settings.show_list_counts`, synced to every device, `spec/data-model.md`) | Not a device preference, but it sits in the General pane anyway, because that is where a user looks for it (decided 2026-11-04). The pane reads and sets it through the host, as the tray reads the agenda: `DocCmd::Settings {show_list_counts?}`, an IPC-only frame with no CLI verb (the flag is read from the Home doc alone and gates every workspace, so a `-w`-taking verb would misstate it; `Request.settings` / `.setShowListCounts`, `WorkspaceSettings`), sent without a workspace and so on Home. The page learns of a change through the mirror like any doc change; the pane re-fetches on every `Changed` event, so a toggle from the page or another device shows there. Nothing crosses `WindowSettings`. |
 | Account: email, log out, delete | — | Already hidden in the mirror (`Session.mirror`); the Account pane and the tray own sign-in / sign-out. |
 | Devices: list, rename, revoke | `/api` through the proxy | Stays in the page: it works in the window and the native panes do not list devices. |
 | Advanced: per-workspace sync facts | engine state | Stays in the page (diagnostic). |
@@ -403,9 +403,10 @@ script sets before any module runs, and which reads the system query
 alone; the dialog's controls are left alone until the section goes
 wholesale), then the transport with typed dates as its first
 passenger, then language and time format from system values (both
-built 2026-11-04, above), then show-list-counts' new home,
-then the dialog's General section wholesale, with the
-`openSettings` request behind its one remaining row.
+built 2026-11-04, above), then show list counts in the General pane
+through the host (built 2026-11-04, the table above), then the
+dialog's General section wholesale, with the `openSettings` request
+behind its one remaining row.
 
 ## Deferred
 

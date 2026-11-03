@@ -109,6 +109,12 @@ final class SettingsModel: ObservableObject {
     /// Settings › General, delivered to the window's page
     /// (`WindowSettings`).
     @Published var typedDates: Bool = WindowSettings.load().typedDates
+    /// Settings › General, but doc content: the Home workspace's
+    /// `show_list_counts` through the host (`WorkspaceSettings`). Nil
+    /// until the host answers, and again when there is no host; the
+    /// toggle is disabled then.
+    @Published var showListCounts: Bool?
+    @Published var showListCountsError: String?
     @Published var openAtLogin = false
     @Published var loginError: String?
     @Published var signingOut = false
@@ -193,6 +199,7 @@ final class SettingsModel: ObservableObject {
             hostLine = String(localized: "Not running · \(reason)")
             syncLine = "—"
             buildLine = Self.withCommit(Self.bundleVersion)
+            showListCounts = nil
         case .connected(let sync):
             hostLine = String(localized: "Running")
             if let d = client.daemon {
@@ -204,6 +211,9 @@ final class SettingsModel: ObservableObject {
                     self?.email = email
                 }
             }
+            // The tray refreshes this window on every doc change too,
+            // so a toggle from the page or another device shows here.
+            fetchWorkspaceSettings()
         }
     }
 
@@ -246,6 +256,37 @@ final class SettingsModel: ObservableObject {
         s.save()
     }
 
+    /// Optimistic; the reply (the settings after the change) settles
+    /// it, an error puts it back.
+    func setShowListCounts(_ on: Bool) {
+        let before = showListCounts
+        showListCounts = on
+        showListCountsError = nil
+        client.send(.setShowListCounts(on)) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(.output(let stdout, _)):
+                self.showListCounts = (try? WorkspaceSettings.parse(stdout))?.showListCounts ?? before
+            case .success:
+                self.showListCounts = before
+            case .failure(let e):
+                self.showListCounts = before
+                self.showListCountsError = e.localizedDescription
+            }
+        }
+    }
+
+    private func fetchWorkspaceSettings() {
+        client.send(.settings) { [weak self] result in
+            guard let self else { return }
+            if case .success(.output(let stdout, _)) = result, let s = try? WorkspaceSettings.parse(stdout) {
+                self.showListCounts = s.showListCounts
+            } else {
+                self.showListCounts = nil
+            }
+        }
+    }
+
     func revealProfile() {
         NSWorkspace.shared.activateFileViewerSelecting([location.dir])
     }
@@ -280,7 +321,8 @@ final class SettingsModel: ObservableObject {
 /// (spec/mac-window-plan.md "Settings"). Appearance drives
 /// `NSApp.appearance`, which the webview follows through
 /// `prefers-color-scheme`; the page itself holds no theme in the app.
-/// The rest reach the page as `WindowSettings`.
+/// The rest reach the page as `WindowSettings`, except list counts,
+/// which are the workspace's own and go through the host.
 struct GeneralPane: View {
     @ObservedObject var model: SettingsModel
 
@@ -299,6 +341,14 @@ struct GeneralPane: View {
                 get: { model.typedDates },
                 set: { model.setTypedDates($0) }
             ))
+            Toggle("Show list counts", isOn: Binding(
+                get: { model.showListCounts ?? true },
+                set: { model.setShowListCounts($0) }
+            ))
+            .disabled(model.showListCounts == nil)
+            if let error = model.showListCountsError {
+                Text(error).font(.footnote).foregroundStyle(.red)
+            }
         }
         .formStyle(.grouped)
         .frame(width: 460)

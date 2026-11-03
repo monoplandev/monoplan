@@ -64,6 +64,11 @@ public enum Request {
     case lists
     /// Who is logged in, from the daemon's account row.
     case account
+    /// The Home doc's account-wide UI settings (`WorkspaceSettings`;
+    /// `DocCmd::Settings`, an IPC-only frame with no CLI verb).
+    case settings
+    /// Set `show_list_counts`; the reply is the settings after.
+    case setShowListCounts(Bool)
 
     var value: MPValue {
         switch self {
@@ -85,6 +90,10 @@ public enum Request {
             ])])])])])])
         case .account:
             return .string("Account")
+        case .settings:
+            return .map(["Doc": .map(["cmd": .map(["Settings": .map([:])])])])
+        case .setShowListCounts(let on):
+            return .map(["Doc": .map(["cmd": .map(["Settings": .map(["show_list_counts": .bool(on)])])])])
         }
     }
 }

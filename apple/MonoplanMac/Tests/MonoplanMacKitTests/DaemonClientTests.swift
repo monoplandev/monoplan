@@ -36,6 +36,16 @@ final class DaemonClientTests: XCTestCase {
             Request.agenda(days: 0).value,
             .map(["Doc": .map(["cmd": .map(["Agenda": .map(["days": .int(0), "today": .nil, "json": .bool(true)])])])])
         )
+        // The shapes cli/src/commands/settings.rs `wire_shape` pins.
+        XCTAssertEqual(
+            Request.settings.value,
+            .map(["Doc": .map(["cmd": .map(["Settings": .map([:])])])])
+        )
+        XCTAssertEqual(
+            Request.setShowListCounts(false).value,
+            .map(["Doc": .map(["cmd": .map(["Settings": .map(["show_list_counts": .bool(false)])])])])
+        )
+        XCTAssertEqual(try WorkspaceSettings.parse("{\n  \"show_list_counts\": false\n}\n"), WorkspaceSettings(showListCounts: false))
     }
 
     func testReplyParsing() throws {

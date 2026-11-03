@@ -475,7 +475,7 @@ Doc-level synced settings that are not owned by any specific `ListMeta`.
 
 | Field | Type | Notes |
 |---|---|---|
-| `show_list_counts` | bool? | when true, clients render each non-Inbox list's open-item count (all Open states) in the nav (subject to a `count > 0` gate). Inbox's count is always shown regardless. Absent ≡ false; the mutation deletes the key on the off path so an unset flag leaves no on-disk trace. |
+| `show_list_counts` | bool? | when true, clients render each non-Inbox list's open-item count (all Open states) in the nav (subject to a `count > 0` gate). Inbox's count is always shown regardless. Absent ≡ **true**; the mutation deletes the key on the on path, so a never-toggled doc and one toggled back on are byte-identical and only the opt-out is persisted. |
 | `inbox_view` | string? | the reserved `inbox` list's **saved default view**. Inbox has no `ListMeta` row, so its `view` register lives here — same encoding, same absent ≡ no-default reading. See `spec/board.md`. |
 | `doc_name` | string? | the doc's user-facing name (`spec/sharing-plan.md`), trimmed. Doc content — every member sees it, the server never does. Absent ≡ unnamed (clients fall back to a built-in label); the Home doc is never named, clients label it "Personal". |
 | `calendar_hidden_docs` | list of string? | doc ids hidden from the merged calendar lens. A **personal** cross-doc preference: only ever read on the account's Home doc (which syncs across its devices and is never shared). Deduped; absent / empty ≡ every doc shown; the key is deleted once empty. Unknown ids are harmless. |

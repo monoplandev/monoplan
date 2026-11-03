@@ -754,7 +754,7 @@ pub struct SettingsView {
     /// When true, clients render each non-Inbox list's open-item count
     /// (Backlog + Live) in the nav (subject to the count > 0 gate).
     /// Inbox's count is always shown regardless. Single global flag;
-    /// default false.
+    /// on by default (the opt-out is what gets persisted).
     pub show_list_counts: bool,
     /// The reserved `inbox` (Inbox) list's saved default view. Inbox has
     /// no ListMeta row, so its default lives here rather than on

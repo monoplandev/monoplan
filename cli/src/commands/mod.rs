@@ -22,6 +22,7 @@ pub mod login;
 pub mod logout;
 mod password;
 mod recover;
+pub mod settings;
 mod share;
 pub mod signup;
 pub mod status;
@@ -175,6 +176,13 @@ pub enum DocCmd {
     Agenda(agenda::AgendaArgs),
     Focus(focus::FocusArgs),
     Lists(lists::ListsArgs),
+    /// The Home doc's account-wide UI settings (`settings.rs`): read,
+    /// or set what is `Some` first. IPC-only, for the macOS app's
+    /// Settings window; no CLI verb maps here.
+    Settings {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        show_list_counts: Option<bool>,
+    },
     ExportJson,
     /// `Doc::reconcile_with`: explicit maintenance sweep, never
     /// scheduled. `sweep_closed_before` is resolved in the client so the
@@ -198,6 +206,7 @@ pub fn run_doc(cmd: DocCmd, doc: &Doc, out: &mut dyn Write) -> anyhow::Result<()
         DocCmd::Agenda(a) => agenda::run(doc, a, out),
         DocCmd::Focus(a) => focus::run(doc, a, out),
         DocCmd::Lists(a) => lists::run(doc, a, out),
+        DocCmd::Settings { show_list_counts } => settings::run(doc, show_list_counts, out),
         DocCmd::ExportJson => {
             out.write_all(export::render(doc)?.as_bytes())?;
             Ok(())
