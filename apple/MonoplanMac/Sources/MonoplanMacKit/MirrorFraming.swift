@@ -24,6 +24,10 @@ public enum HostRequest: Equatable {
     /// The page's Settings entry: the window has no Settings dialog of
     /// its own, the app's Settings window opens instead.
     case openSettings
+    /// Whether Edit › Undo / Redo should be enabled: the doc's undo
+    /// state, or a text field with focus (its own undo). Pushed by the
+    /// page whenever either changes.
+    case undoState(canUndo: Bool, canRedo: Bool)
 
     public enum WindowGesture: String, Equatable {
         /// A mouse-down: move the window with it.
@@ -75,6 +79,12 @@ public enum HostRequest: Equatable {
             self = .window(gesture)
         case "openSettings":
             self = .openSettings
+        case "undoState":
+            func bool(_ key: String) throws -> Bool {
+                guard let v = body[key] as? Bool else { throw ParseError.missing(key) }
+                return v
+            }
+            self = .undoState(canUndo: try bool("canUndo"), canRedo: try bool("canRedo"))
         default:
             throw ParseError.unknownKind(kind)
         }
@@ -143,6 +153,11 @@ public enum HostInbound: Equatable {
     case handOff
     /// The app's device settings changed (`WindowSettings`).
     case settings(WindowSettings)
+    /// Edit › Undo / Redo: the page undoes (a focused text field's own
+    /// undo first, else the doc's), since the window's menu is the one
+    /// undo surface there.
+    case undo
+    case redo
 
     public static let global = "window.__monoplanHost"
 
@@ -159,6 +174,10 @@ public enum HostInbound: Equatable {
             return "\(Self.global).handOff()"
         case .settings(let settings):
             return "\(Self.global).settings(\(settings.json))"
+        case .undo:
+            return "\(Self.global).undo()"
+        case .redo:
+            return "\(Self.global).redo()"
         }
     }
 

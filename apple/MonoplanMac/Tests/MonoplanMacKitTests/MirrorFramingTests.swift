@@ -13,6 +13,9 @@ final class MirrorFramingTests: XCTestCase {
         XCTAssertEqual(try HostRequest(message: ["kind": "window", "action": "drag"]), .window(.drag))
         XCTAssertEqual(try HostRequest(message: ["kind": "window", "action": "doubleClick"]), .window(.doubleClick))
         XCTAssertEqual(try HostRequest(message: ["kind": "openSettings"]), .openSettings)
+        XCTAssertEqual(
+            try HostRequest(message: ["kind": "undoState", "canUndo": true, "canRedo": false]),
+            .undoState(canUndo: true, canRedo: false))
     }
 
     func testRejectsMalformedRequests() {
@@ -23,6 +26,9 @@ final class MirrorFramingTests: XCTestCase {
             XCTAssertEqual($0 as? HostRequest.ParseError, .badBase64("bytes"))
         }
         XCTAssertThrowsError(try HostRequest(message: ["kind": "window"])) { XCTAssertEqual($0 as? HostRequest.ParseError, .missing("action")) }
+        XCTAssertThrowsError(try HostRequest(message: ["kind": "undoState", "canUndo": true])) {
+            XCTAssertEqual($0 as? HostRequest.ParseError, .missing("canRedo"))
+        }
         XCTAssertThrowsError(try HostRequest(message: ["kind": "window", "action": "wiggle"])) {
             XCTAssertEqual($0 as? HostRequest.ParseError, .badValue("action"))
         }
@@ -64,6 +70,8 @@ final class MirrorFramingTests: XCTestCase {
             HostInbound.sync(online: false, lastSyncedAt: nil).script,
             "window.__monoplanHost.sync({online: false, lastSyncedAt: null})")
         XCTAssertEqual(HostInbound.handOff.script, "window.__monoplanHost.handOff()")
+        XCTAssertEqual(HostInbound.undo.script, "window.__monoplanHost.undo()")
+        XCTAssertEqual(HostInbound.redo.script, "window.__monoplanHost.redo()")
     }
 
     func testSchemeRoutes() {

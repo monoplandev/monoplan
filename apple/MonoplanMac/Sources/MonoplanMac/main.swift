@@ -349,6 +349,24 @@ final class TrayController: NSObject, NSMenuDelegate {
         webWindow.reload(sender)
     }
 
+    @objc func undoInWindow(_ sender: Any?) {
+        webWindow.undo(sender)
+    }
+
+    @objc func redoInWindow(_ sender: Any?) {
+        webWindow.redo(sender)
+    }
+
+    /// Edit › Undo / Redo follow the page's `undoState`; every other
+    /// item of ours is always available.
+    @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(undoInWindow(_:)): return webWindow.canUndo
+        case #selector(redoInWindow(_:)): return webWindow.canRedo
+        default: return true
+        }
+    }
+
     /// One window controller for the process; reopening brings the
     /// same window forward rather than stacking a second.
     @objc func openSettings() {
@@ -413,6 +431,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = MainMenu.build(
             settings: #selector(TrayController.openSettings),
             reload: #selector(TrayController.reloadWindow(_:)),
+            undo: #selector(TrayController.undoInWindow(_:)),
+            redo: #selector(TrayController.redoInWindow(_:)),
             target: tray)
     }
 

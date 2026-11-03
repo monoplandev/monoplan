@@ -16,6 +16,7 @@
 //                                                       see `postWindowGesture`)
 //   { kind: "openSettings" }                  → null   (the app's Settings
 //                                                       window; the page has none)
+//   { kind: "undoState", canUndo, canRedo }   → null   (enables Edit › Undo / Redo)
 //
 // Inbound (Swift → JS, by `evaluateJavaScript`), on `window.__monoplanHost`:
 //
@@ -30,6 +31,8 @@
 //   .settings(obj)        the app's device settings changed
 //                         (`hostSettings.ts`; the first values arrive
 //                         by a document-start script, not here)
+//   .undo() / .redo()     Edit › Undo / Redo: the window's one undo
+//                         surface (`setUndoRedoHandler`)
 //
 // The doc id is the `workspace` selector the host resolves (`-w` accepts
 // a doc uuid, `spec/cli.md`). The peer id travels as a decimal string
@@ -71,7 +74,8 @@ export type HostRequest =
   | { kind: "unsubscribe"; docId: string }
   | { kind: "import"; docId: string; bytes: string }
   | { kind: "window"; action: WindowGesture }
-  | { kind: "openSettings" };
+  | { kind: "openSettings" }
+  | { kind: "undoState"; canUndo: boolean; canRedo: boolean };
 
 /** What the sidebar's title strip (`.nav-titlebar`) forwards: the
  *  window has no title bar of its own (the traffic lights sit over the
@@ -105,6 +109,8 @@ export interface HostInbound {
   sync(status: HostSyncStatus): void;
   handOff(): Promise<void>;
   settings(settings: HostSettings): void;
+  undo(): void;
+  redo(): void;
 }
 
 export interface AppHost {
@@ -162,6 +168,19 @@ export function postOpenSettings(): void {
   post({ kind: "openSettings" });
 }
 
+/** What Edit › Undo / Redo in the app's menu bar run: the window's one
+ *  undo surface (the sidebar menu hides its rows there). `Workspace`
+ *  binds it; null unbinds. */
+let undoRedoHandler: ((kind: "undo" | "redo") => void) | null = null;
+export function setUndoRedoHandler(cb: ((kind: "undo" | "redo") => void) | null): void {
+  undoRedoHandler = cb;
+}
+
+/** Tell the app whether its Undo / Redo items should be enabled. */
+export function postUndoState(canUndo: boolean, canRedo: boolean): void {
+  post({ kind: "undoState", canUndo, canRedo });
+}
+
 function post(request: HostRequest): void {
   const handler = findHandler();
   if (!handler) return;
@@ -195,6 +214,12 @@ export function createAppHost(handler: HostMessageHandler, target: object): AppH
     },
     settings(settings) {
       applyHostSettings(settings);
+    },
+    undo() {
+      undoRedoHandler?.("undo");
+    },
+    redo() {
+      undoRedoHandler?.("redo");
     },
   };
   (target as Record<string, unknown>)[HOST_GLOBAL] = inbound;

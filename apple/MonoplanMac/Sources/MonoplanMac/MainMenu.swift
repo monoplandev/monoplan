@@ -4,13 +4,18 @@
 // ⌘X, ⌘C, ⌘V and ⌘A reach the webview at all, since AppKit routes key
 // equivalents through the menu. The page sees each key first (WebKit
 // gives it the chance to `preventDefault`), so the client's own
-// shortcuts, undo included, keep winning inside it; the menu catches
-// what the page leaves alone, such as copy in a text field.
+// shortcuts keep winning inside it; the menu catches what the page
+// leaves alone, such as copy in a text field. Undo and Redo are the
+// exception: they target the app, which asks the page to undo (a
+// focused text field's own undo first, else the doc's), so a click on
+// the menu and ⌘Z do the same thing and the window has one undo
+// surface; the page's sidebar menu hides its own rows there. The
+// items are enabled from the page's `undoState`.
 
 import AppKit
 
 enum MainMenu {
-    static func build(settings: Selector, reload: Selector, target: AnyObject) -> NSMenu {
+    static func build(settings: Selector, reload: Selector, undo: Selector, redo: Selector, target: AnyObject) -> NSMenu {
         let main = NSMenu()
 
         let app = NSMenu()
@@ -30,9 +35,11 @@ enum MainMenu {
         main.addItem(submenu(app, title: "Monoplan"))
 
         let edit = NSMenu(title: String(localized: "Edit"))
-        edit.addItem(withTitle: String(localized: "Undo"), action: Selector(("undo:")), keyEquivalent: "z")
-        let redo = edit.addItem(withTitle: String(localized: "Redo"), action: Selector(("redo:")), keyEquivalent: "z")
-        redo.keyEquivalentModifierMask = [.command, .shift]
+        let undoItem = edit.addItem(withTitle: String(localized: "Undo"), action: undo, keyEquivalent: "z")
+        undoItem.target = target
+        let redoItem = edit.addItem(withTitle: String(localized: "Redo"), action: redo, keyEquivalent: "z")
+        redoItem.keyEquivalentModifierMask = [.command, .shift]
+        redoItem.target = target
         edit.addItem(.separator())
         edit.addItem(withTitle: String(localized: "Cut"), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         edit.addItem(withTitle: String(localized: "Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")

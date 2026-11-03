@@ -7,9 +7,9 @@
 //   closes or the app quits), activation policy via `onVisibility`.
 // - `MirrorHostBridge`: the `monoplan` message handler the page posts
 //   to (`session`, `subscribe`, `unsubscribe`, `import`, `window`,
-//   `openSettings`) and the calls
+//   `openSettings`, `undoState`) and the calls
 //   back into `window.__monoplanHost` (`update`, `stopped`, `sync`,
-//   `handOff`, `settings`). One `Host.subscribe` per open doc; a `MirrorSink` per
+//   `handOff`, `settings`, `undo`, `redo`). One `Host.subscribe` per open doc; a `MirrorSink` per
 //   subscription hops to the main queue and evaluates the update into
 //   the page, never calling `Host.import` from inside `update` (the
 //   loop is busy delivering). Requests that block in Rust (`subscribe`
@@ -55,6 +55,10 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// with them, and pushed live when `UserDefaults` changes.
     private var settings = WindowSettings.load()
     private var settingsObservers: [NSObjectProtocol] = []
+    /// What the page last said about Edit › Undo / Redo (`undoState`);
+    /// the main menu validates against it. Nothing until a page says.
+    private(set) var canUndo = false
+    private(set) var canRedo = false
 
     init(hostProvider: @escaping () -> MonoplanCore.Host?, onVisibility: @escaping (Bool) -> Void,
          onOpenSettings: @escaping () -> Void) {
@@ -66,6 +70,10 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
             credential: { [bridge] in bridge.apiCredential })
         self.devURL = ProcessInfo.processInfo.environment["MONOPLAN_MIRROR_URL"].flatMap(URL.init(string:))
         super.init(window: nil)
+        bridge.onUndoState = { [weak self] canUndo, canRedo in
+            self?.canUndo = canUndo
+            self?.canRedo = canRedo
+        }
         // Any defaults write (the window's own frame autosave included)
         // posts the first; the locale one is the 24-Hour Time switch
         // (a language change relaunches the app). Only a change to the
@@ -135,6 +143,17 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// Reload the page (the View menu).
     @objc func reload(_ sender: Any?) {
         webView?.reload()
+    }
+
+    /// Edit › Undo / Redo: the page's, by menu click or by the key
+    /// equivalent the page let through (it takes ⌘Z itself outside text
+    /// fields, so this is mostly clicks and typing).
+    @objc func undo(_ sender: Any?) {
+        webView?.evaluateJavaScript(HostInbound.undo.script)
+    }
+
+    @objc func redo(_ sender: Any?) {
+        webView?.evaluateJavaScript(HostInbound.redo.script)
     }
 
     /// Hand everything the page committed to the host, then `completion`
@@ -360,11 +379,15 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
         return credential
     }
 
+    /// The page's latest `undoState`; set on the main thread.
+    var onUndoState: ((Bool, Bool) -> Void)?
+
     /// A new page is loading (or the old one is going): close every
     /// subscription so the host releases the peer slots, and let the
     /// sinks of this generation fall silent.
     func resetPage() {
         generation += 1
+        onUndoState?(false, false)
         let old = subscriptions
         subscriptions = [:]
         pageHost = nil
@@ -510,6 +533,10 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
 
         case .openSettings:
             onOpenSettings()
+            replyHandler(NSNull(), nil)
+
+        case .undoState(let canUndo, let canRedo):
+            onUndoState?(canUndo, canRedo)
             replyHandler(NSNull(), nil)
         }
     }

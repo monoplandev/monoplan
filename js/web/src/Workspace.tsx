@@ -58,7 +58,13 @@ import type { ListOption } from "./ListPicker.tsx";
 import { MovePalette } from "./MovePalette.tsx";
 import { EditableNavLabel, Nav, NavFindButton, NavMenu, FirstRunAuthPrompt, StatusSlot } from "./nav.tsx";
 import { MobileBars } from "./MobileShell.tsx";
-import { isMacShell, onTitlebarMouseDown, postOpenSettings } from "./sync/mirrorHost.ts";
+import {
+  isMacShell,
+  onTitlebarMouseDown,
+  postOpenSettings,
+  postUndoState,
+  setUndoRedoHandler,
+} from "./sync/mirrorHost.ts";
 import { installConsoleApi } from "./consoleApi.ts";
 import { digitNavTarget } from "./navShortcuts.ts";
 import {
@@ -1890,6 +1896,40 @@ export function Workspace(props: {
     if (did) e.preventDefault();
   };
   onGlobalKey(onUndoRedoKey);
+
+  // In the app's window the menu bar's Edit › Undo / Redo is the one
+  // undo surface (the sidebar menu hides its rows). A click there, or
+  // a ⌘Z the handler above let through, arrives here: a focused text
+  // field keeps its own undo (what the browser would have done with
+  // the keystroke); otherwise the doc's, with the overlay guard the
+  // key path has. The items are enabled from the same two facts.
+  if (isMacShell()) {
+    const editableFocused = (): boolean =>
+      !!document.activeElement?.closest('input, textarea, [contenteditable="true"]');
+    setUndoRedoHandler((kind) => {
+      if (editableFocused()) {
+        document.execCommand(kind);
+        return;
+      }
+      if (isOverlayOpen()) return;
+      if (kind === "undo") docs.undo();
+      else docs.redo();
+    });
+    const [editing, setEditing] = createSignal(editableFocused());
+    const onFocusChange = () => setEditing(editableFocused());
+    document.addEventListener("focusin", onFocusChange);
+    document.addEventListener("focusout", onFocusChange);
+    onCleanup(() => {
+      setUndoRedoHandler(null);
+      document.removeEventListener("focusin", onFocusChange);
+      document.removeEventListener("focusout", onFocusChange);
+    });
+    createEffect(() => {
+      docs.version();
+      const e = editing();
+      postUndoState(e || docs.canUndo(), e || docs.canRedo());
+    });
+  }
 
   let dndHandle: DndImperative | null = null;
   let boardHandle: BoardImperative | null = null;

@@ -1319,6 +1319,9 @@ export function NavMenu(props: {
         </Tooltip>
         <DropdownMenu.Portal>
           <DropdownMenu.Content class="dropdown-menu-content">
+            {/* Not in the app's window: the menu bar's Edit › Undo / Redo
+                is the one undo surface there (spec/mac-window-plan.md). */}
+            <Show when={!props.session.mirror}>
             <DropdownMenu.Item
               class="dropdown-menu-item"
               disabled={!canUndo()}
@@ -1340,6 +1343,7 @@ export function NavMenu(props: {
               <kbd class="menu-shortcut">⌘⇧Z</kbd>
             </DropdownMenu.Item>
             <DropdownMenu.Separator class="dropdown-menu-separator" />
+            </Show>
             <Show when={props.onNewDoc}>
               {(onNewDoc) => (
                 <DropdownMenu.Item

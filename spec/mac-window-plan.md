@@ -272,6 +272,18 @@ first, backed by the in-process `HostCmd::Session` /
     `Host.subscribe` per open doc, a `MirrorSink` each)
   - `{kind: "unsubscribe", docId}` → `null`
   - `{kind: "import", docId, bytes}` → `null` (`Host.import`)
+  - `{kind: "undoState", canUndo, canRedo}` → `null`: enables Edit ›
+    Undo / Redo. In the window the menu bar's Edit menu is the one undo
+    surface (the page's sidebar menu hides its Undo / Redo rows there):
+    the two items target the app, which evaluates
+    `__monoplanHost.undo()` / `.redo()`; the page undoes a focused text
+    field's own history first (`execCommand`), else the doc's, under
+    the same overlay guard as ⌘Z. So a menu click and the key do the
+    same thing. ⌘Z itself still reaches the page first and is taken
+    there outside text fields; what the page lets through comes back
+    round by the menu. The page pushes `undoState` on every doc event
+    and focus change (`canUndo || editing`), and the app validates the
+    items against it.
   - `{kind: "window", action: "drag" | "doubleClick"}` → `null`. The
     window has no title bar (`.fullSizeContentView`, transparent,
     title hidden, an empty `.unifiedCompact` toolbar so the bar is
