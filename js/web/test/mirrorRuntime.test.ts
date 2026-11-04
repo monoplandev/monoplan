@@ -133,6 +133,53 @@ describe("createMirrorRuntime", () => {
     expect(runtime.presence(HOME)).toEqual([]);
   });
 
+  test("a doc the host adds after boot opens live and routes both ways", async () => {
+    // The host holds a doc the page did not boot with (New Workspace…
+    // created it after the session reply); `docAdded` from the app
+    // opens it in place.
+    const host = new FakeMirrorHost({
+      [HOME]: hostDoc(1n, "home-first"),
+      [OTHER]: hostDoc(2n, "other-first"),
+    });
+    let drainFor: (docId: string) => void = () => {};
+    const bridge = new MirrorBridge({
+      transport: host,
+      createEngine,
+      onServerFrame: (id) => drainFor(id),
+    });
+    const engines = [await bridge.open(HOME)];
+    const runtime = createRoot(() =>
+      createMirrorRuntime({
+        session: sessionFromHost({ ...info, docs: [{ docId: HOME, name: null }] }),
+        engines,
+        bridge,
+        prefs: null,
+      }),
+    );
+    drainFor = runtime.drain;
+    expect(runtime.docs.docs().map((d) => d.docId)).toEqual([HOME]);
+
+    expect(await runtime.openDoc(OTHER)).toBe(OTHER);
+    expect(runtime.docs.docs().map((d) => d.docId)).toEqual([HOME, OTHER]);
+    const other = runtime.docs.appOf(OTHER)!;
+    expect(other.state.listOpen[LIST_INBOX]).toHaveLength(1);
+    // Window → host on the shared pump, and host → store on the pulse.
+    other.addItem(LIST_INBOX, "other-window");
+    await bridge.flushed();
+    expect(hostTexts(host.docs.get(OTHER)!)).toEqual(["other-first", "other-window"]);
+    let cliItem = "";
+    host.commit(OTHER, (d) => {
+      cliItem = d.addItem(LIST_INBOX, "other-cli");
+    });
+    expect(other.state.itemsById[cliItem]?.text).toBe("other-cli");
+    // Already open: nothing happens, and the host sees no new subscriber.
+    const subscribed = host.subscribers.get(OTHER)!.length;
+    expect(await runtime.openDoc(OTHER)).toBe(OTHER);
+    expect(host.subscribers.get(OTHER)!.length).toBe(subscribed);
+    // Hand-off covers the late doc too.
+    expect(engines).toHaveLength(2);
+  });
+
   test("notes typed on the idle timer reach the host on hand-off", async () => {
     const host = new FakeMirrorHost({
       [HOME]: hostDoc(1n, "home-first"),
@@ -267,6 +314,14 @@ describe("the WebKit host transport", () => {
     });
     await inbound.handOff();
     expect(handedOff).toBe(1);
+
+    // A doc the host added after boot (New Workspace…): dropped until
+    // the runtime listens, then delivered by id.
+    inbound.docAdded(OTHER);
+    const added: string[] = [];
+    appHost.onDocAdded((id) => added.push(id));
+    inbound.docAdded(OTHER);
+    expect(added).toEqual([OTHER]);
 
     appHost.transport.unsubscribe(HOME);
     await Promise.resolve();

@@ -275,6 +275,109 @@ async fn fresh_install_works_without_an_account() {
     );
 }
 
+/// `monoplan workspace create <name>` (`spec/cli.md` §Workspaces): the
+/// running daemon registers a doc with the server, seeds and names it,
+/// opens it on its live socket so the seed is pushed, and `-w <name>`
+/// selects it from the next command on. A second device that logs in
+/// afterwards receives the membership and the name. `-w` is refused,
+/// and so is a blank name.
+#[tokio::test]
+async fn workspace_create_opens_a_new_doc_on_the_running_daemon() {
+    let server = TestServer::start().await;
+    let signup = signup_account(&server, "bin-create").await;
+    let tmp = tempfile::tempdir().unwrap();
+    materialize_profile(
+        tmp.path(),
+        &server.base,
+        &signup.account_id,
+        &signup.primary_doc_id,
+        &signup.device_id,
+        &signup.device_token,
+        &signup.dek,
+        &signup.email,
+        true,
+    )
+    .await;
+    let dir = tmp.path();
+
+    // Start the daemon with an ordinary command, then create.
+    ok(monoplan(dir, &["item", "ls"]).await);
+    let out = ok(monoplan(dir, &["workspace", "create", "  Work "]).await);
+    assert!(out.starts_with("Created workspace Work ("), "{out}");
+    let work_id = out
+        .trim()
+        .trim_start_matches("Created workspace Work (")
+        .trim_end_matches(").")
+        .to_string();
+    let work_uuid = Uuid::parse_str(&work_id).expect("a doc id in the output");
+
+    // The daemon opened it without a restart: it is selectable by name
+    // and by id, and Home is untouched.
+    let work_item = ok(monoplan(dir, &["-w", "Work", "item", "add", "in work"]).await)
+        .trim()
+        .to_string();
+    let ls = ok(monoplan(dir, &["-w", &work_id, "item", "ls"]).await);
+    assert!(ls.contains(&work_item), "{ls}");
+    let ls = ok(monoplan(dir, &["item", "ls"]).await);
+    assert!(!ls.contains(&work_item), "{ls}");
+    let e = err(monoplan(dir, &["-w", "Play", "item", "ls"]).await);
+    assert!(e.contains("this install has: Personal, Work"), "{e}");
+
+    // The seed (name included) and the item reached the server's doc.
+    wait_for_updates(&server, work_uuid, 1).await;
+
+    // Refusals.
+    let e = err(monoplan(dir, &["-w", "Work", "workspace", "create", "Play"]).await);
+    assert!(e.contains("does not take --workspace"), "{e}");
+    let e = err(monoplan(dir, &["workspace", "create", "   "]).await);
+    assert!(e.contains("needs a name"), "{e}");
+
+    // A second device logging in afterwards gets the membership with
+    // its key, and reads the name out of the synced doc.
+    let login = login_device(&server.base, &signup.email, TEST_PASSWORD, "bin-create-b")
+        .await
+        .unwrap();
+    let work_dek = login
+        .doc_keys
+        .iter()
+        .find(|(id, _)| id.0 == work_uuid)
+        .map(|(_, dek)| dek.clone())
+        .expect("the created doc is a membership, unwrapped with the Home DEK");
+    let tmp_b = tempfile::tempdir().unwrap();
+    let profile_b = materialize_profile(
+        tmp_b.path(),
+        &server.base,
+        &login.account_id,
+        &login.primary_doc_id,
+        &login.device_id,
+        &login.device_token,
+        &login.dek,
+        &signup.email,
+        false,
+    )
+    .await;
+    let home_doc_id = monoplan_core::DocId(Uuid::parse_str(&signup.primary_doc_id).unwrap());
+    profile_b
+        .write_secrets(&Secrets::new(
+            Some(login.device_token.clone()),
+            [
+                (home_doc_id, &login.dek),
+                (monoplan_core::DocId(work_uuid), &work_dek),
+            ],
+        ))
+        .unwrap();
+    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
+    assert!(session_b.is_online());
+    let work_b = session_b
+        .doc_for(monoplan_core::DocId(work_uuid))
+        .expect("the second device opened the created doc");
+    assert_eq!(work_b.get_settings().doc_name.as_deref(), Some("Work"));
+    assert_eq!(work_b.get_item(&work_item).unwrap().text, "in work");
+    session_b.flush().await.unwrap();
+
+    ok(monoplan(dir, &["daemon", "stop"]).await);
+}
+
 /// `-w <workspace>` (`spec/cli.md` §Workspaces): a second doc the
 /// account owns is selected by name or id, an omitted `-w` stays on
 /// Home, the daemon pushes each doc's ops to the right server doc, and

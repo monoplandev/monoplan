@@ -10,8 +10,9 @@
 //     the browser pumps the WebSocket bridge);
 //   - no WebSocket, no DEK, no device row, no login: the session came
 //     from the host, and the DEK-touching flows (create / join / delete
-//     a doc, invites, password) are unavailable in the window on the
-//     first pass; the tray and the CLI keep them;
+//     a doc, invites, password) are unavailable to the page; the app's
+//     own menus and the CLI do them through the host, and a doc the
+//     host opens after boot arrives here through `openDoc`;
 //   - host updates arrive through the bridge's `onServerFrame`, which
 //     the app routes to `drain(docId)` here.
 //
@@ -57,18 +58,21 @@ export type MirrorBoot = {
 
 export function createMirrorRuntime(boot: MirrorBoot) {
   const docApps = new Map<string, DocApp>();
-  for (const engine of boot.engines) {
-    // Host updates that landed between the seed and now (while the
-    // other docs were opening) queued AppEvents on the doc; the store's
-    // initial materialisation already reflects them, so they must not
-    // be dispatched on top of it afterwards.
+  // A store over one seeded mirror engine. Host updates that landed
+  // between the seed and now (while the other docs were opening)
+  // queued AppEvents on the doc; the store's initial materialisation
+  // already reflects them, so they must not be dispatched on top of it
+  // afterwards.
+  const mount = (engine: SyncEngine): DocApp => {
     while (engine.popAppEvent()) {
       // discard
     }
     const app = createSyncedApp(engine);
     app.setOnFlush(() => boot.bridge.pumpOutbox());
     docApps.set(app.docId, app);
-  }
+    return app;
+  };
+  for (const engine of boot.engines) mount(engine);
   const app = docApps.get(boot.session.primaryDocId);
   if (!app) throw new Error("mirror boot has no Home doc");
   const docs: DocsLayer = createDocsLayer(app, [...docApps.values()]);
@@ -124,6 +128,19 @@ export function createMirrorRuntime(boot: MirrorBoot) {
     boot.bridge.stop();
   });
 
+  /** A doc the host opened after boot (the app's New Workspace…, which
+   *  creates it host-side): subscribe over the bridge, mount a store
+   *  and add it to the layer, the window's half of the browser
+   *  runtime's `openNewDoc`. A doc already open is left alone. Resolves
+   *  to the doc id once it is in `docs`. */
+  const openDoc = async (docId: string): Promise<string> => {
+    if (docApps.has(docId)) return docId;
+    const engine = await boot.bridge.open(docId);
+    boot.engines.push(engine);
+    docs.addDoc(mount(engine));
+    return docId;
+  };
+
   const unavailable =
     (what: string) =>
     async (): Promise<never> => {
@@ -142,6 +159,7 @@ export function createMirrorRuntime(boot: MirrorBoot) {
       dek: import("@monoplan/core/wasm").Dek,
     ) => Promise<string>,
     deleteDoc: unavailable("deleting a workspace") as (docId: string) => Promise<void>,
+    openDoc,
     /** Presence is a server fact the host has not relayed yet. */
     presence: (_docId: string): PresentAccount[] => [],
     /** Route the bridge's `onServerFrame` here: drain the named doc's

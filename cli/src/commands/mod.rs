@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::client::{self, Spawn};
 use crate::config::Profile;
+use crate::ipc::{Reply, Request};
 
 pub const MIN_PASSWORD_LEN: usize = 10;
 
@@ -115,6 +116,11 @@ enum AuthCmd {
 /// account.
 #[derive(Subcommand, Debug)]
 enum WorkspaceCmd {
+    /// Create a workspace you own, by name; it opens in the running host at once. Needs an account.
+    Create {
+        /// The workspace's name (`-w <name>` selects it afterwards).
+        name: String,
+    },
     /// Show the workspace's sync state: doc id, last sync, acked seq, pending changes (local; never connects).
     Status(status::StatusArgs),
     /// Share a workspace: invite links, members.
@@ -261,6 +267,21 @@ impl Cli {
             Cmd::Daemon(a) => {
                 no_workspace("daemon")?;
                 return crate::daemon::run(a).await;
+            }
+            Cmd::Workspace(WorkspaceCmd::Create { name }) => {
+                no_workspace("workspace create")?;
+                let profile = crate::bootstrap::open_or_init().await?;
+                return match client::call(&profile, Request::CreateWorkspace { name }, spawn)
+                    .await?
+                {
+                    Reply::WorkspaceCreated { doc_id, name, sync } => {
+                        println!("Created workspace {name} ({doc_id}).");
+                        offline_notice(sync);
+                        Ok(())
+                    }
+                    Reply::Err { message } => Err(anyhow::anyhow!(message)),
+                    other => anyhow::bail!("unexpected daemon reply: {other:?}"),
+                };
             }
             Cmd::Workspace(WorkspaceCmd::Share(a)) => return share::run(a, workspace).await,
             Cmd::Workspace(WorkspaceCmd::Status(a)) => {

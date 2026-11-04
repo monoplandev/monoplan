@@ -77,6 +77,8 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// The host's latest sync status: the dot on the account bubble
     /// and the line under the email in its menu.
     private var syncStatus: SyncStatus?
+    /// The New Workspace sheet while it is up (`promptNewWorkspace`).
+    private var newWorkspacePrompt: NewWorkspacePrompt?
     /// The dot on the account bubble's shoulder: amber while syncing,
     /// red while offline, hidden when synced so the quiet state is quiet.
     private var syncDot: NSView?
@@ -209,6 +211,40 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// Reload the page (the View menu).
     @objc func reload(_ sender: Any?) {
         webView?.reload()
+    }
+
+    /// The New Workspace sheet (Monoplan › New Workspace…): a name,
+    /// Create / Cancel. `create` is handed the trimmed name and a
+    /// completion; on success the page opens the new doc live
+    /// (`HostInbound.docAdded`) and goes to its Inbox, on failure the
+    /// sheet is followed by the error. One prompt at a time.
+    func promptNewWorkspace(create: @escaping (String, @escaping (Result<String, Error>) -> Void) -> Void) {
+        guard let window, newWorkspacePrompt == nil else { return }
+        let prompt = NewWorkspacePrompt()
+        newWorkspacePrompt = prompt
+        prompt.run(on: window) { [weak self] name in
+            guard let self else { return }
+            guard let name else {
+                self.newWorkspacePrompt = nil
+                return
+            }
+            create(name) { result in
+                DispatchQueue.main.async {
+                    self.newWorkspacePrompt = nil
+                    switch result {
+                    case .success(let docId):
+                        self.webView?.evaluateJavaScript(HostInbound.docAdded(docId: docId).script)
+                    case .failure(let error):
+                        guard let window = self.window else { return }
+                        let alert = NSAlert()
+                        alert.alertStyle = .warning
+                        alert.messageText = String(localized: "Could not create the workspace")
+                        alert.informativeText = error.localizedDescription
+                        alert.beginSheetModal(for: window)
+                    }
+                }
+            }
+        }
     }
 
     /// Edit › Undo / Redo: the page's, by menu click or by the key
@@ -801,6 +837,39 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
 
 /// A JavaScript string literal: JSON-encoded, so nothing in `s` can end
 /// the literal.
+/// The New Workspace sheet: a standard alert with a name field, Create
+/// enabled once the name has a non-blank character. Return in the field
+/// is Create (the alert's default button), Escape is Cancel.
+final class NewWorkspacePrompt: NSObject, NSTextFieldDelegate {
+    private let alert = NSAlert()
+    private let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+
+    override init() {
+        super.init()
+        alert.messageText = String(localized: "New Workspace")
+        alert.informativeText = String(localized: "Create a shareable workspace")
+        field.placeholderString = String(localized: "Name")
+        field.delegate = self
+        alert.accessoryView = field
+        alert.addButton(withTitle: String(localized: "Create"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        alert.buttons[0].isEnabled = false
+    }
+
+    /// `completion` gets the trimmed name, or nil on Cancel.
+    func run(on window: NSWindow, completion: @escaping (String?) -> Void) {
+        alert.window.initialFirstResponder = field
+        alert.beginSheetModal(for: window) { [field] response in
+            let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            completion(response == .alertFirstButtonReturn && !name.isEmpty ? name : nil)
+        }
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        alert.buttons[0].isEnabled = !field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
 private func jsString(_ s: String) -> String {
     let data = try! JSONSerialization.data(withJSONObject: [s], options: [])
     return String(String(decoding: data, as: UTF8.self).dropFirst().dropLast())

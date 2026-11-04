@@ -118,6 +118,9 @@ export interface HostInbound {
    *  the root drops the title-bar strips (styles.css), since there are
    *  no traffic lights to clear and nothing to drag. */
   fullScreen(active: boolean): void;
+  /** The host opened a doc after this page booted (the app's New
+   *  Workspace…): subscribe to it and show it. */
+  docAdded(docId: string): void;
 }
 
 export interface AppHost {
@@ -129,6 +132,9 @@ export interface AppHost {
   onSync(cb: (status: HostSyncStatus) => void): void;
   /** What `handOff()` runs; the runtime binds its own once it exists. */
   onHandOff(cb: () => Promise<void>): void;
+  /** A doc the host opened after boot (`docAdded`); the runtime opens
+   *  it over the bridge. */
+  onDocAdded(cb: (docId: string) => void): void;
 }
 
 /** The app host behind this page, or null outside the app: the
@@ -205,6 +211,7 @@ export function createAppHost(handler: HostMessageHandler, target: object): AppH
   let onSync: ((status: HostSyncStatus) => void) | null = null;
   let lastSync: HostSyncStatus | null = null;
   let onHandOff: (() => Promise<void>) | null = null;
+  let onDocAdded: ((docId: string) => void) | null = null;
   const inbound: HostInbound = {
     update(docId, bytes) {
       onUpdate?.(docId, decodeBytes(bytes));
@@ -234,6 +241,9 @@ export function createAppHost(handler: HostMessageHandler, target: object): AppH
     fullScreen(active) {
       if (active) document.documentElement.dataset.fullscreen = "";
       else delete document.documentElement.dataset.fullscreen;
+    },
+    docAdded(docId) {
+      onDocAdded?.(docId);
     },
   };
   (target as Record<string, unknown>)[HOST_GLOBAL] = inbound;
@@ -274,6 +284,9 @@ export function createAppHost(handler: HostMessageHandler, target: object): AppH
     },
     onHandOff(cb) {
       onHandOff = cb;
+    },
+    onDocAdded(cb) {
+      onDocAdded = cb;
     },
   };
 }

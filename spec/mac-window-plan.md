@@ -384,6 +384,19 @@ first, backed by the in-process `HostCmd::Session` /
   and pending links still list and revoke); the sign-in sheet's
   "Create an account…" still goes to the browser. Each wraps or
   unwraps a key the webview does not hold.
+- New workspace, natively (2026-11-05): Monoplan › New Workspace…
+  (⇧⌘N) runs a standard sheet on the window (`NewWorkspacePrompt`, an
+  alert with a name field), sends `Request.createWorkspace` to the
+  in-process host, which does what `monoplan workspace create` does
+  (`Session::create_doc`: DEK wrap under Home, `POST /api/docs`,
+  seed + name, open on the live socket, `cli.md` §Workspaces), and
+  then tells the page `HostInbound.docAdded(docId)`. The page opens
+  the doc over the bridge without a reload (`createMirrorRuntime
+  .openDoc`: one more `bridge.open`, a store, `docs.addDoc`) and goes
+  to its Inbox. The item is enabled while the host serves a signed-in
+  profile; a failure follows the sheet as an alert. The page's own
+  dialog stays hidden. Delete and invite creation are still only in
+  the browser and the CLI.
 
 ## Settings (plan, decided 2026-11-04, not built)
 

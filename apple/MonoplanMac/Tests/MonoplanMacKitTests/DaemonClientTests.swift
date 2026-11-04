@@ -46,6 +46,11 @@ final class DaemonClientTests: XCTestCase {
             .map(["Doc": .map(["cmd": .map(["Settings": .map(["show_list_counts": .bool(false)])])])])
         )
         XCTAssertEqual(try WorkspaceSettings.parse("{\n  \"show_list_counts\": false\n}\n"), WorkspaceSettings(showListCounts: false))
+        // The shape cli/src/ipc.rs `wire_shape_is_named_maps_and_bare_unit_variants` pins.
+        XCTAssertEqual(
+            Request.createWorkspace(name: "Work").value,
+            .map(["CreateWorkspace": .map(["name": .string("Work")])])
+        )
     }
 
     func testReplyParsing() throws {
@@ -55,6 +60,10 @@ final class DaemonClientTests: XCTestCase {
             .hello(buildId: "b", pid: 4, sync: SyncStatus(online: true, lastSyncedAt: 99))
         )
         XCTAssertEqual(try Reply.parse(.map(["Event": .string("Changed")])), .event(.changed))
+        XCTAssertEqual(
+            try Reply.parse(.map(["WorkspaceCreated": .map(["doc_id": .string("d"), "name": .string("Work"), "sync": sync])])),
+            .workspaceCreated(docId: "d", name: "Work", sync: SyncStatus(online: true, lastSyncedAt: 99))
+        )
         XCTAssertEqual(
             try Reply.parse(.map(["Event": .map(["Sync": sync])])),
             .event(.sync(SyncStatus(online: true, lastSyncedAt: 99)))

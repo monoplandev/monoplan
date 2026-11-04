@@ -50,6 +50,15 @@ pub enum Request {
     /// here rather than from the profile files so a client that holds
     /// no db (the menubar app) still gets the email.
     Account,
+    /// Create a workspace the account owns and open it now
+    /// (`spec/sharing-plan.md` Phase 5; `Session::create_doc`): a fresh
+    /// DEK wrapped under the Home DEK is registered with `POST
+    /// /api/docs`, stored in `secrets.toml`, and the doc is seeded with
+    /// its name and opened on the live socket. The reply is
+    /// `WorkspaceCreated`. Refused on a local-only profile, which has
+    /// no server to own the doc. `monoplan workspace create` and the
+    /// app's New Workspace… send it.
+    CreateWorkspace { name: String },
     /// Turn this connection into a watcher: the reply is `Watching`,
     /// and from then on the daemon also sends `Event` frames on it
     /// whenever the doc or the sync state changes. Ordinary requests
@@ -85,6 +94,12 @@ pub enum Reply {
         account_id: String,
         email: String,
         device_id: String,
+    },
+    /// `CreateWorkspace` done: the doc is open and its seed on its way.
+    WorkspaceCreated {
+        doc_id: String,
+        name: String,
+        sync: SyncStatus,
     },
     /// `Watch` accepted; events follow on this connection.
     Watching {
@@ -348,6 +363,26 @@ mod tests {
                 device_id: "d".into(),
             }),
             serde_json::json!({"Account": {"account_id": "a", "email": "e", "device_id": "d"}})
+        );
+        assert_eq!(
+            shape(&Request::CreateWorkspace {
+                name: "Work".into()
+            }),
+            serde_json::json!({"CreateWorkspace": {"name": "Work"}})
+        );
+        assert_eq!(
+            shape(&Reply::WorkspaceCreated {
+                doc_id: "d".into(),
+                name: "Work".into(),
+                sync: SyncStatus {
+                    online: true,
+                    last_synced_at: None,
+                    offline_reason: None,
+                    local_only: false,
+                    pending: true,
+                },
+            }),
+            serde_json::json!({"WorkspaceCreated": {"doc_id": "d", "name": "Work", "sync": {"online": true, "last_synced_at": null, "pending": true}}})
         );
         assert_eq!(
             rmp_serde::to_vec_named(&Request::Hello {

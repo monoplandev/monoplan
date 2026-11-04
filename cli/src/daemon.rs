@@ -1356,6 +1356,42 @@ impl Host {
                     message: format!("read account: {e}"),
                 },
             },
+            Request::CreateWorkspace { name } => {
+                if self.local_only {
+                    Reply::Err {
+                        message: "no account: sign in to create a workspace".into(),
+                    }
+                } else {
+                    match self.session.create_doc(&name).await {
+                        Ok(doc_id) => {
+                            // On a live socket the doc opens now, so the
+                            // seed goes out with the usual OpenDoc →
+                            // push sequence; otherwise the next connect
+                            // opens it with the rest. Durable before
+                            // the client hears back, like a doc command.
+                            if self.ws.is_some() {
+                                self.session.connect_doc(doc_id);
+                            }
+                            self.session.persist_engine_state().await?;
+                            self.session.flush_engines();
+                            self.pump().await;
+                            self.notify_if_changed();
+                            // Watchers list workspaces from the host
+                            // (Settings, `-w` completion): a new one is
+                            // a change even though no item moved.
+                            let _ = self.watchers.send(WatchEvent::Changed);
+                            Reply::WorkspaceCreated {
+                                doc_id: doc_id.0.to_string(),
+                                name: name.trim().to_string(),
+                                sync: self.sync_status(),
+                            }
+                        }
+                        Err(e) => Reply::Err {
+                            message: format!("create workspace: {e}"),
+                        },
+                    }
+                }
+            }
             // Honoured by every host, the app's included: the app
             // re-hosts once the profile is free again (`monoplan-ffi`).
             Request::Shutdown => {

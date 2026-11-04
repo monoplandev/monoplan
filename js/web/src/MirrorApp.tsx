@@ -151,6 +151,14 @@ function MirrorMain(props: {
   // The app calls `handOff` before closing the window or quitting, then
   // waits for the imports it caused before it drops the subscriptions.
   props.host.onHandOff(runtime.handOff);
+  // The app's New Workspace… created a doc on the host: open it here
+  // and go to its Inbox, as the browser's dialog does on create.
+  props.host.onDocAdded((docId) => {
+    runtime
+      .openDoc(docId)
+      .then((id) => runtime.setView(runtime.docs.listView(id, "inbox")))
+      .catch((e: unknown) => console.error("mirror: the new doc did not open:", e));
+  });
   return (
     <Workspace
       docs={runtime.docs}

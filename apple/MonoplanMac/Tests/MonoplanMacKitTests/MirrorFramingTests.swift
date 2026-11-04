@@ -74,6 +74,7 @@ final class MirrorFramingTests: XCTestCase {
         XCTAssertEqual(HostInbound.find.script, "window.__monoplanHost.find()")
         XCTAssertEqual(HostInbound.fullScreen(true).script, "window.__monoplanHost.fullScreen(true)")
         XCTAssertEqual(HostInbound.fullScreen(false).script, "window.__monoplanHost.fullScreen(false)")
+        XCTAssertEqual(HostInbound.docAdded(docId: "d\"x").script, "window.__monoplanHost.docAdded(\"d\\\"x\")")
     }
 
     func testSchemeRoutes() {

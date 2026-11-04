@@ -11,11 +11,17 @@
 // the menu and ⌘Z do the same thing and the window has one undo
 // surface; the page's sidebar menu hides its own rows there. The
 // items are enabled from the page's `undoState`.
+//
+// New Workspace… is the one doc-level command here: the page's own
+// item is hidden in the window (creating a doc wraps a key the webview
+// does not hold, spec/mac-window-plan.md), so the app asks for the name
+// natively and the host does the work. It sits in the app menu, where
+// the user asked for it; there is no File menu to put it under.
 
 import AppKit
 
 enum MainMenu {
-    static func build(settings: Selector, reload: Selector, undo: Selector, redo: Selector,
+    static func build(newWorkspace: Selector, settings: Selector, reload: Selector, undo: Selector, redo: Selector,
                       zoomIn: Selector, zoomOut: Selector, actualSize: Selector, target: AnyObject) -> NSMenu {
         let main = NSMenu()
 
@@ -23,6 +29,10 @@ enum MainMenu {
         app.addItem(withTitle: String(localized: "About Monoplan"),
                     action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         app.addItem(.separator())
+        // ⇧⌘N, Finder's new-folder chord; the page binds nothing on it.
+        let newWorkspaceItem = app.addItem(withTitle: String(localized: "New Workspace…"), action: newWorkspace, keyEquivalent: "n")
+        newWorkspaceItem.keyEquivalentModifierMask = [.command, .shift]
+        newWorkspaceItem.target = target
         let settingsItem = app.addItem(withTitle: String(localized: "Settings…"), action: settings, keyEquivalent: ",")
         settingsItem.target = target
         app.addItem(.separator())

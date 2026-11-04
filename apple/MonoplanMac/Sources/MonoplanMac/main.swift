@@ -422,11 +422,36 @@ final class TrayController: NSObject, NSMenuDelegate {
     @objc func zoomOutWindow(_ sender: Any?) { webWindow.zoomOut(sender) }
     @objc func actualSizeInWindow(_ sender: Any?) { webWindow.actualSize(sender) }
 
+    /// Monoplan › New Workspace…: the name is asked for natively on the
+    /// window (the page's own dialog is hidden there, `Session.mirror`),
+    /// the host creates and opens the doc (`Request.createWorkspace`),
+    /// and the page is told to show it. Needs a running host, which
+    /// `validateMenuItem` checks.
+    @objc func newWorkspace(_ sender: Any?) {
+        webWindow.show()
+        webWindow.promptNewWorkspace { [weak self] name, done in
+            guard let self else { return }
+            self.client.send(.createWorkspace(name: name)) { result in
+                switch result {
+                case .success(.workspaceCreated(let docId, _, _)):
+                    done(.success(docId))
+                case .success(let other):
+                    done(.failure(ClientError.protocolError("unexpected reply: \(String(describing: other))")))
+                case .failure(let error):
+                    done(.failure(error))
+                }
+            }
+        }
+    }
+
     /// Edit › Undo / Redo follow the page's `undoState`, the zoom items
-    /// the ends of the ladder; every other item of ours is always
-    /// available.
+    /// the ends of the ladder, New Workspace… a host that is serving a
+    /// signed-in profile; every other item of ours is always available.
     @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
+        case #selector(newWorkspace(_:)):
+            guard location.isSignedIn, case .connected = client.state else { return false }
+            return true
         case #selector(undoInWindow(_:)): return webWindow.canUndo
         case #selector(redoInWindow(_:)): return webWindow.canRedo
         case #selector(zoomInWindow(_:)): return webWindow.canZoomIn
@@ -498,6 +523,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let tray = TrayController()
         self.tray = tray
         NSApp.mainMenu = MainMenu.build(
+            newWorkspace: #selector(TrayController.newWorkspace(_:)),
             settings: #selector(TrayController.openSettings),
             reload: #selector(TrayController.reloadWindow(_:)),
             undo: #selector(TrayController.undoInWindow(_:)),

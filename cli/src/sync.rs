@@ -18,18 +18,23 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use http::header::AUTHORIZATION;
 use monoplan_core::{
-    Doc, DocId, EngineOptions, Event, SyncEngine, hello_frame, parse_hello_response,
+    Dek, Doc, DocId, EngineOptions, Event, SyncEngine, hello_frame, parse_hello_response,
 };
+use monoplan_protocol::{CreateDocRequest, CreateDocResponse};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-use crate::config::{ConfigError, Profile};
+use crate::config::{ConfigError, DocSecrets, Profile};
 use crate::keystore::{KeystoreError, dek_for_doc};
 use crate::storage::SqliteStorage;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+/// `create_doc`'s HTTP round trip. It runs inline on a host's loop,
+/// which serves nothing else meanwhile, so an unreachable server has
+/// to fail rather than hang the host.
+const CREATE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// WAL fold thresholds (spec/vv-wal-separation.md). Evaluated after
 /// every command's WAL append and once at boot (so an interrupted
@@ -110,7 +115,7 @@ pub struct Session {
     /// lifetime so no concurrent invocation can commit under the same
     /// peer (see `crate::peer`). Every doc commits under it: the rule
     /// is one live instance per (doc, peer), and each doc has one.
-    _peer: crate::peer::PeerLease,
+    peer: crate::peer::PeerLease,
 }
 
 impl Session {
@@ -183,7 +188,7 @@ impl Session {
             docs,
             store,
             ws: None,
-            _peer: peer,
+            peer,
         };
 
         if !sync || session.is_local_only() {
@@ -501,6 +506,84 @@ impl Session {
     /// Home's last sync stamp: what the status replies carry.
     pub(crate) fn last_synced_at(&self) -> Option<i64> {
         self.home().last_synced_at
+    }
+
+    /// Create a doc this account owns and open it in this session
+    /// (`spec/sharing-plan.md` Phase 5; the web runtime's `createDoc`):
+    /// a fresh DEK wrapped under the Home DEK is registered with the
+    /// server (`POST /api/docs`) and stored in `secrets.toml`, then the
+    /// doc is seeded like any new workspace (the built-ins, `Doc::new`),
+    /// named, written as its baseline snapshot and booted into an
+    /// engine of its own under the session's peer. The engine starts
+    /// Disconnected with an empty `server_known_vv`, so its first open
+    /// pushes the seed: a host with a socket up calls
+    /// [`connect_doc`](Self::connect_doc) next, otherwise the next
+    /// connect opens it with the rest. Refused on a local-only profile,
+    /// which has no server to own the doc.
+    pub async fn create_doc(&mut self, name: &str) -> Result<DocId, SyncError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(SyncError::Engine("a workspace needs a name".into()));
+        }
+        let Some(server_url) = self.server_url.as_deref() else {
+            return Err(SyncError::LocalOnly);
+        };
+        let mut secrets = self.profile.read_secrets()?;
+        let token = secrets.device_token()?.to_string();
+        let home = dek_for_doc(&secrets, self.primary)?;
+        let dek = Dek::generate();
+        let wrapped = home
+            .wrap_dek(&dek)
+            .map_err(|e| SyncError::Engine(format!("wrap the workspace key: {e}")))?;
+        let created: CreateDocResponse = tokio::time::timeout(
+            CREATE_TIMEOUT,
+            crate::net::Client::new(server_url).post_authed(
+                "/api/docs",
+                &token,
+                &CreateDocRequest {
+                    wrapped_dek: wrapped.ciphertext,
+                    wrapped_dek_nonce: wrapped.nonce.to_vec(),
+                },
+            ),
+        )
+        .await
+        .map_err(|_| SyncError::Ws("the server did not answer in time".into()))?
+        .map_err(|e| SyncError::Ws(e.to_string()))?;
+        let doc_id = DocId(
+            uuid::Uuid::parse_str(&created.doc_id)
+                .map_err(|e| SyncError::Engine(format!("server returned a bad doc id: {e}")))?,
+        );
+        // The key first: a crash between here and the boot leaves a
+        // membership this install can open on its next start (empty
+        // locally, filled from the server), never a doc it cannot.
+        secrets.docs.insert(
+            created.doc_id.clone(),
+            DocSecrets {
+                dek_hex: hex::encode(dek.as_bytes()),
+            },
+        );
+        self.profile.write_secrets(&secrets)?;
+
+        let peer_id = self.peer.peer_id;
+        let doc = Doc::new_with_peer(peer_id)?;
+        doc.set_doc_name(Some(name))?;
+        crate::storage::seed_snapshot(&self.store, &dek, doc_id, &doc)?;
+        let account = self.store.read_account()?;
+        let author = account.identity.as_ref().map(|i| i.account_id.as_str());
+        let state = boot_doc_state(&self.store, &secrets, doc_id, peer_id, author)?;
+        self.docs.insert(doc_id, state);
+        Ok(doc_id)
+    }
+
+    /// Open one doc on a socket that is already up and past its version
+    /// handshake: the per-doc half of
+    /// [`handle_connected`](Self::handle_connected), for a doc that
+    /// joined the session after it (`create_doc`). Nothing for a doc
+    /// this session does not hold.
+    pub(crate) fn connect_doc(&mut self, doc_id: DocId) {
+        if let Some(d) = self.docs.get_mut(&doc_id) {
+            d.engine.handle_connected();
+        }
     }
 
     /// The server will not serve `doc_id` to this account any more

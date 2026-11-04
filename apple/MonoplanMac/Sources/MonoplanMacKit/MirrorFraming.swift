@@ -158,6 +158,9 @@ public enum HostInbound: Equatable {
     /// The window entered or left full screen: the page drops the
     /// title-bar padding there (no traffic lights, no drag).
     case fullScreen(Bool)
+    /// The host opened a doc after the page booted (New Workspace…):
+    /// the page subscribes to it and shows its Inbox.
+    case docAdded(docId: String)
 
     public static let global = "window.__monoplanHost"
 
@@ -182,6 +185,8 @@ public enum HostInbound: Equatable {
             return "\(Self.global).find()"
         case .fullScreen(let active):
             return "\(Self.global).fullScreen(\(active ? "true" : "false"))"
+        case .docAdded(let docId):
+            return "\(Self.global).docAdded(\(json(docId)))"
         }
     }
 
