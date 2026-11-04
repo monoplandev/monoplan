@@ -50,6 +50,12 @@ enum MainMenu {
         let view = NSMenu(title: String(localized: "View"))
         let reloadItem = view.addItem(withTitle: String(localized: "Reload"), action: reload, keyEquivalent: "r")
         reloadItem.target = target
+        view.addItem(.separator())
+        // AppKit retitles this to "Exit Full Screen" while the window is in
+        // full screen. ⌃⌘F is the system binding; fn-F keeps working too.
+        let fullScreen = view.addItem(withTitle: String(localized: "Enter Full Screen"),
+                                      action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+        fullScreen.keyEquivalentModifierMask = [.control, .command]
         main.addItem(submenu(view, title: view.title))
 
         let window = NSMenu(title: String(localized: "Window"))

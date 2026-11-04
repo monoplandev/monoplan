@@ -241,6 +241,16 @@
         }
       }
     },
+    "Enter Full Screen": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usar pantalla completa"
+          }
+        }
+      }
+    },
     "Find": {
       "localizations": {
         "es": {

@@ -285,6 +285,30 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         return false
     }
 
+    // MARK: Full screen
+
+    /// The empty toolbar (the taller title bar) would otherwise stay
+    /// pinned across the top of the screen as a blank strip: hide it
+    /// with the menu bar, so both slide down together on a hover at the
+    /// top edge.
+    func window(_ window: NSWindow, willUseFullScreenPresentationOptions proposedOptions: NSApplication.PresentationOptions)
+        -> NSApplication.PresentationOptions {
+        proposedOptions.union(.autoHideToolbar)
+    }
+
+    /// In full screen the revealed title bar has no traffic lights or
+    /// page under it to speak for the window, so show the title there;
+    /// the page gives up its title-bar padding meanwhile.
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        window?.titleVisibility = .visible
+        bridge.pushFullScreen(true, into: webView)
+    }
+
+    func windowWillExitFullScreen(_ notification: Notification) {
+        window?.titleVisibility = .hidden
+        bridge.pushFullScreen(false, into: webView)
+    }
+
     func windowWillClose(_ notification: Notification) {
         handedOff = false
         tearDown()
@@ -536,6 +560,8 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// mid-page fails cleanly instead of crossing hosts.
     private var pageHost: MonoplanCore.Host?
     private var lastSync: SyncStatus?
+    /// Whether the window is in full screen, replayed to a new page.
+    private var fullScreen = false
     /// What `/api` is forwarded with: the server from the session, the
     /// token from the host. Read on the scheme handler's thread.
     private let credentialLock = NSLock()
@@ -572,6 +598,12 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
 
     func pageLoaded(into webView: WKWebView) {
         if let lastSync { push(lastSync, into: webView) }
+        if fullScreen { webView.evaluateJavaScript(HostInbound.fullScreen(true).script) }
+    }
+
+    func pushFullScreen(_ active: Bool, into webView: WKWebView?) {
+        fullScreen = active
+        webView?.evaluateJavaScript(HostInbound.fullScreen(active).script)
     }
 
     func pushSync(_ status: SyncStatus, into webView: WKWebView?) {

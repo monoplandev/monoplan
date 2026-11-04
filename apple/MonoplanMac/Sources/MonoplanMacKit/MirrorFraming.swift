@@ -155,6 +155,9 @@ public enum HostInbound: Equatable {
     case redo
     /// The window's search bubble: open the page's Find palette.
     case find
+    /// The window entered or left full screen: the page drops the
+    /// title-bar padding there (no traffic lights, no drag).
+    case fullScreen(Bool)
 
     public static let global = "window.__monoplanHost"
 
@@ -177,6 +180,8 @@ public enum HostInbound: Equatable {
             return "\(Self.global).redo()"
         case .find:
             return "\(Self.global).find()"
+        case .fullScreen(let active):
+            return "\(Self.global).fullScreen(\(active ? "true" : "false"))"
         }
     }
 

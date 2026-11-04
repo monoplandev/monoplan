@@ -111,6 +111,10 @@ export interface HostInbound {
   undo(): void;
   redo(): void;
   find(): void;
+  /** The window entered or left full screen: `[data-fullscreen]` on
+   *  the root drops the title-bar strips (styles.css), since there are
+   *  no traffic lights to clear and nothing to drag. */
+  fullScreen(active: boolean): void;
 }
 
 export interface AppHost {
@@ -223,6 +227,10 @@ export function createAppHost(handler: HostMessageHandler, target: object): AppH
     },
     find() {
       openFindHandler?.();
+    },
+    fullScreen(active) {
+      if (active) document.documentElement.dataset.fullscreen = "";
+      else delete document.documentElement.dataset.fullscreen;
     },
   };
   (target as Record<string, unknown>)[HOST_GLOBAL] = inbound;

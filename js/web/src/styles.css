@@ -193,6 +193,23 @@ body {
   padding-top: 24px;
 }
 
+/* In full screen (`window.__monoplanHost.fullScreen`) the title bar
+   hides with the menu bar and the traffic lights are gone, so the
+   strips fall back to the plain layout: the nav's usual top padding,
+   no drag strip, no nudge. */
+[data-shell="mac"][data-fullscreen] .nav-titlebar {
+  height: 12px;
+}
+
+[data-shell="mac"][data-fullscreen] .app-titlebar {
+  display: none;
+}
+
+[data-shell="mac"][data-fullscreen] .content,
+[data-shell="mac"][data-fullscreen] .side-panel {
+  padding-top: 0;
+}
+
 /* Sidebar-scoped footer: app menu at the left, account/sync widget
    beside it. Left padding lines the menu up with the nav's scroll-region
    gutter. */
