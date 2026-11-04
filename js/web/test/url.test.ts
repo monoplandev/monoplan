@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+  agendaItemHash,
   appBase,
   itemHash,
+  namesItem,
   itemUrl,
   listUrl,
   parseHash,
@@ -27,6 +29,9 @@ describe("hash routes", () => {
     expect(parseHash("#bin")).toEqual({ kind: "view", view: { kind: "bin" } });
     expect(parseHash(`#list_${ID}`)).toEqual({ kind: "view", view: { kind: "list", id: ID } });
     expect(parseHash(`#item_${ID}`)).toEqual({ kind: "item", id: ID });
+    // The calendar anchored on an item: the same item, opened over the agenda.
+    expect(parseHash(`#upcoming_${ID}`)).toEqual({ kind: "item", id: ID, on: "upcoming" });
+    expect(parseHash(agendaItemHash(ID))).toEqual({ kind: "item", id: ID, on: "upcoming" });
     expect(parseHash("#menu")).toEqual({ kind: "menu" });
     // Leading `#` is optional.
     expect(parseHash(`item_${ID}`)).toEqual({ kind: "item", id: ID });
@@ -43,6 +48,10 @@ describe("hash routes", () => {
     expect(parseHash(`#item_${ID}:${OTHER}`)).toBeNull();
     expect(parseHash("#list_")).toBeNull();
     expect(parseHash("#list_main")).toBeNull();
+    expect(parseHash("#upcoming_")).toBeNull();
+    // The day anchor is reserved, not parsed (spec/calendar-plan.md).
+    expect(parseHash("#upcoming_2026-07-13")).toBeNull();
+    expect(parseHash(`#upcoming_${ID}x`)).toBeNull();
     expect(parseHash("#inbox_")).toBeNull();
     expect(parseHash("#inbox_not-a-doc")).toBeNull();
   });
@@ -75,6 +84,14 @@ describe("hash routes", () => {
   test("open item wins over the view", () => {
     expect(stateHash({ kind: "focus" }, null)).toBe("#focus");
     expect(stateHash({ kind: "focus" }, ID)).toBe(`#item_${ID}`);
+  });
+
+  test("the agenda form names the same item as the canonical one", () => {
+    expect(namesItem(`#item_${ID}`, ID)).toBe(true);
+    expect(namesItem(`#upcoming_${ID}`, ID)).toBe(true);
+    expect(namesItem(`#upcoming_${OTHER}`, ID)).toBe(false);
+    expect(namesItem("#upcoming", ID)).toBe(false);
+    expect(namesItem("", ID)).toBe(false);
   });
 
   test("the menu page wins over both", () => {

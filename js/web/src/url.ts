@@ -5,10 +5,15 @@
 // server route is needed. The grammar is a single self-describing
 // token, safe to paste into a shell or a chat:
 //
-//   "#item_" id | "#list_" id | "#inbox" | "#inbox_" doc | "#focus"
-//   | "#upcoming" | "#done" | "#bin" | "#menu"
+//   "#item_" id | "#upcoming_" id | "#list_" id | "#inbox" | "#inbox_" doc
+//   | "#focus" | "#upcoming" | "#done" | "#bin" | "#menu"
 //   id  = [0-9a-f]{32}
 //   doc = [0-9a-f-]{32,36}      -- a server doc id (uuid, hyphenated)
+//
+// `#upcoming_<id>` is the calendar anchored on an item: the same item
+// as `#item_<id>`, opened over the agenda instead of its home list, for
+// a jump from an agenda-shaped surface (the macOS tray's Today rows).
+// The address bar canonicalises it to `#item_<id>` once applied.
 //
 // One more token is not a route: "#invite_" secret (secret = [0-9a-f]{64})
 // is a sharing link (`spec/sharing-plan.md` §Invites). `parseHash` does
@@ -31,7 +36,9 @@ import type { ViewKey } from "./prefs.ts";
 
 export type Route =
   | { kind: "view"; view: ViewKey }
-  | { kind: "item"; id: string }
+  /** `on` names the view to open the item over instead of its home:
+   *  the agenda, for `#upcoming_<id>`. Absent for a plain item link. */
+  | { kind: "item"; id: string; on?: "upcoming" }
   | { kind: "menu" };
 
 /** The menu page's hash (mobile shell only). */
@@ -65,6 +72,12 @@ export function parseHash(hash: string): Route | null {
   if (token.startsWith("item_")) {
     const id = token.slice("item_".length);
     return ID_RE.test(id) ? { kind: "item", id } : null;
+  }
+  // The agenda anchored on an item. A day anchor (`upcoming_2026-07-13`,
+  // reserved in `spec/calendar-plan.md`) is not an id and stays ignored.
+  if (token.startsWith("upcoming_")) {
+    const id = token.slice("upcoming_".length);
+    return ID_RE.test(id) ? { kind: "item", id, on: "upcoming" } : null;
   }
   if (token.startsWith("list_")) {
     const id = token.slice("list_".length);
@@ -111,6 +124,19 @@ export function viewHash(view: ViewKey): string {
 /** Canonical hash for an item. */
 export function itemHash(id: string): string {
   return `#item_${id}`;
+}
+
+/** Hash for an item opened over the calendar rather than its home list
+ *  (`#upcoming_<id>`). What the macOS tray's Today rows send. */
+export function agendaItemHash(id: string): string {
+  return `#upcoming_${id}`;
+}
+
+/** True when `hash` names `id` in either item form, so the address bar
+ *  mirror can tell a context form of the open item from a stale hash. */
+export function namesItem(hash: string, id: string): boolean {
+  const r = parseHash(hash);
+  return r?.kind === "item" && r.id === id;
 }
 
 /** The hash the address bar should show for a given workspace state: the

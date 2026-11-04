@@ -10,8 +10,8 @@ The whole address lives in the URL fragment. One self-describing token:
 
 ```
 url    = <origin> <path> "#" token
-token  = "item_" id | "list_" id | "inbox" | "inbox_" doc | "focus"
-       | "upcoming" | "done" | "bin" | "menu"
+token  = "item_" id | "upcoming_" id | "list_" id | "inbox" | "inbox_" doc
+       | "focus" | "upcoming" | "done" | "bin" | "menu"
 id     = [0-9a-f]{32}          -- uuid-v7 hex, same as ItemId / ListMeta.id
 doc    = [0-9a-f-]{32,36}      -- a server doc id (uuid, hyphenated)
 ```
@@ -33,9 +33,12 @@ routing and the address bar is rewritten to the view on screen.
 `parseHash` does not recognise it; `parseInviteHash` does.
 
 `#list_inbox` is accepted as an alias and canonicalised to `#inbox`.
-Reserved, not yet parsed (`calendar-plan.md`): `calendar` for a month-grid
-lens, and an underscore day anchor on the agenda and grid
-(`upcoming_2026-07-13`, `calendar_2026-07`).
+`#upcoming_<id>` is the calendar anchored on an item: the same item as
+`#item_<id>`, opened over the agenda instead of its home view (see
+§Resolution). Reserved, not yet parsed (`calendar-plan.md`): `calendar`
+for a month-grid lens, and an underscore day anchor on the agenda and
+grid (`upcoming_2026-07-13`, `calendar_2026-07`); a day is not an id,
+so the two agenda anchors never collide.
 The reserved `events` list (`events-plan.md`) has no token of its own:
 `#list_events` is accepted as an alias and canonicalised to `#upcoming`,
 its home.
@@ -89,6 +92,16 @@ Opening `#item_<id>`:
    opened on a device that hasn't synced the item yet. Nothing is
    shown for a pending id; a permanently deleted item simply lands
    the user on their restored view.
+
+Opening `#upcoming_<id>` resolves the id the same way (including the
+pending retry) but lands on the calendar whatever the item's home: a
+task with a `when` or `deadline` from any list, a ticked task still on
+today's agenda, an event. Only a binned item still goes to the Bin,
+since the agenda never shows one. This is the token an agenda-shaped
+surface jumps with: the macOS tray's Today rows send it, its Starred
+rows send `#item_<id>`. Once applied, the address bar is rewritten to
+the canonical `#item_<id>` in place (no extra history entry), so a
+copied address is always the plain item link.
 
 Opening `#list_<id>` for an unknown list is ignored.
 

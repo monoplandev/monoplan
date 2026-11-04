@@ -264,14 +264,16 @@ final class TrayController: NSObject, NSMenuDelegate {
             } else if lines.isEmpty {
                 addDisabled(String(localized: "Nothing today"))
             } else {
-                for line in lines { menu.addItem(rowItem(line, noteTab: noteTab)) }
+                // Today rows jump to the item on the calendar, whatever
+                // list it lives in: `#upcoming_<id>` (spec/urls.md).
+                for line in lines { menu.addItem(rowItem(line, fragment: "upcoming_\(line.id)", noteTab: noteTab)) }
             }
             menu.addItem(.separator())
             addDisabled(String(localized: "Starred"))
             if starred.isEmpty {
                 addDisabled(String(localized: "Nothing starred"))
             } else {
-                for line in starred { menu.addItem(rowItem(line, noteTab: noteTab)) }
+                for line in starred { menu.addItem(rowItem(line, fragment: "item_\(line.id)", noteTab: noteTab)) }
             }
         }
 
@@ -333,10 +335,11 @@ final class TrayController: NSObject, NSMenuDelegate {
         return ceil((titles.max() ?? 0) + noteGap + (notes.max() ?? 0))
     }
 
-    private func rowItem(_ line: MenuLine, noteTab: CGFloat) -> NSMenuItem {
+    /// `fragment` is the `spec/urls.md` token the row opens the window on.
+    private func rowItem(_ line: MenuLine, fragment: String, noteTab: CGFloat) -> NSMenuItem {
         let item = NSMenuItem(title: "", action: #selector(openItem(_:)), keyEquivalent: "")
         item.target = self
-        item.representedObject = line.id
+        item.representedObject = fragment
         var titleAttributes: [NSAttributedString.Key: Any] = [.font: Self.titleFont]
         if line.done { titleAttributes[.foregroundColor] = NSColor.secondaryLabelColor }
         let title = NSMutableAttributedString(string: Self.displayTitle(line), attributes: titleAttributes)
@@ -503,11 +506,13 @@ final class TrayController: NSObject, NSMenuDelegate {
         return w
     }
 
-    /// Item links are `#item_<id>` (spec/urls.md "Item URLs name only
-    /// the item"), opened in the window.
+    /// A row of the menu: the window on the row's fragment. Today rows
+    /// carry `upcoming_<id>` (the item over the calendar, whatever its
+    /// list), Starred rows `item_<id>` (the item in its home view),
+    /// both per spec/urls.md.
     @objc private func openItem(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String else { return }
-        webWindow.show(fragment: "item_\(id)")
+        guard let fragment = sender.representedObject as? String else { return }
+        webWindow.show(fragment: fragment)
     }
 
     /// Quitting ends the host too (`applicationShouldTerminate`), which

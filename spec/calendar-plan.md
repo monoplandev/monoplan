@@ -402,7 +402,10 @@ reserved so later phases add without renaming:
 - A day anchor with an underscore, `upcoming_2026-07-13` and
   `calendar_2026-07`.
 
-Amend `spec/urls.md` with the reservation only.
+Amend `spec/urls.md` with the reservation only. (Built 2026-11-05: an
+*item* anchor in the same shape, `upcoming_<id>`, opens the item over
+the agenda whatever its list, for the macOS tray's Today rows. A day is
+not an id, so the day anchor stays free.)
 
 ## CLI
 

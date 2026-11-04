@@ -107,7 +107,7 @@ import {
   type WorkflowState,
 } from "./sync/store.ts";
 import { createTheme, type ThemePreference } from "./theme.ts";
-import { parseHash, stateHash, type Route } from "./url.ts";
+import { namesItem, parseHash, stateHash, type Route } from "./url.ts";
 import {
   encodeView,
   LIST_VIEW,
@@ -316,7 +316,9 @@ export function Workspace(props: {
   // gone). Retried on every store change until it resolves or the user
   // navigates elsewhere (`spec/urls.md`). Declared here so opens can drop
   // it.
-  const [pendingItemId, setPendingItemId] = createSignal<string | null>(null);
+  // An item link whose item no open doc has yet (`spec/urls.md`), kept
+  // with its context so the agenda form still lands on the agenda.
+  const [pendingItem, setPendingItem] = createSignal<{ id: string; on?: "upcoming" } | null>(null);
   // Identity for a view, for equality checks (`ViewKey` objects are
   // recreated freely).
   const viewKey = (v: ViewKey) =>
@@ -328,7 +330,7 @@ export function Workspace(props: {
   let openedViewKey: string | null = null;
   const setOpenItemId = (id: string | null) =>
     batch(() => {
-      setPendingItemId(null);
+      setPendingItem(null);
       openedViewKey = id === null ? null : viewKey(untrack(view));
       setOpenItemIdRaw(id);
     });
@@ -590,7 +592,7 @@ export function Workspace(props: {
         setExpandedKey(null);
         if (untrack(newItemTarget)?.draft) setNewItemTarget(null);
         // Moving on abandons an unresolved item link.
-        setPendingItemId(null);
+        setPendingItem(null);
         // Navigating away closes the entered item, so the address bar
         // drops to the new view's token and the side pane re-follows
         // that view's selection instead of holding a row from the
@@ -2361,12 +2363,16 @@ export function Workspace(props: {
           : docs.listView(it.docId, homeListId(it.docId, it.listId));
 
   // Reveal + open an item by id, in whichever doc holds it. False when no
-  // open doc has it.
-  const openItemFromUrl = (id: string): boolean => {
+  // open doc has it. `on: "upcoming"` (`#upcoming_<id>`) opens it over the
+  // calendar whatever its home, as an Open event already does; only a
+  // binned item still goes to the Bin, since the agenda never shows one.
+  const openItemFromUrl = (id: string, on?: "upcoming"): boolean => {
     const it = docs.getItem(id);
     if (!it) return false;
+    const target: ViewKey =
+      on === "upcoming" && !isBinned(it) ? { kind: "upcoming" } : viewForItem(it);
     batch(() => {
-      revealItem(id, viewForItem(it));
+      revealItem(id, target);
       setOpenItemId(id);
     });
     return true;
@@ -2436,7 +2442,7 @@ export function Workspace(props: {
       });
       return true;
     }
-    if (!openItemFromUrl(route.id)) setPendingItemId(route.id);
+    if (!openItemFromUrl(route.id, route.on)) setPendingItem({ id: route.id, on: route.on });
     return true;
   };
 
@@ -2451,10 +2457,10 @@ export function Workspace(props: {
 
   // Pending item link: retry whenever the store changes.
   createEffect(() => {
-    const id = pendingItemId();
-    if (id === null) return;
+    const pending = pendingItem();
+    if (pending === null) return;
     docs.version();
-    if (docs.getItem(id)) untrack(() => openItemFromUrl(id));
+    if (docs.getItem(pending.id)) untrack(() => openItemFromUrl(pending.id, pending.on));
   });
 
   // State → address bar. History rules: a view change pushes; an open
@@ -2484,6 +2490,13 @@ export function Workspace(props: {
     if (location.hash === hash) return;
     if (prev === undefined) {
       history.replaceState(null, "", hash);
+      return;
+    }
+    // A context form of the open item (`#upcoming_<id>`, just applied
+    // from the hash) is the same place: canonicalise the address in its
+    // own entry rather than pushing the view change it carried.
+    if (!menu && item !== null && namesItem(location.hash, item)) {
+      history.replaceState(history.state, "", hash);
       return;
     }
     const viewChanged = prev.viewKey !== cur.viewKey;
