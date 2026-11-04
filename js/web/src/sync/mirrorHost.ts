@@ -74,7 +74,10 @@ export type HostRequest =
   | { kind: "unsubscribe"; docId: string }
   | { kind: "import"; docId: string; bytes: string }
   | { kind: "window"; action: WindowGesture }
-  | { kind: "undoState"; canUndo: boolean; canRedo: boolean };
+  | { kind: "undoState"; canUndo: boolean; canRedo: boolean }
+  /** Delete a workspace: the app confirms natively (with `name` in the
+   *  copy) and has the host delete it; the reply says whether it did. */
+  | { kind: "deleteDoc"; docId: string; name: string };
 
 /** What the sidebar's title strip (`.nav-titlebar`) forwards: the
  *  window has no title bar of its own (the traffic lights sit over the
@@ -135,6 +138,10 @@ export interface AppHost {
   /** A doc the host opened after boot (`docAdded`); the runtime opens
    *  it over the bridge. */
   onDocAdded(cb: (docId: string) => void): void;
+  /** Ask the app to delete a workspace: it confirms natively and has
+   *  the host do it. Resolves true once the doc is gone, false when the
+   *  user cancelled or the app already showed the failure. */
+  deleteDoc(docId: string, name: string): Promise<boolean>;
 }
 
 /** The app host behind this page, or null outside the app: the
@@ -287,6 +294,10 @@ export function createAppHost(handler: HostMessageHandler, target: object): AppH
     },
     onDocAdded(cb) {
       onDocAdded = cb;
+    },
+    deleteDoc: async (docId, name) => {
+      const reply = (await post({ kind: "deleteDoc", docId, name })) as { deleted: boolean };
+      return reply.deleted === true;
     },
   };
 }

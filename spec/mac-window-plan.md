@@ -395,8 +395,23 @@ first, backed by the in-process `HostCmd::Session` /
   .openDoc`: one more `bridge.open`, a store, `docs.addDoc`) and goes
   to its Inbox. The item is enabled while the host serves a signed-in
   profile; a failure follows the sheet as an alert. The page's own
-  dialog stays hidden. Delete and invite creation are still only in
-  the browser and the CLI.
+  dialog stays hidden.
+- Delete workspace, natively (2026-11-05): deleting touches no key,
+  so the page's item (the workspace heading's menu) is shown in the
+  window; under `isMacShell()` it skips the page's confirm dialog and
+  posts `deleteDoc(docId, name)` to the app, which runs the browser's
+  confirmation as a critical sheet (`DeleteWorkspacePrompt`: the name
+  typed back, a destructive Delete), sends `Request.deleteWorkspace`
+  to the host (`Session::delete_doc`: `DELETE /api/docs/:id`, then
+  `forget_doc`; the server unbinds this device silently, so the
+  host's forget is explicit), and replies `{deleted}`. The host's
+  fan-out tells the page's subscription `stopped`, which the page now
+  turns into `createMirrorRuntime.closeDoc` (view leaves the doc,
+  route and store go), the same path a server-side `DocClosed` takes;
+  the app's `deleted: true` closes it too, idempotently. A failure is
+  shown by the app and answered `deleted: false`, so the page does
+  not alert again. Invite creation is still only in the browser and
+  the CLI.
 
 ## Settings (plan, decided 2026-11-04, not built)
 

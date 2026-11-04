@@ -45,6 +45,9 @@ export function MirrorApp(props: {
   // the runtime is built from); its frame pulse is bound here once the
   // runtime is up. Frames before that have nothing to drain into.
   let drainFor: (docId: string) => void = () => {};
+  // Likewise the host stopping a doc (deleted, or closed by the server)
+  // drops it from the runtime once there is one.
+  let closeFor: (docId: string) => void = () => {};
 
   onMount(async () => {
     const host = props.host ?? detectAppHost();
@@ -77,6 +80,7 @@ export function MirrorApp(props: {
         },
         onStopped: (docId) => {
           console.warn(`mirror: the host stopped serving doc ${docId}`);
+          closeFor(docId);
         },
         onError: (message) => {
           console.error("mirror:", message);
@@ -127,8 +131,9 @@ export function MirrorApp(props: {
             <MirrorMain
               boot={b()}
               host={host()!}
-              bind={(drain) => {
+              bind={(drain, close) => {
                 drainFor = drain;
+                closeFor = close;
               }}
             />
           </SessionProvider>
@@ -142,12 +147,20 @@ function MirrorMain(props: {
   boot: MirrorBoot;
   host: AppHost;
   /** Hand the parent the runtime's drain so the bridge's frame pulse
-   *  reaches the stores. Called synchronously during setup, before any
+   *  reaches the stores, and its close so a doc the host stops serving
+   *  leaves the page. Called synchronously during setup, before any
    *  frame can arrive after the runtime materialised its stores. */
-  bind: (drain: (docId: string) => void) => void;
+  bind: (drain: (docId: string) => void, close: (docId: string) => void) => void;
 }) {
   const runtime = createMirrorRuntime(props.boot);
-  props.bind(runtime.drain);
+  props.bind(runtime.drain, runtime.closeDoc);
+  // Delete goes through the app: a native confirm, then the host
+  // deletes on the server and forgets its copy; the page drops the doc
+  // once the app says it is gone (the host's `stopped` for it may have
+  // done so already).
+  const deleteDoc = async (docId: string, name: string): Promise<void> => {
+    if (await props.host.deleteDoc(docId, name)) runtime.closeDoc(docId);
+  };
   // The app calls `handOff` before closing the window or quitting, then
   // waits for the imports it caused before it drops the subscriptions.
   props.host.onHandOff(runtime.handOff);
@@ -166,7 +179,7 @@ function MirrorMain(props: {
       setView={runtime.setView}
       createDoc={runtime.createDoc}
       joinDoc={runtime.joinDoc}
-      deleteDoc={runtime.deleteDoc}
+      deleteDoc={deleteDoc}
       presence={runtime.presence}
     />
   );

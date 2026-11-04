@@ -375,6 +375,28 @@ async fn workspace_create_opens_a_new_doc_on_the_running_daemon() {
     assert_eq!(work_b.get_item(&work_item).unwrap().text, "in work");
     session_b.flush().await.unwrap();
 
+    // Delete: refused without `-w` and on Personal, then gone from the
+    // running daemon (no restart) and from the server, so a fresh
+    // login holds the Home key alone.
+    let e = err(monoplan(dir, &["workspace", "delete", "--yes"]).await);
+    assert!(e.contains("name the workspace to delete"), "{e}");
+    let e = err(monoplan(dir, &["-w", "personal", "workspace", "delete", "--yes"]).await);
+    assert!(e.contains("cannot be deleted"), "{e}");
+    let out = ok(monoplan(dir, &["-w", "Work", "workspace", "delete", "--yes"]).await);
+    assert_eq!(out.trim(), format!("Deleted workspace {work_id}."));
+    let e = err(monoplan(dir, &["-w", "Work", "item", "ls"]).await);
+    assert!(
+        e.contains("this install has: Personal\n")
+            || e.trim_end().ends_with("this install has: Personal"),
+        "{e}"
+    );
+    let ls = ok(monoplan(dir, &["item", "ls"]).await);
+    assert!(!ls.contains(&work_item), "{ls}");
+    let login_c = login_device(&server.base, &signup.email, TEST_PASSWORD, "bin-create-c")
+        .await
+        .unwrap();
+    assert_eq!(login_c.doc_keys.len(), 1, "only Home is left");
+
     ok(monoplan(dir, &["daemon", "stop"]).await);
 }
 

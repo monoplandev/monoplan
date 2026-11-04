@@ -15,6 +15,12 @@ final class MirrorFramingTests: XCTestCase {
         XCTAssertEqual(
             try HostRequest(message: ["kind": "undoState", "canUndo": true, "canRedo": false]),
             .undoState(canUndo: true, canRedo: false))
+        XCTAssertEqual(
+            try HostRequest(message: ["kind": "deleteDoc", "docId": "d1", "name": "Work"]),
+            .deleteDoc(docId: "d1", name: "Work"))
+        XCTAssertThrowsError(try HostRequest(message: ["kind": "deleteDoc", "docId": "d1"])) {
+            XCTAssertEqual($0 as? HostRequest.ParseError, .missing("name"))
+        }
     }
 
     func testRejectsMalformedRequests() {

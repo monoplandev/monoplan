@@ -113,6 +113,9 @@ public enum Request {
     /// Create a workspace the account owns, by name, and open it on the
     /// host (`Request::CreateWorkspace`; the reply is `workspaceCreated`).
     case createWorkspace(name: String)
+    /// Delete a workspace by doc id, on the server and on the host
+    /// (`Request::DeleteWorkspace`; the reply is `workspaceDeleted`).
+    case deleteWorkspace(docId: String)
 
     var value: MPValue {
         switch self {
@@ -142,6 +145,8 @@ public enum Request {
             return .map(["Doc": .map(["cmd": .map(["Settings": .map(["show_list_counts": .bool(on)])])])])
         case .createWorkspace(let name):
             return .map(["CreateWorkspace": .map(["name": .string(name)])])
+        case .deleteWorkspace(let docId):
+            return .map(["DeleteWorkspace": .map(["workspace": .string(docId)])])
         }
     }
 }
@@ -159,6 +164,7 @@ public enum Reply: Equatable {
     case account(accountId: String, email: String, deviceId: String)
     /// `createWorkspace` done: the new doc's id and trimmed name.
     case workspaceCreated(docId: String, name: String, sync: SyncStatus)
+    case workspaceDeleted(docId: String, sync: SyncStatus)
     case event(WatchEvent)
     case shuttingDown
     case error(String)
@@ -193,6 +199,10 @@ public enum Reply: Equatable {
             if let id = body["doc_id"]?.stringValue, let name = body["name"]?.stringValue,
                let sync = SyncStatus.from(body["sync"]) {
                 return .workspaceCreated(docId: id, name: name, sync: sync)
+            }
+        case "WorkspaceDeleted":
+            if let id = body["doc_id"]?.stringValue, let sync = SyncStatus.from(body["sync"]) {
+                return .workspaceDeleted(docId: id, sync: sync)
             }
         case "Event":
             if case .string("Changed") = body { return .event(.changed) }
@@ -477,6 +487,9 @@ public final class DaemonClient {
                 state = .connected(sync)
             }
             if case .workspaceCreated(_, _, let sync) = reply, case .connected = state {
+                state = .connected(sync)
+            }
+            if case .workspaceDeleted(_, let sync) = reply, case .connected = state {
                 state = .connected(sync)
             }
             if case .error(let m) = reply { return .failure(ClientError.daemon(m)) }

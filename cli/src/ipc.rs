@@ -59,6 +59,14 @@ pub enum Request {
     /// no server to own the doc. `monoplan workspace create` and the
     /// app's New Workspace… send it.
     CreateWorkspace { name: String },
+    /// Delete a workspace the account owns (`Session::delete_doc`):
+    /// `DELETE /api/docs/:id` on the server (owner only; never Home;
+    /// refused while other members remain), then the local copy, key
+    /// and engine are forgotten, as after a `DocClosed`. `workspace`
+    /// is the `-w` selector (name or doc id). The reply is
+    /// `WorkspaceDeleted`. `monoplan workspace delete` and the app's
+    /// native confirm send it.
+    DeleteWorkspace { workspace: String },
     /// Turn this connection into a watcher: the reply is `Watching`,
     /// and from then on the daemon also sends `Event` frames on it
     /// whenever the doc or the sync state changes. Ordinary requests
@@ -99,6 +107,11 @@ pub enum Reply {
     WorkspaceCreated {
         doc_id: String,
         name: String,
+        sync: SyncStatus,
+    },
+    /// `DeleteWorkspace` done: the doc is gone here and on the server.
+    WorkspaceDeleted {
+        doc_id: String,
         sync: SyncStatus,
     },
     /// `Watch` accepted; events follow on this connection.
@@ -369,6 +382,25 @@ mod tests {
                 name: "Work".into()
             }),
             serde_json::json!({"CreateWorkspace": {"name": "Work"}})
+        );
+        assert_eq!(
+            shape(&Request::DeleteWorkspace {
+                workspace: "Work".into()
+            }),
+            serde_json::json!({"DeleteWorkspace": {"workspace": "Work"}})
+        );
+        assert_eq!(
+            shape(&Reply::WorkspaceDeleted {
+                doc_id: "d".into(),
+                sync: SyncStatus {
+                    online: true,
+                    last_synced_at: None,
+                    offline_reason: None,
+                    local_only: false,
+                    pending: false,
+                },
+            }),
+            serde_json::json!({"WorkspaceDeleted": {"doc_id": "d", "sync": {"online": true, "last_synced_at": null}}})
         );
         assert_eq!(
             shape(&Reply::WorkspaceCreated {

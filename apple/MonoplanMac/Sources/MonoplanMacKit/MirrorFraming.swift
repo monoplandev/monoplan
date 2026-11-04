@@ -25,6 +25,9 @@ public enum HostRequest: Equatable {
     /// state, or a text field with focus (its own undo). Pushed by the
     /// page whenever either changes.
     case undoState(canUndo: Bool, canRedo: Bool)
+    /// Delete a workspace: the app confirms natively (the name is for
+    /// the copy) and has the host do it; the reply is `{deleted}`.
+    case deleteDoc(docId: String, name: String)
 
     public enum WindowGesture: String, Equatable {
         /// A mouse-down: move the window with it.
@@ -80,6 +83,8 @@ public enum HostRequest: Equatable {
                 return v
             }
             self = .undoState(canUndo: try bool("canUndo"), canRedo: try bool("canRedo"))
+        case "deleteDoc":
+            self = .deleteDoc(docId: try string("docId"), name: try string("name"))
         default:
             throw ParseError.unknownKind(kind)
         }

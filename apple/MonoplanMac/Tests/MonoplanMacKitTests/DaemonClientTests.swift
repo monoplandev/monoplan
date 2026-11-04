@@ -51,6 +51,10 @@ final class DaemonClientTests: XCTestCase {
             Request.createWorkspace(name: "Work").value,
             .map(["CreateWorkspace": .map(["name": .string("Work")])])
         )
+        XCTAssertEqual(
+            Request.deleteWorkspace(docId: "d").value,
+            .map(["DeleteWorkspace": .map(["workspace": .string("d")])])
+        )
     }
 
     func testReplyParsing() throws {
@@ -63,6 +67,10 @@ final class DaemonClientTests: XCTestCase {
         XCTAssertEqual(
             try Reply.parse(.map(["WorkspaceCreated": .map(["doc_id": .string("d"), "name": .string("Work"), "sync": sync])])),
             .workspaceCreated(docId: "d", name: "Work", sync: SyncStatus(online: true, lastSyncedAt: 99))
+        )
+        XCTAssertEqual(
+            try Reply.parse(.map(["WorkspaceDeleted": .map(["doc_id": .string("d"), "sync": sync])])),
+            .workspaceDeleted(docId: "d", sync: SyncStatus(online: true, lastSyncedAt: 99))
         )
         XCTAssertEqual(
             try Reply.parse(.map(["Event": .map(["Sync": sync])])),

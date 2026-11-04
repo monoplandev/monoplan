@@ -1392,6 +1392,30 @@ impl Host {
                     }
                 }
             }
+            Request::DeleteWorkspace { workspace } => {
+                let resolved = self.session.resolve(Some(&workspace));
+                match resolved {
+                    Err(e) => Reply::Err {
+                        message: e.to_string(),
+                    },
+                    Ok(doc_id) => match self.session.delete_doc(doc_id).await {
+                        Ok(()) => {
+                            // Mirrors of the doc hear `stopped` now (the
+                            // fan-out finds no doc behind them), watchers
+                            // re-list; both before the client's reply.
+                            self.fan_out();
+                            let _ = self.watchers.send(WatchEvent::Changed);
+                            Reply::WorkspaceDeleted {
+                                doc_id: doc_id.0.to_string(),
+                                sync: self.sync_status(),
+                            }
+                        }
+                        Err(e) => Reply::Err {
+                            message: format!("delete workspace: {e}"),
+                        },
+                    },
+                }
+            }
             // Honoured by every host, the app's included: the app
             // re-hosts once the profile is free again (`monoplan-ffi`).
             Request::Shutdown => {

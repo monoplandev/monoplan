@@ -31,9 +31,9 @@ use crate::keystore::{KeystoreError, dek_for_doc};
 use crate::storage::SqliteStorage;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
-/// `create_doc`'s HTTP round trip. It runs inline on a host's loop,
-/// which serves nothing else meanwhile, so an unreachable server has
-/// to fail rather than hang the host.
+/// `create_doc`'s and `delete_doc`'s HTTP round trip. It runs inline on
+/// a host's loop, which serves nothing else meanwhile, so an
+/// unreachable server has to fail rather than hang the host.
 const CREATE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// WAL fold thresholds (spec/vv-wal-separation.md). Evaluated after
@@ -573,6 +573,39 @@ impl Session {
         let state = boot_doc_state(&self.store, &secrets, doc_id, peer_id, author)?;
         self.docs.insert(doc_id, state);
         Ok(doc_id)
+    }
+
+    /// Delete a doc this account owns, on the server and here (the web
+    /// runtime's `deleteDoc`): `DELETE /api/docs/:id` first, which the
+    /// server refuses for Home (403, and the guard here says so), for a
+    /// doc the caller does not own (404) and while other members remain
+    /// (409), so a refusal leaves everything in place; then the engine,
+    /// the key and the local rows go the way they do after a
+    /// `DocClosed` (`forget_doc`). The server spares this device the
+    /// `DocClosed` frame and unbinds the doc silently, which is why the
+    /// local forget is explicit. Other members' hosts get the frame.
+    pub async fn delete_doc(&mut self, doc_id: DocId) -> Result<(), SyncError> {
+        if doc_id == self.primary {
+            return Err(SyncError::Engine(
+                "the Personal workspace cannot be deleted".into(),
+            ));
+        }
+        if !self.docs.contains_key(&doc_id) {
+            return Err(SyncError::Engine(format!("no open workspace {}", doc_id.0)));
+        }
+        let Some(server_url) = self.server_url.as_deref() else {
+            return Err(SyncError::LocalOnly);
+        };
+        let token = self.profile.read_secrets()?.device_token()?.to_string();
+        tokio::time::timeout(
+            CREATE_TIMEOUT,
+            crate::net::Client::new(server_url)
+                .delete_authed(&format!("/api/docs/{}", doc_id.0), &token),
+        )
+        .await
+        .map_err(|_| SyncError::Ws("the server did not answer in time".into()))?
+        .map_err(|e| SyncError::Ws(e.to_string()))?;
+        self.forget_doc(doc_id)
     }
 
     /// Open one doc on a socket that is already up and past its version

@@ -319,7 +319,7 @@ export function Nav(props: {
   setView: (v: ViewKey) => void;
   /** Delete a non-Home doc (`runtime.deleteDoc`), or null when this
    *  session can't (anonymous). Drives the heading menu's Delete item. */
-  onDeleteDoc: ((docId: string) => Promise<void>) | null;
+  onDeleteDoc: ((docId: string, name: string) => Promise<void>) | null;
   /** Who has a doc open on the server right now (`runtime.presence`).
    *  Each heading shows the *other* accounts as avatars. */
   presence: (docId: string) => PresentAccount[];
@@ -564,7 +564,7 @@ function DocSection(props: {
   showListCounts: boolean;
   mobile: boolean;
   onToggled: () => void;
-  onDeleteDoc: ((docId: string) => Promise<void>) | null;
+  onDeleteDoc: ((docId: string, name: string) => Promise<void>) | null;
   presence: (docId: string) => PresentAccount[];
   members: MemberDirectory;
 }) {
@@ -601,12 +601,16 @@ function DocSection(props: {
   // Sharing is offered on non-Home docs only (Home is the account's
   // private doc and its DEK is the account key; `spec/sharing-plan.md`).
   const [sharingOpen, setSharingOpen] = createSignal(false);
+  // In the macOS app the confirmation is the app's own sheet (typed
+  // name and all), reached by calling straight through: the page's
+  // dialog is not rendered there.
+  const nativeConfirm = isMacShell();
   const deleteDoc = (): void => {
     const run = props.onDeleteDoc;
     if (!run || props.entry.home) return;
     // The collapse flag is per doc id; nothing else will ever clear it.
     saveSectionCollapsed(docId, false, false);
-    run(docId).catch((err) => {
+    run(docId, label()).catch((err) => {
       console.error("delete workspace failed:", err);
       alert(m().nav.deleteDocFailed);
     });
@@ -941,7 +945,7 @@ function DocSection(props: {
               <DropdownMenu.Separator class="dropdown-menu-separator" />
               <DropdownMenu.Item
                 class="dropdown-menu-item"
-                onSelect={() => setDeleteConfirm(true)}
+                onSelect={() => (nativeConfirm ? deleteDoc() : setDeleteConfirm(true))}
               >
                 {m().nav.deleteDoc}
               </DropdownMenu.Item>
@@ -992,7 +996,7 @@ function DocSection(props: {
         style={{ display: "none" }}
         onChange={onImportFilePicked}
       />
-      <Show when={canDelete()}>
+      <Show when={canDelete() && !nativeConfirm}>
         <ConfirmDialog
           open={deleteConfirmOpen()}
           onOpenChange={setDeleteConfirm}

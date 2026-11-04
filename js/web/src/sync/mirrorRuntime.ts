@@ -141,6 +141,22 @@ export function createMirrorRuntime(boot: MirrorBoot) {
     return docId;
   };
 
+  /** A doc the host stopped serving (deleted here or elsewhere, or the
+   *  server closed it): leave it if the view is in it, end its route
+   *  and drop its store, the window's half of the browser runtime's
+   *  `forgetOpenDoc`. Idempotent; Home is never dropped. */
+  const closeDoc = (docId: string): void => {
+    if (docId === boot.session.primaryDocId) return;
+    const a = docApps.get(docId);
+    if (!a) return;
+    if (docs.viewDocId(view()) === docId) setView({ kind: "list", id: "inbox" });
+    boot.bridge.close(docId);
+    const i = boot.engines.indexOf(a.engine);
+    if (i >= 0) boot.engines.splice(i, 1);
+    docs.removeDoc(docId);
+    docApps.delete(docId);
+  };
+
   const unavailable =
     (what: string) =>
     async (): Promise<never> => {
@@ -158,8 +174,11 @@ export function createMirrorRuntime(boot: MirrorBoot) {
       docId: string,
       dek: import("@monoplan/core/wasm").Dek,
     ) => Promise<string>,
+    /** The app deletes through the host (`MirrorMain`); this is the
+     *  fallback when no app is wired. */
     deleteDoc: unavailable("deleting a workspace") as (docId: string) => Promise<void>,
     openDoc,
+    closeDoc,
     /** Presence is a server fact the host has not relayed yet. */
     presence: (_docId: string): PresentAccount[] => [],
     /** Route the bridge's `onServerFrame` here: drain the named doc's

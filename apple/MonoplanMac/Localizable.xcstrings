@@ -181,6 +181,16 @@
         }
       }
     },
+    "Could not delete the workspace": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo eliminar el espacio"
+          }
+        }
+      }
+    },
     "Could not load devices: %@": {
       "localizations": {
         "es": {
@@ -237,6 +247,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Oscuro"
+          }
+        }
+      }
+    },
+    "Delete": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eliminar"
+          }
+        }
+      }
+    },
+    "Delete “%@”?": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Eliminar «%@»?"
           }
         }
       }
@@ -367,6 +397,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Se cerrará su sesión y tendrá que iniciarla de nuevo para acceder a tu cuenta."
+          }
+        }
+      }
+    },
+    "Its lists and items are removed from every device, and anyone it is shared with loses access. This cannot be undone.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sus listas y elementos se eliminarán de todos los dispositivos y quienes lo compartan perderán el acceso. Esta acción no se puede deshacer."
           }
         }
       }
@@ -977,6 +1017,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Hoy · %@"
+          }
+        }
+      }
+    },
+    "Type “%@” to confirm": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escribe «%@» para confirmar"
           }
         }
       }

@@ -256,8 +256,9 @@ export function Workspace(props: {
    *  (`runtime.joinDoc`); the DEK came out of the link. */
   joinDoc: (docId: string, dek: Dek) => Promise<string>;
   /** Delete a non-Home doc the account owns and forget it here
-   *  (`runtime.deleteDoc`); rejects on Home or anonymous sessions. */
-  deleteDoc: (docId: string) => Promise<void>;
+   *  (`runtime.deleteDoc`); rejects on Home or anonymous sessions. The
+   *  shown name rides along for the app's native confirm. */
+  deleteDoc: (docId: string, name: string) => Promise<void>;
 }) {
   const { m, locale } = useAppI18n();
   const session = useSession();
@@ -847,13 +848,16 @@ export function Workspace(props: {
   // as present since (a member who joined after the load opens the doc
   // and is announced before their first item can arrive).
   const members = createMemberDirectory();
-  // Creating and deleting docs wrap or unwrap a DEK: one workspace per
-  // accountless install (`auth.md`), and the macOS app's window holds
-  // no key (`Session.mirror`), so both hide the verbs.
+  // Creating a doc wraps a DEK: one workspace per accountless install
+  // (`auth.md`), and the macOS app's window holds no key
+  // (`Session.mirror`; its New Workspace… is the app's own menu), so
+  // both hide the verb. Deleting touches no key, so the window offers
+  // it too; the app confirms natively and its host does the work.
   const canManageDocs = (): boolean => {
     const s = session.session();
     return !s.anonymous && !s.mirror;
   };
+  const canDeleteDocs = (): boolean => !session.session().anonymous;
   createEffect(() => {
     if (session.session().anonymous) return;
     for (const d of docs.docs()) if (!d.home) members.ensure(d.docId);
@@ -2835,7 +2839,7 @@ export function Workspace(props: {
         showListCounts={home.state.settings.showListCounts}
         view={view()}
         setView={navigateTo}
-        onDeleteDoc={canManageDocs() ? props.deleteDoc : null}
+        onDeleteDoc={canDeleteDocs() ? props.deleteDoc : null}
         presence={props.presence}
         members={members}
         // No footer at all in the app's window (spec/mac-window-plan.md

@@ -178,6 +178,18 @@ describe("createMirrorRuntime", () => {
     expect(host.subscribers.get(OTHER)!.length).toBe(subscribed);
     // Hand-off covers the late doc too.
     expect(engines).toHaveLength(2);
+
+    // The host stops serving it (deleted, or closed by the server):
+    // the view leaves it, the route and the store go, Home stays.
+    runtime.setView(runtime.docs.listView(OTHER, LIST_INBOX));
+    runtime.closeDoc(OTHER);
+    expect(runtime.docs.docs().map((d) => d.docId)).toEqual([HOME]);
+    expect(runtime.view()).toEqual({ kind: "list", id: "inbox" });
+    expect(host.unsubscribed).toEqual([OTHER]);
+    expect(engines).toHaveLength(1);
+    runtime.closeDoc(OTHER);
+    runtime.closeDoc(HOME);
+    expect(runtime.docs.docs().map((d) => d.docId)).toEqual([HOME]);
   });
 
   test("notes typed on the idle timer reach the host on hand-off", async () => {
@@ -246,6 +258,8 @@ describe("the WebKit host transport", () => {
     const doc = hostDoc(1n, "home-first");
     const requests: HostRequest[] = [];
     const imported: Uint8Array[] = [];
+    // What the app answers a delete with (its native confirm's outcome).
+    const replies = { deleteDoc: { deleted: false } };
     const handler = {
       async postMessage(request: HostRequest): Promise<unknown> {
         requests.push(request);
@@ -259,6 +273,8 @@ describe("the WebKit host transport", () => {
             return null;
           case "unsubscribe":
             return null;
+          case "deleteDoc":
+            return replies.deleteDoc;
         }
       },
     };
@@ -323,9 +339,21 @@ describe("the WebKit host transport", () => {
     inbound.docAdded(OTHER);
     expect(added).toEqual([OTHER]);
 
+    // Delete asks the app, which confirms natively and answers.
+    replies.deleteDoc = { deleted: true };
+    expect(await appHost.deleteDoc(OTHER, "Other")).toBe(true);
+    replies.deleteDoc = { deleted: false };
+    expect(await appHost.deleteDoc(OTHER, "Other")).toBe(false);
+    expect(requests.filter((r) => r.kind === "deleteDoc")).toEqual([
+      { kind: "deleteDoc", docId: OTHER, name: "Other" },
+      { kind: "deleteDoc", docId: OTHER, name: "Other" },
+    ]);
+
     appHost.transport.unsubscribe(HOME);
     await Promise.resolve();
-    expect(requests.map((r) => r.kind)).toEqual(["session", "subscribe", "import", "unsubscribe"]);
+    expect(requests.map((r) => r.kind)).toEqual([
+      "session", "subscribe", "import", "deleteDoc", "deleteDoc", "unsubscribe",
+    ]);
   });
 
   test("base64 round-trips large buffers", () => {

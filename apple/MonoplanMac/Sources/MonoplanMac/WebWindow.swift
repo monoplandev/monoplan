@@ -79,6 +79,8 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     private var syncStatus: SyncStatus?
     /// The New Workspace sheet while it is up (`promptNewWorkspace`).
     private var newWorkspacePrompt: NewWorkspacePrompt?
+    /// The Delete workspace sheet while it is up (`confirmDeleteWorkspace`).
+    private var deleteWorkspacePrompt: DeleteWorkspacePrompt?
     /// The dot on the account bubble's shoulder: amber while syncing,
     /// red while offline, hidden when synced so the quiet state is quiet.
     private var syncDot: NSView?
@@ -108,11 +110,17 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     private(set) var canUndo = false
     private(set) var canRedo = false
 
+    /// Deletes a workspace through the host (`Request.deleteWorkspace`),
+    /// for the page's Delete workspace after the native confirm.
+    private let deleteWorkspace: (String, @escaping (Result<Void, Error>) -> Void) -> Void
+
     init(hostProvider: @escaping () -> MonoplanCore.Host?, onVisibility: @escaping (Bool) -> Void,
-         account: AccountActions) {
+         account: AccountActions,
+         deleteWorkspace: @escaping (String, @escaping (Result<Void, Error>) -> Void) -> Void) {
         self.hostProvider = hostProvider
         self.onVisibility = onVisibility
         self.account = account
+        self.deleteWorkspace = deleteWorkspace
         self.bridge = MirrorHostBridge(hostProvider: hostProvider)
         self.schemeHandler = AppSchemeHandler(
             webRoot: Bundle.main.resourceURL?.appendingPathComponent("web", isDirectory: true),
@@ -124,6 +132,9 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
             self?.canRedo = canRedo
         }
         bridge.onSession = { [weak self] email in self?.accountEmail = email }
+        bridge.onDeleteDoc = { [weak self] docId, name, done in
+            self?.confirmDeleteWorkspace(docId: docId, name: name, done: done)
+        }
         accountMenu.delegate = self
         // Any defaults write (the window's own frame autosave included)
         // posts the first; the locale one is the 24-Hour Time switch
@@ -211,6 +222,45 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// Reload the page (the View menu).
     @objc func reload(_ sender: Any?) {
         webView?.reload()
+    }
+
+    /// The page's Delete workspace, in the app: the confirmation is a
+    /// native sheet (the workspace's name typed back, as the browser's
+    /// dialog asks, since this is cross-device and final), then the
+    /// host deletes on the server and forgets its copy. `done(true)`
+    /// once it is gone; false on Cancel, and on a failure after it has
+    /// been shown here, so the page never alerts twice.
+    private func confirmDeleteWorkspace(docId: String, name: String, done: @escaping (Bool) -> Void) {
+        guard let window, deleteWorkspacePrompt == nil else {
+            done(false)
+            return
+        }
+        let prompt = DeleteWorkspacePrompt(name: name)
+        deleteWorkspacePrompt = prompt
+        prompt.run(on: window) { [weak self] confirmed in
+            guard let self else { return }
+            self.deleteWorkspacePrompt = nil
+            guard confirmed else {
+                done(false)
+                return
+            }
+            self.deleteWorkspace(docId) { result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success:
+                        done(true)
+                    case .failure(let error):
+                        done(false)
+                        guard let window = self.window else { return }
+                        let alert = NSAlert()
+                        alert.alertStyle = .warning
+                        alert.messageText = String(localized: "Could not delete the workspace")
+                        alert.informativeText = error.localizedDescription
+                        alert.beginSheetModal(for: window)
+                    }
+                }
+            }
+        }
     }
 
     /// The New Workspace sheet (Monoplan › New Workspace…): a name,
@@ -870,6 +920,46 @@ final class NewWorkspacePrompt: NSObject, NSTextFieldDelegate {
     }
 }
 
+/// The Delete workspace sheet: the browser's confirmation, natively. A
+/// critical alert whose Delete button stays disabled until the
+/// workspace's name has been typed back exactly (trimmed): a
+/// click-through is too easy for something cross-device and final.
+final class DeleteWorkspacePrompt: NSObject, NSTextFieldDelegate {
+    private let alert = NSAlert()
+    private let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+    private let name: String
+
+    init(name: String) {
+        self.name = name
+        super.init()
+        alert.alertStyle = .critical
+        alert.messageText = String(localized: "Delete “\(name)”?")
+        alert.informativeText = String(localized: "Its lists and items are removed from every device, and anyone it is shared with loses access. This cannot be undone.")
+        field.placeholderString = String(localized: "Type “\(name)” to confirm")
+        field.delegate = self
+        alert.accessoryView = field
+        let delete = alert.addButton(withTitle: String(localized: "Delete"))
+        delete.hasDestructiveAction = true
+        delete.isEnabled = false
+        alert.addButton(withTitle: String(localized: "Cancel"))
+    }
+
+    func run(on window: NSWindow, completion: @escaping (Bool) -> Void) {
+        alert.window.initialFirstResponder = field
+        alert.beginSheetModal(for: window) { [self] response in
+            completion(response == .alertFirstButtonReturn && matches)
+        }
+    }
+
+    private var matches: Bool {
+        field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) == name
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        alert.buttons[0].isEnabled = matches
+    }
+}
+
 private func jsString(_ s: String) -> String {
     let data = try! JSONSerialization.data(withJSONObject: [s], options: [])
     return String(String(decoding: data, as: UTF8.self).dropFirst().dropLast())
@@ -913,6 +1003,9 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     var onUndoState: ((Bool, Bool) -> Void)?
     /// The email of the session a page booted with; on the main thread.
     var onSession: ((String) -> Void)?
+    /// The page's `deleteDoc(docId, name)`: the window confirms and
+    /// deletes, then answers whether the doc is gone. Main thread.
+    var onDeleteDoc: ((String, String, @escaping (Bool) -> Void) -> Void)?
 
     /// A new page is loading (or the old one is going): close every
     /// subscription so the host releases the peer slots, and let the
@@ -1074,6 +1167,13 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
         case .undoState(let canUndo, let canRedo):
             onUndoState?(canUndo, canRedo)
             replyHandler(NSNull(), nil)
+
+        case .deleteDoc(let docId, let name):
+            guard let onDeleteDoc else {
+                replyHandler(["deleted": false], nil)
+                return
+            }
+            onDeleteDoc(docId, name) { deleted in replyHandler(["deleted": deleted], nil) }
         }
     }
 

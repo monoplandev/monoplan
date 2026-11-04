@@ -52,7 +52,20 @@ final class TrayController: NSObject, NSMenuDelegate {
             isSignedIn: { [weak self] in self?.location.isSignedIn ?? false },
             openAccount: { [weak self] in self?.settings().showAccount() },
             signIn: { [weak self] in self?.settings().showSignIn() },
-            signOut: { [weak self] in self?.settings().signOut() }))
+            signOut: { [weak self] in self?.settings().signOut() }),
+        // The page's Delete workspace, after the window's native
+        // confirm: the host deletes on the server and forgets its copy.
+        deleteWorkspace: { [weak self] docId, done in
+            guard let self else { return done(.failure(ClientError.notConnected)) }
+            self.client.send(.deleteWorkspace(docId: docId)) { result in
+                switch result {
+                case .success(.workspaceDeleted): done(.success(()))
+                case .success(let other):
+                    done(.failure(ClientError.protocolError("unexpected reply: \(String(describing: other))")))
+                case .failure(let error): done(.failure(error))
+                }
+            }
+        })
     /// Whether the last client state was connected, to tell a host
     /// coming (back) up from a status refresh.
     private var hadHost = false

@@ -121,6 +121,12 @@ enum WorkspaceCmd {
         /// The workspace's name (`-w <name>` selects it afterwards).
         name: String,
     },
+    /// Delete the workspace (-w) you own, on the server and on every device. Never Personal; refused while it has other members.
+    Delete {
+        /// Skip the confirmation prompt.
+        #[arg(long)]
+        yes: bool,
+    },
     /// Show the workspace's sync state: doc id, last sync, acked seq, pending changes (local; never connects).
     Status(status::StatusArgs),
     /// Share a workspace: invite links, members.
@@ -276,6 +282,43 @@ impl Cli {
                 {
                     Reply::WorkspaceCreated { doc_id, name, sync } => {
                         println!("Created workspace {name} ({doc_id}).");
+                        offline_notice(sync);
+                        Ok(())
+                    }
+                    Reply::Err { message } => Err(anyhow::anyhow!(message)),
+                    other => anyhow::bail!("unexpected daemon reply: {other:?}"),
+                };
+            }
+            Cmd::Workspace(WorkspaceCmd::Delete { yes }) => {
+                let Some(selector) = workspace else {
+                    anyhow::bail!(
+                        "name the workspace to delete with -w; the Personal workspace cannot be deleted"
+                    );
+                };
+                if !yes {
+                    let proceed = Confirm::new()
+                        .with_prompt(format!(
+                            "Delete workspace {selector:?}? Its lists and items are removed from every device, and anyone it is shared with loses access. This cannot be undone."
+                        ))
+                        .default(false)
+                        .interact()?;
+                    if !proceed {
+                        println!("aborted");
+                        return Ok(());
+                    }
+                }
+                let profile = Profile::require_active()?;
+                return match client::call(
+                    &profile,
+                    Request::DeleteWorkspace {
+                        workspace: selector,
+                    },
+                    spawn,
+                )
+                .await?
+                {
+                    Reply::WorkspaceDeleted { doc_id, sync } => {
+                        println!("Deleted workspace {doc_id}.");
                         offline_notice(sync);
                         Ok(())
                     }
