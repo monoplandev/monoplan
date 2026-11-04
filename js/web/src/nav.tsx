@@ -698,6 +698,21 @@ function DocSection(props: {
           v.kind === "list" && isActive(v.id) && lists().some((l) => l.id === v.id);
         if (own) navSelection.selectOnly(v.id);
         else navSelection.clear();
+        // Landing on one of this group's rows (Inbox or a visible list) by
+        // a route that bypasses the nav — [ / ] cycling, the Find palette,
+        // a digit key, a URL — unfolds a collapsed group so the active row
+        // is actually on screen. Only runs on a view *change*: folding the
+        // group while on one of its lists must stick, as must a reload
+        // into that state. `setCollapsedPersisted` bumps the section tick,
+        // which scrolls the revealed row into view.
+        if (
+          collapsed() &&
+          v.kind === "list" &&
+          isActive(v.id) &&
+          (v.id === "inbox" || lists().some((l) => l.id === v.id))
+        ) {
+          setCollapsedPersisted(false);
+        }
       },
       { defer: true },
     ),
