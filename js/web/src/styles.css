@@ -7,6 +7,12 @@
      font size; one-line chrome (rows, badges) opts into the compact ratio. */
   --lh: 1.5;
   --lh-compact: 1.3;
+  /* The browser's own canvas, behind anything that paints no background
+     (the loading / failed states, the ground behind the sign-in dialog):
+     nothing at the root paints one, so the canvas follows the theme
+     here rather than defaulting to white. In the macOS app the webview
+     is transparent and the window's material shows instead. */
+  color-scheme: light;
   --bg: #fafafc;
   --bg-board-col: #fbfcfd;
   /* Auth branding ground: behind the logo artwork and under the
@@ -55,6 +61,7 @@
 }
 
 [data-theme="dark"] {
+  color-scheme: dark;
   --bg: #1a1a1d;
   --bg-board-col: #171718;
   --bg-elevated: #1a1a1c;
@@ -133,7 +140,6 @@ body,
   font-size: 14px;
   line-height: var(--lh);
   color: var(--text);
-  background: var(--surface);
   user-select: none;
   -webkit-user-select: none;
 }
@@ -172,8 +178,12 @@ body {
   height: 42px;
 }
 
+/* The app's window is a vibrant sidebar material under a transparent
+   webview (WebWindow.swift), so the nav paints nothing and the blur
+   shows through it; the main column stays opaque. */
 [data-shell="mac"] .nav {
   padding-top: 0;
+  background: transparent;
 }
 
 /* The same window's thin drag strip across the top of every pane
@@ -993,13 +1003,16 @@ body {
   pointer-events: none;
 }
 
-/* Right-hand column: the main surface fills the pane row. */
+/* Right-hand column: the main surface fills the pane row. Painted
+   itself so the macOS app's drag strip above the main surface matches
+   it rather than showing the window's material. */
 .content {
   display: flex;
   flex-direction: column;
   min-width: 0;
   height: 100%;
   overflow: hidden;
+  background: var(--surface);
 }
 
 .main {

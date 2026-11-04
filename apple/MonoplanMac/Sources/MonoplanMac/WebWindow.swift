@@ -75,6 +75,12 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     private let accountMenu = NSMenu()
     private let schemeHandler: AppSchemeHandler
     private var webView: WKWebView?
+    /// The Liquid Glass under the page's sidebar (macOS 26 and later,
+    /// nil before), retinted as the window gains and loses key.
+    private var sidebarGlass: NSView?
+    /// Re-styles the glass when the app's appearance changes (Settings
+    /// › General › Appearance, or the system).
+    private var appearanceObservation: NSKeyValueObservation?
     /// Set once a hand-off has run for the pending close; the second
     /// `windowShouldClose` lets the window go.
     private var handedOff = false
@@ -227,6 +233,13 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = false
+        // No canvas of its own: the page paints nothing at its root and
+        // its sidebar is transparent in the app (`[data-shell="mac"]
+        // .nav`), so the window's material shows through them. The
+        // key is WebKit's long-standing KVC switch; there is no public
+        // one on macOS (`underPageBackgroundColor` only recolours the
+        // canvas).
+        webView.setValue(false, forKey: "drawsBackground")
         if #available(macOS 13.3, *) {
             webView.isInspectable = debug
         }
@@ -256,8 +269,14 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         window.minSize = NSSize(width: 520, height: 360)
         window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
-        window.contentView = Self.content(over: webView, bubbles: makeBubbles())
+        let (content, glass) = Self.content(over: webView, bubbles: makeBubbles())
+        window.contentView = content
+        sidebarGlass = glass
         window.delegate = self
+        applyGlassTint()
+        appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            self?.applyGlassTint()
+        }
         // Remembered across launches; centred the first time.
         if !window.setFrameUsingName("MonoplanWindow") { window.center() }
         window.setFrameAutosaveName("MonoplanWindow")
@@ -334,11 +353,83 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// The webview edge to edge with the bubbles floating over its
     /// top-right corner. They are added last so they draw (and
     /// hit-test) above the page.
-    private static func content(over webView: WKWebView, bubbles: NSView) -> NSView {
-        let container = NSView()
-        for v in [webView, bubbles] {
+    /// The page's sidebar column, which the glass below it must match:
+    /// `.app`'s first grid column in `styles.css`.
+    private static let sidebarWidth: CGFloat = 260
+    /// How far the glass runs past the window's top, bottom and
+    /// leading edges, so its rim highlight (the bright hairline glass
+    /// draws around its shape) falls outside the window on those
+    /// sides; the trailing rim sits under the nav's border.
+    private static let glassBleed: CGFloat = 24
+    /// The glass's tint by appearance and key state: none in light,
+    /// where the frosting alone matches Finder, and in dark the page's
+    /// dark ground (`--bg`, `#1a1a1d`) at partial opacity, since
+    /// untinted glass over a light desktop stays too light for a dark
+    /// sidebar. Darker again while the window is not key: the material
+    /// under the glass goes flat and lighter in its inactive rendering,
+    /// and the heavier tint cancels that. The alphas are the knobs.
+    private static let glassTint = tint(darkAlpha: 0.7)
+    private static let inactiveGlassTint = tint(darkAlpha: 0.8)
+
+    private static func tint(darkAlpha: CGFloat) -> NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                ? NSColor(srgbRed: 0x1a / 255, green: 0x1a / 255, blue: 0x1d / 255, alpha: darkAlpha)
+                : .clear
+        }
+    }
+
+    /// Dark mode also takes the `.clear` glass style: the regular one
+    /// frosts bright (a mid grey over a light wallpaper even at 0.45
+    /// tint), while clear lets the tint set the darkness and the
+    /// desktop come through as colour. Light keeps the regular frost.
+    private func applyGlassTint() {
+        guard #available(macOS 26, *), let glass = sidebarGlass as? NSGlassEffectView else { return }
+        let dark = glass.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        glass.style = dark ? .clear : .regular
+        glass.tintColor = window?.isKeyWindow == true ? Self.glassTint : Self.inactiveGlassTint
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        applyGlassTint()
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        applyGlassTint()
+    }
+
+    /// The window's ground, under the transparent webview: a vibrant
+    /// material blurring what is behind the window, and on macOS 26
+    /// and later a sheet of Liquid Glass over it the width of the
+    /// page's sidebar, which is what Finder's sidebar is since then
+    /// (an `NSVisualEffectView` alone, in any material, renders the
+    /// older blur and lets far more of the desktop through; tried
+    /// `.sidebar`, `.menu` and `.underWindowBackground` on
+    /// 2026-11-04). The page's nav paints nothing, so the glass
+    /// shows through it; its main column covers the rest. Returns the
+    /// content view and the glass, for retinting.
+    private static func content(over webView: WKWebView, bubbles: NSView) -> (NSView, glass: NSView?) {
+        let container = NSVisualEffectView()
+        container.material = .underWindowBackground
+        container.blendingMode = .behindWindow
+        container.state = .followsWindowActiveState
+        var glass: NSView?
+        if #available(macOS 26, *) {
+            let sheet = NSGlassEffectView()
+            sheet.cornerRadius = 0
+            glass = sheet
+        }
+        for v in [glass, webView, bubbles].compactMap({ $0 }) {
             v.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(v)
+        }
+        if let glass {
+            NSLayoutConstraint.activate([
+                glass.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: -glassBleed),
+                glass.topAnchor.constraint(equalTo: container.topAnchor, constant: -glassBleed),
+                glass.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: glassBleed),
+                glass.widthAnchor.constraint(equalToConstant: sidebarWidth + glassBleed),
+            ])
         }
         NSLayoutConstraint.activate([
             webView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -349,7 +440,7 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
             bubbles.topAnchor.constraint(equalTo: container.topAnchor, constant: bubbleTop),
             bubbles.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -bubbleTrailing),
         ])
-        return container
+        return (container, glass)
     }
 
     /// Search then account, left to right. On macOS 26 and later each

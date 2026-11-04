@@ -299,6 +299,32 @@ first, backed by the in-process `HostCmd::Session` /
     press, by click count, since the drag swallows the `dblclick`)
     follows the system's "double-click a window's title bar to"
     setting (zoom, minimise or nothing).
+    The window's ground (2026-11-04) is an `NSVisualEffectView` in
+    the `.underWindowBackground` material, blended behind the
+    window and following the window's active state, and on macOS 26 and later an `NSGlassEffectView` over it
+    the width of the page's sidebar column (260, `.app`'s first grid
+    column, run 24 past the window's top, bottom and leading edges so
+    the rim highlight glass draws around itself is clipped off there; tinted with the page's dark `--bg` in dark mode, 0.7
+    while the window is key and 0.8 while it is not (0.45 measured
+    as a mid grey, `#5a5856`, over a light wallpaper), since untinted
+    glass over a light desktop is too light for a dark sidebar and
+    the material's inactive rendering under it is lighter still;
+    untinted in light; in dark the glass is the `.clear` style,
+    since the regular frost stays bright under any tint, regular in
+    light; restyled from `windowDidBecomeKey` / `windowDidResignKey`
+    and an observation of `NSApp.effectiveAppearance`), all under a
+    webview that draws no canvas
+    (`drawsBackground` off, WebKit's KVC switch; there is no public
+    one on macOS). Finder's sidebar has been Liquid Glass since
+    macOS 26 and an effect view alone, in any material, renders the
+    older blur and lets far more of the desktop through (`.sidebar`,
+    `.menu` and `.underWindowBackground` all tried). The page paints
+    nothing at its root and its nav is transparent under
+    `[data-shell="mac"]`, so the glass shows through the sidebar and
+    the title bar over it, while `.content` and the side panel paint
+    the surface and stay opaque. In the browser the root's missing
+    background falls to the canvas, which `color-scheme` on the
+    theme rules keeps in step with the theme.
   - inbound, on `window.__monoplanHost`: `update(docId, bytes)` for
     `MirrorSink.update`, `stopped(docId)` for `MirrorSink.stopped`,
     `sync({online, lastSyncedAt})` with the host's `SyncStatus` (sent
