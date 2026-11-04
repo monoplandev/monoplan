@@ -248,13 +248,23 @@ export function Row(props: {
           setLinkifiedText(textRef, props.item().text);
           whenTokens().reset();
           queueMicrotask(() => {
-            textRef.focus();
-            const sel = window.getSelection();
-            const range = document.createRange();
-            range.selectNodeContents(textRef);
-            range.collapse(false);
-            sel?.removeAllRanges();
-            sel?.addRange(range);
+            // No focus-time reveal: the dnd controller scrolls the row
+            // into view on expansion (see `applyExpanded`), and Safari's
+            // own reveal would land on the caret's line box instead.
+            textRef.focus({ preventScroll: true });
+            // Only move the caret when there is text to put it after.
+            // Focus already lands it at the start, which is the end of
+            // an empty draft, and Safari reveals a programmatic range
+            // change with an instant jump that races the controller's
+            // scroll.
+            if (textRef.textContent) {
+              const sel = window.getSelection();
+              const range = document.createRange();
+              range.selectNodeContents(textRef);
+              range.collapse(false);
+              sel?.removeAllRanges();
+              sel?.addRange(range);
+            }
           });
           return;
         }

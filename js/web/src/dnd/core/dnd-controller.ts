@@ -651,24 +651,37 @@ export class DndController {
     const order = this.source.getOrder();
     const idx = order.indexOf(key);
     if (idx === -1) return;
+    const parent = this.opts.host.parent;
     const offset = this.virtualization.getScrollToOffset(
       idx,
-      this.opts.host.parent.scrollTop,
-      this.opts.host.parent.clientHeight,
+      parent.scrollTop,
+      parent.clientHeight,
     );
-    if (offset !== null) this.smoothScrollTo(offset);
+    if (offset === null) return;
+    // Scrolling down to the last row goes to the end of the content, not
+    // to the row's own bottom edge, so whatever trails it comes along:
+    // the host's bottom padding, and the capture slot when a real row is
+    // last. The row lands with room under it instead of flush against
+    // the viewport, and the slot shows as the next thing ArrowDown
+    // reaches. Read per step, once the host has rendered the row.
+    const toEnd = idx === order.length - 1 && offset > parent.scrollTop;
+    this.smoothScrollTo(
+      toEnd ? () => parent.scrollHeight - parent.clientHeight : offset,
+    );
   }
 
-  private smoothScrollTo(target: number): void {
+  private smoothScrollTo(target: number | (() => number)): void {
     if (this.scrollRaf !== null) cancelAnimationFrame(this.scrollRaf);
+    const parent = this.opts.host.parent;
     const step = () => {
-      const diff = target - this.opts.host.parent.scrollTop;
+      const t = typeof target === "function" ? target() : target;
+      const diff = t - parent.scrollTop;
       if (Math.abs(diff) < 1) {
-        this.opts.host.parent.scrollTop = target;
+        parent.scrollTop = t;
         this.scrollRaf = null;
         return;
       }
-      this.opts.host.parent.scrollTop += diff * 0.35;
+      parent.scrollTop += diff * 0.35;
       this.scrollRaf = requestAnimationFrame(step);
     };
     this.scrollRaf = requestAnimationFrame(step);
@@ -1313,6 +1326,13 @@ export class DndController {
       this.selection.selectOnly(next);
     }
     this.opts.onChange();
+    // Bring the expanded row into view ourselves, by slot geometry, the
+    // way arrow navigation does. The row's editor focuses with
+    // preventScroll, so this is the only scroll: left to the browser's
+    // focus-time reveal, Safari aligns the caret's line box to the
+    // nearest edge (the row's padding falls off the bottom) or, with an
+    // empty editable, does not scroll at all, while Chrome centres.
+    if (next !== null) this.scrollToKey(next);
   }
 
   private notifyExpanded(next: Key | null): void {
