@@ -4506,7 +4506,7 @@ input.task-check:hover {
 
 .palette {
   position: fixed;
-  top: clamp(24px, 10vh, 96px);
+  top: 50px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 101;
@@ -4550,7 +4550,7 @@ input.task-check:hover {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
+  padding: 4px 8px;
   border-radius: 3px;
   cursor: pointer;
   font-size: 15px;
