@@ -2,8 +2,9 @@
 //
 // On phones the desktop sidebar (and its footer chrome) is not rendered (see
 // Workspace.tsx). The left pill leads with icon-only jumps to the three
-// fixed views (Focus, Inbox, Upcoming, the same order as the sidebar's
-// top group, minus Done / Bin), then Menu (FindSheet.tsx: a page of its
+// fixed views (Inbox, Focus, Upcoming: the sidebar's top group minus
+// Done / Bin, with Inbox first since capture is the phone's main job),
+// then Menu (FindSheet.tsx: a page of its
 // own, with a `#menu` route and history entry, that doubles as the list
 // switcher and item search: on an empty query it lists Done, Bin and the
 // user lists, one card per workspace (the views this pill already reaches
@@ -59,15 +60,6 @@ export function MobileBars(props: {
         <button
           type="button"
           class="mobile-bar-btn mobile-bar-btn--labelled"
-          data-active={viewActive(props.view.kind === "focus")}
-          onClick={() => props.setView({ kind: "focus" })}
-        >
-          <span class="mobile-bar-icon" innerHTML={starSvg} aria-hidden="true" />
-          <span class="mobile-bar-label">{m().nav.focus}</span>
-        </button>
-        <button
-          type="button"
-          class="mobile-bar-btn mobile-bar-btn--labelled"
           data-active={viewActive(
             props.view.kind === "list" && props.view.id === "inbox",
           )}
@@ -80,6 +72,15 @@ export function MobileBars(props: {
             </Show>
           </span>
           <span class="mobile-bar-label">{m().nav.inbox}</span>
+        </button>
+        <button
+          type="button"
+          class="mobile-bar-btn mobile-bar-btn--labelled"
+          data-active={viewActive(props.view.kind === "focus")}
+          onClick={() => props.setView({ kind: "focus" })}
+        >
+          <span class="mobile-bar-icon" innerHTML={starSvg} aria-hidden="true" />
+          <span class="mobile-bar-label">{m().nav.focus}</span>
         </button>
         <button
           type="button"
