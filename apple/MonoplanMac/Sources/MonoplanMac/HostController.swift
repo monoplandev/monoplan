@@ -29,6 +29,9 @@ final class HostController {
     private let client: DaemonClient
     private var host: MonoplanCore.Host?
     private var starting = false
+    /// The host is being started (`Host.start` off the main thread):
+    /// the tray holds its launch-time window open until this settles.
+    var isStarting: Bool { starting }
     /// The last failed start, shown once and then retried.
     private var failure: String?
     /// A sign-in or sign-out in progress: what the menu says, and a

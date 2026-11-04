@@ -371,6 +371,7 @@ lives, and where it goes:
 | Devices: list, rename, revoke | `/api` through the proxy | A native Devices pane (built 2026-11-04): `GET` / `PATCH` / `DELETE /api/devices` with the host's token, straight from the app (`Devices` in `MonoplanMacKit`, tested; `APICredential` from `Host.session` + `Host.device_token`, fetched off the main thread). Loaded when the pane appears and after every change, never on doc events. This Mac is marked and cannot be revoked there (that is Sign Out). |
 | Advanced: per-workspace sync facts | engine state | Gone from the dialog in both clients (decided 2026-11-04): `monoplan.sync()` in the devtools console (`consoleApi.ts`, installed by `Workspace`) tables the same facts, status, seq, epoch, fingerprint, counts, doc id, and reads better for comparing two devices. The CLI's `workspace status --json` has the seq and pending state; the fingerprint joins it only when a cross-device comparison needs it. |
 | Open at login, CLI link, profile, host, build | — | Native only, as now. |
+| Open window at launch | — | Native only (built 2026-11-04): a toggle in the General pane, `UserDefaults`, on by default (`LaunchPreference`). The tray opens the window on the first client state once the host has settled, connected or not (not signed in, failed to start), never while it is still starting, so the page does not boot against no host and flash its error before the reload. Off leaves a launch tray-only. |
 
 **Transport** (built 2026-11-04: `WindowSettings` in
 `MonoplanMacKit`, the `typedDates` default, the app's language from

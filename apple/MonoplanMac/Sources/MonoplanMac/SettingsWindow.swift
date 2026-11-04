@@ -132,6 +132,9 @@ final class SettingsModel: ObservableObject {
     /// Settings › General, delivered to the window's page
     /// (`WindowSettings`).
     @Published var typedDates: Bool = WindowSettings.load().typedDates
+    /// Settings › General, read by the tray at the next launch
+    /// (`LaunchPreference`).
+    @Published var openWindowAtLaunch: Bool = LaunchPreference.openWindow()
     /// Settings › General, but doc content: the Home workspace's
     /// `show_list_counts` through the host (`WorkspaceSettings`). Nil
     /// until the host answers, and again when there is no host; the
@@ -297,6 +300,11 @@ final class SettingsModel: ObservableObject {
         s.save()
     }
 
+    func setOpenWindowAtLaunch(_ on: Bool) {
+        openWindowAtLaunch = on
+        LaunchPreference.setOpenWindow(on)
+    }
+
     /// Optimistic; the reply (the settings after the change) settles
     /// it, an error puts it back.
     func setShowListCounts(_ on: Bool) {
@@ -451,7 +459,8 @@ final class SettingsModel: ObservableObject {
 /// `NSApp.appearance`, which the webview follows through
 /// `prefers-color-scheme`; the page itself holds no theme in the app.
 /// The rest reach the page as `WindowSettings`, except list counts,
-/// which are the workspace's own and go through the host.
+/// which are the workspace's own and go through the host, and the
+/// launch toggle, which is the tray's (`LaunchPreference`).
 struct GeneralPane: View {
     @ObservedObject var model: SettingsModel
 
@@ -469,6 +478,10 @@ struct GeneralPane: View {
             Toggle("Recognise dates as you type", isOn: Binding(
                 get: { model.typedDates },
                 set: { model.setTypedDates($0) }
+            ))
+            Toggle("Open window at launch", isOn: Binding(
+                get: { model.openWindowAtLaunch },
+                set: { model.setOpenWindowAtLaunch($0) }
             ))
             Toggle("Show list counts", isOn: Binding(
                 get: { model.showListCounts ?? true },

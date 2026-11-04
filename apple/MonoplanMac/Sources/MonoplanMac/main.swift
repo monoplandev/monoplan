@@ -62,6 +62,11 @@ final class TrayController: NSObject, NSMenuDelegate {
     private var fetchError: String?
     private var refreshQueued = false
     private var minuteTimer: Timer?
+    /// Settings › General "Open window at launch": the window opens on
+    /// the first client state after the host has settled, running or
+    /// not (not signed in, failed to start), so the page never boots
+    /// against a host that is still starting. Cleared once used.
+    private var openWindowAtLaunch = LaunchPreference.openWindow()
 
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -80,6 +85,10 @@ final class TrayController: NSObject, NSMenuDelegate {
 
         client.onState = { [weak self] state in
             guard let self else { return }
+            if self.openWindowAtLaunch, !self.hostController.isStarting {
+                self.openWindowAtLaunch = false
+                self.webWindow.show()
+            }
             if case .connected(let sync) = state {
                 self.refresh()
                 self.webWindow.pushSync(sync)

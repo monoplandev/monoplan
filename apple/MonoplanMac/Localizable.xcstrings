@@ -521,6 +521,16 @@
         }
       }
     },
+    "Open window at launch": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir la ventana al iniciar"
+          }
+        }
+      }
+    },
     "Password": {
       "localizations": {
         "es": {
