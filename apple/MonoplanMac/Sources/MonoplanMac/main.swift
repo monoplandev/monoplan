@@ -372,12 +372,20 @@ final class TrayController: NSObject, NSMenuDelegate {
         webWindow.redo(sender)
     }
 
-    /// Edit › Undo / Redo follow the page's `undoState`; every other
-    /// item of ours is always available.
+    @objc func zoomInWindow(_ sender: Any?) { webWindow.zoomIn(sender) }
+    @objc func zoomOutWindow(_ sender: Any?) { webWindow.zoomOut(sender) }
+    @objc func actualSizeInWindow(_ sender: Any?) { webWindow.actualSize(sender) }
+
+    /// Edit › Undo / Redo follow the page's `undoState`, the zoom items
+    /// the ends of the ladder; every other item of ours is always
+    /// available.
     @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
         case #selector(undoInWindow(_:)): return webWindow.canUndo
         case #selector(redoInWindow(_:)): return webWindow.canRedo
+        case #selector(zoomInWindow(_:)): return webWindow.canZoomIn
+        case #selector(zoomOutWindow(_:)): return webWindow.canZoomOut
+        case #selector(actualSizeInWindow(_:)): return webWindow.canResetZoom
         default: return true
         }
     }
@@ -448,6 +456,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             reload: #selector(TrayController.reloadWindow(_:)),
             undo: #selector(TrayController.undoInWindow(_:)),
             redo: #selector(TrayController.redoInWindow(_:)),
+            zoomIn: #selector(TrayController.zoomInWindow(_:)),
+            zoomOut: #selector(TrayController.zoomOutWindow(_:)),
+            actualSize: #selector(TrayController.actualSizeInWindow(_:)),
             target: tray)
     }
 

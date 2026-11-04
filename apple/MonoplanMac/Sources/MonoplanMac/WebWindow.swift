@@ -78,6 +78,9 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// The Liquid Glass under the page's sidebar (macOS 26 and later,
     /// nil before), retinted as the window gains and loses key.
     private var sidebarGlass: NSView?
+    /// The glass's width: the page's sidebar column at the current
+    /// zoom (CSS pixels scale with `pageZoom`), plus the bleed.
+    private var sidebarGlassWidth: NSLayoutConstraint?
     /// Re-styles the glass when the app's appearance changes (Settings
     /// › General › Appearance, or the system).
     private var appearanceObservation: NSKeyValueObservation?
@@ -195,6 +198,49 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         webView?.evaluateJavaScript(HostInbound.redo.script)
     }
 
+    // MARK: Zoom
+
+    /// View › Zoom In / Zoom Out / Actual Size (`PageZoom`): the saved
+    /// level, applied to the webview as it is made and on each step.
+    private var zoom = PageZoom.load()
+    var canZoomIn: Bool { PageZoom.stepIn(from: zoom) != zoom }
+    var canZoomOut: Bool { PageZoom.stepOut(from: zoom) != zoom }
+    var canResetZoom: Bool { zoom != 1 }
+
+    @objc func zoomIn(_ sender: Any?) { setZoom(PageZoom.stepIn(from: zoom)) }
+    @objc func zoomOut(_ sender: Any?) { setZoom(PageZoom.stepOut(from: zoom)) }
+    @objc func actualSize(_ sender: Any?) { setZoom(1) }
+
+    /// The page reflows a frame or so after `pageZoom` changes, while
+    /// the constraint takes effect at once. Glass that is too wide for
+    /// a moment hides under the opaque main column; glass that is too
+    /// narrow shows the bare material past the sidebar's edge. So the
+    /// glass grows before the page and shrinks after it: the shrink
+    /// waits for the page to paint at the new size (two animation
+    /// frames in), and is dropped if the zoom moved again meanwhile.
+    private func setZoom(_ level: Double) {
+        let previous = zoom
+        zoom = level
+        PageZoom.save(level)
+        guard let webView else { return }
+        webView.pageZoom = level
+        if level >= previous {
+            sidebarGlassWidth?.constant = Self.glassWidth(at: level)
+            return
+        }
+        webView.callAsyncJavaScript(
+            "await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))",
+            in: nil, in: .page
+        ) { [weak self] _ in
+            guard let self, self.zoom == level else { return }
+            self.sidebarGlassWidth?.constant = Self.glassWidth(at: level)
+        }
+    }
+
+    private static func glassWidth(at zoom: Double) -> CGFloat {
+        sidebarWidth * CGFloat(zoom) + glassBleed
+    }
+
     /// Hand everything the page committed to the host, then `completion`
     /// (on the main queue). What quit waits for; a no-op without a page.
     func handOff(completion: @escaping () -> Void) {
@@ -243,6 +289,7 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         if #available(macOS 13.3, *) {
             webView.isInspectable = debug
         }
+        webView.pageZoom = zoom
         self.webView = webView
 
         // No title bar of its own: the page runs edge to edge and the
@@ -269,9 +316,11 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         window.minSize = NSSize(width: 520, height: 360)
         window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
-        let (content, glass) = Self.content(over: webView, bubbles: makeBubbles())
+        let (content, glass, glassWidth) = Self.content(over: webView, bubbles: makeBubbles())
         window.contentView = content
         sidebarGlass = glass
+        sidebarGlassWidth = glassWidth
+        glassWidth?.constant = Self.glassWidth(at: zoom)
         window.delegate = self
         applyGlassTint()
         appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
@@ -407,13 +456,16 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// `.sidebar`, `.menu` and `.underWindowBackground` on
     /// 2026-11-04). The page's nav paints nothing, so the glass
     /// shows through it; its main column covers the rest. Returns the
-    /// content view and the glass, for retinting.
-    private static func content(over webView: WKWebView, bubbles: NSView) -> (NSView, glass: NSView?) {
+    /// content view, the glass, for retinting, and its width
+    /// constraint, which follows the page zoom.
+    private static func content(over webView: WKWebView, bubbles: NSView)
+        -> (NSView, glass: NSView?, glassWidth: NSLayoutConstraint?) {
         let container = NSVisualEffectView()
         container.material = .underWindowBackground
         container.blendingMode = .behindWindow
         container.state = .followsWindowActiveState
         var glass: NSView?
+        var widthConstraint: NSLayoutConstraint?
         if #available(macOS 26, *) {
             let sheet = NSGlassEffectView()
             sheet.cornerRadius = 0
@@ -424,11 +476,13 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
             container.addSubview(v)
         }
         if let glass {
+            let width = glass.widthAnchor.constraint(equalToConstant: glassWidth(at: 1))
+            widthConstraint = width
             NSLayoutConstraint.activate([
                 glass.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: -glassBleed),
                 glass.topAnchor.constraint(equalTo: container.topAnchor, constant: -glassBleed),
                 glass.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: glassBleed),
-                glass.widthAnchor.constraint(equalToConstant: sidebarWidth + glassBleed),
+                width,
             ])
         }
         NSLayoutConstraint.activate([
@@ -440,7 +494,7 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
             bubbles.topAnchor.constraint(equalTo: container.topAnchor, constant: bubbleTop),
             bubbles.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -bubbleTrailing),
         ])
-        return (container, glass)
+        return (container, glass, widthConstraint)
     }
 
     /// Search then account, left to right. On macOS 26 and later each

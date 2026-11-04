@@ -259,7 +259,12 @@ first, backed by the in-process `HostCmd::Session` /
   app is `.regular` (Dock icon, the main menu in `MainMenu.swift`,
   whose Edit items are what let ⌘Z / ⌘C / ⌘V reach the webview; the
   page sees every key first, so the client's own shortcuts keep
-  winning); closed, it is a bare status item again.
+  winning; its View menu carries Reload and Safari's Zoom In / Zoom
+  Out / Actual Size, ⌘+ ⌘- ⌘0, 10% steps, two either side of 100%, applied
+  as the webview's `pageZoom` so the page reflows and the glass under
+  the sidebar widens with it, one level for the app saved in
+  `UserDefaults` under `pageZoom`, `PageZoom` in the Kit); closed, it
+  is a bare status item again.
 - `MirrorHostBridge` is the `WKScriptMessageHandlerWithReply` named
   `monoplan`, so `postMessage` resolves with the reply or rejects with
   the error text. Requests and replies, bytes as base64, the peer as a

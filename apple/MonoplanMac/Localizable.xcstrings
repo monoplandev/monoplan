@@ -91,6 +91,16 @@
         }
       }
     },
+    "Actual Size": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tamaño real"
+          }
+        }
+      }
+    },
     "Advanced": {
       "localizations": {
         "es": {
@@ -937,6 +947,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Zoom"
+          }
+        }
+      }
+    },
+    "Zoom In": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Acercar"
+          }
+        }
+      }
+    },
+    "Zoom Out": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alejar"
           }
         }
       }

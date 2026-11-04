@@ -15,7 +15,8 @@
 import AppKit
 
 enum MainMenu {
-    static func build(settings: Selector, reload: Selector, undo: Selector, redo: Selector, target: AnyObject) -> NSMenu {
+    static func build(settings: Selector, reload: Selector, undo: Selector, redo: Selector,
+                      zoomIn: Selector, zoomOut: Selector, actualSize: Selector, target: AnyObject) -> NSMenu {
         let main = NSMenu()
 
         let app = NSMenu()
@@ -50,6 +51,19 @@ enum MainMenu {
         let view = NSMenu(title: String(localized: "View"))
         let reloadItem = view.addItem(withTitle: String(localized: "Reload"), action: reload, keyEquivalent: "r")
         reloadItem.target = target
+        view.addItem(.separator())
+        // Page zoom, Safari's items. ⌘+ is really ⌘⇧= on most layouts,
+        // so Zoom In also answers plain ⌘= through a hidden twin, as
+        // Safari does; the menu shows one row.
+        let zoomInItem = view.addItem(withTitle: String(localized: "Zoom In"), action: zoomIn, keyEquivalent: "+")
+        zoomInItem.target = target
+        let zoomInTwin = view.addItem(withTitle: String(localized: "Zoom In"), action: zoomIn, keyEquivalent: "=")
+        zoomInTwin.target = target
+        zoomInTwin.isHidden = true
+        let zoomOutItem = view.addItem(withTitle: String(localized: "Zoom Out"), action: zoomOut, keyEquivalent: "-")
+        zoomOutItem.target = target
+        let actualSizeItem = view.addItem(withTitle: String(localized: "Actual Size"), action: actualSize, keyEquivalent: "0")
+        actualSizeItem.target = target
         view.addItem(.separator())
         // AppKit retitles this to "Exit Full Screen" while the window is in
         // full screen. ⌃⌘F is the system binding; fn-F keeps working too.
