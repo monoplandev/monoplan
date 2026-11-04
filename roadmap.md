@@ -2,6 +2,10 @@
 
 - onAuthFailed → logout() → dekVault.clear() - a little bit blunt and not quite in local-first spirit, wipe-dek-to-anonymous the wrong response
 
+# UX observations/recos
+
+- watching someone unfamiliar checking an item then having it disappear from the list while still selecetd? should lingering items stay up after checking while you’re still on that note
+
 ## Sync & persistence
 
 - Report catch-up volume in `HelloAck` so clients can show progress and we can observe snapshot-vs-tail sync weight.
