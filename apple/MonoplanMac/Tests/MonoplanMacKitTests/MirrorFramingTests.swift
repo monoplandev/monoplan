@@ -63,11 +63,11 @@ final class MirrorFramingTests: XCTestCase {
             "window.__monoplanHost.update(\"d1\", \"AP8=\")")
         XCTAssertEqual(HostInbound.stopped(docId: "d\"1").script, "window.__monoplanHost.stopped(\"d\\\"1\")")
         XCTAssertEqual(
-            HostInbound.sync(online: true, lastSyncedAt: 1_700_000_000_000).script,
-            "window.__monoplanHost.sync({online: true, lastSyncedAt: 1700000000000})")
+            HostInbound.sync(online: true, lastSyncedAt: 1_700_000_000_000, pending: false).script,
+            "window.__monoplanHost.sync({online: true, lastSyncedAt: 1700000000000, pending: false})")
         XCTAssertEqual(
-            HostInbound.sync(online: false, lastSyncedAt: nil).script,
-            "window.__monoplanHost.sync({online: false, lastSyncedAt: null})")
+            HostInbound.sync(online: false, lastSyncedAt: nil, pending: true).script,
+            "window.__monoplanHost.sync({online: false, lastSyncedAt: null, pending: true})")
         XCTAssertEqual(HostInbound.handOff.script, "window.__monoplanHost.handOff()")
         XCTAssertEqual(HostInbound.undo.script, "window.__monoplanHost.undo()")
         XCTAssertEqual(HostInbound.redo.script, "window.__monoplanHost.redo()")

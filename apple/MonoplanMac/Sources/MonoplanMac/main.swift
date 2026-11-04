@@ -14,6 +14,7 @@
 
 import AppKit
 import MonoplanMacKit
+import Network
 
 /// The web client in the browser, for what the window does not do:
 /// creating an account (the sign-in sheet's link). Signup wraps a DEK
@@ -62,6 +63,13 @@ final class TrayController: NSObject, NSMenuDelegate {
     private var fetchError: String?
     private var refreshQueued = false
     private var minuteTimer: Timer?
+    /// The network as the system sees it. The host's own liveness ping
+    /// takes up to a minute to notice a dead socket after a Wi-Fi
+    /// change or a wake; a path change or a wake tells it to reconnect
+    /// now instead (`Request::Reconnect`).
+    private var pathMonitor: NWPathMonitor?
+    private var lastPath: NWPath?
+    private var reconnectQueued = false
     /// Settings › General "Open window at launch": the window opens on
     /// the first client state after the host has settled, running or
     /// not (not signed in, failed to start), so the page never boots
@@ -117,6 +125,44 @@ final class TrayController: NSObject, NSMenuDelegate {
             self?.refresh()
         }
         minuteTimer?.tolerance = 5
+
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            DispatchQueue.main.async { self?.pathChanged(path) }
+        }
+        monitor.start(queue: DispatchQueue(label: "app.monoplan.mac.path"))
+        pathMonitor = monitor
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
+    }
+
+    // MARK: Network
+
+    /// The first callback describes the path as it is; only a change
+    /// after that is news. A change is any difference (status, the
+    /// interfaces in use), since a healthy-looking socket over a gone
+    /// interface is exactly the case the ping is slow to catch.
+    private func pathChanged(_ path: NWPath) {
+        defer { lastPath = path }
+        guard let previous = lastPath, previous != path else { return }
+        scheduleReconnect()
+    }
+
+    @objc private func didWake() {
+        scheduleReconnect()
+    }
+
+    /// Coalesce the burst a wake produces (several path updates and the
+    /// wake itself) into one reconnect. Nothing to do without a host;
+    /// the request fails quietly then.
+    private func scheduleReconnect() {
+        if reconnectQueued { return }
+        reconnectQueued = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self else { return }
+            self.reconnectQueued = false
+            self.client.send(.reconnect) { _ in }
+        }
     }
 
     // MARK: Data

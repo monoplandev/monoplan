@@ -3,6 +3,7 @@ import { ContextMenu } from "@kobalte/core/context-menu";
 import checkSvg from "./icons/check.svg?raw";
 import crossSvg from "./icons/cross.svg?raw";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
+import plusSvg from "./icons/plus.svg?raw";
 import starFilledSvg from "./icons/star-filled.svg?raw";
 import usersSvg from "./icons/users.svg?raw";
 import { DndSelection } from "./dnd/solid";
@@ -357,31 +358,38 @@ export function Row(props: {
           props.onOpen?.(props.item().id);
         }}
       >
-        <input
-          type="checkbox"
-          class="task-check"
-          tabIndex={-1}
-          checked={isClosed(props.item())}
-          data-cancelled={isCancelled(props.item()) ? "" : undefined}
-          onMouseDown={(e) => {
-            // Clicking still focuses the checkbox despite tabIndex=-1, and
-            // the lingering focus makes a later Space press re-toggle it.
-            // Preventing mousedown's default suppresses the focus move while
-            // the click (and toggle) still fire.
-            e.preventDefault();
-          }}
-          onChange={(e) => {
-            const id = props.item().id;
-            // Un-checking a lingering row in Focus re-pins it (closing
-            // dropped its ref); elsewhere it's a plain lifecycle flip. A
-            // cancelled row un-checks the same way (closed → Backlog).
-            if (!e.currentTarget.checked && props.viewKind === "focus") {
-              props.app.undoneIntoFocus([id]);
-            } else {
-              props.app.setDone(id, e.currentTarget.checked);
-            }
-          }}
-        />
+        {/* A draft keeps the trailer's plus until it commits: it is
+            still "add an item", not an item to tick. */}
+        <Show
+          when={!isDraftId(props.item().id)}
+          fallback={<span class="row-new-check" aria-hidden="true" innerHTML={plusSvg} />}
+        >
+          <input
+            type="checkbox"
+            class="task-check"
+            tabIndex={-1}
+            checked={isClosed(props.item())}
+            data-cancelled={isCancelled(props.item()) ? "" : undefined}
+            onMouseDown={(e) => {
+              // Clicking still focuses the checkbox despite tabIndex=-1, and
+              // the lingering focus makes a later Space press re-toggle it.
+              // Preventing mousedown's default suppresses the focus move while
+              // the click (and toggle) still fire.
+              e.preventDefault();
+            }}
+            onChange={(e) => {
+              const id = props.item().id;
+              // Un-checking a lingering row in Focus re-pins it (closing
+              // dropped its ref); elsewhere it's a plain lifecycle flip. A
+              // cancelled row un-checks the same way (closed → Backlog).
+              if (!e.currentTarget.checked && props.viewKind === "focus") {
+                props.app.undoneIntoFocus([id]);
+              } else {
+                props.app.setDone(id, e.currentTarget.checked);
+              }
+            }}
+          />
+        </Show>
         <Show when={leadingStamp() && rowStamp()}>
           {(ts) => (
             <span class="row-timestamp row-timestamp-lead" title={stampTitle(ts())}>

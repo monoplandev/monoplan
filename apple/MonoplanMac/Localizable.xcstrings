@@ -501,16 +501,6 @@
         }
       }
     },
-    "Online": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "En línea"
-          }
-        }
-      }
-    },
     "Open Monoplan": {
       "localizations": {
         "es": {
@@ -857,6 +847,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Sincronización"
+          }
+        }
+      }
+    },
+    "Synced": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sincronizado"
+          }
+        }
+      }
+    },
+    "Synced · %@ ago": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sincronizado · hace %@"
+          }
+        }
+      }
+    },
+    "Syncing…": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sincronizando…"
           }
         }
       }

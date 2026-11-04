@@ -153,6 +153,8 @@ pub struct DaemonStatus {
     pub offline_reason: Option<String>,
     /// No account: the host never connects (see `ipc::SyncStatus`).
     pub local_only: bool,
+    /// Unconfirmed local work (see `ipc::SyncStatus`).
+    pub pending: bool,
     /// Contiguous-prefix server seq the engine has applied in memory.
     pub last_contiguous_seq: u64,
     pub connects: u32,
@@ -165,6 +167,7 @@ impl DaemonStatus {
             last_synced_at: self.last_synced_at,
             offline_reason: self.offline_reason.clone(),
             local_only: self.local_only,
+            pending: self.pending,
         }
     }
 }
@@ -1323,6 +1326,19 @@ impl Host {
                     return Ok(false);
                 }
             }
+            Request::Reconnect => {
+                if !self.local_only {
+                    self.backoff = BACKOFF_MIN;
+                    if self.ws.is_some() {
+                        self.disconnect("network changed");
+                    } else if self.connecting.is_none() {
+                        self.next_connect = Instant::now();
+                    }
+                }
+                Reply::Synced {
+                    sync: self.sync_status(),
+                }
+            }
             Request::Account => match self.session.account() {
                 Ok(a) => match a.identity {
                     Some(i) => Reply::Account {
@@ -1403,6 +1419,7 @@ impl Host {
             last_synced_at: self.session.last_synced_at(),
             offline_reason: self.offline_reason.clone(),
             local_only: self.local_only,
+            pending: self.has_pending_work(),
         };
         for tx in self.pending_syncs.drain(..) {
             let _ = tx.send(Reply::Synced { sync: sync.clone() });
@@ -1415,11 +1432,21 @@ impl Host {
             last_synced_at: self.session.last_synced_at(),
             offline_reason: self.offline_reason.clone(),
             local_only: self.local_only,
+            pending: self.has_pending_work(),
         }
     }
 
     fn is_online(&self) -> bool {
         self.ws.is_some() && self.session.home_engine().is_online()
+    }
+
+    /// Anything the server has not confirmed: committed ops not yet
+    /// pushed or a push in flight on any doc, or, while the socket is
+    /// up, an engine still opening or pulling. `online` alone flips
+    /// true at the handshake, before a byte of the doc has moved, so
+    /// this is what separates "syncing" from "synced".
+    fn has_pending_work(&self) -> bool {
+        self.session.any_unsynced_ops() || (self.ws.is_some() && !self.session.all_idle())
     }
 
     async fn on_ws_message(
@@ -1521,7 +1548,17 @@ impl Host {
                         tracing::warn!("mark_synced: {e}");
                     }
                 }
-                Event::FrontierAdvanced { .. } => {}
+                // A live batch from another device, applied: an
+                // exchange completed, so the stamp moves. Not during
+                // the initial pull, which stamps once on `PulledInitial`
+                // rather than once per batch.
+                Event::FrontierAdvanced { .. } => {
+                    if self.session.engine_idle(doc_id)
+                        && let Err(e) = self.session.mark_synced(doc_id)
+                    {
+                        tracing::warn!("mark_synced: {e}");
+                    }
+                }
                 // Who else has the doc open. Nothing in the CLI shows
                 // it yet; the web client's navbar does.
                 Event::Presence { .. } => {}
@@ -1602,6 +1639,7 @@ impl Host {
             last_synced_at: self.session.last_synced_at(),
             offline_reason: self.offline_reason.clone(),
             local_only: self.local_only,
+            pending: self.has_pending_work(),
             last_contiguous_seq: self.session.home_engine().last_contiguous_seq(),
             connects: self.status.borrow().connects,
         };

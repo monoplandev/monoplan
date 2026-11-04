@@ -394,6 +394,18 @@ impl Session {
         self.docs.values().all(|d| d.engine.is_idle())
     }
 
+    /// Whether `doc_id`'s engine is idle (past its initial pull, no
+    /// push in flight); false for a doc this session does not hold.
+    pub(crate) fn engine_idle(&self, doc_id: DocId) -> bool {
+        self.docs.get(&doc_id).is_some_and(|d| d.engine.is_idle())
+    }
+
+    /// Committed ops the server has not acked, or a push in flight, on
+    /// any doc: the browser footer's "pending" (`hasUnsyncedOps`).
+    pub(crate) fn any_unsynced_ops(&self) -> bool {
+        self.docs.values().any(|d| d.engine.has_unsynced_ops())
+    }
+
     /// Hand a post-handshake server frame to the engine it is about.
     /// A frame for a doc this session does not hold is dropped (the
     /// server only sends frames for docs we opened, so this is a race

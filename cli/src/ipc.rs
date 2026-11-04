@@ -40,6 +40,12 @@ pub enum Request {
     },
     /// Push now and report whether the server is reachable.
     Sync,
+    /// The network changed under the host (a path change, a wake from
+    /// sleep): drop the socket if there is one and connect again now,
+    /// rather than waiting for the liveness ping to miss its pong and
+    /// the backoff to run out. The reply is `Synced` with the status
+    /// as of the drop; the watch carries the reconnect.
+    Reconnect,
     /// Who is logged in: the account row the daemon booted with. Read
     /// here rather than from the profile files so a client that holds
     /// no db (the menubar app) still gets the email.
@@ -129,6 +135,13 @@ pub struct SyncStatus {
     /// so an account's replies are byte-for-byte what they were.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub local_only: bool,
+    /// Local work the server has not confirmed yet: an engine still
+    /// opening or pulling, a push in flight, or committed ops not yet
+    /// pushed (`SyncEngine::has_unsynced_ops`). With `online` this
+    /// gives a client the browser footer's four states: offline,
+    /// syncing, synced. Absent on the wire when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pending: bool,
 }
 
 impl SyncStatus {
@@ -287,6 +300,7 @@ mod tests {
             last_synced_at: Some(5),
             offline_reason: None,
             local_only: false,
+            pending: false,
         };
         write_frame(&mut a, &Reply::Synced { sync }).await.unwrap();
         drop(a);
@@ -301,6 +315,7 @@ mod tests {
                     last_synced_at: Some(5),
                     offline_reason: None,
                     local_only: false,
+                    pending: false,
                 }
             }
         ));
@@ -379,6 +394,7 @@ mod tests {
             last_synced_at: Some(7),
             offline_reason: None,
             local_only: false,
+            pending: false,
         };
         assert_eq!(
             shape(&Reply::Watching { sync: sync.clone() }),
@@ -408,6 +424,7 @@ mod tests {
             last_synced_at: None,
             offline_reason: None,
             local_only: false,
+            pending: false,
         };
         assert!(online.offline_notice(0).is_none());
         let never = SyncStatus {
@@ -415,6 +432,7 @@ mod tests {
             last_synced_at: None,
             offline_reason: None,
             local_only: false,
+            pending: false,
         };
         assert_eq!(never.offline_notice(0).unwrap(), "offline; never synced");
         // A local-only workspace is never offline from anything, and
@@ -433,6 +451,7 @@ mod tests {
             last_synced_at: Some(1_000),
             offline_reason: Some("TLS support not compiled in".into()),
             local_only: false,
+            pending: false,
         };
         assert_eq!(
             stale.offline_notice(1_000 + 3 * 60_000).unwrap(),

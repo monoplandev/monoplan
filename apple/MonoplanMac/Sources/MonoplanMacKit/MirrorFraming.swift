@@ -144,7 +144,7 @@ public enum HostReply {
 public enum HostInbound: Equatable {
     case update(docId: String, bytes: Data)
     case stopped(docId: String)
-    case sync(online: Bool, lastSyncedAt: Int64?)
+    case sync(online: Bool, lastSyncedAt: Int64?, pending: Bool)
     case handOff
     /// The app's device settings changed (`WindowSettings`).
     case settings(WindowSettings)
@@ -167,9 +167,9 @@ public enum HostInbound: Equatable {
             return "\(Self.global).update(\(json(docId)), \(json(bytes.base64EncodedString())))"
         case .stopped(let docId):
             return "\(Self.global).stopped(\(json(docId)))"
-        case .sync(let online, let at):
+        case .sync(let online, let at, let pending):
             let last = at.map(String.init) ?? "null"
-            return "\(Self.global).sync({online: \(online ? "true" : "false"), lastSyncedAt: \(last)})"
+            return "\(Self.global).sync({online: \(online ? "true" : "false"), lastSyncedAt: \(last), pending: \(pending ? "true" : "false")})"
         case .handOff:
             return "\(Self.global).handOff()"
         case .settings(let settings):

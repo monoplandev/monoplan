@@ -244,6 +244,8 @@ struct SyncStatus {
     online: bool,                // socket up and the doc open on it right now
     last_synced_at: Option<i64>, // unix millis of the last completed exchange,
                                  // persisted beside the sync cursor across runs
+    pending: bool,               // unconfirmed local work on any doc (built
+                                 // 2026-11-04; `spec/cli.md` "Daemon behaviour")
 }
 
 enum AppEvent {

@@ -3482,7 +3482,7 @@ export function Workspace(props: {
                           startDraft(items().length);
                         }}
                       >
-                        <span class="task-check row-new-check" aria-hidden="true" />
+                        <span class="row-new-check" aria-hidden="true" innerHTML={plusSvg} />
                         <div class="row-body">
                           <span class="row-text row-new-text">
                             {m().workspace.newItemPlaceholder}

@@ -1651,8 +1651,24 @@ input.task-check:hover {
   border-bottom-color: transparent;
 }
 
+/* A plus, not a faint checkbox: a dim box reads as a disabled item, a
+   plus reads as "add here". The trailer and the open draft both show
+   it (the draft only grows a checkbox once it commits as an item). The
+   shared plus.svg sits in the checkbox's 15px slot with the same
+   optical nudge as `.row .task-check`. */
 .row-new-check {
-  opacity: 0.45;
+  position: relative;
+  top: 2px;
+  display: inline-flex;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  color: var(--text-empty);
+}
+
+.row-new-check svg {
+  width: 15px;
+  height: 15px;
 }
 
 .row-new-text {

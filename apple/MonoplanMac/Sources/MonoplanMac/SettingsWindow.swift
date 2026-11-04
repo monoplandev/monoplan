@@ -249,7 +249,7 @@ final class SettingsModel: ObservableObject {
             if let d = client.daemon {
                 buildLine = Self.withCommit(String(d.buildId.split(separator: ":", maxSplits: 1).first ?? ""))
             }
-            syncLine = sync.online ? String(localized: "Online") : (sync.offlineNotice() ?? String(localized: "Offline"))
+            syncLine = sync.line()
             client.send(.account) { [weak self] result in
                 if case .success(.account(_, let email, _)) = result {
                     self?.email = email

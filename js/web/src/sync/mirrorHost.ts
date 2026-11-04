@@ -99,6 +99,9 @@ export interface HostSyncStatus {
   /** Unix millis of the last completed exchange, on any run of the
    *  host, or null if it never synced. */
   lastSyncedAt: number | null;
+  /** Local work the server has not confirmed (an engine still pulling,
+   *  a push in flight, ops not yet pushed): the footer's "syncing". */
+  pending: boolean;
 }
 
 /** What the app calls on `window.__monoplanHost`. */

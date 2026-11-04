@@ -249,13 +249,13 @@ describe("the WebKit host transport", () => {
     // The host's sync status: a push before anyone listens is replayed
     // to the first listener (the app sends it as soon as the page is
     // up, before the runtime exists), later ones arrive live.
-    inbound.sync({ online: false, lastSyncedAt: null });
-    const statuses: Array<{ online: boolean; lastSyncedAt: number | null }> = [];
+    inbound.sync({ online: false, lastSyncedAt: null, pending: false });
+    const statuses: Array<{ online: boolean; lastSyncedAt: number | null; pending: boolean }> = [];
     appHost.onSync((st) => statuses.push(st));
-    inbound.sync({ online: true, lastSyncedAt: 1700000000000 });
+    inbound.sync({ online: true, lastSyncedAt: 1700000000000, pending: true });
     expect(statuses).toEqual([
-      { online: false, lastSyncedAt: null },
-      { online: true, lastSyncedAt: 1700000000000 },
+      { online: false, lastSyncedAt: null, pending: false },
+      { online: true, lastSyncedAt: 1700000000000, pending: true },
     ]);
 
     // Hand-off: resolved at once until the runtime binds its own, then

@@ -60,6 +60,30 @@ final class DaemonClientTests: XCTestCase {
             .event(.sync(SyncStatus(online: true, lastSyncedAt: 99)))
         )
         XCTAssertEqual(try Reply.parse(.map(["Err": .map(["message": .string("no")])])), .error("no"))
+        // `pending` and `Synced` (the `Reconnect` reply) are newer than
+        // the fields above; absent `pending` reads as false.
+        let busy: MPValue = .map(["online": .bool(true), "last_synced_at": .int(99), "pending": .bool(true)])
+        XCTAssertEqual(
+            try Reply.parse(.map(["Synced": .map(["sync": busy])])),
+            .synced(sync: SyncStatus(online: true, lastSyncedAt: 99, pending: true))
+        )
+        XCTAssertEqual(Request.reconnect.value, .string("Reconnect"))
+    }
+
+    func testSyncStatusLine() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let at = Int64(1_000_000 - 120) * 1000
+        XCTAssertEqual(SyncStatus(online: true, lastSyncedAt: at).level, .synced)
+        XCTAssertEqual(SyncStatus(online: true, lastSyncedAt: at).line(now: now), "Synced · 2m ago")
+        XCTAssertEqual(SyncStatus(online: true, lastSyncedAt: nil).line(now: now), "Synced")
+        XCTAssertEqual(SyncStatus(online: true, lastSyncedAt: at, pending: true).level, .syncing)
+        XCTAssertEqual(SyncStatus(online: true, lastSyncedAt: at, pending: true).line(now: now), "Syncing…")
+        // Offline with unconfirmed work is still offline: the dot and
+        // the line say so, not "syncing".
+        let off = SyncStatus(online: false, lastSyncedAt: at, offlineReason: "pong timeout", pending: true)
+        XCTAssertEqual(off.level, .offline)
+        XCTAssertEqual(off.line(now: now), "Offline · last synced 2m ago · pong timeout")
+        XCTAssertNil(SyncStatus(online: true, lastSyncedAt: at).offlineNotice(now: now))
         XCTAssertEqual(
             try Reply.parse(.map(["Account": .map([
                 "account_id": .string("a"), "email": .string("e"), "device_id": .string("d"),

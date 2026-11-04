@@ -73,6 +73,12 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     private var accountEmail: String?
     /// The account bubble's menu, filled in on open (`menuNeedsUpdate`).
     private let accountMenu = NSMenu()
+    /// The host's latest sync status: the dot on the account bubble
+    /// and the line under the email in its menu.
+    private var syncStatus: SyncStatus?
+    /// The dot on the account bubble's shoulder: amber while syncing,
+    /// red while offline, hidden when synced so the quiet state is quiet.
+    private var syncDot: NSView?
     private let schemeHandler: AppSchemeHandler
     private var webView: WKWebView?
     /// The Liquid Glass under the page's sidebar (macOS 26 and later,
@@ -169,10 +175,27 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         window?.makeKeyAndOrderFront(nil)
     }
 
-    /// The host's sync status, for the page's footer. Kept and replayed
-    /// on load, pushed live afterwards.
+    /// The host's sync status: the account bubble's dot and menu line
+    /// here, and the page's copy, kept and replayed on load, pushed
+    /// live afterwards.
     func pushSync(_ status: SyncStatus) {
+        syncStatus = status
+        applySyncDot()
         bridge.pushSync(status, into: webView)
+    }
+
+    private func applySyncDot() {
+        guard let dot = syncDot else { return }
+        switch syncStatus?.level {
+        case .syncing?:
+            dot.layer?.backgroundColor = NSColor.systemOrange.cgColor
+            dot.isHidden = false
+        case .offline?:
+            dot.layer?.backgroundColor = NSColor.systemRed.cgColor
+            dot.isHidden = false
+        case .synced?, nil:
+            dot.isHidden = true
+        }
     }
 
     /// A host is serving again after none was: the page booted against
@@ -398,6 +421,9 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// than the gap, so the pair reads as one piece of glass pinched in
     /// the middle rather than two discs.
     private static let bubbleMerge: CGFloat = 10
+    /// The sync dot's diameter, sitting on the account bubble's
+    /// top-right shoulder, a hair outside the disc.
+    private static let dotSize: CGFloat = 8
 
     /// The webview edge to edge with the bubbles floating over its
     /// top-right corner. They are added last so they draw (and
@@ -538,6 +564,26 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         }
         constraints.append(row.trailingAnchor.constraint(equalTo: leading))
         NSLayoutConstraint.activate(constraints)
+        // The sync dot, over the account bubble (added last, so it
+        // paints above the glass). A plain view: the container only
+        // melts glass, so it leaves this alone.
+        let dot = NSView()
+        dot.wantsLayer = true
+        dot.layer?.cornerRadius = Self.dotSize / 2
+        dot.isHidden = true
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        dot.setAccessibilityElement(false)
+        row.addSubview(dot)
+        if let account = items.last {
+            NSLayoutConstraint.activate([
+                dot.widthAnchor.constraint(equalToConstant: Self.dotSize),
+                dot.heightAnchor.constraint(equalToConstant: Self.dotSize),
+                dot.trailingAnchor.constraint(equalTo: account.trailingAnchor, constant: 1),
+                dot.topAnchor.constraint(equalTo: account.topAnchor, constant: -1),
+            ])
+        }
+        syncDot = dot
+        applySyncDot()
         if #available(macOS 26, *) {
             let group = NSGlassEffectContainerView()
             group.spacing = Self.bubbleMerge
@@ -570,9 +616,10 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         accountMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: -4), in: sender)
     }
 
-    /// Built on every open: who is signed in, the Account pane, and
-    /// sign out or sign in. The email is the one the page booted with,
-    /// dropped once the profile is signed out.
+    /// Built on every open: who is signed in, the host's sync state
+    /// (built here so the relative time is fresh), the Account pane,
+    /// and sign out or sign in. The email is the one the page booted
+    /// with, dropped once the profile is signed out.
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === accountMenu else { return }
         menu.removeAllItems()
@@ -582,6 +629,11 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
             action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
+        if signedIn, let syncStatus {
+            let sync = NSMenuItem(title: syncStatus.line(), action: nil, keyEquivalent: "")
+            sync.isEnabled = false
+            menu.addItem(sync)
+        }
         menu.addItem(.separator())
         func add(_ title: String, _ action: Selector) {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
@@ -757,7 +809,8 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     }
 
     private func push(_ status: SyncStatus, into webView: WKWebView) {
-        webView.evaluateJavaScript(HostInbound.sync(online: status.online, lastSyncedAt: status.lastSyncedAt).script)
+        webView.evaluateJavaScript(
+            HostInbound.sync(online: status.online, lastSyncedAt: status.lastSyncedAt, pending: status.pending).script)
     }
 
     /// Ask the page to flush to the host and wait for the imports that

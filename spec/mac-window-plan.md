@@ -332,11 +332,14 @@ first, backed by the in-process `HostCmd::Session` /
     theme rules keeps in step with the theme.
   - inbound, on `window.__monoplanHost`: `update(docId, bytes)` for
     `MirrorSink.update`, `stopped(docId)` for `MirrorSink.stopped`,
-    `sync({online, lastSyncedAt})` with the host's `SyncStatus` (sent
-    once the page is up and on every change, from the tray's watch;
-    the page keeps it for `session.online()`, though the window's
-    sidebar has no footer to show it in since 2026-11-04, the tray's
-    offline notice being the surface), and `handOff()`, which
+    `sync({online, lastSyncedAt, pending})` with the host's
+    `SyncStatus` (sent once the page is up and on every change, from
+    the tray's watch; the page keeps it for `session.online()`, though
+    the window's sidebar has no footer to show it in since 2026-11-04:
+    the window's surface is the account bubble, a dot on its shoulder
+    while syncing (amber) or offline (red), none when synced, and a
+    line under the email in its menu, "Syncing…" / "Synced · 2m ago"
+    / the offline notice, built on open), and `handOff()`, which
     flushes everything committed to the host and resolves once the
     host has answered the imports it caused.
   Calls that block in Rust (`session`, `subscribe`, `import`) run on

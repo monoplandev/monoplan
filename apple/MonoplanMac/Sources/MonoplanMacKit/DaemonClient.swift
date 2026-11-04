@@ -19,11 +19,28 @@ public struct SyncStatus: Equatable {
     /// Why the host is offline, when it knows (a failed connect, a
     /// dropped socket); nil while online or before the first attempt.
     public let offlineReason: String?
+    /// Local work the server has not confirmed: an engine still
+    /// pulling, a push in flight, or ops not yet pushed. Absent on the
+    /// wire when false.
+    public let pending: Bool
 
-    public init(online: Bool, lastSyncedAt: Int64?, offlineReason: String? = nil) {
+    public init(online: Bool, lastSyncedAt: Int64?, offlineReason: String? = nil, pending: Bool = false) {
         self.online = online
         self.lastSyncedAt = lastSyncedAt
         self.offlineReason = offlineReason
+        self.pending = pending
+    }
+
+    /// The browser footer's fold of the two facts (js/web/src/syncFacts.tsx).
+    public enum Level: Equatable {
+        case offline
+        case syncing
+        case synced
+    }
+
+    public var level: Level {
+        if !online { return .offline }
+        return pending ? .syncing : .synced
     }
 
     /// Mirrors `SyncStatus::offline_notice` in cli/src/ipc.rs.
@@ -31,13 +48,7 @@ public struct SyncStatus: Equatable {
         if online { return nil }
         var line: String
         if let at = lastSyncedAt {
-            let secs = max(0, Int(now.timeIntervalSince1970) - Int(at / 1000))
-            let ago: String
-            if secs < 60 { ago = String(localized: "\(secs)s") }
-            else if secs < 3600 { ago = String(localized: "\(secs / 60)m") }
-            else if secs < 86_400 { ago = String(localized: "\(secs / 3600)h") }
-            else { ago = String(localized: "\(secs / 86_400)d") }
-            line = String(localized: "Offline · last synced \(ago) ago")
+            line = String(localized: "Offline · last synced \(Self.ago(since: at, now: now)) ago")
         } else {
             line = String(localized: "Offline · never synced")
         }
@@ -45,17 +56,47 @@ public struct SyncStatus: Equatable {
         return line
     }
 
+    /// One line for any state: "Syncing…", "Synced · 2m ago", or the
+    /// offline notice. What the window's account menu and the Settings
+    /// window show.
+    public func line(now: Date = Date()) -> String {
+        switch level {
+        case .syncing:
+            return String(localized: "Syncing…")
+        case .synced:
+            if let at = lastSyncedAt {
+                return String(localized: "Synced · \(Self.ago(since: at, now: now)) ago")
+            }
+            return String(localized: "Synced")
+        case .offline:
+            return offlineNotice(now: now) ?? String(localized: "Offline")
+        }
+    }
+
+    /// `12s`, `3m`, `2h`, `5d`: the CLI's `ago` (cli/src/ipc.rs).
+    static func ago(since millis: Int64, now: Date) -> String {
+        let secs = max(0, Int(now.timeIntervalSince1970) - Int(millis / 1000))
+        if secs < 60 { return String(localized: "\(secs)s") }
+        if secs < 3600 { return String(localized: "\(secs / 60)m") }
+        if secs < 86_400 { return String(localized: "\(secs / 3600)h") }
+        return String(localized: "\(secs / 86_400)d")
+    }
+
     static func from(_ v: MPValue?) -> SyncStatus? {
         guard let online = v?["online"]?.boolValue else { return nil }
         return SyncStatus(
             online: online, lastSyncedAt: v?["last_synced_at"]?.intValue,
-            offlineReason: v?["offline_reason"]?.stringValue)
+            offlineReason: v?["offline_reason"]?.stringValue,
+            pending: v?["pending"]?.boolValue ?? false)
     }
 }
 
 public enum Request {
     case hello(buildId: String)
     case watch
+    /// The network changed under the host (path change, wake): drop
+    /// the socket and connect again now (`Request::Reconnect`).
+    case reconnect
     case agenda(days: Int)
     /// `monoplan focus --json`: the Starred lens (spec/focus.md).
     case focus
@@ -76,6 +117,8 @@ public enum Request {
             return .map(["Hello": .map(["build_id": .string(buildId)])])
         case .watch:
             return .string("Watch")
+        case .reconnect:
+            return .string("Reconnect")
         // `Doc { workspace?, cmd }`: no `workspace` means the Personal
         // workspace (`spec/cli.md` §Workspaces), which is all the app shows.
         case .agenda(let days):
@@ -107,6 +150,7 @@ public enum Reply: Equatable {
     case hello(buildId: String, pid: Int64, sync: SyncStatus)
     case output(stdout: String, sync: SyncStatus)
     case watching(sync: SyncStatus)
+    case synced(sync: SyncStatus)
     case account(accountId: String, email: String, deviceId: String)
     case event(WatchEvent)
     case shuttingDown
@@ -131,6 +175,8 @@ public enum Reply: Equatable {
             }
         case "Watching":
             if let sync = SyncStatus.from(body["sync"]) { return .watching(sync: sync) }
+        case "Synced":
+            if let sync = SyncStatus.from(body["sync"]) { return .synced(sync: sync) }
         case "Account":
             if let id = body["account_id"]?.stringValue, let email = body["email"]?.stringValue,
                let device = body["device_id"]?.stringValue {
@@ -413,6 +459,9 @@ public final class DaemonClient {
                 return .failure(ClientError.protocolError("undecodable reply: \(error)"))
             }
             if case .output(_, let sync) = reply, case .connected = state {
+                state = .connected(sync)
+            }
+            if case .synced(let sync) = reply, case .connected = state {
                 state = .connected(sync)
             }
             if case .error(let m) = reply { return .failure(ClientError.daemon(m)) }
