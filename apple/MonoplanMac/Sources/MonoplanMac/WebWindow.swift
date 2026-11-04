@@ -38,6 +38,7 @@
 import AppKit
 import MonoplanCore
 import MonoplanMacKit
+import UniformTypeIdentifiers
 import WebKit
 
 /// What the window's account button can do; all of it is the tray's
@@ -57,7 +58,7 @@ struct AccountActions {
 }
 
 final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate,
-                                 NSMenuDelegate {
+                                 WKDownloadDelegate, NSMenuDelegate {
     /// Where the host comes from at request time: the running one, or
     /// nil while there is none (the page then shows its boot error and
     /// is reloaded when a host is back, see `hostAvailable`).
@@ -673,11 +674,19 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     }
 
     /// Everything that is not the app's own page opens in the default
-    /// browser: the website link in the menu, a link in a note.
+    /// browser: the website link in the menu, a link in a note. A
+    /// download the page asks for (an anchor with `download`, which is
+    /// how "Export JSON" saves its blob) becomes a `WKDownload` and goes
+    /// through the save panel below; without this WebKit would navigate
+    /// the window to the raw blob instead.
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else {
             decisionHandler(.cancel)
+            return
+        }
+        if navigationAction.shouldPerformDownload {
+            decisionHandler(.download)
             return
         }
         if isOwnPage(url) {
@@ -699,6 +708,41 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         return nil
     }
 
+    // MARK: Downloads the page starts
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        download.delegate = self
+    }
+
+    /// Where a download lands: a save panel seeded with the page's
+    /// filename, as a sheet on the window. Cancel drops the download.
+    /// WebKit refuses to write over an existing file, and the panel has
+    /// already asked the user about replacing one, so the stale file is
+    /// removed first.
+    func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
+                  suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = suggestedFilename
+        panel.canCreateDirectories = true
+        let finish: (NSApplication.ModalResponse) -> Void = { result in
+            guard result == .OK, let url = panel.url else {
+                completionHandler(nil)
+                return
+            }
+            try? FileManager.default.removeItem(at: url)
+            completionHandler(url)
+        }
+        guard let window else {
+            finish(panel.runModal())
+            return
+        }
+        panel.beginSheetModal(for: window, completionHandler: finish)
+    }
+
+    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        NSLog("MonoplanMac: download failed %@", String(describing: error))
+    }
+
     private func isOwnPage(_ url: URL) -> Bool {
         if url.scheme?.lowercased() == AppScheme.scheme { return true }
         if let devURL, url.scheme == devURL.scheme, url.host == devURL.host, url.port == devURL.port { return true }
@@ -706,6 +750,28 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     }
 
     // MARK: Dialogs the page opens
+
+    /// A file input the page clicks ("Import JSON" in a workspace's
+    /// menu): WebKit shows nothing on macOS unless the app supplies the
+    /// panel. The input's `accept` is not passed through, so the filter
+    /// is the app's: the page's only file input takes JSON, so the panel
+    /// takes JSON. Widen this if the page ever grows another input.
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.json]
+        panel.canChooseDirectories = parameters.allowsDirectories
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        let finish: (NSApplication.ModalResponse) -> Void = { result in
+            completionHandler(result == .OK ? panel.urls : nil)
+        }
+        guard let window else {
+            finish(panel.runModal())
+            return
+        }
+        panel.beginSheetModal(for: window, completionHandler: finish)
+    }
 
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
