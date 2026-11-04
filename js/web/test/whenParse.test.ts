@@ -81,6 +81,20 @@ describe("findWhenPhrase", () => {
     expect(find("saturday")?.when).toBe("2026-11-07");
   });
 
+  test("a bare duration is nothing; with its preposition it is a date", () => {
+    // Under forwardDate chrono reads "a d" as "in a day" (tomorrow).
+    expect(find("a d")).toBeNull();
+    expect(find("call a d")).toBeNull();
+    expect(find("1 d")).toBeNull();
+    expect(find("3 days")).toBeNull();
+    expect(find("half an hour")).toBeNull();
+    expect(find("in a day")?.when).toBe("2026-11-04");
+    expect(find("in 3 days")?.when).toBe("2026-11-06");
+    expect(find("3 days later")?.when).toBe("2026-11-06");
+    expect(find("3 días", { locale: "es" })).toBeNull();
+    expect(find("en 3 días", { locale: "es" })?.when).toBe("2026-11-06");
+  });
+
   test("a half-typed word or a suffixed one is nothing yet", () => {
     expect(find("call mum frida")).toBeNull();
     expect(find("tomorrows meeting")).toBeNull();

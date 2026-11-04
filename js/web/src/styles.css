@@ -27,6 +27,11 @@
   --bg-badge: #f3f2f7;
   --text-badge: #5e5c68;
   --text-badge-faint: #8c8a96;
+  /* Date token inline in title text (`.when-token`): the badge hue, a
+     few steps stronger, since it sits on the surface itself where the
+     badge pill all but vanishes. */
+  --bg-token: #e4e2ec;
+  --text-token: #46445a;
   --text: #1a1a1a;
   --text-muted: #999;
   --text-faint: #9e9e9f;
@@ -71,6 +76,8 @@
   --bg-badge: #24232a;
   --text-badge: #aaa8b2;
   --text-badge-faint: #7a7884;
+  --bg-token: #36353f;
+  --text-token: #d0ced8;
   --text: #e5e5e5;
   --text-muted: #aaa;
   --text-faint: #636364;
@@ -898,16 +905,20 @@ body {
 .nav-item-icon {
   /* Leading glyph for built-in nav rows (Queue / Done / Bin). Sized to
      match the row's cap height; color inherits via currentColor on the
-     SVG paths. flex-shrink:0 keeps it pinned while the label flexes. */
+     SVG paths. flex-shrink:0 keeps it pinned while the label flexes. A
+     fixed width with the glyph centred keeps labels aligned across rows
+     whether the icon is a 14px SVG or an emoji. */
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  width: 18px;
   flex-shrink: 0;
   color: var(--text-muted);
 }
 
 .nav-item-icon svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 /* Emoji list icon in the nav: color is intrinsic to the glyph, so drop
@@ -3239,13 +3250,14 @@ input.task-check:hover {
 
 /* A date phrase recognised in a title while typing (`whenToken.ts`): the
    user's own words, set off as one non-editable unit that Backspace
-   removes whole. Badge palette, so it reads as metadata rather than
-   title text, in the draft row and the task surface alike. */
+   removes whole. The badge hue, stronger, so it reads as metadata rather
+   than title text yet still shows on the bare surface, in the draft row
+   and the task surface alike. */
 .when-token {
   padding: 0 4px;
   border-radius: 5px;
-  background: var(--bg-badge);
-  color: var(--text-badge);
+  background: var(--bg-token);
+  color: var(--text-token);
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
   cursor: default;

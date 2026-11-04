@@ -19,6 +19,10 @@
 //     happens to know.
 //   - A three-letter weekday on its own ("sun", "wed", "sat") is ignored:
 //     too often a word of the title. "sat 3pm" or "saturday" still count.
+//   - A bare duration ("3 days", "a d") is ignored: it is a date only by
+//     an assumed "in", and under the forward-date option chrono assumes
+//     it, one-letter units included, so a stray letter after "a" or a
+//     digit would land on tomorrow. "in 3 days" still counts.
 //   - A phrase the user has rejected (`exclude`, by its exact words) is
 //     passed over; a longer phrase that extends it is not.
 //   - With an `anchor` (the token already standing), only a match that
@@ -120,6 +124,22 @@ function anchored(r: ParsedResult): boolean {
   return !(s.isCertain("weekday") && !s.isCertain("day") && WEEKDAY_ABBREVIATION.test(r.text));
 }
 
+/** The preposition that makes a duration a date, per grammar. */
+const DURATION_PREPOSITION = { en: "in ", es: "en " } as const;
+
+/** Whether `r` is a bare duration ("a d", "3 days", "half an hour"):
+ *  a phrase chrono read as a date only by assuming the preposition the
+ *  user did not type. The test is chrono's own: with the preposition
+ *  prepended, the whole string reads as one phrase. A real date phrase
+ *  does not ("in tomorrow" matches "tomorrow"), nor does a duration the
+ *  user already prefixed or suffixed ("in a day", "3 days later"). */
+function bareDuration(r: ParsedResult, now: Date, grammar: "en" | "es"): boolean {
+  const text = DURATION_PREPOSITION[grammar] + r.text;
+  return parserFor(grammar)
+    .parse(text, now, { forwardDate: true })
+    .some((a) => a.index === 0 && a.text.length === text.length);
+}
+
 function registerValue(
   r: ParsedResult,
   now: Date,
@@ -165,6 +185,7 @@ export function findWhenPhrase(text: string, opts: FindWhenOptions): WhenPhrase 
     const end = start + r.text.length;
     if (anchor && (start > anchor.start || end <= anchor.start)) continue;
     if (!anchored(r)) continue;
+    if (bareDuration(r, opts.now, grammar)) continue;
     if (opts.exclude?.has(phraseKey(r.text))) continue;
     const value = registerValue(r, opts.now, grammar);
     if (!value) continue;

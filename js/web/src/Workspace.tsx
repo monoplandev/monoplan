@@ -2519,6 +2519,22 @@ export function Workspace(props: {
     }
   });
 
+  // Tab title: "Monoplan - <list>", or "Monoplan - <item>" while an item
+  // is entered (same signal the address bar mirrors, so the side pane
+  // following the selection leaves the title on the list). An item with
+  // no text yet (a fresh draft) keeps the list's name. Restored to the
+  // bare name when the workspace unmounts (logout back to the login
+  // screen).
+  createEffect(() => {
+    const id = openItemId();
+    const itemText = id === null ? "" : (docs.getItem(id)?.text ?? "").trim().split("\n")[0];
+    const label = itemText || viewTitle(view(), allLists(), m());
+    document.title = `Monoplan - ${label}`;
+  });
+  onCleanup(() => {
+    document.title = "Monoplan";
+  });
+
   // Address bar → state: Back / Forward, a hand-edited hash, an internal
   // link click. An unrecognised hash is rewritten to the current state.
   // A sharing link pasted into this tab's address bar is a fragment-only
