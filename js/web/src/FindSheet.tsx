@@ -32,6 +32,7 @@ import { useAppI18n } from "./i18n.tsx";
 import { overlayDepth, trackOverlay } from "./overlay.ts";
 import externalLinkSvg from "./icons/external-link.svg?raw";
 import mixerHzSvg from "./icons/mixer-hz.svg?raw";
+import usersSvg from "./icons/users.svg?raw";
 import {
   createFindState,
   findResultLifecycle,
@@ -168,6 +169,7 @@ export function FindSheet(props: {
       .docs()
       .map((d) => ({
         docId: d.docId,
+        shared: !d.home,
         label: d.home
           ? m().nav.personal
           : (d.app.state.settings.docName ?? m().nav.untitledDoc),
@@ -247,7 +249,18 @@ export function FindSheet(props: {
                   <For each={workspaceGroups()}>
                     {(group) => (
                       <section class="find-sheet__section" aria-label={group.label}>
-                        <h2 class="find-sheet__section-title">{group.label}</h2>
+                        {/* A shared workspace's caption leads with the
+                            people glyph, as its nav heading does. */}
+                        <h2 class="find-sheet__section-title">
+                          <Show when={group.shared}>
+                            <span
+                              class="find-sheet__section-shared"
+                              aria-hidden="true"
+                              innerHTML={usersSvg}
+                            />
+                          </Show>
+                          <span class="find-sheet__section-name">{group.label}</span>
+                        </h2>
                         <div class="find-sheet__group">
                           <For each={group.rows}>{(item) => row(item, true)}</For>
                         </div>

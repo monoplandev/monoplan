@@ -4623,10 +4623,32 @@ input.task-check:hover {
   color: var(--text-faint);
 }
 
-/* A non-Home result's doc, after its list column. */
+/* A non-Home result's doc, after its list column: the shared people
+   glyph then the name, the name alone truncating. */
 .palette__item-doc {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   max-width: 25%;
   opacity: 0.8;
+}
+
+.palette__item-doc-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.palette__item-doc-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+.palette__item-doc-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Footer key hints: muted, read-only legend of the palette's bindings.
@@ -5444,14 +5466,33 @@ input.task-check:hover {
 /* Workspace caption over its card: the sidebar's section label at the
    iOS grouped-table caption's size and inset, aligned to the rows' text. */
 .find-sheet__section-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin: 0 0 6px;
   padding: 0 16px;
-  overflow: hidden;
   color: var(--text-faint);
   font-size: 13px;
   font-weight: 500;
+}
+
+.find-sheet__section-name {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Shared marker on a workspace caption, sized to the nav heading's. */
+.find-sheet__section-shared {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.find-sheet__section-shared svg {
+  width: 13px;
+  height: 13px;
 }
 
 /* Home page link, a row in its own card under the lists: an anchor

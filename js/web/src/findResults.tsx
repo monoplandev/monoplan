@@ -17,6 +17,7 @@ import checkSvg from "./icons/check.svg?raw";
 import crumpledPaperSvg from "./icons/trash.svg?raw";
 import starSvg from "./icons/star.svg?raw";
 import fileSvg from "./icons/file.svg?raw";
+import usersSvg from "./icons/users.svg?raw";
 
 // The built-in views (Focus / Upcoming / Done / Bin / Inbox) aren't
 // `ListMeta` rows, so the search engine never indexes them
@@ -262,8 +263,16 @@ export function FindResultBody(props: {
       <Show when={listLabel()}>
         {(label) => <span class="palette__item-list">{label()}</span>}
       </Show>
+      {/* Workspace column: every non-Home doc is a shared workspace, so
+          it carries the people glyph ahead of its name, the same marker
+          the nav heading, row badges and agenda use. */}
       <Show when={docLabel()}>
-        {(label) => <span class="palette__item-list palette__item-doc">{label()}</span>}
+        {(label) => (
+          <span class="palette__item-list palette__item-doc" title={label()}>
+            <span class="palette__item-doc-icon" aria-hidden="true" innerHTML={usersSvg} />
+            <span class="palette__item-doc-name">{label()}</span>
+          </span>
+        )}
       </Show>
     </>
   );
