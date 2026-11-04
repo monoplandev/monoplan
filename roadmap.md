@@ -108,3 +108,4 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - automate sweeper function
 - perma deleting archived lists + recovering orphans
 - can't directly add emojis opening up the macos emoji picker through the emoji interface into title
+- Mem profiling web app (and maybe hybrid mac app)
