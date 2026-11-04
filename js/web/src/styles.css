@@ -936,6 +936,23 @@ body {
   color: #fff;
 }
 
+/* Over the app's glass (WebWindow.swift) the opaque greys read wrong:
+   the selected row's `--bg-active` comes out darker than the tinted
+   ground in dark mode and heavy in light, and the faint section
+   labels sink into it. Translucent fills instead, as native sidebars
+   use, so they track whatever the glass shows. */
+[data-shell="mac"] .nav-item[data-active] {
+  background: rgba(0, 0, 0, 0.07);
+}
+
+[data-shell="mac"][data-theme="dark"] .nav-item[data-active] {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+[data-shell="mac"][data-theme="dark"] .nav-section {
+  color: rgba(255, 255, 255, 0.55);
+}
+
 /* On the selected row, drop the muted glyph colour so the SVG icon reads
    as part of the label rather than a dimmer decoration. Emoji icons are
    already `color: inherit` and unaffected (their colour is intrinsic). */
