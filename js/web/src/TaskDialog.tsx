@@ -1795,6 +1795,7 @@ function LifecycleBadge(props: {
     <DropdownMenu>
       <DropdownMenu.Trigger
         class="task-dialog-lifecycle"
+        tabIndex={0}
         aria-label={m().workspace.changeStatus}
         title={m().workspace.changeStatus}
       >
@@ -1846,6 +1847,7 @@ function PinToggle(props: {
     <button
       type="button"
       class="icon-button task-dialog-pin-toggle"
+      tabIndex={0}
       aria-pressed={props.pinned()}
       aria-label={label()}
       title={label()}
