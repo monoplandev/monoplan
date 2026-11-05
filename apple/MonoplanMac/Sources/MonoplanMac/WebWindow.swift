@@ -78,6 +78,11 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     private var accountEmail: String?
     /// The account bubble's menu, filled in on open (`menuNeedsUpdate`).
     private let accountMenu = NSMenu()
+    /// The account bubble itself and its width: a person icon with the
+    /// menu while signed in, a "Sign In" pill straight to the sheet
+    /// while the workspace has no account (`applyAccountBubble`).
+    private var accountButton: NSButton?
+    private var accountWidth: NSLayoutConstraint?
     /// The host's latest sync status: the dot on the account bubble
     /// and the line under the email in its menu.
     private var syncStatus: SyncStatus?
@@ -136,7 +141,10 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
             self?.canUndo = canUndo
             self?.canRedo = canRedo
         }
-        bridge.onSession = { [weak self] email in self?.accountEmail = email.isEmpty ? nil : email }
+        bridge.onSession = { [weak self] email in
+            self?.accountEmail = email.isEmpty ? nil : email
+            self?.applyAccountBubble()
+        }
         bridge.onSignIn = { [weak self] in self?.account.signIn() }
         bridge.onDeleteDoc = { [weak self] docId, name, done in
             self?.confirmDeleteWorkspace(docId: docId, name: name, done: done)
@@ -222,6 +230,7 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// the old one (or showed its signed-out / waiting screen), so
     /// reload it against this one.
     func hostAvailable() {
+        applyAccountBubble()
         guard let webView, webView.url != nil else { return }
         webView.reload()
     }
@@ -230,6 +239,7 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// command taking the profile): the page's docs are stale, so
     /// reload it onto the screen `hostState` now describes.
     func hostLost() {
+        applyAccountBubble()
         guard let webView, webView.url != nil else { return }
         webView.reload()
     }
@@ -524,6 +534,9 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     private static let bubbleGap: CGFloat = 6
     private static let bubbleTop: CGFloat = 5
     private static let bubbleTrailing: CGFloat = 10
+    /// Horizontal room around the "Sign In" pill's title beyond what
+    /// the bare button asks for, so the text sits in from the glass edge.
+    private static let pillPadding: CGFloat = 12
     /// How close two glass bubbles have to be before the container
     /// melts them together (`NSGlassEffectContainerView.spacing`): more
     /// than the gap, so the pair reads as one piece of glass pinched in
@@ -662,8 +675,10 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         for (i, v) in items.enumerated() {
             v.translatesAutoresizingMaskIntoConstraints = false
             row.addSubview(v)
+            let width = v.widthAnchor.constraint(equalToConstant: Self.bubbleSize)
+            if i == items.count - 1 { accountWidth = width }
             constraints += [
-                v.widthAnchor.constraint(equalToConstant: Self.bubbleSize),
+                width,
                 v.topAnchor.constraint(equalTo: row.topAnchor),
                 v.bottomAnchor.constraint(equalTo: row.bottomAnchor),
                 v.leadingAnchor.constraint(equalTo: leading, constant: i == 0 ? 0 : Self.bubbleGap),
@@ -672,6 +687,8 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         }
         constraints.append(row.trailingAnchor.constraint(equalTo: leading))
         NSLayoutConstraint.activate(constraints)
+        accountButton = account
+        applyAccountBubble()
         // The sync dot, over the account bubble (added last, so it
         // paints above the glass). A plain view: the container only
         // melts glass, so it leaves this alone.
@@ -716,6 +733,37 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// The search bubble: the page's Find palette.
     @objc private func find(_ sender: Any?) {
         webView?.evaluateJavaScript(HostInbound.find.script)
+    }
+
+    /// The account bubble for the profile's state. Signed in: the person
+    /// icon, opening the menu (who, sync, Account…, Sign Out…). No
+    /// account: there is nothing to report and one thing to do, so the
+    /// bubble is a "Sign In" pill that opens the app's sign-in sheet
+    /// directly, as the tray's Sign In… does. Re-applied whenever the
+    /// state can have changed: a page boot, a host coming or going.
+    private func applyAccountBubble() {
+        guard let button = accountButton else { return }
+        if account.hasAccount() {
+            let label = String(localized: "Account")
+            button.title = ""
+            button.image = NSImage(systemSymbolName: "person.crop.circle", accessibilityDescription: label)?
+                .withSymbolConfiguration(.init(pointSize: 15, weight: .regular))
+            button.imagePosition = .imageOnly
+            button.action = #selector(showAccountMenu(_:))
+            button.toolTip = label
+            button.setAccessibilityLabel(label)
+            accountWidth?.constant = Self.bubbleSize
+        } else {
+            let label = String(localized: "Sign In")
+            button.image = nil
+            button.imagePosition = .noImage
+            button.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .medium)
+            button.title = label
+            button.action = #selector(signIn)
+            button.toolTip = nil
+            button.setAccessibilityLabel(label)
+            accountWidth?.constant = max(Self.bubbleSize, button.fittingSize.width + Self.pillPadding)
+        }
     }
 
     /// The menu hangs off the bubble's bottom-left, as a pull-down's

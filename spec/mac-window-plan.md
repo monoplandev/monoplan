@@ -549,15 +549,20 @@ bubbles added above it; the toolbar stays empty.
   `Workspace.tsx` binds it under `isMacShell()` (`setFindHandler` in
   `mirrorHost.ts`) to open the Find palette, as the sidebar's Find
   button does.
-- Account pops a menu under itself, built on open: the email the
-  page's session booted with (the bridge's `onSession`), else "Signed
-  in" / "Not signed in" by `ProfileLocation.isSignedIn`; then Account…,
-  which opens the Settings window on its Account pane
+- Account, signed in, pops a menu under itself, built on open: the
+  email the page's session booted with (the bridge's `onSession`), else
+  "Signed in"; the host's sync line; then Account…, which opens the
+  Settings window on its Account pane
   (`SettingsWindowController.showAccount`); then Sign Out… (the pane's
-  own confirm-then-`HostController.signOut`) or Sign In… (the pane with
-  its sheet up). The actions reach the window as `AccountActions`
-  closures from the tray, so it knows neither the Settings window nor
-  the host controller.
+  own confirm-then-`HostController.signOut`). With no account
+  (`ProfileLocation.hasAccount` false, the local-only workspace) there
+  is nothing to report and one thing to do, so the bubble is instead a
+  "Sign In" pill (the same glass, widened to its title) that opens the
+  pane with its sheet up directly, as the tray's Sign In… does
+  (2026-11-05). `applyAccountBubble` switches between the two on every
+  page boot and host transition. The actions reach the window as
+  `AccountActions` closures from the tray, so it knows neither the
+  Settings window nor the host controller.
 
 With both bubbles up, the window's sidebar has **no footer row at
 all** (2026-11-04): `Workspace.tsx` passes no `footer` under

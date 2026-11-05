@@ -1439,7 +1439,7 @@ export function TaskDialog(props: {
                   ? undefined
                   : newItemTarget()?.done
                     ? m().workspace.logCompleted
-                    : m().board.addItem
+                    : m().workspace.newItemPlaceholder
               }
               onInput={() => {
                 editorText(titleRef);
