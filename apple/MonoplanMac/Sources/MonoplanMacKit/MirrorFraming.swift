@@ -28,6 +28,10 @@ public enum HostRequest: Equatable {
     /// Delete a workspace: the app confirms natively (the name is for
     /// the copy) and has the host do it; the reply is `{deleted}`.
     case deleteDoc(docId: String, name: String)
+    /// The page's Sign in (an accountless session's, as the web client
+    /// offers it): open the app's sheet; the page holds no credentials
+    /// and never sees any.
+    case signIn
 
     public enum WindowGesture: String, Equatable {
         /// A mouse-down: move the window with it.
@@ -85,6 +89,8 @@ public enum HostRequest: Equatable {
             self = .undoState(canUndo: try bool("canUndo"), canRedo: try bool("canRedo"))
         case "deleteDoc":
             self = .deleteDoc(docId: try string("docId"), name: try string("name"))
+        case "signIn":
+            self = .signIn
         default:
             throw ParseError.unknownKind(kind)
         }
@@ -109,26 +115,34 @@ public struct WindowSession: Equatable {
     public let deviceId: String
     public let primaryDocId: String
     public let serverURL: String
+    /// No account behind the profile (empty identity and server): the
+    /// page runs it as the web client's anonymous session.
+    public let localOnly: Bool
     public let docs: [Doc]
 
     public init(accountId: String, email: String, deviceId: String, primaryDocId: String,
-                serverURL: String, docs: [Doc]) {
+                serverURL: String, localOnly: Bool, docs: [Doc]) {
         self.accountId = accountId
         self.email = email
         self.deviceId = deviceId
         self.primaryDocId = primaryDocId
         self.serverURL = serverURL
+        self.localOnly = localOnly
         self.docs = docs
     }
 
     /// The reply body, as `WKScriptMessage` reply handlers take it.
+    /// `status: "ok"` tells it apart from a `HostState` reply, which is
+    /// what `session` answers while there is no host to bind to.
     public var reply: [String: Any] {
         [
+            "status": "ok",
             "accountId": accountId,
             "email": email,
             "deviceId": deviceId,
             "primaryDocId": primaryDocId,
             "serverUrl": serverURL,
+            "localOnly": localOnly,
             "docs": docs.map { d -> [String: Any] in
                 ["docId": d.docId, "name": d.name as Any? ?? NSNull()]
             },
@@ -140,6 +154,31 @@ public enum HostReply {
     /// `{snapshot, peer}` for `subscribe`.
     public static func subscribe(snapshot: Data, peer: UInt64) -> [String: Any] {
         ["snapshot": snapshot.base64EncodedString(), "peer": String(peer)]
+    }
+}
+
+/// Whether the page has a host to mirror, as the page sees it: the
+/// `session` reply while there is none, and `HostInbound.hostState`
+/// whenever it changes afterwards. The page shows a waiting line for
+/// `pending` (the tray's reason: starting, signing out, profile in
+/// use); it is reloaded by the app once a host serves, so `running` is
+/// only ever news. There is no signed-out state: without a profile the
+/// app seeds a local-only workspace and hosts that.
+public enum HostState: Equatable {
+    case running
+    case pending(String)
+
+    public var reply: [String: Any] {
+        switch self {
+        case .running: return ["status": "running"]
+        case .pending(let reason): return ["status": "pending", "reason": reason]
+        }
+    }
+
+    /// The reply as a JavaScript object literal.
+    var json: String {
+        let data = try! JSONSerialization.data(withJSONObject: reply, options: [.sortedKeys])
+        return String(decoding: data, as: UTF8.self)
     }
 }
 
@@ -166,6 +205,9 @@ public enum HostInbound: Equatable {
     /// The host opened a doc after the page booted (New Workspace…):
     /// the page subscribes to it and shows its Inbox.
     case docAdded(docId: String)
+    /// The host came or went (sign out, sign in, a start): what the
+    /// page's pre-boot screen shows.
+    case hostState(HostState)
 
     public static let global = "window.__monoplanHost"
 
@@ -192,6 +234,8 @@ public enum HostInbound: Equatable {
             return "\(Self.global).fullScreen(\(active ? "true" : "false"))"
         case .docAdded(let docId):
             return "\(Self.global).docAdded(\(json(docId)))"
+        case .hostState(let state):
+            return "\(Self.global).hostState(\(state.json))"
         }
     }
 

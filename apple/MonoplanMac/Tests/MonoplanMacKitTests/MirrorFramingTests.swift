@@ -21,6 +21,7 @@ final class MirrorFramingTests: XCTestCase {
         XCTAssertThrowsError(try HostRequest(message: ["kind": "deleteDoc", "docId": "d1"])) {
             XCTAssertEqual($0 as? HostRequest.ParseError, .missing("name"))
         }
+        XCTAssertEqual(try HostRequest(message: ["kind": "signIn"]), .signIn)
     }
 
     func testRejectsMalformedRequests() {
@@ -49,9 +50,11 @@ final class MirrorFramingTests: XCTestCase {
     func testSessionReplyShape() {
         let s = WindowSession(
             accountId: "a", email: "e@x", deviceId: "dev", primaryDocId: "home",
-            serverURL: "https://alpha.monoplan.app",
+            serverURL: "https://alpha.monoplan.app", localOnly: false,
             docs: [.init(docId: "home", name: nil), .init(docId: "other", name: "Other")])
         let r = s.reply
+        XCTAssertEqual(r["status"] as? String, "ok")
+        XCTAssertEqual(r["localOnly"] as? Bool, false)
         XCTAssertEqual(r["accountId"] as? String, "a")
         XCTAssertEqual(r["serverUrl"] as? String, "https://alpha.monoplan.app")
         let docs = r["docs"] as? [[String: Any]]
@@ -61,6 +64,18 @@ final class MirrorFramingTests: XCTestCase {
         XCTAssertEqual(docs?[1]["name"] as? String, "Other")
         // The reply is what a WKScriptMessage reply handler can serialise.
         XCTAssertTrue(JSONSerialization.isValidJSONObject(r))
+    }
+
+    func testHostStateReplies() {
+        XCTAssertEqual(HostState.running.reply["status"] as? String, "running")
+        let pending = HostState.pending("signing out").reply
+        XCTAssertEqual(pending["status"] as? String, "pending")
+        XCTAssertEqual(pending["reason"] as? String, "signing out")
+        XCTAssertTrue(JSONSerialization.isValidJSONObject(pending))
+        XCTAssertEqual(HostInbound.hostState(.running).script, "window.__monoplanHost.hostState({\"status\":\"running\"})")
+        XCTAssertEqual(
+            HostInbound.hostState(.pending("in \"use\"")).script,
+            "window.__monoplanHost.hostState({\"reason\":\"in \\\"use\\\"\",\"status\":\"pending\"})")
     }
 
     func testInboundScriptsQuoteTheirArguments() {

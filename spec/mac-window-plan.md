@@ -270,10 +270,24 @@ first, backed by the in-process `HostCmd::Session` /
   the error text. Requests and replies, bytes as base64, the peer as a
   decimal string (a u64 does not fit a JSON number), the doc id as the
   `workspace` selector `Host.subscribe` resolves:
-  - `{kind: "session"}` → `{accountId, email, deviceId, primaryDocId,
-    serverUrl, docs: [{docId, name}]}` (`Host.session`; `serverUrl` is
-    also the base of every "Copy link" URL, `spec/urls.md`; binds the page
-    to the host running now)
+  - `{kind: "session"}` → `{status: "ok", accountId, email, deviceId,
+    primaryDocId, serverUrl, localOnly, docs: [{docId, name}]}`
+    (`Host.session`; `serverUrl` is also the base of every "Copy link"
+    URL, `spec/urls.md`; binds the page to the host running now).
+    `localOnly` (2026-11-05) marks the CLI's local-only workspace
+    (`cli.md` §No account): identity and server are empty and the page
+    runs it as the browser's anonymous session (`sessionFromHost`:
+    `anonymous`, no author stamp, prefs under `local-<docId>`, which
+    follow the account on the first signed-in boot since signup keeps
+    the doc id). With no host to bind to it answers a `HostState`
+    instead of an error: `{status: "pending", reason}` (the tray's
+    reason: starting, signing out, profile in use; the page shows it
+    as waiting). There is no signed-out state: the app seeds a
+    local-only workspace whenever there is no profile. The app pushes
+    `__monoplanHost.hostState(state)` as the reason moves and reloads
+    the page once a host serves (2026-11-05).
+  - `{kind: "signIn"}` → `null`: an anonymous session's Sign in; the
+    app opens its account sheet. The page holds no credentials.
   - `{kind: "subscribe", docId}` → `{snapshot, peer}` (one
     `Host.subscribe` per open doc, a `MirrorSink` each)
   - `{kind: "unsubscribe", docId}` → `null`
@@ -381,9 +395,9 @@ first, backed by the in-process `HostCmd::Session` /
   and Delete workspace items, Log out (the nav menu and Settings ›
   Account, which says the menu bar does it), the Danger zone (account
   deletion), and invite-link creation in the sharing dialog (members
-  and pending links still list and revoke); the sign-in sheet's
-  "Create an account…" still goes to the browser. Each wraps or
-  unwraps a key the webview does not hold.
+  and pending links still list and revoke). Each wraps or unwraps a
+  key the webview does not hold; signing in and creating an account
+  are the app's own sheet (below), through the FFI, never the page.
 - New workspace, natively (2026-11-05): Monoplan › New Workspace…
   (⇧⌘N) runs a standard sheet on the window (`NewWorkspacePrompt`, an
   alert with a name field), sends `Request.createWorkspace` to the
@@ -412,6 +426,47 @@ first, backed by the in-process `HostCmd::Session` /
   shown by the app and answered `deleted: false`, so the page does
   not alert again. Invite creation is still only in the browser and
   the CLI.
+- Accountless, natively (2026-11-05): the app needs no account, as
+  the web client and the CLI do not (`auth.md` §Device pairing,
+  `cli.md` §No account). Whenever the host controller finds no
+  profile (first launch, or just after a sign-out's wipe) it calls
+  `monoplan-ffi::ensure_local_workspace` (the CLI's
+  `bootstrap::open_or_init_at`: a doc id and DEK minted locally, the
+  Welcome seed, no device token) and hosts that; the page's session
+  comes back `localOnly` and runs as anonymous (one workspace, no
+  sharing, no links, no author stamp). `ProfileLocation.hasProfile`
+  (secrets.toml exists) is what the host needs; `hasAccount` (it
+  carries a `device_token`) is what every sign-in offer, the tray's
+  Sign In…, New Workspace… and Settings › Devices hang on. The
+  account sheet has two modes: Sign In (`monoplan-ffi::login`, which
+  replaces the local workspace, and the form says so) and Create
+  Account (`monoplan-ffi::signup`, the CLI's `signup::signup`: the
+  local workspace is adopted as the account's Home doc with its
+  history, and the sheet then shows the recovery code once, Copy plus
+  a checkbox gating Continue, as the browser's pane does). Both hand
+  the window off first and let the host controller host the result.
+- Sign out and the window (2026-11-05): the Account pane's Sign Out
+  first has the window hand off (as a close or quit does), then stops
+  the host and wipes the profile. The tray sees the client lose its
+  host and reloads the page (`hostLost`), which boots onto the
+  `HostState` waiting screen rather than the stale workspace or a
+  "not connected" error; the controller's next provision seeds a
+  fresh local workspace (the browser's fresh anonymous session) and
+  the existing `hostAvailable` reload boots the page against it.
+  `Host.isRunning` is false from the moment the loop ends (not from
+  the thread's exit), so neither the page nor the tray's client is
+  handed a host that can only answer `Stopped` while a sign-in's claim
+  or a sign-out is unwinding it; a `Stopped` on `session` is answered
+  as waiting all the same. The watch's `stopped` is forwarded from a
+  plain thread (`Host.watch`), not a task on the host's runtime: the
+  runtime is dropped when the loop returns, which cancelled the task
+  before it could see the channel close, so the tray's client kept a
+  dead transport, its `poke` found "a transport" and never asked for a
+  new host (seen 2026-11-05 as a sign-in that never came back online).
+  The host controller also tells the client `hostGone` after its own
+  sign-in, sign-up and sign-out, rather than waiting for the watch.
+  Settings › Devices shows "Not signed in" (not an error) without an
+  account and reloads itself when a host serves while the pane is up.
 
 ## Settings (plan, decided 2026-11-04, not built)
 

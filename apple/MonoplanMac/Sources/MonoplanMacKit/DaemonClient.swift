@@ -23,12 +23,18 @@ public struct SyncStatus: Equatable {
     /// pulling, a push in flight, or ops not yet pushed. Absent on the
     /// wire when false.
     public let pending: Bool
+    /// No account: the host never connects, so there is nothing to be
+    /// offline from (`ipc::SyncStatus::local_only`). Absent on the
+    /// wire when false.
+    public let localOnly: Bool
 
-    public init(online: Bool, lastSyncedAt: Int64?, offlineReason: String? = nil, pending: Bool = false) {
+    public init(online: Bool, lastSyncedAt: Int64?, offlineReason: String? = nil, pending: Bool = false,
+                localOnly: Bool = false) {
         self.online = online
         self.lastSyncedAt = lastSyncedAt
         self.offlineReason = offlineReason
         self.pending = pending
+        self.localOnly = localOnly
     }
 
     /// The browser footer's fold of the two facts (js/web/src/syncFacts.tsx).
@@ -38,14 +44,17 @@ public struct SyncStatus: Equatable {
         case synced
     }
 
+    /// A local-only workspace is quiet, like a synced one: no dot, no
+    /// notice.
     public var level: Level {
+        if localOnly { return .synced }
         if !online { return .offline }
         return pending ? .syncing : .synced
     }
 
     /// Mirrors `SyncStatus::offline_notice` in cli/src/ipc.rs.
     public func offlineNotice(now: Date = Date()) -> String? {
-        if online { return nil }
+        if online || localOnly { return nil }
         var line: String
         if let at = lastSyncedAt {
             line = String(localized: "Offline · last synced \(Self.ago(since: at, now: now)) ago")
@@ -60,6 +69,7 @@ public struct SyncStatus: Equatable {
     /// offline notice. What the window's account menu and the Settings
     /// window show.
     public func line(now: Date = Date()) -> String {
+        if localOnly { return String(localized: "Local workspace · not synced") }
         switch level {
         case .syncing:
             return String(localized: "Syncing…")
@@ -87,7 +97,8 @@ public struct SyncStatus: Equatable {
         return SyncStatus(
             online: online, lastSyncedAt: v?["last_synced_at"]?.intValue,
             offlineReason: v?["offline_reason"]?.stringValue,
-            pending: v?["pending"]?.boolValue ?? false)
+            pending: v?["pending"]?.boolValue ?? false,
+            localOnly: v?["local_only"]?.boolValue ?? false)
     }
 }
 
@@ -283,10 +294,23 @@ public struct ProfileLocation {
 
     public var lockPath: String { dir.path + "/daemon.lock" }
 
-    /// Logged in, by the CLI's own rule (`Profile::active`): the
-    /// profile holds device credentials, i.e. `secrets.toml` exists.
-    public var isSignedIn: Bool {
+    /// A profile exists, by the CLI's own rule (`Profile::active`):
+    /// `secrets.toml` is there. True for an account's device and for a
+    /// local-only workspace alike (`cli/src/bootstrap.rs`); the host
+    /// runs either. False only before the first bootstrap and between
+    /// a sign-out's wipe and the next one.
+    public var hasProfile: Bool {
         FileManager.default.fileExists(atPath: dir.appendingPathComponent("secrets.toml").path)
+    }
+
+    /// The profile has an account behind it (`Profile::has_account`):
+    /// `secrets.toml` carries a `device_token`. False for a local-only
+    /// workspace, which is what the Sign In… offers hang on.
+    public var hasAccount: Bool {
+        guard let text = try? String(contentsOf: dir.appendingPathComponent("secrets.toml"), encoding: .utf8) else {
+            return false
+        }
+        return Self.tomlString(key: "device_token", in: text) != nil
     }
 
     /// `server_url` from `config.toml`, or nil when there is no profile.
@@ -372,6 +396,15 @@ public final class DaemonClient {
         guard !stopped, transport == nil else { return }
         backoff = 1
         connect()
+    }
+
+    /// The host this client is on has ended, by the caller's own doing
+    /// (a sign-in, a sign-up or a sign-out stopped it): forget it now
+    /// and ask the provider, without waiting for the watch to say so.
+    public func hostGone() {
+        if stopped { return }
+        backoff = 1
+        if transport == nil { connect() } else { drop(reason: String(localized: "host stopped")) }
     }
 
     /// One request with its own reply. Fails immediately when there is

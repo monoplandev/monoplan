@@ -439,8 +439,8 @@ impl LocalClient {
 
     /// The profile as the window should see it: identity, server, and
     /// the open docs, Home first (`spec/mac-window-plan.md` "Swift
-    /// side"). `Failed` for a local-only workspace, which has no
-    /// identity to report and nothing to mirror an account for.
+    /// side"). A local-only workspace answers with empty identity
+    /// fields and `local_only` set.
     pub async fn session(&self) -> Result<SessionInfo, MirrorError> {
         let (tx, rx) = oneshot::channel();
         self.requests
@@ -742,11 +742,16 @@ pub(crate) struct Seed {
 /// the mirror: the socket has no frame for it.
 #[derive(Debug, Clone)]
 pub struct SessionInfo {
+    /// Empty for a local-only workspace, as are `email`, `device_id`
+    /// and `server_url`.
     pub account_id: String,
     pub email: String,
     pub device_id: String,
     pub primary_doc_id: DocId,
     pub server_url: String,
+    /// No account behind the profile (`crate::bootstrap`): the window
+    /// runs it as the web client runs an anonymous session.
+    pub local_only: bool,
     pub docs: Vec<SessionDoc>,
 }
 
@@ -1117,29 +1122,28 @@ impl Host {
         }
     }
 
-    /// Seed a mirror: lease it a peer slot, snapshot the doc, and
-    /// remember where this subscriber's deliveries start.
+    /// The profile for the window: identity and server when there is
+    /// an account; for a local-only workspace (`crate::bootstrap`) the
+    /// identity fields are empty and `local_only` says so, which the
+    /// window shows as the web client's anonymous session.
     fn on_session(&self) -> Result<SessionInfo, MirrorError> {
         let account = self
             .session
             .account()
             .map_err(|e| MirrorError::Failed(format!("read account: {e}")))?;
-        let Some(identity) = account.identity else {
-            return Err(MirrorError::Failed(
-                "no account: this workspace is local-only".into(),
-            ));
+        let (identity, server_url) = match (account.identity, self.session.connect_params()) {
+            (Some(identity), Some((_, server_url))) => (Some(identity), server_url.to_string()),
+            _ => (None, String::new()),
         };
-        let Some((_, server_url)) = self.session.connect_params() else {
-            return Err(MirrorError::Failed(
-                "no account: this workspace is local-only".into(),
-            ));
-        };
+        let local_only = identity.is_none();
+        let identity = identity.unwrap_or_default();
         Ok(SessionInfo {
             account_id: identity.account_id,
             email: identity.email,
             device_id: identity.device_id,
             primary_doc_id: account.primary_doc_id,
-            server_url: server_url.to_string(),
+            server_url,
+            local_only,
             docs: self
                 .session
                 .candidates()

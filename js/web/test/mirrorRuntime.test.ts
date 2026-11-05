@@ -46,6 +46,7 @@ const info = {
   deviceId: "dev-1",
   primaryDocId: HOME,
   serverUrl: "https://alpha.monoplan.app",
+  localOnly: false,
   docs: [
     { docId: HOME, name: null },
     { docId: OTHER, name: "Other" },
@@ -265,7 +266,9 @@ describe("the WebKit host transport", () => {
         requests.push(request);
         switch (request.kind) {
           case "session":
-            return info;
+            return { status: "ok", ...info };
+          case "signIn":
+            return null;
           case "subscribe":
             return { snapshot: encodeBytes(doc.exportSnapshot()), peer: "18446744073709551614" };
           case "import":
@@ -280,7 +283,7 @@ describe("the WebKit host transport", () => {
     };
     const target: Record<string, unknown> = {};
     const appHost = createAppHost(handler, target);
-    expect(await appHost.session()).toEqual(info);
+    expect(await appHost.session()).toEqual({ status: "ok", ...info });
 
     const seed = await appHost.transport.subscribe(HOME);
     expect(seed.docId).toBe(HOME);
@@ -354,6 +357,46 @@ describe("the WebKit host transport", () => {
     expect(requests.map((r) => r.kind)).toEqual([
       "session", "subscribe", "import", "deleteDoc", "deleteDoc", "unsubscribe",
     ]);
+  });
+
+  test("without a host, session hands back the state; Sign in reaches the app", async () => {
+    const requests: HostRequest[] = [];
+    const handler = {
+      async postMessage(request: HostRequest): Promise<unknown> {
+        requests.push(request);
+        if (request.kind === "session") return { status: "pending", reason: "starting" };
+        return null;
+      },
+    };
+    const target: Record<string, unknown> = {};
+    const appHost = createAppHost(handler, target);
+    expect(await appHost.session()).toEqual({ status: "pending", reason: "starting" });
+    // The app's later pushes move the screen: a sign-out finishing and
+    // the fresh local workspace's host starting, say.
+    const states: unknown[] = [];
+    appHost.onHostState((s) => states.push(s));
+    (target[HOST_GLOBAL] as HostInbound).hostState({ status: "pending", reason: "signing out" });
+    expect(states).toEqual([{ status: "pending", reason: "signing out" }]);
+    appHost.signIn();
+    expect(requests.map((r) => r.kind)).toEqual(["session", "signIn"]);
+  });
+
+  test("a local-only workspace is an anonymous session keyed by its doc", () => {
+    const s = sessionFromHost({
+      accountId: "",
+      email: "",
+      deviceId: "",
+      primaryDocId: HOME,
+      serverUrl: "",
+      localOnly: true,
+      docs: [{ docId: HOME, name: null }],
+    });
+    expect(s.anonymous).toBe(true);
+    expect(s.mirror).toBe(true);
+    expect(s.email).toBeNull();
+    expect(s.deviceId).toBeNull();
+    expect(s.accountId).toBe(`local-${HOME}`);
+    expect(sessionFromHost(info).anonymous).toBe(false);
   });
 
   test("base64 round-trips large buffers", () => {

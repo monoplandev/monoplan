@@ -13,22 +13,9 @@
 // (spec/mac-window-plan.md).
 
 import AppKit
+import MonoplanCore
 import MonoplanMacKit
 import Network
-
-/// The web client in the browser, for what the window does not do:
-/// creating an account (the sign-in sheet's link). Signup wraps a DEK
-/// the app would then have to hold, so it stays in the browser
-/// (spec/mac-window-plan.md "DEK-touching flows"). The dev stack serves
-/// the client on 5176, so `MONOPLAN_WEB_URL=http://localhost:5176 bun
-/// run mac` points the link there.
-let webURL: URL = {
-    if let raw = ProcessInfo.processInfo.environment["MONOPLAN_WEB_URL"],
-       let url = URL(string: raw) {
-        return url
-    }
-    return URL(string: "https://alpha.monoplan.app")!
-}()
 
 /// `MONOPLAN_MAC_DEBUG=1` logs every menu rebuild (connection state,
 /// rows, fetch error) so the tray can be checked from a terminal.
@@ -45,11 +32,12 @@ final class TrayController: NSObject, NSMenuDelegate {
     /// controller's running host.
     private lazy var webWindow = WebWindowController(
         hostProvider: { [weak self] in self?.hostController.runningHost },
+        hostState: { [weak self] in self?.hostState() ?? .pending(String(localized: "starting")) },
         onVisibility: { visible in NSApp.setActivationPolicy(visible ? .regular : .accessory) },
         // The title bar's account button: the Settings window's Account
         // pane and its sign-in / sign-out flows.
         account: AccountActions(
-            isSignedIn: { [weak self] in self?.location.isSignedIn ?? false },
+            hasAccount: { [weak self] in self?.location.hasAccount ?? false },
             openAccount: { [weak self] in self?.settings().showAccount() },
             signIn: { [weak self] in self?.settings().showSignIn() },
             signOut: { [weak self] in self?.settings().signOut() }),
@@ -114,10 +102,17 @@ final class TrayController: NSObject, NSMenuDelegate {
                 self.refresh()
                 self.webWindow.pushSync(sync)
                 // A host after none: the window's page booted against
-                // the old one (or showed its error); reload it.
+                // the old one (or showed its signed-out / waiting
+                // screen); reload it.
                 if !self.hadHost { self.webWindow.hostAvailable() }
                 self.hadHost = true
             } else {
+                // No host: the page's docs are stale after a sign out
+                // (or a terminal command taking the profile), so reload
+                // it onto the pre-boot screen; after that, keep that
+                // screen told as the reason moves (signing out → not
+                // signed in, signing in → starting).
+                if self.hadHost { self.webWindow.hostLost() } else { self.webWindow.pushHostState(self.hostState()) }
                 self.hadHost = false
                 self.rebuildMenu()
             }
@@ -147,6 +142,16 @@ final class TrayController: NSObject, NSMenuDelegate {
         pathMonitor = monitor
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
+    }
+
+    /// The host as the window's page should see it (`HostState`):
+    /// running, or waiting with the tray's reason. There is always a
+    /// profile to host (a local-only workspace is seeded when there is
+    /// none), so the page never has to offer sign-in to get going.
+    private func hostState() -> HostState {
+        if hostController.runningHost != nil { return .running }
+        if case .connecting(let reason) = client.state { return .pending(reason) }
+        return .pending(String(localized: "starting"))
     }
 
     // MARK: Network
@@ -204,8 +209,12 @@ final class TrayController: NSObject, NSMenuDelegate {
             case .success(let other):
                 self.fetchError = String(localized: "unexpected reply: \(String(describing: other))")
             case .failure(let error):
+                // No host, or one that has just stopped: the state line
+                // says so and the next host's refresh fills the rows.
                 if case ClientError.notConnected = error { break }
-                self.fetchError = error.localizedDescription
+                if case ClientError.hostStopped = error { break }
+                if case HostError.Stopped = error { break }
+                self.fetchError = hostErrorMessage(error)
             }
             self.rebuildMenu()
         }
@@ -289,7 +298,9 @@ final class TrayController: NSObject, NSMenuDelegate {
         // column on every row, which shows as dead space after the
         // right-aligned notes. An image would likewise open an icon
         // column that the other rows do not use.
-        if !location.isSignedIn {
+        // A local-only workspace (no account): the way to one. The
+        // sheet offers both signing in and creating an account.
+        if !location.hasAccount {
             addAction(String(localized: "Sign In…"), #selector(signIn))
         }
         addAction(String(localized: "Settings…"), #selector(openSettings))
@@ -441,8 +452,9 @@ final class TrayController: NSObject, NSMenuDelegate {
     /// Monoplan › New Workspace…: the name is asked for natively on the
     /// window (the page's own dialog is hidden there, `Session.mirror`),
     /// the host creates and opens the doc (`Request.createWorkspace`),
-    /// and the page is told to show it. Needs a running host, which
-    /// `validateMenuItem` checks.
+    /// and the page is told to show it. Needs a running host with an
+    /// account (one workspace per accountless install, `spec/auth.md`),
+    /// which `validateMenuItem` checks.
     @objc func newWorkspace(_ sender: Any?) {
         webWindow.show()
         webWindow.promptNewWorkspace { [weak self] name, done in
@@ -466,7 +478,7 @@ final class TrayController: NSObject, NSMenuDelegate {
     @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
         case #selector(newWorkspace(_:)):
-            guard location.isSignedIn, case .connected = client.state else { return false }
+            guard location.hasAccount, case .connected = client.state else { return false }
             return true
         case #selector(undoInWindow(_:)): return webWindow.canUndo
         case #selector(redoInWindow(_:)): return webWindow.canRedo
@@ -492,7 +504,17 @@ final class TrayController: NSObject, NSMenuDelegate {
         let w = SettingsWindowController(
             location: location, client: client,
             signIn: { [weak self] creds, done in self?.hostController.signIn(creds, completion: done) },
-            signOut: { [weak self] done in self?.hostController.signOut(completion: done) },
+            // The window hands its last edits to the host first, as it
+            // does before a close or quit: the host is about to stop,
+            // and its doc is what signup adopts or sign-out wipes.
+            signUp: { [weak self] creds, done in
+                guard let self else { return }
+                self.webWindow.handOff { self.hostController.signUp(creds, completion: done) }
+            },
+            signOut: { [weak self] done in
+                guard let self else { return }
+                self.webWindow.handOff { self.hostController.signOut(completion: done) }
+            },
             // The Devices pane's server access: the host's session and
             // token. `session()` blocks briefly; the pane asks off the
             // main thread.

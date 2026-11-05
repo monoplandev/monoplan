@@ -18,6 +18,8 @@ path = "src/bin/uniffi-bindgen.rs"
 [dependencies]
 # The host loop (`Host` below): the CLI crate's daemon, embedded.
 monoplan = { path = "../../cli" }
+# `KdfParams::DEFAULT` for `signup`.
+monoplan-protocol = { path = "../../crates/protocol" }
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
 uniffi = { version = "0.32", features = ["cli"] }

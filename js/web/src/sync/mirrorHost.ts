@@ -8,7 +8,12 @@
 // handler (`WKScriptMessageHandlerWithReply`), so `postMessage` resolves
 // with the reply or rejects with the host's error message:
 //
-//   { kind: "session" }                       → HostSessionInfo
+//   { kind: "session" }                       → HostSessionReply: the session
+//                                               (`status: "ok"`), or the host's
+//                                               state while there is none to
+//                                               bind to (`HostState`)
+//   { kind: "signIn" }                        → null   (opens the app's sign-in sheet;
+//                                               an anonymous session's way to an account)
 //   { kind: "subscribe", docId }              → { snapshot: b64, peer: "u64 decimal" }
 //   { kind: "unsubscribe", docId }            → null
 //   { kind: "import", docId, bytes: b64 }     → null   (`Host.import`)
@@ -33,6 +38,11 @@
 //                         surface (`setUndoRedoHandler`)
 //   .find()               the window's search bubble: open the Find
 //                         palette (`setFindHandler`)
+//   .hostState(state)     the host came or went while there was none
+//                         serving this page (a sign out finishing, a
+//                         sign in starting): what the pre-boot screen
+//                         shows. The app reloads the page once a host
+//                         serves, so the page never boots from here.
 //
 // The doc id is the `workspace` selector the host resolves (`-w` accepts
 // a doc uuid, `spec/cli.md`). The peer id travels as a decimal string
@@ -56,20 +66,40 @@ export interface HostDocInfo {
   name: string | null;
 }
 
-/** What the host knows about the signed-in profile. */
+/** What the host knows about the profile. */
 export interface HostSessionInfo {
+  /** Empty for a local-only workspace, as are `email`, `deviceId` and
+   *  `serverUrl`. */
   accountId: string;
   email: string;
   deviceId: string;
   primaryDocId: string;
   /** The server the host syncs with: where `api.ts` should point. */
   serverUrl: string;
+  /** No account behind the profile (the CLI's local-only workspace,
+   *  `spec/cli.md`): the page runs it as the web client's anonymous
+   *  session, with sign-in offered through the app. */
+  localOnly: boolean;
   /** Every doc the profile has open, Home included. */
   docs: HostDocInfo[];
 }
 
+/** The host as the page sees it while there is none to mirror
+ *  (`HostState` on the Swift side): waiting with the tray's reason
+ *  (`pending`: starting, signing out, profile in use by another
+ *  process). `running` is the moment in between; the app reloads the
+ *  page on it. There is no signed-out state: the app seeds a local-only
+ *  workspace when there is no profile and hosts that, so the page
+ *  always has a session (an anonymous one then, `localOnly`). */
+export type HostState = { status: "running" } | { status: "pending"; reason: string };
+
+/** The `session` reply: the session, or the state while there is none. */
+export type HostSessionReply = ({ status: "ok" } & HostSessionInfo) | HostState;
+
 export type HostRequest =
   | { kind: "session" }
+  /** An anonymous session's Sign in: the app opens its sheet. */
+  | { kind: "signIn" }
   | { kind: "subscribe"; docId: string }
   | { kind: "unsubscribe"; docId: string }
   | { kind: "import"; docId: string; bytes: string }
@@ -124,10 +154,17 @@ export interface HostInbound {
   /** The host opened a doc after this page booted (the app's New
    *  Workspace…): subscribe to it and show it. */
   docAdded(docId: string): void;
+  /** The host came or went while this page has none (`HostState`). */
+  hostState(state: HostState): void;
 }
 
 export interface AppHost {
-  session(): Promise<HostSessionInfo>;
+  session(): Promise<HostSessionReply>;
+  /** Open the app's sign-in sheet (an anonymous session's Sign in). */
+  signIn(): void;
+  /** The host's state while this page has none, whenever the app
+   *  reports it; the pre-boot screen follows it. */
+  onHostState(cb: (state: HostState) => void): void;
   transport: MirrorTransport;
   /** The host's sync status, whenever the app reports it. The last one
    *  is replayed to a late subscriber, so the footer never misses the
@@ -219,6 +256,7 @@ export function createAppHost(handler: HostMessageHandler, target: object): AppH
   let lastSync: HostSyncStatus | null = null;
   let onHandOff: (() => Promise<void>) | null = null;
   let onDocAdded: ((docId: string) => void) | null = null;
+  let onHostState: ((state: HostState) => void) | null = null;
   const inbound: HostInbound = {
     update(docId, bytes) {
       onUpdate?.(docId, decodeBytes(bytes));
@@ -252,6 +290,9 @@ export function createAppHost(handler: HostMessageHandler, target: object): AppH
     docAdded(docId) {
       onDocAdded?.(docId);
     },
+    hostState(state) {
+      onHostState?.(state);
+    },
   };
   (target as Record<string, unknown>)[HOST_GLOBAL] = inbound;
 
@@ -284,7 +325,15 @@ export function createAppHost(handler: HostMessageHandler, target: object): AppH
 
   return {
     transport,
-    session: async () => (await post({ kind: "session" })) as HostSessionInfo,
+    session: async () => (await post({ kind: "session" })) as HostSessionReply,
+    signIn() {
+      void post({ kind: "signIn" }).catch((e) => {
+        console.warn("mirror: signIn failed:", e);
+      });
+    },
+    onHostState(cb) {
+      onHostState = cb;
+    },
     onSync(cb) {
       onSync = cb;
       if (lastSync) cb(lastSync);

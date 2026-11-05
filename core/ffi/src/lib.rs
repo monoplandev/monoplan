@@ -1,6 +1,7 @@
 //! Monoplan FFI — the Rust↔Swift boundary for the Apple clients.
 //!
-//! What crosses: the profile's lifecycle (`login` and `logout`, the
+//! What crosses: the profile's lifecycle (`ensure_local_workspace`,
+//! `login`, `signup` and `logout`: the local-only bootstrap and the
 //! bodies of the CLI commands of the same names), `Host`, the daemon
 //! loop embedded in the app's process (`spec/daemon-plan.md`, amended
 //! 2026-10-27), and the app's client path into it: `Host::request`
@@ -19,6 +20,7 @@
 //! `setup_scaffolding!` plus `#[uniffi::export]` / `#[derive(uniffi::…)]`.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 uniffi::setup_scaffolding!();
@@ -88,10 +90,117 @@ fn init_log(profile_dir: &std::path::Path) {
         .try_init();
 }
 
+fn runtime() -> Result<tokio::runtime::Runtime, HostError> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| HostError::Failed {
+            message: e.to_string(),
+        })
+}
+
+/// The profile at `profile_dir`, created as a local-only workspace if
+/// there is none (`monoplan_cli::bootstrap`: a doc id and DEK minted
+/// locally, the onboarding doc as the baseline, no device token). What
+/// the first doc command does on a fresh CLI install, for the app to
+/// do before it hosts: accountless use on a Mac is the web client's
+/// anonymous session (`spec/auth.md` §Device pairing). Nothing to do
+/// when a profile exists. Blocks briefly (the seed is written and the
+/// profile held meanwhile), so call it off the main thread.
+#[uniffi::export]
+pub fn ensure_local_workspace(profile_dir: String) -> Result<(), HostError> {
+    use monoplan_cli::bootstrap::open_or_init_at;
+    runtime()?
+        .block_on(open_or_init_at(PathBuf::from(profile_dir)))
+        .map(|_| ())
+        .map_err(|e| HostError::Failed {
+            message: format!("{e:#}"),
+        })
+}
+
+/// What the profile holds, for the app's menus and sheets: nothing,
+/// a local-only workspace, or an account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ProfileState {
+    None,
+    LocalOnly,
+    Account,
+}
+
+#[uniffi::export]
+pub fn profile_state(profile_dir: String) -> ProfileState {
+    use monoplan_cli::config::Profile;
+    match Profile::active_at(PathBuf::from(profile_dir)) {
+        None => ProfileState::None,
+        Some(p) => match p.has_account() {
+            Ok(true) => ProfileState::Account,
+            _ => ProfileState::LocalOnly,
+        },
+    }
+}
+
+/// What a signup gave back (`monoplan_cli::commands::signup::Outcome`).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SignupOutcome {
+    pub account_id: String,
+    /// Shown once by the app; never persisted.
+    pub recovery_code: String,
+    /// The profile held a local-only workspace and the account now
+    /// owns it: same doc id, same key, history intact.
+    pub adopted: bool,
+}
+
+/// Create an account: what `monoplan auth signup` does once it has the
+/// credentials, for the app's sheet. A local-only workspace in the
+/// profile is adopted as the account's Home doc (`spec/auth.md` §Device
+/// pairing). Blocks for the key derivation and the round trips, so
+/// call it off the main thread. On success the profile is written and
+/// released; the app's host controller then hosts it, and the first
+/// connect pushes the local history.
+#[uniffi::export]
+pub fn signup(
+    profile_dir: String,
+    server: String,
+    email: String,
+    password: String,
+    device_name: String,
+) -> Result<SignupOutcome, HostError> {
+    use monoplan_cli::{
+        commands::signup::{Credentials, signup},
+        config::Profile,
+    };
+    use monoplan_protocol::KdfParams;
+    let profile =
+        Profile::create_at(PathBuf::from(profile_dir)).map_err(|e| HostError::Failed {
+            message: e.to_string(),
+        })?;
+    runtime()?
+        .block_on(signup(
+            &profile,
+            Credentials {
+                server,
+                email,
+                password,
+                device_name,
+                kdf_params: KdfParams::DEFAULT,
+            },
+        ))
+        .map(|o| SignupOutcome {
+            account_id: o.account_id,
+            recovery_code: o.recovery_code,
+            adopted: o.adopted,
+        })
+        .map_err(|e| HostError::Failed {
+            message: format!("{e:#}"),
+        })
+}
+
 /// Sign in: what `monoplan auth login` does once it has the credentials,
 /// for the app's sign-in sheet. Blocks for the key derivation and two
 /// round trips, so call it off the main thread. On success the profile
 /// is written and released; the app's host controller then hosts it.
+/// A local-only workspace in the profile is replaced, as the CLI's
+/// login does after its confirmation: the app asks first.
 #[uniffi::export]
 pub fn login(
     profile_dir: String,
@@ -160,8 +269,6 @@ pub struct Host {
     thread: Mutex<Option<std::thread::JoinHandle<()>>>,
     /// The in-process client path (`daemon::LocalClient`).
     client: monoplan_cli::daemon::LocalClient,
-    /// The host thread's runtime, for the watch forwarding tasks.
-    rt: tokio::runtime::Handle,
     /// The profile being hosted, for `device_token`.
     profile_dir: PathBuf,
 }
@@ -181,15 +288,13 @@ pub trait HostSink: Send + Sync {
 /// sink hears nothing more and no `stopped`.
 #[derive(uniffi::Object)]
 pub struct Watcher {
-    task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    cancelled: Arc<AtomicBool>,
 }
 
 #[uniffi::export]
 impl Watcher {
     pub fn cancel(&self) {
-        if let Some(t) = self.task.lock().unwrap().take() {
-            t.abort();
-        }
+        self.cancelled.store(true, Ordering::SeqCst);
     }
 }
 
@@ -279,12 +384,17 @@ impl From<monoplan_cli::daemon::MirrorError> for HostError {
 /// (`Host::device_token`) and never reaches the webview.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct HostSession {
+    /// Empty for a local-only workspace, as are `email`, `device_id`
+    /// and `server_url`.
     pub account_id: String,
     pub email: String,
     pub device_id: String,
     pub primary_doc_id: String,
     /// The server the host syncs with: where the window's HTTP calls go.
     pub server_url: String,
+    /// No account behind the profile: the window runs it as the web
+    /// client runs an anonymous session (`spec/auth.md`).
+    pub local_only: bool,
     /// Every doc the host has open, Home first.
     pub docs: Vec<HostDoc>,
 }
@@ -316,7 +426,7 @@ impl Host {
         init_log(&profile.dir);
         let profile_dir = profile.dir.clone();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-        type Ready = Result<(daemon::LocalClient, tokio::runtime::Handle), HostError>;
+        type Ready = Result<daemon::LocalClient, HostError>;
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Ready>();
         let thread = std::thread::Builder::new()
             .name("monoplan-host".into())
@@ -363,7 +473,7 @@ impl Host {
                         }
                     };
                     let (serving, client) = daemon::Serving::new(started, true);
-                    let _ = ready_tx.send(Ok((client, tokio::runtime::Handle::current())));
+                    let _ = ready_tx.send(Ok(client));
                     if let Err(e) = serving.run(shutdown_rx).await {
                         eprintln!("monoplan host: {e:#}");
                     }
@@ -373,11 +483,10 @@ impl Host {
                 message: e.to_string(),
             })?;
         match ready_rx.recv() {
-            Ok(Ok((client, rt))) => Ok(Arc::new(Host {
+            Ok(Ok(client)) => Ok(Arc::new(Host {
                 shutdown: Mutex::new(Some(shutdown_tx)),
                 thread: Mutex::new(Some(thread)),
                 client,
-                rt,
                 profile_dir,
             })),
             Ok(Err(e)) => {
@@ -418,8 +527,17 @@ impl Host {
 
     /// Subscribe to the loop's watch stream (`spec/daemon-plan.md`
     /// projection tier): `sink` gets `Watching` now, then one `Event`
-    /// frame per change until the watcher is cancelled or dropped, or
-    /// `stopped` once when the loop ends.
+    /// frame per event, each msgpack-encoded exactly as the socket
+    /// would carry it after the length prefix, and `stopped` once when
+    /// the loop ends.
+    ///
+    /// The forwarder is a plain thread, not a task on the host's
+    /// runtime: that runtime is dropped as soon as the loop returns,
+    /// which cancels its tasks, and a forwarder cancelled between the
+    /// channel closing and its next poll would never deliver the one
+    /// event the app's client depends on to notice the host is gone
+    /// (a sign-in's claim or a terminal command ending it). A blocking
+    /// receive sees `Closed` whatever happened to the runtime.
     pub fn watch(&self, sink: Arc<dyn HostSink>) -> Result<Arc<Watcher>, HostError> {
         use monoplan_cli::ipc::{Reply, WatchEvent};
         use tokio::sync::broadcast::error::RecvError;
@@ -428,24 +546,36 @@ impl Host {
         }
         let (sync, mut rx) = self.client.watch();
         sink.frame(encode(&Reply::Watching { sync }));
-        let task = self.rt.spawn(async move {
-            loop {
-                let ev = match rx.recv().await {
-                    Ok(ev) => ev,
-                    // Behind by more than the buffer: the backlog
-                    // collapses to "something changed", as on the socket.
-                    Err(RecvError::Lagged(_)) => WatchEvent::Changed,
-                    Err(RecvError::Closed) => {
-                        sink.stopped();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let flag = cancelled.clone();
+        std::thread::Builder::new()
+            .name("monoplan-watch".into())
+            .spawn(move || {
+                loop {
+                    let ev = match rx.blocking_recv() {
+                        Ok(ev) => ev,
+                        // Behind by more than the buffer: the backlog
+                        // collapses to "something changed", as on the socket.
+                        Err(RecvError::Lagged(_)) => WatchEvent::Changed,
+                        Err(RecvError::Closed) => {
+                            if !flag.load(Ordering::SeqCst) {
+                                sink.stopped();
+                            }
+                            return;
+                        }
+                    };
+                    // A cancelled watch stays subscribed until the next
+                    // event or the loop's end, and says nothing.
+                    if flag.load(Ordering::SeqCst) {
                         return;
                     }
-                };
-                sink.frame(encode(&Reply::Event(ev)));
-            }
-        });
-        Ok(Arc::new(Watcher {
-            task: Mutex::new(Some(task)),
-        }))
+                    sink.frame(encode(&Reply::Event(ev)));
+                }
+            })
+            .map_err(|e| HostError::Failed {
+                message: e.to_string(),
+            })?;
+        Ok(Arc::new(Watcher { cancelled }))
     }
 
     /// Mirror a doc in the window (`spec/mac-window-plan.md`, phase 2):
@@ -494,7 +624,8 @@ impl Host {
     /// The profile as the window should see it (`spec/mac-window-plan.md`
     /// "Swift side"): identity, server, and the open docs, Home first.
     /// Blocks for the loop's turn, so call it off the main thread.
-    /// `Failed` for a local-only workspace.
+    /// A local-only workspace answers with `local_only` set and empty
+    /// identity fields.
     pub fn session(&self) -> Result<HostSession, HostError> {
         if self.client.is_stopped() {
             return Err(HostError::Stopped);
@@ -506,6 +637,7 @@ impl Host {
             device_id: info.device_id,
             primary_doc_id: info.primary_doc_id.0.to_string(),
             server_url: info.server_url,
+            local_only: info.local_only,
             docs: info
                 .docs
                 .into_iter()
@@ -530,12 +662,18 @@ impl Host {
             .device_token
     }
 
-    /// Still serving? False once a client's `Shutdown` ended the loop.
+    /// Still serving? False once the loop has ended (a client's
+    /// `Shutdown`, a command's `claim`), from the moment it ends: the
+    /// thread is still unwinding then, and a request to it would only
+    /// get `Stopped`, so the app must not hand this host to a new page
+    /// or client meanwhile.
     pub fn is_running(&self) -> bool {
-        self.thread
-            .lock()
-            .unwrap()
-            .as_ref()
-            .is_some_and(|t| !t.is_finished())
+        !self.client.is_stopped()
+            && self
+                .thread
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|t| !t.is_finished())
     }
 }

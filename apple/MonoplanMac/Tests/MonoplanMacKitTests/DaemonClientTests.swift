@@ -222,7 +222,23 @@ final class DaemonClientTests: XCTestCase {
         XCTAssertEqual(ProfileLocation.tomlString(key: "server_url", in: text), "http://127.0.0.1:8000")
         XCTAssertNil(ProfileLocation.tomlString(key: "missing", in: text))
         XCTAssertNil(ProfileLocation(dir: URL(fileURLWithPath: "/nonexistent/monoplan")).serverURL)
-        XCTAssertFalse(ProfileLocation(dir: URL(fileURLWithPath: "/nonexistent/monoplan")).isSignedIn)
+        XCTAssertFalse(ProfileLocation(dir: URL(fileURLWithPath: "/nonexistent/monoplan")).hasProfile)
+        XCTAssertFalse(ProfileLocation(dir: URL(fileURLWithPath: "/nonexistent/monoplan")).hasAccount)
+    }
+
+    /// A profile is `secrets.toml`; an account is its `device_token`
+    /// (a local-only workspace has the file without the key).
+    func testProfileAndAccountFromSecrets() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("monoplan-loc-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let location = ProfileLocation(dir: dir)
+        let secrets = dir.appendingPathComponent("secrets.toml")
+        try "[docs.abc]\ndek = \"00\"\n".write(to: secrets, atomically: true, encoding: .utf8)
+        XCTAssertTrue(location.hasProfile)
+        XCTAssertFalse(location.hasAccount)
+        try "device_token = \"tok\"\n\n[docs.abc]\ndek = \"00\"\n".write(to: secrets, atomically: true, encoding: .utf8)
+        XCTAssertTrue(location.hasAccount)
     }
 
     func testOfflineNotice() {
@@ -239,5 +255,11 @@ final class DaemonClientTests: XCTestCase {
             SyncStatus(online: false, lastSyncedAt: 1_000_000).offlineNotice(now: now),
             "Offline · last synced 3m ago"
         )
+        // A local-only workspace is never "offline": nothing to sync to.
+        let local = SyncStatus.from(.map(["online": .bool(false), "local_only": .bool(true)]))
+        XCTAssertEqual(local, SyncStatus(online: false, lastSyncedAt: nil, localOnly: true))
+        XCTAssertNil(local?.offlineNotice())
+        XCTAssertEqual(local?.level, .synced)
+        XCTAssertEqual(local?.line(), "Local workspace · not synced")
     }
 }

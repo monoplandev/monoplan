@@ -2018,6 +2018,7 @@ name = "monoplan-ffi"
 version = "0.0.1-alpha.15"
 dependencies = [
  "monoplan",
+ "monoplan-protocol",
  "thiserror 2.0.21",
  "tokio",
  "tracing-subscriber",

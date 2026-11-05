@@ -10,13 +10,19 @@ import { createEffect, createMemo, createSignal, onMount, Show } from "solid-js"
 import { Doc, SyncEngine } from "@monoplan/core/wasm";
 import { MirrorBridge, type MirrorSeed } from "@monoplan/core/mirror-bridge";
 import { useAppI18n } from "./i18n.tsx";
-import { loadPrefs } from "./prefs.ts";
+import { deletePrefs, loadPrefs, savePrefs, type Prefs } from "./prefs.ts";
 import { SessionProvider } from "./SessionContext.tsx";
 import { Workspace } from "./Workspace.tsx";
-import { detectAppHost, type AppHost } from "./sync/mirrorHost.ts";
+import {
+  detectAppHost,
+  type AppHost,
+  type HostSessionInfo,
+  type HostState,
+} from "./sync/mirrorHost.ts";
 import { serverLinkBase, setLinkBase } from "./url.ts";
 import {
   createMirrorRuntime,
+  localAccountId,
   sessionFromHost,
   type MirrorBoot,
 } from "./sync/mirrorRuntime.ts";
@@ -33,6 +39,10 @@ export function MirrorApp(props: {
   const [boot, setBoot] = createSignal<MirrorBoot | null>(null);
   const [host, setHost] = createSignal<AppHost | null>(null);
   const [error, setError] = createSignal<string | null>(null);
+  // No host to mirror yet (starting, or stopping for a sign-out): the
+  // waiting screen instead of the workspace. The app reloads the page
+  // once a host serves, so this only ever moves between reasons.
+  const [gate, setGate] = createSignal<HostState | null>(null);
   // "Online" is two facts: the host is serving the mirrors (the bridge,
   // from the first seeded doc until the host stops them) and the host
   // itself reaches the server (its sync status, pushed by the app). The
@@ -52,7 +62,7 @@ export function MirrorApp(props: {
   onMount(async () => {
     const host = props.host ?? detectAppHost();
     if (!host) {
-      setError("This page only runs inside the Monoplan app.");
+      setError(m().mirror.notInApp);
       return;
     }
     host.onSync((status) => {
@@ -60,17 +70,27 @@ export function MirrorApp(props: {
       setLastSyncAt(status.lastSyncedAt);
     });
     try {
-      const info = await host.session();
+      const reply = await host.session();
+      if (reply.status !== "ok") {
+        setHost(host);
+        setGate(reply);
+        host.onHostState(setGate);
+        return;
+      }
+      const info = reply;
       // Shareable links name the server's web client, not this window
-      // (`spec/urls.md` "Affordances").
-      setLinkBase(serverLinkBase(info.serverUrl));
+      // (`spec/urls.md` "Affordances"); a local-only workspace has no
+      // server and "Copy link" is disabled on an anonymous session.
+      if (!info.localOnly) setLinkBase(serverLinkBase(info.serverUrl));
       const bridge = new MirrorBridge({
         transport: host.transport,
         createEngine: (seed: MirrorSeed) => {
           const doc = Doc.loadWithPeer(seed.snapshot, seed.peer);
           // Items the window creates carry the account id like any
-          // authed session's (`createdBy`, spec/data-model.md "Item").
-          doc.setAuthor(info.accountId);
+          // authed session's (`createdBy`, spec/data-model.md "Item");
+          // a local-only workspace has none, like the browser's
+          // anonymous session.
+          if (!info.localOnly) doc.setAuthor(info.accountId);
           return SyncEngine.mirror(doc, seed.docId);
         },
         onServerFrame: (docId) => drainFor(docId),
@@ -98,9 +118,10 @@ export function MirrorApp(props: {
           console.warn(`mirror: doc ${d.docId} did not open:`, e);
         }
       }
-      const prefs = await loadPrefs(info.accountId).catch(() => null);
+      const session = sessionFromHost(info);
+      const prefs = await loadBootPrefs(session.accountId, info).catch(() => null);
       setHost(host);
-      setBoot({ session: sessionFromHost(info), engines, bridge, prefs });
+      setBoot({ session, engines, bridge, prefs });
     } catch (e) {
       console.error("[mirror boot] FAILED:", e);
       setError(e instanceof Error ? e.message : String(e));
@@ -108,9 +129,17 @@ export function MirrorApp(props: {
   });
 
   return (
-    <Show when={!error()} fallback={<div class="empty">Failed to start: {error()}</div>}>
-      <Show when={boot()} fallback={<div class="empty">{m().common.loading}</div>}>
-        {(b) => (
+    <Show
+      when={!error()}
+      fallback={
+        <div class="empty">
+          {m().mirror.failedToStart}: {error()}
+        </div>
+      }
+    >
+      <Show when={!gate()} fallback={<HostGate state={gate()!} />}>
+        <Show when={boot()} fallback={<div class="empty">{m().common.loading}</div>}>
+          {(b) => (
           <SessionProvider
             value={{
               session: () => b().session,
@@ -137,9 +166,40 @@ export function MirrorApp(props: {
               }}
             />
           </SessionProvider>
-        )}
+          )}
+        </Show>
       </Show>
     </Show>
+  );
+}
+
+/** The prefs row for this boot. Signup adopts the local-only workspace
+ *  (same doc id), so a row the anonymous session saved under its
+ *  derived account id follows the account the first time the page
+ *  boots signed in, as the browser's `onAuthenticated` does. */
+async function loadBootPrefs(accountId: string, info: HostSessionInfo): Promise<Prefs | null> {
+  const prefs = await loadPrefs(accountId);
+  if (prefs || info.localOnly) return prefs;
+  const local = localAccountId(info.primaryDocId);
+  const adopted = await loadPrefs(local);
+  if (!adopted) return null;
+  await savePrefs(accountId, adopted);
+  await deletePrefs(local);
+  return adopted;
+}
+
+/** The window without a host yet: waiting on it, with the app's
+ *  reason. Centred in the window, under the title-bar strip the app
+ *  draws its traffic lights over. */
+function HostGate(props: { state: HostState }) {
+  const { m } = useAppI18n();
+  return (
+    <div class="mirror-gate">
+      <p class="mirror-gate-title">{m().mirror.waiting}</p>
+      <Show when={props.state.status === "pending" && props.state}>
+        {(s) => <p class="mirror-gate-hint">{s().reason}</p>}
+      </Show>
+    </div>
   );
 }
 

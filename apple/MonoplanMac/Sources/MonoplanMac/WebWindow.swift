@@ -14,9 +14,12 @@
 //   user looks.
 // - `MirrorHostBridge`: the `monoplan` message handler the page posts
 //   to (`session`, `subscribe`, `unsubscribe`, `import`, `window`,
-//   `undoState`) and the calls
+//   `undoState`, `deleteDoc`, `signIn`) and the calls
 //   back into `window.__monoplanHost` (`update`, `stopped`, `sync`,
-//   `handOff`, `settings`, `undo`, `redo`, `find`). One `Host.subscribe` per open doc; a `MirrorSink` per
+//   `handOff`, `settings`, `undo`, `redo`, `find`, `docAdded`,
+//   `hostState`). Without a host, `session` answers a `HostState`
+//   (signed out, or waiting on a reason) that the page shows instead
+//   of the workspace. One `Host.subscribe` per open doc; a `MirrorSink` per
 //   subscription hops to the main queue and evaluates the update into
 //   the page, never calling `Host.import` from inside `update` (the
 //   loop is busy delivering). Requests that block in Rust (`subscribe`
@@ -45,10 +48,10 @@ import WebKit
 /// (the Settings window and the host controller), handed in as
 /// closures so the window stays ignorant of both.
 struct AccountActions {
-    /// Whether the profile is signed in (`ProfileLocation.isSignedIn`):
-    /// decides between Sign Out… and Sign In… and whether the cached
-    /// email is still current.
-    let isSignedIn: () -> Bool
+    /// Whether the profile has an account (`ProfileLocation.hasAccount`;
+    /// false for a local-only workspace): decides between Sign Out… and
+    /// Sign In… and whether the cached email is still current.
+    let hasAccount: () -> Bool
     /// Settings on the Account pane.
     let openAccount: () -> Void
     /// Settings on the Account pane with the sign-in sheet up.
@@ -60,8 +63,9 @@ struct AccountActions {
 final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate,
                                  WKDownloadDelegate, NSMenuDelegate {
     /// Where the host comes from at request time: the running one, or
-    /// nil while there is none (the page then shows its boot error and
-    /// is reloaded when a host is back, see `hostAvailable`).
+    /// nil while there is none (the page then shows its signed-out or
+    /// waiting screen, by `hostState`, and is reloaded when a host is
+    /// back, see `hostAvailable`).
     private let hostProvider: () -> MonoplanCore.Host?
     /// The tray switches the activation policy on this: a regular app
     /// with a Dock icon and menu bar while the window is up, a bare
@@ -114,14 +118,15 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// for the page's Delete workspace after the native confirm.
     private let deleteWorkspace: (String, @escaping (Result<Void, Error>) -> Void) -> Void
 
-    init(hostProvider: @escaping () -> MonoplanCore.Host?, onVisibility: @escaping (Bool) -> Void,
+    init(hostProvider: @escaping () -> MonoplanCore.Host?, hostState: @escaping () -> HostState,
+         onVisibility: @escaping (Bool) -> Void,
          account: AccountActions,
          deleteWorkspace: @escaping (String, @escaping (Result<Void, Error>) -> Void) -> Void) {
         self.hostProvider = hostProvider
         self.onVisibility = onVisibility
         self.account = account
         self.deleteWorkspace = deleteWorkspace
-        self.bridge = MirrorHostBridge(hostProvider: hostProvider)
+        self.bridge = MirrorHostBridge(hostProvider: hostProvider, hostState: hostState)
         self.schemeHandler = AppSchemeHandler(
             webRoot: Bundle.main.resourceURL?.appendingPathComponent("web", isDirectory: true),
             credential: { [bridge] in bridge.apiCredential })
@@ -131,7 +136,8 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
             self?.canUndo = canUndo
             self?.canRedo = canRedo
         }
-        bridge.onSession = { [weak self] email in self?.accountEmail = email }
+        bridge.onSession = { [weak self] email in self?.accountEmail = email.isEmpty ? nil : email }
+        bridge.onSignIn = { [weak self] in self?.account.signIn() }
         bridge.onDeleteDoc = { [weak self] docId, name, done in
             self?.confirmDeleteWorkspace(docId: docId, name: name, done: done)
         }
@@ -213,10 +219,25 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     }
 
     /// A host is serving again after none was: the page booted against
-    /// the old one (or failed to), so reload it against this one.
+    /// the old one (or showed its signed-out / waiting screen), so
+    /// reload it against this one.
     func hostAvailable() {
         guard let webView, webView.url != nil else { return }
         webView.reload()
+    }
+
+    /// The host the page mirrors has stopped (sign out, or a terminal
+    /// command taking the profile): the page's docs are stale, so
+    /// reload it onto the screen `hostState` now describes.
+    func hostLost() {
+        guard let webView, webView.url != nil else { return }
+        webView.reload()
+    }
+
+    /// The host's state while there is none serving: what the page's
+    /// pre-boot screen shows (signed out, or waiting on a reason).
+    func pushHostState(_ state: HostState) {
+        bridge.pushHostState(state, into: webView)
     }
 
     /// Reload the page (the View menu).
@@ -703,16 +724,17 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         accountMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: -4), in: sender)
     }
 
-    /// Built on every open: who is signed in, the host's sync state
-    /// (built here so the relative time is fresh), the Account pane,
-    /// and sign out or sign in. The email is the one the page booted
-    /// with, dropped once the profile is signed out.
+    /// Built on every open: who is signed in (or that this is a local
+    /// workspace with no account), the host's sync state (built here so
+    /// the relative time is fresh), the Account pane, and sign out or
+    /// sign in. The email is the one the page booted with, dropped once
+    /// the profile is signed out.
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === accountMenu else { return }
         menu.removeAllItems()
-        let signedIn = account.isSignedIn()
+        let signedIn = account.hasAccount()
         let header = NSMenuItem(
-            title: signedIn ? (accountEmail ?? String(localized: "Signed in")) : String(localized: "Not signed in"),
+            title: signedIn ? (accountEmail ?? String(localized: "Signed in")) : String(localized: "Local workspace (no account)"),
             action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
@@ -971,6 +993,8 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     static let handlerName = "monoplan"
 
     private let hostProvider: () -> MonoplanCore.Host?
+    /// What `session` answers when `hostProvider` has nothing.
+    private let hostState: () -> HostState
     /// Blocking host calls, one at a time, in request order.
     private let work = DispatchQueue(label: "app.monoplan.mac.mirror", qos: .userInitiated)
     /// Main-queue state: the live subscriptions of the current page.
@@ -989,8 +1013,9 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     private let credentialLock = NSLock()
     private var credential: AppSchemeHandler.Credential?
 
-    init(hostProvider: @escaping () -> MonoplanCore.Host?) {
+    init(hostProvider: @escaping () -> MonoplanCore.Host?, hostState: @escaping () -> HostState) {
         self.hostProvider = hostProvider
+        self.hostState = hostState
     }
 
     var apiCredential: AppSchemeHandler.Credential? {
@@ -1001,11 +1026,14 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
 
     /// The page's latest `undoState`; set on the main thread.
     var onUndoState: ((Bool, Bool) -> Void)?
-    /// The email of the session a page booted with; on the main thread.
+    /// The email of the session a page booted with (empty for a
+    /// local-only workspace); on the main thread.
     var onSession: ((String) -> Void)?
     /// The page's `deleteDoc(docId, name)`: the window confirms and
     /// deletes, then answers whether the doc is gone. Main thread.
     var onDeleteDoc: ((String, String, @escaping (Bool) -> Void) -> Void)?
+    /// The page's Sign in. Main thread.
+    var onSignIn: (() -> Void)?
 
     /// A new page is loading (or the old one is going): close every
     /// subscription so the host releases the peer slots, and let the
@@ -1039,6 +1067,12 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     private func push(_ status: SyncStatus, into webView: WKWebView) {
         webView.evaluateJavaScript(
             HostInbound.sync(online: status.online, lastSyncedAt: status.lastSyncedAt, pending: status.pending).script)
+    }
+
+    /// Not replayed on load: a new page asks `session`, which answers
+    /// with the state of the moment.
+    func pushHostState(_ state: HostState, into webView: WKWebView?) {
+        webView?.evaluateJavaScript(HostInbound.hostState(state).script)
     }
 
     /// Ask the page to flush to the host and wait for the imports that
@@ -1077,21 +1111,35 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
             DispatchQueue.main.async {
                 switch result {
                 case .success(let v): replyHandler(v, nil)
-                case .failure(let e): replyHandler(nil, e.localizedDescription)
+                case .failure(let e): replyHandler(nil, hostErrorMessage(e))
                 }
             }
         }
         switch request {
         case .session:
             // The page's first request: bind this page to the host that
-            // is running now.
+            // is running now. Without one the page gets the state to
+            // show instead of an error: waiting on a reason, until the
+            // app reloads it once a host serves. A state that says
+            // running while the provider has nothing is the gap between
+            // the two, so it waits.
             guard let host = hostProvider() else {
-                reply(.failure(ClientError.notConnected))
+                var state = hostState()
+                if state == .running { state = .pending(String(localized: "starting")) }
+                reply(.success(state.reply))
                 return
             }
             pageHost = host
             work.async { [weak self] in
                 let result = Result { try host.session() }
+                // The loop ended between the provider's check and the
+                // call (a sign-in's claim, a sign-out): not an error
+                // for the page, the same waiting screen; the app
+                // reloads it against the next host.
+                if case .failure(HostError.Stopped) = result {
+                    reply(.success(HostState.pending(String(localized: "the host has stopped")).reply))
+                    return
+                }
                 if case .success(let s) = result {
                     let token = host.deviceToken()
                     self?.credentialLock.lock()
@@ -1102,7 +1150,7 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
                 reply(result.map { s in
                     WindowSession(
                         accountId: s.accountId, email: s.email, deviceId: s.deviceId,
-                        primaryDocId: s.primaryDocId, serverURL: s.serverUrl,
+                        primaryDocId: s.primaryDocId, serverURL: s.serverUrl, localOnly: s.localOnly,
                         docs: s.docs.map { .init(docId: $0.docId, name: $0.name) }
                     ).reply
                 })
@@ -1136,7 +1184,7 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
                         self.subscriptions[docId] = sub
                         replyHandler(HostReply.subscribe(snapshot: sub.snapshot(), peer: sub.peerId()), nil)
                     case .failure(let e):
-                        replyHandler(nil, e.localizedDescription)
+                        replyHandler(nil, hostErrorMessage(e))
                     }
                 }
             }
@@ -1174,6 +1222,10 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
                 return
             }
             onDeleteDoc(docId, name) { deleted in replyHandler(["deleted": deleted], nil) }
+
+        case .signIn:
+            onSignIn?()
+            replyHandler(NSNull(), nil)
         }
     }
 

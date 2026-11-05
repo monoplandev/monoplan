@@ -101,6 +101,14 @@ export type Messages = {
     prereleaseNotice: string;
     prereleaseLink: string;
   };
+  /** The macOS app's window before it has a host to mirror
+   *  (`MirrorApp`): waiting on the host. */
+  mirror: {
+    /** Waiting on the host; the app's reason follows in smaller type. */
+    waiting: string;
+    notInApp: string;
+    failedToStart: string;
+  };
   nav: {
     inbox: string;
     /** The reserved `events` list (`spec/events-plan.md`). Never a nav
@@ -618,6 +626,11 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       prereleaseLink:
         "Suscríbete a nuestra lista de correo para saber cuándo se lance Monoplan.",
     },
+    mirror: {
+      waiting: "Esperando a la app…",
+      notInApp: "Esta página solo funciona dentro de la app de Monoplan.",
+      failedToStart: "No se pudo iniciar",
+    },
     nav: {
       inbox: "Bandeja de entrada",
       events: "Calendario",
@@ -987,6 +1000,11 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         "This is a pre-release build. Data will be regularly deleted.",
       prereleaseLink:
         "Sign up to the mailing list to get notified when Monoplan releases.",
+    },
+    mirror: {
+      waiting: "Waiting for the app…",
+      notInApp: "This page only runs inside the Monoplan app.",
+      failedToStart: "Failed to start",
     },
     nav: {
       inbox: "Inbox",

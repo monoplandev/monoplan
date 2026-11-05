@@ -7,6 +7,7 @@ mod support;
 use monoplan_cli::bootstrap;
 use monoplan_cli::commands::signup::{self, Credentials};
 use monoplan_cli::config::Profile;
+use monoplan_cli::daemon;
 use monoplan_cli::sync::Session;
 use monoplan_core::LIST_INBOX;
 use support::{
@@ -163,4 +164,67 @@ async fn signup_without_a_local_workspace_seeds_a_fresh_doc() {
             .any(|l| l.name == "Welcome")
     );
     session.flush().await.unwrap();
+}
+
+/// The macOS app hosts a local-only workspace like any other and asks
+/// the loop for the window's session (`spec/mac-window-plan.md` "Swift
+/// side"): no identity and no server, `local_only` set, the one doc.
+#[tokio::test]
+async fn embedded_host_reports_a_local_only_session() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("profile");
+    let profile = bootstrap::open_or_init_at(dir.clone()).await.unwrap();
+    let (local_doc_id, _) = bootstrap::local_only_doc(&profile).unwrap().unwrap();
+
+    let handle = daemon::spawn_with(reopen_profile(&dir), true)
+        .await
+        .unwrap();
+    let info = handle.client.session().await.unwrap();
+    assert!(info.local_only);
+    assert_eq!(info.account_id, "");
+    assert_eq!(info.email, "");
+    assert_eq!(info.device_id, "");
+    assert_eq!(info.server_url, "");
+    assert_eq!(info.primary_doc_id, local_doc_id);
+    assert_eq!(info.docs.len(), 1);
+    assert_eq!(info.docs[0].doc_id, local_doc_id);
+    handle.shutdown().await.unwrap();
+}
+
+/// Signing in to an existing account from a local-only workspace (the
+/// app's sheet, after its warning; the CLI's `auth login` after its
+/// confirmation) replaces the workspace, and the host boots the
+/// account's doc afterwards.
+#[tokio::test]
+async fn login_over_a_local_only_workspace_then_host_boots() {
+    use monoplan_cli::commands::login::{self, Credentials as LoginCredentials};
+    use support::signup_account;
+
+    let server = TestServer::start().await;
+    let account = signup_account(&server, "login-over-local-a").await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("profile");
+    let profile = bootstrap::open_or_init_at(dir.clone()).await.unwrap();
+    assert!(bootstrap::local_only_doc(&profile).unwrap().is_some());
+
+    let outcome = login::login(
+        &reopen_profile(&dir),
+        LoginCredentials {
+            server: server.base.clone(),
+            email: account.email.clone(),
+            password: TEST_PASSWORD.into(),
+            device_name: "login-over-local-b".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(outcome.account_id, account.account_id);
+
+    let handle = daemon::spawn_with(reopen_profile(&dir), true).await.unwrap();
+    let info = handle.client.session().await.unwrap();
+    assert!(!info.local_only);
+    assert_eq!(info.account_id, account.account_id);
+    assert_eq!(info.primary_doc_id.0.to_string(), account.primary_doc_id);
+    handle.shutdown().await.unwrap();
 }

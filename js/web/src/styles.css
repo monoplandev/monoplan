@@ -1694,6 +1694,35 @@ input.task-check:hover {
   color: var(--text-empty);
 }
 
+/* The app window without a host yet (MirrorApp's HostGate): waiting
+   on it. Fills the window and centres its two lines; the reason is
+   secondary. */
+.mirror-gate {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text);
+}
+
+.mirror-gate p {
+  margin: 0;
+}
+
+.mirror-gate-title {
+  font-size: 1.1em;
+  font-weight: 500;
+}
+
+.mirror-gate-hint {
+  color: var(--text-muted);
+  max-width: 32em;
+}
+
 .connection-indicator {
   display: inline-flex;
   align-items: center;

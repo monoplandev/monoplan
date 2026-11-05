@@ -381,6 +381,7 @@ async fn local_client_shares_the_loop_with_the_socket() {
     assert_eq!(info.device_id, signup.device_id);
     assert_eq!(info.primary_doc_id.0.to_string(), signup.primary_doc_id);
     assert_eq!(info.server_url, server.base);
+    assert!(!info.local_only);
     assert_eq!(info.docs.len(), 1);
     assert_eq!(info.docs[0].doc_id, info.primary_doc_id);
     assert_eq!(info.docs[0].name, None);

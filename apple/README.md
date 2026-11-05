@@ -154,7 +154,6 @@ bun run mac:app                                       # build Monoplan.app (rele
 bun run mac:install                                   # build release, quit a running Monoplan, install to /Applications (`-d ~/Applications`, `--no-open`) and launch
 swift test --package-path apple/MonoplanMac           # codec / model tests, no host needed
 MONOPLAN_MIRROR_URL=http://localhost:5176/mirror.html bun run mac   # the window over the Vite dev server
-MONOPLAN_WEB_URL=http://localhost:5176 bun run mac    # the sign-in sheet's "Create an account…" link at the dev stack
 MONOPLAN_DATA_DIR=local/cli bun run mac               # a different profile, same rule as the CLI
 MONOPLAN_MAC_DEBUG=1 bun run mac                      # log state and rows to stderr
 ```
@@ -187,15 +186,24 @@ in Finder, Login Items and Force Quit while stderr stays on the
 terminal. The menu bar glyph is separate: a template image drawn in
 `main.swift`.
 
-Settings has two panes. Account: server, status, sync, an "Open at
-login" toggle (`SMAppService.mainApp`, which lists the app under System
-Settings › Login Items; works only from an .app bundle), and Sign In /
-Sign Out. Sign In is a sheet (email, password; server and device name
-under an Advanced disclosure, the server defaulting to
-`https://alpha.monoplan.app`) that runs `monoplan-ffi::login`, the
-same body as `monoplan auth login`; the tray shows "Sign In…" while signed
-out. Sign Out is confirmed and runs `monoplan-ffi::logout`, the same
-as `monoplan auth logout`: it stops the in-app host and wipes the profile.
+No account is needed: with no profile the app seeds the CLI's
+local-only workspace (`monoplan-ffi::ensure_local_workspace`) and
+hosts it; the window runs it as the web client's anonymous session.
+Settings has two panes. Account: server, status ("Local workspace (no
+account)" until there is one), sync, an "Open at login" toggle
+(`SMAppService.mainApp`, which lists the app under System Settings ›
+Login Items; works only from an .app bundle), and Sign In / Create
+Account / Sign Out. The account sheet (email, password; server and
+device name under an Advanced disclosure, the server defaulting to
+`https://alpha.monoplan.app`) has two modes: Sign In runs
+`monoplan-ffi::login`, the same body as `monoplan auth login`, and
+replaces the local workspace (the form says so); Create Account runs
+`monoplan-ffi::signup`, the same body as `monoplan auth signup`, adopts
+the local workspace as the account's Home doc, and shows the recovery
+code once. The tray shows "Sign In…" while there is no account. Sign
+Out is confirmed and runs `monoplan-ffi::logout`, the same as
+`monoplan auth logout`: it stops the in-app host and wipes the profile,
+and a fresh local workspace takes its place.
 Advanced: the
 Host row (running, or why not), the Build row (package version, then
 the short commit `build-app.sh` baked into Info.plist, "+" if the tree

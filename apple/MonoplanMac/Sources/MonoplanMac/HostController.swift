@@ -7,11 +7,14 @@
 // and it only ever talks to its own host.
 //
 // The app hosts whenever it runs:
-// - Whenever the client has no host and the profile is signed in,
-//   start. `Host.start` takes a headless `monoplan daemon` over (asks
-//   it to exit, then claims the profile) and blocks while the doc
-//   boots, so it runs off the main thread and the menu says "starting"
-//   meanwhile.
+// - Whenever the client has no host, start. No profile (a first run,
+//   or just after a sign-out's wipe) first gets a local-only workspace
+//   (`ensureLocalWorkspace`, what the CLI's first doc command does), so
+//   the app never needs an account to be used, as the web client does
+//   not (spec/auth.md). `Host.start` takes a headless `monoplan daemon`
+//   over (asks it to exit, then claims the profile) and blocks while
+//   the doc boots, so it runs off the main thread and the menu says
+//   "starting" meanwhile.
 // - A client's `Shutdown` ends our host like any other: `logout`,
 //   `login`, `password` from the terminal stop it, hold the profile
 //   while they rewrite it, and we re-host once it is free again. The
@@ -37,6 +40,10 @@ final class HostController {
     /// A sign-in or sign-out in progress: what the menu says, and a
     /// reason not to start a host when the socket drops meanwhile.
     private var accountWork: String?
+    /// Whether a sign-in or sign-out is in progress: the window's page
+    /// shows it as waiting rather than signed out, whatever the profile
+    /// on disk says mid-way.
+    var isBusy: Bool { accountWork != nil }
 
     init(location: ProfileLocation, client: DaemonClient) {
         self.location = location
@@ -64,11 +71,15 @@ final class HostController {
             self.failure = nil
             return .pending(failure)
         }
-        guard location.isSignedIn else { return .pending(String(localized: "not signed in")) }
         starting = true
         let dir = location.dir.path
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = Result { try MonoplanCore.Host.start(profileDir: dir) }
+            let result = Result {
+                // A no-op with a profile; a seeded local-only workspace
+                // without one.
+                try MonoplanCore.ensureLocalWorkspace(profileDir: dir)
+                return try MonoplanCore.Host.start(profileDir: dir)
+            }
             DispatchQueue.main.async { self?.didStart(result) }
         }
         return .pending(String(localized: "starting"))
@@ -85,8 +96,8 @@ final class HostController {
         case .failure(HostError.Busy):
             failure = String(localized: "profile in use by another process")
         case .failure(let e):
-            failure = String(localized: "host failed: \(e.localizedDescription)")
-            NSLog("MonoplanMac: host failed: %@", e.localizedDescription)
+            failure = String(localized: "host failed: \(hostErrorMessage(e))")
+            NSLog("MonoplanMac: host failed: %@", hostErrorMessage(e))
         }
         client.poke()
     }
@@ -97,8 +108,11 @@ final class HostController {
         host = nil
     }
 
-    /// Sign out: stop our host, wipe the profile (what `monoplan
-    /// logout` does), and let the client see "not signed in". Off the
+    /// Sign out: stop our host and wipe the profile (what `monoplan
+    /// logout` does). The client is then told the host is gone
+    /// (`hostGone`, whether or not its watch said so yet), finds no
+    /// profile, and the no-host path seeds a fresh local-only workspace and hosts it,
+    /// as the web client drops to a fresh anonymous session. Off the
     /// main thread, since the host's clean exit persists and folds.
     /// `accountWork` keeps the no-host path from starting a fresh host
     /// between the stop and the wipe.
@@ -112,8 +126,8 @@ final class HostController {
                 guard let self else { return }
                 self.host = nil
                 self.accountWork = nil
-                self.client.poke()
-                completion(result.failure)
+                self.client.hostGone()
+                completion(result.failure.map(HostFailure.init))
             }
         }
     }
@@ -121,8 +135,10 @@ final class HostController {
     /// Sign in: what `monoplan auth login` does (`MonoplanCore.login`), off
     /// the main thread for the key derivation. The Rust side claims the
     /// profile only once the server has accepted the credentials, so a
-    /// running host for another account is stopped then and not before;
-    /// on return the profile is free and the client's poke hosts it.
+    /// running host (the local-only workspace's, or another account's)
+    /// is stopped then and not before; on return the profile is free
+    /// and the client's poke hosts it. A local-only workspace is
+    /// replaced (the sheet says so first).
     func signIn(_ creds: SignInCredentials, completion: @escaping (Error?) -> Void) {
         accountWork = String(localized: "signing in")
         let dir = location.dir.path
@@ -136,8 +152,33 @@ final class HostController {
                 guard let self else { return }
                 if result.failure == nil { self.host = nil }
                 self.accountWork = nil
-                self.client.poke()
-                completion(result.failure)
+                self.client.hostGone()
+                completion(result.failure.map(HostFailure.init))
+            }
+        }
+    }
+
+    /// Create an account: what `monoplan auth signup` does
+    /// (`MonoplanCore.signup`), off the main thread. The local-only
+    /// workspace the app has been hosting is adopted as the account's
+    /// Home doc (same id, same key; `spec/auth.md` §Device pairing), so
+    /// nothing captured before is lost; the host that comes up after
+    /// pushes its whole history on the first connect.
+    func signUp(_ creds: SignInCredentials, completion: @escaping (Result<SignupOutcome, Error>) -> Void) {
+        accountWork = String(localized: "signing in")
+        let dir = location.dir.path
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = Result {
+                try MonoplanCore.signup(
+                    profileDir: dir, server: creds.server, email: creds.email,
+                    password: creds.password, deviceName: creds.deviceName)
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if case .success = result { self.host = nil }
+                self.accountWork = nil
+                self.client.hostGone()
+                completion(result.mapError(HostFailure.init))
             }
         }
     }
@@ -148,6 +189,27 @@ struct SignInCredentials {
     var email: String
     var password: String
     var deviceName: String
+}
+
+/// A host error as a sentence. The generated `HostError` describes
+/// itself by reflection ("MonoplanCore.HostError.Failed(message: …)"),
+/// which is not what a sheet, a menu or the page should show.
+func hostErrorMessage(_ error: Error) -> String {
+    switch error {
+    case HostError.NotLoggedIn: return String(localized: "no profile to host")
+    case HostError.Busy: return String(localized: "profile in use by another process")
+    case HostError.Stopped: return String(localized: "the host has stopped")
+    case HostError.Failed(let message): return message
+    default: return error.localizedDescription
+    }
+}
+
+/// `hostErrorMessage` as an `Error`, for completions whose callers
+/// read `localizedDescription`.
+struct HostFailure: LocalizedError {
+    let message: String
+    init(_ error: Error) { message = hostErrorMessage(error) }
+    var errorDescription: String? { message }
 }
 
 private extension Result {

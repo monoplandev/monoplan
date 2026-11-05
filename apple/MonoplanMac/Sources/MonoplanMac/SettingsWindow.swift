@@ -16,6 +16,7 @@
 import AppKit
 import ServiceManagement
 import SwiftUI
+import MonoplanCore
 import MonoplanMacKit
 
 /// What the Devices pane calls the server with: the host's session and
@@ -33,10 +34,13 @@ final class SettingsWindowController: NSWindowController {
     init(
         location: ProfileLocation, client: DaemonClient,
         signIn: @escaping (SignInCredentials, @escaping (Error?) -> Void) -> Void,
+        signUp: @escaping (SignInCredentials, @escaping (Result<SignupOutcome, Error>) -> Void) -> Void,
         signOut: @escaping (@escaping (Error?) -> Void) -> Void,
         credential: @escaping () -> APICredential?
     ) {
-        model = SettingsModel(location: location, client: client, signIn: signIn, signOut: signOut, credential: credential)
+        model = SettingsModel(
+            location: location, client: client, signIn: signIn, signUp: signUp, signOut: signOut,
+            credential: credential)
         // The toolbar tab style: AppKit builds the toolbar from the tab
         // items (one icon + label each) and, with the `.preference`
         // toolbar style, draws it as the full-height icon surface every
@@ -97,9 +101,11 @@ final class SettingsWindowController: NSWindowController {
     }
 
     /// Open on the Account pane with the sign-in sheet up (the tray's
-    /// and the window's "Sign In…").
-    func showSignIn() {
+    /// and the window's "Sign In…"); the sheet itself offers creating
+    /// an account too.
+    func showSignIn(mode: SignInSheet.Mode = .signIn) {
         showAccount()
+        model.signInMode = mode
         model.showSignIn = true
     }
 
@@ -146,8 +152,13 @@ final class SettingsModel: ObservableObject {
     @Published var signingOut = false
     @Published var signOutError: String?
     @Published var showSignIn = false
+    /// Which form the sheet opens on; the sheet can switch.
+    @Published var signInMode: SignInSheet.Mode = .signIn
     @Published var signingIn = false
     @Published var signInError: String?
+    /// A signup's recovery code, held only while the sheet shows it
+    /// once; cleared when the sheet closes.
+    @Published var recoveryCode: String?
     @Published var cliLine: String = "—"
     @Published var cliError: String?
     /// Settings › Devices. Nil until the first load (or without a
@@ -156,6 +167,9 @@ final class SettingsModel: ObservableObject {
     @Published var devices: [DeviceRow]?
     @Published var devicesError: String?
     @Published var devicesBusy = false
+    /// Whether the Devices pane is showing: a host that comes up (a
+    /// sign-in, a start) reloads the list only while it is.
+    var devicesVisible = false
     @Published var thisDeviceId: String?
     /// The row the rename sheet is up for.
     @Published var renaming: DeviceRow?
@@ -165,6 +179,7 @@ final class SettingsModel: ObservableObject {
     private let location: ProfileLocation
     private let client: DaemonClient
     private let signInAction: (SignInCredentials, @escaping (Error?) -> Void) -> Void
+    private let signUpAction: (SignInCredentials, @escaping (Result<SignupOutcome, Error>) -> Void) -> Void
     private let signOutAction: (@escaping (Error?) -> Void) -> Void
     private let credential: () -> APICredential?
     private let api: URLSession = {
@@ -177,12 +192,14 @@ final class SettingsModel: ObservableObject {
     init(
         location: ProfileLocation, client: DaemonClient,
         signIn: @escaping (SignInCredentials, @escaping (Error?) -> Void) -> Void,
+        signUp: @escaping (SignInCredentials, @escaping (Result<SignupOutcome, Error>) -> Void) -> Void,
         signOut: @escaping (@escaping (Error?) -> Void) -> Void,
         credential: @escaping () -> APICredential?
     ) {
         self.location = location
         self.client = client
         self.signInAction = signIn
+        self.signUpAction = signUp
         self.signOutAction = signOut
         self.credential = credential
         profilePath = location.dir.path
@@ -203,13 +220,36 @@ final class SettingsModel: ObservableObject {
         }
     }
 
+    /// The sheet's Create Account. On success the sheet stays up to
+    /// show the recovery code once (`recoveryCode`); the local
+    /// workspace is now the account's Home doc.
+    func signUp(_ creds: SignInCredentials) {
+        signingIn = true
+        signInError = nil
+        signUpAction(creds) { [weak self] result in
+            guard let self else { return }
+            self.signingIn = false
+            switch result {
+            case .success(let outcome):
+                self.recoveryCode = outcome.recoveryCode
+            case .failure(let error):
+                self.signInError = error.localizedDescription
+            }
+            self.refresh()
+        }
+    }
+
+    /// Whether signing in would replace a local-only workspace (the
+    /// sheet warns; creating an account keeps it instead).
+    var hasLocalWorkspace: Bool { location.hasProfile && !location.hasAccount }
+
     /// Confirm, then stop the host and wipe the profile. Local state
     /// only: everything is on the server, and signing in again pulls
-    /// it back.
+    /// it back; a fresh local workspace takes its place meanwhile.
     func signOut() {
         let alert = NSAlert()
         alert.messageText = String(localized: "Sign out of Monoplan?")
-        alert.informativeText = String(localized: "This removes the local copy of your data from this Mac. Your data stays on the server and comes back when you sign in again.")
+        alert.informativeText = String(localized: "This removes the local copy of your data from this Mac and starts a fresh local workspace. Your data stays on the server and comes back when you sign in again.")
         alert.alertStyle = .warning
         alert.addButton(withTitle: String(localized: "Sign Out"))
         alert.addButton(withTitle: String(localized: "Cancel"))
@@ -227,7 +267,7 @@ final class SettingsModel: ObservableObject {
 
     func refresh() {
         serverURL = location.serverURL ?? "—"
-        signedIn = location.isSignedIn
+        signedIn = location.hasAccount
         openAtLogin = SMAppService.mainApp.status == .enabled
         if let cli {
             switch cli.state {
@@ -238,6 +278,13 @@ final class SettingsModel: ObservableObject {
         } else {
             cliLine = String(localized: "No bundled binary (run the built app)")
         }
+        // Devices are the account's: nothing to show once signed out,
+        // and the pane's own load again once a host serves (the
+        // credential needs one).
+        if !signedIn {
+            devices = nil
+            devicesError = nil
+        }
         switch client.state {
         case .connecting(let reason):
             hostLine = String(localized: "Not running · \(reason)")
@@ -245,6 +292,7 @@ final class SettingsModel: ObservableObject {
             buildLine = Self.withCommit(Self.bundleVersion)
             showListCounts = nil
         case .connected(let sync):
+            if signedIn, devicesVisible, devices == nil, devicesError == nil, !devicesBusy { loadDevices() }
             hostLine = String(localized: "Running")
             if let d = client.daemon {
                 buildLine = Self.withCommit(String(d.buildId.split(separator: ":", maxSplits: 1).first ?? ""))
@@ -281,9 +329,10 @@ final class SettingsModel: ObservableObject {
     }
 
     /// "Signed in (you@example.com)", or just the state while the
-    /// host has not answered or there is no profile.
+    /// host has not answered; "Local workspace (no account)" for an
+    /// accountless install, which is what a fresh app runs as.
     var statusLine: String {
-        guard signedIn else { return String(localized: "Not signed in") }
+        guard signedIn else { return String(localized: "Local workspace (no account)") }
         if let email { return String(localized: "Signed in (\(email))") }
         return String(localized: "Signed in")
     }
@@ -349,6 +398,11 @@ final class SettingsModel: ObservableObject {
                 } catch {
                     self.devicesError = String(localized: "Could not load devices: \(error.localizedDescription)")
                 }
+            case .failure(DevicesError.notSignedIn):
+                // No signed-in host to ask with: not an error, just
+                // nothing to list until there is one.
+                self.devices = nil
+                self.devicesError = nil
             case .failure(let error):
                 self.devices = nil
                 self.devicesError = String(localized: "Could not load devices: \(error.localizedDescription)")
@@ -519,7 +573,16 @@ struct AccountPane: View {
                     }
                     .disabled(model.signingOut)
                 } else {
-                    Button("Sign In…") { model.showSignIn = true }
+                    HStack {
+                        Button("Sign In…") {
+                            model.signInMode = .signIn
+                            model.showSignIn = true
+                        }
+                        Button("Create Account…") {
+                            model.signInMode = .signUp
+                            model.showSignIn = true
+                        }
+                    }
                 }
             }
             if let error = model.signOutError {
@@ -534,11 +597,17 @@ struct AccountPane: View {
     }
 }
 
-/// The add-account sheet: email and password, with the server and
-/// device name under a disclosure since almost nobody changes them.
-/// The server is part of the account, not a preference, which is why
-/// it is set here and only read back on the Account pane.
+/// The account sheet: sign in to an account, or create one, with the
+/// server and device name under a disclosure since almost nobody
+/// changes them. The server is part of the account, not a preference,
+/// which is why it is set here and only read back on the Account pane.
+/// Creating an account adopts the local workspace the app has been
+/// hosting (`spec/auth.md` §Device pairing) and then shows the
+/// recovery code once, in place of the form; signing in to an existing
+/// account replaces that workspace, which the form says.
 struct SignInSheet: View {
+    enum Mode { case signIn, signUp }
+
     @ObservedObject var model: SettingsModel
     @Environment(\.dismiss) private var dismiss
     @State private var email = ""
@@ -554,13 +623,38 @@ struct SignInSheet: View {
     }
 
     var body: some View {
+        Group {
+            if let code = model.recoveryCode {
+                RecoveryCodePane(code: code) {
+                    model.recoveryCode = nil
+                    dismiss()
+                }
+            } else {
+                form
+            }
+        }
+        .padding(20)
+        .frame(width: 400)
+        .onDisappear {
+            model.signInError = nil
+            model.recoveryCode = nil
+        }
+    }
+
+    private var form: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Sign in to Monoplan").font(.headline)
+            Picker("", selection: $model.signInMode) {
+                Text("Sign In").tag(Mode.signIn)
+                Text("Create Account").tag(Mode.signUp)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .disabled(model.signingIn)
             Form {
                 TextField("Email", text: $email)
                     .textContentType(.username)
                 SecureField("Password", text: $password)
-                    .textContentType(.password)
+                    .textContentType(model.signInMode == .signUp ? .newPassword : .password)
                     .onSubmit { if canSubmit { submit() } }
                 DisclosureGroup("Advanced", isExpanded: $advanced) {
                     TextField("Server", text: $server)
@@ -570,34 +664,49 @@ struct SignInSheet: View {
             }
             .formStyle(.columns)
             .disabled(model.signingIn)
+            if model.signInMode == .signUp {
+                Text("You will get a 12-word recovery code. It is the only way back in if you forget your password: Monoplan cannot reset it for you.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if model.hasLocalWorkspace {
+                Text("Signing in replaces the local workspace on this Mac with the account's. Create an account instead to keep it.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let error = model.signInError {
                 Text(error).font(.footnote).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack {
-                Link("Create an account…", destination: webURL)
-                    .font(.footnote)
                 Spacer()
                 if model.signingIn { ProgressView().controlSize(.small) }
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                     .disabled(model.signingIn)
-                Button("Sign In") { submit() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!canSubmit)
+                if model.signInMode == .signUp {
+                    Button("Create Account") { submit() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(!canSubmit)
+                } else {
+                    Button("Sign In") { submit() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(!canSubmit)
+                }
             }
         }
-        .padding(20)
-        .frame(width: 400)
-        .onDisappear { model.signInError = nil }
     }
 
     private func submit() {
         let creds = SignInCredentials(
             server: Self.normalise(server), email: email.trimmingCharacters(in: .whitespaces),
             password: password, deviceName: deviceName.trimmingCharacters(in: .whitespaces))
-        model.signIn(creds) { ok in
-            if ok { dismiss() }
+        switch model.signInMode {
+        case .signIn:
+            model.signIn(creds) { ok in
+                if ok { dismiss() }
+            }
+        case .signUp:
+            model.signUp(creds)
         }
     }
 
@@ -608,6 +717,53 @@ struct SignInSheet: View {
         if !s.contains("://") { s = "https://" + s }
         while s.hasSuffix("/") { s.removeLast() }
         return s
+    }
+}
+
+/// The one time the recovery code is ever shown (the web client's
+/// pane, `Login.tsx`): the twelve words, Copy, and a checkbox that
+/// gates Continue, so the only way on is to confirm they are written
+/// down. The sheet has no close button around it.
+struct RecoveryCodePane: View {
+    let code: String
+    let onContinue: () -> Void
+    @State private var saved = false
+    @State private var copied = false
+
+    private var words: [String] { code.split(separator: " ").map(String.init) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Your recovery code").font(.headline)
+            Text("Write these 12 words down and keep them somewhere safe. They are shown only once and are the only way to reset a forgotten password.")
+                .font(.footnote).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 3), spacing: 6) {
+                ForEach(Array(words.enumerated()), id: \.offset) { i, word in
+                    HStack(spacing: 6) {
+                        Text(verbatim: "\(i + 1).").foregroundStyle(.secondary).monospacedDigit()
+                        Text(word).textSelection(.enabled)
+                    }
+                }
+            }
+            .padding(10)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(code, forType: .string)
+                copied = true
+            } label: {
+                if copied { Text("Copied") } else { Text("Copy") }
+            }
+            Toggle("I have written down these 12 words", isOn: $saved)
+                .toggleStyle(.checkbox)
+            HStack {
+                Spacer()
+                Button("Continue") { onContinue() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!saved)
+            }
+        }
     }
 }
 
@@ -626,8 +782,12 @@ struct DevicesPane: View {
             } else if model.devicesError == nil {
                 if model.devicesBusy {
                     Text("Loading…").foregroundStyle(.secondary)
-                } else {
+                } else if !model.signedIn {
                     Text("Not signed in").foregroundStyle(.secondary)
+                } else {
+                    // Signed in but no host to ask with yet (starting);
+                    // `refresh` loads once it serves.
+                    Text("Waiting for the host…").foregroundStyle(.secondary)
                 }
             }
             if let error = model.devicesError {
@@ -637,7 +797,11 @@ struct DevicesPane: View {
         }
         .formStyle(.grouped)
         .frame(width: 460)
-        .onAppear { model.loadDevices() }
+        .onAppear {
+            model.devicesVisible = true
+            model.loadDevices()
+        }
+        .onDisappear { model.devicesVisible = false }
         .sheet(item: $model.renaming) { device in
             RenameDeviceSheet(model: model, device: device)
         }

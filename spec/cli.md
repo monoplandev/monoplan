@@ -14,7 +14,7 @@ No account is needed to use the CLI. The first doc command on a fresh install cr
 - `monoplan auth logout` on a local-only workspace does nothing (`Not logged in (the local workspace is kept).`); `monoplan db clear` is the way to erase it, and always asks (`--force` when not a TTY), then re-seeds a fresh one under the same id and key.
 - Verbs that need a server (`workspace share …`, `auth password`) fail with `no account on this install; …`.
 - A local-only profile holds exactly one workspace; `workspace` has no verb to create a second (`auth.md` §One workspace per accountless install). Signup is the gate to more.
-- The macOS app hosts a CLI-made local-only profile like any other (its Settings get an `Err` to the `Account` request instead of an identity); it does not create one itself yet.
+- The macOS app (2026-11-05) creates one itself whenever there is no profile (`monoplan-ffi::ensure_local_workspace` wraps `bootstrap::open_or_init_at`) and hosts it like any other; its account sheet runs `signup::signup` (adopts it) or `login::login` (replaces it, after saying so). See `mac-window-plan.md` "Accountless, natively".
 
 ### Account (`monoplan auth …`)
 - `monoplan auth signup [--server URL]` — interactive: email, password, recovery code shown once and typed back; then syncs. The body is `signup::signup` (`Credentials` → `Outcome { account_id, recovery_code, adopted }`), the same split as `login`

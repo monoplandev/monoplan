@@ -31,19 +31,27 @@ import type { HostSessionInfo } from "./mirrorHost.ts";
 import type { PresentAccount } from "./runtime.ts";
 import { createViewState } from "./viewState.ts";
 
-/** The session as the window sees it: the host's identity, no key. */
+/** The session as the window sees it: the host's identity, no key. A
+ *  local-only workspace is an anonymous session, as in the browser: no
+ *  identity, an account id derived from the doc id (it namespaces the
+ *  prefs row; signup keeps the doc id, so the row can follow). */
 export function sessionFromHost(info: HostSessionInfo): Session {
   return {
-    anonymous: false,
+    anonymous: info.localOnly,
     mirror: true,
-    accountId: info.accountId,
+    accountId: info.localOnly ? localAccountId(info.primaryDocId) : info.accountId,
     primaryDocId: info.primaryDocId,
-    email: info.email,
-    deviceId: info.deviceId,
+    email: info.localOnly ? null : info.email,
+    deviceId: info.localOnly ? null : info.deviceId,
     dek: null,
     docKeys: new Map(),
     freshSignup: false,
   };
+}
+
+/** The prefs namespace of a local-only workspace, by its doc id. */
+export function localAccountId(primaryDocId: string): string {
+  return `local-${primaryDocId}`;
 }
 
 /** Everything the app resolved before the runtime can start: the

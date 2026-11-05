@@ -53,7 +53,9 @@ pub struct Account {
 }
 
 /// The server-side identity of an install that has an account.
-#[derive(Debug, Clone)]
+/// `Default` is the empty identity a local-only workspace reports
+/// where a shape needs one (`daemon::SessionInfo`).
+#[derive(Debug, Clone, Default)]
 pub struct Identity {
     pub account_id: String,
     pub email: String,
