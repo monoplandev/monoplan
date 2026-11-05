@@ -83,16 +83,13 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// while the workspace has no account (`applyAccountBubble`).
     private var accountButton: NSButton?
     private var accountWidth: NSLayoutConstraint?
-    /// The host's latest sync status: the dot on the account bubble
-    /// and the line under the email in its menu.
+    /// The host's latest sync status: the line under the email in the
+    /// account bubble's menu.
     private var syncStatus: SyncStatus?
     /// The New Workspace sheet while it is up (`promptNewWorkspace`).
     private var newWorkspacePrompt: NewWorkspacePrompt?
     /// The Delete workspace sheet while it is up (`confirmDeleteWorkspace`).
     private var deleteWorkspacePrompt: DeleteWorkspacePrompt?
-    /// The dot on the account bubble's shoulder: amber while syncing,
-    /// red while offline, hidden when synced so the quiet state is quiet.
-    private var syncDot: NSView?
     private let schemeHandler: AppSchemeHandler
     private var webView: WKWebView?
     /// The Liquid Glass under the page's sidebar (macOS 26 and later,
@@ -203,27 +200,12 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         window?.makeKeyAndOrderFront(nil)
     }
 
-    /// The host's sync status: the account bubble's dot and menu line
-    /// here, and the page's copy, kept and replayed on load, pushed
-    /// live afterwards.
+    /// The host's sync status: the account menu's line here (the bubble
+    /// itself carries no indicator; the tray shows the state), and the
+    /// page's copy, kept and replayed on load, pushed live afterwards.
     func pushSync(_ status: SyncStatus) {
         syncStatus = status
-        applySyncDot()
         bridge.pushSync(status, into: webView)
-    }
-
-    private func applySyncDot() {
-        guard let dot = syncDot else { return }
-        switch syncStatus?.level {
-        case .syncing?:
-            dot.layer?.backgroundColor = NSColor.systemOrange.cgColor
-            dot.isHidden = false
-        case .offline?:
-            dot.layer?.backgroundColor = NSColor.systemRed.cgColor
-            dot.isHidden = false
-        case .synced?, nil:
-            dot.isHidden = true
-        }
     }
 
     /// A host is serving again after none was: the page booted against
@@ -542,9 +524,6 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// than the gap, so the pair reads as one piece of glass pinched in
     /// the middle rather than two discs.
     private static let bubbleMerge: CGFloat = 10
-    /// The sync dot's diameter, sitting on the account bubble's
-    /// top-right shoulder, a hair outside the disc.
-    private static let dotSize: CGFloat = 8
 
     /// The webview edge to edge with the bubbles floating over its
     /// top-right corner. They are added last so they draw (and
@@ -689,26 +668,6 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         NSLayoutConstraint.activate(constraints)
         accountButton = account
         applyAccountBubble()
-        // The sync dot, over the account bubble (added last, so it
-        // paints above the glass). A plain view: the container only
-        // melts glass, so it leaves this alone.
-        let dot = NSView()
-        dot.wantsLayer = true
-        dot.layer?.cornerRadius = Self.dotSize / 2
-        dot.isHidden = true
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        dot.setAccessibilityElement(false)
-        row.addSubview(dot)
-        if let account = items.last {
-            NSLayoutConstraint.activate([
-                dot.widthAnchor.constraint(equalToConstant: Self.dotSize),
-                dot.heightAnchor.constraint(equalToConstant: Self.dotSize),
-                dot.trailingAnchor.constraint(equalTo: account.trailingAnchor, constant: 1),
-                dot.topAnchor.constraint(equalTo: account.topAnchor, constant: -1),
-            ])
-        }
-        syncDot = dot
-        applySyncDot()
         if #available(macOS 26, *) {
             let group = NSGlassEffectContainerView()
             group.spacing = Self.bubbleMerge
