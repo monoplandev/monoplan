@@ -25,15 +25,6 @@ import { createSyncedApp, type DocApp } from "./store.ts";
 import { createSyncBridge, SyncBridge } from "./sync.ts";
 import { createViewState } from "./viewState.ts";
 
-// The single onboarding item a brand-new doc's Inbox opens with. Kept
-// literal (user-list content is user-authored plain text, not localized).
-const WELCOME_ITEM = "👋 Welcome to Monoplan";
-
-/** Seed a fresh doc's Inbox with the onboarding item. */
-function seedWelcome(app: DocApp): void {
-  app.addItem("inbox", WELCOME_ITEM);
-}
-
 /** One account with a doc open on the server right now, as the server
  *  announces it (`ServerFrame::Presence`, `spec/sync-protocol.md`
  *  §Presence). `accountId` is the hyphenated uuid `Session.accountId`
@@ -592,7 +583,8 @@ export function createWorkspaceRuntime(props: {
   };
 
   // Freshly-created Home doc (signup, or a brand-new anonymous doc): drop
-  // a single welcome item into Inbox and persist as the first op row so a
+  // the core's single welcome item into Inbox (`seedWelcome`, the same
+  // seed the CLI and macOS host write) and persist as the first op row so a
   // reload before any user mutation still has something to replay. Same
   // for anonymous and signed-up sessions. Seeding goes through the normal
   // mutation path, so it commits and (for authed sessions) pushes to the
@@ -603,7 +595,7 @@ export function createWorkspaceRuntime(props: {
     if (!b.seeded) continue;
     const r = runtimes.get(b.docId)!;
     if (r === home && Object.keys(app.state.itemsById).length === 0) {
-      seedWelcome(app);
+      app.seedWelcome();
     }
     r.capture();
     r.scheduleDurable();

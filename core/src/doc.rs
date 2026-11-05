@@ -66,6 +66,11 @@ use monoplan_protocol::EncryptedBlob;
 
 pub const LIST_INBOX: &str = "inbox";
 pub const INBOX_NAME: &str = "Inbox";
+/// The single onboarding item every new workspace's Inbox opens with,
+/// whichever client created the doc (`Doc::seed_welcome`). Kept
+/// literal: user-list content is user-authored plain text, not
+/// localized.
+pub const WELCOME_ITEM: &str = "👋 Welcome to Monoplan";
 /// Reserved home of events (`spec/events-plan.md`): an item located here
 /// is an event. Same shape as `inbox` (no ListMeta row), but no list or
 /// board view projects it.
@@ -1895,6 +1900,15 @@ impl Doc {
     }
 
     // ---------- mutations: items ----------
+
+    /// Seed a brand-new doc's Inbox with `WELCOME_ITEM`. One ordinary
+    /// committed op, so the creating client must bind its leased peer
+    /// id first and only the *creating* client calls it (genesis stays
+    /// an empty baseline, see `seed_builtins`); other devices receive
+    /// it through sync. Returns the new item's id.
+    pub fn seed_welcome(&self) -> Result<String, DocError> {
+        self.add_item(LIST_INBOX, WELCOME_ITEM)
+    }
 
     pub fn add_item(&self, list_id: &str, text: &str) -> Result<String, DocError> {
         self.add_item_at(list_id, text, usize::MAX)
@@ -5696,12 +5710,12 @@ fn seed_builtins(doc: &LoroDoc) -> Result<bool, DocError> {
     // client-side. Touch the root containers so fresh docs keep the
     // same top-level shape; no ops are emitted for untouched roots.
     //
-    // Starter content (e.g. a "Welcome" list) is deliberately NOT seeded
+    // Starter content (`WELCOME_ITEM`) is deliberately NOT seeded
     // here: genesis must stay a clean empty baseline so a second replica
     // constructed the same way doesn't mint a duplicate. The
-    // account-creating *client* seeds via the public API right after
-    // create (see the web boot in App.tsx / the CLI init path); other
-    // devices receive it through sync.
+    // account-creating *client* calls `Doc::seed_welcome` right after
+    // create (the web runtime / the CLI `bootstrap::welcome_doc`);
+    // other devices receive it through sync.
     let _ = doc.get_map(ROOT_ITEMS);
     let _ = doc.get_movable_list(ROOT_LISTS);
     let _ = doc.get_map(ROOT_SETTINGS);

@@ -224,9 +224,8 @@ async fn fresh_install_works_without_an_account() {
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     let ls = ok(out);
     assert!(ls.contains("no account yet"), "{ls}");
+    assert!(ls.contains("Welcome to Monoplan"), "{ls}");
     assert!(!stderr.contains("offline"), "{stderr}");
-    let lists = ok(monoplan(&dir, &["list", "ls"]).await);
-    assert!(lists.contains("Welcome"), "{lists}");
     // The maintenance sweep goes over the same IPC and finds a fresh
     // doc clean; a second run is equally a no-op.
     let swept = ok(monoplan(&dir, &["workspace", "reconcile"]).await);

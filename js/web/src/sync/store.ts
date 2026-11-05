@@ -383,6 +383,9 @@ export interface DocApp extends ItemActions {
   // Reads
   getItem(id: string): ItemView | undefined;
   // Mutations
+  /** Seed a brand-new doc's Inbox with the onboarding item the core
+   *  defines (`Doc::seed_welcome`); every client seeds the same way. */
+  seedWelcome(): string;
   addItem(listId: string, text: string): string;
   /** Insert a single item at `indexInList` (per the live-item view of
    *  `listId`). Past-end indices append. Single Loro op — no
@@ -1327,6 +1330,9 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     },
     isFocused(id) {
       return state.focusOrder.includes(id);
+    },
+    seedWelcome() {
+      return mutate(() => engine.seedWelcome());
     },
     addItem(listId, text) {
       return mutate(() => engine.addItem(listId, text));

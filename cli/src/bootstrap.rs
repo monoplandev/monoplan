@@ -15,40 +15,19 @@
 
 use std::path::PathBuf;
 
-use monoplan_core::{Dek, Doc, DocId, NotesDeltaOp};
+use monoplan_core::{Dek, Doc, DocId};
 
 use crate::config::{Profile, Secrets};
 use crate::storage::Account;
 
-/// The onboarding doc every new workspace starts from, whether minted
-/// locally or by a fresh signup: a "Welcome" list with a few
-/// learn-by-doing items, the first carrying a descriptive line in its
-/// notes. The same content the web client seeds (see its runtime.ts),
-/// so a workspace looks the same whichever client created it. Real
-/// committed ops, so `peer_id` must be the leased one
-/// (`spec/peer-id-plan.md`).
+/// The onboarding doc every new workspace starts from: the built-in
+/// lists plus the core's `WELCOME_ITEM` in the Inbox (`Doc::seed_welcome`,
+/// the same call the web client makes), so a workspace looks the same
+/// whichever client created it. A real committed op, so `peer_id` must
+/// be the leased one (`spec/peer-id-plan.md`).
 pub fn welcome_doc(peer_id: u64) -> anyhow::Result<Doc> {
     let doc = Doc::new_with_peer(peer_id)?;
-    let welcome = doc.add_list("Welcome")?;
-    doc.set_list_icon(&welcome, "👋")?;
-    // The list is empty, so index 0 keeps the authored order.
-    let welcome_items = [
-        "Welcome to Monoplan",
-        "Press 'space' to create a new item",
-        "Tick the box (or press 'x') to complete an item",
-        "Press 's' to star an item",
-        "Press '?' to see all keyboard shortcuts",
-    ];
-    let item_ids = doc.add_items_at(&welcome, &welcome_items, 0)?;
-    if let Some(first) = item_ids.first() {
-        doc.apply_notes_delta(
-            first,
-            &[NotesDeltaOp::Insert {
-                insert: "Monoplan helps you capture and organise your ideas, tasks, and projects."
-                    .to_string(),
-            }],
-        )?;
-    }
+    doc.seed_welcome()?;
     Ok(doc)
 }
 

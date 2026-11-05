@@ -1969,6 +1969,13 @@ impl SyncEngine {
 
     // -- mutations: items --
 
+    /// Seed a brand-new doc's Inbox with the shared onboarding item
+    /// (`Doc::seed_welcome`). Creating client only; returns the item id.
+    #[wasm_bindgen(js_name = seedWelcome)]
+    pub fn seed_welcome(&self) -> Result<String, JsError> {
+        self.doc().seed_welcome().map_err(js_err)
+    }
+
     #[wasm_bindgen(js_name = addItem)]
     pub fn add_item(&self, list_id: &str, text: &str) -> Result<String, JsError> {
         self.doc().add_item(list_id, text).map_err(js_err)

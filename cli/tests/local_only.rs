@@ -9,7 +9,7 @@ use monoplan_cli::commands::signup::{self, Credentials};
 use monoplan_cli::config::Profile;
 use monoplan_cli::daemon;
 use monoplan_cli::sync::Session;
-use monoplan_core::LIST_INBOX;
+use monoplan_core::{LIST_INBOX, WELCOME_ITEM};
 use support::{
     TEST_PASSWORD, TestServer, login_device, materialize_profile, reopen_profile, weak_params,
 };
@@ -45,10 +45,10 @@ async fn fresh_install_runs_local_only_and_signup_adopts_it() {
         .unwrap();
     assert!(session.is_local_only());
     assert!(!session.is_online());
-    let lists = session.doc().all_lists();
+    let inbox = session.doc().items_in_list(LIST_INBOX, false);
     assert!(
-        lists.iter().any(|l| l.name == "Welcome"),
-        "seeded with the onboarding list: {lists:?}"
+        inbox.iter().any(|i| i.text == WELCOME_ITEM),
+        "seeded with the onboarding item: {inbox:?}"
     );
     let item_id = session
         .doc()
@@ -126,9 +126,9 @@ async fn fresh_install_runs_local_only_and_signup_adopts_it() {
     assert!(
         session_b
             .doc()
-            .all_lists()
+            .items_in_list(LIST_INBOX, false)
             .iter()
-            .any(|l| l.name == "Welcome")
+            .any(|i| i.text == WELCOME_ITEM)
     );
     session_b.flush().await.unwrap();
 }
@@ -159,9 +159,9 @@ async fn signup_without_a_local_workspace_seeds_a_fresh_doc() {
     assert!(
         session
             .doc()
-            .all_lists()
+            .items_in_list(LIST_INBOX, false)
             .iter()
-            .any(|l| l.name == "Welcome")
+            .any(|i| i.text == WELCOME_ITEM)
     );
     session.flush().await.unwrap();
 }
