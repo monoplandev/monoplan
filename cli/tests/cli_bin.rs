@@ -474,6 +474,67 @@ async fn workspace_flag_selects_a_second_doc() {
         "{export}"
     );
 
+    // `agenda --all` is the one merged read: both docs' rows in one
+    // placement, tagged; `-w` with it is refused.
+    ok(monoplan(
+        dir,
+        &[
+            "-w",
+            "Work",
+            "item",
+            "set",
+            &work_item,
+            "--when",
+            "2030-01-02T09:00",
+        ],
+    )
+    .await);
+    ok(monoplan(dir, &["item", "set", &home_item, "--when", "2030-01-02"]).await);
+    let json = ok(monoplan(
+        dir,
+        &[
+            "agenda",
+            "--all",
+            "--json",
+            "--today",
+            "2030-01-01",
+            "--days",
+            "3",
+        ],
+    )
+    .await);
+    let days: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let rows = &days[1]["rows"];
+    assert_eq!(rows.as_array().map(Vec::len), Some(2), "{json}");
+    // All-day Home row ahead of the timed Work one.
+    assert_eq!(rows[0]["id"], home_item, "{json}");
+    assert_eq!(rows[0]["doc_id"], signup.primary_doc_id, "{json}");
+    assert!(rows[0].get("doc_name").is_none(), "{json}");
+    assert_eq!(rows[1]["id"], work_item, "{json}");
+    assert_eq!(rows[1]["doc_id"], work_id, "{json}");
+    assert_eq!(rows[1]["doc_name"], "Work", "{json}");
+    let text = ok(monoplan(
+        dir,
+        &["agenda", "--all", "--today", "2030-01-01", "--days", "3"],
+    )
+    .await);
+    assert!(
+        text.contains("in work @2030-01-02T09:00+1h  [Work]")
+            && text.contains("in home @2030-01-02  [Personal]"),
+        "{text}"
+    );
+    let single = ok(monoplan(
+        dir,
+        &["agenda", "--json", "--today", "2030-01-01", "--days", "3"],
+    )
+    .await);
+    assert!(
+        single.contains(&home_item) && !single.contains(&work_item) && !single.contains("doc_id"),
+        "{single}"
+    );
+    let e = err(monoplan(dir, &["-w", "Work", "agenda", "--all"]).await);
+    assert!(e.contains("takes no -w"), "{e}");
+
     // Each doc's ops reached its own server doc.
     wait_for_updates(&server, Uuid::parse_str(&work_id).unwrap(), 1).await;
     wait_for_updates(&server, Uuid::parse_str(&signup.primary_doc_id).unwrap(), 1).await;

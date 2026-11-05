@@ -111,9 +111,14 @@ public enum Request {
     /// The network changed under the host (path change, wake): drop
     /// the socket and connect again now (`Request::Reconnect`).
     case reconnect
-    case agenda(days: Int)
+    /// `monoplan agenda --days N --json`; `all` is `--all`, every
+    /// workspace merged with rows tagged by `doc_id` / `doc_name`.
+    case agenda(days: Int, all: Bool = false)
     /// `monoplan focus --json`: the Starred lens (spec/focus.md).
     case focus
+    /// `monoplan item ls --list <list> [--done] --json`: a list's items
+    /// (`Items.parse`); Open only unless `done`.
+    case items(list: String, done: Bool = false)
     /// `monoplan list ls --json --all`: id → name, archived included so
     /// every list id an item can carry resolves.
     case lists
@@ -143,12 +148,18 @@ public enum Request {
             return .string("Reconnect")
         // `Doc { workspace?, cmd }`: no `workspace` means the Personal
         // workspace (`spec/cli.md` §Workspaces), which is all the app shows.
-        case .agenda(let days):
-            return .map(["Doc": .map(["cmd": .map(["Agenda": .map([
-                "days": .int(Int64(days)), "today": .nil, "json": .bool(true),
-            ])])])])
+        case .agenda(let days, let all):
+            var args: [String: MPValue] = ["days": .int(Int64(days)), "today": .nil, "json": .bool(true)]
+            // Absent means false on the wire (`serde(default)`), so the
+            // single-doc shape is unchanged.
+            if all { args["all"] = .bool(true) }
+            return .map(["Doc": .map(["cmd": .map(["Agenda": .map(args)])])])
         case .focus:
             return .map(["Doc": .map(["cmd": .map(["Focus": .map(["cmd": .nil, "json": .bool(true)])])])])
+        case .items(let list, let done):
+            return .map(["Doc": .map(["cmd": .map(["Ls": .map([
+                "list": .string(list), "done": .bool(done), "json": .bool(true),
+            ])])])])
         case .lists:
             return .map(["Doc": .map(["cmd": .map(["Lists": .map(["cmd": .map(["Ls": .map([
                 "json": .bool(true), "archived": .bool(false), "all": .bool(true),

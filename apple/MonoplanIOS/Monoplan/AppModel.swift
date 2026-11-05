@@ -25,6 +25,15 @@ final class AppModel: ObservableObject {
     /// time: the cheapest proof that remote ops are arriving.
     @Published private(set) var changeCount = 0
     @Published private(set) var lastChangeAt: Date?
+    /// The Inbox's Open items, in list order, refetched on `Changed`.
+    @Published private(set) var inbox: [ItemRow] = []
+    /// Why the last Inbox fetch failed, until one succeeds.
+    @Published private(set) var inboxError: String?
+    /// The agenda's day groups (`agenda --days 14 --json`), refetched
+    /// on `Changed` beside the Inbox.
+    @Published private(set) var agenda: [AgendaDay] = []
+    @Published private(set) var agendaError: String?
+    private var refreshQueued = false
     @Published var lastError: String?
     @Published var signingIn = false
     @Published var signInError: String?
@@ -59,6 +68,8 @@ final class AppModel: ObservableObject {
         hasAccount = location.hasAccount
         if case .connected = state {
             loadSession()
+            refreshInbox()
+            refreshAgenda()
         } else {
             session = nil
         }
@@ -68,6 +79,63 @@ final class AppModel: ObservableObject {
         if case .changed = event {
             changeCount += 1
             lastChangeAt = Date()
+            scheduleRefresh()
+        }
+    }
+
+    /// Coalesce a burst of `Changed` events into one round of fetches,
+    /// as the Mac tray does for its agenda.
+    private func scheduleRefresh() {
+        if refreshQueued { return }
+        refreshQueued = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            self?.refreshQueued = false
+            self?.refreshInbox()
+            self?.refreshAgenda()
+        }
+    }
+
+    /// `item ls --list inbox --json` through the host.
+    func refreshInbox() {
+        fetch(.items(list: "inbox"), what: "inbox", parse: Items.parse) { [weak self] rows, error in
+            if let rows { self?.inbox = rows }
+            self?.inboxError = error
+        }
+    }
+
+    /// `agenda --days 14 --all --json`: every workspace merged, Today
+    /// first, then each non-empty day. Workspaces hidden from the
+    /// calendar (the Home doc's setting) are already left out.
+    func refreshAgenda() {
+        fetch(.agenda(days: 14, all: true), what: "agenda", parse: Agenda.parse) { [weak self] days, error in
+            if let days { self?.agenda = days }
+            self?.agendaError = error
+        }
+    }
+
+    /// One read through the host, decoded. No host is not an error:
+    /// the rows stay until the next host's refresh replaces them, so
+    /// `done` gets neither rows nor an error then.
+    private func fetch<T>(
+        _ request: Request, what: String, parse: @escaping (String) throws -> T,
+        done: @escaping (T?, String?) -> Void
+    ) {
+        client.send(request) { result in
+            switch result {
+            case .success(.output(let stdout, _)):
+                do {
+                    done(try parse(stdout), nil)
+                } catch {
+                    done(nil, "could not read \(what): \(error.localizedDescription)")
+                }
+            case .success(let other):
+                done(nil, "unexpected reply: \(String(describing: other))")
+            case .failure(let error):
+                if case ClientError.notConnected = error { return }
+                if case ClientError.hostStopped = error { return }
+                if case HostError.Stopped = error { return }
+                done(nil, hostErrorMessage(error))
+            }
         }
     }
 

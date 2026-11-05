@@ -20,8 +20,9 @@ pub enum WorkspaceError {
     Ambiguous { wanted: String, ids: String },
 }
 
-/// One doc this install can open, as the resolver sees it.
-#[derive(Debug, Clone)]
+/// One doc this install can open, as the resolver sees it; also the
+/// workspace tag on a merged agenda row (`agenda --all`).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Candidate {
     pub doc_id: DocId,
     /// `doc_name`, `None` for Home and for an unnamed doc.

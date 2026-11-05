@@ -25,6 +25,10 @@ public struct AgendaRow: Decodable, Equatable {
     public let deadline: String?
     public let placedBy: String?
     public let tone: String
+    /// `--all` only: the row's workspace. `docName` is nil for Home
+    /// ("Personal") and for an unnamed doc.
+    public let docId: String?
+    public let docName: String?
 
     public var isDone: Bool { state == "done" }
     public var isTimed: Bool { (when?.count ?? 0) >= 16 }

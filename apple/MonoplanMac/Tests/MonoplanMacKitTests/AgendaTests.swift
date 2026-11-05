@@ -76,4 +76,18 @@ extension AgendaTests {
         let line = TodayMenu.lines(from: try! Agenda.parse(row), now: date(8, 0))[0]
         XCTAssertEqual(line.title, "09:00  " + clipped)
     }
+
+    func testMergedRowsCarryTheirWorkspace() throws {
+        let json = """
+        [{"day":"2026-09-09","today":true,"rows":[
+          {"id":"a","text":"Home row","list_id":"inbox","state":"todo","placed_by":"when","tone":"neutral",
+           "when":"2026-09-09","doc_id":"00000000-0000-0000-0000-000000000001"},
+          {"id":"b","text":"Work row","list_id":"inbox","state":"todo","placed_by":"when","tone":"neutral",
+           "when":"2026-09-09","doc_id":"00000000-0000-0000-0000-000000000002","doc_name":"Work"}]}]
+        """
+        let rows = try Agenda.parse(json)[0].rows
+        XCTAssertNil(rows[0].docName)
+        XCTAssertEqual(rows[0].docId, "00000000-0000-0000-0000-000000000001")
+        XCTAssertEqual(rows[1].docName, "Work")
+    }
 }

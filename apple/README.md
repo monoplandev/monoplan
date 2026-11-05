@@ -297,9 +297,20 @@ icon in `Assets.car` for iOS 26 and flat `icon60x60` / `icon76x76`
 PNGs for iOS 17 and 18. There is no `Assets.xcassets`; one is only
 needed once the app wants named colours or images of its own.
 
-Two tabs in a system `TabView` (`ContentView.swift`; the floating
-glass pill on iOS 26, the flat bar before). **Inbox** is a stub for the
-capture list until the host exposes item projections here. **Debug**
+Three tabs in a system `TabView` (`ContentView.swift`; the floating
+glass pill on iOS 26, the flat bar before). **Inbox** (`InboxView.swift`)
+is the capture list's Open items in list order, read through the Kit's
+`Request.items` (`item ls --list inbox --json`, decoded by
+`Items.parse`) and refetched on every `Changed` event, coalesced over
+250 ms as the Mac tray's agenda is; read-only so far, capture and
+lifecycle moves are next. **Agenda** (`AgendaView.swift`) is the
+daemon's merged agenda (`Request.agenda(days: 14, all: true)`, i.e.
+`agenda --all --json`, `spec/cli.md` §Items: every open workspace in
+one placement, the Home doc's hidden-from-calendar docs left out), every
+group as a section: Today, Unscheduled events, then each non-empty
+day, with the row's time, its workspace under the text when it is not
+Personal's, and the duration or overdue / due-today tone; read-only
+markup, nothing tappable yet. **Debug**
 (`DebugView.swift`) is the original surface: the `SyncStatus` the host
 publishes (online, pending, local-only, last synced, offline reason),
 `Changed` events counted as they arrive, the host's build id and pid,

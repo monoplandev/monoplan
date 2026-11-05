@@ -1293,6 +1293,43 @@ impl Host {
                 embedded: self.embedded,
                 sync: self.sync_status(),
             },
+            // `agenda --all` reads every open doc at once: the one
+            // merged read the host serves (`spec/cli.md` §Agenda), so
+            // native clients get the cross-doc lens from Rust rather
+            // than merging per-doc replies themselves. Read-only:
+            // nothing to persist or push after it.
+            Request::Doc {
+                workspace,
+                cmd: crate::commands::DocCmd::Agenda(args),
+            } if args.all => {
+                if workspace.is_some() {
+                    Reply::Err {
+                        message: "agenda --all reads every workspace; it takes no -w".into(),
+                    }
+                } else {
+                    let docs: Vec<(crate::workspace::Candidate, &monoplan_core::Doc)> = self
+                        .session
+                        .candidates()
+                        .into_iter()
+                        .filter_map(|c| self.session.doc_for(c.doc_id).map(|d| (c, d)))
+                        .collect();
+                    let hidden = self
+                        .session
+                        .doc_for(self.session.primary_doc_id())
+                        .map(|d| d.get_settings().calendar_hidden_docs)
+                        .unwrap_or_default();
+                    let mut buf = Vec::new();
+                    match crate::commands::agenda::run_all(&docs, &hidden, args, &mut buf) {
+                        Ok(()) => Reply::Output {
+                            stdout: String::from_utf8_lossy(&buf).into_owned(),
+                            sync: self.sync_status(),
+                        },
+                        Err(e) => Reply::Err {
+                            message: format!("{e:#}"),
+                        },
+                    }
+                }
+            }
             Request::Doc { workspace, cmd } => {
                 let doc_id = match self.session.resolve(workspace.as_deref()) {
                     Ok(id) => id,

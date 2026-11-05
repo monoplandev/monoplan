@@ -27,6 +27,12 @@ final class DaemonClientTests: XCTestCase {
             .map(["Doc": .map(["cmd": .map(["Focus": .map(["cmd": .nil, "json": .bool(true)])])])])
         )
         XCTAssertEqual(
+            Request.items(list: "inbox").value,
+            .map(["Doc": .map(["cmd": .map(["Ls": .map([
+                "list": .string("inbox"), "done": .bool(false), "json": .bool(true),
+            ])])])])
+        )
+        XCTAssertEqual(
             Request.lists.value,
             .map(["Doc": .map(["cmd": .map(["Lists": .map(["cmd": .map(["Ls": .map([
                 "json": .bool(true), "archived": .bool(false), "all": .bool(true),
@@ -35,6 +41,12 @@ final class DaemonClientTests: XCTestCase {
         XCTAssertEqual(
             Request.agenda(days: 0).value,
             .map(["Doc": .map(["cmd": .map(["Agenda": .map(["days": .int(0), "today": .nil, "json": .bool(true)])])])])
+        )
+        XCTAssertEqual(
+            Request.agenda(days: 14, all: true).value,
+            .map(["Doc": .map(["cmd": .map(["Agenda": .map([
+                "days": .int(14), "today": .nil, "json": .bool(true), "all": .bool(true),
+            ])])])])
         )
         // The shapes cli/src/commands/settings.rs `wire_shape` pins.
         XCTAssertEqual(

@@ -9,6 +9,12 @@
 //!
 //! Placement, tone, and ordering are pure functions of the item views
 //! and a `today` stamp, so they are unit-tested here without a doc.
+//!
+//! `--all` merges every workspace this install can open into one
+//! agenda (the daemon runs it over its open docs, `spec/cli.md`
+//! §Agenda): the same placement over every doc's items at once, each
+//! row tagged with its workspace, and the Home doc's
+//! `calendar_hidden_docs` left out as on the web calendar.
 
 use std::io::Write;
 
@@ -18,6 +24,7 @@ use monoplan_core::{Doc, ItemView, Place};
 use serde::{Deserialize, Serialize};
 
 use super::items::{date_tags, row_box, write_json};
+use crate::workspace::{Candidate, HOME_LABEL};
 
 #[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 pub struct AgendaArgs {
@@ -30,6 +37,12 @@ pub struct AgendaArgs {
     /// Machine-parseable output.
     #[arg(long)]
     pub json: bool,
+    /// Every workspace this install can open, merged; rows carry their
+    /// workspace. Takes no `-w`. Workspaces hidden from the calendar
+    /// (the Home doc's `calendar_hidden_docs`) are left out.
+    #[arg(long)]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub all: bool,
 }
 
 /// Row tone, least to most urgent. Both come from the deadline; `when`
@@ -65,7 +78,14 @@ pub struct AgendaRow {
     pub item: ItemView,
     pub placed_by: PlacedBy,
     pub tone: Tone,
+    /// The row's workspace on a merged agenda; `None` on a single-doc
+    /// one, where every row is the selected workspace's.
+    pub doc: Option<Candidate>,
 }
+
+/// One workspace's items for [`build_agenda_from`]: the tag every row
+/// from it carries (`None` tags nothing) and its item views.
+pub type Source<'a> = (Option<&'a Candidate>, &'a [ItemView]);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgendaDay {
@@ -92,80 +112,91 @@ pub struct AgendaDay {
 ///   nothing is owed and past days are not shown. Cancelled and binned
 ///   items never appear: a cancelled slot is something that did not
 ///   happen, so it clutters rather than records.
-pub fn build_agenda<'a>(items: &'a [ItemView], today: &'a str, horizon: &str) -> Vec<AgendaDay> {
+pub fn build_agenda(items: &[ItemView], today: &str, horizon: &str) -> Vec<AgendaDay> {
+    build_agenda_from(&[(None, items)], today, horizon)
+}
+
+/// [`build_agenda`] over several workspaces at once: one placement and
+/// one order across all of them (a stable sort, so equal keys keep
+/// source order), each row tagged with its source.
+pub fn build_agenda_from(sources: &[Source<'_>], today: &str, horizon: &str) -> Vec<AgendaDay> {
     // (day, fold group, placing raw, created_at, row)
     let mut placed: Vec<(String, u8, String, i64, AgendaRow)> = Vec::new();
-    for item in items {
-        if item.is_binned() || item.is_cancelled() {
-            continue;
-        }
-        // Past days are not shown, so a past `when` places nothing.
-        let when_day = item
-            .when
-            .as_deref()
-            .map(|w| &w[..w.len().min(10)])
-            .filter(|w| *w >= today);
-        let deadline_day = item.deadline.as_deref();
-        if when_day.is_none() && deadline_day.is_none() {
-            continue;
-        }
-        if item.is_done() {
-            let Some(day) = when_day else {
+    for (doc, items) in sources {
+        for item in *items {
+            if item.is_binned() || item.is_cancelled() {
                 continue;
+            }
+            // Past days are not shown, so a past `when` places nothing.
+            let when_day = item
+                .when
+                .as_deref()
+                .map(|w| &w[..w.len().min(10)])
+                .filter(|w| *w >= today);
+            let deadline_day = item.deadline.as_deref();
+            if when_day.is_none() && deadline_day.is_none() {
+                continue;
+            }
+            if item.is_done() {
+                let Some(day) = when_day else {
+                    continue;
+                };
+                if day > horizon {
+                    continue;
+                }
+                placed.push((
+                    day.to_string(),
+                    1,
+                    item.when.clone().unwrap(),
+                    item.created_at,
+                    AgendaRow {
+                        item: item.clone(),
+                        placed_by: PlacedBy::When,
+                        tone: Tone::Neutral,
+                        doc: doc.cloned(),
+                    },
+                ));
+                continue;
+            }
+            let deadline_placed = deadline_day.map(|d| if d < today { today } else { d });
+            // `when` wins a tie: it is the "happens on" date and renders first.
+            let (day, placed_by, raw) = match (when_day, deadline_placed) {
+                (Some(w), Some(d)) if d < w => (d, PlacedBy::Deadline, deadline_day.unwrap()),
+                (Some(w), _) => (w, PlacedBy::When, item.when.as_deref().unwrap()),
+                (None, Some(d)) => (d, PlacedBy::Deadline, deadline_day.unwrap()),
+                (None, None) => unreachable!(),
             };
             if day > horizon {
                 continue;
             }
+            let deadline_overdue = deadline_day.is_some_and(|d| d < today);
+            let tone = if deadline_overdue {
+                Tone::Overdue
+            } else if deadline_day == Some(today) {
+                Tone::Warning
+            } else {
+                Tone::Neutral
+            };
+            // Today's fold: overdue deadlines lead (by their own date), then
+            // today's own rows, done or not.
+            let (group, raw) = if deadline_overdue {
+                (0, deadline_day.unwrap().to_string())
+            } else {
+                (1, raw.to_string())
+            };
             placed.push((
                 day.to_string(),
-                1,
-                item.when.clone().unwrap(),
+                group,
+                raw,
                 item.created_at,
                 AgendaRow {
                     item: item.clone(),
-                    placed_by: PlacedBy::When,
-                    tone: Tone::Neutral,
+                    placed_by,
+                    tone,
+                    doc: doc.cloned(),
                 },
             ));
-            continue;
         }
-        let deadline_placed = deadline_day.map(|d| if d < today { today } else { d });
-        // `when` wins a tie: it is the "happens on" date and renders first.
-        let (day, placed_by, raw) = match (when_day, deadline_placed) {
-            (Some(w), Some(d)) if d < w => (d, PlacedBy::Deadline, deadline_day.unwrap()),
-            (Some(w), _) => (w, PlacedBy::When, item.when.as_deref().unwrap()),
-            (None, Some(d)) => (d, PlacedBy::Deadline, deadline_day.unwrap()),
-            (None, None) => unreachable!(),
-        };
-        if day > horizon {
-            continue;
-        }
-        let deadline_overdue = deadline_day.is_some_and(|d| d < today);
-        let tone = if deadline_overdue {
-            Tone::Overdue
-        } else if deadline_day == Some(today) {
-            Tone::Warning
-        } else {
-            Tone::Neutral
-        };
-        // Today's fold: overdue deadlines lead (by their own date), then
-        // today's own rows, done or not.
-        let (group, raw) = if deadline_overdue {
-            (0, deadline_day.unwrap().to_string())
-        } else {
-            (1, raw.to_string())
-        };
-        placed.push((
-            day.to_string(),
-            group,
-            raw,
-            item.created_at,
-            AgendaRow {
-                item: item.clone(),
-                placed_by,
-                tone,
-            },
-        ));
     }
     placed.sort_by(|a, b| {
         a.0.cmp(&b.0)
@@ -203,7 +234,51 @@ pub fn unscheduled_events(items: &[ItemView]) -> Vec<&ItemView> {
     out
 }
 
+/// [`unscheduled_events`] across sources, oldest first, each tagged.
+pub fn unscheduled_from<'a>(sources: &[Source<'a>]) -> Vec<(Option<Candidate>, &'a ItemView)> {
+    let mut out: Vec<(Option<Candidate>, &'a ItemView)> = sources
+        .iter()
+        .flat_map(|(doc, items)| {
+            unscheduled_events(items)
+                .into_iter()
+                .map(move |i| (doc.cloned(), i))
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        a.1.created_at
+            .cmp(&b.1.created_at)
+            .then(a.1.id.cmp(&b.1.id))
+    });
+    out
+}
+
 pub fn run(doc: &Doc, args: AgendaArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+    let items = doc.all_items();
+    render(&[(None, &items)], &args, out)
+}
+
+/// `--all`: one agenda over `docs`, every workspace the caller has
+/// open, minus those `hidden` names (doc ids; the Home doc's
+/// `calendar_hidden_docs`). Rows carry their workspace.
+pub fn run_all(
+    docs: &[(Candidate, &Doc)],
+    hidden: &[String],
+    args: AgendaArgs,
+    out: &mut dyn Write,
+) -> anyhow::Result<()> {
+    let shown: Vec<(&Candidate, Vec<ItemView>)> = docs
+        .iter()
+        .filter(|(c, _)| !hidden.iter().any(|h| *h == c.doc_id.0.to_string()))
+        .map(|(c, d)| (c, d.all_items()))
+        .collect();
+    let sources: Vec<Source<'_>> = shown
+        .iter()
+        .map(|(c, items)| (Some(*c), items.as_slice()))
+        .collect();
+    render(&sources, &args, out)
+}
+
+fn render(sources: &[Source<'_>], args: &AgendaArgs, out: &mut dyn Write) -> anyhow::Result<()> {
     let today = match &args.today {
         Some(t) => NaiveDate::parse_from_str(t, "%Y-%m-%d")
             .map_err(|_| anyhow::anyhow!("--today must be YYYY-MM-DD: {t:?}"))?,
@@ -215,9 +290,8 @@ pub fn run(doc: &Doc, args: AgendaArgs, out: &mut dyn Write) -> anyhow::Result<(
     let today_s = today.format("%Y-%m-%d").to_string();
     let horizon_s = horizon.format("%Y-%m-%d").to_string();
 
-    let items = doc.all_items();
-    let days = build_agenda(&items, &today_s, &horizon_s);
-    let unscheduled = unscheduled_events(&items);
+    let days = build_agenda_from(sources, &today_s, &horizon_s);
+    let unscheduled = unscheduled_from(sources);
     if args.json {
         let mut rows: Vec<DayJson<'_>> = days
             .iter()
@@ -234,7 +308,10 @@ pub fn run(doc: &Doc, args: AgendaArgs, out: &mut dyn Write) -> anyhow::Result<(
                 DayJson {
                     day: None,
                     today: false,
-                    rows: unscheduled.iter().map(|i| unscheduled_json(i)).collect(),
+                    rows: unscheduled
+                        .iter()
+                        .map(|(doc, i)| unscheduled_json(doc.as_ref(), i))
+                        .collect(),
                 },
             );
         }
@@ -245,10 +322,17 @@ pub fn run(doc: &Doc, args: AgendaArgs, out: &mut dyn Write) -> anyhow::Result<(
     Ok(())
 }
 
+/// `  [Work]` after a merged row, `  [Personal]` for Home; nothing on
+/// a single-doc agenda.
+fn doc_tag(doc: Option<&Candidate>) -> String {
+    doc.map(|c| format!("  [{}]", c.name.as_deref().unwrap_or(HOME_LABEL)))
+        .unwrap_or_default()
+}
+
 fn print_agenda(
     out: &mut dyn Write,
     days: &[AgendaDay],
-    unscheduled: &[&ItemView],
+    unscheduled: &[(Option<Candidate>, &ItemView)],
     today: &str,
 ) -> anyhow::Result<()> {
     for (i, day) in days.iter().enumerate() {
@@ -279,11 +363,12 @@ fn print_agenda(
                 .unwrap_or_default();
             writeln!(
                 out,
-                "  {}  {} {}{}{tone}",
+                "  {}  {} {}{}{}{tone}",
                 row.item.id,
                 row_box(&row.item),
                 row.item.text,
-                date_tags(&row.item)
+                date_tags(&row.item),
+                doc_tag(row.doc.as_ref())
             )?;
         }
     }
@@ -295,10 +380,20 @@ fn print_agenda(
     Ok(())
 }
 
-fn print_unscheduled(out: &mut dyn Write, unscheduled: &[&ItemView]) -> anyhow::Result<()> {
+fn print_unscheduled(
+    out: &mut dyn Write,
+    unscheduled: &[(Option<Candidate>, &ItemView)],
+) -> anyhow::Result<()> {
     writeln!(out, "Unscheduled")?;
-    for item in unscheduled {
-        writeln!(out, "  {}  {} {}", item.id, row_box(item), item.text)?;
+    for (doc, item) in unscheduled {
+        writeln!(
+            out,
+            "  {}  {} {}{}",
+            item.id,
+            row_box(item),
+            item.text,
+            doc_tag(doc.as_ref())
+        )?;
     }
     Ok(())
 }
@@ -329,6 +424,12 @@ struct RowJson<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     placed_by: Option<PlacedBy>,
     tone: Tone,
+    /// `--all` only: the row's workspace. `doc_name` is absent for
+    /// Home (never named) and for an unnamed doc.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    doc_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    doc_name: Option<&'a str>,
 }
 
 fn row_json(row: &AgendaRow) -> RowJson<'_> {
@@ -343,10 +444,12 @@ fn row_json(row: &AgendaRow) -> RowJson<'_> {
         place: row.item.place.as_ref(),
         placed_by: Some(row.placed_by),
         tone: row.tone,
+        doc_id: row.doc.as_ref().map(|c| c.doc_id.0.to_string()),
+        doc_name: row.doc.as_ref().and_then(|c| c.name.as_deref()),
     }
 }
 
-fn unscheduled_json(item: &ItemView) -> RowJson<'_> {
+fn unscheduled_json<'a>(doc: Option<&'a Candidate>, item: &'a ItemView) -> RowJson<'a> {
     RowJson {
         id: &item.id,
         text: &item.text,
@@ -358,6 +461,8 @@ fn unscheduled_json(item: &ItemView) -> RowJson<'_> {
         place: item.place.as_ref(),
         placed_by: None,
         tone: Tone::Neutral,
+        doc_id: doc.map(|c| c.doc_id.0.to_string()),
+        doc_name: doc.and_then(|c| c.name.as_deref()),
     }
 }
 
@@ -392,6 +497,41 @@ mod tests {
 
     const TODAY: &str = "2026-09-09";
     const HORIZON: &str = "2026-09-23";
+
+    #[test]
+    fn merged_sources_share_one_order_and_carry_their_tag() {
+        use monoplan_core::DocId;
+        let home = Candidate {
+            doc_id: DocId(uuid::Uuid::from_u128(1)),
+            name: None,
+        };
+        let work = Candidate {
+            doc_id: DocId(uuid::Uuid::from_u128(2)),
+            name: Some("Work".into()),
+        };
+        let home_items = [
+            item("h-late", Some("2026-09-12T15:00"), None, 1),
+            item("h-over", None, Some("2026-09-01"), 2),
+        ];
+        let work_items = [
+            item("w-early", Some("2026-09-12T09:00"), None, 3),
+            item("w-today", Some(TODAY), None, 4),
+        ];
+        let days = build_agenda_from(
+            &[(Some(&home), &home_items), (Some(&work), &work_items)],
+            TODAY,
+            HORIZON,
+        );
+        // Today: Home's overdue deadline leads, then Work's own row;
+        // Saturday interleaves the two docs by time.
+        assert_eq!(ids(&days[0]), vec!["h-over", "w-today"]);
+        assert_eq!(ids(&days[1]), vec!["w-early", "h-late"]);
+        assert_eq!(days[0].rows[0].doc.as_ref(), Some(&home));
+        assert_eq!(days[1].rows[0].doc.as_ref(), Some(&work));
+        // The single-doc path tags nothing.
+        let alone = build_agenda(&work_items, TODAY, HORIZON);
+        assert!(alone[1].rows.iter().all(|r| r.doc.is_none()));
+    }
 
     #[test]
     fn today_is_always_first_even_when_empty() {

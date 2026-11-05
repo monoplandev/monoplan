@@ -430,6 +430,7 @@ mod tests {
                     days: 0,
                     today: None,
                     json: true,
+                    all: false,
                 })
             }),
             serde_json::json!({"Doc": {"cmd": {"Agenda": {"days": 0, "today": null, "json": true}}}})

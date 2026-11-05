@@ -227,6 +227,7 @@ async fn watcher_hears_sync_local_and_remote_changes() {
                 days: 0,
                 today: None,
                 json: true,
+                all: false,
             }),
         },
     )
