@@ -9,10 +9,12 @@
 /* Begin PBXBuildFile section */
 		4D00000000000000000000C5 /* MonoplanCore in Frameworks */ = {isa = PBXBuildFile; productRef = 4D00000000000000000000C3 /* MonoplanCore */; };
 		4D00000000000000000000C6 /* MonoplanMacKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4D00000000000000000000C4 /* MonoplanMacKit */; };
+		4D00000000000000000000D2 /* icon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 4D00000000000000000000D1 /* icon.icon */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		4D00000000000000000000A5 /* Monoplan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Monoplan.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4D00000000000000000000D1 /* icon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; name = icon.icon; path = ../icon.icon; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -40,6 +42,7 @@
 			isa = PBXGroup;
 			children = (
 				4D00000000000000000000A4 /* Monoplan */,
+				4D00000000000000000000D1 /* icon.icon */,
 				4D00000000000000000000A3 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -122,6 +125,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4D00000000000000000000D2 /* icon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -247,6 +251,7 @@
 		4D00000000000000000000B5 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = icon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
@@ -275,6 +280,7 @@
 		4D00000000000000000000B6 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = icon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;

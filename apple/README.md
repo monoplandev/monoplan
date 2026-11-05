@@ -182,7 +182,8 @@ signatures, and the app icon. The icon is the Icon Composer document
 `apple/icon.icon`; `actool` compiles it straight from that file into
 `Assets.car` (the layered icon macOS 26 renders) and `icon.icns` (the
 flat fallback for macOS 14 and 15). Edit the icon in Icon Composer and
-rebuild; nothing else references it. `bun run mac` runs the binary
+rebuild; the iOS project references the same document (below), nothing
+else does. `bun run mac` runs the binary
 *inside* the bundle rather than `swift run`, so dev runs show the icon
 in Finder, Login Items and Force Quit while stderr stays on the
 terminal. The menu bar glyph is separate: a template image drawn in
@@ -287,6 +288,14 @@ xcrun simctl io booted screenshot shot.png   # Xcode 27 ships no Simulator.app
 Needs `bun run build:apple` first. DerivedData goes to
 `apple/MonoplanIOS/.build/` (gitignored). A device build needs a
 signing team: set `DEVELOPMENT_TEAM` in the environment or in Xcode.
+
+The app icon is the same `apple/icon.icon` the Mac bundle uses, added
+to the project as a file reference (`../icon.icon`) in the Resources
+phase with `ASSETCATALOG_COMPILER_APPICON_NAME = icon`; Xcode runs
+`actool` on it as it would an asset catalog, producing the layered
+icon in `Assets.car` for iOS 26 and flat `icon60x60` / `icon76x76`
+PNGs for iOS 17 and 18. There is no `Assets.xcassets`; one is only
+needed once the app wants named colours or images of its own.
 
 What the screen shows: the `SyncStatus` the host publishes (online,
 pending, local-only, last synced, offline reason), `Changed` events
