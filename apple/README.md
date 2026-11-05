@@ -23,8 +23,10 @@ a WebKit message handler named `monoplan` and the
 framing are in that spec's "Swift side" and in
 `js/web/src/sync/mirrorHost.ts`, the Swift side in
 `MonoplanMac/Sources/MonoplanMac/WebWindow.swift`.
-The socket stays the CLI's; it never carries the mirror. Typed native views
-over the FFI are not planned while the UI is web. The offline
+The socket stays the CLI's; it never carries the mirror. iOS is native
+(decided 2026-11-05, no webview): `apple/MonoplanIOS` below is its
+first surface, a client of the same embedded host over the same FFI,
+so the FFI grows typed reads as that UI does. The offline
 `MonoplanStore` prototype from
 [`spec/swift-ffi-plan.md`](../spec/swift-ffi-plan.md) was removed on
 2026-10-27; that plan is kept for the build pipeline it set up.
@@ -35,7 +37,7 @@ over the FFI are not planned while the UI is web. The offline
 monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's daemon: Host (start, request, watch, subscribe, import, session, device_token, shutdown), login, logout
    → MonoplanCoreFFI.xcframework        static libs (macOS/iOS/iOS-sim) + C headers
       → MonoplanCore (SwiftPM)          generated Swift bindings + a thin facade
-         → MonoplanMac / future iOS app  consume MonoplanCore as a local package
+         → MonoplanMac, MonoplanIOS      consume MonoplanCore (and MonoplanMac's Kit product) as local packages
 ```
 
 ## Prerequisites
@@ -246,4 +248,59 @@ the same change; the build will not let it drift.
 
 Next: the window's deferred items in `spec/mac-window-plan.md`
 (DEK-touching flows in the window, several windows, typed uniffi
-request and reply for the tray), and iOS.
+request and reply for the tray).
+
+## MonoplanIOS — the native iOS surface
+
+`apple/MonoplanIOS/` (2026-11-05) is a hand-written Xcode project (no
+xcodegen on this machine; `Monoplan.xcodeproj` uses a synchronized
+folder, so new files under `Monoplan/` need no project edit) with one
+SwiftUI target. It is the first native client and exists to drive the
+architecture, not to be used yet: sign in, sign out, run a sync, and
+show what the host reports.
+
+The app is the profile's host, as the Mac app is: `HostController`
+runs `Host` from MonoplanCore in process and `DaemonClient` (the Kit,
+consumed as the `MonoplanMacKit` product of `../MonoplanMac`) talks to
+it through `FFITransport`, hello then watch. Two things differ from
+the Mac. The host serves **no socket**: nothing on iOS would dial one,
+and the container paths are longer than `sun_path` allows, so
+`monoplan-ffi` passes `serve_socket = false` (`daemon::start_with`)
+under `target_os = "ios"` and skips the headless-daemon takeover. And
+the process is suspended rather than quit: on return to the
+foreground the app sends `Reconnect`, since the WebSocket is dead by
+then (`spec/daemon-plan.md` "Mobile hosts"); there is no clean
+shutdown, the host's persist tick and the WAL cover a kill. The
+missing socket also means `login` cannot stop the app's host itself,
+as it does on the Mac (`client::claim` sends `Shutdown` over the
+socket and would wait out its deadline here), so `HostController`
+shuts its host down before calling `login`, as both apps already do
+before `logout`; a rejected password costs a host restart.
+
+```sh
+bun run ios          # build for the simulator, install, launch
+bun run ios:build    # build only
+apple/MonoplanIOS/build-sim.sh -d "iPhone 17 Pro" --run
+xcrun simctl io booted screenshot shot.png   # Xcode 27 ships no Simulator.app
+```
+
+Needs `bun run build:apple` first. DerivedData goes to
+`apple/MonoplanIOS/.build/` (gitignored). A device build needs a
+signing team: set `DEVELOPMENT_TEAM` in the environment or in Xcode.
+
+What the screen shows: the `SyncStatus` the host publishes (online,
+pending, local-only, last synced, offline reason), `Changed` events
+counted as they arrive, the host's build id and pid, the profile path,
+and the `Host.session` record (email, account, device, server, open
+docs). Sign-in is the Mac sheet's form without account creation or
+recovery; the local-only workspace a first launch hosts is replaced by
+the account's, as on the Mac.
+
+Not shared yet: `HostController` and `FFITransport` are copies of the
+Mac app's. The obvious next step is a third target beside the Kit,
+depending on MonoplanCore, that both apps consume; the Kit's name
+(`MonoplanMacKit`) should go with it. After that, the native reads
+the UI needs (lists, items, a board) belong on the FFI as typed
+calls, and the cross-doc layer the web client keeps in
+`js/web/src/sync/docs.ts` belongs in Rust above `Doc`, since a native
+UI cannot reuse it.

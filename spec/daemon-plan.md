@@ -398,7 +398,17 @@ exposes a wake notification (macOS `NSWorkspace` wake, systemd-logind
 on Linux) the daemon drops and reconnects immediately on wake so a
 lid-open is synced in about a second rather than after a ping timeout.
 
-### Mobile hosts (context, not built)
+### Mobile hosts (context; first iOS host built 2026-11-05)
+
+Built so far (`apple/MonoplanIOS`, `apple/README.md`): the iOS app
+hosts in process through `monoplan-ffi::Host` exactly as the Mac app
+does, with two differences. It serves **no Unix socket**
+(`daemon::start_with(profile, false)`; `Started::listener` is
+optional): nothing on iOS would dial one, and the container paths
+exceed `sun_path`. And it skips the headless-daemon takeover, since
+nothing else can hold the profile. The UI is native SwiftUI over the
+FFI, not a webview. The app sends `Reconnect` on every return to the
+foreground. The rest of this section is still the plan.
 
 iOS suspends backgrounded apps within seconds and permits no persistent
 socket; `BGAppRefreshTask` and silent push are both budgeted and

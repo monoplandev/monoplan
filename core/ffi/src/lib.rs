@@ -90,6 +90,12 @@ fn init_log(profile_dir: &std::path::Path) {
         .try_init();
 }
 
+/// Whether the embedded host serves the CLI's Unix socket. Every
+/// platform with a terminal, except iOS: no CLI runs there, nothing
+/// else can hold the profile, and the app container's paths are longer
+/// than a socket path may be (`daemon::start_with`).
+const SERVE_SOCKET: bool = !cfg!(target_os = "ios");
+
 fn runtime() -> Result<tokio::runtime::Runtime, HostError> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -444,20 +450,27 @@ impl Host {
                     }
                 };
                 rt.block_on(async move {
-                    match client::take_over(&profile.dir).await {
-                        Ok(true) => {}
-                        Ok(false) => {
-                            let _ = ready_tx.send(Err(HostError::Busy));
-                            return;
-                        }
-                        Err(e) => {
-                            let _ = ready_tx.send(Err(HostError::Failed {
-                                message: format!("{e:#}"),
-                            }));
-                            return;
+                    // On iOS nothing else can hold the profile (no CLI,
+                    // no headless daemon, one process per container),
+                    // and the host serves no socket: the app is its
+                    // only client, and the container paths are longer
+                    // than `sun_path` allows anyway.
+                    if SERVE_SOCKET {
+                        match client::take_over(&profile.dir).await {
+                            Ok(true) => {}
+                            Ok(false) => {
+                                let _ = ready_tx.send(Err(HostError::Busy));
+                                return;
+                            }
+                            Err(e) => {
+                                let _ = ready_tx.send(Err(HostError::Failed {
+                                    message: format!("{e:#}"),
+                                }));
+                                return;
+                            }
                         }
                     }
-                    let started = match daemon::start(profile).await {
+                    let started = match daemon::start_with(profile, SERVE_SOCKET).await {
                         Ok(Some(s)) => s,
                         // Lost the lock to someone between the takeover
                         // and the claim; the app tries again later.

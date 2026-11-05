@@ -18,12 +18,22 @@
 // the `MonoplanMac` executable (status item, menu). Run from the repo root
 // with `bun run mac`; `swift test --package-path apple/MonoplanMac` runs
 // the codec and model tests.
+//
+// `MonoplanMacKit` is also a product: the iOS app (`apple/MonoplanIOS`,
+// 2026-11-05) consumes it for the codec, the client and `SyncStatus`,
+// so the package lists iOS too. The Kit is Foundation-only except the
+// CLI-symlink helper, which is `#if os(macOS)`. Its name predates the
+// second consumer; the hoist into a platform-neutral package is a
+// bounded follow-up.
 
 import PackageDescription
 
 let package = Package(
     name: "MonoplanMac",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v14), .iOS(.v17)],
+    products: [
+        .library(name: "MonoplanMacKit", targets: ["MonoplanMacKit"]),
+    ],
     dependencies: [
         .package(path: "../MonoplanCore"),
     ],

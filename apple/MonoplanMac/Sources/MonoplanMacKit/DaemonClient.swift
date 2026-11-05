@@ -105,6 +105,9 @@ public struct SyncStatus: Equatable {
 public enum Request {
     case hello(buildId: String)
     case watch
+    /// Push now and report whether the server is reachable
+    /// (`Request::Sync`; the reply is `synced`).
+    case sync
     /// The network changed under the host (path change, wake): drop
     /// the socket and connect again now (`Request::Reconnect`).
     case reconnect
@@ -134,6 +137,8 @@ public enum Request {
             return .map(["Hello": .map(["build_id": .string(buildId)])])
         case .watch:
             return .string("Watch")
+        case .sync:
+            return .string("Sync")
         case .reconnect:
             return .string("Reconnect")
         // `Doc { workspace?, cmd }`: no `workspace` means the Personal
@@ -367,6 +372,10 @@ public final class DaemonClient {
     }
 
     private let queue: DispatchQueue
+    /// What this client's hello calls itself. The CLI's build id
+    /// restarts a stale daemon; the host here is this process, so the
+    /// name only identifies the client (`monoplan-mac`, `monoplan-ios`).
+    private let clientId: String
     private var transport: HostTransport?
     private var backoff: TimeInterval = 1
     private var stopped = false
@@ -376,8 +385,9 @@ public final class DaemonClient {
     /// transport once it runs; nil (tests) means nothing is hosting.
     public var hostProvider: (() -> HostProvision)?
 
-    public init(queue: DispatchQueue = .main) {
+    public init(queue: DispatchQueue = .main, clientId: String = "monoplan-mac") {
         self.queue = queue
+        self.clientId = clientId
     }
 
     public func start() {
@@ -448,7 +458,7 @@ public final class DaemonClient {
     private func handshake(_ t: HostTransport) {
         // The CLI uses the build id to restart a stale daemon; the host
         // is this process, so we only identify ourselves.
-        t.request(MessagePack.encode(Request.hello(buildId: "monoplan-mac").value)) { [weak self] result in
+        t.request(MessagePack.encode(Request.hello(buildId: clientId).value)) { [weak self] result in
             self?.queue.async {
                 guard let self, self.transport === t else { return }
                 guard case .success(.hello(let buildId, let pid, _)) = self.reply(from: result) else {

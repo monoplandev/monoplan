@@ -10,7 +10,7 @@ Workflow: a reserved primary capture list ("Inbox", id `inbox`), any number of u
 - **Rust server** (`server/`) — sqlite-backed, sequenced encrypted-blob store + auth + WS relay. The server is *dumb*: it cannot read op contents, cannot run a Loro doc, cannot validate semantics. Its job is auth, ordering, durability, frontier tracking, snapshot orchestration. TODO: Compaction may put an asterisk on "DUMB".
 - **CLI** (`cli/`) — Monoplan CLI
 - **Web** (`js/web/`, consuming `core/web/` wasm via `js/core/`) — browser client; multi-device proof spans CLI ↔ web.
-- **iOS / Android / native macOS** — future clients
+- **iOS** (`apple/MonoplanIOS/`) — native SwiftUI client over the same embedded host and FFI, no webview; first surface (sign in / out, sync state) built 2026-11-05, see `apple/README.md`. **Android** — future
 
 E2EE: password-derived KEK wraps a randomly-generated DEK. DEK encrypts every update blob. Server has no key. Recovery via a user-held recovery code (independent wrap of DEK) is implemented; server-assisted escrow (Vault-backed, opt-in) is future work.
 

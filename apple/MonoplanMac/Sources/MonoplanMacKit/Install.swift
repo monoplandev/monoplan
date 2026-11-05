@@ -5,6 +5,9 @@
 
 import Foundation
 
+// macOS only: there is no terminal, no PATH and no `Process` on iOS.
+#if os(macOS)
+
 /// The `monoplan` copy `build-app.sh` puts beside the app executable.
 public func bundledBinary(executable: URL? = Bundle.main.executableURL) -> String? {
     guard let executable else { return nil }
@@ -93,3 +96,5 @@ public struct CommandLineLink {
         }
     }
 }
+
+#endif

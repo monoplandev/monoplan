@@ -201,17 +201,32 @@ impl DaemonHandle {
 /// (`monoplan-ffi::Host`, `spec/daemon-plan.md` amendment 2026-10-27).
 pub struct Started {
     lock: DaemonLock,
-    listener: UnixListener,
+    /// `None` for a host with no CLI to serve (the iOS app): the loop
+    /// runs, the in-process [`LocalClient`] is its only client, and no
+    /// socket file is made. On iOS the container paths also exceed
+    /// `sun_path`, so a bind there would fail outright.
+    listener: Option<UnixListener>,
     session: Session,
 }
 
 /// Claim the profile, bind the socket and boot the doc. `Ok(None)` when
 /// another process holds the lock.
 pub async fn start(profile: Profile) -> anyhow::Result<Option<Started>> {
+    start_with(profile, true).await
+}
+
+/// `start`, with the socket optional: `serve_socket` false hosts the
+/// doc for in-process clients only (the mobile host, which has no CLI
+/// and no path short enough for a socket).
+pub async fn start_with(profile: Profile, serve_socket: bool) -> anyhow::Result<Option<Started>> {
     let Some(lock) = try_acquire(&profile.dir)? else {
         return Ok(None);
     };
-    let listener = bind(&profile.dir)?;
+    let listener = if serve_socket {
+        Some(bind(&profile.dir)?)
+    } else {
+        None
+    };
     let session = Session::open_resident(profile).await?;
     Ok(Some(Started {
         lock,
@@ -247,7 +262,8 @@ pub async fn serve(
 /// clients of the same loop by construction.
 pub struct Serving {
     host: Host,
-    accept: tokio::task::JoinHandle<()>,
+    /// Absent when the host serves no socket (`Started::listener`).
+    accept: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Serving {
@@ -265,13 +281,15 @@ impl Serving {
         // `Subscription`'s `Drop` can release its slot without a runtime.
         let (req_tx, req_rx) = mpsc::unbounded_channel();
         let (watch_tx, _) = broadcast::channel(WATCH_BUFFER);
-        let accept = tokio::spawn(accept_loop(
-            listener,
-            req_tx.clone(),
-            status_rx.clone(),
-            watch_tx.subscribe(),
-            embedded,
-        ));
+        let accept = listener.map(|listener| {
+            tokio::spawn(accept_loop(
+                listener,
+                req_tx.clone(),
+                status_rx.clone(),
+                watch_tx.subscribe(),
+                embedded,
+            ))
+        });
         let client = LocalClient {
             requests: req_tx,
             status: status_rx,
@@ -287,7 +305,9 @@ impl Serving {
     /// then, and nothing it accepted could be answered.
     pub async fn run(self, shutdown: oneshot::Receiver<()>) -> Result<(), SyncError> {
         let result = self.host.run(shutdown).await;
-        self.accept.abort();
+        if let Some(accept) = self.accept {
+            accept.abort();
+        }
         result
     }
 }
@@ -898,7 +918,7 @@ pub async fn spawn_with(profile: Profile, embedded: bool) -> Result<DaemonHandle
     let (serving, client) = Serving::new(
         Started {
             lock,
-            listener,
+            listener: Some(listener),
             session,
         },
         embedded,

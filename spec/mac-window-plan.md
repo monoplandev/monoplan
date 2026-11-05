@@ -39,7 +39,7 @@ internal request channel the socket handler already sits on),
 | Host-side undo | Mirror ops are imported tagged, like remote ops, so `monoplan undo` in the terminal never undoes a window edit, as it never undoes another device's. The window's undo is its own Doc's `UndoManager`, as in the browser. |
 | HTTP | The non-doc surface (`api.ts`: devices, members, invites, doc list) keeps calling the server, unchanged: the app's URL scheme handler forwards `/api/*` to the host's server with the device token the CLI already holds (`Authorization: Bearer`, `spec/auth.md`), so the page's same-origin fetches just work and the credential never enters the webview, which never logs in. |
 | DEK-touching flows | **Hidden in the window on the first pass**: password change, recovery, doc creation, invite accept (each wraps or unwraps a key the webview does not hold). The tray, Settings and the CLI keep them. |
-| iOS | Same shape when it comes: the iOS app embeds core as a host (`daemon-plan.md` "Mobile hosts") and a webview mirrors it through the same FFI. The FFI surface stays small for as long as the UI is web. |
+| iOS | **Native, not a webview** (decided 2026-11-05, superseding the earlier "same shape" row). The iOS app embeds core as a host (`daemon-plan.md` "Mobile hosts"; first surface built 2026-11-05 in `apple/MonoplanIOS`, see `apple/README.md`) and its SwiftUI client reaches it over the same FFI (`Host.request` / `Host.watch` / `Host.session`), never the mirror. The FFI therefore grows typed reads as the native UI does; the mirror stays the Mac window's. |
 
 ## Why not a view
 
