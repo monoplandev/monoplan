@@ -795,3 +795,92 @@ async fn mirror_converges_both_ways_through_the_host() {
     ));
     assert!(!slot_is_leased(tmp.path(), 2), "leases go with the loop");
 }
+
+/// `Request::Reconnect` (the app's wake / foreground / network-change
+/// path) drops a live socket and dials again. The host must come back
+/// online on that second socket and keep applying peer broadcasts: a
+/// host-initiated disconnect leaves the engine's `ConnStateChanged {
+/// online: false }` queued, and the pump after the next connect must
+/// not mistake that stale event for the *new* socket's engine going
+/// offline (which once dropped the fresh socket and left the engine
+/// `Opening` with no socket, cycling "engine disconnected" /
+/// "handle_connected called while already connected" forever).
+#[tokio::test]
+async fn reconnect_request_comes_back_online_and_stays_live() {
+    let server = TestServer::start().await;
+    let signup = signup_account(&server, "reconnect-a").await;
+    let tmp_a = tempfile::tempdir().unwrap();
+    let profile_a = materialize_profile(
+        tmp_a.path(),
+        &server.base,
+        &signup.account_id,
+        &signup.primary_doc_id,
+        &signup.device_id,
+        &signup.device_token,
+        &signup.dek,
+        &signup.email,
+        true,
+    )
+    .await;
+    let mut handle = daemon::spawn(profile_a).await.unwrap();
+    wait_until(&mut handle.status, "daemon online", |s| s.online).await;
+    assert_eq!(handle.status.borrow().connects, 1);
+
+    let mut stream = connect(tmp_a.path()).await;
+    write_frame(&mut stream, &Request::Reconnect).await.unwrap();
+    expect_frame(&mut stream, "reconnect reply", |r| {
+        matches!(r, Reply::Synced { .. })
+    })
+    .await;
+
+    // Back on a second socket, with the doc open on it.
+    wait_until(&mut handle.status, "online after reconnect", |s| {
+        s.online && s.connects == 2
+    })
+    .await;
+
+    // And still live: a peer push arrives without anyone asking.
+    let login = login_device(&server.base, &signup.email, TEST_PASSWORD, "reconnect-b")
+        .await
+        .unwrap();
+    let tmp_b = tempfile::tempdir().unwrap();
+    let profile_b = materialize_profile(
+        tmp_b.path(),
+        &server.base,
+        &login.account_id,
+        &login.primary_doc_id,
+        &login.device_id,
+        &login.device_token,
+        &login.dek,
+        &signup.email,
+        false,
+    )
+    .await;
+    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
+    session_b
+        .doc()
+        .add_item(LIST_INBOX, "after-reconnect")
+        .unwrap();
+    session_b.flush().await.unwrap();
+    let primary_doc_id = Uuid::parse_str(&signup.primary_doc_id).unwrap();
+    let batch = queries::fetch_updates_batch(&server.state.db, primary_doc_id, 0)
+        .await
+        .unwrap();
+    let pushed_seq = batch.updates.iter().map(|o| o.seq).max().unwrap();
+    wait_until(
+        &mut handle.status,
+        "broadcast applied after reconnect",
+        |s| s.last_contiguous_seq >= pushed_seq,
+    )
+    .await;
+    // One socket per connect, no reconnect storm behind the scenes,
+    // and the status shows nothing wrong.
+    let status = handle.status.borrow().clone();
+    assert_eq!(status.connects, 2, "{status:?}");
+    assert!(
+        status.online && status.offline_reason.is_none(),
+        "{status:?}"
+    );
+
+    handle.shutdown().await.unwrap();
+}

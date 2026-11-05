@@ -297,13 +297,17 @@ icon in `Assets.car` for iOS 26 and flat `icon60x60` / `icon76x76`
 PNGs for iOS 17 and 18. There is no `Assets.xcassets`; one is only
 needed once the app wants named colours or images of its own.
 
-What the screen shows: the `SyncStatus` the host publishes (online,
-pending, local-only, last synced, offline reason), `Changed` events
-counted as they arrive, the host's build id and pid, the profile path,
-and the `Host.session` record (email, account, device, server, open
-docs). Sign-in is the Mac sheet's form without account creation or
-recovery; the local-only workspace a first launch hosts is replaced by
-the account's, as on the Mac.
+Two tabs in a system `TabView` (`ContentView.swift`; the floating
+glass pill on iOS 26, the flat bar before). **Inbox** is a stub for the
+capture list until the host exposes item projections here. **Debug**
+(`DebugView.swift`) is the original surface: the `SyncStatus` the host
+publishes (online, pending, local-only, last synced, offline reason),
+`Changed` events counted as they arrive, the host's build id and pid,
+the profile path, and the `Host.session` record (email, account,
+device, server, open docs), with the sign-in / sign-out buttons until
+a settings surface takes them. Sign-in is the Mac sheet's form without
+account creation or recovery; the local-only workspace a first launch
+hosts is replaced by the account's, as on the Mac.
 
 Not shared yet: `HostController` and `FFITransport` are copies of the
 Mac app's. The obvious next step is a third target beside the Kit,

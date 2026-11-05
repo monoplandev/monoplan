@@ -1608,16 +1608,19 @@ impl Host {
         let mut forget: Vec<DocId> = Vec::new();
         for (doc_id, event) in self.session.drain_events() {
             match event {
+                // Not acted on as events: whether Home is open on the
+                // socket is read off the engine after the drain (below),
+                // because a `false` here may be stale. A host-initiated
+                // `disconnect` (a `Reconnect` request, a pong timeout,
+                // an engine error in this very loop) queues one with no
+                // pump before the next connect; drained *then*, beside
+                // the new `true`, it describes the old socket, and
+                // dropping the new one for it left the engine `Opening`
+                // with no socket, cycling "engine disconnected" /
+                // "handle_connected called while already connected".
                 // A non-Home engine going offline on its own is the
-                // `DocClosed` below, already handled; the socket stays
-                // up for the other docs.
-                Event::ConnStateChanged { online: false } if doc_id != home => {}
-                Event::ConnStateChanged { online: false } => {
-                    // Engine already went Disconnected (rejected
-                    // handshake, fatal frame); drop the socket to match.
-                    self.drop_socket("engine disconnected");
-                }
-                Event::ConnStateChanged { online: true } => {}
+                // `DocClosed` below; the socket stays up for the rest.
+                Event::ConnStateChanged { .. } => {}
                 Event::PulledInitial => {
                     if let Err(e) = self.session.mark_synced(doc_id) {
                         tracing::warn!("mark_synced: {e}");
@@ -1669,6 +1672,11 @@ impl Host {
                     self.disconnect(&format!("doc closed: {reason}"));
                 }
             }
+        }
+        // Home went Disconnected on its own (rejected handshake, fatal
+        // frame) while the socket is up: drop the socket to match.
+        if self.ws.is_some() && !self.session.home_engine().is_online() {
+            self.drop_socket("engine disconnected");
         }
         let forgot = !forget.is_empty();
         for doc_id in forget {

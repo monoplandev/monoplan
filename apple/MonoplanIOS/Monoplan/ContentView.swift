@@ -1,120 +1,38 @@
-// Everything the host reports, as a list: sync state, the host
-// itself, and the session. Buttons for the four things this surface
-// can do: sync now, reconnect, sign in, sign out.
+// The root: a tab per surface. The system tab bar is the floating
+// Liquid Glass pill on iOS 26 (the selection slides between tabs); on
+// iOS 17 and 18 it is the flat bar. `Tab` is the iOS 18 API; the
+// `tabItem` branch keeps the 17.0 deployment target buildable and can
+// go with it.
 
-import MonoplanCore
-import MonoplanMacKit
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject private var model: AppModel
-    @State private var showSignIn = false
+    enum Page: Hashable {
+        case inbox
+        case debug
+    }
+
+    @State private var page: Page = .inbox
 
     var body: some View {
-        NavigationStack {
-            List {
-                syncSection
-                hostSection
-                accountSection
-                if let error = model.lastError {
-                    Section("Last error") {
-                        Text(error).foregroundStyle(.red)
-                    }
+        if #available(iOS 18, *) {
+            TabView(selection: $page) {
+                Tab("Inbox", systemImage: "tray", value: .inbox) {
+                    InboxView()
+                }
+                Tab("Debug", systemImage: "ladybug", value: .debug) {
+                    DebugView()
                 }
             }
-            .navigationTitle("Monoplan")
-            .refreshable {
-                model.syncNow()
-                model.loadSession()
-            }
-            .sheet(isPresented: $showSignIn) {
-                SignInView()
-                    .environmentObject(model)
+        } else {
+            TabView(selection: $page) {
+                InboxView()
+                    .tabItem { Label("Inbox", systemImage: "tray") }
+                    .tag(Page.inbox)
+                DebugView()
+                    .tabItem { Label("Debug", systemImage: "ladybug") }
+                    .tag(Page.debug)
             }
         }
-    }
-
-    private var syncSection: some View {
-        Section("Sync") {
-            if let sync = model.sync {
-                LabeledContent("Status", value: sync.line())
-                LabeledContent("Online", value: sync.online ? "yes" : "no")
-                LabeledContent("Pending local work", value: sync.pending ? "yes" : "no")
-                LabeledContent("Local only", value: sync.localOnly ? "yes" : "no")
-                LabeledContent("Last synced", value: Self.format(millis: sync.lastSyncedAt))
-                if let reason = sync.offlineReason {
-                    LabeledContent("Offline reason", value: reason)
-                }
-                LabeledContent("Doc changes seen", value: "\(model.changeCount)")
-                if let at = model.lastChangeAt {
-                    LabeledContent("Last change", value: at.formatted(date: .omitted, time: .standard))
-                }
-                Button("Sync now") { model.syncNow() }
-                    .disabled(sync.localOnly)
-                Button("Reconnect") { model.reconnect() }
-                    .disabled(sync.localOnly)
-            } else if case .connecting(let why) = model.clientState {
-                LabeledContent("Status", value: why)
-            }
-        }
-    }
-
-    private var hostSection: some View {
-        Section("Host") {
-            if let info = model.hostInfo {
-                LabeledContent("Serving", value: "yes")
-                LabeledContent("Build", value: info.buildId)
-                LabeledContent("PID", value: "\(info.pid)")
-            } else {
-                LabeledContent("Serving", value: "no")
-            }
-            LabeledContent("Profile") {
-                Text(model.location.dir.path)
-                    .font(.caption2.monospaced())
-                    .multilineTextAlignment(.trailing)
-                    .textSelection(.enabled)
-            }
-        }
-    }
-
-    private var accountSection: some View {
-        Section("Account") {
-            if let busy = model.busy {
-                HStack {
-                    ProgressView()
-                    Text(busy).padding(.leading, 8)
-                }
-            }
-            if let session = model.session, !session.localOnly {
-                LabeledContent("Email", value: session.email)
-                LabeledContent("Account", value: session.accountId)
-                    .font(.footnote)
-                LabeledContent("Device", value: session.deviceId)
-                    .font(.footnote)
-                LabeledContent("Server", value: session.serverUrl)
-                LabeledContent("Open docs", value: "\(session.docs.count)")
-                ForEach(session.docs, id: \.docId) { doc in
-                    LabeledContent(doc.name ?? "Personal") {
-                        Text(doc.docId).font(.caption2.monospaced())
-                    }
-                }
-                Button("Sign Out", role: .destructive) { model.signOut() }
-                    .disabled(model.busy != nil)
-            } else {
-                LabeledContent("Signed in", value: "no")
-                if model.session?.localOnly == true {
-                    Text("A local-only workspace is being hosted. Signing in replaces it with the account's.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-                Button("Sign In…") { showSignIn = true }
-                    .disabled(model.busy != nil)
-            }
-        }
-    }
-
-    private static func format(millis: Int64?) -> String {
-        guard let millis else { return "never" }
-        return Date(timeIntervalSince1970: Double(millis) / 1000)
-            .formatted(date: .abbreviated, time: .standard)
     }
 }
