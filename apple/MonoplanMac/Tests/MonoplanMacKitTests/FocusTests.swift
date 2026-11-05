@@ -37,4 +37,19 @@ final class FocusTests: XCTestCase {
         """)
         XCTAssertNil(StarredMenu.lines(from: orphan, listNames: names)[0].note)
     }
+
+    func testFullLensRowsCarryWorkspaceAndListName() throws {
+        let json = """
+        [{"pos":1,"id":"w","text":"Work row","list_id":"inbox","state":"todo",
+          "doc_id":"00000000-0000-0000-0000-000000000002","doc_name":"Work","list_name":"Inbox"},
+         {"pos":2,"id":"h","text":"Home row","list_id":"abc","state":"backlog",
+          "doc_id":"00000000-0000-0000-0000-000000000001","list_name":"Errands"}]
+        """
+        let rows = try Focus.parse(json)
+        XCTAssertEqual(rows[0].docName, "Work")
+        XCTAssertEqual(rows[0].listName, "Inbox")
+        XCTAssertNil(rows[1].docName)
+        XCTAssertEqual(rows[1].listName, "Errands")
+        XCTAssertNil(try Focus.parse(sample)[0].docId)
+    }
 }

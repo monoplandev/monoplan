@@ -114,8 +114,10 @@ public enum Request {
     /// `monoplan agenda --days N --json`; `all` is `--all`, every
     /// workspace merged with rows tagged by `doc_id` / `doc_name`.
     case agenda(days: Int, all: Bool = false)
-    /// `monoplan focus --json`: the Starred lens (spec/focus.md).
-    case focus
+    /// `monoplan starred --json`: the Starred lens (spec/focus.md).
+    /// `all` is `--all`: Home's entries with their cross-workspace refs
+    /// resolved, rows tagged with `doc_id` / `doc_name` / `list_name`.
+    case focus(all: Bool = false)
     /// `monoplan item ls --list <list> [--done] --json`: a list's items
     /// (`Items.parse`); Open only unless `done`.
     case items(list: String, done: Bool = false)
@@ -154,8 +156,10 @@ public enum Request {
             // single-doc shape is unchanged.
             if all { args["all"] = .bool(true) }
             return .map(["Doc": .map(["cmd": .map(["Agenda": .map(args)])])])
-        case .focus:
-            return .map(["Doc": .map(["cmd": .map(["Focus": .map(["cmd": .nil, "json": .bool(true)])])])])
+        case .focus(let all):
+            var args: [String: MPValue] = ["cmd": .nil, "json": .bool(true)]
+            if all { args["all"] = .bool(true) }
+            return .map(["Doc": .map(["cmd": .map(["Focus": .map(args)])])])
         case .items(let list, let done):
             return .map(["Doc": .map(["cmd": .map(["Ls": .map([
                 "list": .string(list), "done": .bool(done), "json": .bool(true),

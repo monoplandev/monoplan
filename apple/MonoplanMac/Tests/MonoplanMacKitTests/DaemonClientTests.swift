@@ -23,8 +23,12 @@ final class DaemonClientTests: XCTestCase {
         XCTAssertEqual(Request.watch.value, .string("Watch"))
         XCTAssertEqual(Request.account.value, .string("Account"))
         XCTAssertEqual(
-            Request.focus.value,
+            Request.focus().value,
             .map(["Doc": .map(["cmd": .map(["Focus": .map(["cmd": .nil, "json": .bool(true)])])])])
+        )
+        XCTAssertEqual(
+            Request.focus(all: true).value,
+            .map(["Doc": .map(["cmd": .map(["Focus": .map(["cmd": .nil, "json": .bool(true), "all": .bool(true)])])])])
         )
         XCTAssertEqual(
             Request.items(list: "inbox").value,

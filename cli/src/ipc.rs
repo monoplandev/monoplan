@@ -441,6 +441,7 @@ mod tests {
                 cmd: DocCmd::Focus(crate::commands::focus::FocusArgs {
                     cmd: None,
                     json: true,
+                    all: false,
                 })
             }),
             serde_json::json!({"Doc": {"workspace": "Work", "cmd": {"Focus": {"cmd": null, "json": true}}}})

@@ -33,6 +33,10 @@ final class AppModel: ObservableObject {
     /// on `Changed` beside the Inbox.
     @Published private(set) var agenda: [AgendaDay] = []
     @Published private(set) var agendaError: String?
+    /// The Starred lens (`starred --all --json`): Home's curated order
+    /// with its cross-workspace entries resolved.
+    @Published private(set) var starred: [FocusRow] = []
+    @Published private(set) var starredError: String?
     private var refreshQueued = false
     @Published var lastError: String?
     @Published var signingIn = false
@@ -70,6 +74,7 @@ final class AppModel: ObservableObject {
             loadSession()
             refreshInbox()
             refreshAgenda()
+            refreshStarred()
         } else {
             session = nil
         }
@@ -92,6 +97,15 @@ final class AppModel: ObservableObject {
             self?.refreshQueued = false
             self?.refreshInbox()
             self?.refreshAgenda()
+            self?.refreshStarred()
+        }
+    }
+
+    /// `starred --all --json` through the host.
+    func refreshStarred() {
+        fetch(.focus(all: true), what: "starred", parse: Focus.parse) { [weak self] rows, error in
+            if let rows { self?.starred = rows }
+            self?.starredError = error
         }
     }
 

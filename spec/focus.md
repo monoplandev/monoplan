@@ -97,6 +97,11 @@ it does not hold the other doc — so the division of labour is:
   the item close, get binned or vanish in its doc, or when the account leaves
   that doc. Core never judges a foreign ref dead, because a client that has not
   (or not yet) loaded the other doc must not destroy the ref.
+- The CLI daemon's `starred --all` (2026-11-05, `cli.md` §Focus) is this
+  resolution for the native clients: Home's entries resolved against the
+  daemon's open docs, non-Open and unresolvable ones left out, rows tagged
+  with workspace and list name. It reads only; pruning is still the
+  observing client's.
 - Entry **indices** (`add_to_focus`, `move_in_focus`) address the full entry
   list, foreign entries included, which is what a merged Focus view shows.
 - Foreign refs are not exported by `export_json` and are dropped on import.

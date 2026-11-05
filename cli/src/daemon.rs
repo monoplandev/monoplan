@@ -1330,6 +1330,46 @@ impl Host {
                     }
                 }
             }
+            // `starred --all`: Home's lens with its cross-workspace
+            // entries resolved against the open docs (the host's half
+            // of `spec/focus.md` "Foreign refs"). Read-only, like the
+            // merged agenda above.
+            Request::Doc {
+                workspace,
+                cmd: crate::commands::DocCmd::Focus(args),
+            } if args.all => {
+                if workspace.is_some() {
+                    Reply::Err {
+                        message: "starred --all reads every workspace; it takes no -w".into(),
+                    }
+                } else if args.cmd.is_some() {
+                    Reply::Err {
+                        message: "starred --all only lists; mv takes -w instead".into(),
+                    }
+                } else {
+                    let docs: Vec<(crate::workspace::Candidate, &monoplan_core::Doc)> = self
+                        .session
+                        .candidates()
+                        .into_iter()
+                        .filter_map(|c| self.session.doc_for(c.doc_id).map(|d| (c, d)))
+                        .collect();
+                    let mut buf = Vec::new();
+                    match crate::commands::focus::show_all(
+                        &docs,
+                        self.session.primary_doc_id(),
+                        args.json,
+                        &mut buf,
+                    ) {
+                        Ok(()) => Reply::Output {
+                            stdout: String::from_utf8_lossy(&buf).into_owned(),
+                            sync: self.sync_status(),
+                        },
+                        Err(e) => Reply::Err {
+                            message: format!("{e:#}"),
+                        },
+                    }
+                }
+            }
             Request::Doc { workspace, cmd } => {
                 let doc_id = match self.session.resolve(workspace.as_deref()) {
                     Ok(id) => id,

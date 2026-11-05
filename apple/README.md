@@ -297,13 +297,17 @@ icon in `Assets.car` for iOS 26 and flat `icon60x60` / `icon76x76`
 PNGs for iOS 17 and 18. There is no `Assets.xcassets`; one is only
 needed once the app wants named colours or images of its own.
 
-Three tabs in a system `TabView` (`ContentView.swift`; the floating
+Four tabs in a system `TabView` (`ContentView.swift`; the floating
 glass pill on iOS 26, the flat bar before). **Inbox** (`InboxView.swift`)
 is the capture list's Open items in list order, read through the Kit's
 `Request.items` (`item ls --list inbox --json`, decoded by
 `Items.parse`) and refetched on every `Changed` event, coalesced over
 250 ms as the Mac tray's agenda is; read-only so far, capture and
-lifecycle moves are next. **Agenda** (`AgendaView.swift`) is the
+lifecycle moves are next. **Starred** (`StarredView.swift`) is the
+Focus lens as the daemon resolves it (`Request.focus(all: true)`, i.e.
+`starred --all --json`, `spec/cli.md` §Focus: Home's curated order with
+its cross-workspace entries resolved), each row with its list name and,
+when not Personal's, its workspace; read-only. **Agenda** (`AgendaView.swift`) is the
 daemon's merged agenda (`Request.agenda(days: 14, all: true)`, i.e.
 `agenda --all --json`, `spec/cli.md` §Items: every open workspace in
 one placement, the Home doc's hidden-from-calendar docs left out), every

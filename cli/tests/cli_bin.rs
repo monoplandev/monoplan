@@ -535,6 +535,28 @@ async fn workspace_flag_selects_a_second_doc() {
     let e = err(monoplan(dir, &["-w", "Work", "agenda", "--all"]).await);
     assert!(e.contains("takes no -w"), "{e}");
 
+    // `starred --all` is Home's lens with its tags (foreign refs have
+    // no CLI verb yet; their resolution is unit-tested in `focus.rs`).
+    ok(monoplan(dir, &["item", "set", &home_item, "--star"]).await);
+    let json = ok(monoplan(dir, &["starred", "--all", "--json"]).await);
+    let rows: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(rows.as_array().map(Vec::len), Some(1), "{json}");
+    assert_eq!(rows[0]["id"], home_item, "{json}");
+    assert_eq!(rows[0]["doc_id"], signup.primary_doc_id, "{json}");
+    assert_eq!(rows[0]["list_name"], "Inbox", "{json}");
+    assert!(rows[0].get("doc_name").is_none(), "{json}");
+    let text = ok(monoplan(dir, &["starred", "--all"]).await);
+    assert!(text.contains("in home  [Personal]"), "{text}");
+    let plain = ok(monoplan(dir, &["starred", "--json"]).await);
+    assert!(
+        plain.contains(&home_item) && !plain.contains("doc_id"),
+        "{plain}"
+    );
+    let e = err(monoplan(dir, &["-w", "Work", "starred", "--all"]).await);
+    assert!(e.contains("takes no -w"), "{e}");
+    let e = err(monoplan(dir, &["starred", "--all", "mv", &home_item, "1"]).await);
+    assert!(e.contains("only lists"), "{e}");
+
     // Each doc's ops reached its own server doc.
     wait_for_updates(&server, Uuid::parse_str(&work_id).unwrap(), 1).await;
     wait_for_updates(&server, Uuid::parse_str(&signup.primary_doc_id).unwrap(), 1).await;

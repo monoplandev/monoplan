@@ -9,6 +9,7 @@ import SwiftUI
 struct ContentView: View {
     enum Page: Hashable {
         case inbox
+        case starred
         case agenda
         case debug
     }
@@ -20,6 +21,9 @@ struct ContentView: View {
             TabView(selection: $page) {
                 Tab("Inbox", systemImage: "tray", value: .inbox) {
                     InboxView()
+                }
+                Tab("Starred", systemImage: "star", value: .starred) {
+                    StarredView()
                 }
                 Tab("Agenda", systemImage: "calendar", value: .agenda) {
                     AgendaView()
@@ -33,6 +37,9 @@ struct ContentView: View {
                 InboxView()
                     .tabItem { Label("Inbox", systemImage: "tray") }
                     .tag(Page.inbox)
+                StarredView()
+                    .tabItem { Label("Starred", systemImage: "star") }
+                    .tag(Page.starred)
                 AgendaView()
                     .tabItem { Label("Agenda", systemImage: "calendar") }
                     .tag(Page.agenda)

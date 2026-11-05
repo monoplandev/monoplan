@@ -11,6 +11,11 @@ public struct FocusRow: Decodable, Equatable {
     public let text: String
     public let listId: String
     public let state: String
+    /// `--all` only: the row's workspace (`docName` nil for Home) and
+    /// its list's name there.
+    public let docId: String?
+    public let docName: String?
+    public let listName: String?
 }
 
 public enum Focus {

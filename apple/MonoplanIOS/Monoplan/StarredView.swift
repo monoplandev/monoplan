@@ -1,0 +1,78 @@
+// The Starred tab: the Focus lens (spec/focus.md; "Starred" is the UI
+// name) as the daemon resolves it with `starred --all`: Home's curated
+// order, entries from other workspaces included, each row naming its
+// list and, when not Personal's, its workspace. Read-only markup.
+
+import MonoplanMacKit
+import SwiftUI
+
+struct StarredView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if model.starred.isEmpty {
+                    emptyState
+                } else {
+                    List(model.starred, id: \.id) { row in
+                        StarredRowView(row: row)
+                    }
+                    .listStyle(.plain)
+                }
+            }
+            .navigationTitle("Starred")
+            .refreshable { model.refreshStarred() }
+            .onAppear { model.refreshStarred() }
+        }
+    }
+
+    private var emptyState: some View {
+        ScrollView {
+            if let error = model.starredError {
+                ContentUnavailableView(
+                    "Starred unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(error)
+                )
+            } else if model.sync == nil, case .connecting(let why) = model.clientState {
+                ContentUnavailableView("Starred", systemImage: "star", description: Text(why))
+            } else {
+                ContentUnavailableView(
+                    "Nothing starred",
+                    systemImage: "star",
+                    description: Text("Items you star show here, in your order.")
+                )
+            }
+        }
+    }
+}
+
+/// One starred row: its position, the text, and underneath the list it
+/// lives in with the workspace after it when that is not Personal.
+struct StarredRowView: View {
+    let row: FocusRow
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text("\(row.pos)")
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 24, alignment: .trailing)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.text)
+                if let note {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var note: String? {
+        let parts = [row.listName, row.docName].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
