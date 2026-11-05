@@ -114,3 +114,4 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - can't directly add emojis opening up the macos emoji picker through the emoji interface into title
 - Mem profiling web app (and maybe hybrid mac app)
 - consider optimistic UI when looking at multi-tab/after hybrid app
+- figure out safari scroll state issue - autoscroll up/down while dragging to top/bottom is not super reliable - and sometimes the scroll gets stuck esp. on first open it seems?
