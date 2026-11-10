@@ -86,8 +86,7 @@ export function App(props: {
   // keep readable account data, and the rows would otherwise make the
   // next login of the same account resume as a long-offline device.
   // The sync runtime's `onAuthFailed` (expired or revoked cookie) calls
-  // this bare, so it only forgets keys and never destroys unsynced work
-  // (see spec/pwa-plan.md "Non-destructive auth failure").
+  // this bare, so it only forgets keys and never destroys unsynced work.
   const logout = async (opts?: { wipeLocal?: boolean; serverGone?: boolean }) => {
     const current = session();
     const storages = (boot()?.docs ?? []).map((d) => d.storage);

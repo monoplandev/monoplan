@@ -57,8 +57,8 @@ from local prefs, as before URLs existed.
   for the first time; a fragment never leaves the browser. This keeps
   the "server is dumb" property (`spec/architecture.md`) intact.
 - **No server route.** `web.rs` serves `/` and a flat set of files. The
-  fragment needs nothing new and works cold on a fresh device, before
-  the PWA service worker fallback (`spec/pwa-plan.md`) exists.
+  fragment needs nothing new and works cold on a fresh device, with no
+  service worker fallback.
 - **Trivial to migrate.** A native deep link (`monoplan://item_<id>`) or
   a future path scheme carries the identical token.
 
