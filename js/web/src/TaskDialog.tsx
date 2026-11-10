@@ -92,6 +92,10 @@ const KNOWN_PLACES_LIMIT = 200;
  *  to capture into, plus what the capture opens with. */
 export type NewItemTarget = {
   listId: string;
+  /** Set only when the surface re-targets a capture at a list of
+   *  another workspace: the doc that list is in. The owner then hosts
+   *  the capture in that doc. Absent ≡ the capture's current doc. */
+  docId?: string;
   /** Which open lane to capture into (`backlog` is also the list view's
    *  default). */
   state: WorkflowState;
@@ -166,6 +170,15 @@ export function TaskDialog(props: {
   app: DocApp;
   /** Active (non-archived) user lists — the move/capture destinations. */
   lists: () => ListView[];
+  /** The other workspaces' destinations (`foreign`, each with its
+   *  `docId`), offered after this doc's own lists. */
+  otherLists?: () => ListOption[];
+  /** Move the open item to a list of another workspace
+   *  (`spec/sharing-plan.md` "Cross-doc move"). The surface has settled
+   *  its edits into the item first; the owner confirms when the move
+   *  changes who can see it, and the surface then follows the item into
+   *  its new doc. */
+  onMoveAcross?: (id: string, docId: string, listId: string) => void;
   /** Name of the shared workspace the item lives in, shown in the list
    *  picker; null for Personal, which is the default and goes unsaid. */
   docLabel?: () => string | null;
@@ -305,19 +318,22 @@ export function TaskDialog(props: {
   // renders the current list's name (and moving *out* to an active list
   // remains possible).
   const listOptions = createMemo<ListOption[]>(() => {
+    // A shared workspace's lists carry its name, this doc's included;
+    // Personal's go unsaid.
+    const workspace = props.docLabel?.() ?? undefined;
     const opts: ListOption[] = [
-      { id: "inbox", name: m().nav.inbox },
-      { id: LIST_EVENTS, name: m().nav.events },
-      ...props.lists().map((l) => ({ id: l.id, name: l.name, icon: l.icon })),
+      { id: "inbox", name: m().nav.inbox, workspace },
+      { id: LIST_EVENTS, name: m().nav.events, workspace },
+      ...props.lists().map((l) => ({ id: l.id, name: l.name, icon: l.icon, workspace })),
     ];
     const currentId = item()?.listId;
     if (currentId && !opts.some((o) => o.id === currentId)) {
       const current = props.app.state.listsById[currentId];
       if (current) {
-        opts.push({ id: current.id, name: current.name, icon: current.icon });
+        opts.push({ id: current.id, name: current.name, icon: current.icon, workspace });
       }
     }
-    return opts;
+    return [...opts, ...(props.otherLists?.() ?? [])];
   });
   const moveItemToList = (targetId: string, currentListId: string) => {
     const id = props.itemId();
@@ -352,6 +368,41 @@ export function TaskDialog(props: {
       // old list.
       draft: nw.draft,
     });
+  };
+  // Re-target a capture at a list of another workspace. The surface is
+  // per doc, so the owner remounts it on the target's: what the capture
+  // opens with (date, pin) rides the new target, and the other field
+  // buffers start clean. A capture that already has a title is not
+  // re-targeted but created where it is and then moved, so nothing
+  // typed is dropped (reaching the picker blurs the title, which
+  // promotes a named capture anyway).
+  const setNewItemAcross = (docId: string, targetId: string) => {
+    const nw = newItemTarget();
+    if (!nw) return;
+    if (text().trim()) {
+      const id = promote();
+      if (id) props.onMoveAcross?.(id, docId, targetId);
+      return;
+    }
+    const toEvents = targetId === LIST_EVENTS;
+    props.setNewItem?.({
+      listId: targetId,
+      docId,
+      state: toEvents ? "backlog" : nw.state,
+      done: nw.done,
+      draft: nw.draft,
+      when: newWhen() ?? (toEvents ? todayStamp(nowMs()) : undefined),
+      focus: newFocus() || undefined,
+    });
+  };
+  // Move the open item to another workspace's list. Its edits are
+  // settled into the item first (title, notes, the open notes session
+  // as its undo step): the item leaves this doc, and the surface
+  // remounts on the doc it lands in.
+  const moveItemAcross = (id: string, docId: string, targetId: string) => {
+    flush(id);
+    endNotesEdit();
+    props.onMoveAcross?.(id, docId, targetId);
   };
   // Toggle whether a new capture is logged as already-done.
   const setNewItemDone = (done: boolean) => {
@@ -1249,10 +1300,15 @@ export function TaskDialog(props: {
     if (it) props.app.setLifecycle(it.id, state);
     else setNewItemState(state);
   };
-  const onListChange = (id: string) => {
+  const onListChange = (opt: ListOption) => {
     const it = item();
-    if (it) moveItemToList(id, it.listId);
-    else setNewItemList(id);
+    if (opt.foreign && opt.docId !== undefined) {
+      if (it) moveItemAcross(it.id, opt.docId, opt.id);
+      else setNewItemAcross(opt.docId, opt.id);
+      return;
+    }
+    if (it) moveItemToList(opt.id, it.listId);
+    else setNewItemList(opt.id);
   };
   const onPinToggle = () => {
     if (item()) toggleFocus();

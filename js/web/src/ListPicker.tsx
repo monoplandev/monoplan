@@ -41,12 +41,17 @@ export type ListOption = {
   id: string;
   name: string;
   icon?: string;
-  /** The doc holding the list. Only the move palette sets it: it offers
-   *  every workspace's lists, and `inbox` / `events` exist in each. */
+  /** The doc holding the list, where the options span workspaces:
+   *  `inbox` / `events` exist in each. */
   docId?: string;
-  /** That doc's label, shown muted on the row, for the lists of a
-   *  workspace other than the one the rows are in. */
+  /** The list's shared workspace (any non-Home doc), shown muted on the
+   *  row behind the people glyph, whether or not it is the workspace
+   *  being worked in. Absent for Personal: it is the default and goes
+   *  unsaid. */
   workspace?: string;
+  /** The list is in a doc other than the one being worked in: picking
+   *  it is a move between workspaces. */
+  foreign?: boolean;
 };
 
 /** Fallback glyph for a list with no chosen emoji: the nav's own marks
@@ -60,6 +65,24 @@ export const listGlyph = (id: string): string =>
 const GUTTER = 4;
 const MARGIN = 8;
 
+const isForeign = (o: ListOption): boolean => o.foreign === true;
+
+/** The workspace tag on a shared workspace's list row: the people glyph
+ *  then its name, the same marker the find palette and the nav use.
+ *  Renders nothing for a Personal list. Shared with the move palette. */
+export function WorkspaceTag(props: { option: ListOption }) {
+  return (
+    <Show when={props.option.workspace}>
+      {(workspace) => (
+        <span class="palette__item-list palette__item-doc" title={workspace()}>
+          <span class="palette__item-doc-icon" aria-hidden="true" innerHTML={usersSvg} />
+          <span class="palette__item-doc-name">{workspace()}</span>
+        </span>
+      )}
+    </Show>
+  );
+}
+
 export function ListPicker(props: {
   options: () => ListOption[];
   /** Currently filed-under list id, or null while a new capture has none. */
@@ -70,7 +93,9 @@ export function ListPicker(props: {
    *  Trigger-only: every option is in the same workspace, so the rows
    *  don't repeat it. */
   workspace?: () => string | null;
-  onChange: (id: string) => void;
+  /** The picked option. A `foreign` one is a list of another doc
+   *  (`docId`): for the owner, a move between workspaces. */
+  onChange: (opt: ListOption) => void;
 }) {
   const { m } = useAppI18n();
   const baseId = createUniqueId();
@@ -99,11 +124,21 @@ export function ListPicker(props: {
   const [pos, setPos] = createSignal({ left: 0, top: 0 });
 
   const selected = createMemo<ListOption | null>(
-    () => props.options().find((o) => o.id === props.value()) ?? null,
+    () => props.options().find((o) => !isForeign(o) && o.id === props.value()) ?? null,
   );
   const items = createMemo(() =>
-    props.options().filter((o) => matchesName(o.name, query())),
+    props.options().filter(
+      (o) =>
+        matchesName(o.name, query()) ||
+        (o.workspace !== undefined && matchesName(o.workspace, query())),
+    ),
   );
+
+  // "Search lists in <workspace>" only while every option is in it.
+  const searchLabel = (): string =>
+    m().workspace.searchLists(
+      props.options().some(isForeign) ? "" : (props.workspace?.() ?? ""),
+    );
 
   let triggerRef: HTMLButtonElement | undefined;
   let panelRef: HTMLDivElement | undefined;
@@ -141,7 +176,7 @@ export function ListPicker(props: {
   };
 
   const commit = (opt: ListOption) => {
-    props.onChange(opt.id);
+    props.onChange(opt);
     close();
   };
 
@@ -154,7 +189,7 @@ export function ListPicker(props: {
     // item's current list under the cursor — so Enter straight after
     // opening is a no-op rather than a surprise move.
     setQuery("");
-    const at = props.options().findIndex((o) => o.id === props.value());
+    const at = props.options().findIndex((o) => !isForeign(o) && o.id === props.value());
     setSelectedIndex(at === -1 ? 0 : at);
     const anchor = triggerRef?.getBoundingClientRect();
     if (anchor) setPos({ left: anchor.left, top: anchor.bottom + GUTTER });
@@ -321,8 +356,8 @@ export function ListPicker(props: {
                 aria-activedescendant={
                   items().length ? optionId(selectedIndex()) : undefined
                 }
-                placeholder={m().workspace.searchLists(props.workspace?.() ?? "")}
-                aria-label={m().workspace.searchLists(props.workspace?.() ?? "")}
+                placeholder={searchLabel()}
+                aria-label={searchLabel()}
                 value={query()}
                 onInput={(e) => {
                   setQuery(e.currentTarget.value);
@@ -377,7 +412,8 @@ export function ListPicker(props: {
                       )}
                     </Show>
                     <span class="palette__item-name">{opt.name}</span>
-                    <Show when={opt.id === props.value()}>
+                    <WorkspaceTag option={opt} />
+                    <Show when={!isForeign(opt) && opt.id === props.value()}>
                       <span class="palette__item-list">
                         {m().workspace.currentList}
                       </span>

@@ -61,7 +61,7 @@
 // is the foreign-ref prune effect, which the tests drive directly.
 
 import { placeSuggestionsJson } from "@monoplan/core/wasm";
-import { createEffect, createSignal, type Accessor } from "solid-js";
+import { batch, createEffect, createSignal, type Accessor } from "solid-js";
 import { restoreCapturedPositions } from "../linger.ts";
 import type { PlaceSuggestion } from "../placeSuggest.ts";
 import type { ViewKey } from "../prefs.ts";
@@ -629,7 +629,10 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
     }
     const stampsBefore = involved.map((app) => app.topUndoStamp());
     const moved: string[] = [];
-    inBatches(involved, () => {
+    // One reactive update: the stores drain one after another as their
+    // batches close, and nothing should observe the items in neither
+    // doc (an open item would read as deleted) or in both.
+    batch(() => inBatches(involved, () => {
       let at = indexInList;
       for (const [src, group] of groups) {
         // The stores do not drain inside a batch, so read the rows now.
@@ -647,7 +650,7 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
         at += landsOpen;
         moved.push(...group);
       }
-    });
+    }));
     const members = involved
       .map((app, i) => ({ app, stamp: app.topUndoStamp(), was: stampsBefore[i] }))
       .filter((mb) => mb.stamp !== mb.was)

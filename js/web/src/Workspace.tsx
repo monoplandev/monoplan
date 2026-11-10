@@ -1518,29 +1518,35 @@ export function Workspace(props: {
   // Move destinations, per doc: Inbox, Events (moving there makes an
   // item an event, `spec/events-plan.md`), then every active user list —
   // archived lists are not offered, matching the task dialog's picker.
+  // A shared workspace's lists are tagged with its name behind the
+  // people glyph, whichever workspace is being worked in (`own`);
+  // Personal's go unsaid, as everywhere. A list outside `own` is
+  // `foreign`: picking it is a move between workspaces.
+  const listOptionsOf = (docId: string, own: string): ListOption[] => {
+    const workspace = docId === docs.homeDocId ? undefined : docLabel(docId);
+    const foreign = docId !== own;
+    return [
+      { id: "inbox", name: m().nav.inbox, docId, workspace, foreign },
+      { id: LIST_EVENTS, name: m().nav.events, docId, workspace, foreign },
+      ...activeListsOf(docId).map((l) => ({
+        id: l.id,
+        name: l.name,
+        icon: l.icon,
+        docId,
+        workspace,
+        foreign,
+      })),
+    ];
+  };
+  /** Every other workspace's destinations, in nav order. */
+  const otherListOptions = (own: string): ListOption[] =>
+    docs
+      .docs()
+      .filter((d) => d.docId !== own)
+      .flatMap((d) => listOptionsOf(d.docId, own));
   const moveListOptions = createMemo<ListOption[]>(() => {
     const own = moveDocId();
-    const of = (docId: string): ListOption[] => {
-      const workspace = docId === own ? undefined : docLabel(docId);
-      return [
-        { id: "inbox", name: m().nav.inbox, docId, workspace },
-        { id: LIST_EVENTS, name: m().nav.events, docId, workspace },
-        ...activeListsOf(docId).map((l) => ({
-          id: l.id,
-          name: l.name,
-          icon: l.icon,
-          docId,
-          workspace,
-        })),
-      ];
-    };
-    return [
-      ...of(own),
-      ...docs
-        .docs()
-        .filter((d) => d.docId !== own)
-        .flatMap((d) => of(d.docId)),
-    ];
+    return [...listOptionsOf(own, own), ...otherListOptions(own)];
   });
 
   // A move between workspaces (`spec/sharing-plan.md` "Cross-doc move")
@@ -3102,12 +3108,27 @@ export function Workspace(props: {
         setItemId={setOpenItemId}
         newItem={newItemTarget}
         setNewItem={(v) =>
-          // A re-target keeps the capture in its doc: the surface's list
-          // picker only ever offers that doc's lists.
-          setNewItemTarget(v ? { ...v, docId: untrack(taskDocId) } : null)
+          // A re-target stays in the capture's doc unless the picker
+          // named a list of another workspace (`v.docId`), which
+          // remounts the surface on that doc.
+          setNewItemTarget(v ? { ...v, docId: v.docId ?? untrack(taskDocId) } : null)
         }
         app={tApp}
         lists={() => activeListsOf(tApp.docId)}
+        otherLists={() => otherListOptions(tApp.docId)}
+        onMoveAcross={(id, docId, listId) => {
+          // The picker's own-doc move appends; so does this one. The
+          // open item stays the open item: the surface follows it into
+          // its new doc (keyed on `taskApp`).
+          const target = docs.appOf(docId);
+          if (!target) return;
+          confirmingCrossDoc([id], docId, () => {
+            const at = target.state.listOpen[listId]?.length ?? 0;
+            if (docs.moveToDoc([id], docId, listId, at).length === 0) return;
+            const it = target.getItem(id);
+            if (listId === LIST_EVENTS && it && isOpen(it) && !it.when) openItemWhen(id);
+          });
+        }}
         // Only a shared workspace is named in the list picker: Personal
         // is the default and goes unsaid, as on the agenda.
         docLabel={() =>

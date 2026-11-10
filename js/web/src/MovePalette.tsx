@@ -1,6 +1,7 @@
 // `m` with a selection (or a row context menu's Move to list) opens a
 // centered palette to re-file the acted-on rows into another list, of
-// their own workspace or another one (rows tagged with its name).
+// their own workspace or another one (a shared workspace's lists are
+// tagged with its name; Personal's go untagged).
 // FindPalette's shell with ListPicker's policy: an empty query lists
 // every option, opening highlights the current list, and there is no
 // debounce — the option set is a handful of names filtered in memory,
@@ -16,7 +17,7 @@ import {
 } from "solid-js";
 import { Portal } from "solid-js/web";
 import { useAppI18n } from "./i18n.tsx";
-import { listGlyph, type ListOption } from "./ListPicker.tsx";
+import { listGlyph, WorkspaceTag, type ListOption } from "./ListPicker.tsx";
 import { trackOverlay } from "./overlay.ts";
 import { PaletteFooter } from "./PaletteFooter.tsx";
 import { matchesName } from "./search.ts";
@@ -223,16 +224,8 @@ export function MovePalette(props: {
                     )}
                   </Show>
                   <span class="palette__item-name">{opt.name}</span>
-                  <Show
-                    when={props.isCurrent(opt)}
-                    fallback={
-                      <Show when={opt.workspace}>
-                        {(workspace) => (
-                          <span class="palette__item-list">{workspace()}</span>
-                        )}
-                      </Show>
-                    }
-                  >
+                  <WorkspaceTag option={opt} />
+                  <Show when={props.isCurrent(opt)}>
                     <span class="palette__item-list">
                       {m().workspace.currentList}
                     </span>
