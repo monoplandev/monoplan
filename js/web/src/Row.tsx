@@ -165,21 +165,6 @@ export function Row(props: {
     const when = formatDateTime(ts, locale());
     return props.viewKind === "bin" ? m().workspace.binnedAt(when) : when;
   };
-  // Whether the item carries any notes text. Whitespace-only notes don't
-  // count — the dialog would open to an empty-looking editor.
-  const hasNotes = () => props.item().notes.trim().length > 0;
-  // Purely an indicator, like the focus badge: it has no click behaviour
-  // of its own, so a press on it is just a press on the row.
-  const NotesBadge = () => (
-    <span
-      class="badge row-notes-badge"
-      title={m().workspace.hasNotes}
-      aria-label={m().workspace.hasNotes}
-    >
-      …
-    </span>
-  );
-
   // Whether this row currently has a visible Focus ref. The Focus entry
   // list is small (bounded), so the membership scan is cheap and only
   // re-runs when the Focus lens actually changes. See spec/focus.md.
@@ -553,17 +538,6 @@ export function Row(props: {
               if (e.key !== "Escape") e.stopPropagation();
             }}
           />
-          {/* Has-notes badge: an ellipsis marking that the item
-              carries notes (more text here). Sits inline right after the
-              title — the text is the shrinking flex child of .row-body,
-              so the badge hugs the last word of a short title and sits
-              just past the ellipsis of a truncated one. List rows only:
-              a card title that wraps (without clamping) is full width,
-              which would strand the badge at the card's edge, so cards
-              keep it in the footer below instead. */}
-          <Show when={!props.deadlineInFooter && !props.expanded() && hasNotes()}>
-            <NotesBadge />
-          </Show>
         </div>
         {/* Board cards gather every badge on a full-width bottom line —
             a direct child of the card so the badges start at the card's
@@ -578,14 +552,10 @@ export function Row(props: {
             !props.expanded() &&
             ((isOpen(props.item()) && (props.item().when || props.item().deadline)) ||
               (canPinToFocus() && focused()) ||
-              hasNotes() ||
               rowStamp())
           }
         >
           <div class="row-footer">
-            <Show when={hasNotes()}>
-              <NotesBadge />
-            </Show>
             <Show when={canPinToFocus() && focused()}>
               <span
                 class="badge row-focus-badge"

@@ -206,7 +206,6 @@ export type Messages = {
     newItemPlaceholder: string;
     emptyState: string;
     notes: string;
-    hasNotes: string;
     /** Hover text on a Bin row's stamp; `when` is the full local date-time. */
     binnedAt: (when: string) => string;
     markDone: string;
@@ -703,7 +702,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       newItemPlaceholder: "Añadir un elemento…",
       emptyState: "Nada aquí.",
       notes: "Notas",
-      hasNotes: "Tiene notas",
       binnedAt: (when) => `Eliminado ${when}`,
       markDone: "Marcar como hecho",
       markNotDone: "Marcar como no hecho",
@@ -1074,7 +1072,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       newItemPlaceholder: "Add an item…",
       emptyState: "Nothing here.",
       notes: "Notes",
-      hasNotes: "Has notes",
       binnedAt: (when) => `Binned ${when}`,
       markDone: "Mark as done",
       markNotDone: "Mark as not done",

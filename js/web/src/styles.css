@@ -1396,9 +1396,7 @@ input.task-check:hover {
 }
 
 /* Title line: a flex row whose text child shrinks (and ellipsizes /
-   clamps) before the has-notes badge does, so the badge shrink-wraps to
-   the text — right after the last word of a short title, right after
-   the ellipsis of a truncated one.
+   clamps).
 
    Precedence against the inline badges: the title gives way first, down
    to a floor (`--row-text-min`, a share of the row so it scales with
@@ -1562,8 +1560,8 @@ input.task-check:hover {
 /* Static Focus-membership badge on list rows — a non-interactive star
    glyph, always visible (not hover-gated) so Focus membership is
    glanceable while scanning a list. Add / remove happens via the row
-   context menu. No pill background — like the notes badge it reads as a
-   glyph in the text flow, not a detached chip; being icon-only it has no
+   context menu. No pill background — it reads as a glyph in the text
+   flow, not a detached chip; being icon-only it has no
    line box, so min-height pins it to the deadline badge's text-driven
    height (1.3em line + 2px padding + 2px border). */
 .row-focus-badge {
@@ -1584,17 +1582,6 @@ input.task-check:hover {
   stroke-width: 6px;
 }
 
-/* Has-notes badge: same geometry as the focus badge, an inert indicator.
-   No pill background: it sits inline right after the title text, so it
-   reads as a glyph in the text flow, not a detached chip. Same softened
-   colour as the origin-list badge (.row-list). */
-.row-notes-badge {
-  justify-content: center;
-  padding-inline: 0;
-  background: none;
-  color: color-mix(in srgb, var(--text-badge) 80%, var(--bg));
-}
-
 /* `overflow: hidden` on .dnd-item (set by primavera-dnd's inline stylesheet)
    makes it a scroll container, which trips the browser's caret-scroll-into-view
    while typing in the expanded row's contenteditable: text wraps below the
@@ -1613,9 +1600,9 @@ input.task-check:hover {
   cursor: text;
 }
 
-/* The collapsed title shrink-wraps so the notes badge can sit next to
-   it, but the inline editor should span the full row so clicks in the
-   empty space to the right of short text still land in the editable.
+/* The collapsed title shrink-wraps, but the inline editor should span
+   the full row so clicks in the empty space to the right of short text
+   still land in the editable.
    Keyed on contenteditable (not `.row[data-expanded]`) because Kobalte
    also sets data-expanded while the row's context menu is open — that
    must not reflow the title. */
