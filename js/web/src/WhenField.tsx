@@ -123,8 +123,8 @@ export function WhenField(props: {
     }
   };
 
-  // The inputs read the day only ("Wed 23 Sept", the year once it isn't
-  // this one) rather than the badge's relative labels: a field should say
+  // The inputs read the day only ("Wed 23 Sept"; in another year the
+  // year takes the weekday's place, "23 Sept 2027") rather than the badge's relative labels: a field should say
   // what is stored, and the time has its own row below. Judged against
   // the shared `nowMs()` tick so the year appears at the turn of the year
   // without a reload.
@@ -135,10 +135,9 @@ export function WhenField(props: {
       date.getFullYear() ===
       parseLocalDateParts(todayStamp(nowMs()))?.getFullYear();
     return new Intl.DateTimeFormat(locale(), {
-      weekday: "short",
       day: "numeric",
       month: "short",
-      ...(thisYear ? {} : { year: "numeric" }),
+      ...(thisYear ? { weekday: "short" } : { year: "numeric" }),
     }).format(date);
   };
   const label = createMemo(() => {
