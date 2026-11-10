@@ -1,5 +1,6 @@
 // `m` with a selection (or a row context menu's Move to list) opens a
-// centered palette to re-file the acted-on rows into another list.
+// centered palette to re-file the acted-on rows into another list, of
+// their own workspace or another one (rows tagged with its name).
 // FindPalette's shell with ListPicker's policy: an empty query lists
 // every option, opening highlights the current list, and there is no
 // debounce — the option set is a handful of names filtered in memory,
@@ -24,15 +25,15 @@ export function MovePalette(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   options: () => ListOption[];
-  /** List the acted-on rows already live in (list / board views), or null
-   *  in the cross-list views (Focus / Done / Bin). Highlighted on open so
-   *  Enter straight after opening is a no-op rather than a surprise
-   *  move. */
-  currentId: () => string | null;
+  /** Whether an option is the list the acted-on rows already live in
+   *  (list / board views; none in the cross-list views Focus / Done /
+   *  Bin). Highlighted on open so Enter straight after opening is a
+   *  no-op rather than a surprise move. */
+  isCurrent: (opt: ListOption) => boolean;
   /** Number of rows the pick acts on — drives the singular / plural
    *  placeholder. */
   count: () => number;
-  onPick: (listId: string) => void;
+  onPick: (opt: ListOption) => void;
 }) {
   const { m } = useAppI18n();
   trackOverlay(() => props.open);
@@ -55,7 +56,11 @@ export function MovePalette(props: {
   let listRef: HTMLDivElement | undefined;
 
   const items = createMemo(() =>
-    props.options().filter((o) => matchesName(o.name, query())),
+    props.options().filter(
+      (o) =>
+        matchesName(o.name, query()) ||
+        (o.workspace !== undefined && matchesName(o.workspace, query())),
+    ),
   );
 
   function scrollSelectedIntoView(index: number) {
@@ -68,7 +73,7 @@ export function MovePalette(props: {
   createEffect(() => {
     if (!props.open) return;
     setQuery("");
-    const at = props.options().findIndex((o) => o.id === props.currentId());
+    const at = props.options().findIndex(props.isCurrent);
     const index = at === -1 ? 0 : at;
     setSelectedIndex(index);
     requestAnimationFrame(() => {
@@ -78,7 +83,7 @@ export function MovePalette(props: {
   });
 
   function commit(opt: ListOption) {
-    props.onPick(opt.id);
+    props.onPick(opt);
     props.onOpenChange(false);
   }
 
@@ -218,7 +223,16 @@ export function MovePalette(props: {
                     )}
                   </Show>
                   <span class="palette__item-name">{opt.name}</span>
-                  <Show when={opt.id === props.currentId()}>
+                  <Show
+                    when={props.isCurrent(opt)}
+                    fallback={
+                      <Show when={opt.workspace}>
+                        {(workspace) => (
+                          <span class="palette__item-list">{workspace()}</span>
+                        )}
+                      </Show>
+                    }
+                  >
                     <span class="palette__item-list">
                       {m().workspace.currentList}
                     </span>

@@ -247,6 +247,15 @@ export type Messages = {
     /** Tag marking the row for the list an item is already filed under, in
      *  the move-to-list picker. */
     currentList: string;
+    /** Confirmation before a move between workspaces changes who can
+     *  see the rows (`spec/sharing-plan.md` "Cross-doc move"). Title
+     *  names the target workspace; the message is one or both of the
+     *  sentences below. `members` is null while the count is unknown. */
+    moveAcrossTitle: (target: string) => string;
+    /** The target is shared: its members gain the rows. */
+    moveAcrossExposes: (target: string, members: number | null, count: number) => string;
+    /** A source is shared: its members lose the rows. */
+    moveAcrossRemoves: (source: string, count: number) => string;
     /** Accessible name for the Done / Focus views' display-options popover
      *  trigger. */
     displayOptions: string;
@@ -724,6 +733,13 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       moveItems: "Mover elementos",
       noMatchingLists: "No hay listas coincidentes",
       currentList: "Actual",
+      moveAcrossTitle: (target) => `¿Mover a ${target}?`,
+      moveAcrossExposes: (target, n, count) =>
+        `${count > 1 ? `Estos ${count} elementos serán visibles` : "Este elemento será visible"} para ${
+          n === null ? "todas las personas" : `los ${n} miembros`
+        } de ${target}.`,
+      moveAcrossRemoves: (source, count) =>
+        `${count > 1 ? "Se quitarán" : "Se quitará"} de ${source} para todos sus miembros.`,
       displayOptions: "Opciones de visualización",
       showState: "Mostrar estado",
       allDocs: "Todos los espacios",
@@ -1094,6 +1110,13 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       moveItems: "Move items",
       noMatchingLists: "No matching lists",
       currentList: "Current",
+      moveAcrossTitle: (target) => `Move to ${target}?`,
+      moveAcrossExposes: (target, n, count) =>
+        `${count > 1 ? `These ${count} items` : "This item"} will be visible to ${
+          n === null ? "everyone in" : `all ${n} members of`
+        } ${target}.`,
+      moveAcrossRemoves: (source, count) =>
+        `${count > 1 ? "They" : "It"} will be removed from ${source} for everyone there.`,
       displayOptions: "Display options",
       showState: "Show state",
       allDocs: "All workspaces",

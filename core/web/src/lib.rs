@@ -2363,6 +2363,58 @@ impl Replica {
             .map_err(js_err)
     }
 
+    // -- cross-doc move (`spec/sharing-plan.md` "Cross-doc move") --
+
+    /// See [`Doc::export_items`]: the items' export form as a JSON
+    /// array, the payload another replica's `adoptItems` takes.
+    #[wasm_bindgen(js_name = exportItemsJson)]
+    pub fn export_items_json(&self, item_ids: Vec<String>) -> Result<String, JsError> {
+        let refs: Vec<&str> = item_ids.iter().map(|s| s.as_str()).collect();
+        let items = self.doc().export_items(&refs).map_err(js_err)?;
+        serde_json::to_string(&items).map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// See [`Doc::adopt_items`].
+    #[wasm_bindgen(js_name = adoptItems)]
+    pub fn adopt_items(
+        &self,
+        items_json: &str,
+        list_id: &str,
+        target_index: usize,
+    ) -> Result<(), JsError> {
+        let items: Vec<monoplan_core::ExportItem> =
+            serde_json::from_str(items_json).map_err(|e| JsError::new(&e.to_string()))?;
+        self.doc()
+            .adopt_items(&items, list_id, target_index)
+            .map_err(js_err)
+    }
+
+    /// See [`Doc::release_items`].
+    #[wasm_bindgen(js_name = releaseItems)]
+    pub fn release_items(&self, item_ids: Vec<String>) -> Result<(), JsError> {
+        let refs: Vec<&str> = item_ids.iter().map(|s| s.as_str()).collect();
+        self.doc().release_items(&refs).map_err(js_err)
+    }
+
+    /// See [`Doc::retarget_focus`]. `doc_id` absent ≡ this doc.
+    #[wasm_bindgen(js_name = retargetFocus)]
+    pub fn retarget_focus(
+        &self,
+        item_ids: Vec<String>,
+        doc_id: Option<String>,
+    ) -> Result<usize, JsError> {
+        let refs: Vec<&str> = item_ids.iter().map(|s| s.as_str()).collect();
+        self.doc()
+            .retarget_focus(&refs, doc_id.as_deref())
+            .map_err(js_err)
+    }
+
+    /// See [`Doc::forget_undo`].
+    #[wasm_bindgen(js_name = forgetUndo)]
+    pub fn forget_undo(&self) {
+        self.doc().forget_undo();
+    }
+
     /// Ranked search over items and lists (`spec/search.md`) as a JSON
     /// array of `{id, kind, title, body?, listId?, lifecycle?, score}`.
     #[wasm_bindgen(js_name = searchJson)]

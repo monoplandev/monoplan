@@ -3083,10 +3083,17 @@ impl Doc {
         Ok(binned.len())
     }
 
-    /// Shared hard-delete path: remove item maps + their order entries
-    /// in one commit, then update the index and emit `ItemRemoved`s.
-    /// Callers have already validated the ids.
+    /// The Bin's hard delete: permanent, so the undo history goes too.
     fn hard_delete_items(&self, item_ids: &[&str]) -> Result<(), DocError> {
+        self.remove_items(item_ids, true)
+    }
+
+    /// Shared removal path: remove item maps + their order entries in
+    /// one commit, then update the index and emit `ItemRemoved`s.
+    /// `permanent` also drops the undo history (a hard delete); without
+    /// it the commit is an ordinary undo step (`release_items`).
+    /// Callers have already validated the ids.
+    fn remove_items(&self, item_ids: &[&str], permanent: bool) -> Result<(), DocError> {
         // Entry positions + visibility per item, gathered before any
         // mutation. `per_item` rows are (item_id, list_id, was_visible).
         type PerItem = Vec<(String, String, bool)>;
@@ -3127,7 +3134,9 @@ impl Doc {
         // A hard delete is permanent: drop the session's undo / redo
         // history so neither the delete nor the steps before it can
         // resurrect the item.
-        self.rearm_undo();
+        if permanent {
+            self.rearm_undo();
+        }
         {
             let mut guard = self.item_index.lock().expect("item index mutex poisoned");
             for item_id in item_ids {
@@ -3802,28 +3811,7 @@ impl Doc {
             builtin: false,
         }));
 
-        let items = self
-            .iter_items()
-            .map(|item| ExportItem {
-                id: item.id,
-                text: item.text,
-                notes: item.notes,
-                list_id: item.list_id,
-                lifecycle: ExportLifecycle {
-                    state: item.state.name().to_string(),
-                    at: item.lifecycle_at,
-                },
-                deadline: item.deadline,
-                when: item.when,
-                duration: item.duration,
-                place: item.place,
-                created_at: item.created_at,
-                created_by: item.created_by,
-                started_at: item.started_at,
-                done_at: item.done_at,
-                binned_at: item.binned_at,
-            })
-            .collect();
+        let items = self.iter_items().map(export_item).collect();
 
         JsonExport {
             version: 1,
@@ -3955,7 +3943,6 @@ impl Doc {
             lists_added += 1;
         }
 
-        let items = self.items();
         let mut items_added: usize = 0;
         let mut items_skipped: usize = 0;
         let mut items_existing: usize = 0;
@@ -3987,78 +3974,17 @@ impl Doc {
                 new_id()
             };
             let placement = new_id();
-            let map = items.insert_container(&new_item_id, LoroMap::new())?;
-            map.insert(KEY_ID, new_item_id.as_str())?;
-            map.insert(KEY_TEXT, text)?;
-            map.insert(
-                KEY_LOCATION,
-                Location {
+            let state = self.write_item_from_export(
+                &new_item_id,
+                src_item,
+                text,
+                src_item.notes.trim(),
+                &Location {
                     list_id: target_list_id.clone(),
                     placement_id: placement.clone(),
-                }
-                .encode()
-                .as_str(),
+                },
+                src_item.binned_at,
             )?;
-            map.insert(KEY_CREATED_AT, src_item.created_at)?;
-            // Attribution survives a round trip; the importer's own id is
-            // not substituted, since the import is not the creation.
-            if let Some(author) = src_item
-                .created_by
-                .as_deref()
-                .map(str::trim)
-                .filter(|a| !a.is_empty())
-            {
-                map.insert(KEY_CREATED_BY, author)?;
-            }
-            // Workflow register + reflection stamps. An unrecognized
-            // state name in a hand-edited export degrades to Backlog:
-            // visible and open.
-            let state = WorkflowState::parse_name(&src_item.lifecycle.state)
-                .unwrap_or(WorkflowState::Backlog);
-            let at = src_item.lifecycle.at;
-            // The exact fallback value stays unwritten so a plain
-            // Backlog item round-trips to a keyless map.
-            if state != WorkflowState::Backlog || at != src_item.created_at {
-                write_workflow(&map, state, at)?;
-            }
-            if let Some(t) = src_item.started_at {
-                map.insert(KEY_STARTED_AT, t)?;
-            }
-            // Carry a well-formed deadline through; a malformed one in a
-            // hand-edited export is silently dropped rather than aborting
-            // the whole import.
-            if let Some(date) = src_item
-                .deadline
-                .as_deref()
-                .and_then(|d| parse_deadline(d).ok())
-            {
-                map.insert(KEY_DEADLINE, date.as_str())?;
-            }
-            if let Some(value) = src_item.when.as_deref().and_then(|w| parse_when(w).ok()) {
-                map.insert(KEY_WHEN, value.as_str())?;
-            }
-            // Same leniency for an out-of-range duration.
-            if let Some(n) = src_item
-                .duration
-                .filter(|n| (1..=MAX_DURATION_MINUTES).contains(n))
-            {
-                map.insert(KEY_DURATION, i64::from(n))?;
-            }
-            // And for a malformed place: dropped rather than rejected.
-            if let Some(place) = src_item.place.as_ref().and_then(|p| p.normalized().ok()) {
-                map.insert(KEY_PLACE, place.to_loro_value())?;
-            }
-            let notes = src_item.notes.trim();
-            if !notes.is_empty() {
-                let text = map.ensure_mergeable_text(KEY_NOTES)?;
-                text.insert(0, notes)?;
-            }
-            if let Some(t) = src_item.done_at {
-                map.insert(KEY_DONE_AT, t)?;
-            }
-            if let Some(t) = src_item.binned_at {
-                map.insert(KEY_BINNED_AT, t)?;
-            }
             self.order_list(&target_list_id).push(
                 OrderEntry {
                     item_id: new_item_id.clone(),
@@ -4122,6 +4048,239 @@ impl Doc {
             lists_existing,
             items_existing,
         })
+    }
+
+    /// Write one item map under `id` from its export form: every field
+    /// an [`ExportItem`] carries, with the caller's `text`, `notes`,
+    /// `location` and bin mask. A malformed deadline / when / duration /
+    /// place is dropped, not rejected. Shared by [`import_json`]
+    /// (Self::import_json) and [`adopt_items`](Self::adopt_items); the
+    /// caller writes the order entry and commits. Returns the workflow
+    /// state written.
+    fn write_item_from_export(
+        &self,
+        id: &str,
+        src: &ExportItem,
+        text: &str,
+        notes: &str,
+        location: &Location,
+        binned_at: Option<i64>,
+    ) -> Result<WorkflowState, DocError> {
+        let map = self.items().insert_container(id, LoroMap::new())?;
+        map.insert(KEY_ID, id)?;
+        map.insert(KEY_TEXT, text)?;
+        map.insert(KEY_LOCATION, location.encode().as_str())?;
+        map.insert(KEY_CREATED_AT, src.created_at)?;
+        // Attribution survives a round trip; the importer's own id is
+        // not substituted, since the import is not the creation.
+        if let Some(author) = src
+            .created_by
+            .as_deref()
+            .map(str::trim)
+            .filter(|a| !a.is_empty())
+        {
+            map.insert(KEY_CREATED_BY, author)?;
+        }
+        // Workflow register + reflection stamps. An unrecognized
+        // state name in a hand-edited export degrades to Backlog:
+        // visible and open.
+        let state =
+            WorkflowState::parse_name(&src.lifecycle.state).unwrap_or(WorkflowState::Backlog);
+        let at = src.lifecycle.at;
+        // The exact fallback value stays unwritten so a plain
+        // Backlog item round-trips to a keyless map.
+        if state != WorkflowState::Backlog || at != src.created_at {
+            write_workflow(&map, state, at)?;
+        }
+        if let Some(t) = src.started_at {
+            map.insert(KEY_STARTED_AT, t)?;
+        }
+        // Carry a well-formed deadline through; a malformed one in a
+        // hand-edited export is silently dropped rather than aborting
+        // the whole import.
+        if let Some(date) = src.deadline.as_deref().and_then(|d| parse_deadline(d).ok()) {
+            map.insert(KEY_DEADLINE, date.as_str())?;
+        }
+        if let Some(value) = src.when.as_deref().and_then(|w| parse_when(w).ok()) {
+            map.insert(KEY_WHEN, value.as_str())?;
+        }
+        // Same leniency for an out-of-range duration.
+        if let Some(n) = src
+            .duration
+            .filter(|n| (1..=MAX_DURATION_MINUTES).contains(n))
+        {
+            map.insert(KEY_DURATION, i64::from(n))?;
+        }
+        // And for a malformed place: dropped rather than rejected.
+        if let Some(place) = src.place.as_ref().and_then(|p| p.normalized().ok()) {
+            map.insert(KEY_PLACE, place.to_loro_value())?;
+        }
+        if !notes.is_empty() {
+            let text = map.ensure_mergeable_text(KEY_NOTES)?;
+            text.insert(0, notes)?;
+        }
+        if let Some(t) = src.done_at {
+            map.insert(KEY_DONE_AT, t)?;
+        }
+        if let Some(t) = binned_at {
+            map.insert(KEY_BINNED_AT, t)?;
+        }
+        Ok(state)
+    }
+
+    // ---------- cross-doc move (`spec/sharing-plan.md` "Cross-doc move") ----------
+
+    /// The export form of `item_ids`, in the given order: what
+    /// [`adopt_items`](Self::adopt_items) on another doc takes. Read
+    /// only. Errors on an unknown or repeated id.
+    pub fn export_items(&self, item_ids: &[&str]) -> Result<Vec<ExportItem>, DocError> {
+        assert_unique_item_ids(item_ids)?;
+        item_ids
+            .iter()
+            .map(|id| {
+                self.get_item(id)
+                    .map(export_item)
+                    .ok_or_else(|| DocError::ItemNotFound((*id).to_string()))
+            })
+            .collect()
+    }
+
+    /// The receiving half of a cross-doc move: insert `items` (another
+    /// doc's [`export_items`](Self::export_items)) as a block at
+    /// `target_index` of `list_id`'s Open projection, in one commit.
+    ///
+    /// Ids are **preserved**, so item URLs and Focus refs keep
+    /// resolving; an id this doc already holds (live, done or binned)
+    /// rejects the whole call, as does a malformed or repeated one.
+    /// Every field travels (text, notes as plain content, deadline,
+    /// when, duration, place, workflow state and stamps, creator), with
+    /// two exceptions: the item is located in `list_id`, and it lands
+    /// **not binned** (a move out of the Bin restores).
+    pub fn adopt_items(
+        &self,
+        items: &[ExportItem],
+        list_id: &str,
+        target_index: usize,
+    ) -> Result<(), DocError> {
+        self.assert_list_exists(list_id)?;
+        if items.is_empty() {
+            return Ok(());
+        }
+        let ids: Vec<&str> = items.iter().map(|i| i.id.as_str()).collect();
+        assert_unique_item_ids(&ids)?;
+        for id in &ids {
+            if !is_well_formed_id(id) {
+                return Err(DocError::Invalid(format!("malformed item id: {id}")));
+            }
+            if self.find_item(id).is_ok() {
+                return Err(DocError::Invalid(format!("item already in this doc: {id}")));
+            }
+        }
+        let pre_items: Vec<ItemView> = self.iter_items().collect();
+        let pre_lists: Vec<ListView> = self.all_lists();
+        let pre_settings = self.get_settings();
+        let raw_pos = self.plan_target(list_id, target_index, true, None).raw_pos;
+        let order = self.order_list(list_id);
+        for (i, src) in items.iter().enumerate() {
+            let placement = new_id();
+            self.write_item_from_export(
+                &src.id,
+                src,
+                &src.text,
+                &src.notes,
+                &Location {
+                    list_id: list_id.to_string(),
+                    placement_id: placement.clone(),
+                },
+                None,
+            )?;
+            let entry = OrderEntry {
+                item_id: src.id.clone(),
+                placement_id: placement,
+            }
+            .encode();
+            let at = raw_pos + i;
+            if at >= order.len() {
+                order.push(entry.as_str())?;
+            } else {
+                order.insert(at, entry.as_str())?;
+            }
+        }
+        self.inner.commit();
+        self.rebuild_index();
+        self.emit_state_diff(&pre_items, &pre_lists, &pre_settings);
+        Ok(())
+    }
+
+    /// The giving half of a cross-doc move: remove `item_ids` and their
+    /// order entries in one commit, whatever their lifecycle. Unlike
+    /// the Bin's hard delete this is an ordinary undo step (undo puts
+    /// the items back), because the items live on in the doc that
+    /// adopted them; the host undoes both halves together. Errors on an
+    /// unknown or repeated id.
+    pub fn release_items(&self, item_ids: &[&str]) -> Result<(), DocError> {
+        if item_ids.is_empty() {
+            return Ok(());
+        }
+        assert_unique_item_ids(item_ids)?;
+        for item_id in item_ids {
+            self.find_item(item_id)?;
+        }
+        self.remove_items(item_ids, false)
+    }
+
+    /// Point the Focus entries of `item_ids` at `doc_id` (`None` ≡ this
+    /// doc), each in place, in one commit: what a cross-doc move does to
+    /// a starred item so its slot in the lens survives. Ids without an
+    /// entry, or already in that form, are skipped. Folds a dead-ref
+    /// sweep in, so call it while a local ref still resolves (before
+    /// releasing the item, after adopting it). Returns the number of
+    /// entries rewritten.
+    pub fn retarget_focus(
+        &self,
+        item_ids: &[&str],
+        doc_id: Option<&str>,
+    ) -> Result<usize, DocError> {
+        if let Some(d) = doc_id
+            && (d.is_empty() || d.contains(':'))
+        {
+            return Err(DocError::Invalid(format!("focus doc id `{d}`")));
+        }
+        let scan = self.scan_focus();
+        let targets: HashSet<&str> = item_ids.iter().copied().collect();
+        let hits: Vec<usize> = scan
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| targets.contains(r.item_id.as_str()) && r.doc_id.as_deref() != doc_id)
+            .map(|(i, _)| i)
+            .collect();
+        if hits.is_empty() {
+            return Ok(0);
+        }
+        let focus = self.focus_list();
+        for &i in scan.dead_idx.iter().rev() {
+            focus.delete(i, 1)?;
+        }
+        // After the sweep, positions align with `entries`.
+        for &i in &hits {
+            let next = FocusRef {
+                doc_id: doc_id.map(str::to_string),
+                item_id: scan.entries[i].item_id.clone(),
+            };
+            focus.set(i, next.encode().as_str())?;
+        }
+        self.inner.commit();
+        self.push_event(AppEvent::FocusChanged);
+        Ok(hits.len())
+    }
+
+    /// Drop this session's undo / redo history, as a hard delete does.
+    /// For a host that links undo steps across docs (a cross-doc move)
+    /// and finds one half's history gone: the other half must not be
+    /// undone alone.
+    pub fn forget_undo(&self) {
+        self.rearm_undo();
     }
 
     /// JSON-string convenience wrapper around `import_json` — what the
@@ -5687,6 +5846,64 @@ struct LocalState {
     snapshot: Vec<u8>,
     #[serde(with = "serde_bytes")]
     last_persisted_vv: Vec<u8>,
+}
+
+/// An item's export form (`JsonExport.items`, and the payload of a
+/// cross-doc move).
+fn export_item(item: ItemView) -> ExportItem {
+    ExportItem {
+        id: item.id,
+        text: item.text,
+        notes: item.notes,
+        list_id: item.list_id,
+        lifecycle: ExportLifecycle {
+            state: item.state.name().to_string(),
+            at: item.lifecycle_at,
+        },
+        deadline: item.deadline,
+        when: item.when,
+        duration: item.duration,
+        place: item.place,
+        created_at: item.created_at,
+        created_by: item.created_by,
+        started_at: item.started_at,
+        done_at: item.done_at,
+        binned_at: item.binned_at,
+    }
+}
+
+/// Where a cross-doc move re-points the Focus entries of the moved
+/// items (`spec/focus.md` "Foreign refs").
+pub struct FocusRetarget<'a> {
+    /// The account's Home doc, which holds Focus. May be the move's
+    /// source or target.
+    pub home: &'a Doc,
+    /// The target doc's id, or `None` when the target is Home itself
+    /// (the refs become local).
+    pub target_doc_id: Option<&'a str>,
+}
+
+/// Move items from one doc to another (`spec/sharing-plan.md`
+/// "Cross-doc move"): `dst` adopts them under their own ids at
+/// `target_index` of `list_id`, Home's Focus entries follow, then `src`
+/// releases them. There is no atomicity across docs, so the order is
+/// the safe one: a failure or crash part-way leaves a duplicate, never
+/// a loss. Each doc gets one commit (one undo step); undoing the move
+/// means undoing all of them, which is the host's job.
+pub fn move_items_across_docs(
+    src: &Doc,
+    dst: &Doc,
+    item_ids: &[&str],
+    list_id: &str,
+    target_index: usize,
+    focus: Option<FocusRetarget<'_>>,
+) -> Result<(), DocError> {
+    let items = src.export_items(item_ids)?;
+    dst.adopt_items(&items, list_id, target_index)?;
+    if let Some(f) = focus {
+        f.home.retarget_focus(item_ids, f.target_doc_id)?;
+    }
+    src.release_items(item_ids)
 }
 
 fn assert_unique_item_ids(item_ids: &[&str]) -> Result<(), DocError> {
@@ -13032,5 +13249,268 @@ mod duplicate_list_rows {
         assert_eq!(names(&doc), ["Y", "X", "Z"]);
         assert_eq!(doc.reconcile().unwrap(), 1);
         assert_eq!(names(&doc), ["Y", "X", "Z"]);
+    }
+}
+
+#[cfg(test)]
+mod cross_doc_move_tests {
+    use super::*;
+
+    fn docs() -> (Doc, Doc) {
+        (Doc::new().unwrap(), Doc::new().unwrap())
+    }
+
+    #[test]
+    fn move_preserves_id_and_fields_and_lands_at_index() {
+        let (src, dst) = docs();
+        let list = dst.add_list("Target").unwrap();
+        let x = dst.add_item(&list, "x").unwrap();
+        let y = dst.add_item(&list, "y").unwrap();
+        let a = src.add_item(LIST_INBOX, "a").unwrap();
+        let b = src.add_item(LIST_INBOX, "b").unwrap();
+        let keep = src.add_item(LIST_INBOX, "keep").unwrap();
+        src.set_item_deadline(&a, Some("2026-12-01")).unwrap();
+        src.set_item_when(&a, Some("2026-11-30T09:30")).unwrap();
+        src.set_item_duration(&a, Some(45)).unwrap();
+        src.apply_notes_delta(
+            &a,
+            &[NotesDeltaOp::Insert {
+                insert: "  some notes\n".into(),
+            }],
+        )
+        .unwrap();
+        src.set_item_done(&b, true).unwrap();
+        let before_a = src.get_item(&a).unwrap();
+        let before_b = src.get_item(&b).unwrap();
+        let _ = (src.drain_events(), dst.drain_events());
+
+        move_items_across_docs(&src, &dst, &[&a, &b], &list, 1, None).unwrap();
+
+        // Gone from the source, whatever the lifecycle; the rest stays.
+        assert!(src.get_item(&a).is_none());
+        assert!(src.get_item(&b).is_none());
+        assert_eq!(src.open_item_ids(LIST_INBOX), vec![keep]);
+        // Same ids, same fields, new list; the open one sits at index 1.
+        let after_a = dst.get_item(&a).unwrap();
+        assert_eq!(
+            after_a,
+            ItemView {
+                list_id: list.clone(),
+                ..before_a
+            }
+        );
+        let after_b = dst.get_item(&b).unwrap();
+        assert_eq!(
+            after_b,
+            ItemView {
+                list_id: list.clone(),
+                ..before_b
+            }
+        );
+        assert!(after_b.is_done(), "a Done item stays Done");
+        assert_eq!(dst.open_item_ids(&list), vec![x, a.clone(), y]);
+
+        let removed: Vec<String> = src
+            .drain_events()
+            .into_iter()
+            .filter_map(|e| match e {
+                AppEvent::ItemRemoved { id } => Some(id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(removed, vec![a.clone(), b.clone()]);
+        let added: Vec<String> = dst
+            .drain_events()
+            .into_iter()
+            .filter_map(|e| match e {
+                AppEvent::ItemAdded { id, .. } => Some(id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(added.len(), 2);
+        assert!(added.contains(&a) && added.contains(&b));
+    }
+
+    #[test]
+    fn a_binned_item_lands_restored() {
+        let (src, dst) = docs();
+        let a = src.add_item(LIST_INBOX, "a").unwrap();
+        src.set_item_binned(&a, true).unwrap();
+        move_items_across_docs(&src, &dst, &[&a], LIST_INBOX, 0, None).unwrap();
+        let it = dst.get_item(&a).unwrap();
+        assert!(!it.is_binned());
+        assert!(it.is_open());
+        assert!(src.binned_items().is_empty());
+    }
+
+    #[test]
+    fn adopt_rejects_an_id_already_present_and_moves_nothing() {
+        let (src, dst) = docs();
+        let a = src.add_item(LIST_INBOX, "a").unwrap();
+        let b = src.add_item(LIST_INBOX, "b").unwrap();
+        // The same id in both docs: what two devices moving one item to
+        // different docs leave behind.
+        dst.adopt_items(&src.export_items(&[&a]).unwrap(), LIST_INBOX, 0)
+            .unwrap();
+        let err = move_items_across_docs(&src, &dst, &[&b, &a], LIST_INBOX, 0, None).unwrap_err();
+        assert!(matches!(err, DocError::Invalid(_)));
+        assert!(src.get_item(&a).is_some() && src.get_item(&b).is_some());
+        assert!(dst.get_item(&b).is_none());
+    }
+
+    #[test]
+    fn unknown_target_list_or_item_moves_nothing() {
+        let (src, dst) = docs();
+        let a = src.add_item(LIST_INBOX, "a").unwrap();
+        let err = move_items_across_docs(&src, &dst, &[&a], "nope", 0, None).unwrap_err();
+        assert!(matches!(err, DocError::ListNotFound(_)));
+        let ghost = "0".repeat(32);
+        let err =
+            move_items_across_docs(&src, &dst, &[&a, &ghost], LIST_INBOX, 0, None).unwrap_err();
+        assert!(matches!(err, DocError::ItemNotFound(_)));
+        assert!(src.get_item(&a).is_some());
+        assert!(dst.get_item(&a).is_none());
+    }
+
+    #[test]
+    fn both_halves_undo_and_redo() {
+        let (src, dst) = docs();
+        let a = src.add_item(LIST_INBOX, "a").unwrap();
+        let b = src.add_item(LIST_INBOX, "b").unwrap();
+        let c = src.add_item(LIST_INBOX, "c").unwrap();
+        src.apply_notes_delta(
+            &b,
+            &[NotesDeltaOp::Insert {
+                insert: "notes".into(),
+            }],
+        )
+        .unwrap();
+        let before = src.get_item(&b).unwrap();
+
+        move_items_across_docs(&src, &dst, &[&b], LIST_INBOX, 0, None).unwrap();
+        let moved = dst.get_item(&b).unwrap();
+
+        // Release is an ordinary undo step: the item comes back whole,
+        // in its old slot.
+        assert!(dst.undo().unwrap());
+        assert!(src.undo().unwrap());
+        assert!(dst.get_item(&b).is_none());
+        assert_eq!(src.get_item(&b).unwrap(), before);
+        assert_eq!(
+            src.open_item_ids(LIST_INBOX),
+            vec![a.clone(), b.clone(), c.clone()]
+        );
+
+        assert!(dst.redo().unwrap());
+        assert!(src.redo().unwrap());
+        assert!(src.get_item(&b).is_none());
+        assert_eq!(dst.get_item(&b).unwrap(), moved);
+        assert_eq!(src.open_item_ids(LIST_INBOX), vec![a, c]);
+    }
+
+    #[test]
+    fn release_keeps_earlier_undo_history_and_forget_undo_drops_it() {
+        let (src, dst) = docs();
+        let a = src.add_item(LIST_INBOX, "a").unwrap();
+        let b = src.add_item(LIST_INBOX, "b").unwrap();
+        move_items_across_docs(&src, &dst, &[&b], LIST_INBOX, 0, None).unwrap();
+        assert!(src.undo().unwrap(), "the release");
+        assert!(src.undo().unwrap(), "the add before it");
+        assert!(src.get_item(&b).is_none());
+        assert!(src.get_item(&a).is_some());
+        src.forget_undo();
+        assert!(!src.can_undo() && !src.can_redo());
+    }
+
+    #[test]
+    fn a_move_and_back_round_trips() {
+        let (home, other) = docs();
+        let a = home.add_item(LIST_INBOX, "a").unwrap();
+        move_items_across_docs(&home, &other, &[&a], LIST_INBOX, 0, None).unwrap();
+        move_items_across_docs(&other, &home, &[&a], LIST_INBOX, 0, None).unwrap();
+        assert_eq!(home.get_item(&a).unwrap().text, "a");
+        assert!(other.get_item(&a).is_none());
+        // And it survives a save / load of each doc.
+        let home2 = Doc::load(&home.save().unwrap()).unwrap();
+        assert_eq!(home2.open_item_ids(LIST_INBOX), vec![a.clone()]);
+        let other2 = Doc::load(&other.save().unwrap()).unwrap();
+        assert!(other2.get_item(&a).is_none());
+    }
+
+    #[test]
+    fn focus_follows_the_item_in_place() {
+        let (home, work) = docs();
+        let (work_id, side_id) = ("work", "side");
+        let side = Doc::new().unwrap();
+        let a = home.add_item(LIST_INBOX, "a").unwrap();
+        let b = home.add_item(LIST_INBOX, "b").unwrap();
+        let c = home.add_item(LIST_INBOX, "c").unwrap();
+        home.add_to_focus_many(&[&a, &b, &c]).unwrap();
+        let refs = |d: &Doc| -> Vec<(Option<String>, String)> {
+            d.focus_entries()
+                .into_iter()
+                .map(|r| (r.doc_id, r.item_id))
+                .collect()
+        };
+        let entry = |doc: Option<&str>, id: &str| (doc.map(str::to_string), id.to_string());
+
+        // Home → shared: the local ref becomes foreign, same slot.
+        let to_work = Some(FocusRetarget {
+            home: &home,
+            target_doc_id: Some(work_id),
+        });
+        move_items_across_docs(&home, &work, &[&b], LIST_INBOX, 0, to_work).unwrap();
+        assert_eq!(
+            refs(&home),
+            vec![entry(None, &a), entry(Some(work_id), &b), entry(None, &c)]
+        );
+
+        // Shared → shared: Home is a third party; the ref is re-pointed.
+        let to_side = Some(FocusRetarget {
+            home: &home,
+            target_doc_id: Some(side_id),
+        });
+        move_items_across_docs(&work, &side, &[&b], LIST_INBOX, 0, to_side).unwrap();
+        assert_eq!(
+            refs(&home),
+            vec![entry(None, &a), entry(Some(side_id), &b), entry(None, &c)]
+        );
+
+        // Shared → Home: local again, and the lens shows it in its slot.
+        let to_home = Some(FocusRetarget {
+            home: &home,
+            target_doc_id: None,
+        });
+        move_items_across_docs(&side, &home, &[&b], LIST_INBOX, 0, to_home).unwrap();
+        assert_eq!(
+            refs(&home),
+            vec![entry(None, &a), entry(None, &b), entry(None, &c)]
+        );
+        assert_eq!(home.focus_refs(), vec![a.clone(), b.clone(), c.clone()]);
+
+        // An unstarred item gains no entry.
+        let d = home.add_item(LIST_INBOX, "d").unwrap();
+        let to_work = Some(FocusRetarget {
+            home: &home,
+            target_doc_id: Some(work_id),
+        });
+        move_items_across_docs(&home, &work, &[&d], LIST_INBOX, 0, to_work).unwrap();
+        assert_eq!(refs(&home).len(), 3);
+    }
+
+    #[test]
+    fn home_undo_restores_the_local_focus_ref_with_the_item() {
+        let (home, work) = docs();
+        let a = home.add_item(LIST_INBOX, "a").unwrap();
+        home.add_to_focus(&a, 0).unwrap();
+        let focus = Some(FocusRetarget {
+            home: &home,
+            target_doc_id: Some("work"),
+        });
+        move_items_across_docs(&home, &work, &[&a], LIST_INBOX, 0, focus).unwrap();
+        // Two Home commits (retarget, release), newest first.
+        assert!(home.undo().unwrap());
+        assert!(home.undo().unwrap());
+        assert_eq!(home.focus_refs(), vec![a]);
     }
 }

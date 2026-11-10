@@ -1500,10 +1500,9 @@ export function Workspace(props: {
     if (ids.length > 0) setMoveIds(ids);
   };
 
-  // The doc a move acts in: the doc of the rows being moved (a cross-doc
-  // move is not a thing yet, `spec/sharing-plan.md`; a mixed selection
-  // in a lens moves only the rows of the first row's doc), else the
-  // view's.
+  // The doc the move palette lists first: the doc of the rows being
+  // moved (the first row's, for a mixed selection in a lens), else the
+  // view's. The other workspaces' lists follow, tagged with their name.
   const moveDocId = (): string => {
     const first = moveIds()?.[0];
     return (first !== undefined ? docs.docIdOf(first) : undefined) ?? viewDocId();
@@ -1511,19 +1510,116 @@ export function Workspace(props: {
   // The list the move palette annotates as "Current": only the list /
   // board views have one — in the cross-list views (Focus / Done / Bin)
   // the acted-on rows may come from anywhere.
-  const moveCurrentId = () => {
+  const moveIsCurrent = (opt: ListOption): boolean => {
     const v = view();
-    return v.kind === "list" && viewDocId() === moveDocId() ? v.id : null;
+    return v.kind === "list" && v.id === opt.id && viewDocId() === opt.docId;
   };
 
-  // Move destinations in that doc: Inbox, Events (moving there makes an
+  // Move destinations, per doc: Inbox, Events (moving there makes an
   // item an event, `spec/events-plan.md`), then every active user list —
   // archived lists are not offered, matching the task dialog's picker.
-  const moveListOptions = createMemo<ListOption[]>(() => [
-    { id: "inbox", name: m().nav.inbox },
-    { id: LIST_EVENTS, name: m().nav.events },
-    ...activeListsOf(moveDocId()).map((l) => ({ id: l.id, name: l.name, icon: l.icon })),
-  ]);
+  const moveListOptions = createMemo<ListOption[]>(() => {
+    const own = moveDocId();
+    const of = (docId: string): ListOption[] => {
+      const workspace = docId === own ? undefined : docLabel(docId);
+      return [
+        { id: "inbox", name: m().nav.inbox, docId, workspace },
+        { id: LIST_EVENTS, name: m().nav.events, docId, workspace },
+        ...activeListsOf(docId).map((l) => ({
+          id: l.id,
+          name: l.name,
+          icon: l.icon,
+          docId,
+          workspace,
+        })),
+      ];
+    };
+    return [
+      ...of(own),
+      ...docs
+        .docs()
+        .filter((d) => d.docId !== own)
+        .flatMap((d) => of(d.docId)),
+    ];
+  });
+
+  // A move between workspaces (`spec/sharing-plan.md` "Cross-doc move")
+  // is confirmed only when it changes who can see the rows: into a
+  // shared workspace its members gain them, out of one its members lose
+  // them. Between the account's own unshared workspaces it just
+  // happens, and Cmd+Z takes it back. A non-Home doc counts as shared
+  // unless its member list is loaded and says one.
+  const [crossMove, setCrossMove] = createSignal<{
+    title: string;
+    message: string;
+    run: () => void;
+  } | null>(null);
+  // Separate from the record so the text stays put while the dialog
+  // closes.
+  const [crossMoveOpen, setCrossMoveOpen] = createSignal(false);
+  const hasOtherMembers = (docId: string): boolean =>
+    docId !== docs.homeDocId && members.countOf(docId) !== 1;
+  const confirmingCrossDoc = (
+    ids: readonly string[],
+    targetDocId: string,
+    run: () => void,
+  ): void => {
+    const sourceOf = (id: string): string | undefined => {
+      const docId = docs.docIdOf(id);
+      return docId === targetDocId ? undefined : docId;
+    };
+    const crossing = ids.filter((id) => sourceOf(id) !== undefined);
+    const parts: string[] = [];
+    if (crossing.length > 0 && hasOtherMembers(targetDocId)) {
+      parts.push(
+        m().workspace.moveAcrossExposes(
+          docLabel(targetDocId),
+          members.countOf(targetDocId) ?? null,
+          crossing.length,
+        ),
+      );
+    }
+    const leaving = crossing.filter((id) => hasOtherMembers(sourceOf(id)!));
+    if (leaving.length > 0) {
+      const sources = [...new Set(leaving.map((id) => sourceOf(id)!))];
+      parts.push(
+        m().workspace.moveAcrossRemoves(sources.map(docLabel).join(", "), leaving.length),
+      );
+    }
+    if (parts.length === 0) {
+      run();
+      return;
+    }
+    setCrossMove({
+      title: m().workspace.moveAcrossTitle(docLabel(targetDocId)),
+      message: parts.join(" "),
+      run,
+    });
+    setCrossMoveOpen(true);
+  };
+
+  // Land `ids` (visible order) as the first items of a list of `tApp`:
+  // rows of another doc cross over (ids kept, binned rows restored,
+  // closed rows still closed; one undo step across the docs), rows
+  // already in the doc are un-binned and relocated in one step of
+  // their own. A mixed block puts the doc's own rows above the
+  // arrivals.
+  const relocateTo = (ids: readonly string[], tApp: DocApp, listId: string): void => {
+    const own = ids.filter((id) => tApp.getItem(id) !== undefined);
+    const arriving = ids.filter((id) => tApp.getItem(id) === undefined);
+    if (arriving.length > 0) docs.moveToDoc(arriving, tApp.docId, listId, 0);
+    if (own.length === 0) return;
+    const toUnbin = own.filter((id) => {
+      const it = tApp.getItem(id);
+      return it !== undefined && isBinned(it);
+    });
+    tApp.withActionBatch(() => {
+      if (toUnbin.length > 0) tApp.setBinnedMany(toUnbin, false);
+      for (const [i, id] of own.entries()) {
+        tApp.moveItem(id, listId, i);
+      }
+    });
+  };
 
   // Commit a palette pick: mirrors the drag-into-nav drop above — un-bin
   // first, then land as the first items of the target list in visible
@@ -1531,26 +1627,23 @@ export function Workspace(props: {
   // items stay Done and land in the target's Done lane (`spec/board.md`).
   // Picking the view's own list is a no-op (not a reorder-to-top
   // surprise), matching the task dialog's picker.
-  const moveBlockToList = (sourceIds: readonly string[], targetListId: string) => {
+  const moveBlockToList = (
+    sourceIds: readonly string[],
+    targetDocId: string,
+    targetListId: string,
+  ) => {
     const v = view();
-    const mApp = docs.appOf(moveDocId());
+    const mApp = docs.appOf(targetDocId);
     if (!mApp) return;
     if (v.kind === "list" && v.id === targetListId && viewDocId() === mApp.docId) return;
-    // Only the rows of the palette's doc move; the rest stay put.
-    const ids = sourceIds.filter((id) => mApp.getItem(id) !== undefined);
+    const ids = sourceIds.filter((id) => docs.getItem(id) !== undefined);
     if (ids.length === 0) return;
-    const toUnbin = ids.filter((id) => {
-      const it = mApp.getItem(id);
-      return it !== undefined && isBinned(it);
-    });
+    confirmingCrossDoc(ids, mApp.docId, () => landBlock(ids, mApp, targetListId));
+  };
+  const landBlock = (ids: readonly string[], mApp: DocApp, targetListId: string) => {
     const sel = actionSelection();
     const beforeIds = items().map((it) => it.id);
-    mApp.withActionBatch(() => {
-      if (toUnbin.length > 0) mApp.setBinnedMany(toUnbin, false);
-      for (const [i, id] of ids.entries()) {
-        mApp.moveItem(id, targetListId, i);
-      }
-    });
+    relocateTo(ids, mApp, targetListId);
     // Where the moved rows stay in view (Focus and Done are cross-list
     // lenses) the selection stays with them. Where they leave (a list,
     // or the Bin, which the un-bin empties them out of) a lingering
@@ -2156,33 +2249,26 @@ export function Workspace(props: {
       selection.clear();
       return;
     }
-    // Relocation only, within the target's doc (a cross-doc move is not
-    // a thing yet, `spec/sharing-plan.md`; rows from another doc stay
-    // put): binned rows are restored into the target (the Bin is outside
-    // the workspace, so "move while binned" has no meaning), but Done
-    // rows stay Done — reopening is the lane drag / un-done key.
+    // Relocation only, into whichever doc the target list is in (rows
+    // of another doc cross over, confirmed first when that changes who
+    // sees them): binned rows are restored into the target (the Bin is
+    // outside the workspace, so "move while binned" has no meaning), but
+    // Done rows stay Done — reopening is the lane drag / un-done key.
     const tApp = docs.appOf(target.docId);
     if (!tApp) return;
-    const movable = idsInOrder.filter((id) => tApp.getItem(id) !== undefined);
+    const movable = idsInOrder.filter((id) => docs.getItem(id) !== undefined);
     if (movable.length === 0) return;
-    const toUnbin = movable.filter((id) => {
-      const it = tApp.getItem(id);
-      return it !== undefined && isBinned(it);
+    confirmingCrossDoc(movable, tApp.docId, () => {
+      relocateTo(movable, tApp, target.listId);
+      // When dragging out of the current list, the rows are no longer
+      // visible here — leaving them "selected" means a phantom block
+      // anchor lingers. Same-list drops keep selection so the user can
+      // continue acting on the rows they just rearranged.
+      const v = view();
+      const sameList =
+        v.kind === "list" && v.id === target.listId && viewDocId() === target.docId;
+      if (!sameList) selection.clear();
     });
-    tApp.withActionBatch(() => {
-      if (toUnbin.length > 0) tApp.setBinnedMany(toUnbin, false);
-      for (const [i, id] of movable.entries()) {
-        tApp.moveItem(id, target.listId, i);
-      }
-    });
-    // When dragging out of the current list, the rows are no longer
-    // visible here — leaving them "selected" means a phantom block
-    // anchor lingers. Same-list drops keep selection so the user can
-    // continue acting on the rows they just rearranged.
-    const v = view();
-    const sameList =
-      v.kind === "list" && v.id === target.listId && viewDocId() === target.docId;
-    if (!sameList) selection.clear();
   };
   document.addEventListener("primavera-dnd-dragmove", onDndDragMove);
   document.addEventListener("primavera-dnd-dragend", onDndDragEnd);
@@ -2939,12 +3025,20 @@ export function Workspace(props: {
           focusItems();
         }}
         options={moveListOptions}
-        currentId={moveCurrentId}
+        isCurrent={moveIsCurrent}
         count={() => moveIds()?.length ?? 0}
-        onPick={(listId) => {
+        onPick={(opt) => {
           const ids = moveIds();
-          if (ids) moveBlockToList(ids, listId);
+          if (ids) moveBlockToList(ids, opt.docId ?? moveDocId(), opt.id);
         }}
+      />
+      <ConfirmDialog
+        open={crossMoveOpen()}
+        onOpenChange={setCrossMoveOpen}
+        title={crossMove()?.title ?? ""}
+        message={crossMove()?.message ?? ""}
+        confirmLabel={m().common.move}
+        onConfirm={() => crossMove()?.run()}
       />
       {/* Not in the app's window (spec/mac-window-plan.md "Settings"):
           the app's Settings window has every pane; the dialog is not

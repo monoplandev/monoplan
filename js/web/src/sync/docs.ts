@@ -45,6 +45,15 @@
 // top redo entry is newest. Across docs that reads as one history; a
 // routed call that spans docs is still undone one doc at a time.
 //
+// The one action that is not per doc is a move between docs
+// (`moveToDoc`, `spec/sharing-plan.md` "Cross-doc move"): the target
+// adopts the items under their own ids, Home's Focus entries follow,
+// the source releases them. That is one undo entry per doc involved,
+// and this layer links them so one undo (or redo) applies them all. If
+// one half's history is gone by then (a hard delete, a closed doc) the
+// other halves' histories are dropped rather than undone alone, which
+// would lose or duplicate the items.
+//
 // The merged reads are plain functions over the docs' Solid stores, not
 // memos: a caller's own memo tracks exactly the store paths they touch,
 // and they stay honest under bun's test resolution of Solid (the server
@@ -158,6 +167,19 @@ export interface DocsLayer {
   pruneDeadForeignRefs(): void;
   // ---- mutations
   routed: ItemActions;
+  /** Move items into a list of another doc, as a block at `indexInList`
+   *  of its Open projection, in the given order (grouped by source doc
+   *  when they come from several). Ids are preserved; binned rows land
+   *  restored, closed rows stay closed; a starred row keeps its Focus
+   *  slot. Ids already in the target doc, or in no open doc, are
+   *  skipped. One undo step across the docs involved. Returns the ids
+   *  that moved. */
+  moveToDoc(
+    ids: readonly string[],
+    targetDocId: string,
+    listId: string,
+    indexInList: number,
+  ): string[];
   /** Empty every doc's bin. Returns the number of items removed. */
   emptyBin(): number;
   undo(): boolean;
@@ -196,6 +218,8 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
     if (pinned.length > 0) home.removeFromFocusMany(pinned);
     docOffs.get(docId)?.();
     docOffs.delete(docId);
+    const gone = byId.get(docId);
+    if (gone) breakLinksOf(gone);
     byId.delete(docId);
     setDocs((prev) => prev.filter((d) => d.docId !== docId));
   };
@@ -545,6 +569,122 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
     return n;
   };
 
+  // ---- cross-doc move
+  // A move's undo entries, one per doc it touched, in the order they
+  // are applied: target first, source last. Adopt-before-release keeps
+  // a redo on the safe side (a duplicate, never a loss), and the giving
+  // doc reporting last is what lands the user on the rows after an undo.
+  type MoveLink = {
+    members: { app: DocApp; stamp: number }[];
+    /** A doc of this move is gone: what is left must not be undone. */
+    broken: boolean;
+  };
+  const undoLinks: MoveLink[] = [];
+  const redoLinks: MoveLink[] = [];
+  const breakLinksOf = (app: DocApp): void => {
+    for (const link of [...undoLinks, ...redoLinks]) {
+      const before = link.members.length;
+      link.members = link.members.filter((mb) => mb.app !== app);
+      if (link.members.length !== before) link.broken = true;
+    }
+  };
+  const inBatches = (apps: readonly DocApp[], fn: () => void): void => {
+    const run = (i: number): void => {
+      const app = apps[i];
+      if (!app) fn();
+      else app.withActionBatch(() => run(i + 1));
+    };
+    run(0);
+  };
+
+  const moveToDoc = (
+    ids: readonly string[],
+    targetDocId: string,
+    listId: string,
+    indexInList: number,
+  ): string[] => {
+    const target = byId.get(targetDocId);
+    if (!target) return [];
+    const known =
+      listId === "inbox" || listId === "events" || target.state.listsById[listId];
+    if (!known) return [];
+    // An id the target already holds is either not a cross-doc move or
+    // a twin left by two devices moving one item apart; neither moves.
+    const groups = groupByDoc([...new Set(ids)])
+      .filter(([app]) => app !== target)
+      .map(([app, group]): [DocApp, string[]] => [
+        app,
+        group.filter((id) => !target.state.itemsById[id]),
+      ])
+      .filter(([, group]) => group.length > 0);
+    if (groups.length === 0) return [];
+    const toDocId = target === home ? null : target.docId;
+    const starred = (group: readonly string[]): string[] =>
+      group.filter((id) =>
+        home.state.focusEntries.some((e) => e.itemId === id && e.docId !== toDocId),
+      );
+    const involved: DocApp[] = [target];
+    for (const app of [home, ...groups.map(([app]) => app)]) {
+      if (!involved.includes(app)) involved.push(app);
+    }
+    const stampsBefore = involved.map((app) => app.topUndoStamp());
+    const moved: string[] = [];
+    inBatches(involved, () => {
+      let at = indexInList;
+      for (const [src, group] of groups) {
+        // The stores do not drain inside a batch, so read the rows now.
+        const landsOpen = group.filter((id) => {
+          const it = src.state.itemsById[id];
+          return it !== undefined && !isClosed(it);
+        }).length;
+        const pins = starred(group);
+        target.adoptItems(src.exportItemsJson(group), listId, at);
+        // While a local ref still resolves: after Home adopts, before
+        // Home releases. Skipped when nothing is starred, since a no-op
+        // would still count as a step of the batch.
+        if (pins.length > 0) home.retargetFocus(pins, toDocId);
+        src.releaseItems(group);
+        at += landsOpen;
+        moved.push(...group);
+      }
+    });
+    const members = involved
+      .map((app, i) => ({ app, stamp: app.topUndoStamp(), was: stampsBefore[i] }))
+      .filter((mb) => mb.stamp !== mb.was)
+      .map(({ app, stamp }) => ({ app, stamp }));
+    if (members.length > 1) undoLinks.push({ members, broken: false });
+    return moved;
+  };
+
+  /** One undo / redo step for `app`, following a move's link when its
+   *  top entry is half of one. */
+  const stepLinked = (app: DocApp, dir: "undo" | "redo"): boolean => {
+    const top = (a: DocApp): number => (dir === "undo" ? a.topUndoStamp() : a.topRedoStamp());
+    const landed = (a: DocApp): number => (dir === "undo" ? a.topRedoStamp() : a.topUndoStamp());
+    const from = dir === "undo" ? undoLinks : redoLinks;
+    const at = from.findIndex((l) => l.members.some((mb) => mb.app === app && mb.stamp === top(app)));
+    if (at < 0) return dir === "undo" ? app.undo() : app.redo();
+    const link = from.splice(at, 1)[0]!;
+    const onTop = link.members.filter((mb) => top(mb.app) === mb.stamp);
+    if (link.broken || onTop.length !== link.members.length) {
+      // Half the move can no longer be stepped. Stepping the rest would
+      // lose the items (adopt undone, release not) or duplicate them,
+      // so the move stands and those docs' histories go, as after a
+      // hard delete.
+      for (const mb of onTop) mb.app.forgetUndoHistory();
+      return false;
+    }
+    const done: { app: DocApp; stamp: number }[] = [];
+    for (const mb of link.members) {
+      const did = dir === "undo" ? mb.app.undo() : mb.app.redo();
+      if (did) done.push({ app: mb.app, stamp: landed(mb.app) });
+    }
+    if (done.length > 1) {
+      (dir === "undo" ? redoLinks : undoLinks).push({ members: done, broken: false });
+    }
+    return done.length > 0;
+  };
+
   // Undo goes to the doc whose next step is newest; redo likewise.
   const latest = (
     stamp: (app: DocApp) => number,
@@ -562,10 +702,14 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
     }
     return best;
   };
-  const undo = (): boolean =>
-    latest((a) => a.topUndoStamp(), (a) => a.canUndo())?.undo() ?? false;
-  const redo = (): boolean =>
-    latest((a) => a.topRedoStamp(), (a) => a.canRedo())?.redo() ?? false;
+  const undo = (): boolean => {
+    const app = latest((a) => a.topUndoStamp(), (a) => a.canUndo());
+    return app ? stepLinked(app, "undo") : false;
+  };
+  const redo = (): boolean => {
+    const app = latest((a) => a.topRedoStamp(), (a) => a.canRedo());
+    return app ? stepLinked(app, "redo") : false;
+  };
   const canUndo = (): boolean => docs().some((d) => d.app.canUndo());
   const canRedo = (): boolean => docs().some((d) => d.app.canRedo());
   // Undo / redo listeners span every doc, including ones added later
@@ -620,6 +764,7 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
     binCount,
     pruneDeadForeignRefs,
     routed,
+    moveToDoc,
     emptyBin,
     undo,
     redo,

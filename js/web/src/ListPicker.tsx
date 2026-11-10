@@ -37,7 +37,17 @@ import { LIST_EVENTS } from "./sync/store.ts";
  *  `events` lists plus every user list. `icon` is a list's chosen emoji
  *  grapheme when it has one; the picker falls back to the same glyphs the
  *  nav uses. */
-export type ListOption = { id: string; name: string; icon?: string };
+export type ListOption = {
+  id: string;
+  name: string;
+  icon?: string;
+  /** The doc holding the list. Only the move palette sets it: it offers
+   *  every workspace's lists, and `inbox` / `events` exist in each. */
+  docId?: string;
+  /** That doc's label, shown muted on the row, for the lists of a
+   *  workspace other than the one the rows are in. */
+  workspace?: string;
+};
 
 /** Fallback glyph for a list with no chosen emoji: the nav's own marks
  *  for the reserved lists (Inbox's archive box, the calendar for Events),

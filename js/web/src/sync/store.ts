@@ -319,9 +319,10 @@ export interface DocItemActions {
   setBinnedMany(ids: string[], binned: boolean): void;
   setLifecycle(id: string, lifecycle: Lifecycle): void;
   setLifecycleMany(ids: string[], lifecycle: Lifecycle): void;
-  /** Move within the item's own doc. Cross-doc moves are not a thing
-   *  yet (`spec/sharing-plan.md` "Open: cross-doc move"); the routed
-   *  layer ignores a target list the item's doc does not hold. */
+  /** Move within the item's own doc; the routed layer ignores a target
+   *  list the item's doc does not hold. A move to another doc is the
+   *  personal layer's `moveToDoc` (`spec/sharing-plan.md` "Cross-doc
+   *  move"). */
   moveItem(id: string, listId: string, indexInList: number): void;
   deleteBinned(id: string): void;
   deleteBinnedMany(ids: string[]): void;
@@ -490,6 +491,24 @@ export interface DocApp extends DocItemActions {
   deleteBinned(id: string): void;
   deleteBinnedMany(ids: string[]): void;
   emptyBin(): number;
+  /** Cross-doc move, the giving doc's read (`spec/sharing-plan.md`
+   *  "Cross-doc move"): the export form of `ids` as a JSON array, the
+   *  payload another doc's `adoptItems` takes. Throws on an unknown id. */
+  exportItemsJson(ids: string[]): string;
+  /** Cross-doc move, the receiving half: insert another doc's
+   *  `exportItemsJson` payload as a block at `indexInList` of the list's
+   *  Open projection, ids preserved, binned rows restored. One undo
+   *  step. Throws when the list is unknown or an id is already here. */
+  adoptItems(itemsJson: string, listId: string, indexInList: number): void;
+  /** Cross-doc move, the giving half: remove `ids` outright, whatever
+   *  their lifecycle. Unlike the Bin's hard delete this is an ordinary
+   *  undo step: the items live on in the doc that adopted them, and the
+   *  personal layer undoes both halves together. */
+  releaseItems(ids: string[]): void;
+  /** Drop this doc's undo / redo history, as a hard delete does. The
+   *  personal layer calls it when a cross-doc move's other half can no
+   *  longer be undone, so this half is never undone alone. */
+  forgetUndoHistory(): void;
   addList(name: string): string;
   renameList(id: string, name: string): void;
   /** Set (`icon` = emoji grapheme) or clear (`icon` = "") a list's
@@ -581,6 +600,11 @@ export interface HomeApp extends DocApp {
    *  layer resolved the item and prunes the ref when it closes. No-op
    *  if the item is already focused. */
   addForeignToFocus(docId: string, itemId: string, index: number): void;
+  /** Point the entries of `ids` at `docId` (`null` = Home itself), each
+   *  in its slot: what a cross-doc move does to a starred item. Ids
+   *  with no entry are skipped. A local ref must resolve when this
+   *  runs: before Home releases the item, after Home adopts it. */
+  retargetFocus(ids: string[], docId: string | null): void;
 }
 
 /** What an undo / redo step touched: see `DocApp.onUndoRedo`. */
@@ -1485,6 +1509,19 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
     emptyBin() {
       return hardDelete(() => replica.emptyBin());
     },
+    exportItemsJson(ids) {
+      return replica.exportItemsJson(ids);
+    },
+    adoptItems(itemsJson, listId, indexInList) {
+      mutate(() => replica.adoptItems(itemsJson, listId, indexInList));
+    },
+    releaseItems(ids) {
+      mutate(() => replica.releaseItems(ids));
+    },
+    forgetUndoHistory() {
+      replica.forgetUndo();
+      forgetUndoHistory();
+    },
     addList(name) {
       return mutate(() => replica.addList(name));
     },
@@ -1532,6 +1569,9 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
     },
     addForeignToFocus(docId, itemId, index) {
       mutate(() => replica.addForeignToFocus(docId, itemId, index));
+    },
+    retargetFocus(ids, docId) {
+      mutate(() => replica.retargetFocus(ids, docId ?? undefined));
     },
     setDocName(name) {
       mutate(() => replica.setDocName(name));

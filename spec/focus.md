@@ -114,6 +114,12 @@ it does not hold the other doc — so the division of labour is:
   (foreign rows counted, foreign rows captured) for the overlay and for
   un-done's re-pin.
 - Foreign refs are not exported by `export_json` and are dropped on import.
+- A **cross-doc move** (2026-11-11, `spec/sharing-plan.md` "Cross-doc move")
+  keeps a starred item's slot: `retarget_focus(item_ids, doc_id)` (wasm
+  `retargetFocus`) rewrites each entry in place to name `doc_id` (`None` ≡
+  the Home doc itself, the local form), one commit. It folds the dead-ref
+  sweep in, so the host calls it while a local ref still resolves: after
+  Home adopts the item, before Home releases it.
 
 ## Projection & visibility
 

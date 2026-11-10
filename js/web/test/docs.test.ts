@@ -346,3 +346,177 @@ describe("docs layer", () => {
     dispose();
   });
 });
+
+describe("cross-doc move", () => {
+  const THIRD = "00000000-0000-0000-0000-00000000000c";
+
+  test("items move under their own ids, as a block at the index", () => {
+    const { home, other, layer, dispose } = setup();
+    const list = other.addList("Target");
+    const x = other.addItem(list, "x");
+    const y = other.addItem(list, "y");
+    const a = home.addItem("inbox", "a");
+    const done = home.addItem("inbox", "done");
+    const binned = home.addItem("inbox", "binned");
+    const stays = home.addItem("inbox", "stays");
+    home.setItemDeadline(a, "2026-12-01");
+    home.setItemNotes(a, "some notes");
+    home.setDone(done, true);
+    home.setBinned(binned, true);
+
+    expect(layer.moveToDoc([a, done, binned], OTHER, list, 1)).toEqual([a, done, binned]);
+
+    expect(home.getItem(a)).toBeUndefined();
+    expect(home.getItem(done)).toBeUndefined();
+    expect(home.getItem(binned)).toBeUndefined();
+    expect(home.state.binCount).toBe(0);
+    expect(home.getItem(stays)).toBeDefined();
+    expect(layer.docIdOf(a)).toBe(OTHER);
+    const moved = other.getItem(a)!;
+    expect(moved.docId).toBe(OTHER);
+    expect(moved.listId).toBe(list);
+    expect(moved.text).toBe("a");
+    expect(moved.deadline).toBe("2026-12-01");
+    expect(moved.notes).toBe("some notes");
+    // Done stays Done; a binned row lands restored.
+    expect(other.getItem(done)?.state).toBe("done");
+    expect(other.getItem(binned)?.binnedAt ?? null).toBeNull();
+    expect(other.state.listOpen[list]).toEqual([x, a, binned, y]);
+    dispose();
+  });
+
+  test("ids already in the target, unknown ids and unknown lists move nothing", () => {
+    const { home, other, layer, dispose } = setup();
+    const a = home.addItem("inbox", "a");
+    const b = other.addItem("inbox", "b");
+    expect(layer.moveToDoc([b, "nope"], OTHER, "inbox", 0)).toEqual([]);
+    expect(layer.moveToDoc([a], OTHER, "no-such-list", 0)).toEqual([]);
+    expect(layer.moveToDoc([a], "no-such-doc", "inbox", 0)).toEqual([]);
+    expect(home.getItem(a)).toBeDefined();
+    // Nothing happened, so nothing was recorded beyond the two adds.
+    expect(layer.undo()).toBe(true);
+    expect(layer.undo()).toBe(true);
+    expect(layer.undo()).toBe(false);
+    dispose();
+  });
+
+  test("a starred item keeps its Focus slot, in and out of Home", () => {
+    const { home, layer, dispose } = setup();
+    const a = home.addItem("inbox", "a");
+    const b = home.addItem("inbox", "b");
+    const c = home.addItem("inbox", "c");
+    layer.routed.addToFocusMany([a, b, c]);
+
+    layer.moveToDoc([b], OTHER, "inbox", 0);
+    expect(home.state.focusEntries).toEqual([
+      { docId: null, itemId: a },
+      { docId: OTHER, itemId: b },
+      { docId: null, itemId: c },
+    ]);
+    expect(layer.focusItems().map((it) => it.id)).toEqual([a, b, c]);
+    layer.pruneDeadForeignRefs();
+    expect(layer.isFocused(b)).toBe(true);
+
+    layer.moveToDoc([b], HOME, "inbox", 0);
+    expect(home.state.focusEntries).toEqual([
+      { docId: null, itemId: a },
+      { docId: null, itemId: b },
+      { docId: null, itemId: c },
+    ]);
+    expect(layer.focusItems().map((it) => it.id)).toEqual([a, b, c]);
+    dispose();
+  });
+
+  test("between two shared docs Home only re-points the ref", () => {
+    const { home, other, layer, dispose } = setup();
+    const third = createSyncedApp(replicaFor(THIRD));
+    layer.addDoc(third);
+    const b = other.addItem("inbox", "b");
+    layer.routed.addToFocus(b);
+    layer.moveToDoc([b], THIRD, "inbox", 0);
+    expect(home.state.focusEntries).toEqual([{ docId: THIRD, itemId: b }]);
+    expect(layer.focusItems().map((it) => it.id)).toEqual([b]);
+    // One undo walks all three docs back; one redo, forward again.
+    expect(layer.undo()).toBe(true);
+    expect(other.getItem(b)).toBeDefined();
+    expect(third.getItem(b)).toBeUndefined();
+    expect(home.state.focusEntries).toEqual([{ docId: OTHER, itemId: b }]);
+    expect(layer.redo()).toBe(true);
+    expect(third.getItem(b)).toBeDefined();
+    expect(other.getItem(b)).toBeUndefined();
+    expect(home.state.focusEntries).toEqual([{ docId: THIRD, itemId: b }]);
+    dispose();
+  });
+
+  test("one undo reverts both halves, one redo reapplies them", () => {
+    const { home, other, layer, dispose } = setup();
+    const a = home.addItem("inbox", "a");
+    const b = home.addItem("inbox", "b");
+    const c = home.addItem("inbox", "c");
+    const o = other.addItem("inbox", "o");
+    layer.routed.addToFocus(b);
+    const touched: string[] = [];
+    const off = layer.onUndoRedo((_outcome, docId) => touched.push(docId));
+
+    layer.moveToDoc([b], OTHER, "inbox", 0);
+    expect(other.state.listOpen["inbox"]).toEqual([b, o]);
+
+    expect(layer.undo()).toBe(true);
+    expect(other.getItem(b)).toBeUndefined();
+    expect(home.getItem(b)?.docId).toBe(HOME);
+    expect(home.state.listOpen["inbox"]).toEqual([a, b, c]);
+    expect(home.state.focusEntries).toEqual([{ docId: null, itemId: b }]);
+    // The giving doc reports last: it is where the rows are again.
+    expect(touched).toEqual([OTHER, HOME]);
+
+    expect(layer.redo()).toBe(true);
+    expect(home.getItem(b)).toBeUndefined();
+    expect(other.state.listOpen["inbox"]).toEqual([b, o]);
+    expect(home.state.focusEntries).toEqual([{ docId: OTHER, itemId: b }]);
+
+    // And back once more, then on to the steps before the move.
+    expect(layer.undo()).toBe(true);
+    expect(home.getItem(b)).toBeDefined();
+    expect(layer.undo()).toBe(true);
+    expect(layer.isFocused(b)).toBe(false);
+    off();
+    dispose();
+  });
+
+  test("a move whose other half lost its history is not undone alone", () => {
+    const { home, other, layer, dispose } = setup();
+    const a = home.addItem("inbox", "a");
+    const junk = home.addItem("inbox", "junk");
+    const o = other.addItem("inbox", "o");
+    expect(layer.moveToDoc([a], OTHER, "inbox", 0)).toEqual([a]);
+    // A hard delete in the giving doc drops its history, the release
+    // included.
+    home.setBinned(junk, true);
+    layer.routed.deleteBinnedMany([junk]);
+    expect(home.canUndo()).toBe(false);
+
+    // Undoing the adopt alone would lose the item: the move stands and
+    // the receiving doc's history goes instead.
+    expect(layer.undo()).toBe(false);
+    expect(other.getItem(a)).toBeDefined();
+    expect(other.getItem(o)).toBeDefined();
+    expect(layer.canUndo()).toBe(false);
+    // Later steps undo as usual.
+    const later = other.addItem("inbox", "later");
+    expect(layer.undo()).toBe(true);
+    expect(other.getItem(later)).toBeUndefined();
+    expect(other.getItem(a)).toBeDefined();
+    dispose();
+  });
+
+  test("a move out of a doc that then closes cannot be undone", () => {
+    const { home, other, layer, dispose } = setup();
+    const b = other.addItem("inbox", "b");
+    layer.moveToDoc([b], HOME, "inbox", 0);
+    expect(other.getItem(b)).toBeUndefined();
+    layer.removeDoc(OTHER);
+    expect(layer.undo()).toBe(false);
+    expect(home.getItem(b)).toBeDefined();
+    dispose();
+  });
+});

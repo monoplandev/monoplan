@@ -522,6 +522,16 @@ All mutations go through Loro APIs internally; the core exposes typed helpers:
 - `delete_list(list_id)` — refuses for `inbox` and `events`; see "Delete list" contract above. **Internal-only**: not surfaced in any client UI (archive is the user-facing removal).
 - `empty_bin()` — hard-deletes all `Binned` items.
 - `delete_binned(item_id)` — hard-deletes one `Binned` item.
+- `export_items(item_ids)` / `adopt_items(items, list_id, target_index)` /
+  `release_items(item_ids)` — the halves of a cross-doc move
+  (`spec/sharing-plan.md` "Cross-doc move"). `export_items` reads the items'
+  export form; `adopt_items` inserts another doc's export as a block at
+  `target_index` of the list's Open projection, ids preserved, not binned,
+  one commit, rejecting an id already present; `release_items` removes
+  items and their order entries whatever their lifecycle, one commit, as an
+  ordinary undo step (the undo history is kept, unlike a hard delete).
+  `move_items_across_docs(src, dst, …)` composes them with
+  `retarget_focus` in the safe order (adopt, re-point, release).
 - `add_to_focus(item_id, index)` / `remove_from_focus(item_id)` / `move_in_focus(item_id, index)` — curated Focus lens mutations over the `focus` container (`spec/focus.md`). Each is one commit and sweeps dead focus refs. `add_to_focus` no-ops when the item already has a visible ref.
 - `focus_view()` / `focus_refs()` — the Focus projection (Open, deduped, resolved order). Pure reads.
 - `reconcile()` — explicit stale/duplicate/missing order-entry repair plus focus
