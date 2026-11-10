@@ -3561,6 +3561,7 @@ export function Workspace(props: {
           {(_key) => (
             <Board
               app={viewApp()}
+              rowApp={routed}
               listId={boardListId()!}
               onOpen={(id) => setOpenItemId(id)}
               onReveal={revealItemIn}

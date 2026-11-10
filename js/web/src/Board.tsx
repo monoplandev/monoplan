@@ -38,6 +38,7 @@ import {
   isClosed,
   OPEN_STATES,
   type DocApp,
+  type ItemActions,
   type ItemView,
   type WorkflowState,
 } from "./sync/store.ts";
@@ -75,6 +76,11 @@ const H_SCROLL_STEP = 14;
 
 export function Board(props: {
   app: DocApp;
+  /** What each card and its context menu act through: the routed layer,
+   *  so the star reads (and the menu writes) the account's Focus. The
+   *  list's own `app` only knows its doc's local lens, which is empty
+   *  for a shared doc: its items are pinned as foreign refs in Home. */
+  rowApp: ItemActions;
   listId: string;
   onOpen: (id: string) => void;
   /** Row context-menu jump to the item's other appearance (the Focus
@@ -636,7 +642,7 @@ export function Board(props: {
       <For each={visibleOpen()}>
         {(lane, i) => (
           <BoardColumn
-            app={app}
+            app={props.rowApp}
             laneKey={lane}
             name={laneLabel(m(), lane)}
             selection={selectionFor(lane)}
@@ -661,7 +667,7 @@ export function Board(props: {
           per-list preference from the view-mode popover. */}
       <Show when={doneVisible()}>
         <BoardColumn
-          app={app}
+          app={props.rowApp}
           laneKey={DONE_LANE}
           variant="done"
           name={m().board.doneLane}
@@ -683,7 +689,8 @@ export function Board(props: {
 }
 
 function BoardColumn(props: {
-  app: DocApp;
+  /** The cards' item actions (`Board`'s `rowApp`). */
+  app: ItemActions;
   /** Fixed lane key: a workflow state name (`done` = the Done lane). */
   laneKey: WorkflowState;
   name: string;
