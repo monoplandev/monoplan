@@ -8,28 +8,32 @@ import { createRoot } from "solid-js";
 import { Dek, Doc, Replica } from "@monoplan/core/wasm";
 import type { ReplicaStorage } from "@monoplan/core/wasm";
 import { MemReplicaStorage } from "../../core/test/mem-replica-storage.ts";
-import { createSyncedApp, type DocApp } from "../src/sync/store.ts";
+import {
+  createHomeApp,
+  createSyncedApp,
+  type DocApp,
+  type HomeApp,
+} from "../src/sync/store.ts";
 import { createDocsLayer, type DocsLayer } from "../src/sync/docs.ts";
+import { restoreCapturedPositions } from "../src/linger.ts";
 
 const HOME = "00000000-0000-0000-0000-00000000000a";
 const OTHER = "00000000-0000-0000-0000-00000000000b";
 
-function appFor(docId: string): DocApp {
-  return createSyncedApp(
-    new Replica(
-      Doc.create(),
-      docId,
-      Dek.generate(),
-      0n,
-      new MemReplicaStorage() as unknown as ReplicaStorage,
-    ),
+function replicaFor(docId: string): Replica {
+  return new Replica(
+    Doc.create(),
+    docId,
+    Dek.generate(),
+    0n,
+    new MemReplicaStorage() as unknown as ReplicaStorage,
   );
 }
 
-function setup(): { home: DocApp; other: DocApp; layer: DocsLayer; dispose: () => void } {
+function setup(): { home: HomeApp; other: DocApp; layer: DocsLayer; dispose: () => void } {
   return createRoot((dispose) => {
-    const home = appFor(HOME);
-    const other = appFor(OTHER);
+    const home = createHomeApp(replicaFor(HOME));
+    const other = createSyncedApp(replicaFor(OTHER));
     const layer = createDocsLayer(home, [other]);
     return { home, other, layer, dispose };
   });
@@ -138,7 +142,8 @@ describe("docs layer", () => {
       { docId: OTHER, itemId: b },
       { docId: null, itemId: a },
     ]);
-    expect(home.state.focusOrder).toEqual([a]);
+    // Focus is Home's alone: the other doc's app has no Focus state.
+    expect("focusEntries" in other.state && (other.state as HomeApp["state"]).focusEntries).toEqual([]);
     expect(layer.focusItems().map((it) => it.id)).toEqual([b, a]);
     expect(layer.isFocused(b)).toBe(true);
     expect(layer.routed.isFocused(b)).toBe(true);
@@ -154,13 +159,63 @@ describe("docs layer", () => {
     layer.pruneDeadForeignRefs();
     expect(home.state.focusEntries).toEqual([{ docId: null, itemId: a }]);
     expect(layer.focusItems().map((it) => it.id)).toEqual([a]);
-    // Un-done into Focus reopens the foreign item and pins it on top.
+    // Un-done into Focus reopens the foreign item and re-pins it at the
+    // slot it held.
     layer.routed.undoneIntoFocus([b]);
     expect(other.getItem(b)?.state).toBe("backlog");
     expect(layer.focusItems().map((it) => it.id)).toEqual([b, a]);
     // Done through the routed path prunes in the same call.
     layer.routed.setDone(b, true);
     expect(layer.isFocused(b)).toBe(false);
+    dispose();
+  });
+
+  test("Focus linger captures slots in the merged order, foreign rows included", () => {
+    const { home, other, layer, dispose } = setup();
+    const h1 = home.addItem("inbox", "h1");
+    const h2 = home.addItem("inbox", "h2");
+    const f1 = other.addItem("inbox", "f1");
+    const f2 = other.addItem("inbox", "f2");
+    const unstarred = home.addItem("inbox", "unstarred");
+    layer.routed.addToFocusMany([f1, h1, f2, h2]);
+    const lens = (): string[] => layer.focusItems().map((it) => it.id);
+    expect(lens()).toEqual([f1, h1, f2, h2]);
+
+    // A Home row below a foreign one: its slot counts the foreign row.
+    layer.routed.setDone(h1, true);
+    // A foreign row lingers too, at its slot once h1 has left.
+    layer.routed.setDone(f2, true);
+    // A row outside Focus records nothing.
+    layer.routed.setDone(unstarred, true);
+    expect(layer.focusRecentDone().map((e) => [e.id, e.index])).toEqual([
+      [h1, 1],
+      [f2, 1],
+    ]);
+    expect(lens()).toEqual([f1, h2]);
+
+    // The overlay's replay rebuilds the lens as it stood.
+    const rows = lens();
+    restoreCapturedPositions(
+      rows,
+      layer.focusRecentDone().map((e) => ({ index: e.index, value: e.id })),
+    );
+    expect(rows).toEqual([f1, h1, f2, h2]);
+
+    // Un-done re-pins both where they sat, in Home's entries.
+    layer.routed.undoneIntoFocus([h1, f2]);
+    expect(lens()).toEqual([f1, h1, f2, h2]);
+    expect(home.state.focusEntries).toEqual([
+      { docId: OTHER, itemId: f1 },
+      { docId: null, itemId: h1 },
+      { docId: OTHER, itemId: f2 },
+      { docId: null, itemId: h2 },
+    ]);
+    expect(layer.focusRecentDone()).toEqual([]);
+
+    // A close made in the item's own doc (a peer's, say) is captured the
+    // same way, before the ref is pruned.
+    other.setDone(f1, true);
+    expect(layer.focusRecentDone().map((e) => [e.id, e.index])).toEqual([[f1, 0]]);
     dispose();
   });
 
@@ -277,11 +332,11 @@ describe("docs layer", () => {
 
   test("a doc added later joins the map and the merged reads", () => {
     const { layer, dispose } = createRoot((dispose) => {
-      const home = appFor(HOME);
+      const home = createHomeApp(replicaFor(HOME));
       return { layer: createDocsLayer(home, []), dispose };
     });
     expect(layer.docs().length).toBe(1);
-    const third = appFor(OTHER);
+    const third = createSyncedApp(replicaFor(OTHER));
     const x = third.addItem("inbox", "x");
     layer.addDoc(third);
     expect(layer.docs().map((d) => d.docId)).toEqual([HOME, OTHER]);

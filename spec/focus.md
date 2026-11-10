@@ -104,6 +104,15 @@ it does not hold the other doc — so the division of labour is:
   observing client's.
 - Entry **indices** (`add_to_focus`, `move_in_focus`) address the full entry
   list, foreign entries included, which is what a merged Focus view shows.
+- Focus has **no shared counterpart**: only the Home doc has one, and that is
+  the one asymmetry between Home and a shared doc. The web mirrors it in its
+  types (2026-11-11): a shared doc's `DocApp` has no Focus state or actions,
+  the Home doc's `HomeApp` adds the entry list and the container primitives,
+  and the personal layer (`js/web/src/sync/docs.ts`) owns what the lens means
+  across docs. That includes the done-linger: each store announces an item
+  about to close, and the layer snapshots the row's slot in the merged order
+  (foreign rows counted, foreign rows captured) for the overlay and for
+  un-done's re-pin.
 - Foreign refs are not exported by `export_json` and are dropped on import.
 
 ## Projection & visibility

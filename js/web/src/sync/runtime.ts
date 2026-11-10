@@ -21,7 +21,7 @@ import { type Prefs } from "../prefs.ts";
 import { type Session } from "../Login.tsx";
 import { dekVault } from "./dekVault.ts";
 import { createDocsLayer, type DocsLayer } from "./docs.ts";
-import { createSyncedApp, type DocApp } from "./store.ts";
+import { createHomeApp, createSyncedApp, type DocApp, type HomeApp } from "./store.ts";
 import { createSyncBridge, SyncBridge } from "./sync.ts";
 import { createViewState } from "./viewState.ts";
 
@@ -80,8 +80,8 @@ export type BootInfo = {
 /** The per-doc half of the runtime: one replica, one synced store, and
  *  the op-log persistence rhythm around them. Every doc gets one; the
  *  bridge multiplexes their replicas over a single socket. */
-type DocRuntime = {
-  app: DocApp;
+type DocRuntime<A extends DocApp = DocApp> = {
+  app: A;
   replica: Replica;
   /** Write the just-committed mutation as a durable op row. Must run
    *  before `replica.flush()`. */
@@ -103,9 +103,15 @@ type DocRuntime = {
 
 /** Build one doc's replica + store + persistence rhythm. `pumpOutbox`
  *  is resolved lazily because the bridge that owns it is constructed
- *  after every doc runtime exists. Registers `onCleanup` against the
- *  calling owner. */
-function createDocRuntime(boot: DocBoot, pumpOutbox: () => void): DocRuntime {
+ *  after every doc runtime exists. `makeApp` picks the store: the Home
+ *  doc's (`createHomeApp`, which owns Focus) or a shared doc's
+ *  (`createSyncedApp`). Registers `onCleanup` against the calling
+ *  owner. */
+function createDocRuntime<A extends DocApp>(
+  boot: DocBoot,
+  pumpOutbox: () => void,
+  makeApp: (replica: Replica) => A,
+): DocRuntime<A> {
   const storage = boot.storage;
   // `Replica` consumes its Dek argument, and the session-level Dek
   // must stay valid across MainApp remounts (anonymous → authed swap
@@ -138,7 +144,7 @@ function createDocRuntime(boot: DocBoot, pumpOutbox: () => void): DocRuntime {
       inFlight.toVv,
     );
   }
-  const app = createSyncedApp(replica);
+  const app = makeApp(replica);
 
   // ---------- Replica op-log persistence (IdbStorage) ----------
   //
@@ -287,10 +293,16 @@ export function createWorkspaceRuntime(props: {
   // is what the workspace renders today; the others sync headlessly
   // until the cross-doc lenses land (`spec/sharing-plan.md` Phase 5).
   const runtimes = new Map<string, DocRuntime>();
+  // The Home doc is the one with Focus, so it alone gets the Home app.
+  let home: DocRuntime<HomeApp> | undefined;
   for (const b of props.boot.docs) {
-    runtimes.set(b.docId, createDocRuntime(b, pumpOutbox));
+    if (b.docId === props.session.primaryDocId) {
+      home = createDocRuntime(b, pumpOutbox, createHomeApp);
+      runtimes.set(b.docId, home);
+    } else {
+      runtimes.set(b.docId, createDocRuntime(b, pumpOutbox, createSyncedApp));
+    }
   }
-  const home = runtimes.get(props.session.primaryDocId);
   if (!home) throw new Error("boot has no Home doc");
   const app = home.app;
   const docApps = new Map<string, DocApp>(
@@ -479,7 +491,7 @@ export function createWorkspaceRuntime(props: {
       walBytes: 0,
       seeded: opts.seeded,
     };
-    const r = runWithOwner(owner, () => createDocRuntime(boot, pumpOutbox));
+    const r = runWithOwner(owner, () => createDocRuntime(boot, pumpOutbox, createSyncedApp));
     if (!r) throw new Error("runtime owner is gone");
     runtimes.set(docId, r);
     docApps.set(docId, r.app);

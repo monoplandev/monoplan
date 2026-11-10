@@ -10,7 +10,7 @@ import { Dek, Doc, Replica } from "@monoplan/core/wasm";
 import type { ReplicaStorage } from "@monoplan/core/wasm";
 import { MemReplicaStorage } from "../../core/test/mem-replica-storage.ts";
 import { createRoot } from "solid-js";
-import { createSyncedApp } from "../src/sync/store.ts";
+import { createHomeApp, createSyncedApp } from "../src/sync/store.ts";
 import { createDocsLayer } from "../src/sync/docs.ts";
 import { findResultArchived } from "../src/findResults.tsx";
 
@@ -107,7 +107,7 @@ describe("store archived lists", () => {
     const inWork = doc.addItem(work, "ship it");
     const inHome = doc.addItem(home, "ship it too");
     const inInbox = doc.addItem("inbox", "ship it three");
-    const app = createSyncedApp(replicaFrom(doc));
+    const app = createHomeApp(replicaFrom(doc));
     // The Find surfaces resolve lists through the cross-doc layer; one
     // doc here, so it is just a view over `app`.
     const layer = createRoot(() => createDocsLayer(app, []));

@@ -11,6 +11,7 @@ import { createRoot } from "solid-js";
 import { findResultListLabel } from "../src/findResults.tsx";
 import { createDocsLayer } from "../src/sync/docs.ts";
 import {
+  createHomeApp,
   createSyncedApp,
   EVENT_STATES,
   isEvent,
@@ -90,7 +91,7 @@ describe("store events", () => {
   });
 
   test("find results label an event's list with the built-in name", () => {
-    const app = createSyncedApp(replicaFrom(Doc.create()));
+    const app = createHomeApp(replicaFrom(Doc.create()));
     const id = app.addItem(LIST_EVENTS, "gig");
     const it: ItemView = app.getItem(id)!;
     const layer = createRoot(() => createDocsLayer(app, []));

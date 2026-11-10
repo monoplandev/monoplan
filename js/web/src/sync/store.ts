@@ -234,36 +234,36 @@ export interface WorkspaceState {
   /** Binned-item count, maintained incrementally so the Bin badge
    *  never needs a global scan. */
   binCount: number;
-  /** Visible Focus refs in curated order (`replica.focusRefIds()` — Open,
-   *  local, deduped). The Focus lens iterates this; each id resolves to
-   *  `itemsById`. Re-derived wholesale per non-empty event drain, since a
-   *  focus mutation *or* an item lifecycle change elsewhere can alter
-   *  visibility. See spec/focus.md. */
-  focusOrder: string[];
-  /** Every live Focus entry in curated order, foreign refs included
-   *  (`replica.focusEntriesJson()`; `spec/focus.md` §FocusRef grammar).
-   *  Only meaningful on the account's Home doc, which owns Focus: the
-   *  cross-doc layer resolves foreign entries against the other docs
-   *  and prunes the dead ones. This is the index space `addToFocus` /
-   *  `moveInFocus` address. Re-derived with `focusOrder`. */
-  focusEntries: FocusEntry[];
   listsOrder: string[];
   listsById: Record<string, ListView>;
   settings: SettingsView;
 }
 
+/** The Home doc's state: a doc's, plus Focus. Focus is personal and
+ *  lives only in the account's Home doc (`spec/focus.md`); a shared
+ *  doc has no Focus of its own, so its `DocApp` carries none of this. */
+export interface HomeState extends WorkspaceState {
+  /** Every live Focus entry in curated order, foreign refs included
+   *  (`replica.focusEntriesJson()`; `spec/focus.md` §FocusRef grammar).
+   *  The personal layer (`docs.ts`) resolves each entry against the doc
+   *  that holds its item and prunes the dead foreign ones. This is the
+   *  index space `addToFocus` / `moveInFocus` address. Re-derived
+   *  wholesale per non-empty event drain, since a focus mutation *or*
+   *  an item lifecycle change elsewhere can alter it. */
+  focusEntries: FocusEntry[];
+}
+
 /** Snapshot of where an item sat in its list's live order at the
  *  moment it was closed (done or cancelled). Feeds the list-view "linger" affordance
  *  (`Workspace`), which briefly re-inserts recently-done rows at their
- *  old position — the live projection itself drops them instantly. */
+ *  old position — the live projection itself drops them instantly.
+ *  The Focus lens has its own capture in the personal layer
+ *  (`docs.ts` `focusRecentDone`): a doc does not know Focus. */
 export interface RecentDoneEntry {
   id: string;
   listId: string;
   /** Open index the item occupied just before leaving the projection. */
   index: number;
-  /** Visible Focus slot the item occupied, when it was in the Focus lens
-   *  (Done auto-removes the ref, so this is the only record). */
-  focusIndex?: number;
   /** The closing transition's register timestamp (`lifecycleAt`). */
   doneAt: number;
 }
@@ -298,22 +298,15 @@ export interface SettingsView {
   doneAmalgamate: boolean;
 }
 
-/** The item-keyed half of a `DocApp`: what a row, a context menu, the
- *  agenda or the task surface needs to act on the items it shows. Every
- *  member takes item ids, so the cross-doc layer can implement it too,
- *  routing each call to the doc that owns the item by `ItemView.docId`
- *  (`spec/sharing-plan.md` "Decisions", 2026-10-20). Views that show
- *  items from several docs (Focus, the calendar, an amalgamated Done)
- *  hand their rows the routed implementation; a per-list view hands
- *  them the list's own `DocApp`, which satisfies this directly. Batches
- *  are per doc: a routed multi-id call that spans docs commits (and
- *  undoes) once per doc. */
-export interface ItemActions {
+/** The item-keyed half of a `DocApp`: the per-doc item mutations.
+ *  Every member takes item ids, so the personal layer can implement it
+ *  too, routing each call to the doc that owns the item by
+ *  `ItemView.docId` (`spec/sharing-plan.md` "Decisions", 2026-10-20).
+ *  Batches are per doc: a routed multi-id call that spans docs commits
+ *  (and undoes) once per doc. Nothing here knows Focus: see
+ *  `ItemActions`. */
+export interface DocItemActions {
   getItem(id: string): ItemView | undefined;
-  /** Whether the item currently has a visible Focus ref. On a `DocApp`
-   *  this is the doc's own (local) lens; the routed layer answers for
-   *  the account's Focus, foreign refs included. */
-  isFocused(id: string): boolean;
   editItemText(id: string, text: string): void;
   setItemNotes(id: string, notes: string): void;
   setItemDeadline(id: string, deadline: string | null): void;
@@ -322,7 +315,6 @@ export interface ItemActions {
   setItemPlace(id: string, place: Place | null): void;
   setDone(id: string, done: boolean): void;
   setDoneMany(ids: string[], done: boolean): void;
-  undoneIntoFocus(ids: string[]): void;
   setBinned(id: string, binned: boolean): void;
   setBinnedMany(ids: string[], binned: boolean): void;
   setLifecycle(id: string, lifecycle: Lifecycle): void;
@@ -333,15 +325,35 @@ export interface ItemActions {
   moveItem(id: string, listId: string, indexInList: number): void;
   deleteBinned(id: string): void;
   deleteBinnedMany(ids: string[]): void;
+  withActionBatch<T>(fn: () => T): T;
+}
+
+/** What a row, a context menu, the agenda or the task surface needs to
+ *  act on the items it shows: the per-doc mutations plus Focus. Only
+ *  the personal layer's `routed` implements it. Focus is the account's,
+ *  held in the Home doc, and takes items of any open doc (a shared
+ *  doc's item as a foreign ref), so no single `DocApp` can answer for
+ *  it: a shared doc has no Focus, and Home alone cannot see a foreign
+ *  item (`spec/focus.md`). */
+export interface ItemActions extends DocItemActions {
+  /** Whether the item has a live Focus entry, local or foreign. */
+  isFocused(id: string): boolean;
+  /** Un-done from inside the Focus lens: reopen each id in its doc and
+   *  re-pin it at the Focus slot it vacated (closing drops the ref,
+   *  `spec/focus.md`, so "un-done" in Focus is the deliberate re-add).
+   *  Ids without a captured slot land at the top. */
+  undoneIntoFocus(ids: string[]): void;
+  /** Pin an item into Focus at entry position `index` (default: the
+   *  top). No-op if it is already focused or isn't Open. */
   addToFocus(id: string, index?: number): void;
+  /** Batch add: pin each id (prepended to the top in order). */
   addToFocusMany(ids: string[]): void;
   removeFromFocus(id: string): void;
   removeFromFocusMany(ids: string[]): void;
   moveInFocus(id: string, index: number): void;
-  withActionBatch<T>(fn: () => T): T;
 }
 
-export interface DocApp extends ItemActions {
+export interface DocApp extends DocItemActions {
   replica: Replica;
   /** The doc this app projects; what every `ItemView` it emits carries. */
   docId: string;
@@ -366,6 +378,12 @@ export interface DocApp extends ItemActions {
    *  is restored, binned, removed, or moved, and pruned by age; the
    *  linger UI applies its own (shorter) expiry window on top. */
   recentDone: Accessor<readonly RecentDoneEntry[]>;
+  /** Called for each item about to leave the Open projection by being
+   *  closed (done or cancelled; local or remote), *before* the store
+   *  reflects it, with the closing transition's timestamp. The personal
+   *  layer uses it to snapshot the item's Focus slot while the row is
+   *  still in place. Returns an unsubscribe. */
+  onItemClosing(cb: (id: string, doneAt: number) => void): () => void;
   /** Pump the replica's AppEvent queue into the store. The WS bridge
    *  calls this after every server frame; mutation methods call it
    *  inline so local writes flow through the same dispatcher path. */
@@ -445,11 +463,6 @@ export interface DocApp extends ItemActions {
    *  Cancelled) items. */
   setDone(id: string, done: boolean): void;
   setDoneMany(ids: string[], done: boolean): void;
-  /** Un-done from inside the Focus lens: clear each id's done flag and
-   *  re-pin it at the Focus slot it vacated (Done auto-removes the ref,
-   *  spec/focus.md, so "un-done" in Focus is the deliberate re-add). Ids
-   *  without a captured slot land at the top. One undo step. */
-  undoneIntoFocus(ids: string[]): void;
   /** Bin toggle: `true` sets the bin mask (workflow state preserved for
    *  restore); `false` restores — clears the mask only, revealing the
    *  preserved state (which may itself be done). */
@@ -502,26 +515,6 @@ export interface DocApp extends ItemActions {
    *  Queue's own count is always visible (subject to count > 0) and is
    *  not gated by this flag. */
   setShowListCounts(show: boolean): void;
-  /** Pin an item into the Focus lens at `index` in the visible curated
-   *  order (default: the top — new focus items are "what am I working on
-   *  now"). No-op if the item already has a visible ref or isn't Open;
-   *  throws if the item is unknown. See spec/focus.md. */
-  addToFocus(id: string, index?: number): void;
-  /** Batch add: pin each id into the Focus lens (prepended to the top in
-   *  order) in a single commit. Unknown / not-Open / already-focused ids
-   *  are skipped. Backs multi-select "add to focus". */
-  addToFocusMany(ids: string[]): void;
-  /** Remove an item's ref(s) from the Focus lens. The item is untouched. */
-  removeFromFocus(id: string): void;
-  /** Batch remove: drop each id's ref(s) from the Focus lens in one commit. */
-  removeFromFocusMany(ids: string[]): void;
-  /** Reorder an item within the Focus lens to visible position `index`. */
-  moveInFocus(id: string, index: number): void;
-  /** Add a foreign FocusRef (`docId:itemId`, an item in another open
-   *  doc) at entry position `index`. Home doc only; no Open check — the
-   *  cross-doc layer resolved the item and prunes the ref when it
-   *  closes (`spec/focus.md`). No-op if the item is already focused. */
-  addForeignToFocus(docId: string, itemId: string, index: number): void;
   /** Name the doc (`""` un-names it). Doc content: every member sees it. */
   setDocName(name: string): void;
   /** Hide / show a doc on the merged calendar. Personal: Home doc only. */
@@ -558,6 +551,36 @@ export interface DocApp extends ItemActions {
    *  well-formed id are minted fresh. Single Loro commit → one undo
    *  step. */
   importJson(json: string): ImportSummary;
+}
+
+/** The account's Home doc as an app: a `DocApp` plus the Focus
+ *  primitives. Focus is a personal-workspace concept with no shared
+ *  counterpart: the Home doc's `focus` container holds every entry,
+ *  its own items and foreign refs to items of the shared docs alike
+ *  (`spec/focus.md`). These address the container only; the personal
+ *  layer (`docs.ts`) builds the lens the UI shows on top of them. */
+export interface HomeApp extends DocApp {
+  state: HomeState;
+  /** Pin one of Home's own items at entry position `index` (default:
+   *  the top — new focus items are "what am I working on now"). No-op
+   *  if the item is already focused or isn't Open; throws if the item
+   *  is unknown. */
+  addToFocus(id: string, index?: number): void;
+  /** Batch add: pin each of Home's own ids (prepended to the top in
+   *  order) in a single commit. Unknown / not-Open / already-focused
+   *  ids are skipped. */
+  addToFocusMany(ids: string[]): void;
+  /** Remove an item's ref(s), local or foreign. The item is untouched. */
+  removeFromFocus(id: string): void;
+  /** Batch remove: drop each id's ref(s) in one commit. */
+  removeFromFocusMany(ids: string[]): void;
+  /** Reorder an entry, local or foreign, to entry position `index`. */
+  moveInFocus(id: string, index: number): void;
+  /** Add a foreign FocusRef (`docId:itemId`, an item in another open
+   *  doc) at entry position `index`. No Open check — the personal
+   *  layer resolved the item and prunes the ref when it closes. No-op
+   *  if the item is already focused. */
+  addForeignToFocus(docId: string, itemId: string, index: number): void;
 }
 
 /** What an undo / redo step touched: see `DocApp.onUndoRedo`. */
@@ -600,7 +623,7 @@ interface WorkspaceSnapshotPayload {
   items: (Omit<ItemView, "state" | "docId"> & { state?: string })[];
 }
 
-function materializeReplicaSnapshot(replica: Replica): WorkspaceState {
+function materializeReplicaSnapshot(replica: Replica, home: boolean): HomeState {
   const payload = JSON.parse(replica.workspaceSnapshotJson()) as WorkspaceSnapshotPayload;
   const docId = replica.docId();
   const itemsById: Record<string, ItemView> = {};
@@ -632,12 +655,11 @@ function materializeReplicaSnapshot(replica: Replica): WorkspaceState {
     itemsById,
     listOpen,
     binCount,
-    // Not part of the workspace snapshot JSON (which is items + lists +
-    // settings only) — read straight from the replica's focus projection.
-    // Covers the coarse / fullResync reconcile path too, since both
-    // rematerialize through here.
-    focusOrder: replica.focusRefIds(),
-    focusEntries: readFocusEntries(replica),
+    // Home only. Not part of the workspace snapshot JSON (which is
+    // items + lists + settings only) — read straight from the replica's
+    // focus container. Covers the coarse / fullResync reconcile path
+    // too, since both rematerialize through here.
+    focusEntries: home ? readFocusEntries(replica) : [],
     listsOrder: payload.lists.map((list) => list.id),
     listsById,
     settings: {
@@ -669,12 +691,24 @@ function shouldUseCoarseProjection(events: readonly AppEventJs[]): boolean {
   return coarseCandidates >= events.length / 2;
 }
 
+/** The app over a shared (non-Home) doc. It has no Focus. */
 export function createSyncedApp(replica: Replica): DocApp {
-  const [state, setState] = createStore<WorkspaceState>({
+  return buildApp(replica, false);
+}
+
+/** The app over the account's Home doc, which owns Focus. */
+export function createHomeApp(replica: Replica): HomeApp {
+  return buildApp(replica, true);
+}
+
+// One builder for both: `home` decides whether the Focus container is
+// projected. The Focus members exist on every built object but only
+// `createHomeApp` types them in.
+function buildApp(replica: Replica, home: boolean): HomeApp {
+  const [state, setState] = createStore<HomeState>({
     itemsById: {},
     listOpen: {},
     binCount: 0,
-    focusOrder: [],
     focusEntries: [],
     listsOrder: [],
     listsById: {},
@@ -782,6 +816,7 @@ export function createSyncedApp(replica: Replica): DocApp {
       entry,
     ]);
   };
+  const closingListeners = new Set<(id: string, doneAt: number) => void>();
   const dropRecentDone = (id: string): void => {
     setRecentDone((prev) =>
       prev.some((e) => e.id === id) ? prev.filter((e) => e.id !== id) : prev,
@@ -899,22 +934,15 @@ export function createSyncedApp(replica: Replica): DocApp {
           // the vacated position (before the removal below) for the
           // linger re-insert.
           const idx = state.listOpen[prev.listId]?.indexOf(ev.id) ?? -1;
-          // Done also auto-removes the item's Focus ref (spec/focus.md), so
-          // snapshot its Focus slot too. `focusOrder` is re-derived
-          // wholesale after the drain; drop the id here as well so later
-          // captures in the same drain see sequential indices, matching
-          // what `restoreCapturedPositions` replays.
-          const focusIdx = state.focusOrder.indexOf(ev.id);
-          if (focusIdx >= 0) {
-            setState("focusOrder", (order) => order.filter((x) => x !== ev.id));
-          }
           captureRecentDone({
             id: ev.id,
             listId: prev.listId,
             index: idx >= 0 ? idx : 0,
-            focusIndex: focusIdx >= 0 ? focusIdx : undefined,
             doneAt: lifecycleAt,
           });
+          // The item may also hold a Focus slot, which only the personal
+          // layer can see; let it snapshot that while the row is in place.
+          for (const cb of closingListeners) cb(ev.id, lifecycleAt);
         } else if (nowOpen || binnedAt != null) {
           dropRecentDone(ev.id);
         }
@@ -1092,7 +1120,7 @@ export function createSyncedApp(replica: Replica): DocApp {
     // see the intermediate order and animate through it.
     batch(() => {
       if (fullResync || coarse) {
-        const next = materializeReplicaSnapshot(replica);
+        const next = materializeReplicaSnapshot(replica, home);
         setState(reconcile(next));
         // Any per-item delta in the bucket is lost with it; subscribed
         // editors reload from the fresh state.
@@ -1101,14 +1129,13 @@ export function createSyncedApp(replica: Replica): DocApp {
         for (const ev of events) {
           dispatch(ev);
         }
-        // Focus visibility depends on both focus-container mutations
-        // (`focusChanged`) and item add/remove/lifecycle events elsewhere
-        // (a Done/Bin drops a focused item from the view, and Done also
-        // auto-removes its ref). One wholesale re-derive per non-empty
-        // drain is the cheapest correct approach — `reconcile` no-ops when
-        // the order is unchanged. See spec/focus.md B.8.
-        if (events.length > 0) {
-          setState("focusOrder", reconcile(replica.focusRefIds()));
+        // Home's Focus entries depend on both focus-container mutations
+        // (`focusChanged`) and item lifecycle events elsewhere (Done
+        // auto-removes a local ref, a sweep drops a binned one). One
+        // wholesale re-derive per non-empty drain is the cheapest correct
+        // approach — `reconcile` no-ops when the list is unchanged. See
+        // spec/focus.md B.8.
+        if (home && events.length > 0) {
           setState("focusEntries", reconcile(readFocusEntries(replica)));
         }
       }
@@ -1119,7 +1146,7 @@ export function createSyncedApp(replica: Replica): DocApp {
   // Initial attach is explicit materialization, not a live event replay.
   // A single compact JSON snapshot crosses the wasm boundary and the
   // historical event queue remains empty.
-  const initialState = materializeReplicaSnapshot(replica);
+  const initialState = materializeReplicaSnapshot(replica, home);
   setState(reconcile(initialState));
 
   let onFlush: () => void = () => {};
@@ -1328,8 +1355,11 @@ export function createSyncedApp(replica: Replica): DocApp {
     getItem(id) {
       return state.itemsById[id];
     },
-    isFocused(id) {
-      return state.focusOrder.includes(id);
+    onItemClosing(cb) {
+      closingListeners.add(cb);
+      return () => {
+        closingListeners.delete(cb);
+      };
     },
     seedWelcome() {
       return mutate(() => replica.seedWelcome());
@@ -1422,25 +1452,6 @@ export function createSyncedApp(replica: Replica): DocApp {
     },
     setDoneMany(ids, done) {
       mutate(() => replica.setItemsDone(ids, done));
-    },
-    undoneIntoFocus(ids) {
-      if (ids.length === 0) return;
-      const wanted = new Set(ids);
-      const captured = recentDone().filter((r) => wanted.has(r.id));
-      const capturedIds = new Set(captured.map((r) => r.id));
-      withActionBatch(() => {
-        mutate(() => replica.setItemsDone(ids, false));
-        // Slots were captured sequentially (each after earlier removals),
-        // so re-insert newest-first to rebuild the original layout, as
-        // `restoreCapturedPositions` does for the render overlay.
-        for (let i = captured.length - 1; i >= 0; i--) {
-          const r = captured[i];
-          mutate(() => replica.addToFocus(r.id, r.focusIndex ?? 0));
-        }
-        for (const id of ids) {
-          if (!capturedIds.has(id)) mutate(() => replica.addToFocus(id, 0));
-        }
-      });
     },
     setBinned(id, binned) {
       mutate(() => replica.setItemBinned(id, binned));

@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { Dek, Doc, EncryptedBlob, Replica } from "@monoplan/core/wasm";
 import type { ReplicaStorage } from "@monoplan/core/wasm";
 import { MemReplicaStorage } from "../../core/test/mem-replica-storage.ts";
-import { createSyncedApp } from "../src/sync/store.ts";
+import { createHomeApp, createSyncedApp } from "../src/sync/store.ts";
 
 const DOC_ID = "00000000-0000-0000-0000-000000000000";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -189,7 +189,7 @@ test("a full capture is one undo step and redo restores its fields", () => {
     0n,
     new MemReplicaStorage() as unknown as ReplicaStorage,
   );
-  const app = createSyncedApp(replica);
+  const app = createHomeApp(replica);
   const id = app.withActionBatch(() => {
     const id = app.addItemAt("inbox", "capture", 0);
     app.setItemNotes(id, "some notes");
@@ -206,5 +206,5 @@ test("a full capture is one undo step and redo restores its fields", () => {
   expect(it?.text).toBe("capture");
   expect(it?.notes).toBe("some notes");
   expect(it?.deadline).toBe("2026-10-01");
-  expect(app.state.focusOrder).toContain(id);
+  expect(app.state.focusEntries).toContainEqual({ docId: null, itemId: id });
 });

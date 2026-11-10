@@ -21,8 +21,15 @@
 //     known places a place field suggests (always every doc: they are
 //     the account's, `spec/place-plan.md` "Reuse").
 //
-// Focus is personal and lives in the Home doc's `focus` container. A
-// foreign ref is `<doc_id>:<item_id>`; the core keeps every one through
+// Focus is personal and lives in the Home doc's `focus` container:
+// there is no shared Focus, and a shared doc's `DocApp` knows nothing
+// of it. That is the one asymmetry between Home and the other docs
+// (`HomeApp` vs `DocApp`). Home's Focus takes items of any open doc,
+// so everything the lens *means* is here, not in a store: resolving
+// entries to rows, `isFocused`, the done-linger capture
+// (`focusRecentDone`) and un-done's re-pin (`undoneIntoFocus`), all in
+// the one merged order the lens shows. A foreign ref is
+// `<doc_id>:<item_id>`; the core keeps every one through
 // every sweep and leaves judging them dead to this layer, which prunes
 // a ref — by item id — once it *observes* the item closed or binned in
 // its doc. A ref whose item is missing is never pruned here: the doc
@@ -46,6 +53,7 @@
 
 import { placeSuggestionsJson } from "@monoplan/core/wasm";
 import { createEffect, createSignal, type Accessor } from "solid-js";
+import { restoreCapturedPositions } from "../linger.ts";
 import type { PlaceSuggestion } from "../placeSuggest.ts";
 import type { ViewKey } from "../prefs.ts";
 import {
@@ -53,6 +61,7 @@ import {
   isClosed,
   isOpen,
   type DocApp,
+  type HomeApp,
   type ItemActions,
   type ItemView,
   type Lifecycle,
@@ -68,9 +77,22 @@ export interface DocEntry {
   home: boolean;
 }
 
+/** Snapshot of the Focus slot an item held at the moment it was closed
+ *  (done or cancelled), in whichever doc it lives. The Focus lens's
+ *  twin of a store's `RecentDoneEntry`: closing drops the ref, so this
+ *  is the only record of where the row sat. */
+export interface FocusDoneEntry {
+  id: string;
+  /** Visible slot in the merged lens (`focusItems`) just before the
+   *  row left it, earlier captures already gone. */
+  index: number;
+  /** The closing transition's register timestamp (`lifecycleAt`). */
+  doneAt: number;
+}
+
 export interface DocsLayer {
   readonly homeDocId: string;
-  readonly home: DocApp;
+  readonly home: HomeApp;
   /** Every open doc, Home first. */
   docs: Accessor<DocEntry[]>;
   /** Register a doc opened after boot (`createDoc` in the runtime). */
@@ -114,6 +136,10 @@ export interface DocsLayer {
   /** Entry index (the space `addToFocus` / `moveInFocus` address) of a
    *  visible Focus slot; past-end slots map past the last entry. */
   focusEntryIndex(visibleIndex: number): number;
+  /** Rolling capture of rows that just left the Focus lens by being
+   *  closed, Home's and foreign alike, in capture order. Feeds the
+   *  lens's linger overlay, which applies its own (shorter) window. */
+  focusRecentDone: Accessor<readonly FocusDoneEntry[]>;
   /** The Done view: closed, not-binned items of Home, or of every doc
    *  when amalgamated, newest transition first. */
   doneItems(): ItemView[];
@@ -141,7 +167,7 @@ export interface DocsLayer {
   onUndoRedo(cb: (outcome: UndoOutcome, docId: string) => void): () => void;
 }
 
-export function createDocsLayer(home: DocApp, initial: readonly DocApp[]): DocsLayer {
+export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): DocsLayer {
   const homeDocId = home.docId;
   const seed: DocEntry[] = [{ docId: homeDocId, app: home, home: true }];
   for (const app of initial) {
@@ -266,6 +292,28 @@ export function createDocsLayer(home: DocApp, initial: readonly DocApp[]): DocsL
     return out;
   };
   const focusItems = (): ItemView[] => focusResolved().map((r) => r.item);
+
+  // Done-linger capture for the lens. Every doc's store announces an
+  // item about to close (`onItemClosing`, before its state changes), so
+  // the row is still in `focusResolved()` and its index is its slot in
+  // the merged order, foreign rows counted. Later closes in the same
+  // batch see the earlier ones already gone, giving the sequential
+  // indices `restoreCapturedPositions` replays. Entries older than the
+  // TTL are unreachable by any linger chain and pruned on write.
+  const FOCUS_RECENT_DONE_TTL_MS = 15_000;
+  const [focusRecentDone, setFocusRecentDone] = createSignal<readonly FocusDoneEntry[]>(
+    [],
+  );
+  const captureFocusDone = (id: string, doneAt: number): void => {
+    const index = focusResolved().findIndex((r) => r.item.id === id);
+    setFocusRecentDone((prev) => {
+      const kept = prev.filter(
+        (e) => e.id !== id && doneAt - e.doneAt < FOCUS_RECENT_DONE_TTL_MS,
+      );
+      if (index < 0) return kept.length === prev.length ? prev : kept;
+      return [...kept, { id, index, doneAt }];
+    });
+  };
   const isFocused = (itemId: string): boolean =>
     home.state.focusEntries.some((e) => e.itemId === itemId);
   const focusEntryIndex = (visibleIndex: number): number => {
@@ -372,19 +420,45 @@ export function createDocsLayer(home: DocApp, initial: readonly DocApp[]): DocsL
       if (done) pruneForeignFocus(ids);
     },
     undoneIntoFocus(ids) {
-      // Home's own path re-pins at the captured slot; a foreign item is
-      // reopened in its doc and pinned fresh at the top (its doc's
-      // store captured no Focus slot).
-      for (const [app, group] of groupByDoc(ids)) {
-        if (app === home) {
-          home.undoneIntoFocus(group);
-          continue;
-        }
-        app.setDoneMany(group, false);
-        home.withActionBatch(() => {
-          for (const id of group) home.addForeignToFocus(app.docId, id, 0);
-        });
+      if (ids.length === 0) return;
+      // Rebuild the lens as it stood before the closes: the live rows
+      // with the captured ones put back at their slots (sequential
+      // captures, replayed newest-first as the linger overlay does),
+      // ids without a capture on top. Each returning row then goes in
+      // just before the live row that follows it, in entry positions
+      // (the core's index space; an entry the lens cannot show still
+      // occupies one).
+      const wanted = new Set(ids);
+      const layout: Array<{ id: string; entryIndex?: number }> = focusResolved().map(
+        (r) => ({ id: r.item.id, entryIndex: r.entryIndex }),
+      );
+      const live = new Set(layout.map((r) => r.id));
+      const captured = focusRecentDone().filter((e) => wanted.has(e.id) && !live.has(e.id));
+      restoreCapturedPositions(
+        layout,
+        captured.map((e) => ({ index: e.index, value: { id: e.id } })),
+      );
+      const placed = new Set(captured.map((e) => e.id));
+      const fresh = ids.filter((id, i) => !placed.has(id) && !live.has(id) && ids.indexOf(id) === i);
+      layout.unshift(...fresh.map((id) => ({ id })));
+      // Bottom-up, so an insert never shifts a position still to be used.
+      const pins: Array<{ id: string; at: number }> = [];
+      let at = home.state.focusEntries.length;
+      for (let i = layout.length - 1; i >= 0; i--) {
+        const row = layout[i]!;
+        if (row.entryIndex !== undefined) at = row.entryIndex;
+        else pins.push({ id: row.id, at });
       }
+      setFocusRecentDone((prev) => prev.filter((e) => !wanted.has(e.id)));
+      routed.withActionBatch(() => {
+        for (const [app, group] of groupByDoc(ids)) app.setDoneMany(group, false);
+        for (const pin of pins) {
+          const app = appForItem(pin.id);
+          if (!app) continue;
+          if (app === home) home.addToFocus(pin.id, pin.at);
+          else home.addForeignToFocus(app.docId, pin.id, pin.at);
+        }
+      });
     },
     setBinned(id, binned) {
       forItem(id, (app) => app.setBinned(id, binned));
@@ -499,12 +573,14 @@ export function createDocsLayer(home: DocApp, initial: readonly DocApp[]): DocsL
   const undoListeners = new Set<(outcome: UndoOutcome, docId: string) => void>();
   const docOffs = new Map<string, () => void>();
   const subscribeDoc = (d: DocEntry): void => {
-    docOffs.set(
-      d.docId,
-      d.app.onUndoRedo((outcome) => {
-        for (const cb of undoListeners) cb(outcome, d.docId);
-      }),
-    );
+    const offUndo = d.app.onUndoRedo((outcome) => {
+      for (const cb of undoListeners) cb(outcome, d.docId);
+    });
+    const offClosing = d.app.onItemClosing(captureFocusDone);
+    docOffs.set(d.docId, () => {
+      offUndo();
+      offClosing();
+    });
   };
   for (const d of seed) subscribeDoc(d);
   const onUndoRedo = (cb: (outcome: UndoOutcome, docId: string) => void): (() => void) => {
@@ -537,6 +613,7 @@ export function createDocsLayer(home: DocApp, initial: readonly DocApp[]): DocsL
     focusItems,
     isFocused,
     focusEntryIndex,
+    focusRecentDone,
     doneItems,
     doneAmalgamate,
     binnedItems,

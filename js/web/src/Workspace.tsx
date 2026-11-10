@@ -103,7 +103,6 @@ import {
   type Place,
   type UndoOutcome,
   type ListView,
-  type RecentDoneEntry,
   type WorkflowState,
 } from "./sync/store.ts";
 import { createTheme, type ThemePreference } from "./theme.ts";
@@ -620,20 +619,27 @@ export function Workspace(props: {
   // Done click within DONE_LINGER_MS of the previous extends the
   // whole chain, so a burst of clicks all leave together at the
   // latest's expiry; a click after a gap starts a fresh chain.
-  // Sourced from the store's `recentDone` capture — the live
+  // Sourced from a capture taken as each row left — the live
   // projection drops done items instantly, so this is the only record
   // of what just left (and where it sat, for the re-insert below).
-  // A capture belongs to the current view if it left this list (list
-  // view) or held a Focus slot (Focus lens).
-  const lingerMatches = (r: RecentDoneEntry, v: ViewKey): boolean =>
-    v.kind === "list"
-      ? r.listId === v.id
-      : v.kind === "focus" && r.focusIndex !== undefined;
-  // Captures for the view: the list's own doc, or Home for Focus (the
-  // only store that records a Focus slot; a foreign row ticked in Focus
-  // leaves without a linger).
-  const recentDoneFor = (v: ViewKey): readonly RecentDoneEntry[] =>
-    v.kind === "focus" ? home.recentDone() : viewApp().recentDone();
+  // A list view reads its doc's store (`recentDone`, the rows that left
+  // this list). The Focus lens reads the personal layer
+  // (`focusRecentDone`): Focus is Home's alone but shows items of every
+  // doc, so only that layer knows the slot a row held in the merged
+  // order, whichever doc the row lives in.
+  interface LingerCapture {
+    id: string;
+    index: number;
+    doneAt: number;
+  }
+  const recentDoneFor = (v: ViewKey): readonly LingerCapture[] =>
+    v.kind === "focus"
+      ? docs.focusRecentDone()
+      : v.kind === "list"
+        ? viewApp()
+            .recentDone()
+            .filter((r) => r.listId === v.id)
+        : [];
   const lingerChain = createMemo(
     (): { ids: Set<string>; expiry: number } => {
       const v = view();
@@ -642,7 +648,6 @@ export function Workspace(props: {
       }
       const done = recentDoneFor(v)
         .filter((r) => {
-          if (!lingerMatches(r, v)) return false;
           const it = docs.getItem(r.id);
           return it !== undefined && isClosed(it) && !isBinned(it);
         })
@@ -687,15 +692,11 @@ export function Workspace(props: {
     const { ids: lingerIds, expiry } = lingerChain();
     if (Date.now() >= expiry) return;
     const captured: Array<{ index: number; value: ItemView }> = [];
-    for (const r of recentDoneFor(v).filter(
-      (r) => lingerMatches(r, v) && lingerIds.has(r.id),
-    )) {
+    for (const r of recentDoneFor(v)) {
+      if (!lingerIds.has(r.id)) continue;
       const it = docs.getItem(r.id);
       if (!it || !isClosed(it) || isBinned(it)) continue;
-      captured.push({
-        index: v.kind === "focus" ? (r.focusIndex ?? 0) : r.index,
-        value: it,
-      });
+      captured.push({ index: r.index, value: it });
     }
     restoreCapturedPositions(out, captured);
   };

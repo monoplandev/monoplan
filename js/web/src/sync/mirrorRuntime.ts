@@ -26,7 +26,7 @@ import type { MirrorBridge } from "@monoplan/core/mirror-bridge";
 import type { Session } from "../Login.tsx";
 import type { Prefs } from "../prefs.ts";
 import { createDocsLayer, type DocsLayer } from "./docs.ts";
-import { createSyncedApp, type DocApp } from "./store.ts";
+import { createHomeApp, createSyncedApp, type DocApp, type HomeApp } from "./store.ts";
 import type { EngineSessionInfo } from "./mirrorHost.ts";
 import type { PresentAccount } from "./runtime.ts";
 import { createViewState } from "./viewState.ts";
@@ -71,17 +71,21 @@ export function createMirrorRuntime(boot: MirrorBoot) {
   // queued AppEvents on the doc; the store's initial materialisation
   // already reflects them, so they must not be dispatched on top of it
   // afterwards.
-  const mount = (replica: Replica): DocApp => {
+  // The Home doc is the one with Focus, so it alone gets the Home app.
+  const mount = <A extends DocApp>(replica: Replica, makeApp: (replica: Replica) => A): A => {
     while (replica.popAppEvent()) {
       // discard
     }
-    const app = createSyncedApp(replica);
+    const app = makeApp(replica);
     app.setOnFlush(() => boot.bridge.pumpOutbox());
     docApps.set(app.docId, app);
     return app;
   };
-  for (const replica of boot.replicas) mount(replica);
-  const app = docApps.get(boot.session.primaryDocId);
+  let app: HomeApp | undefined;
+  for (const replica of boot.replicas) {
+    if (replica.docId() === boot.session.primaryDocId) app = mount(replica, createHomeApp);
+    else mount(replica, createSyncedApp);
+  }
   if (!app) throw new Error("mirror boot has no Home doc");
   const docs: DocsLayer = createDocsLayer(app, [...docApps.values()]);
   const { view, setView } = createViewState(docs, boot.prefs, boot.session.accountId);
@@ -145,7 +149,7 @@ export function createMirrorRuntime(boot: MirrorBoot) {
     if (docApps.has(docId)) return docId;
     const replica = await boot.bridge.open(docId);
     boot.replicas.push(replica);
-    docs.addDoc(mount(replica));
+    docs.addDoc(mount(replica, createSyncedApp));
     return docId;
   };
 
