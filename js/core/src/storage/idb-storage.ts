@@ -1,12 +1,12 @@
 // Web implementation of the Rust `LocalStorage` trait
 // (`spec/local-storage.md`, model in `spec/vv-wal-separation.md`).
 //
-// The engine's trait is **synchronous** — `appendLocalWal` must return
+// The replica's trait is **synchronous** — `appendLocalWal` must return
 // a `localSeq` immediately — but IndexedDB is async. We bridge the gap
 // with an in-memory mirror of the WAL: the synchronous methods
 // read/write the mirror and return at once, while the underlying IDB
 // write is queued onto a background flush chain. Real durability (the
-// IDB transaction committing) is surfaced to the engine out-of-band via
+// IDB transaction committing) is surfaced to the replica out-of-band via
 // `whenFlushed()` → the host's `notifyOplogDurable`, so the server's
 // `Ack` isn't shipped until the bytes are actually on disk.
 //
@@ -15,12 +15,12 @@
 // completion + VV) each run as ONE queued IDB transaction spanning the
 // involved stores.
 //
-// This object is handed to the wasm `SyncEngine` constructor as the
-// `EngineStorage` — its method names line up with the extern interface
+// This object is handed to the wasm `Replica` constructor as the
+// `ReplicaStorage` — its method names line up with the extern interface
 // declared in `core/web/src/lib.rs`. Encrypted payloads cross as
 // `(ciphertext, nonce)` byte pairs; `pushId` as the raw 16 UUID bytes;
 // encoded VersionVectors as opaque byte arrays. Everything stays opaque
-// (the DEK never crosses this boundary — the engine seals/opens
+// (the DEK never crosses this boundary — the replica seals/opens
 // before/after).
 
 import {
@@ -45,8 +45,8 @@ interface MirrorOp {
   createdAt: number;
 }
 
-/** The in-flight push in the boot shape the host seeds the engine
- *  with (`engine.seedInFlightPush`). `pushId` is the raw 16 uuid
+/** The in-flight push in the boot shape the host seeds the replica
+ *  with (`replica.seedInFlightPush`). `pushId` is the raw 16 uuid
  *  bytes. */
 export interface InFlightPushJs {
   pushId: Uint8Array;
@@ -56,27 +56,27 @@ export interface InFlightPushJs {
   toVv: Uint8Array;
 }
 
-/** What the host needs to rebuild the `Doc` and seed the engine before
+/** What the host needs to rebuild the `Doc` and seed the replica before
  *  constructing it: the snapshot (if any), every WAL row after it, and
  *  the persisted sync cursors. */
-export interface EngineBootRows {
+export interface ReplicaBootRows {
   snapshot: { ciphertext: Uint8Array; nonce: Uint8Array } | null;
   replay: { ciphertext: Uint8Array; nonce: Uint8Array }[];
   /** Highest `localSeq` ever assigned (max of snapshot frontier and
-   *  the WAL) — seeds `engine.setLastLocalSeq`. */
+   *  the WAL) — seeds `replica.setLastLocalSeq`. */
   lastLocalSeq: number;
   /** Persisted resume cursor — the highest contiguous serverSeq the
-   *  engine durably applied last session. Seeds `SyncEngine`'s
+   *  replica durably applied last session. Seeds `Replica`'s
    *  `lastAckedSeq` (the `since_seq` of the resume `PullUpdates`). */
   lastAckedSeq: number;
   /** Encoded `serverKnownVv` (empty = never synced) — seeds
-   *  `engine.seedServerKnownVv`. */
+   *  `replica.seedServerKnownVv`. */
   serverKnownVv: Uint8Array;
   /** The durable in-flight push, if the previous session left one —
-   *  seeds `engine.seedInFlightPush`. */
+   *  seeds `replica.seedInFlightPush`. */
   inFlightPush: InFlightPushJs | null;
   /** Payload bytes across the surviving WAL rows — with
-   *  `replay.length`, seeds `engine.seedWalStats`. */
+   *  `replay.length`, seeds `replica.seedWalStats`. */
   walBytes: number;
 }
 
@@ -204,7 +204,7 @@ export class IdbStorage {
         const maxOp = rows.reduce((m, r) => Math.max(m, r.localSeq), 0);
         this.nextLocalSeq = Math.max(highWater, maxOp);
         // Read the persisted cursors from the docs row — NOT derived
-        // from the WAL rows, which snapshot folding prunes. The engine
+        // from the WAL rows, which snapshot folding prunes. The replica
         // is the authority; we just replay what it last wrote.
         const docRow = docGet.result as DocRow | undefined;
         this.docCreatedAt = docRow?.createdAt ?? Date.now();
@@ -220,9 +220,9 @@ export class IdbStorage {
   // ---------- host-facing (async) ----------
 
   /** Snapshot + post-snapshot WAL rows for boot, plus every persisted
-   *  cursor the engine seeds from. Read straight from the mirror
+   *  cursor the replica seeds from. Read straight from the mirror
    *  loaded by `open()`. */
-  bootRows(): EngineBootRows {
+  bootRows(): ReplicaBootRows {
     // Replay every surviving row: `writeSnapshot` already pruned the
     // prefix the snapshot contains.
     const replay = this.ops

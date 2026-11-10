@@ -38,9 +38,9 @@
 //! The struct holds a `last_persisted_vv` — the local WAL capture
 //! cursor. Everything at or below it has been durably appended to the
 //! local encrypted WAL (see `spec/local-storage.md`); `pending_export`
-//! hands the engine exactly the commits past it. This cursor is about
+//! hands the replica exactly the commits past it. This cursor is about
 //! *local durability only* — what the server has is tracked separately
-//! by the engine's `server_known_vv`.
+//! by the replica's `server_known_vv`.
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -1771,7 +1771,7 @@ impl Doc {
 
     /// Set (or clear) the account id stamped into `created_by` on items
     /// this handle creates from now on. Hosts call it once at boot, after
-    /// replay and before the engine takes the doc: the web client with
+    /// replay and before the replica takes the doc: the web client with
     /// the session's account id, the CLI with the profile's. Existing
     /// items are untouched; a trimmed-empty id clears. Attribution is
     /// per write, not per doc, so the same doc opened by two members
@@ -1880,7 +1880,7 @@ impl Doc {
     }
 
     /// Snapshot of the oplog VV — every commit currently in the log,
-    /// across every peer we've seen. The engine captures this at the
+    /// across every peer we've seen. The replica captures this at the
     /// moment of an export and feeds it back via `mark_persisted_at`
     /// once the exported bytes are durably in the WAL, so a mutation
     /// committed *during* the append isn't silently skipped.
@@ -4280,7 +4280,7 @@ impl Doc {
     // ---------- update stream ----------
 
     /// Encrypted full-state snapshot at the doc's current frontier.
-    /// Used by the sync engine to satisfy a server `SnapshotRequest`.
+    /// Used by the replica to satisfy a server `SnapshotRequest`.
     /// Independent of `last_persisted_vv` — the snapshot covers the whole
     /// doc, not a delta — so this does not advance any push-state
     /// bookkeeping; producing a snapshot is side-effect-free locally.
@@ -4319,7 +4319,7 @@ impl Doc {
     }
 
     /// Encrypted blob containing every commit strictly after `from` —
-    /// the outbound-sync export. The engine passes its `server_known_vv`
+    /// the outbound-sync export. The replica passes its `server_known_vv`
     /// here so the delta is derived from Loro history, independent of
     /// which WAL rows still exist. Returns `None` when `from` already
     /// covers the whole oplog.
@@ -4399,7 +4399,7 @@ impl Doc {
 
     /// Mark the local view as "everything currently in oplog is now
     /// durably captured in the WAL." Caller-friendly shortcut for the
-    /// common synchronous case (CLI tests). The sync engine uses
+    /// common synchronous case (CLI tests). The replica uses
     /// `mark_persisted_at` instead so a mutation committed between the
     /// export and the durable append isn't silently included in the
     /// advance.
@@ -4503,9 +4503,9 @@ impl Doc {
     /// Decrypt and apply a peer update blob. Returns the blob's *declared*
     /// operation range (its decoded `partial_end_vv`) — the proof of
     /// which Loro ops the blob carries, independent of whether the
-    /// import was a no-op duplicate. The engine merges this into its
+    /// import was a no-op duplicate. The replica merges this into its
     /// `server_known_vv`. `last_persisted_vv` advances by the same
-    /// range (the engine WAL-logs the very same blob, and boot replay
+    /// range (the replica WAL-logs the very same blob, and boot replay
     /// feeds stored rows back through this path).
     ///
     /// Translates the import's Loro container diffs (captured by the
@@ -4563,7 +4563,7 @@ impl Doc {
     }
 
     /// The mirror's side of host → mirror (`spec/mac-window-plan.md`
-    /// "Host to mirror"): plaintext Loro updates the host exported since
+    /// "Engine to mirror"): plaintext Loro updates the host exported since
     /// what it last sent this doc. Imported tagged `remote`, so the
     /// window's own undo never reverses a host-side change (a CLI
     /// command, a remote device, another window), and translated to
@@ -5261,7 +5261,7 @@ impl Doc {
     // ---------- event queue ----------
 
     /// Pop the next domain event, FIFO. UI consumers drain this on each
-    /// engine tick. See `snapshot_events` for the synthetic backfill
+    /// replica tick. See `snapshot_events` for the synthetic backfill
     /// emitted on first attach.
     pub fn pop_event(&self) -> Option<AppEvent> {
         self.events.lock().ok()?.pop_front()

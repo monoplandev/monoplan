@@ -27,7 +27,7 @@ at research time and 1.16.0 after the bump.
 
 ### Why the same doc
 
-- One sync engine, one WAL, one compaction horizon, one DEK. A separate
+- One replica, one WAL, one compaction horizon, one DEK. A separate
   notes doc per item is the multi-doc substrate from `sharing-plan.md`
   Phases 1-5 (about six days) plus per-doc frontier and snapshot management
   for thousands of tiny docs. Nothing about notes needs it.

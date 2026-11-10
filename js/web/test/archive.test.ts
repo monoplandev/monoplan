@@ -6,9 +6,9 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { Dek, Doc, SyncEngine } from "@monoplan/core/wasm";
-import type { EngineStorage } from "@monoplan/core/wasm";
-import { MemEngineStorage } from "../../core/test/mem-engine-storage.ts";
+import { Dek, Doc, Replica } from "@monoplan/core/wasm";
+import type { ReplicaStorage } from "@monoplan/core/wasm";
+import { MemReplicaStorage } from "../../core/test/mem-replica-storage.ts";
 import { createRoot } from "solid-js";
 import { createSyncedApp } from "../src/sync/store.ts";
 import { createDocsLayer } from "../src/sync/docs.ts";
@@ -16,13 +16,13 @@ import { findResultArchived } from "../src/findResults.tsx";
 
 const DOC_ID = "00000000-0000-0000-0000-000000000000";
 
-function engineFrom(doc: Doc): SyncEngine {
-  return new SyncEngine(
+function replicaFrom(doc: Doc): Replica {
+  return new Replica(
     doc,
     DOC_ID,
     Dek.generate(),
     0n,
-    new MemEngineStorage() as unknown as EngineStorage,
+    new MemReplicaStorage() as unknown as ReplicaStorage,
   );
 }
 
@@ -33,7 +33,7 @@ describe("store archived lists", () => {
     const old = doc.addList("Old");
     doc.setListArchived(old, true);
 
-    const app = createSyncedApp(engineFrom(doc));
+    const app = createSyncedApp(replicaFrom(doc));
     // Both stay in the canonical order/byId projections.
     expect(app.state.listsOrder).toEqual([active, old]);
     expect(app.state.listsById[active]?.archivedAt).toBeUndefined();
@@ -44,7 +44,7 @@ describe("store archived lists", () => {
     const doc = Doc.create();
     const id = doc.addList("Work");
     doc.setListIcon(id, "🎯");
-    const app = createSyncedApp(engineFrom(doc));
+    const app = createSyncedApp(replicaFrom(doc));
     expect(app.state.listsById[id]?.archivedAt).toBeUndefined();
 
     app.setListArchived(id, true);
@@ -68,7 +68,7 @@ describe("store archived lists", () => {
     const id = doc.addList("Errands");
     const a = doc.addItem(id, "a");
     const b = doc.addItem(id, "b");
-    const app = createSyncedApp(engineFrom(doc));
+    const app = createSyncedApp(replicaFrom(doc));
 
     app.setListArchived(id, true);
     expect(app.state.listOpen[id]).toEqual([a, b]);
@@ -84,7 +84,7 @@ describe("store archived lists", () => {
     const binned = doc.addItem(id, "binned thing");
     doc.setItemDone(done, true);
     doc.setItemBinned(binned, true);
-    const app = createSyncedApp(engineFrom(doc));
+    const app = createSyncedApp(replicaFrom(doc));
 
     app.setListArchived(id, true);
     // Done / Bin rows resolve the origin-list label via listsById — the
@@ -107,7 +107,7 @@ describe("store archived lists", () => {
     const inWork = doc.addItem(work, "ship it");
     const inHome = doc.addItem(home, "ship it too");
     const inInbox = doc.addItem("inbox", "ship it three");
-    const app = createSyncedApp(engineFrom(doc));
+    const app = createSyncedApp(replicaFrom(doc));
     // The Find surfaces resolve lists through the cross-doc layer; one
     // doc here, so it is just a view over `app`.
     const layer = createRoot(() => createDocsLayer(app, []));
@@ -146,7 +146,7 @@ describe("store archived lists", () => {
   });
 
   test("no user-facing list delete remains on the store API", () => {
-    const app = createSyncedApp(engineFrom(Doc.create()));
+    const app = createSyncedApp(replicaFrom(Doc.create()));
     expect(
       (app as unknown as Record<string, unknown>).deleteList,
     ).toBeUndefined();

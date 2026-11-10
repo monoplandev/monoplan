@@ -5,7 +5,7 @@ Per-account local persistence for the doc — the **same logical model on every 
 1. **Crash recovery** is snapshot + WAL: one encrypted full-history Loro snapshot plus a bounded encrypted WAL of updates applied after it. Every commit — local mutation or applied remote update — appends a WAL row; when the WAL crosses a threshold it is folded into a fresh snapshot and the folded prefix pruned. Folding runs **regardless of online/sync status**.
 2. **Outbound sync** is derived from Loro history against `server_known_vv` — the operations proven to exist in the server update stream — never from which WAL rows still exist. There is no outbox of rows; a full Loro snapshot retains operation history, so even unsent local operations survive folding and re-derive at push time.
 
-The substrate differs by platform — **CLI: sqlite on disk; web: IndexedDB on the main thread** — but the schema, boot semantics, and fold policy are identical (the engine only ever sees the trait).
+The substrate differs by platform — **CLI: sqlite on disk; web: IndexedDB on the main thread** — but the schema, boot semantics, and fold policy are identical (the replica only ever sees the trait).
 
 ## Persisted state (per doc)
 
@@ -20,9 +20,9 @@ The in-memory WAL capture cursor is the doc's `last_persisted_vv`: it advances w
 ## Storage substrate
 
 - **CLI**: `SqliteStorage` (`crates/storage-sqlite`, CLI newtype in `cli/src/storage.rs`) — a file on disk under the profile dir. Same pragmas as the server (`spec/storage.md` §Sqlite settings). Writes are synchronously durable: the trait method returns only after the transaction commits.
-- **Web**: `IdbStorage` (`js/core/src/storage/idb-storage.ts`) — IndexedDB on the **main thread**, behind a wasm-bindgen `EngineStorage` extern (`core/web/src/lib.rs`). The trait is synchronous but IDB is async, so `IdbStorage` keeps a synchronous in-memory mirror that the extern methods read/write immediately and flushes the real IDB transaction on a background promise chain; durability is signalled back out-of-band (`whenFlushed()` → the host's `notify_oplog_durable`) so an `Ack` isn't shipped until the bytes are on disk. Writes the trait requires to be atomic run as one queued IDB transaction spanning the involved stores. IndexedDB is **hard-required** — a session that can't open it surfaces a "Failed to start" screen rather than booting on a storage-less engine.
+- **Web**: `IdbStorage` (`js/core/src/storage/idb-storage.ts`) — IndexedDB on the **main thread**, behind a wasm-bindgen `ReplicaStorage` extern (`core/web/src/lib.rs`). The trait is synchronous but IDB is async, so `IdbStorage` keeps a synchronous in-memory mirror that the extern methods read/write immediately and flushes the real IDB transaction on a background promise chain; durability is signalled back out-of-band (`whenFlushed()` → the host's `notify_oplog_durable`) so an `Ack` isn't shipped until the bytes are on disk. Writes the trait requires to be atomic run as one queued IDB transaction spanning the involved stores. IndexedDB is **hard-required** — a session that can't open it surfaces a "Failed to start" screen rather than booting on a storage-less replica.
 
-The engine sees a single `LocalStorage` trait; storage is mandatory — there is no storage-less engine mode.
+The replica sees a single `LocalStorage` trait; storage is mandatory — there is no storage-less replica mode.
 
 ## Schema (sqlite; the IDB stores mirror it)
 
@@ -70,12 +70,12 @@ Notes:
 - `local_seq` is local bookkeeping only: append/replay order and the snapshot-fold cutoff. Not a sync coordinate.
 - `wal.server_seq` exists solely for idempotent re-delivery detection (resume re-pull, broadcast overlap) — a duplicate `server_seq` returns the existing row instead of inserting a phantom. It plays no role in deciding what uploads.
 - `docs.last_acked_server_seq` is the **persisted** pull cursor. Never derived from `MAX(wal.server_seq)` — that underestimates once folding prunes the rows it was read from, and overestimates past a gap.
-- `docs.server_known_vv` is the upload-derivation base. The engine holds the decoded VV in memory and hands storage the full merged encoding on every advance.
+- `docs.server_known_vv` is the upload-derivation base. The replica holds the decoded VV in memory and hands storage the full merged encoding on every advance.
 - One snapshot row per doc — replaced on each fold.
 
 ## Write paths
 
-Local mutation (engine `capture_local_ops`):
+Local mutation (replica `capture_local_ops`):
 
 1. Commit the Loro mutation.
 2. Export `Updates(last_persisted_vv)`, encrypt with the DEK.
@@ -83,7 +83,7 @@ Local mutation (engine `capture_local_ops`):
 4. Advance `last_persisted_vv` to the pre-export oplog VV.
 5. `server_known_vv` is untouched.
 
-Remote server update (engine `apply_remote_updates`):
+Remote server update (replica `apply_remote_updates`):
 
 1. Decrypt; decode the blob's **declared** operation range (`decode_import_blob_meta` → `partial_end_vv`); apply to the doc.
 2. Merge the declared range into `server_known_vv` — the *declared* range, not `ImportStatus.success`: a duplicate import is a no-op but still proves the server possesses those operations.
@@ -94,7 +94,7 @@ Remote server update (engine `apply_remote_updates`):
 
 Trigger: WAL row count ≥ threshold (CLI: 100, evaluated after every command's append and once at boot so an interrupted fold self-heals; web hot pulse: 250, plus an idle/hidden-tab full fold) **or** WAL payload bytes over a safety cap (CLI 4 MiB, web 8 MiB — initial values pending measurement).
 
-Procedure (engine `snapshot_if_wal_exceeds` / `force_snapshot` → storage `write_snapshot`, one transaction):
+Procedure (replica `snapshot_if_wal_exceeds` / `force_snapshot` → storage `write_snapshot`, one transaction):
 
 1. Capture any uncommitted mutations to the WAL first (so the export provably contains every row at or below the cutoff).
 2. Cutoff = current `last_local_seq`.
@@ -127,7 +127,7 @@ Bootstrapping **from** a server snapshot: apply it, merge its declared frontier 
 
 ## Replay / boot
 
-Per doc: read the snapshot row (if any), decrypt and import; then decrypt and import every surviving WAL row in `local_seq` order; `finish_oplog_replay` once. Boot replays **every surviving row** with no cutoff — the fold already pruned exactly what the snapshot contains. The imports advance `last_persisted_vv` (via their declared ranges), so a booted doc reports `has_uncaptured_ops() == false`. `BootState` also hands back `server_known_vv`, `last_acked_server_seq`, the in-flight push, and the WAL row/byte statistics; the engine seeds from them (`seed_boot`).
+Per doc: read the snapshot row (if any), decrypt and import; then decrypt and import every surviving WAL row in `local_seq` order; `finish_oplog_replay` once. Boot replays **every surviving row** with no cutoff — the fold already pruned exactly what the snapshot contains. The imports advance `last_persisted_vv` (via their declared ranges), so a booted doc reports `has_uncaptured_ops() == false`. `BootState` also hands back `server_known_vv`, `last_acked_server_seq`, the in-flight push, and the WAL row/byte statistics; the replica seeds from them (`seed_boot`).
 
 The same path covers a fresh account (no rows at all), pure-WAL recovery (no snapshot yet), and the steady-state snapshot + tail case.
 
@@ -141,36 +141,36 @@ The same path covers a fresh account (no rows at all), pure-WAL recovery (no sna
 
 ## Why IDB on web (not sqlite / Worker / OPFS)
 
-An earlier spike (`spike/shared-worker`) ran sqlite-wasm on the OPFS-SAH-pool VFS inside a SharedWorker, with the engine off the main thread. It worked end-to-end and was abandoned. The reasons are durable design constraints, not incidental:
+An earlier spike (`spike/shared-worker`) ran sqlite-wasm on the OPFS-SAH-pool VFS inside a SharedWorker, with the replica off the main thread. It worked end-to-end and was abandoned. The reasons are durable design constraints, not incidental:
 
 1. **`createSyncAccessHandle` is `DedicatedWorkerGlobalScope`-only by spec** — not a vendor bug. A SharedWorker therefore *cannot* host OPFS-backed sqlite in any browser. ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/FileSystemFileHandle/createSyncAccessHandle), [wa-sqlite #79](https://github.com/rhashimoto/wa-sqlite/discussions/79)). Don't propose this combination again.
 2. **sqlite-wasm buys nothing here.** We store opaque encrypted blobs, not queryable data, so we never use SQL's query power — but we'd pay ~1 MB of bundle plus the COOP/COEP header requirement. IDB is exactly the right shape (ordered keyed store with transactions) and ships in every browser for free.
-3. **The engine must stay on the main thread.** Moving it into a Worker adds a postMessage round-trip to every mutation; the lag is perceptible in tight UI loops (typing, drag-reorder). Multi-tab coherence and Argon2id-off-main are real wins but not worth that regression.
-4. **The trait is the prize, not a unified storage technology.** "Same Rust engine, same boot semantics, same WAL, same fold policy" is the value. sqlite on one side and IDB on the other satisfy it identically — the engine never knows which.
+3. **The replica must stay on the main thread.** Moving it into a Worker adds a postMessage round-trip to every mutation; the lag is perceptible in tight UI loops (typing, drag-reorder). Multi-tab coherence and Argon2id-off-main are real wins but not worth that regression.
+4. **The trait is the prize, not a unified storage technology.** "Same Rust replica, same boot semantics, same WAL, same fold policy" is the value. sqlite on one side and IDB on the other satisfy it identically — the replica never knows which.
 
 ### Web boot + the bytes-copy gotcha
 
-Web boot is **host-driven in JS** and mirrors the CLI's `boot_doc` (it does *not* use `Doc.load`): `Doc.empty()` → replay the decrypted snapshot and every surviving WAL row (`bootRows`, in `local_seq` order) through `replayOplogUpdate` → call `finishOplogReplay()` once → `markPersisted()` so the capture cursor covers the replayed ops. Rebuilding after every row is forbidden: with N items and R replay rows it turns refresh into O(N×R); keeping R small is the fold threshold's job. The host then seeds the engine from `bootRows`: `setLastLocalSeq`, `seedWalStats`, `seedServerKnownVv`, and `seedInFlightPush` (if present). The resume cursor comes from `bootRows().lastAckedSeq` — the engine-persisted `docs.lastAckedServerSeq` (written via `writeAckedSeq`), **not** the `device` row and **not** derived from the WAL.
+Web boot is **host-driven in JS** and mirrors the CLI's `boot_doc` (it does *not* use `Doc.load`): `Doc.empty()` → replay the decrypted snapshot and every surviving WAL row (`bootRows`, in `local_seq` order) through `replayOplogUpdate` → call `finishOplogReplay()` once → `markPersisted()` so the capture cursor covers the replayed ops. Rebuilding after every row is forbidden: with N items and R replay rows it turns refresh into O(N×R); keeping R small is the fold threshold's job. The host then seeds the replica from `bootRows`: `setLastLocalSeq`, `seedWalStats`, `seedServerKnownVv`, and `seedInFlightPush` (if present). The resume cursor comes from `bootRows().lastAckedSeq` — the replica-persisted `docs.lastAckedServerSeq` (written via `writeAckedSeq`), **not** the `device` row and **not** derived from the WAL.
 
 Initial attachment is not a live mutation stream. The web store materializes once from `workspaceSnapshotJson`; live bulk/opaque changes emit one `FullResync` control event and use the same one-shot materialization path.
 
-⚠️ Any JS-side `EngineStorage` impl that **retains** wasm-passed `&[u8]` bytes must copy them on entry (`.slice()`). wasm-bindgen hands `&[u8]` as a `Uint8Array` view into wasm linear memory valid only for that synchronous call; `IdbStorage` defers the IDB write, so without a copy it persists reused/garbage memory and the next boot fails to decrypt. This cost a real bug and is invisible to synchronous mock tests — only a real browser reload catches it. This applies to payloads, VV encodings, and `pushId` bytes alike.
+⚠️ Any JS-side `ReplicaStorage` impl that **retains** wasm-passed `&[u8]` bytes must copy them on entry (`.slice()`). wasm-bindgen hands `&[u8]` as a `Uint8Array` view into wasm linear memory valid only for that synchronous call; `IdbStorage` defers the IDB write, so without a copy it persists reused/garbage memory and the next boot fails to decrypt. This cost a real bug and is invisible to synchronous mock tests — only a real browser reload catches it. This applies to payloads, VV encodings, and `pushId` bytes alike.
 
 ## Migration
 
 Pre-release rule (see `AGENTS.md`): exactly one migration file per database, edited in place — never incremental migrations, never legacy bridges. Old-layout data is abandoned, not drained.
 
 - **CLI**: `crates/storage-sqlite/migrations/001_init.sql` (+ the CLI's `001_cli` account table). The old outbox-era `ops` schema was replaced in place.
-- **Web**: the engine stores live in the single `monoplan-web` IDB database (`docs` / `ops` / `snapshots` / `inflight`) alongside the config stores. The v9 upgrade recreates `ops` as the WAL (v8's outbox-era rows are abandoned; authed devices re-pull and the snapshot baseline carries anonymous docs) and adds the `inflight` store.
+- **Web**: the replica stores live in the single `monoplan-web` IDB database (`docs` / `ops` / `snapshots` / `inflight`) alongside the config stores. The v9 upgrade recreates `ops` as the WAL (v8's outbox-era rows are abandoned; authed devices re-pull and the snapshot baseline carries anonymous docs) and adds the `inflight` store.
 
 ## Testing
 
-The authoritative test list is `spec/vv-wal-separation.md` §Tests. Coverage lives in `core/src/sync.rs` (engine semantics: VV-derived export after folding, in-flight retry, duplicate-delivery proof, mixed-history deltas, server-frontier snapshots), `crates/storage-sqlite/tests/wal.rs` (bounded WAL over thousands of offline mutations, exact restart, fold/reopen consistency, idempotent remote append, scoped `complete_push`), `server/tests/sync.rs` (push_id dedup end-to-end), and `js/core/test/*` (the same contract over the `EngineStorage` mirror plus a live browser-stack e2e).
+The authoritative test list is `spec/vv-wal-separation.md` §Tests. Coverage lives in `core/src/sync.rs` (replica semantics: VV-derived export after folding, in-flight retry, duplicate-delivery proof, mixed-history deltas, server-frontier snapshots), `crates/storage-sqlite/tests/wal.rs` (bounded WAL over thousands of offline mutations, exact restart, fold/reopen consistency, idempotent remote append, scoped `complete_push`), `server/tests/sync.rs` (push_id dedup end-to-end), and `js/core/test/*` (the same contract over the `ReplicaStorage` mirror plus a live browser-stack e2e).
 
 ## Out of scope
 
-- **Multi-tab coherence on web.** One engine, one tab; the `navigator.locks` single-tab gate stays.
-- **Engine in a Worker.** Stays on the main thread — see *Why IDB on web* §3.
+- **Multi-tab coherence on web.** One replica, one tab; the `navigator.locks` single-tab gate stays.
+- **Replica in a Worker.** Stays on the main thread — see *Why IDB on web* §3.
 - **Argon2id off the main thread.** Solvable later with a dedicated Worker just for the KDF.
 - **sqlite on web.** Not happening unless the OPFS-SAH spec changes — see *Why IDB on web* §1.
 - **Shallow snapshots / peer-ID lifetime changes.** Explicit non-goals of the WAL/VV refactor (`spec/vv-wal-separation.md`).

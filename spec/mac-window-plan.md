@@ -1,45 +1,45 @@
 # macOS window: plan
 
 Status: decided 2026-10-29; phase 1 (tray over the FFI) built the same
-day, phase 2 (the mirror on the host: `Host.subscribe` / `Host.import`,
+day, phase 2 (the mirror on the engine: `Engine.subscribe` / `Engine.import`,
 `Doc::import_mirror_update`, `HostCmd`) built 2026-11-03, phase 3 (the
-mirror in wasm and JS: `SyncEngine.mirror`, `MirrorBridge`, the app
+mirror in wasm and JS: `Replica.mirror`, `MirrorBridge`, the app
 runtime and its Vite entry) built 2026-11-04, phase 4 (the window
-itself, in Swift: `WebWindow.swift`, the scheme handler, `Host.session`)
+itself, in Swift: `WebWindow.swift`, the scheme handler, `Engine.session`)
 built 2026-11-04. The macOS app's window is a
 webview running the web client (`js/web`) over a **mirror**: a second
 Loro doc in the webview, with a peer id of its own, seeded from the
-app's in-process host and kept converged with it by exchanging Loro
+app's in-process engine and kept converged with it by exchanging Loro
 update bytes across the Swift FFI. Nothing in the web store changes;
 only its IO does. The socket (`spec/daemon-plan.md` "IPC protocol")
 stays the CLI's path and never carries the mirror.
 
-Companion to `spec/daemon-plan.md` (the host, amended 2026-10-27 and
-2026-10-29), `spec/architecture.md` (sans-IO engine, host
+Companion to `spec/daemon-plan.md` (the engine, amended 2026-10-27 and
+2026-10-29), `spec/architecture.md` (sans-IO replica, host
 responsibilities), `spec/peer-id-plan.md` (the slot lease the mirror
 borrows), `apple/README.md` (the FFI build pipeline and the tray).
 Reference code: `js/web/src/sync/runtime.ts` and `store.ts` (what the
-web store expects of its engine), `core/web/src/lib.rs` (`SyncEngine`,
+web store expects of its replica), `core/web/src/lib.rs` (`Replica`,
 the wasm class the store drives), `cli/src/daemon.rs` (`Pending`, the
 internal request channel the socket handler already sits on),
-`core/ffi/src/lib.rs` (`Host`).
+`core/ffi/src/lib.rs` (`Engine`).
 
 ## Decisions in one screen
 
 | Question | Decision |
 |---|---|
 | Native or webview? | **Webview.** The web client is the UI, on macOS as in the browser. SwiftUI is for later, once the UI has settled under real users; building it now would mean rebuilding a UI that is still moving. |
-| View or mirror? | **Mirror.** A *view* makes the host the view model: it pushes state out, the webview renders it, every action goes back as an intent. Either flavour (Swift-held projections, or the web store's read half fed by host AppEvents) rebuilds the store's write half on the host: batching, undo grouping, lifecycle cascades, Focus auto-remove, draft ids, the notes bridge. That is the code with the most behaviour in it and it would then exist twice, once per client, with every feature landing in both. The mirror keeps one code path. See "Why not a view". |
-| Transport | **The FFI, in process, always.** `Host` (`monoplan-ffi`) grows `subscribe` and `import`. The socket is served for the CLI only; the headless `monoplan daemon` is the fallback host for Linux, servers and CLI-only Macs and never learns the mirror. The tray moves to the FFI first (phase 1), so the app has one client path. |
+| View or mirror? | **Mirror.** A *view* makes the engine the view model: it pushes state out, the webview renders it, every action goes back as an intent. Either flavour (Swift-held projections, or the web store's read half fed by engine AppEvents) rebuilds the store's write half on the engine: batching, undo grouping, lifecycle cascades, Focus auto-remove, draft ids, the notes bridge. That is the code with the most behaviour in it and it would then exist twice, once per client, with every feature landing in both. The mirror keeps one code path. See "Why not a view". |
+| Transport | **The FFI, in process, always.** `Engine` (`monoplan-ffi`) grows `subscribe` and `import`. The socket is served for the CLI only; the headless `monoplan daemon` is the fallback engine for Linux, servers and CLI-only Macs and never learns the mirror. The tray moves to the FFI first (phase 1), so the app has one client path. |
 | Wire | **Loro bytes, plaintext, three verbs.** Snapshot in (`export_snapshot`), updates in, updates out (`export(updates(vv))`, `import_with`). No envelope, no seqs, no acks, no encryption: the sync protocol exists to survive a network and an untrusted server, and the mirror has neither. |
-| The mirror's peer id | **Its own**, leased by the host from the slot pool (`peer::claim`, a second flock in the same process takes the next slot) for the life of the subscription. Two writers on one peer would mint duplicate op ids. With its own peer the mirror is an honest concurrent writer and merges with the host like a second device would. VV width grows by one slot, which the pool already bounds by historical concurrency. |
-| What the webview holds | **No storage, no DEK, no WebSocket, no login.** Close the window and the mirror is gone; reopen and it reseeds from a fresh snapshot. The host is the durable copy. |
-| Durability of a window edit | The mirror hands its ops to the host on every store flush, the same cadence that reaches IndexedDB in the browser. The host WALs them on its capture tick. The window is lost between a flush and the host's import only if the process dies in that microsecond, which is the same window the browser has between a commit and its IDB write. |
-| Engine surface | **One wasm class.** `SyncEngine` gains a mirror constructor (no DEK, no storage). The store's sixty engine calls and `createSyncedApp` are untouched; `runtime.ts` picks a bridge. |
-| Host-side undo | Mirror ops are imported tagged, like remote ops, so `monoplan undo` in the terminal never undoes a window edit, as it never undoes another device's. The window's undo is its own Doc's `UndoManager`, as in the browser. |
-| HTTP | The non-doc surface (`api.ts`: devices, members, invites, doc list) keeps calling the server, unchanged: the app's URL scheme handler forwards `/api/*` to the host's server with the device token the CLI already holds (`Authorization: Bearer`, `spec/auth.md`), so the page's same-origin fetches just work and the credential never enters the webview, which never logs in. |
+| The mirror's peer id | **Its own**, leased by the engine from the slot pool (`peer::claim`, a second flock in the same process takes the next slot) for the life of the subscription. Two writers on one peer would mint duplicate op ids. With its own peer the mirror is an honest concurrent writer and merges with the engine like a second device would. VV width grows by one slot, which the pool already bounds by historical concurrency. |
+| What the webview holds | **No storage, no DEK, no WebSocket, no login.** Close the window and the mirror is gone; reopen and it reseeds from a fresh snapshot. The engine is the durable copy. |
+| Durability of a window edit | The mirror hands its ops to the engine on every store flush, the same cadence that reaches IndexedDB in the browser. The engine WALs them on its capture tick. The window is lost between a flush and the engine's import only if the process dies in that microsecond, which is the same window the browser has between a commit and its IDB write. |
+| Replica surface | **One wasm class.** `Replica` gains a mirror constructor (no DEK, no storage). The store's sixty replica calls and `createSyncedApp` are untouched; `runtime.ts` picks a bridge. |
+| Engine-side undo | Mirror ops are imported tagged, like remote ops, so `monoplan undo` in the terminal never undoes a window edit, as it never undoes another device's. The window's undo is its own Doc's `UndoManager`, as in the browser. |
+| HTTP | The non-doc surface (`api.ts`: devices, members, invites, doc list) keeps calling the server, unchanged: the app's URL scheme handler forwards `/api/*` to the engine's server with the device token the CLI already holds (`Authorization: Bearer`, `spec/auth.md`), so the page's same-origin fetches just work and the credential never enters the webview, which never logs in. |
 | DEK-touching flows | **Hidden in the window on the first pass**: password change, recovery, doc creation, invite accept (each wraps or unwraps a key the webview does not hold). The tray, Settings and the CLI keep them. |
-| iOS | **Native, not a webview** (decided 2026-11-05, superseding the earlier "same shape" row). The iOS app embeds core as a host (`daemon-plan.md` "Mobile hosts"; first surface built 2026-11-05 in `apple/MonoplanIOS`, see `apple/README.md`) and its SwiftUI client reaches it over the same FFI (`Host.request` / `Host.watch` / `Host.session`), never the mirror. The FFI therefore grows typed reads as the native UI does; the mirror stays the Mac window's. |
+| iOS | **Native, not a webview** (decided 2026-11-05, superseding the earlier "same shape" row). The iOS app embeds core as an engine (`daemon-plan.md` "Mobile hosts"; first surface built 2026-11-05 in `apple/MonoplanIOS`, see `apple/README.md`) and its SwiftUI client reaches it over the same FFI (`Engine.request` / `Engine.watch` / `Engine.session`), never the mirror. The FFI therefore grows typed reads as the native UI does; the mirror stays the Mac window's. |
 
 ## Why not a view
 
@@ -49,11 +49,11 @@ the view model and needs incremental-apply code in every GUI. The mirror
 it described was read-only, with mutations as intents over the socket,
 because its consumers were going to be native views over the FFI. A
 webview running `js/web` inverts the trade-off: the store is built on a
-locally mutated Doc. Every mutation calls the wasm engine synchronously
+locally mutated Doc. Every mutation calls the wasm replica synchronously
 and drains AppEvents on the same tick; undo is the Doc's `UndoManager`;
 the notes bridge subscribes to the Doc's `LoroText`; the search index
 rebuilds from the Doc's events. A read-only mirror would need an intent
-enum mirroring the whole core mutation surface, a host-side undo, async
+enum mirroring the whole core mutation surface, an engine-side undo, async
 mutation plumbing through the store, and a round trip per keystroke in
 notes. The spec called a mirror with its own peer id "the escape hatch,
 not the default". For the webview it is the default: latency is the
@@ -64,7 +64,7 @@ alone.
 
 ```
  ┌──────────────── app process ─────────────────────────────────────┐
- │  Rust host thread                        WKWebView (JS + wasm)   │
+ │  Rust engine thread                        WKWebView (JS + wasm)   │
  │  ┌────────────────────────┐              ┌─────────────────────┐ │
  │  │ authoritative Doc      │  snapshot    │ mirror Doc          │ │
  │  │ peer slot 0            │ ───────────► │ peer slot 1         │ │
@@ -80,28 +80,28 @@ alone.
 
 Three flows and nothing else:
 
-1. **Seed.** On subscribe the host leases a peer slot, exports a
+1. **Seed.** On subscribe the engine leases a peer slot, exports a
    plaintext snapshot of the workspace's doc, and returns both. The
    webview loads the snapshot into a fresh wasm Doc under that peer.
-2. **Host to mirror.** After every apply on the host, whatever its source
+2. **Engine to mirror.** After every apply on the engine, whatever its source
    (a CLI command, a remote frame, another subscriber's import, the
-   mirror's own import coming back round), the host exports the updates
+   mirror's own import coming back round), the engine exports the updates
    since what it last sent this subscriber and delivers them through the
    subscriber's sink. The mirror imports them tagged `remote`. Loro skips
    ops the mirror already has, so its own edits echo harmlessly, and the
-   tag keeps host-side changes out of the mirror's undo stack.
-3. **Mirror to host.** The store mutates the mirror Doc exactly as in the
-   browser and the UI updates on the same tick. On flush the engine
+   tag keeps engine-side changes out of the mirror's undo stack.
+3. **Mirror to engine.** The store mutates the mirror Doc exactly as in the
+   browser and the UI updates on the same tick. On flush the replica
    exports the mirror's ops since its last send and the bridge hands
-   them to `Host.import`. The host imports them tagged `mirror`, leaving
+   them to `Engine.import`. The engine imports them tagged `mirror`, leaving
    `last_persisted_vv` alone, so its capture tick sees them as
    uncaptured local ops: WAL row, encrypt, push, like anything the CLI
    committed.
 
 What the mirror is not: a device (the server sees one device for the
-Mac), durable, a key holder, or a second sync engine.
+Mac), durable, a key holder, or a second replica.
 
-## Host side (Rust)
+## Engine side (Rust)
 
 Built 2026-11-03 (phase 2). `cli/src/daemon.rs`, `core/ffi/src/lib.rs`,
 `Doc::import_mirror_update` in `core/src/doc.rs`.
@@ -118,7 +118,7 @@ Built 2026-11-03 (phase 2). `cli/src/daemon.rs`, `core/ffi/src/lib.rs`,
   a runtime; every client awaits its reply before its next command, so
   the queue depth is bounded by the client count anyway.
 - **`LocalClient::subscribe(workspace, sink) -> Subscription`**, and on
-  the FFI **`Host.subscribe(workspace, sink) -> Subscription`** (uniffi
+  the FFI **`Engine.subscribe(workspace, sink) -> Subscription`** (uniffi
   object with `docId()`, `peerId()`, `snapshot()`, `close()`). `sink` is
   `MirrorSink { update(bytes), stopped() }`, a uniffi callback interface
   on the FFI, a plain trait in the daemon. The seed carries the
@@ -127,12 +127,12 @@ Built 2026-11-03 (phase 2). `cli/src/daemon.rs`, `core/ffi/src/lib.rs`,
   subscriber record and with it the lease; the loop ending calls
   `stopped()` on every live sink first, and a doc forgotten under a
   mirror (`DocClosed`) does the same for that doc's sinks.
-- **`Subscription::import(bytes)`**, on the FFI **`Host.import(subscription,
+- **`Subscription::import(bytes)`**, on the FFI **`Engine.import(subscription,
   bytes)`**. `Doc::import_mirror_update`: `import_with(bytes, "mirror")`
   under the same diff capture and translation as `apply_remote` (shared
   `import_translated`), no change to `last_persisted_vv`, returns the
-  blob's declared range. The host then persists (WAL capture picks the
-  ops up as uncaptured local), flushes the engines, pumps, and runs the
+  blob's declared range. The engine then persists (WAL capture picks the
+  ops up as uncaptured local), flushes the replicas, pumps, and runs the
   usual `notify_if_changed`: socket watchers get `Changed`, mirrors get
   the update. `MIRROR_ORIGIN` is an undo-excluded prefix beside
   `remote`, `notes:` and `sweep`.
@@ -144,18 +144,18 @@ Built 2026-11-03 (phase 2). `cli/src/daemon.rs`, `core/ffi/src/lib.rs`,
   the importing subscriber's `last_sent` is merged with the blob's
   declared range, so a mirror's own ops are not echoed back to it (the
   echo would have been harmless; this just saves the bytes). A blob
-  that also carries host ops the mirror had imported is fine too: the
+  that also carries engine ops the mirror had imported is fine too: the
   import is idempotent and the merge is still truthful.
-- **Peer lease.** `Session::claim_peer` is `peer::claim` a second time:
-  the host holds slot 0, the flock scan gives the subscriber slot 1 (or
+- **Peer lease.** `Engine::claim_peer` is `peer::claim` a second time:
+  the engine holds slot 0, the flock scan gives the subscriber slot 1 (or
   the next free one with two windows). The lease lives in the
   subscriber record.
-- **Sink contract.** `update` and `stopped` run on the host loop's
+- **Sink contract.** `update` and `stopped` run on the engine loop's
   thread while it is delivering; a sink hands the bytes off and never
-  calls `Host.import` synchronously from inside `update` (it would wait
+  calls `Engine.import` synchronously from inside `update` (it would wait
   on the loop that is calling it).
-- **Tray** (built, phase 1). `Host.request(bytes) -> bytes` and
-  `Host.watch(sink)`, the socket's msgpack payloads over a function
+- **Tray** (built, phase 1). `Engine.request(bytes) -> bytes` and
+  `Engine.watch(sink)`, the socket's msgpack payloads over a function
   call. The tray's `DaemonClient` keeps its codec and swaps its
   transport; the connect, backoff and build-id dance left the app.
   Liveness comes from the sink's `stopped()` instead of a dropped
@@ -167,8 +167,8 @@ Built 2026-11-03 (phase 2). `cli/src/daemon.rs`, `core/ffi/src/lib.rs`,
 Built 2026-11-04 (phase 3). `core/web/src/lib.rs`;
 `Doc::import_host_update` in `core/src/doc.rs`.
 
-- `SyncEngine.mirror(doc, docId)`: no DEK, no `EngineStorage`. The
-  class holds an enum (`Synced(CoreSyncEngine)` or `Mirror { doc,
+- `Replica.mirror(doc, docId)`: no DEK, no `ReplicaStorage`. The
+  class holds an enum (`Synced(CoreReplica)` or `Mirror { doc,
   doc_id, last_sent: VersionVector, outbox }`) behind one `doc()`
   accessor, so the sixty forwarded mutation and read methods stay
   single. `isMirror()` tells them apart.
@@ -179,14 +179,14 @@ Built 2026-11-04 (phase 3). `core/web/src/lib.rs`;
   same diff capture and translation as `apply_remote` (shared
   `import_translated`), so it queues the same AppEvents, never lands
   on the mirror's undo stack, and advances `last_persisted_vv` like a
-  server frame; the engine then folds the update's declared range into
-  `last_sent`, so the host's ops are never exported back to it.
+  server frame; the replica then folds the update's declared range into
+  `last_sent`, so the engine's ops are never exported back to it.
   `hasUnsyncedOps()` on a mirror is "committed but not yet flushed".
 - The WebSocket verbs (`handleConnected`, `handleServerBytes`,
   `popOutbox`, `popEvent`, ...) and the persistence verbs
   (`captureLocalOps`, the snapshot folds, the seeds) are no-ops in
   mirror mode; the cursors read as zero / unknown and `isOnline()` as
-  false (the window's status is the host's to report).
+  false (the window's status is the engine's to report).
 - `Doc.loadWithPeer(bytes, peer)`: `empty_with_peer` then
   `import_oplog_updates` (the boot replay path: tagged remote, index
   rebuilt once, events cleared) then `mark_persisted`, so the seed is
@@ -200,17 +200,17 @@ Built 2026-11-04 (phase 3).
 - `MirrorBridge` (`js/core/src/mirror-bridge.ts`, beside `SyncBridge`)
   over a `MirrorTransport`: `subscribe(docId) → {snapshot, peer}`,
   `unsubscribe(docId)`, `send(docId, bytes)`, `onUpdate(cb)`,
-  `onStopped(cb)`. `open(docId)` subscribes, builds the engine through
-  the injected `createEngine(seed)` and routes it; updates that land
-  while a subscribe is in flight wait and apply once the engine exists.
-  Host updates apply tagged remote and pulse `onServerFrame(docId)`;
-  `pumpOutbox()` drains every engine's mirror outbox to `send`, one
+  `onStopped(cb)`. `open(docId)` subscribes, builds the replica through
+  the injected `createReplica(seed)` and routes it; updates that land
+  while a subscribe is in flight wait and apply once the replica exists.
+  Engine updates apply tagged remote and pulse `onServerFrame(docId)`;
+  `pumpOutbox()` drains every replica's mirror outbox to `send`, one
   import at a time, in order; `onChange` is `online` on the first open,
-  `offline` once the host has stopped every doc, `drain` after each
-  pump; `onStopped(docId)` relays the host's end-of-stream. No wasm
+  `offline` once the engine has stopped every doc, `drain` after each
+  pump; `onStopped(docId)` relays the engine's end-of-stream. No wasm
   import at load time, as for `SyncBridge`.
 - `js/web/src/sync/mirrorHost.ts`: the app's transport over the WebKit
-  message handler, and the host's session (`HostSessionInfo`:
+  message handler, and the engine's session (`EngineSessionInfo`:
   account id, email, device id, primary doc id, server URL, doc list).
   `detectAppHost()` is the presence of the handler. The contract the
   Swift side implements is in the file header and under "Swift side".
@@ -220,7 +220,7 @@ Built 2026-11-04 (phase 3).
   shared with the browser runtime); `setOnFlush` pumps the bridge,
   there is no `setBeforeFlush` (no capture); `drain(docId)` is what
   the bridge's frame pulse routes to; `handOff()` flushes notes bursts
-  and every engine to the host when the window hides or unloads.
+  and every doc's outbox to the engine when the window hides or unloads.
   `createDoc` / `joinDoc` / `deleteDoc` reject with a message (the
   DEK-touching flows, hidden in phase 4); `presence` is empty.
 - `Session` gained `mirror: boolean` and `dek: Dek | null` (null only
@@ -228,11 +228,11 @@ Built 2026-11-04 (phase 3).
   `sessionFromHost(info)` builds the window's session: not anonymous,
   mirror, no key, empty `docKeys`.
 - `MirrorApp.tsx` replaces `BrowserTabGate` → `App` → `BootGate`: ask
-  the host for the session, `bridge.open` Home then every other doc (a
+  the engine for the session, `bridge.open` Home then every other doc (a
   non-Home doc that will not open is skipped, not fatal), read the
   prefs row, then `createMirrorRuntime` and `Workspace` under a
   `SessionProvider` whose `online` is the bridge's, `lastSyncAt` null
-  (the host's sync status is phase 4), `logout` a console warning (the
+  (the engine's sync status is phase 4), `logout` a console warning (the
   tray signs out).
 - Entry: `js/web/mirror.html` + `src/mirror.tsx`, a second Vite input
   beside `index.html`; the browser bundle imports nothing of it. (Not
@@ -246,11 +246,11 @@ Built 2026-11-04 (phase 4). `Sources/MonoplanMac/WebWindow.swift`
 `MainMenu.swift`; the pure framing in
 `Sources/MonoplanMacKit/MirrorFraming.swift` (`HostRequest`,
 `WindowSession`, `HostReply`, `HostInbound`, `AppScheme`), tested
-without WebKit. On the FFI, `Host.session()` (`HostSession`: account
+without WebKit. On the FFI, `Engine.session()` (`EngineSession`: account
 id, email, device id, primary doc id, server URL, the open docs Home
 first, backed by the in-process `HostCmd::Session` /
 `LocalClient::session`; the socket has no such frame) and
-`Host.device_token()`.
+`Engine.device_token()`.
 
 - `WebWindowController` owns the `NSWindow` and the `WKWebView`, made
   on first open and torn down on close; the tray's "Open Monoplan" and
@@ -269,29 +269,29 @@ first, backed by the in-process `HostCmd::Session` /
   `monoplan`, so `postMessage` resolves with the reply or rejects with
   the error text. Requests and replies, bytes as base64, the peer as a
   decimal string (a u64 does not fit a JSON number), the doc id as the
-  `workspace` selector `Host.subscribe` resolves:
+  `workspace` selector `Engine.subscribe` resolves:
   - `{kind: "session"}` → `{status: "ok", accountId, email, deviceId,
     primaryDocId, serverUrl, localOnly, docs: [{docId, name}]}`
-    (`Host.session`; `serverUrl` is also the base of every "Copy link"
-    URL, `spec/urls.md`; binds the page to the host running now).
+    (`Engine.session`; `serverUrl` is also the base of every "Copy link"
+    URL, `spec/urls.md`; binds the page to the engine running now).
     `localOnly` (2026-11-05) marks the CLI's local-only workspace
     (`cli.md` §No account): identity and server are empty and the page
     runs it as the browser's anonymous session (`sessionFromHost`:
     `anonymous`, no author stamp, prefs under `local-<docId>`, which
     follow the account on the first signed-in boot since signup keeps
-    the doc id). With no host to bind to it answers a `HostState`
+    the doc id). With no engine to bind to it answers an `EngineState`
     instead of an error: `{status: "pending", reason}` (the tray's
     reason: starting, signing out, profile in use; the page shows it
     as waiting). There is no signed-out state: the app seeds a
     local-only workspace whenever there is no profile. The app pushes
-    `__monoplanHost.hostState(state)` as the reason moves and reloads
-    the page once a host serves (2026-11-05).
+    `__monoplanHost.engineState(state)` as the reason moves and reloads
+    the page once an engine serves (2026-11-05).
   - `{kind: "signIn"}` → `null`: an anonymous session's Sign in; the
     app opens its account sheet. The page holds no credentials.
   - `{kind: "subscribe", docId}` → `{snapshot, peer}` (one
-    `Host.subscribe` per open doc, a `MirrorSink` each)
+    `Engine.subscribe` per open doc, a `MirrorSink` each)
   - `{kind: "unsubscribe", docId}` → `null`
-  - `{kind: "import", docId, bytes}` → `null` (`Host.import`)
+  - `{kind: "import", docId, bytes}` → `null` (`Engine.import`)
   - `{kind: "undoState", canUndo, canRedo}` → `null`: enables Edit ›
     Undo / Redo. In the window the menu bar's Edit menu is the one undo
     surface (the page's sidebar app menu is not rendered there):
@@ -346,7 +346,7 @@ first, backed by the in-process `HostCmd::Session` /
     theme rules keeps in step with the theme.
   - inbound, on `window.__monoplanHost`: `update(docId, bytes)` for
     `MirrorSink.update`, `stopped(docId)` for `MirrorSink.stopped`,
-    `sync({online, lastSyncedAt, pending})` with the host's
+    `sync({online, lastSyncedAt, pending})` with the engine's
     `SyncStatus` (sent once the page is up and on every change, from
     the tray's watch; the page keeps it for `session.online()`, though
     the window's sidebar has no footer to show it in since 2026-11-04:
@@ -355,41 +355,41 @@ first, backed by the in-process `HostCmd::Session` /
     built on open; the shoulder dot it had while syncing or offline
     was dropped 2026-11-05, the tray shows the state), and
     `handOff()`, which
-    flushes everything committed to the host and resolves once the
-    host has answered the imports it caused.
+    flushes everything committed to the engine and resolves once the
+    engine has answered the imports it caused.
   Calls that block in Rust (`session`, `subscribe`, `import`) run on
   one serial work queue, in order, off the main thread. The sink
   contract holds: a sink hops to the main queue and evaluates the
-  update into the page; nothing calls `Host.import` from inside
-  `update`. A new page load (reload, a host coming back) closes the
+  update into the page; nothing calls `Engine.import` from inside
+  `update`. A new page load (reload, an engine coming back) closes the
   previous page's subscriptions and silences its sinks, so the peer
   slots are released and nothing is evaluated into a page that lacks
   the global.
 - Closing hands off first: `windowShouldClose` refuses once, awaits
   `handOff()` through `callAsyncJavaScript` (bounded at three seconds),
   then closes for real and drops the subscriptions; quit does the same
-  (`.terminateLater`) before the host persists and releases the
-  profile. So the window's last notes burst or flush reaches the host
+  (`.terminateLater`) before the engine persists and releases the
+  profile. So the window's last notes burst or flush reaches the engine
   before the mirror goes, which the browser's `pagehide` cannot
   promise on its own.
 - `AppSchemeHandler` serves `monoplan://app/*` out of
   `Contents/Resources/web` (the Vite build, copied by `build-app.sh`)
   with an explicit MIME map (wasm streams only under
   `application/wasm`), `mirror.html` at the root, no traversal; and
-  forwards `/api/*` to the host's server with `Authorization: Bearer
-  <device token>` (`Host.device_token`, cached per page session),
+  forwards `/api/*` to the engine's server with `Authorization: Bearer
+  <device token>` (`Engine.device_token`, cached per page session),
   passing `Content-Type`, `Accept` and `X-Request-Id` each way and
   answering a proxy failure in the API's own `{code, message}` shape.
   `localStorage` prefs get a stable origin; no `file://` rules apply.
   Links to anything else open in the default browser; `alert` and
   `confirm` from the page are `NSAlert` sheets.
-- Host comes and goes: when the tray's client sees a host after none
-  (sign-in, a CLI `login` or `password` that stopped and re-hosted),
-  the open page is reloaded against it; when the host stops, every doc
+- Engine comes and goes: when the tray's client sees an engine after none
+  (sign-in, a CLI `login` or `password` that stopped it and let it restart),
+  the open page is reloaded against it; when the engine stops, every doc
   hears `stopped` and the page shows offline until then.
 - `MONOPLAN_MIRROR_URL=http://localhost:5176/mirror.html` loads the
   Vite dev server instead of the bundle (HMR for the UI; the doc still
-  mirrors the host through the handler, but `/api` then goes through
+  mirrors the engine through the handler, but `/api` then goes through
   Vite's proxy without the token, so the HTTP surface is
   unauthenticated there).
 - Hidden in the window (`Session.mirror`, phase 4): the New workspace
@@ -402,13 +402,13 @@ first, backed by the in-process `HostCmd::Session` /
 - New workspace, natively (2026-11-05): Monoplan › New Workspace…
   (⇧⌘N) runs a standard sheet on the window (`NewWorkspacePrompt`, an
   alert with a name field), sends `Request.createWorkspace` to the
-  in-process host, which does what `monoplan workspace create` does
-  (`Session::create_doc`: DEK wrap under Home, `POST /api/docs`,
+  in-process engine, which does what `monoplan workspace create` does
+  (`Engine::create_doc`: DEK wrap under Home, `POST /api/docs`,
   seed + name, open on the live socket, `cli.md` §Workspaces), and
   then tells the page `HostInbound.docAdded(docId)`. The page opens
   the doc over the bridge without a reload (`createMirrorRuntime
   .openDoc`: one more `bridge.open`, a store, `docs.addDoc`) and goes
-  to its Inbox. The item is enabled while the host serves a signed-in
+  to its Inbox. The item is enabled while the engine serves a signed-in
   profile; a failure follows the sheet as an alert. The page's own
   dialog stays hidden.
 - Delete workspace, natively (2026-11-05): deleting touches no key,
@@ -417,9 +417,9 @@ first, backed by the in-process `HostCmd::Session` /
   posts `deleteDoc(docId, name)` to the app, which runs the browser's
   confirmation as a critical sheet (`DeleteWorkspacePrompt`: the name
   typed back, a destructive Delete), sends `Request.deleteWorkspace`
-  to the host (`Session::delete_doc`: `DELETE /api/docs/:id`, then
+  to the engine (`Engine::delete_doc`: `DELETE /api/docs/:id`, then
   `forget_doc`; the server unbinds this device silently, so the
-  host's forget is explicit), and replies `{deleted}`. The host's
+  engine's forget is explicit), and replies `{deleted}`. The engine's
   fan-out tells the page's subscription `stopped`, which the page now
   turns into `createMirrorRuntime.closeDoc` (view leaves the doc,
   route and store go), the same path a server-side `DocClosed` takes;
@@ -429,14 +429,14 @@ first, backed by the in-process `HostCmd::Session` /
   the CLI.
 - Accountless, natively (2026-11-05): the app needs no account, as
   the web client and the CLI do not (`auth.md` §Device pairing,
-  `cli.md` §No account). Whenever the host controller finds no
+  `cli.md` §No account). Whenever the engine controller finds no
   profile (first launch, or just after a sign-out's wipe) it calls
   `monoplan-ffi::ensure_local_workspace` (the CLI's
   `bootstrap::open_or_init_at`: a doc id and DEK minted locally, the
-  Welcome seed, no device token) and hosts that; the page's session
+  Welcome seed, no device token) and runs that; the page's session
   comes back `localOnly` and runs as anonymous (one workspace, no
   sharing, no links, no author stamp). `ProfileLocation.hasProfile`
-  (secrets.toml exists) is what the host needs; `hasAccount` (it
+  (secrets.toml exists) is what the engine needs; `hasAccount` (it
   carries a `device_token`) is what every sign-in offer, the tray's
   Sign In…, New Workspace… and Settings › Devices hang on. The
   account sheet has two modes: Sign In (`monoplan-ffi::login`, which
@@ -445,29 +445,29 @@ first, backed by the in-process `HostCmd::Session` /
   local workspace is adopted as the account's Home doc with its
   history, and the sheet then shows the recovery code once, Copy plus
   a checkbox gating Continue, as the browser's pane does). Both hand
-  the window off first and let the host controller host the result.
+  the window off first and let the engine controller start an engine on the result.
 - Sign out and the window (2026-11-05): the Account pane's Sign Out
   first has the window hand off (as a close or quit does), then stops
-  the host and wipes the profile. The tray sees the client lose its
-  host and reloads the page (`hostLost`), which boots onto the
-  `HostState` waiting screen rather than the stale workspace or a
+  the engine and wipes the profile. The tray sees the client lose its
+  engine and reloads the page (`engineLost`), which boots onto the
+  `EngineState` waiting screen rather than the stale workspace or a
   "not connected" error; the controller's next provision seeds a
   fresh local workspace (the browser's fresh anonymous session) and
-  the existing `hostAvailable` reload boots the page against it.
-  `Host.isRunning` is false from the moment the loop ends (not from
+  the existing `engineAvailable` reload boots the page against it.
+  `Engine.isRunning` is false from the moment the loop ends (not from
   the thread's exit), so neither the page nor the tray's client is
-  handed a host that can only answer `Stopped` while a sign-in's claim
+  handed an engine that can only answer `Stopped` while a sign-in's claim
   or a sign-out is unwinding it; a `Stopped` on `session` is answered
   as waiting all the same. The watch's `stopped` is forwarded from a
-  plain thread (`Host.watch`), not a task on the host's runtime: the
+  plain thread (`Engine.watch`), not a task on the engine's runtime: the
   runtime is dropped when the loop returns, which cancelled the task
   before it could see the channel close, so the tray's client kept a
   dead transport, its `poke` found "a transport" and never asked for a
-  new host (seen 2026-11-05 as a sign-in that never came back online).
-  The host controller also tells the client `hostGone` after its own
+  new engine (seen 2026-11-05 as a sign-in that never came back online).
+  The engine controller also tells the client `engineGone` after its own
   sign-in, sign-up and sign-out, rather than waiting for the watch.
   Settings › Devices shows "Not signed in" (not an error) without an
-  account and reloads itself when a host serves while the pane is up.
+  account and reloads itself when an engine serves while the pane is up.
 
 ## Settings (plan, decided 2026-11-04, not built)
 
@@ -484,12 +484,12 @@ lives, and where it goes:
 | Theme (auto / light / dark) | `theme` cookie + localStorage (`theme.ts`) | An Appearance picker (System / Light / Dark) in a new General pane, `UserDefaults`. The app sets `NSApp.appearance`; the webview's `prefers-color-scheme` follows its effective appearance, so the page stays on `auto` and no value crosses. Sheets, alerts and the traffic lights match for free. |
 | Time format (auto / 12h / 24h) | `hourcycle` cookie (`format.tsx`) | The system's: `Locale.current.hourCycle`. No app setting. |
 | Typed dates (on / off) | `typeddates` cookie (`whenToken.ts`) | A toggle in the General pane, `UserDefaults`. |
-| Show list counts | **The doc** (`settings.show_list_counts`, synced to every device, `spec/data-model.md`) | Not a device preference, but it sits in the General pane anyway, because that is where a user looks for it (decided 2026-11-04). The pane reads and sets it through the host, as the tray reads the agenda: `DocCmd::Settings {show_list_counts?}`, an IPC-only frame with no CLI verb (the flag is read from the Home doc alone and gates every workspace, so a `-w`-taking verb would misstate it; `Request.settings` / `.setShowListCounts`, `WorkspaceSettings`), sent without a workspace and so on Home. The page learns of a change through the mirror like any doc change; the pane re-fetches on every `Changed` event, so a toggle from the page or another device shows there. Nothing crosses `WindowSettings`. |
+| Show list counts | **The doc** (`settings.show_list_counts`, synced to every device, `spec/data-model.md`) | Not a device preference, but it sits in the General pane anyway, because that is where a user looks for it (decided 2026-11-04). The pane reads and sets it through the engine, as the tray reads the agenda: `DocCmd::Settings {show_list_counts?}`, an IPC-only frame with no CLI verb (the flag is read from the Home doc alone and gates every workspace, so a `-w`-taking verb would misstate it; `Request.settings` / `.setShowListCounts`, `WorkspaceSettings`), sent without a workspace and so on Home. The page learns of a change through the mirror like any doc change; the pane re-fetches on every `Changed` event, so a toggle from the page or another device shows there. Nothing crosses `WindowSettings`. |
 | Account: email, log out, delete | — | Already hidden in the mirror (`Session.mirror`); the Account pane and the tray own sign-in / sign-out. |
-| Devices: list, rename, revoke | `/api` through the proxy | A native Devices pane (built 2026-11-04): `GET` / `PATCH` / `DELETE /api/devices` with the host's token, straight from the app (`Devices` in `MonoplanMacKit`, tested; `APICredential` from `Host.session` + `Host.device_token`, fetched off the main thread). Loaded when the pane appears and after every change, never on doc events. This Mac is marked and cannot be revoked there (that is Sign Out). |
-| Advanced: per-workspace sync facts | engine state | Gone from the dialog in both clients (decided 2026-11-04): `monoplan.sync()` in the devtools console (`consoleApi.ts`, installed by `Workspace`) tables the same facts, status, seq, epoch, fingerprint, counts, doc id, and reads better for comparing two devices. The CLI's `workspace status --json` has the seq and pending state; the fingerprint joins it only when a cross-device comparison needs it. |
-| Open at login, CLI link, profile, host, build | — | Native only, as now. |
-| Open window at launch | — | Native only (built 2026-11-04): a toggle in the General pane, `UserDefaults`, on by default (`LaunchPreference`). The tray opens the window on the first client state once the host has settled, connected or not (not signed in, failed to start), never while it is still starting, so the page does not boot against no host and flash its error before the reload. Off leaves a launch tray-only. |
+| Devices: list, rename, revoke | `/api` through the proxy | A native Devices pane (built 2026-11-04): `GET` / `PATCH` / `DELETE /api/devices` with the engine's token, straight from the app (`Devices` in `MonoplanMacKit`, tested; `APICredential` from `Engine.session` + `Engine.device_token`, fetched off the main thread). Loaded when the pane appears and after every change, never on doc events. This Mac is marked and cannot be revoked there (that is Sign Out). |
+| Advanced: per-workspace sync facts | replica state | Gone from the dialog in both clients (decided 2026-11-04): `monoplan.sync()` in the devtools console (`consoleApi.ts`, installed by `Workspace`) tables the same facts, status, seq, epoch, fingerprint, counts, doc id, and reads better for comparing two devices. The CLI's `workspace status --json` has the seq and pending state; the fingerprint joins it only when a cross-device comparison needs it. |
+| Open at login, CLI link, profile, engine, build | — | Native only, as now. |
+| Open window at launch | — | Native only (built 2026-11-04): a toggle in the General pane, `UserDefaults`, on by default (`LaunchPreference`). The tray opens the window on the first client state once the engine has settled, connected or not (not signed in, failed to start), never while it is still starting, so the page does not boot against no engine and flash its error before the reload. Off leaves a launch tray-only. |
 
 **Transport** (built 2026-11-04: `WindowSettings` in
 `MonoplanMacKit`, the `typedDates` default, the app's language from
@@ -552,18 +552,18 @@ bubbles added above it; the toolbar stays empty.
   button does.
 - Account, signed in, pops a menu under itself, built on open: the
   email the page's session booted with (the bridge's `onSession`), else
-  "Signed in"; the host's sync line; then Account…, which opens the
+  "Signed in"; the engine's sync line; then Account…, which opens the
   Settings window on its Account pane
   (`SettingsWindowController.showAccount`); then Sign Out… (the pane's
-  own confirm-then-`HostController.signOut`). With no account
+  own confirm-then-`EngineController.signOut`). With no account
   (`ProfileLocation.hasAccount` false, the local-only workspace) there
   is nothing to report and one thing to do, so the bubble is instead a
   "Sign In" pill (the same glass, widened to its title) that opens the
   pane with its sheet up directly, as the tray's Sign In… does
   (2026-11-05). `applyAccountBubble` switches between the two on every
-  page boot and host transition. The actions reach the window as
+  page boot and engine transition. The actions reach the window as
   `AccountActions` closures from the tray, so it knows neither the
-  Settings window nor the host controller.
+  Settings window nor the engine controller.
 
 With both bubbles up, the window's sidebar has **no footer row at
 all** (2026-11-04): `Workspace.tsx` passes no `footer` under
@@ -586,7 +586,7 @@ alone; the dialog's controls are left alone until the section goes
 wholesale), then the transport with typed dates as its first
 passenger, then language and time format from system values (both
 built 2026-11-04, above), then show list counts in the General pane
-through the host (built 2026-11-04, the table above), then the
+through the engine (built 2026-11-04, the table above), then the
 Devices pane, the console facts and the dialog's removal from the
 window (all built 2026-11-04, above). Done.
 
@@ -595,7 +595,7 @@ window (all built 2026-11-04, above). Done.
 - Typed uniffi request and reply for the tray.
 - The DEK-touching flows in the window (see decisions).
 - Several windows: each is a subscriber; nothing here precludes it.
-- iOS, which reuses all of this once the embedded host exists.
+- iOS, which reuses all of this once the embedded engine exists.
 
 ## Testing
 
@@ -613,28 +613,28 @@ window (all built 2026-11-04, above). Done.
 - `core/src/doc.rs` (`mirror_import_is_uncaptured_local_and_excluded_from_undo`,
   built): the import emits the remote-style `AppEvent`s, leaves
   `last_persisted_vv` behind so the next capture exports exactly the
-  mirror's op, never lands on the host's undo stack, and is idempotent.
+  mirror's op, never lands on the engine's undo stack, and is idempotent.
 - `core/src/doc.rs` (`host_update_into_mirror_is_remote_for_undo_and_events`,
-  built): the mirror side; a host update is remote for events and undo,
+  built): the mirror side; an engine update is remote for events and undo,
   not uncaptured work, idempotent, and the mirror's own echo is a no-op.
-- `js/core/test/mirror-engine.test.ts` (built): `Doc.loadWithPeer`
+- `js/core/test/mirror-replica.test.ts` (built): `Doc.loadWithPeer`
   binds the peer and seeds as history; mirror-mode `flush` yields bytes
-  a host doc imports to fingerprint equality, one update per flush,
+  an engine doc imports to fingerprint equality, one update per flush,
   queued oldest first; `applyMirrorUpdate` emits exactly the AppEvents
-  `applyRemote` does for the same op and is idempotent; host updates
+  `applyRemote` does for the same op and is idempotent; engine updates
   and the echo never enter the mirror's undo; the WebSocket and
   persistence verbs are inert.
 - `js/core/test/mirror-bridge.test.ts` (built), over
-  `test/fake-mirror-host.ts` (an in-memory host that leases peers, fans
+  `test/fake-mirror-host.ts` (an in-memory engine that leases peers, fans
   out and deliberately echoes): both directions converge through the
   bridge, an update during an in-flight subscribe is not lost, two
-  docs route independently and `close` releases one, a stopped host
+  docs route independently and `close` releases one, a stopped engine
   ends routing and refused imports are reported.
 - `js/web/test/mirrorRuntime.test.ts` (built): `createMirrorRuntime`
-  renders the host's docs, a store mutation reaches the host on the
-  flush pump with no capture, a host change reaches the store through
+  renders the engine's docs, a store mutation reaches the engine on the
+  flush pump with no capture, an engine change reaches the store through
   the frame pulse, undo reverses only the window's op, notes on the
-  idle timer reach the host on hand-off, an update queued before the
+  idle timer reach the engine on hand-off, an update queued before the
   store existed is not dispatched twice; the WebKit transport's
   framing (base64 both ways, a u64 peer as `BigInt`, request order).
 - `MonoplanMacKit` (`MirrorFramingTests`, built): request parsing and
@@ -662,24 +662,24 @@ window (all built 2026-11-04, above). Done.
 1. **Tray over the FFI** (built 2026-10-29). `daemon::Serving` wires
    the loop once and hands out `daemon::LocalClient`, the in-process
    twin of a socket connection; `monoplan-ffi` exposes it as
-   `Host.request` (msgpack payload in, payload out, blocking) and
-   `Host.watch` (a `HostSink` callback: `Watching`, then `Event`s,
+   `Engine.request` (msgpack payload in, payload out, blocking) and
+   `Engine.watch` (an `EngineSink` callback: `Watching`, then `Event`s,
    `stopped` when the loop ends). `DaemonClient` speaks the same
-   payloads over a `HostTransport` protocol; the app's is
+   payloads over an `EngineTransport` protocol; the app's is
    `FFITransport`, tests use an in-memory one. The client no longer
-   connects, backs off or hellos a socket: it asks `HostController`
-   for a host (`HostProvision`) and hears the loop end through the
+   connects, backs off or hellos a socket: it asks `EngineController`
+   for an engine (`EngineProvision`) and hears the loop end through the
    watch. Tested in `cli/tests/daemon.rs`
    (`local_client_shares_the_loop_with_the_socket`) and
    `DaemonClientTests`. `HostCmd` is deferred to phase 2, where the
    first variant the socket must not reach appears. Socket untouched.
-2. **Mirror on the host** (built 2026-11-03). `HostCmd`,
+2. **Mirror on the engine** (built 2026-11-03). `HostCmd`,
    `LocalClient::subscribe` / `Subscription::import` / lease / fan-out
    in `cli/src/daemon.rs`; `Doc::import_mirror_update` and
-   `MIRROR_ORIGIN` in core; `Host.subscribe` / `Host.import`,
+   `MIRROR_ORIGIN` in core; `Engine.subscribe` / `Engine.import`,
    `MirrorSink` and `Subscription` on the FFI; tests above. No Swift
    consumer yet; the generated bindings carry the new surface.
-3. **Mirror in wasm and JS** (built 2026-11-04). `SyncEngine.mirror`,
+3. **Mirror in wasm and JS** (built 2026-11-04). `Replica.mirror`,
    `takeMirrorOutbox`, `applyMirrorUpdate`, `Doc.loadWithPeer` and
    `Doc::import_host_update`; `MirrorBridge` in `js/core`; the WebKit
    transport, `createMirrorRuntime`, `MirrorApp` and the `mirror.html`
@@ -688,7 +688,7 @@ window (all built 2026-11-04, above). Done.
    runtime. No Swift consumer yet; the browser bundle is unchanged.
 4. **The window** (built 2026-11-04). `WebWindowController`,
    `MirrorHostBridge`, `AppSchemeHandler`, `MainMenu` and the Kit's
-   `MirrorFraming`; `Host.session` / `Host.device_token` and the
+   `MirrorFraming`; `Engine.session` / `Engine.device_token` and the
    in-process `HostCmd::Session` on the FFI; the `sync` and `handOff`
    inbound calls and the awaitable `handOff` in `mirrorRuntime.ts`;
    `api.ts` untouched (the scheme handler proxies `/api` with the

@@ -216,7 +216,7 @@ Item register, integer minutes, optional. `1..=525600` (one year of days).
   gains `itemWhenChanged` and `itemAdded.when`.
 - Export dump (`ItemDump`) gains `when`, skipped when unset so existing dumps
   stay byte-identical. Import accepts it and validates.
-- wasm: `setItemWhen(itemId, when?: string)` on both engine surfaces, next to
+- wasm: `setItemWhen(itemId, when?: string)` on both replica surfaces, next to
   `setItemDeadline`.
 - Search (`spec/search.md`) does not tokenise either date. A date query
   belongs to the calendar lens, not the palette.

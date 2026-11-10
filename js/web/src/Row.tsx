@@ -279,7 +279,7 @@ export function Row(props: {
           const when = read.token?.when ?? null;
           whenTokens().reset();
           // Draft path: the row is a transient pseudo-item that has no
-          // engine-side record yet. Hand the trimmed text back to the
+          // replica-side record yet. Hand the trimmed text back to the
           // workspace, which decides commit (addItemAt) vs drop. Skip the
           // editItemText path — there's no item to edit.
           if (isDraftId(props.item().id)) {

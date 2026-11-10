@@ -1,14 +1,14 @@
 // Top-level app. First visit auto-creates a local-only anonymous
 // session (DEK generated client-side, no server account) and drops
 // straight into the workspace — no auth gate. Reads and mutations
-// always flow through the SyncEngine over an IndexedDB op log, anonymous
+// always flow through the Replica over an IndexedDB op log, anonymous
 // or authed. Signing up swaps the anonymous session for an authenticated
 // one that *adopts* the anonymous doc (same doc id, same DEK; see
 // `AdoptedDoc` in Login.tsx) and turns on server sync, so the local
 // history ships to the new account's Home doc on first connect. Logging
 // in to an existing account swaps to that account's docs instead and
 // leaves the anonymous doc behind. Anonymous sessions run the same
-// engine but never ship ops to a server.
+// replica but never ship ops to a server.
 
 import { createEffect, createSignal, onMount, Show } from "solid-js";
 import { Dek, Doc, EncryptedBlob } from "@monoplan/core/wasm";
@@ -113,7 +113,7 @@ export function App(props: {
     // below cannot touch it.
     setSession(await createAnonymousSession());
     if (opts?.wipeLocal && current) {
-      // Let the disposed engines' queued IDB writes settle so a late
+      // Let the disposed replicas' queued IDB writes settle so a late
       // append cannot resurrect a doc row after its wipe.
       await Promise.allSettled(storages.map((s) => s.whenFlushed()));
       for (const docId of current.docKeys.keys()) {
@@ -310,7 +310,7 @@ function BootGate(props: {
   setBootError: (m: string | null) => void;
 }) {
   const { m } = useAppI18n();
-  // Rebuild every doc the session can open from its engine WAL
+  // Rebuild every doc the session can open from its replica WAL
   // (`spec/local-storage.md` §"Web boot"), mirroring the CLI's `boot_doc`:
   // load the snapshot (a bare Loro snapshot) and replay every WAL row after
   // it via the deferred replay API, finalize indexes once, then
@@ -381,7 +381,7 @@ function BootGate(props: {
           docId,
           dek,
           doc,
-          // Resume cursor comes from the engine's own persisted state
+          // Resume cursor comes from the replica's own persisted state
           // (`IdbStorage`/`writeAckedSeq`), not the device row.
           lastAcked: BigInt(rows.lastAckedSeq),
           storage,

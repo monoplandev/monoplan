@@ -238,7 +238,7 @@ pub fn matches_name(name: &str, query: &str) -> bool;
 impl Doc { pub fn search(&self, input: &str, limit: usize) -> Vec<SearchResult>; }
 ```
 
-and wasm mirrors them as `tokenize`, `matchesName` and `Doc.searchJson` / `SyncEngine.searchJson` (a JSON array of the result shape below, `lifecycle` as its wire name, `body` / `listId` / `lifecycle` omitted when unset).
+and wasm mirrors them as `tokenize`, `matchesName` and `Doc.searchJson` / `Replica.searchJson` (a JSON array of the result shape below, `lifecycle` as its wire name, `body` / `listId` / `lifecycle` omitted when unset).
 
 The palette/query surface should consume a narrow interface, e.g.:
 

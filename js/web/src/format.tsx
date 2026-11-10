@@ -61,7 +61,7 @@ export function setTimeFormatPref(pref: TimeFormatPreference): void {
 }
 
 // `hourCycle` rather than `hour12: false` — the latter yields "24:05" at
-// midnight in some engines; h23 / h12 are unambiguous.
+// midnight in some replicas; h23 / h12 are unambiguous.
 function hourCycleOpts(): Intl.DateTimeFormatOptions {
   switch (timeFormatPref()) {
     case "12h":

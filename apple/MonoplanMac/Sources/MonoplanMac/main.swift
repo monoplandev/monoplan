@@ -5,11 +5,11 @@
 // switches to `.regular`, with a Dock icon and the main menu, and
 // closing it switches back.
 //
-// The tray holds no doc. It watches its own in-process host (a watch
+// The tray holds no doc. It watches its own in-process engine (a watch
 // over the FFI, never the socket) and re-fetches `agenda --days 0
-// --json` when the host says something changed, once a minute (the
+// --json` when the engine says something changed, once a minute (the
 // relative times move), and when the menu opens. "Open Monoplan" and
-// the item rows open the window, which mirrors the host's docs
+// the item rows open the window, which mirrors the engine's docs
 // (spec/mac-window-plan.md).
 
 import AppKit
@@ -26,13 +26,13 @@ final class TrayController: NSObject, NSMenuDelegate {
     private let menu = NSMenu()
     private let client: DaemonClient
     private let location: ProfileLocation
-    private let hostController: HostController
+    private let engineController: EngineController
     private var settingsWindow: SettingsWindowController?
     /// The window: one per process, made on first open, mirrors the
-    /// controller's running host.
+    /// controller's running engine.
     private lazy var webWindow = WebWindowController(
-        hostProvider: { [weak self] in self?.hostController.runningHost },
-        hostState: { [weak self] in self?.hostState() ?? .pending(String(localized: "starting")) },
+        engineProvider: { [weak self] in self?.engineController.runningEngine },
+        engineState: { [weak self] in self?.engineState() ?? .pending(String(localized: "starting")) },
         onVisibility: { visible in NSApp.setActivationPolicy(visible ? .regular : .accessory) },
         // The title bar's account button: the Settings window's Account
         // pane and its sign-in / sign-out flows.
@@ -42,7 +42,7 @@ final class TrayController: NSObject, NSMenuDelegate {
             signIn: { [weak self] in self?.settings().showSignIn() },
             signOut: { [weak self] in self?.settings().signOut() }),
         // The page's Delete workspace, after the window's native
-        // confirm: the host deletes on the server and forgets its copy.
+        // confirm: the engine deletes on the server and forgets its copy.
         deleteWorkspace: { [weak self] docId, done in
             guard let self else { return done(.failure(ClientError.notConnected)) }
             self.client.send(.deleteWorkspace(docId: docId)) { result in
@@ -54,9 +54,9 @@ final class TrayController: NSObject, NSMenuDelegate {
                 }
             }
         })
-    /// Whether the last client state was connected, to tell a host
+    /// Whether the last client state was connected, to tell an engine
     /// coming (back) up from a status refresh.
-    private var hadHost = false
+    private var hadEngine = false
     private var lines: [MenuLine] = []
     private var starred: [MenuLine] = []
     private var starredRows: [FocusRow] = []
@@ -64,7 +64,7 @@ final class TrayController: NSObject, NSMenuDelegate {
     private var fetchError: String?
     private var refreshQueued = false
     private var minuteTimer: Timer?
-    /// The network as the system sees it. The host's own liveness ping
+    /// The network as the system sees it. The engine's own liveness ping
     /// takes up to a minute to notice a dead socket after a Wi-Fi
     /// change or a wake; a path change or a wake tells it to reconnect
     /// now instead (`Request::Reconnect`).
@@ -72,16 +72,16 @@ final class TrayController: NSObject, NSMenuDelegate {
     private var lastPath: NWPath?
     private var reconnectQueued = false
     /// Settings › General "Open window at launch": the window opens on
-    /// the first client state after the host has settled, running or
+    /// the first client state after the engine has settled, running or
     /// not (not signed in, failed to start), so the page never boots
-    /// against a host that is still starting. Cleared once used.
+    /// against an engine that is still starting. Cleared once used.
     private var openWindowAtLaunch = LaunchPreference.openWindow()
 
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         location = ProfileLocation.resolve()
         client = DaemonClient()
-        hostController = HostController(location: location, client: client)
+        engineController = EngineController(location: location, client: client)
         super.init()
 
         if let button = statusItem.button {
@@ -94,26 +94,26 @@ final class TrayController: NSObject, NSMenuDelegate {
 
         client.onState = { [weak self] state in
             guard let self else { return }
-            if self.openWindowAtLaunch, !self.hostController.isStarting {
+            if self.openWindowAtLaunch, !self.engineController.isStarting {
                 self.openWindowAtLaunch = false
                 self.webWindow.show()
             }
             if case .connected(let sync) = state {
                 self.refresh()
                 self.webWindow.pushSync(sync)
-                // A host after none: the window's page booted against
+                // An engine after none: the window's page booted against
                 // the old one (or showed its signed-out / waiting
                 // screen); reload it.
-                if !self.hadHost { self.webWindow.hostAvailable() }
-                self.hadHost = true
+                if !self.hadEngine { self.webWindow.engineAvailable() }
+                self.hadEngine = true
             } else {
-                // No host: the page's docs are stale after a sign out
+                // No engine: the page's docs are stale after a sign out
                 // (or a terminal command taking the profile), so reload
                 // it onto the pre-boot screen; after that, keep that
                 // screen told as the reason moves (signing out → not
                 // signed in, signing in → starting).
-                if self.hadHost { self.webWindow.hostLost() } else { self.webWindow.pushHostState(self.hostState()) }
-                self.hadHost = false
+                if self.hadEngine { self.webWindow.engineLost() } else { self.webWindow.pushEngineState(self.engineState()) }
+                self.hadEngine = false
                 self.rebuildMenu()
             }
             self.settingsWindow?.refresh()
@@ -144,12 +144,12 @@ final class TrayController: NSObject, NSMenuDelegate {
             self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
     }
 
-    /// The host as the window's page should see it (`HostState`):
+    /// The engine as the window's page should see it (`EngineState`):
     /// running, or waiting with the tray's reason. There is always a
-    /// profile to host (a local-only workspace is seeded when there is
+    /// profile to run (a local-only workspace is seeded when there is
     /// none), so the page never has to offer sign-in to get going.
-    private func hostState() -> HostState {
-        if hostController.runningHost != nil { return .running }
+    private func engineState() -> EngineState {
+        if engineController.runningEngine != nil { return .running }
         if case .connecting(let reason) = client.state { return .pending(reason) }
         return .pending(String(localized: "starting"))
     }
@@ -171,7 +171,7 @@ final class TrayController: NSObject, NSMenuDelegate {
     }
 
     /// Coalesce the burst a wake produces (several path updates and the
-    /// wake itself) into one reconnect. Nothing to do without a host;
+    /// wake itself) into one reconnect. Nothing to do without an engine;
     /// the request fails quietly then.
     private func scheduleReconnect() {
         if reconnectQueued { return }
@@ -209,12 +209,12 @@ final class TrayController: NSObject, NSMenuDelegate {
             case .success(let other):
                 self.fetchError = String(localized: "unexpected reply: \(String(describing: other))")
             case .failure(let error):
-                // No host, or one that has just stopped: the state line
-                // says so and the next host's refresh fills the rows.
+                // No engine, or one that has just stopped: the state line
+                // says so and the next engine's refresh fills the rows.
                 if case ClientError.notConnected = error { break }
-                if case ClientError.hostStopped = error { break }
-                if case HostError.Stopped = error { break }
-                self.fetchError = hostErrorMessage(error)
+                if case ClientError.engineStopped = error { break }
+                if case EngineError.Stopped = error { break }
+                self.fetchError = engineErrorMessage(error)
             }
             self.rebuildMenu()
         }
@@ -427,7 +427,7 @@ final class TrayController: NSObject, NSMenuDelegate {
 
     // MARK: Actions
 
-    /// The window over the host's docs; also the Dock icon's reopen.
+    /// The window over the engine's docs; also the Dock icon's reopen.
     @objc func openWindow() {
         webWindow.show()
     }
@@ -451,8 +451,8 @@ final class TrayController: NSObject, NSMenuDelegate {
 
     /// Monoplan › New Workspace…: the name is asked for natively on the
     /// window (the page's own dialog is hidden there, `Session.mirror`),
-    /// the host creates and opens the doc (`Request.createWorkspace`),
-    /// and the page is told to show it. Needs a running host with an
+    /// the engine creates and opens the doc (`Request.createWorkspace`),
+    /// and the page is told to show it. Needs a running engine with an
     /// account (one workspace per accountless install, `spec/auth.md`),
     /// which `validateMenuItem` checks.
     @objc func newWorkspace(_ sender: Any?) {
@@ -473,7 +473,7 @@ final class TrayController: NSObject, NSMenuDelegate {
     }
 
     /// Edit › Undo / Redo follow the page's `undoState`, the zoom items
-    /// the ends of the ladder, New Workspace… a host that is serving a
+    /// the ends of the ladder, New Workspace… an engine that is serving a
     /// signed-in profile; every other item of ours is always available.
     @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
@@ -503,24 +503,24 @@ final class TrayController: NSObject, NSMenuDelegate {
         if let settingsWindow { return settingsWindow }
         let w = SettingsWindowController(
             location: location, client: client,
-            signIn: { [weak self] creds, done in self?.hostController.signIn(creds, completion: done) },
-            // The window hands its last edits to the host first, as it
-            // does before a close or quit: the host is about to stop,
+            signIn: { [weak self] creds, done in self?.engineController.signIn(creds, completion: done) },
+            // The window hands its last edits to the engine first, as it
+            // does before a close or quit: the engine is about to stop,
             // and its doc is what signup adopts or sign-out wipes.
             signUp: { [weak self] creds, done in
                 guard let self else { return }
-                self.webWindow.handOff { self.hostController.signUp(creds, completion: done) }
+                self.webWindow.handOff { self.engineController.signUp(creds, completion: done) }
             },
             signOut: { [weak self] done in
                 guard let self else { return }
-                self.webWindow.handOff { self.hostController.signOut(completion: done) }
+                self.webWindow.handOff { self.engineController.signOut(completion: done) }
             },
-            // The Devices pane's server access: the host's session and
+            // The Devices pane's server access: the engine's session and
             // token. `session()` blocks briefly; the pane asks off the
             // main thread.
             credential: { [weak self] in
-                guard let host = self?.hostController.runningHost, let token = host.deviceToken(),
-                      let session = try? host.session()
+                guard let engine = self?.engineController.runningEngine, let token = engine.deviceToken(),
+                      let session = try? engine.session()
                 else { return nil }
                 return APICredential(serverURL: session.serverUrl, token: token, deviceId: session.deviceId)
             })
@@ -537,7 +537,7 @@ final class TrayController: NSObject, NSMenuDelegate {
         webWindow.show(fragment: fragment)
     }
 
-    /// Quitting ends the host too (`applicationShouldTerminate`), which
+    /// Quitting ends the engine too (`applicationShouldTerminate`), which
     /// is how to stop syncing on a Mac; the CLI starts a headless
     /// daemon on its next command if it needs one.
     @objc private func quit() {
@@ -545,12 +545,12 @@ final class TrayController: NSObject, NSMenuDelegate {
     }
 
     /// Before the process goes: the window hands its last edits to the
-    /// host, then the host persists, folds and releases the profile.
+    /// engine, then the engine persists, folds and releases the profile.
     func shutdown(completion: @escaping () -> Void) {
         webWindow.handOff { [self] in
             webWindow.tearDown()
             client.stop()
-            hostController.stop()
+            engineController.stop()
             completion()
         }
     }

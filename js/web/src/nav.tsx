@@ -137,7 +137,7 @@ function ConnectionStatusPopover(props: {
   const pending = (): boolean =>
     props.docs.docs().some((d) => {
       d.app.version();
-      return d.app.engine.hasUnsyncedOps();
+      return d.app.replica.hasUnsyncedOps();
     });
   const { status, statusLabel } = createSyncStatus(pending, () => props.online);
   const docsCount = (): number => props.docs.docs().length;
@@ -524,7 +524,7 @@ function triggerDownload(blob: Blob, filename: string): void {
  *  on failure so the caller can surface its own alert. */
 export function exportDocJson(app: DocApp, slug: string): boolean {
   try {
-    const json = app.engine.exportJson();
+    const json = app.replica.exportJson();
     const blob = new Blob([json], { type: "application/json" });
     const stamp = new Date().toISOString().slice(0, 10);
     triggerDownload(blob, `${slug}-${stamp}.json`);
@@ -1314,7 +1314,7 @@ export function NavMenu(props: {
     props.onSession(s);
   };
 
-  // Reactive read-throughs of the engine's undo state. `app.version`
+  // Reactive read-throughs of the replica's undo state. `app.version`
   // bumps on every dispatched event (local mutation, undo/redo, remote
   // import), which is exactly when undo availability can change.
   const canUndo = (): boolean => {

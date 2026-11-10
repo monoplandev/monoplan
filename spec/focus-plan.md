@@ -288,7 +288,7 @@ the server. No wire-version bump, no server work.
   handoff note 5).
 - ✅ **Phase 2 — WASM. DONE.** Added `addToFocus` / `removeFromFocus` / `moveInFocus` /
   `focusRefIds` / `focusViewJson` to **both** handle structs in `core/web/src/lib.rs`
-  (`Doc` and `SyncEngine`). Added the `focusChanged` variant to `AppEventJs::from`
+  (`Doc` and `Replica`). Added the `focusChanged` variant to `AppEventJs::from`
   (no payload — fixes the non-exhaustive match Phase 1 left broken) + its doc-comment
   entry. Renamed the JS-facing inbox surface: `setMainName`→`setInboxName` (both structs),
   the `AppEventJs` getter `mainName`→`inboxName`, and the settings-JSON key
@@ -371,9 +371,9 @@ in `js/web`.
   to `"inbox"` (kept the `LIST_MAIN` const name). These broke the moment Phase 2 rebuilt the
   wasm; not enumerated in the original Phase 3 list.
 - **Store (`sync/store.ts`):** `focusOrder: string[]` on `WorkspaceState`, seeded in
-  `materializeEngineSnapshot` via `engine.focusRefIds()` (also covers coarse/fullResync).
+  `materializeReplicaSnapshot` via `replica.focusRefIds()` (also covers coarse/fullResync).
   `drainEvents` re-derives it once per non-empty drain with
-  `setState("focusOrder", reconcile(engine.focusRefIds()))` — one call covers both
+  `setState("focusOrder", reconcile(replica.focusRefIds()))` — one call covers both
   `focusChanged` and any item lifecycle/add/remove that changes visibility. `focusChanged`
   needs no `dispatch` case (unknown kinds fall through; `search.apply` ignores it). New
   `DocApp` methods `addToFocus`/`removeFromFocus`/`moveInFocus` (default add index =

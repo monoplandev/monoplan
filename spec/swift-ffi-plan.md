@@ -7,9 +7,9 @@ Status: built, then superseded. Milestones 0 and 2 to 4 stand: the
 `MonoplanError` and `generate_dek`) was removed on 2026-10-27: it booted
 a second doc under a fake doc id with a caller-held DEK and never saw the
 account's doc or sync, and nothing but its smoke test used it. The FFI
-crate now exports the profile lifecycle only (`login`, `logout`, `Host`;
+crate now exports the profile lifecycle only (`login`, `logout`, `Engine`;
 `spec/daemon-plan.md`, amendment 2026-10-27). In-process doc access for
-the native clients is the next plan, and it hangs off `Host`, not a
+the native clients is the next plan, and it hangs off `Engine`, not a
 store. The rest of this file is kept as the record of the build pipeline.
 
 Goal: prove the Rust↔Swift FFI boundary on macOS with an offline
@@ -17,7 +17,7 @@ capture/read round-trip, packaged so an Xcode app (layer 3, out of scope
 here) can consume it as a local SwiftPM dependency.
 
 **Non-goals for this plan:** no sync/websocket, no auth/HTTP, no UI, no
-Keychain, no iOS app target. The `SyncEngine` is *not* exposed yet — the
+Keychain, no iOS app target. The `Replica` is *not* exposed yet — the
 FFI surface is offline doc + storage only. Sync plumbing is a follow-up
 once the boundary is proven.
 

@@ -7,9 +7,9 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { Dek, Doc, SyncEngine } from "@monoplan/core/wasm";
-import type { EngineStorage } from "@monoplan/core/wasm";
-import { MemEngineStorage } from "../../core/test/mem-engine-storage.ts";
+import { Dek, Doc, Replica } from "@monoplan/core/wasm";
+import type { ReplicaStorage } from "@monoplan/core/wasm";
+import { MemReplicaStorage } from "../../core/test/mem-replica-storage.ts";
 import { createSyncedApp } from "../src/sync/store.ts";
 import {
   formatWhenBadge,
@@ -36,13 +36,13 @@ import {
 
 const DOC_ID = "00000000-0000-0000-0000-000000000000";
 
-function engineFrom(doc: Doc): SyncEngine {
-  return new SyncEngine(
+function replicaFrom(doc: Doc): Replica {
+  return new Replica(
     doc,
     DOC_ID,
     Dek.generate(),
     0n,
-    new MemEngineStorage() as unknown as EngineStorage,
+    new MemReplicaStorage() as unknown as ReplicaStorage,
   );
 }
 
@@ -52,14 +52,14 @@ describe("store when", () => {
     const id = doc.addItem("inbox", "planned");
     doc.setItemWhen(id, "2026-07-13T14:00");
 
-    const app = createSyncedApp(engineFrom(doc));
+    const app = createSyncedApp(replicaFrom(doc));
     expect(app.state.itemsById[id]?.when).toBe("2026-07-13T14:00");
   });
 
   test("patches when on set, then clears it, deadline untouched", () => {
     const doc = Doc.create();
     const id = doc.addItem("inbox", "task");
-    const app = createSyncedApp(engineFrom(doc));
+    const app = createSyncedApp(replicaFrom(doc));
     expect(app.state.itemsById[id]?.when).toBeUndefined();
 
     app.setItemDeadline(id, "2026-10-31");

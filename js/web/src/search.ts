@@ -1,4 +1,4 @@
-// Search surface over the core engine (spec/search.md). The index itself
+// Search surface over the core replica (spec/search.md). The index itself
 // lives in Rust: core keeps it current from its own event funnel and
 // reconciles against the doc on every query, so this module is only the
 // typed boundary. `tokenize` / `matchesName` are re-exported from wasm so
@@ -7,7 +7,7 @@
 import {
   matchesName as wasmMatchesName,
   tokenize as wasmTokenize,
-  type SyncEngine,
+  type Replica,
 } from "@monoplan/core/wasm";
 import type { Lifecycle } from "./sync/store.ts";
 
@@ -19,7 +19,7 @@ export interface SearchResult {
   id: string;
   kind: SearchKind;
   /** The doc the result came from. Stamped by the Find surfaces' fan-out
-   *  (`findResults.ts`), never by the engine, whose index is per doc. */
+   *  (`findResults.ts`), never by the replica, whose index is per doc. */
   docId?: string;
   title: string;
   body?: string;
@@ -47,13 +47,13 @@ export function matchesName(name: string, query: string): boolean {
   return wasmMatchesName(name, query);
 }
 
-/** Query surface bound to an engine. Each call crosses the wasm boundary
- *  once and parses one JSON array; the engine does the rest. */
-export function createSearchEngine(engine: SyncEngine): SearchEngine {
+/** Query surface bound to a replica. Each call crosses the wasm boundary
+ *  once and parses one JSON array; the replica does the rest. */
+export function createSearchEngine(replica: Replica): SearchEngine {
   return {
     query(input, limit = 50) {
       if (!input.trim()) return [];
-      return JSON.parse(engine.searchJson(input, limit)) as SearchResult[];
+      return JSON.parse(replica.searchJson(input, limit)) as SearchResult[];
     },
   };
 }

@@ -1,9 +1,9 @@
-//! Sans-IO sync engine: the protocol state machine in shared Rust.
+//! Sans-IO replica: the protocol state machine in shared Rust.
 //!
-//! The engine owns no socket, no clock, no thread. The caller (CLI's
+//! The replica owns no socket, no clock, no thread. The caller (CLI's
 //! tokio adapter, the browser's `WebSocket`, mobile's `URLSession` /
 //! OkHttp) feeds it transport events via `handle_*` and drains
-//! ready-to-send frame bytes via `pop_outbox()` and engine events via
+//! ready-to-send frame bytes via `pop_outbox()` and replica events via
 //! `pop_event()`.
 //!
 //! Two independent responsibilities meet here
@@ -12,7 +12,7 @@
 //!   - **Local crash recovery** — every commit (local mutation or
 //!     applied remote op) is captured into the encrypted WAL through
 //!     the [`LocalStorage`] trait; when the WAL crosses the host's
-//!     threshold the engine folds it into a fresh full-history
+//!     threshold the replica folds it into a fresh full-history
 //!     snapshot and prunes the folded prefix. This runs regardless of
 //!     online/sync status.
 //!   - **Outbound sync** — what needs uploading is derived from Loro
@@ -39,16 +39,16 @@
 //!     Pulling ── complete ─▶ Idle ◀──────────────────────────── ┘
 //! ```
 //!
-//! The engine is **doc-scoped**; the connection is not its concern.
+//! The replica is **doc-scoped**; the connection is not its concern.
 //! One socket serves every doc a device has open, and the
 //! `Hello` / `HelloAck` version handshake happens once per socket,
-//! before any engine goes online. The host owns that step with
+//! before any replica goes online. The host owns that step with
 //! [`hello_frame`] and [`parse_hello_response`], then calls
-//! `handle_connected` on each engine, which binds its doc with
+//! `handle_connected` on each replica, which binds its doc with
 //! `OpenDoc`. Every payload frame in both directions names the doc it
-//! is about (`doc_id`); the engine stamps its own on the way out and
+//! is about (`doc_id`); the replica stamps its own on the way out and
 //! drops any inbound frame for another doc. The host routes inbound
-//! frames to engines with [`server_frame_doc_id`].
+//! frames to replicas with [`server_frame_doc_id`].
 
 use std::collections::VecDeque;
 
@@ -68,19 +68,19 @@ use crate::storage::{
 
 /// `Box<dyn LocalStorage>` with a `Send` bound on native targets only.
 /// Wasm runs single-threaded and `JsValue`-holding impls are `!Send` by
-/// construction, so the bound flips off there. Engine call sites use
+/// construction, so the bound flips off there. Replica call sites use
 /// `self.storage.method()` regardless.
 #[cfg(not(target_arch = "wasm32"))]
 pub type DynStorage = Box<dyn LocalStorage + Send>;
 #[cfg(target_arch = "wasm32")]
 pub type DynStorage = Box<dyn LocalStorage>;
 
-/// Engine-emitted notification, drained via `pop_event()`. None of
+/// Replica-emitted notification, drained via `pop_event()`. None of
 /// these are fatal on their own — the caller decides whether to
 /// disconnect on `Error`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    /// `online=true` after `handle_connected`; `false` after the engine
+    /// `online=true` after `handle_connected`; `false` after the replica
     /// transitions to `Disconnected` (caller-driven, rejected handshake,
     /// or fatal frame error).
     ConnStateChanged { online: bool },
@@ -90,32 +90,32 @@ pub enum Event {
     PulledInitial,
     /// Our own `PushUpdates` was acked and `server_known_vv` advanced.
     Pushed,
-    /// The contiguous-prefix seq the engine has applied advanced.
+    /// The contiguous-prefix seq the replica has applied advanced.
     /// Useful for callers persisting `last_acked_seq` between sessions.
     FrontierAdvanced { seq: u64 },
     /// Recoverable error — the caller may choose to disconnect or just
     /// log and continue. Fatal handshake errors come paired with a
     /// `ConnStateChanged { online: false }` so the caller knows the
-    /// engine is already back to `Disconnected`.
+    /// replica is already back to `Disconnected`.
     Error(String),
     /// The server will not serve this doc to this account any more:
     /// `DocRejected` answered our `OpenDoc`, or `DocClosed` unbound the
     /// doc mid-session (membership removed, `spec/sharing-plan.md`
-    /// §Member removal). The engine is already `Disconnected` (a
+    /// §Member removal). The replica is already `Disconnected` (a
     /// `ConnStateChanged { online: false }` follows). The host should
-    /// stop routing this engine and forget the doc's local copy — a
+    /// stop routing this replica and forget the doc's local copy — a
     /// reconnect would only be refused again.
     DocClosed { reason: String },
     /// Who has this doc open on the server right now, this device's
     /// own account included (`ServerFrame::Presence`). Replaces, never
     /// extends, whatever the host showed before; a host should reset
-    /// to "only me" when the engine goes offline, since the server
+    /// to "only me" when the replica goes offline, since the server
     /// sends nothing to a connection alone on a doc.
     Presence { accounts: Vec<PresentAccount> },
 }
 
 /// Client identity advertised in the `Hello` frame: per connection,
-/// not per engine (see [`hello_frame`]).
+/// not per replica (see [`hello_frame`]).
 #[derive(Debug, Clone)]
 pub struct EngineOptions {
     pub client_name: String,
@@ -125,8 +125,8 @@ pub struct EngineOptions {
 // ---------- connection-level handshake ----------
 //
 // `Hello` / `HelloAck` is per socket, not per doc, so it lives beside
-// the engine rather than inside it: a host opens the socket, runs this
-// exchange once, and only then brings each doc's engine online.
+// the replica rather than inside it: a host opens the socket, runs this
+// exchange once, and only then brings each doc's replica online.
 
 /// The encoded `Hello` frame to send first on a fresh socket.
 pub fn hello_frame(opts: &EngineOptions) -> Vec<u8> {
@@ -186,9 +186,9 @@ pub fn parse_hello_response(bytes: &[u8]) -> Result<HelloAck, HelloError> {
 }
 
 /// The doc a post-handshake server frame is about, for a host that
-/// routes one socket's frames to several engines. `None` when the
+/// routes one socket's frames to several replicas. `None` when the
 /// bytes are not a `ServerFrame`; the host should then hand them to
-/// any engine, which will report the decode error as an event.
+/// any replica, which will report the decode error as an event.
 pub fn server_frame_doc_id(bytes: &[u8]) -> Option<uuid::Uuid> {
     rmp_serde::from_slice::<ServerFrame>(bytes)
         .ok()
@@ -221,12 +221,12 @@ struct InFlightState {
     to_vv: VersionVector,
 }
 
-pub struct SyncEngine {
+pub struct Replica {
     doc: Doc,
     dek: Dek,
-    /// Identifies which doc this engine syncs. Passed verbatim to every
+    /// Identifies which doc this replica syncs. Passed verbatim to every
     /// `storage.*` call so the trait can scope rows by doc (matters
-    /// once multi-doc sharing lands; today every engine only ever
+    /// once multi-doc sharing lands; today every replica only ever
     /// drives one doc).
     doc_id: DocId,
     /// Per-doc local persistence (`SqliteStorage` on the CLI,
@@ -260,7 +260,7 @@ pub struct SyncEngine {
     /// Contiguous-prefix seq we've applied in memory. Advances
     /// synchronously inside `apply_remote_updates` / `UpdatesAck` / `Snapshot`.
     /// Server seqs are dense and delivered in order, so this equals the
-    /// maximum seq seen. **Not** the value we ack — the engine only
+    /// maximum seq seen. **Not** the value we ack — the replica only
     /// ships an Ack for a seq the host has confirmed durable via
     /// `notify_oplog_durable`.
     last_contiguous_seq: u64,
@@ -270,7 +270,7 @@ pub struct SyncEngine {
     server_epoch: Option<u64>,
     /// Contiguous-prefix seq the host has confirmed locally durable
     /// (encrypted WAL row committed for the bytes covering this seq).
-    /// `<= last_contiguous_seq`. This is the value the engine sends
+    /// `<= last_contiguous_seq`. This is the value the replica sends
     /// in `Ack { last_acked_seq }`, and the value callers persist
     /// between sessions as the resume cursor (`PullUpdates`'s
     /// `since_seq`). Advances only via `notify_oplog_durable`.
@@ -306,8 +306,8 @@ fn open_vv(dek: &Dek, blob: &EncryptedBlob) -> Result<VersionVector, String> {
     VersionVector::decode(&plaintext).map_err(|e| e.to_string())
 }
 
-impl SyncEngine {
-    /// Build a fresh engine. `last_acked_seq` is the persisted
+impl Replica {
+    /// Build a fresh replica. `last_acked_seq` is the persisted
     /// durable-prefix from the previous session — used as `since_seq`
     /// in the initial pull and as the floor for `last_durable_seq`.
     /// `storage` is mandatory: WAL capture, snapshots, and every sync
@@ -345,7 +345,7 @@ impl SyncEngine {
         &self.doc
     }
 
-    /// The doc this engine syncs: the routing key a multiplexing host
+    /// The doc this replica syncs: the routing key a multiplexing host
     /// matches [`server_frame_doc_id`] against.
     pub fn doc_id(&self) -> DocId {
         self.doc_id
@@ -368,7 +368,7 @@ impl SyncEngine {
     }
 
     /// Seed the highest `local_seq` the storage has assigned for this
-    /// doc. Thereafter the engine maintains it from every WAL append.
+    /// doc. Thereafter the replica maintains it from every WAL append.
     pub fn set_last_local_seq(&mut self, seq: LocalSeq) {
         self.last_local_seq = seq;
     }
@@ -525,7 +525,7 @@ impl SyncEngine {
         Ok(true)
     }
 
-    /// Contiguous-prefix seq the engine has applied **in memory**.
+    /// Contiguous-prefix seq the replica has applied **in memory**.
     /// Use this for transport-layer decisions (the `since_seq` of a
     /// mid-session resume `PullUpdates`, snapshot eligibility) — NOT as
     /// the persisted resume cursor. The persisted cursor must be
@@ -542,14 +542,14 @@ impl SyncEngine {
     }
 
     /// Contiguous-prefix seq the host has confirmed locally durable.
-    /// This is the value the engine has shipped (or will ship) in
+    /// This is the value the replica has shipped (or will ship) in
     /// `Ack` frames, and the value callers persist between sessions
     /// as the resume cursor.
     pub fn last_durable_seq(&self) -> u64 {
         self.last_durable_seq
     }
 
-    /// Host signal: every byte the engine had advanced through up to
+    /// Host signal: every byte the replica had advanced through up to
     /// `seq` is now durable in local storage (encrypted WAL row
     /// committed). Advances `last_durable_seq` — clamped to
     /// `last_contiguous_seq` and monotonic — and queues an `Ack` if
@@ -560,7 +560,7 @@ impl SyncEngine {
     /// at the moment of the durability work (e.g. just before queueing
     /// the IDB append promise) and pass that sample back here after
     /// the write commits — this binds the notify to bytes that were
-    /// actually persisted, not to wherever the in-memory engine has
+    /// actually persisted, not to wherever the in-memory replica has
     /// run on to in the meantime.
     ///
     /// The corresponding `server_known_vv` advance was persisted
@@ -571,7 +571,7 @@ impl SyncEngine {
         if clamped > self.last_durable_seq {
             self.last_durable_seq = clamped;
             // Persist the resume cursor at the one moment it advances —
-            // through the engine's own storage handle, so the host never
+            // through the replica's own storage handle, so the host never
             // has to read it back out and re-persist it. Storage failure
             // surfaces as an Event::Error (consistent with the other
             // storage calls); the ack still queues so the wire isn't
@@ -587,13 +587,13 @@ impl SyncEngine {
         }
     }
 
-    /// True if the engine is past `Disconnected` — caller can treat
+    /// True if the replica is past `Disconnected` — caller can treat
     /// this as "socket should be open."
     pub fn is_online(&self) -> bool {
         !matches!(self.state, ConnState::Disconnected)
     }
 
-    /// True iff the engine has finished initial pull and isn't pushing.
+    /// True iff the replica has finished initial pull and isn't pushing.
     /// Useful for tests; callers usually don't need it.
     pub fn is_idle(&self) -> bool {
         matches!(self.state, ConnState::Idle)
@@ -606,14 +606,14 @@ impl SyncEngine {
         self.outbox.pop_front()
     }
 
-    /// Drain the next engine event. Returns `None` when the event queue
+    /// Drain the next replica event. Returns `None` when the event queue
     /// is empty.
     pub fn pop_event(&mut self) -> Option<Event> {
         self.events.pop_front()
     }
 
     /// Drain the next domain-level change event from the underlying
-    /// doc. Pair with `pop_event` — the engine emits protocol events
+    /// doc. Pair with `pop_event` — the replica emits protocol events
     /// (`ConnStateChanged`, `Pushed`, `FrontierAdvanced`, `Error`),
     /// the doc emits `AppEvent`s (item / list lifecycle).
     pub fn pop_app_event(&self) -> Option<crate::events::AppEvent> {
@@ -621,7 +621,7 @@ impl SyncEngine {
     }
 
     /// Caller has a socket whose version handshake succeeded (see
-    /// [`hello_frame`] / [`parse_hello_response`]). Engine binds its
+    /// [`hello_frame`] / [`parse_hello_response`]). Replica binds its
     /// doc with `OpenDoc`, transitions to `Opening`, and awaits
     /// `DocOpened`, which also carries the epoch and starts the pull.
     pub fn handle_connected(&mut self) {
@@ -645,7 +645,7 @@ impl SyncEngine {
     }
 
     /// Caller's socket dropped (clean close, network error, tab closed).
-    /// Engine returns to `Disconnected`; outbox is cleared (those bytes
+    /// Replica returns to `Disconnected`; outbox is cleared (those bytes
     /// will be re-derived on reconnect).
     pub fn handle_disconnected(&mut self) {
         if matches!(self.state, ConnState::Disconnected) {
@@ -682,7 +682,7 @@ impl SyncEngine {
     }
 
     /// Caller signal: "user committed local mutations." If we're idle
-    /// and there's something to ship, push. Otherwise the engine
+    /// and there's something to ship, push. Otherwise the replica
     /// re-checks on the next transition into `Idle`, so flushing during
     /// `Pulling` / `Hello` / `Disconnected` is safe and just queues the
     /// intent.
@@ -712,12 +712,12 @@ impl SyncEngine {
                 return;
             }
         };
-        // Every payload frame names its doc. This engine drives exactly
+        // Every payload frame names its doc. This replica drives exactly
         // one, so anything else is a routing error upstream — surface
         // it and leave the state machine untouched.
         if frame.doc_id() != self.doc_id.0 {
             self.events.push_back(Event::Error(format!(
-                "frame for doc {} but this engine syncs {}",
+                "frame for doc {} but this replica syncs {}",
                 frame.doc_id(),
                 self.doc_id.0
             )));
@@ -1252,7 +1252,7 @@ impl SyncEngine {
     fn go_disconnected(&mut self) {
         self.state = ConnState::Disconnected;
         // The in-flight push survives — both here and durably. On
-        // reconnect the engine pulls first (the pull may prove the updates
+        // reconnect the replica pulls first (the pull may prove the updates
         // landed), then re-sends the same push_id; the server
         // deduplicates either way.
         self.outbox.clear();
@@ -1288,8 +1288,8 @@ mod tests {
         Box::new(MemStorage::new())
     }
 
-    /// The one doc every test engine syncs. `MemStorage` instances are
-    /// per-engine, so the value only has to match between the engine
+    /// The one doc every test replica syncs. `MemStorage` instances are
+    /// per-replica, so the value only has to match between the replica
     /// and the frames a test feeds it.
     const DOC: uuid::Uuid = uuid::Uuid::nil();
 
@@ -1297,14 +1297,14 @@ mod tests {
         DocId(DOC)
     }
 
-    /// Drive a freshly connected engine from `Opening` to `Pulling`:
+    /// Drive a freshly connected replica from `Opening` to `Pulling`:
     /// consume the `OpenDoc` that `handle_connected` queued and open
-    /// the doc. Leaves the engine's `PullUpdates` in the outbox.
-    fn open_doc(eng: &mut SyncEngine) {
+    /// the doc. Leaves the replica's `PullUpdates` in the outbox.
+    fn open_doc(eng: &mut Replica) {
         let open: ClientFrame = dec(&eng.pop_outbox().expect("OpenDoc after handle_connected"));
         assert!(
             matches!(open, ClientFrame::OpenDoc { doc_id } if doc_id == DOC),
-            "expected OpenDoc for the engine's doc, got {open:?}"
+            "expected OpenDoc for the replica's doc, got {open:?}"
         );
         eng.handle_server_bytes(&enc(&ServerFrame::DocOpened {
             doc_id: DOC,
@@ -1312,11 +1312,11 @@ mod tests {
         }));
     }
 
-    /// Engine over a fresh doc. Its seeded built-ins are pending
+    /// Replica over a fresh doc. Its seeded built-ins are pending
     /// against an empty `server_known_vv`, so pull-complete triggers a
     /// seed push.
-    fn fresh_engine() -> SyncEngine {
-        SyncEngine::new(
+    fn fresh_replica() -> Replica {
+        Replica::new(
             Doc::new().unwrap(),
             fake_doc_id(),
             Dek::generate(),
@@ -1325,15 +1325,15 @@ mod tests {
         )
     }
 
-    /// Engine whose doc's seeds are already covered by
+    /// Replica whose doc's seeds are already covered by
     /// `server_known_vv` — pull-complete leaves it cleanly Idle
     /// without queueing a seed push. Default for state-machine tests
     /// so each one isolates a single transition.
-    fn fresh_engine_clean() -> SyncEngine {
+    fn fresh_replica_clean() -> Replica {
         let mut doc = Doc::new().unwrap();
         doc.mark_persisted();
         let vv = doc.oplog_vv();
-        let mut eng = SyncEngine::new(doc, fake_doc_id(), Dek::generate(), 0, mem());
+        let mut eng = Replica::new(doc, fake_doc_id(), Dek::generate(), 0, mem());
         eng.server_known_vv = vv;
         eng
     }
@@ -1346,7 +1346,7 @@ mod tests {
         rmp_serde::from_slice(bytes).unwrap()
     }
 
-    fn drain_outbox(eng: &mut SyncEngine) -> Vec<Vec<u8>> {
+    fn drain_outbox(eng: &mut Replica) -> Vec<Vec<u8>> {
         let mut out = Vec::new();
         while let Some(b) = eng.pop_outbox() {
             out.push(b);
@@ -1354,7 +1354,7 @@ mod tests {
         out
     }
 
-    fn drain_events(eng: &mut SyncEngine) -> Vec<Event> {
+    fn drain_events(eng: &mut Replica) -> Vec<Event> {
         let mut out = Vec::new();
         while let Some(e) = eng.pop_event() {
             out.push(e);
@@ -1368,7 +1368,7 @@ mod tests {
         let frame: ClientFrame = dec(push_bytes);
         match frame {
             ClientFrame::PushUpdates { updates, .. } => {
-                assert_eq!(updates.len(), 1, "engine ships exactly one blob per push");
+                assert_eq!(updates.len(), 1, "replica ships exactly one blob per push");
                 ServerFrame::UpdatesAck {
                     doc_id: DOC,
                     acks: vec![PushAck {
@@ -1381,9 +1381,9 @@ mod tests {
         }
     }
 
-    /// Push a `fresh_engine_clean` through `Disconnected → ... → Idle`
+    /// Push a `fresh_replica_clean` through `Disconnected → ... → Idle`
     /// with an empty initial pull.
-    fn drive_to_idle(eng: &mut SyncEngine) {
+    fn drive_to_idle(eng: &mut Replica) {
         eng.handle_connected();
         open_doc(eng);
         let _pull = eng
@@ -1475,7 +1475,7 @@ mod tests {
 
     #[test]
     fn happy_path_open_and_empty_pull() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         eng.handle_connected();
         assert!(matches!(
             drain_events(&mut eng).as_slice(),
@@ -1507,7 +1507,7 @@ mod tests {
     fn pull_complete_on_fresh_doc_stays_idle() {
         // A fresh doc has an empty oplog (built-ins are virtual), so an
         // empty initial pull completes without queuing a follow-up push.
-        let mut eng = fresh_engine();
+        let mut eng = fresh_replica();
         eng.handle_connected();
         open_doc(&mut eng);
         let _pull = eng.pop_outbox().unwrap();
@@ -1525,7 +1525,7 @@ mod tests {
 
     #[test]
     fn handle_timeout_while_opening_emits_error_only() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         eng.handle_timeout();
         assert!(
             drain_events(&mut eng).is_empty(),
@@ -1540,7 +1540,7 @@ mod tests {
         assert!(matches!(evs.as_slice(), [Event::Error(s)] if s.contains("timed out")));
 
         // In Idle, timeout is a no-op.
-        let mut eng2 = fresh_engine_clean();
+        let mut eng2 = fresh_replica_clean();
         drive_to_idle(&mut eng2);
         let _ = drain_events(&mut eng2);
         eng2.handle_timeout();
@@ -1549,7 +1549,7 @@ mod tests {
 
     #[test]
     fn flush_in_idle_pushes_when_pending() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
         let _ = drain_outbox(&mut eng);
@@ -1564,7 +1564,7 @@ mod tests {
         assert!(events.contains(&Event::Pushed));
         assert!(events.contains(&Event::FrontierAdvanced { seq: 1 }));
 
-        // Engine must NOT queue an Ack before the host confirms the
+        // Replica must NOT queue an Ack before the host confirms the
         // op's bytes are locally durable — even on our own UpdatesAck.
         assert!(
             eng.pop_outbox().is_none(),
@@ -1595,7 +1595,7 @@ mod tests {
         let mut doc = Doc::new().unwrap();
         doc.mark_persisted();
         let vv = doc.oplog_vv();
-        let mut eng = SyncEngine::new(
+        let mut eng = Replica::new(
             doc,
             fake_doc_id(),
             Dek::generate(),
@@ -1620,7 +1620,7 @@ mod tests {
 
     #[test]
     fn wal_threshold_gates_hot_pulse_but_not_forced_fold() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
         let _ = drain_outbox(&mut eng);
@@ -1640,7 +1640,7 @@ mod tests {
 
     #[test]
     fn wal_byte_threshold_triggers_fold() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         eng.doc_mut().add_item(LIST_INBOX, "thing").unwrap();
         eng.capture_local_ops().unwrap();
         assert!(eng.wal_bytes() > 0);
@@ -1659,7 +1659,7 @@ mod tests {
         doc.mark_persisted();
         let vv = doc.oplog_vv();
         let dek = Dek::generate();
-        let mut eng = SyncEngine::new(
+        let mut eng = Replica::new(
             doc,
             fake_doc_id(),
             dek.clone(),
@@ -1675,7 +1675,7 @@ mod tests {
         assert_eq!(storage.wal_len(), 0, "pending row folded away");
 
         // Online: the push still derives the unsent op. (Pull-complete
-        // auto-starts the push, so the engine lands in Pushing, not
+        // auto-starts the push, so the replica lands in Pushing, not
         // Idle.)
         eng.handle_connected();
         open_doc(&mut eng);
@@ -1699,7 +1699,7 @@ mod tests {
 
     #[test]
     fn flush_in_idle_with_no_pending_is_noop() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         drive_to_idle(&mut eng);
         let _ = drain_outbox(&mut eng);
         let _ = drain_events(&mut eng);
@@ -1709,7 +1709,7 @@ mod tests {
 
     #[test]
     fn pushing_dirty_re_pushes_after_ack() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
 
@@ -1721,13 +1721,13 @@ mod tests {
         // Mutate again while the push is in flight.
         let item_id = eng.doc_mut().add_item(LIST_INBOX, "during-push").unwrap();
         eng.flush();
-        // No new wire bytes yet — engine is in PushingDirty, waiting.
+        // No new wire bytes yet — replica is in PushingDirty, waiting.
         assert!(eng.pop_outbox().is_none());
 
         // Server acks the first push.
         eng.handle_server_bytes(&enc(&ack_frame(&first_push, 1)));
 
-        // Engine should immediately re-push with the mid-push mutation.
+        // Replica should immediately re-push with the mid-push mutation.
         let second_push = eng.pop_outbox().expect("re-push after ack");
         let frame: ClientFrame = dec(&second_push);
         assert!(matches!(frame, ClientFrame::PushUpdates { .. }));
@@ -1745,8 +1745,8 @@ mod tests {
     fn mutation_during_in_flight_push_stays_pending_after_ack() {
         // Spec test 7: a mutation made during an in-flight push is
         // beyond the acked `to_vv`, so it remains pending (and the
-        // engine re-derives it) even without an explicit flush.
-        let mut eng = fresh_engine_clean();
+        // replica re-derives it) even without an explicit flush.
+        let mut eng = fresh_replica_clean();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
 
@@ -1779,7 +1779,7 @@ mod tests {
 
     #[test]
     fn flush_during_pull_pushes_when_pull_completes() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         eng.handle_connected();
         open_doc(&mut eng);
         let _ = eng.pop_outbox().unwrap(); // PullUpdates
@@ -1789,7 +1789,7 @@ mod tests {
         eng.flush();
         assert!(eng.pop_outbox().is_none(), "Pulling defers push until Idle");
 
-        // Pull completes — engine should self-trigger the push.
+        // Pull completes — replica should self-trigger the push.
         eng.handle_server_bytes(&enc(&ServerFrame::UpdatesBatch {
             doc_id: DOC,
             updates: vec![],
@@ -1801,7 +1801,7 @@ mod tests {
 
     #[test]
     fn broadcast_during_idle_applies_and_acks() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         let dek = eng.dek.clone();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
@@ -1853,7 +1853,7 @@ mod tests {
 
     #[test]
     fn ops_batch_applies_multiple_remote_ops_before_ack() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         let dek = eng.dek.clone();
         let mut remote = Doc::new().unwrap();
         let id = remote.add_item(LIST_INBOX, "old").unwrap();
@@ -1910,7 +1910,7 @@ mod tests {
 
     #[test]
     fn broadcast_during_pushing_does_not_clobber_in_flight() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         let dek = eng.dek.clone();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
@@ -1954,7 +1954,7 @@ mod tests {
 
     #[test]
     fn multi_batch_pull_reaches_idle_only_on_complete() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         let dek = eng.dek.clone();
         eng.handle_connected();
         open_doc(&mut eng);
@@ -2001,7 +2001,7 @@ mod tests {
         let mut doc = Doc::new().unwrap();
         doc.mark_persisted();
         let vv = doc.oplog_vv();
-        let mut eng = SyncEngine::new(
+        let mut eng = Replica::new(
             doc,
             fake_doc_id(),
             Dek::generate(),
@@ -2067,10 +2067,10 @@ mod tests {
             in_flight_push: Some(push.clone()),
             ..Default::default()
         };
-        let mut eng = SyncEngine::new(doc, fake_doc_id(), dek, 0, mem());
+        let mut eng = Replica::new(doc, fake_doc_id(), dek, 0, mem());
         eng.seed_boot(&meta);
 
-        // Pull-complete auto-starts the retry, so the engine ends in
+        // Pull-complete auto-starts the retry, so the replica ends in
         // Pushing rather than Idle.
         eng.handle_connected();
         open_doc(&mut eng);
@@ -2101,7 +2101,7 @@ mod tests {
         // server had inserted it), so the dedup ack's original seq is
         // below the frontier. It must not trip the contiguity
         // assertion or regress anything.
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         let dek = eng.dek.clone();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
@@ -2148,7 +2148,7 @@ mod tests {
         doc.mark_persisted();
         let vv = doc.oplog_vv();
         let dek = Dek::generate();
-        let mut eng = SyncEngine::new(
+        let mut eng = Replica::new(
             doc,
             fake_doc_id(),
             dek.clone(),
@@ -2193,7 +2193,7 @@ mod tests {
 
     #[test]
     fn server_bytes_while_disconnected_is_an_error() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         eng.handle_server_bytes(b"\x00\x01");
         let evs = drain_events(&mut eng);
         assert!(matches!(evs.as_slice(), [Event::Error(_)]));
@@ -2201,7 +2201,7 @@ mod tests {
 
     #[test]
     fn handle_connected_twice_emits_error() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         eng.handle_connected();
         let _ = drain_events(&mut eng);
         eng.handle_connected();
@@ -2211,7 +2211,7 @@ mod tests {
 
     #[test]
     fn opsack_outside_pushing_emits_error() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
         eng.handle_server_bytes(&enc(&ServerFrame::UpdatesAck {
@@ -2229,7 +2229,7 @@ mod tests {
     fn since_seq_carries_persisted_frontier() {
         let mut doc = Doc::new().unwrap();
         doc.mark_persisted();
-        let mut eng = SyncEngine::new(doc, fake_doc_id(), Dek::generate(), 42, mem());
+        let mut eng = Replica::new(doc, fake_doc_id(), Dek::generate(), 42, mem());
         eng.handle_connected();
         open_doc(&mut eng);
         let pull: ClientFrame = dec(&eng.pop_outbox().unwrap());
@@ -2243,7 +2243,7 @@ mod tests {
     fn snapshot_request_produces_at_server_known_frontier_not_current_doc() {
         // Spec test 12: a server snapshot excludes the producer's
         // unsent local operations.
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         let dek = eng.dek.clone();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
@@ -2315,7 +2315,7 @@ mod tests {
         // seq 1 from an earlier full snapshot and asks for a delta
         // from it. The delta must carry seq 2's updates, nothing from seq
         // 1, and nothing unsent.
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         let dek = eng.dek.clone();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
@@ -2401,7 +2401,7 @@ mod tests {
     fn delta_request_with_base_outside_frontier_is_declined() {
         // A base VV we don't hold (another doc's history) must not
         // produce a blob — that would fork the server's chain.
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         let dek = eng.dek.clone();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
@@ -2430,7 +2430,7 @@ mod tests {
 
     #[test]
     fn unsolicited_snapshot_in_idle_is_an_error() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
         eng.handle_server_bytes(&enc(&ServerFrame::Snapshot {
@@ -2453,7 +2453,7 @@ mod tests {
         //   ->   UpdatesBatch{complete} -> Idle
         let dek = Dek::generate();
         let storage = std::sync::Arc::new(MemStorage::new());
-        let mut eng = SyncEngine::new(
+        let mut eng = Replica::new(
             Doc::empty(),
             fake_doc_id(),
             dek.clone(),
@@ -2502,7 +2502,7 @@ mod tests {
             "VV persisted at bootstrap"
         );
 
-        // Engine advanced its frontier and re-issued PullUpdates. The Ack
+        // Replica advanced its frontier and re-issued PullUpdates. The Ack
         // waits for the host durability confirm.
         assert_eq!(eng.last_contiguous_seq(), 42);
         assert_eq!(eng.last_durable_seq(), 0);
@@ -2555,7 +2555,7 @@ mod tests {
         let storage = std::sync::Arc::new(MemStorage::new());
         let doc = Doc::new().unwrap();
         let local_id = doc.add_item(LIST_INBOX, "pending-local").unwrap();
-        let mut eng = SyncEngine::new(
+        let mut eng = Replica::new(
             doc,
             fake_doc_id(),
             dek.clone(),
@@ -2625,7 +2625,7 @@ mod tests {
     #[test]
     fn opsbroadcast_during_bootstrap_is_dropped() {
         let dek = Dek::generate();
-        let mut eng = SyncEngine::new(Doc::empty(), fake_doc_id(), dek.clone(), 0, mem());
+        let mut eng = Replica::new(Doc::empty(), fake_doc_id(), dek.clone(), 0, mem());
         eng.handle_connected();
         open_doc(&mut eng);
         let _ = eng.pop_outbox().unwrap(); // PullUpdates
@@ -2666,11 +2666,11 @@ mod tests {
         //   B applies, pulls past-the-snapshot updates, reaches Idle.
         //   Fingerprints converge.
         let dek = Dek::generate();
-        let mut a = SyncEngine::new(Doc::new().unwrap(), fake_doc_id(), dek.clone(), 0, mem());
+        let mut a = Replica::new(Doc::new().unwrap(), fake_doc_id(), dek.clone(), 0, mem());
         let mut b = {
             let mut doc = Doc::empty();
             doc.mark_persisted();
-            SyncEngine::new(doc, fake_doc_id(), dek.clone(), 0, mem())
+            Replica::new(doc, fake_doc_id(), dek.clone(), 0, mem())
         };
 
         // Fake server state.
@@ -2908,7 +2908,7 @@ mod tests {
 
     #[test]
     fn snapshot_required_outside_pulling_is_an_error() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
         eng.handle_server_bytes(&enc(&ServerFrame::SnapshotRequired {
@@ -2921,7 +2921,7 @@ mod tests {
 
     #[test]
     fn notify_oplog_durable_clamps_to_last_contiguous() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         let dek = eng.dek.clone();
         drive_to_idle(&mut eng);
         let _ = drain_outbox(&mut eng);
@@ -2948,7 +2948,7 @@ mod tests {
 
     #[test]
     fn notify_oplog_durable_is_monotonic_and_coalesces() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         let dek = eng.dek.clone();
         drive_to_idle(&mut eng);
         let _ = drain_outbox(&mut eng);
@@ -2975,7 +2975,7 @@ mod tests {
 
     #[test]
     fn inbound_apply_does_not_queue_ack_until_durable() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         let dek = eng.dek.clone();
         drive_to_idle(&mut eng);
         let _ = drain_outbox(&mut eng);
@@ -3002,7 +3002,7 @@ mod tests {
 
     #[test]
     fn malformed_server_frame_emits_error_without_disconnect() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
         eng.handle_server_bytes(b"not msgpack at all");
@@ -3012,13 +3012,13 @@ mod tests {
     }
 
     #[test]
-    fn end_to_end_two_engines_converge_via_engine_loop() {
+    fn end_to_end_two_replicas_converge_via_replica_loop() {
         let dek = Dek::generate();
-        let mut a = SyncEngine::new(Doc::new().unwrap(), fake_doc_id(), dek.clone(), 0, mem());
+        let mut a = Replica::new(Doc::new().unwrap(), fake_doc_id(), dek.clone(), 0, mem());
         let mut b = {
             let mut doc = Doc::empty();
             doc.mark_persisted();
-            SyncEngine::new(doc, fake_doc_id(), dek.clone(), 0, mem())
+            Replica::new(doc, fake_doc_id(), dek.clone(), 0, mem())
         };
 
         let mut next_seq: u64 = 0;
@@ -3095,7 +3095,7 @@ mod tests {
     fn remote_ops_append_wal_rows_and_count_toward_threshold() {
         // Spec test 4: remote updates enter the WAL and trigger local
         // snapshotting through the same threshold as local rows.
-        let (mut eng, mem) = engine_with_mem();
+        let (mut eng, mem) = replica_with_mem();
         let dek = eng.dek.clone();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
@@ -3146,12 +3146,12 @@ mod tests {
         assert_eq!(mem.wal_len(), 0);
     }
 
-    fn engine_with_mem() -> (SyncEngine, std::sync::Arc<MemStorage>) {
+    fn replica_with_mem() -> (Replica, std::sync::Arc<MemStorage>) {
         let mut doc = Doc::new().unwrap();
         doc.mark_persisted();
         let vv = doc.oplog_vv();
         let mem = std::sync::Arc::new(MemStorage::new());
-        let mut eng = SyncEngine::new(
+        let mut eng = Replica::new(
             doc,
             fake_doc_id(),
             Dek::generate(),
@@ -3166,7 +3166,7 @@ mod tests {
     fn mixed_history_exports_only_beyond_server_known_vv() {
         // Spec test 5: with mixed local and remote history, the push
         // delta carries only operations beyond `server_known_vv`.
-        let (mut eng, _mem) = engine_with_mem();
+        let (mut eng, _mem) = replica_with_mem();
         let dek = eng.dek.clone();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
@@ -3229,7 +3229,7 @@ mod tests {
 
     #[test]
     fn disconnect_mid_push_keeps_durable_record() {
-        let (mut eng, mem) = engine_with_mem();
+        let (mut eng, mem) = replica_with_mem();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
 
@@ -3250,7 +3250,7 @@ mod tests {
 
     #[test]
     fn doc_rejected_disconnects_with_doc_closed() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         eng.handle_connected();
         let _ = drain_events(&mut eng);
         let open: ClientFrame = dec(&eng.pop_outbox().expect("OpenDoc after handle_connected"));
@@ -3279,7 +3279,7 @@ mod tests {
     /// any connected state and leaves the sync state machine alone.
     #[test]
     fn presence_surfaces_as_event_without_touching_sync_state() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         eng.handle_connected();
         let _ = eng.pop_outbox().expect("OpenDoc");
         eng.handle_server_bytes(&enc(&ServerFrame::DocOpened {
@@ -3325,11 +3325,11 @@ mod tests {
     }
 
     /// `DocClosed` lands on an open, idle doc (membership removed while
-    /// syncing): the engine goes offline with the same `DocClosed`
+    /// syncing): the replica goes offline with the same `DocClosed`
     /// event a rejection produces, and sends nothing more.
     #[test]
     fn doc_closed_mid_session_disconnects_with_doc_closed() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         eng.handle_connected();
         let _ = eng.pop_outbox().expect("OpenDoc");
         eng.handle_server_bytes(&enc(&ServerFrame::DocOpened {
@@ -3367,7 +3367,7 @@ mod tests {
 
     #[test]
     fn handle_timeout_while_opening_emits_error() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         eng.handle_connected();
         let _open = eng.pop_outbox().unwrap();
         let _ = drain_events(&mut eng);
@@ -3382,7 +3382,7 @@ mod tests {
 
     #[test]
     fn frame_for_another_doc_is_ignored() {
-        let mut eng = fresh_engine_clean();
+        let mut eng = fresh_replica_clean();
         drive_to_idle(&mut eng);
         let _ = drain_events(&mut eng);
         let _ = drain_outbox(&mut eng);
@@ -3403,7 +3403,7 @@ mod tests {
         }));
         let events = drain_events(&mut eng);
         assert!(
-            matches!(events.as_slice(), [Event::Error(s)] if s.contains("this engine syncs")),
+            matches!(events.as_slice(), [Event::Error(s)] if s.contains("this replica syncs")),
             "expected a single routing error, got {events:?}"
         );
         assert_eq!(

@@ -1,20 +1,20 @@
-// The app as the profile's host: the iOS edition of
-// `MonoplanMac/Sources/MonoplanMac/HostController.swift`. Same rules,
+// The app running the profile's engine: the iOS edition of
+// `MonoplanMac/Sources/MonoplanMac/EngineController.swift`. Same rules,
 // fewer cases: on iOS nothing else can hold the profile (no CLI, no
 // headless daemon, one process per container), so there is no takeover
-// and "busy" can only be a host of ours still starting. The host serves
+// and "busy" can only be an engine of ours still starting. The engine serves
 // no socket here (`monoplan-ffi`, `SERVE_SOCKET`); the client reaches
 // it in process through `FFITransport`.
 //
-// - Whenever the client has no host, start one. No profile (first
+// - Whenever the client has no engine, start one. No profile (first
 //   launch, or just after a sign-out's wipe) first gets a local-only
 //   workspace, so the app works without an account as the web client
 //   does (spec/auth.md); a sign-in replaces it.
-// - Sign-in and sign-out stop our host *here*, before the Rust side
-//   claims the profile. On macOS the claim stops the host itself over
+// - Sign-in and sign-out stop our engine *here*, before the Rust side
+//   claims the profile. On macOS the claim stops the engine itself over
 //   the socket; with no socket there is nothing for it to signal, and
 //   it would wait out its deadline ("daemon did not stop within 10s").
-//   The client re-hosts once the profile is free again.
+//   The client starts the engine again once the profile is free.
 //
 // Sharing this with the macOS app is the obvious follow-up: it would
 // be a third target beside the Kit, depending on MonoplanCore.
@@ -23,36 +23,36 @@ import Foundation
 import MonoplanCore
 import MonoplanMacKit
 
-final class HostController {
+final class EngineController {
     private let location: ProfileLocation
     private let client: DaemonClient
-    private var host: MonoplanCore.Host?
+    private var engine: MonoplanCore.Engine?
     private var starting = false
     /// The last failed start, shown once and then retried.
     private var failure: String?
     /// A sign-in or sign-out in progress: what the client is told, and
-    /// a reason not to start a host meanwhile.
+    /// a reason not to start an engine meanwhile.
     private var accountWork: String?
 
     init(location: ProfileLocation, client: DaemonClient) {
         self.location = location
         self.client = client
-        client.hostProvider = { [weak self] in
+        client.engineProvider = { [weak self] in
             self?.provision() ?? .pending("not signed in")
         }
     }
 
-    /// The host while it serves; nil between hosts.
-    var runningHost: MonoplanCore.Host? {
-        if let host, host.isRunning() { return host }
+    /// The engine while it serves; nil between engines.
+    var runningEngine: MonoplanCore.Engine? {
+        if let engine, engine.isRunning() { return engine }
         return nil
     }
 
-    /// Called by the client whenever it has no host: a transport to the
+    /// Called by the client whenever it has no engine: a transport to the
     /// running one, else what to show while there is none.
-    private func provision() -> HostProvision {
-        if let host, host.isRunning() { return .transport(FFITransport(host: host)) }
-        host = nil
+    private func provision() -> EngineProvision {
+        if let engine, engine.isRunning() { return .transport(FFITransport(engine: engine)) }
+        engine = nil
         if let accountWork { return .pending(accountWork) }
         if starting { return .pending("starting") }
         if let failure {
@@ -64,67 +64,67 @@ final class HostController {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = Result {
                 try MonoplanCore.ensureLocalWorkspace(profileDir: dir)
-                return try MonoplanCore.Host.start(profileDir: dir)
+                return try MonoplanCore.Engine.start(profileDir: dir)
             }
             DispatchQueue.main.async { self?.didStart(result) }
         }
         return .pending("starting")
     }
 
-    private func didStart(_ result: Result<MonoplanCore.Host, Error>) {
+    private func didStart(_ result: Result<MonoplanCore.Engine, Error>) {
         starting = false
         switch result {
         case .success(let h):
-            host = h
-            NSLog("MonoplanIOS: hosting %@", location.dir.path)
-        case .failure(HostError.NotLoggedIn):
+            engine = h
+            NSLog("MonoplanIOS: engine running on %@", location.dir.path)
+        case .failure(EngineError.NotLoggedIn):
             break
-        case .failure(HostError.Busy):
+        case .failure(EngineError.Busy):
             failure = "profile in use"
         case .failure(let e):
-            failure = "host failed: \(hostErrorMessage(e))"
-            NSLog("MonoplanIOS: host failed: %@", hostErrorMessage(e))
+            failure = "engine failed: \(engineErrorMessage(e))"
+            NSLog("MonoplanIOS: engine failed: %@", engineErrorMessage(e))
         }
         client.poke()
     }
 
     /// Clean exit: persist, fold, release the profile. Blocks.
     func stop() {
-        host?.shutdown()
-        host = nil
+        engine?.shutdown()
+        engine = nil
     }
 
-    /// Sign out: stop our host and wipe the profile (`monoplan auth
-    /// logout`). The client is then told the host is gone, finds no
-    /// profile, and the no-host path seeds a fresh local-only workspace.
+    /// Sign out: stop our engine and wipe the profile (`monoplan auth
+    /// logout`). The client is then told the engine is gone, finds no
+    /// profile, and the no-engine path seeds a fresh local-only workspace.
     func signOut(completion: @escaping (Error?) -> Void) {
         accountWork = "signing out"
         let dir = location.dir.path
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.host?.shutdown()
+            self?.engine?.shutdown()
             let result = Result { try MonoplanCore.logout(profileDir: dir) }
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.host = nil
+                self.engine = nil
                 self.accountWork = nil
-                self.client.hostGone()
-                completion(result.failure.map(HostFailure.init))
+                self.client.engineGone()
+                completion(result.failure.map(EngineFailure.init))
             }
         }
     }
 
     /// Sign in (`monoplan auth login`), off the main thread for the key
-    /// derivation. Our host is stopped first: the Rust side's claim
-    /// cannot reach a socket-less host, so it would never see the
-    /// profile freed. A wrong password therefore costs a host restart
-    /// (the client's poke hosts the untouched local-only workspace
+    /// derivation. Our engine is stopped first: the Rust side's claim
+    /// cannot reach a socket-less engine, so it would never see the
+    /// profile freed. A wrong password therefore costs an engine restart
+    /// (the client's poke starts the engine on the untouched local-only workspace
     /// again), which the macOS edition avoids; on success the profile
-    /// is rewritten and the poke hosts the account's.
+    /// is rewritten and the poke starts it on the account's.
     func signIn(_ creds: SignInCredentials, completion: @escaping (Error?) -> Void) {
         accountWork = "signing in"
         let dir = location.dir.path
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.host?.shutdown()
+            self?.engine?.shutdown()
             let result = Result {
                 try MonoplanCore.login(
                     profileDir: dir, server: creds.server, email: creds.email,
@@ -132,10 +132,10 @@ final class HostController {
             }
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.host = nil
+                self.engine = nil
                 self.accountWork = nil
-                self.client.hostGone()
-                completion(result.failure.map(HostFailure.init))
+                self.client.engineGone()
+                completion(result.failure.map(EngineFailure.init))
             }
         }
     }
@@ -148,21 +148,21 @@ struct SignInCredentials {
     var deviceName: String
 }
 
-/// A host error as a sentence; the generated `HostError` describes
+/// An engine error as a sentence; the generated `EngineError` describes
 /// itself by reflection.
-func hostErrorMessage(_ error: Error) -> String {
+func engineErrorMessage(_ error: Error) -> String {
     switch error {
-    case HostError.NotLoggedIn: return "no profile to host"
-    case HostError.Busy: return "profile in use"
-    case HostError.Stopped: return "the host has stopped"
-    case HostError.Failed(let message): return message
+    case EngineError.NotLoggedIn: return "no profile to run"
+    case EngineError.Busy: return "profile in use"
+    case EngineError.Stopped: return "the engine has stopped"
+    case EngineError.Failed(let message): return message
     default: return error.localizedDescription
     }
 }
 
-struct HostFailure: LocalizedError {
+struct EngineFailure: LocalizedError {
     let message: String
-    init(_ error: Error) { message = hostErrorMessage(error) }
+    init(_ error: Error) { message = engineErrorMessage(error) }
     var errorDescription: String? { message }
 }
 

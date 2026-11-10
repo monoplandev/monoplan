@@ -66,16 +66,16 @@ final class MirrorFramingTests: XCTestCase {
         XCTAssertTrue(JSONSerialization.isValidJSONObject(r))
     }
 
-    func testHostStateReplies() {
-        XCTAssertEqual(HostState.running.reply["status"] as? String, "running")
-        let pending = HostState.pending("signing out").reply
+    func testEngineStateReplies() {
+        XCTAssertEqual(EngineState.running.reply["status"] as? String, "running")
+        let pending = EngineState.pending("signing out").reply
         XCTAssertEqual(pending["status"] as? String, "pending")
         XCTAssertEqual(pending["reason"] as? String, "signing out")
         XCTAssertTrue(JSONSerialization.isValidJSONObject(pending))
-        XCTAssertEqual(HostInbound.hostState(.running).script, "window.__monoplanHost.hostState({\"status\":\"running\"})")
+        XCTAssertEqual(HostInbound.engineState(.running).script, "window.__monoplanHost.engineState({\"status\":\"running\"})")
         XCTAssertEqual(
-            HostInbound.hostState(.pending("in \"use\"")).script,
-            "window.__monoplanHost.hostState({\"reason\":\"in \\\"use\\\"\",\"status\":\"pending\"})")
+            HostInbound.engineState(.pending("in \"use\"")).script,
+            "window.__monoplanHost.engineState({\"reason\":\"in \\\"use\\\"\",\"status\":\"pending\"})")
     }
 
     func testInboundScriptsQuoteTheirArguments() {

@@ -6,7 +6,7 @@ Workflow: a reserved primary capture list ("Inbox", id `inbox`), any number of u
 
 ## Architecture
 
-- **Rust core** (`core/`) — Loro CRDT, E2EE, sync engine. Compiles to native (CLI, server) and WASM (web) via `core/web/`.
+- **Rust core** (`core/`) — Loro CRDT, E2EE, `Replica` (the per-doc sans-IO sync state machine). Compiles to native (CLI, server) and WASM (web) via `core/web/`.
 - **Rust server** (`server/`) — sqlite-backed, sequenced encrypted-blob store + auth + WS relay. The server is *dumb*: it cannot read op contents, cannot run a Loro doc, cannot validate semantics. Its job is auth, ordering, durability, frontier tracking, snapshot orchestration. TODO: Compaction may put an asterisk on "DUMB".
 - **CLI** (`cli/`) — Monoplan CLI
 - **Web** (`js/web/`, consuming `core/web/` wasm via `js/core/`) — browser client; multi-device proof spans CLI ↔ web.

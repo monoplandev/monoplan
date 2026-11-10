@@ -7,7 +7,7 @@
 //!     Loro snapshot per doc plus a bounded encrypted WAL of updates
 //!     applied after it. Every commit — local mutation or applied
 //!     remote op — is appended to the WAL; when the WAL crosses the
-//!     host's threshold the engine folds it into a fresh snapshot and
+//!     host's threshold the replica folds it into a fresh snapshot and
 //!     prunes the folded prefix. This happens regardless of
 //!     online/sync status; a full Loro snapshot retains operation
 //!     history, so unsent local operations survive folding and can be
@@ -32,7 +32,7 @@
 //!   - `IdbStorage` (web) — IndexedDB behind a wasm-bindgen `extern`
 //!     interface. Writes update an in-memory mirror synchronously (so
 //!     the trait method can return immediately) and the underlying IDB
-//!     transaction flushes in the background. The engine learns about
+//!     transaction flushes in the background. The replica learns about
 //!     real durability via a separate callback so the server-side `Ack`
 //!     frame isn't shipped until the bytes are actually on disk.
 //!
@@ -138,7 +138,7 @@ pub struct InFlightPush {
     pub to_vv: Vec<u8>,
 }
 
-/// Everything the engine needs at startup to reconstruct in-memory
+/// Everything the replica needs at startup to reconstruct in-memory
 /// state for one doc. Empty for a brand-new doc (`Default`).
 #[derive(Debug, Clone, Default)]
 pub struct BootState {
@@ -146,15 +146,15 @@ pub struct BootState {
     pub snapshot: Option<SnapshotRow>,
     /// Every surviving WAL row, in ascending `local_seq` order. The
     /// snapshot (if any) already pruned the prefix it contains, so the
-    /// engine replays all of these on top of the snapshot. Empty for a
-    /// fresh doc. Engine decrypts each and feeds the plaintext through
+    /// replica replays all of these on top of the snapshot. Empty for a
+    /// fresh doc. Replica decrypts each and feeds the plaintext through
     /// Loro.
     pub replay: Vec<WalRow>,
     /// Highest `local_seq` ever assigned for this doc. The next
     /// append returns `LocalSeq(this + 1)`.
     pub last_local_seq: LocalSeq,
     /// Highest contiguous `server_seq` we've durably applied. Seeds
-    /// `SyncEngine::last_contiguous_seq` / `last_durable_seq` — the
+    /// `Replica::last_contiguous_seq` / `last_durable_seq` — the
     /// `since_seq` of the resume `PullUpdates`.
     pub last_acked_server_seq: ServerSeq,
     /// Encoded `server_known_vv` — the Loro operations proven to exist
@@ -164,13 +164,13 @@ pub struct BootState {
     /// disconnected) with one outstanding.
     pub in_flight_push: Option<InFlightPush>,
     /// Total payload bytes across the surviving WAL rows — with
-    /// `replay.len()`, seeds the engine's snapshot-threshold stats.
+    /// `replay.len()`, seeds the replica's snapshot-threshold stats.
     pub wal_bytes: u64,
 }
 
-/// The engine-facing subset of [`BootState`] — everything except the
+/// The replica-facing subset of [`BootState`] — everything except the
 /// blobs the host already replayed into the `Doc`. Hosts hand this to
-/// [`crate::SyncEngine::new`] so the engine starts with the persisted
+/// [`crate::Replica::new`] so the replica starts with the persisted
 /// cursors, VV, in-flight push, and WAL statistics.
 #[derive(Debug, Clone, Default)]
 pub struct BootMeta {
@@ -183,7 +183,7 @@ pub struct BootMeta {
 }
 
 impl BootState {
-    /// Split off the engine-facing metadata (see [`BootMeta`]).
+    /// Split off the replica-facing metadata (see [`BootMeta`]).
     pub fn meta(&self) -> BootMeta {
         BootMeta {
             last_local_seq: self.last_local_seq,
@@ -205,7 +205,7 @@ pub enum StorageError {
     /// boundary so the trait stays portable.
     #[error("storage backend: {0}")]
     Backend(String),
-    /// Caller asked for a doc the storage has never seen. Engine
+    /// Caller asked for a doc the storage has never seen. Replica
     /// treats this as "fresh doc, empty BootState."
     #[error("doc not found: {0:?}")]
     DocNotFound(DocId),
@@ -222,14 +222,14 @@ pub enum StorageError {
 /// IDB in the background (durability signalled out-of-band — see
 /// `spec/local-storage.md`).
 pub trait LocalStorage {
-    /// Load everything the engine needs to bring a doc back to its
+    /// Load everything the replica needs to bring a doc back to its
     /// last-persisted state. For a doc the storage has never seen,
     /// returns `Ok(BootState::default())` — not `Err(DocNotFound)` —
     /// so the first-boot path is a single happy path.
     fn boot(&self, doc_id: DocId) -> Result<BootState, StorageError>;
 
     /// Append a locally-originated update to the WAL. Returns the
-    /// freshly-assigned `LocalSeq`. The engine calls this from
+    /// freshly-assigned `LocalSeq`. The replica calls this from
     /// `capture_local_ops` and advances the doc's `last_persisted_vv`
     /// only after this returns.
     fn append_local_wal(
@@ -272,7 +272,7 @@ pub trait LocalStorage {
     ) -> Result<(), StorageError>;
 
     /// Persist the resume cursor: the highest *contiguous* `server_seq`
-    /// the engine has durably applied. The engine calls this from
+    /// the replica has durably applied. The replica calls this from
     /// `notify_oplog_durable` whenever the durable frontier advances, and
     /// impls must return this exact value as `BootState::last_acked_server_seq`
     /// next boot.
@@ -280,8 +280,8 @@ pub trait LocalStorage {
     /// This is set **explicitly**, never derived from
     /// `MAX(wal.server_seq)`: that derivation underestimates once a
     /// snapshot prunes the rows it was derived from, and over-estimates
-    /// past a gap. The engine is the sole authority for the value —
-    /// impls just store the last one handed to them. The engine only
+    /// past a gap. The replica is the sole authority for the value —
+    /// impls just store the last one handed to them. The replica only
     /// ever advances it after the corresponding `server_known_vv`
     /// write, so the persisted cursor never runs ahead of the VV.
     fn write_acked_seq(&self, doc_id: DocId, seq: ServerSeq) -> Result<(), StorageError>;
@@ -307,10 +307,10 @@ pub trait LocalStorage {
     ) -> Result<(), StorageError>;
 }
 
-/// Lets tests share one MemStorage between the engine (via
+/// Lets tests share one MemStorage between the replica (via
 /// `Box<Arc<MemStorage>>`) and the test body (via the original `Arc`)
 /// without inventing a per-storage adapter type. Production impls
-/// don't need this — they're constructed once and owned by the engine.
+/// don't need this — they're constructed once and owned by the replica.
 impl<T: LocalStorage + ?Sized> LocalStorage for Arc<T> {
     fn boot(&self, doc_id: DocId) -> Result<BootState, StorageError> {
         (**self).boot(doc_id)
@@ -375,7 +375,7 @@ pub enum BootError {
 /// decrypts and imports each blob and advances `last_persisted_vv` to
 /// cover them, so the returned doc reports `has_uncaptured_ops() ==
 /// false` — every stored op is already captured. Returns the doc and
-/// the [`BootMeta`] to seed `SyncEngine::new` with.
+/// the [`BootMeta`] to seed `Replica::new` with.
 ///
 /// A doc the storage has never seen yields `BootState::default()`, so the
 /// result is a fresh empty `Doc` — the first-boot happy path.

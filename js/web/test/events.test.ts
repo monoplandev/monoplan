@@ -4,9 +4,9 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { Dek, Doc, SyncEngine } from "@monoplan/core/wasm";
-import type { EngineStorage } from "@monoplan/core/wasm";
-import { MemEngineStorage } from "../../core/test/mem-engine-storage.ts";
+import { Dek, Doc, Replica } from "@monoplan/core/wasm";
+import type { ReplicaStorage } from "@monoplan/core/wasm";
+import { MemReplicaStorage } from "../../core/test/mem-replica-storage.ts";
 import { createRoot } from "solid-js";
 import { findResultListLabel } from "../src/findResults.tsx";
 import { createDocsLayer } from "../src/sync/docs.ts";
@@ -22,19 +22,19 @@ import {
 
 const DOC_ID = "00000000-0000-0000-0000-000000000000";
 
-function engineFrom(doc: Doc): SyncEngine {
-  return new SyncEngine(
+function replicaFrom(doc: Doc): Replica {
+  return new Replica(
     doc,
     DOC_ID,
     Dek.generate(),
     0n,
-    new MemEngineStorage() as unknown as EngineStorage,
+    new MemReplicaStorage() as unknown as ReplicaStorage,
   );
 }
 
 describe("store events", () => {
   test("an item added to `events` is an event with no ListMeta row", () => {
-    const app = createSyncedApp(engineFrom(Doc.create()));
+    const app = createSyncedApp(replicaFrom(Doc.create()));
     const id = app.addItem(LIST_EVENTS, "gig");
     const it = app.getItem(id)!;
     expect(isEvent(it)).toBe(true);
@@ -47,7 +47,7 @@ describe("store events", () => {
   });
 
   test("moving is converting, both ways, with dates and state intact", () => {
-    const app = createSyncedApp(engineFrom(Doc.create()));
+    const app = createSyncedApp(replicaFrom(Doc.create()));
     const id = app.addItem("inbox", "dentist");
     app.setItemWhen(id, "2026-10-09T09:30");
     app.setLifecycle(id, "in_progress");
@@ -71,7 +71,7 @@ describe("store events", () => {
   });
 
   test("closing and reopening an event are ordinary lifecycle writes", () => {
-    const app = createSyncedApp(engineFrom(Doc.create()));
+    const app = createSyncedApp(replicaFrom(Doc.create()));
     const id = app.addItem(LIST_EVENTS, "gig");
     app.setDone(id, true);
     expect(statusValue(app.getItem(id)!)).toBe("done");
@@ -90,7 +90,7 @@ describe("store events", () => {
   });
 
   test("find results label an event's list with the built-in name", () => {
-    const app = createSyncedApp(engineFrom(Doc.create()));
+    const app = createSyncedApp(replicaFrom(Doc.create()));
     const id = app.addItem(LIST_EVENTS, "gig");
     const it: ItemView = app.getItem(id)!;
     const layer = createRoot(() => createDocsLayer(app, []));

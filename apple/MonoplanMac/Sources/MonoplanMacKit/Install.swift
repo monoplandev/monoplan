@@ -1,4 +1,4 @@
-// The bundled CLI on the user's PATH. The app hosts the doc itself
+// The bundled CLI on the user's PATH. The app runs the engine itself
 // (spec/daemon-plan.md, amended 2026-10-27); the `monoplan` copy in
 // the bundle is for the terminal, and a symlink to it keeps the CLI at
 // the app's version so its hello never refuses.

@@ -127,7 +127,7 @@ from a fresh one. Only the client knows its own deps.
 
 `storage.md` §Epochs previously stated that a device acked at/above the
 floor is compatible because of an "ack-after-push client invariant". The
-engine has no such invariant. In `core/src/sync.rs`, acks fire from
+replica has no such invariant. In `core/src/sync.rs`, acks fire from
 `notify_oplog_durable` as each pulled batch becomes durable, during
 `Pulling`; the post-reconnect push cannot start until `Pulling` ends
 (`try_start_push` returns unless `Idle`). Acks therefore *precede* the
@@ -237,7 +237,7 @@ to its sync cursor.
 
 Buys: a chain head of bounded size, bootstrap cost proportional to
 state rather than history, a seq log that can be emptied below the head,
-and an engine with no causal reasoning in it at all.
+and a replica with no causal reasoning in it at all.
 
 Does not buy: a smaller VV (fact 1), or continuity for up-to-date
 devices (they re-download once per trim). For one user with small docs

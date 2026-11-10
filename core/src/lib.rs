@@ -1,4 +1,4 @@
-//! Monoplan core: encryption + Loro CRDT engine + sync logic.
+//! Monoplan core: encryption + Loro CRDT replica + sync logic.
 
 pub mod crypto;
 pub mod doc;
@@ -28,6 +28,6 @@ pub use storage::{
     load_doc, seed_snapshot,
 };
 pub use sync::{
-    EngineOptions, Event, HelloError, SyncEngine, hello_frame, parse_hello_response,
+    EngineOptions, Event, HelloError, Replica, hello_frame, parse_hello_response,
     server_frame_doc_id,
 };

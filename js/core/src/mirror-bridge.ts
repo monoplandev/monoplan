@@ -1,19 +1,19 @@
 // The mirror's IO (`spec/mac-window-plan.md` "JS side"): the twin of
 // `SyncBridge` for a webview that runs over an in-process host instead
-// of a WebSocket. Where `SyncBridge` multiplexes synced engines over one
-// socket, this routes *mirror* engines (`SyncEngine.mirror`) over a
+// of a WebSocket. Where `SyncBridge` multiplexes synced replicas over one
+// socket, this routes *mirror* replicas (`Replica.mirror`) over a
 // `MirrorTransport`: three verbs and no envelope, because there is no
 // network and no untrusted server between the two docs.
 //
 //   - `open(docId)` subscribes on the host, which answers with the seed
 //     (a plaintext Loro snapshot and the peer id it leased for this
-//     mirror); the caller-supplied `createEngine` turns the seed into a
-//     mirror engine, which is then routed.
+//     mirror); the caller-supplied `createReplica` turns the seed into a
+//     mirror replica, which is then routed.
 //   - host → mirror: every update the transport delivers is applied to
-//     its doc's engine (`applyMirrorUpdate`, tagged remote) and
+//     its doc's replica (`applyMirrorUpdate`, tagged remote) and
 //     `onServerFrame(docId)` pulses so the host drains AppEvents into
 //     its store, exactly as after a server frame.
-//   - mirror → host: `pumpOutbox()` drains each engine's mirror outbox
+//   - mirror → host: `pumpOutbox()` drains each replica's mirror outbox
 //     (what `flush` exported) and hands every update to `send`, in
 //     order. The store's `setOnFlush` hook calls this after each local
 //     commit, as it calls `SyncBridge.pumpOutbox` in the browser.
@@ -21,12 +21,12 @@
 // The transport is injected so the same bridge runs under the macOS
 // app (a WebKit message handler, bytes as base64) and under Bun (an
 // in-memory host). Like `SyncBridge`, this module imports no wasm at
-// load time: the engine type is only used as a type.
+// load time: the replica type is only used as a type.
 
-import type { SyncEngine } from "../wasm/monoplan_core_web.js";
+import type { Replica } from "../wasm/monoplan_core_web.js";
 import type { ConnectionEvent } from "./sync-bridge.ts";
 
-/** What the host answers a subscribe with (`Host.subscribe`): the doc
+/** What the host answers a subscribe with (`Engine.subscribe`): the doc
  *  as it stands, and the peer id the mirror must write under for the
  *  life of the subscription. */
 export interface MirrorSeed {
@@ -44,7 +44,7 @@ export interface MirrorTransport {
   subscribe(docId: string): Promise<MirrorSeed>;
   /** End the subscription; the host releases the peer lease. */
   unsubscribe(docId: string): void;
-  /** Hand one of the mirror's updates to the host (`Host.import`).
+  /** Hand one of the mirror's updates to the host (`Engine.import`).
    *  Rejects when the host refused it (stopped, or bytes Loro would
    *  not import). Calls for one doc are made in order and awaited one
    *  at a time. */
@@ -60,32 +60,32 @@ export interface MirrorTransport {
 
 export interface MirrorBridgeOpts {
   transport: MirrorTransport;
-  /** Turn a seed into a mirror engine: `Doc.loadWithPeer(snapshot,
-   *  peer)` then `SyncEngine.mirror(doc, docId)`, plus whatever the
+  /** Turn a seed into a mirror replica: `Doc.loadWithPeer(snapshot,
+   *  peer)` then `Replica.mirror(doc, docId)`, plus whatever the
    *  host wants on the doc first (the author). Injected so this module
    *  picks no wasm build. */
-  createEngine: (seed: MirrorSeed) => SyncEngine;
+  createReplica: (seed: MirrorSeed) => Replica;
   /** `online` once the first doc is open; `offline` once the host has
    *  stopped every doc; `drain` after every outbox pump, the pulse the
    *  browser runtime reads as "we just round-tripped". */
   onChange?: (kind: ConnectionEvent) => void;
-  /** Fires after every host update applied to an engine, and once
+  /** Fires after every host update applied to a replica, and once
    *  right after a doc opens (the seed is the first frame). Hosts
-   *  drain `popAppEvent` on the named engine into their store here. */
+   *  drain `popAppEvent` on the named replica into their store here. */
   onServerFrame?: (docId: string) => void;
-  /** The host stopped serving `docId`; its engine is no longer routed
+  /** The host stopped serving `docId`; its replica is no longer routed
    *  and will not converge again until a new host seeds a new one. */
   onStopped?: (docId: string) => void;
   /** Problems with no owner: an update for a doc the bridge does not
-   *  route, an import the host refused, bytes the engine would not
+   *  route, an import the host refused, bytes the replica would not
    *  apply. */
   onError?: (message: string) => void;
 }
 
 export class MirrorBridge {
-  private readonly engines = new Map<string, SyncEngine>();
+  private readonly replicas = new Map<string, Replica>();
   /** Docs whose subscribe is in flight: updates that arrive before the
-   *  engine exists wait here and apply once it does. */
+   *  replica exists wait here and apply once it does. */
   private readonly pending = new Map<string, Uint8Array[]>();
   /** Imports are serialised so the host sees a doc's updates in the
    *  order the mirror produced them. */
@@ -100,20 +100,20 @@ export class MirrorBridge {
 
   /** Doc ids this bridge routes, in open order. */
   docIds(): string[] {
-    return [...this.engines.keys()];
+    return [...this.replicas.keys()];
   }
 
-  engine(docId: string): SyncEngine | undefined {
-    return this.engines.get(docId);
+  replica(docId: string): Replica | undefined {
+    return this.replicas.get(docId);
   }
 
-  /** Subscribe to `docId` on the host and route the resulting engine.
-   *  Resolves with the engine once it is seeded; `onServerFrame`
+  /** Subscribe to `docId` on the host and route the resulting replica.
+   *  Resolves with the replica once it is seeded; `onServerFrame`
    *  pulses once for it before that. Throws if the doc is already
    *  routed or the bridge is stopped. */
-  async open(docId: string): Promise<SyncEngine> {
+  async open(docId: string): Promise<Replica> {
     if (this.stopped) throw new Error("MirrorBridge: stopped");
-    if (this.engines.has(docId) || this.pending.has(docId)) {
+    if (this.replicas.has(docId) || this.pending.has(docId)) {
       throw new Error(`MirrorBridge: doc ${docId} is already open`);
     }
     this.pending.set(docId, []);
@@ -124,7 +124,7 @@ export class MirrorBridge {
       this.pending.delete(docId);
       throw e;
     }
-    const engine = this.opts.createEngine({ ...seed, docId });
+    const replica = this.opts.createReplica({ ...seed, docId });
     const queued = this.pending.get(docId) ?? [];
     this.pending.delete(docId);
     if (this.stopped) {
@@ -132,33 +132,33 @@ export class MirrorBridge {
       this.opts.transport.unsubscribe(docId);
       throw new Error("MirrorBridge: stopped");
     }
-    this.engines.set(docId, engine);
-    for (const bytes of queued) this.apply(docId, engine, bytes);
+    this.replicas.set(docId, replica);
+    for (const bytes of queued) this.apply(docId, replica, bytes);
     this.opts.onServerFrame?.(docId);
     if (!this.online) {
       this.online = true;
       this.opts.onChange?.("online");
     }
-    return engine;
+    return replica;
   }
 
   /** Stop routing `docId` and end its subscription on the host. Any
-   *  update still in the engine's outbox is pumped first. Returns
+   *  update still in the replica's outbox is pumped first. Returns
    *  whether the doc was routed. */
   close(docId: string): boolean {
-    const engine = this.engines.get(docId);
-    if (!engine) return false;
-    this.pumpOne(docId, engine);
-    this.engines.delete(docId);
+    const replica = this.replicas.get(docId);
+    if (!replica) return false;
+    this.pumpOne(docId, replica);
+    this.replicas.delete(docId);
     this.opts.transport.unsubscribe(docId);
     return true;
   }
 
   /** Caller signal: a local commit may have left bytes in some
-   *  engine's mirror outbox. Drain every engine to the host. */
+   *  replica's mirror outbox. Drain every replica to the host. */
   pumpOutbox(): void {
     if (this.stopped) return;
-    for (const [docId, engine] of this.engines) this.pumpOne(docId, engine);
+    for (const [docId, replica] of this.replicas) this.pumpOne(docId, replica);
     this.opts.onChange?.("drain");
   }
 
@@ -168,13 +168,13 @@ export class MirrorBridge {
     return this.sendChain;
   }
 
-  /** End every subscription. Engines keep working as plain docs but
+  /** End every subscription. Replicas keep working as plain docs but
    *  neither send nor receive from here on. */
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
-    for (const docId of [...this.engines.keys()]) {
-      this.engines.delete(docId);
+    for (const docId of [...this.replicas.keys()]) {
+      this.replicas.delete(docId);
       this.opts.transport.unsubscribe(docId);
     }
     this.pending.clear();
@@ -184,9 +184,9 @@ export class MirrorBridge {
     }
   }
 
-  private pumpOne(docId: string, engine: SyncEngine): void {
+  private pumpOne(docId: string, replica: Replica): void {
     while (true) {
-      const bytes = engine.takeMirrorOutbox();
+      const bytes = replica.takeMirrorOutbox();
       if (!bytes) break;
       this.sendChain = this.sendChain
         .then(() => this.opts.transport.send(docId, bytes))
@@ -200,23 +200,23 @@ export class MirrorBridge {
 
   private handleUpdate(docId: string, bytes: Uint8Array): void {
     if (this.stopped) return;
-    const engine = this.engines.get(docId);
-    if (!engine) {
+    const replica = this.replicas.get(docId);
+    if (!replica) {
       const queue = this.pending.get(docId);
       if (queue) {
         queue.push(bytes);
         return;
       }
-      this.opts.onError?.(`host update for doc ${docId} dropped: no engine routes it`);
+      this.opts.onError?.(`host update for doc ${docId} dropped: no replica routes it`);
       return;
     }
-    this.apply(docId, engine, bytes);
+    this.apply(docId, replica, bytes);
     this.opts.onServerFrame?.(docId);
   }
 
-  private apply(docId: string, engine: SyncEngine, bytes: Uint8Array): void {
+  private apply(docId: string, replica: Replica, bytes: Uint8Array): void {
     try {
-      engine.applyMirrorUpdate(bytes);
+      replica.applyMirrorUpdate(bytes);
     } catch (e) {
       this.opts.onError?.(
         `host update for doc ${docId} not applied: ${e instanceof Error ? e.message : String(e)}`,
@@ -226,10 +226,10 @@ export class MirrorBridge {
 
   private handleStopped(docId: string): void {
     if (this.stopped) return;
-    const had = this.engines.delete(docId) || this.pending.delete(docId);
+    const had = this.replicas.delete(docId) || this.pending.delete(docId);
     if (!had) return;
     this.opts.onStopped?.(docId);
-    if (this.engines.size === 0 && this.pending.size === 0 && this.online) {
+    if (this.replicas.size === 0 && this.pending.size === 0 && this.online) {
       this.online = false;
       this.opts.onChange?.("offline");
     }

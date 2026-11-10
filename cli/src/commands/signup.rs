@@ -109,7 +109,7 @@ pub struct Outcome {
 /// its DEK becomes the Home DEK (wrapped under the new password KEK
 /// and the recovery code exactly as a fresh one would be) and its doc
 /// id is sent as `primary_doc_id`, so nothing is copied or
-/// re-encrypted and the engine's empty `server_known_vv` pushes the
+/// re-encrypted and the replica's empty `server_known_vv` pushes the
 /// whole local history on first connect (`spec/auth.md` §Device
 /// pairing). Any other profile (none, or an earlier account's) gets a
 /// freshly minted and seeded doc, as before.

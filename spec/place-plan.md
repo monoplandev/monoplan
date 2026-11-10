@@ -61,7 +61,7 @@ place = {
   bulk-diff paths all emit `ItemPlaceChanged` on a change.
 - Hashed into the logical fingerprint (label, coordinate bits, address,
   ref).
-- wasm: `setItemPlace(itemId, placeJson?)` on `Doc` and `SyncEngine`,
+- wasm: `setItemPlace(itemId, placeJson?)` on `Doc` and `Replica`,
   JSON text in; `AppEventJs.place` is JSON text out; the workspace
   snapshot carries `place` as an object.
 
@@ -142,7 +142,7 @@ Vec<PlaceSuggestion { place, count, last_used }>` (`places.rs`), a
 sibling of `Doc::search`. A full scan per call, not an index: distinct
 places are few, and the view is derived from the `ItemView`s the doc
 already produces. wasm: `placeSuggestionsJson(query, limit)` on `Doc`
-and `SyncEngine`, JSON out.
+and `Replica`, JSON out.
 
 - **Which items count.** Everything not binned. Done items count: last
   week's done gym visit still makes "Gym" current. Archived lists count.

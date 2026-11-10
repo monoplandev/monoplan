@@ -1,14 +1,14 @@
-// Search boundary. The engine itself lives in core (`core/src/search.rs`,
+// Search boundary. The replica itself lives in core (`core/src/search.rs`,
 // covered by `core/tests/search.rs`); this file checks that the wasm
 // exports the web consumes round-trip: the shared tokenizer, the name
 // filter, and the JSON query surface the store wraps. Mutations go
-// through a real SyncEngine, as in production.
+// through a real Replica, as in production.
 
 import { describe, expect, test } from "bun:test";
 
-import { Dek, Doc, SyncEngine } from "@monoplan/core/wasm";
-import type { EngineStorage } from "@monoplan/core/wasm";
-import { MemEngineStorage } from "../../core/test/mem-engine-storage.ts";
+import { Dek, Doc, Replica } from "@monoplan/core/wasm";
+import type { ReplicaStorage } from "@monoplan/core/wasm";
+import { MemReplicaStorage } from "../../core/test/mem-replica-storage.ts";
 import {
   createSearchEngine,
   matchesName,
@@ -18,13 +18,13 @@ import {
 
 const LIST_MAIN = "inbox";
 
-function newSearch(): { eng: SyncEngine; search: SearchEngine } {
-  const eng = new SyncEngine(
+function newSearch(): { eng: Replica; search: SearchEngine } {
+  const eng = new Replica(
     Doc.create(),
     "00000000-0000-0000-0000-000000000000",
     Dek.generate(),
     0n,
-    new MemEngineStorage() as unknown as EngineStorage,
+    new MemReplicaStorage() as unknown as ReplicaStorage,
   );
   return { eng, search: createSearchEngine(eng) };
 }

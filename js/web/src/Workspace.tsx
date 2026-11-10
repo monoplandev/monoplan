@@ -377,7 +377,7 @@ export function Workspace(props: {
     null,
   );
   // UI-only mirror of the title being edited in the dialog: the list row
-  // reflects it live while typing, but nothing is written to the engine
+  // reflects it live while typing, but nothing is written to the replica
   // until the dialog flushes on close (so no op-per-keystroke). Cleared
   // whenever the dialog closes, via any path.
   const [liveEdit, setLiveEdit] = createSignal<{
@@ -1892,7 +1892,7 @@ export function Workspace(props: {
   // Cmd/Ctrl+Z (undo) and Cmd/Ctrl+Shift+Z (redo). Skipped when focus
   // is in an editable surface so the browser's native text-undo handles
   // mid-typing in inputs/textareas/contenteditable rows. Only swallows
-  // the keystroke when the engine actually applied a step — otherwise
+  // the keystroke when the replica actually applied a step — otherwise
   // the OS / browser still gets a shot at it.
   const onUndoRedoKey = (e: KeyboardEvent) => {
     if (e.key !== "z" && e.key !== "Z") return;

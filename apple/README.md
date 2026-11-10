@@ -2,21 +2,21 @@
 
 The Rust↔Swift FFI boundary for the Apple clients. What crosses it today
 is the profile's lifecycle, not the doc: `login` / `logout` (the bodies of
-the CLI commands) and `Host`, the daemon loop embedded in the app's
+the CLI commands) and `Engine`, the daemon loop embedded in the app's
 process (`spec/daemon-plan.md`, amended 2026-10-27), and the app's
-client path into it: `Host.request` and `Host.watch`, the socket's
+client path into it: `Engine.request` and `Engine.watch`, the socket's
 request and watch payloads as function calls (phase 1 of
 [`spec/mac-window-plan.md`](../spec/mac-window-plan.md), built
-2026-10-29), and the host side of the window's mirror: `Host.subscribe`
+2026-10-29), and the engine side of the window's mirror: `Engine.subscribe`
 (a plaintext snapshot, a peer id leased for the mirror, and every later
-change as Loro update bytes through a `MirrorSink`) and `Host.import`
+change as Loro update bytes through a `MirrorSink`) and `Engine.import`
 (the mirror's ops applied as local), phase 2, built 2026-11-03, plus
-`Host.session` (the signed-in identity, server and open docs the
-window boots from) and `Host.device_token` (what the app puts on the
+`Engine.session` (the signed-in identity, server and open docs the
+window boots from) and `Engine.device_token` (what the app puts on the
 window's HTTP calls), phase 4. The tray never opens the socket. The
 window is that plan's phases 3 and 4, both built 2026-11-04: a webview
-running the web client (`js/web/mirror.html`, over `SyncEngine.mirror`)
-over a mirror doc that `Host` seeds and converges through that
+running the web client (`js/web/mirror.html`, over `Replica.mirror`)
+over a mirror doc that `Engine` seeds and converges through that
 surface, with a peer id of its own. The page talks to the app through
 a WebKit message handler named `monoplan` and the
 `window.__monoplanHost` global; the exact requests, replies and base64
@@ -25,7 +25,7 @@ framing are in that spec's "Swift side" and in
 `MonoplanMac/Sources/MonoplanMac/WebWindow.swift`.
 The socket stays the CLI's; it never carries the mirror. iOS is native
 (decided 2026-11-05, no webview): `apple/MonoplanIOS` below is its
-first surface, a client of the same embedded host over the same FFI,
+first surface, a client of the same embedded engine over the same FFI,
 so the FFI grows typed reads as that UI does. The offline
 `MonoplanStore` prototype from
 [`spec/swift-ffi-plan.md`](../spec/swift-ffi-plan.md) was removed on
@@ -34,7 +34,7 @@ so the FFI grows typed reads as that UI does. The offline
 ## Layering
 
 ```
-monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's daemon: Host (start, request, watch, subscribe, import, session, device_token, shutdown), login, logout
+monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's daemon: Engine (start, request, watch, subscribe, import, session, device_token, shutdown), login, logout
    → MonoplanCoreFFI.xcframework        static libs (macOS/iOS/iOS-sim) + C headers
       → MonoplanCore (SwiftPM)          generated Swift bindings + a thin facade
          → MonoplanMac, MonoplanIOS      consume MonoplanCore (and MonoplanMac's Kit product) as local packages
@@ -56,7 +56,7 @@ monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's 
 # 1. Build the XCFramework + generated Swift bindings from the Rust crate.
 bun run build:apple            # == apple/build-xcframework.sh
 
-# 2. Run the SwiftPM tests (the embedded host's start-up refusals, no server needed).
+# 2. Run the SwiftPM tests (the embedded engine's start-up refusals, no server needed).
 swift test --package-path apple/MonoplanCore
 # on a CLT-default machine:
 # DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --package-path apple/MonoplanCore
@@ -74,37 +74,37 @@ won't compile without those outputs present.
 ## MonoplanMac — the menubar app
 
 `apple/MonoplanMac/` is a SwiftPM package: the macOS status-item app, and
-on macOS the normal host of the profile (`spec/daemon-plan.md`,
-amendment 2026-10-27). One process: it runs the Rust host loop
-in-process (`Host` from `MonoplanCore`, the same loop as `monoplan
+on macOS the process that normally runs the profile's engine (`spec/daemon-plan.md`,
+amendment 2026-10-27). One process: it runs the Rust engine loop
+in-process (`Engine` from `MonoplanCore`, the same loop as `monoplan
 daemon`) on a background thread, and its tray is an in-process client
 of that loop: `DaemonClient` (MonoplanMacKit) speaks the socket's
-MessagePack payloads over a `HostTransport`, which in the app is
-`FFITransport` over `Host.request` / `Host.watch`, never the socket. It
+MessagePack payloads over an `EngineTransport`, which in the app is
+`FFITransport` over `Engine.request` / `Engine.watch`, never the socket. It
 sends hello, opens a watch, and re-fetches `agenda --days 0 --json`
-whenever the host reports a change, once a minute, and when the menu
+whenever the engine reports a change, once a minute, and when the menu
 opens. The menu shows
 Today's rows (time, title, "in 2h 15m" / "now" / "due today" /
 "overdue"; a row opens the item in the web client), a Starred section
 with the first three rows of the Focus lens (`starred --json`) each with
 its list's name muted on the right (`list ls --json --all`), an offline
 notice when there is no server, "Open Monoplan" (the window, below),
-"Settings…" and "Quit Monoplan" (which stops the host: persist, fold,
+"Settings…" and "Quit Monoplan" (which stops the engine: persist, fold,
 release the profile). An item row opens the window on that item.
 
-Hosting rules (`Sources/MonoplanMac/HostController.swift`): the app
-hosts whenever it runs and only ever talks to its own host. Whenever
-the client has no host and the profile is signed in it starts one,
+Engine rules (`Sources/MonoplanMac/EngineController.swift`): the engine
+runs whenever the app does, and the app only ever talks to its own engine. Whenever
+the client has no engine and the profile is signed in it starts one,
 which takes a headless `monoplan daemon` over (asks it to exit, then
 claims the profile), and hands the client a transport to it. It
 honours `Shutdown`, so `logout`, `login` and `password` in the
 terminal stop it, hold the profile while they rewrite it, and the app
-re-hosts once it is free: the client hears the loop end through its
+starts the engine again once it is free: the client hears the loop end through its
 watch and asks the controller again. The one thing it
 waits out rather than takes over is "busy": another copy of the app, a
-host still starting, or a command holding the profile; the menu says
+engine still starting, or a command holding the profile; the menu says
 "profile in use" and the client's backoff retries. Doc commands from
-the CLI work against the app's host; it is never restarted as stale,
+the CLI work against the app's engine; it is never restarted as stale,
 its hello only has to match the app's package version, which the
 bundled CLI symlinked onto `PATH` guarantees.
 
@@ -112,7 +112,7 @@ Three targets: `MonoplanMacKit` (MessagePack codec for the subset
 `rmp_serde::to_vec_named` emits, the socket client, the agenda model,
 the window's message framing and scheme routes; unit-tested, no
 MonoplanCore dependency), the `MonoplanMac` executable (AppKit, the
-host controller, the window) and `MonoplanCore` (the prebuilt
+engine controller, the window) and `MonoplanCore` (the prebuilt
 XCFramework). The wire shape it hand-encodes is pinned on the Rust side
 by `wire_shape_is_named_maps_and_bare_unit_variants` in `cli/src/ipc.rs`.
 
@@ -124,19 +124,19 @@ by `wire_shape_is_named_maps_and_bare_unit_variants` in `cli/src/ipc.rs`.
 by Vite and copied into `Contents/Resources/web` by `build-app.sh`,
 served by the app's own URL scheme handler (right MIME types so the
 wasm streams, a stable origin for `localStorage`, no `file://` rules).
-The page asks the app for the session (`Host.session`), subscribes to
-each open doc (`Host.subscribe`: a plaintext snapshot and a leased
-peer id), imports the host's later updates as they arrive and hands
-its own edits back on every store flush (`Host.import`); the web store
+The page asks the app for the session (`Engine.session`), subscribes to
+each open doc (`Engine.subscribe`: a plaintext snapshot and a leased
+peer id), imports the engine's later updates as they arrive and hands
+its own edits back on every store flush (`Engine.import`); the web store
 is the browser's, unchanged, over a mirror doc. `/api/*` requests from
-the page are forwarded by the same scheme handler to the host's server
+the page are forwarded by the same scheme handler to the engine's server
 with the device token (`Authorization: Bearer`), so the page never
 holds a credential and never logs in; it holds no DEK either, so the
 flows that wrap or unwrap one (new / delete workspace, invite links,
 log out, delete account) are hidden there and stay with the tray, the
-browser and the CLI. The host's sync status is pushed into the page
+browser and the CLI. The engine's sync status is pushed into the page
 for its footer. Closing or quitting first asks the page to hand
-everything to the host and waits for it (bounded), then drops the
+everything to the engine and waits for it (bounded), then drops the
 subscriptions, which releases the peer slots.
 
 While the window is open the app is a regular app (Dock icon, a main
@@ -145,7 +145,7 @@ sees each key first, so its own shortcuts win); closed, it goes back
 to a bare status item. Clicking the Dock icon or launching the app
 again reopens it. `MONOPLAN_MIRROR_URL=http://localhost:5176/mirror.html`
 loads the Vite dev server instead of the bundle for UI work (the doc
-still mirrors the host; `/api` then goes through Vite's proxy without
+still mirrors the engine; `/api` then goes through Vite's proxy without
 the token). `MONOPLAN_MAC_DEBUG=1` also enables Inspect Element and
 logs the page's security context on load.
 
@@ -154,13 +154,13 @@ bun run build:apple                                   # once, and after core cha
 bun run mac                                           # build Monoplan.app (debug) and run the binary inside it
 bun run mac:app                                       # build Monoplan.app (release) and `open` it
 bun run mac:install                                   # build release, quit a running Monoplan, install to /Applications (`-d ~/Applications`, `--no-open`) and launch
-swift test --package-path apple/MonoplanMac           # codec / model tests, no host needed
+swift test --package-path apple/MonoplanMac           # codec / model tests, no engine needed
 MONOPLAN_MIRROR_URL=http://localhost:5176/mirror.html bun run mac   # the window over the Vite dev server
 MONOPLAN_DATA_DIR=local/cli bun run mac               # a different profile, same rule as the CLI
 MONOPLAN_MAC_DEBUG=1 bun run mac                      # log state and rows to stderr
 ```
 
-The in-app host logs to `daemon.log` in the profile dir (`~/Library/
+The in-app engine logs to `daemon.log` in the profile dir (`~/Library/
 Application Support/monoplan/daemon.log` by default; `RUST_LOG`
 overrides the `info` level): connect failures and drops land there
 once per distinct reason, and the same reason shows on the Settings
@@ -191,7 +191,7 @@ terminal. The menu bar glyph is separate: a template image drawn in
 
 No account is needed: with no profile the app seeds the CLI's
 local-only workspace (`monoplan-ffi::ensure_local_workspace`) and
-hosts it; the window runs it as the web client's anonymous session.
+runs it; the window runs it as the web client's anonymous session.
 Settings has two panes. Account: server, status ("Local workspace (no
 account)" until there is one), sync, an "Open at login" toggle
 (`SMAppService.mainApp`, which lists the app under System Settings ›
@@ -205,10 +205,10 @@ replaces the local workspace (the form says so); Create Account runs
 the local workspace as the account's Home doc, and shows the recovery
 code once. The tray shows "Sign In…" while there is no account. Sign
 Out is confirmed and runs `monoplan-ffi::logout`, the same as
-`monoplan auth logout`: it stops the in-app host and wipes the profile,
+`monoplan auth logout`: it stops the in-app engine and wipes the profile,
 and a fresh local workspace takes its place.
 Advanced: the
-Host row (running, or why not), the Build row (package version, then
+Engine row (running, or why not), the Build row (package version, then
 the short commit `build-app.sh` baked into Info.plist, "+" if the tree
 was dirty), a
 "Command line" row whose Install button symlinks `/usr/local/bin/monoplan`
@@ -216,7 +216,7 @@ to the bundled binary (admin prompt if the directory is root's), and
 the profile path with a Reveal button. The
 launchd agent from `monoplan daemon install` is the headless
 alternative for Macs without the app: the app takes its daemon over at
-launch, and `install` refuses while the app hosts.
+launch, and `install` refuses while the app's engine runs.
 
 ### Localisation
 
@@ -258,25 +258,25 @@ xcodegen on this machine; `Monoplan.xcodeproj` uses a synchronized
 folder, so new files under `Monoplan/` need no project edit) with one
 SwiftUI target. It is the first native client and exists to drive the
 architecture, not to be used yet: sign in, sign out, run a sync, and
-show what the host reports.
+show what the engine reports.
 
-The app is the profile's host, as the Mac app is: `HostController`
-runs `Host` from MonoplanCore in process and `DaemonClient` (the Kit,
+The app runs the profile's engine, as the Mac app does: `EngineController`
+runs `Engine` from MonoplanCore in process and `DaemonClient` (the Kit,
 consumed as the `MonoplanMacKit` product of `../MonoplanMac`) talks to
 it through `FFITransport`, hello then watch. Two things differ from
-the Mac. The host serves **no socket**: nothing on iOS would dial one,
+the Mac. The engine serves **no socket**: nothing on iOS would dial one,
 and the container paths are longer than `sun_path` allows, so
 `monoplan-ffi` passes `serve_socket = false` (`daemon::start_with`)
 under `target_os = "ios"` and skips the headless-daemon takeover. And
 the process is suspended rather than quit: on return to the
 foreground the app sends `Reconnect`, since the WebSocket is dead by
 then (`spec/daemon-plan.md` "Mobile hosts"); there is no clean
-shutdown, the host's persist tick and the WAL cover a kill. The
-missing socket also means `login` cannot stop the app's host itself,
+shutdown, the engine's persist tick and the WAL cover a kill. The
+missing socket also means `login` cannot stop the app's engine itself,
 as it does on the Mac (`client::claim` sends `Shutdown` over the
-socket and would wait out its deadline here), so `HostController`
-shuts its host down before calling `login`, as both apps already do
-before `logout`; a rejected password costs a host restart.
+socket and would wait out its deadline here), so `EngineController`
+shuts its engine down before calling `login`, as both apps already do
+before `logout`; a rejected password costs an engine restart.
 
 ```sh
 bun run ios          # build for the simulator, install, launch
@@ -315,16 +315,16 @@ group as a section: Today, Unscheduled events, then each non-empty
 day, with the row's time, its workspace under the text when it is not
 Personal's, and the duration or overdue / due-today tone; read-only
 markup, nothing tappable yet. **Debug**
-(`DebugView.swift`) is the original surface: the `SyncStatus` the host
+(`DebugView.swift`) is the original surface: the `SyncStatus` the engine
 publishes (online, pending, local-only, last synced, offline reason),
-`Changed` events counted as they arrive, the host's build id and pid,
-the profile path, and the `Host.session` record (email, account,
+`Changed` events counted as they arrive, the engine's build id and pid,
+the profile path, and the `Engine.session` record (email, account,
 device, server, open docs), with the sign-in / sign-out buttons until
 a settings surface takes them. Sign-in is the Mac sheet's form without
 account creation or recovery; the local-only workspace a first launch
-hosts is replaced by the account's, as on the Mac.
+runs is replaced by the account's, as on the Mac.
 
-Not shared yet: `HostController` and `FFITransport` are copies of the
+Not shared yet: `EngineController` and `FFITransport` are copies of the
 Mac app's. The obvious next step is a third target beside the Kit,
 depending on MonoplanCore, that both apps consume; the Kit's name
 (`MonoplanMacKit`) should go with it. After that, the native reads

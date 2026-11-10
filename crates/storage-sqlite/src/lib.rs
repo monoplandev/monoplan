@@ -45,7 +45,7 @@ pub enum DbError {
 /// Native `LocalStorage` over a sqlite file.
 ///
 /// `Clone` is shallow: clones share one `Connection` behind the
-/// `Arc<Mutex>`, so an engine and its owning session can both hold a
+/// `Arc<Mutex>`, so a replica and its owning session can both hold a
 /// handle to the *same* db without a second file open. WAL + the `Mutex`
 /// serialise their accesses.
 #[derive(Clone)]

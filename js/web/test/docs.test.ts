@@ -1,13 +1,13 @@
 // The cross-doc personal layer (`src/sync/docs.ts`): the reverse index,
 // mutations routed by the item's doc, the merged lenses, foreign Focus
 // refs (spec/focus.md §FocusRef grammar) and per-doc undo. Two in-memory
-// engines stand in for Home and one other doc.
+// replicas stand in for Home and one other doc.
 
 import { describe, expect, test } from "bun:test";
 import { createRoot } from "solid-js";
-import { Dek, Doc, SyncEngine } from "@monoplan/core/wasm";
-import type { EngineStorage } from "@monoplan/core/wasm";
-import { MemEngineStorage } from "../../core/test/mem-engine-storage.ts";
+import { Dek, Doc, Replica } from "@monoplan/core/wasm";
+import type { ReplicaStorage } from "@monoplan/core/wasm";
+import { MemReplicaStorage } from "../../core/test/mem-replica-storage.ts";
 import { createSyncedApp, type DocApp } from "../src/sync/store.ts";
 import { createDocsLayer, type DocsLayer } from "../src/sync/docs.ts";
 
@@ -16,12 +16,12 @@ const OTHER = "00000000-0000-0000-0000-00000000000b";
 
 function appFor(docId: string): DocApp {
   return createSyncedApp(
-    new SyncEngine(
+    new Replica(
       Doc.create(),
       docId,
       Dek.generate(),
       0n,
-      new MemEngineStorage() as unknown as EngineStorage,
+      new MemReplicaStorage() as unknown as ReplicaStorage,
     ),
   );
 }

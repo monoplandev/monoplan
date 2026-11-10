@@ -1,7 +1,7 @@
 // In-memory stand-in for the macOS app's host (`spec/mac-window-plan.md`
-// "Host side"), for driving `MirrorBridge` and mirror engines under
+// "Engine side"), for driving `MirrorBridge` and mirror replicas under
 // Bun. One wasm `Doc` per doc id plays the authoritative doc under peer
-// slot 0; the fake does what `Session::subscribe` and the loop's
+// slot 0; the fake does what `Engine::subscribe` and the loop's
 // `notify_if_changed` do, minus the WAL and the server:
 //
 //   - `subscribe` exports a plaintext snapshot and leases the next peer

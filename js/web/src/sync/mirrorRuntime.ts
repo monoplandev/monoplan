@@ -21,13 +21,13 @@
 // body.
 
 import { onCleanup } from "solid-js";
-import type { SyncEngine } from "@monoplan/core/wasm";
+import type { Replica } from "@monoplan/core/wasm";
 import type { MirrorBridge } from "@monoplan/core/mirror-bridge";
 import type { Session } from "../Login.tsx";
 import type { Prefs } from "../prefs.ts";
 import { createDocsLayer, type DocsLayer } from "./docs.ts";
 import { createSyncedApp, type DocApp } from "./store.ts";
-import type { HostSessionInfo } from "./mirrorHost.ts";
+import type { EngineSessionInfo } from "./mirrorHost.ts";
 import type { PresentAccount } from "./runtime.ts";
 import { createViewState } from "./viewState.ts";
 
@@ -35,7 +35,7 @@ import { createViewState } from "./viewState.ts";
  *  local-only workspace is an anonymous session, as in the browser: no
  *  identity, an account id derived from the doc id (it namespaces the
  *  prefs row; signup keeps the doc id, so the row can follow). */
-export function sessionFromHost(info: HostSessionInfo): Session {
+export function sessionFromHost(info: EngineSessionInfo): Session {
   return {
     anonymous: info.localOnly,
     mirror: true,
@@ -55,32 +55,32 @@ export function localAccountId(primaryDocId: string): string {
 }
 
 /** Everything the app resolved before the runtime can start: the
- *  session as the host reports it, one seeded mirror engine per open
+ *  session as the host reports it, one seeded mirror replica per open
  *  doc (Home first), the bridge that routes them, and the prefs row. */
 export type MirrorBoot = {
   session: Session;
-  engines: SyncEngine[];
+  replicas: Replica[];
   bridge: MirrorBridge;
   prefs: Prefs | null;
 };
 
 export function createMirrorRuntime(boot: MirrorBoot) {
   const docApps = new Map<string, DocApp>();
-  // A store over one seeded mirror engine. Host updates that landed
+  // A store over one seeded mirror replica. Host updates that landed
   // between the seed and now (while the other docs were opening)
   // queued AppEvents on the doc; the store's initial materialisation
   // already reflects them, so they must not be dispatched on top of it
   // afterwards.
-  const mount = (engine: SyncEngine): DocApp => {
-    while (engine.popAppEvent()) {
+  const mount = (replica: Replica): DocApp => {
+    while (replica.popAppEvent()) {
       // discard
     }
-    const app = createSyncedApp(engine);
+    const app = createSyncedApp(replica);
     app.setOnFlush(() => boot.bridge.pumpOutbox());
     docApps.set(app.docId, app);
     return app;
   };
-  for (const engine of boot.engines) mount(engine);
+  for (const replica of boot.replicas) mount(replica);
   const app = docApps.get(boot.session.primaryDocId);
   if (!app) throw new Error("mirror boot has no Home doc");
   const docs: DocsLayer = createDocsLayer(app, [...docApps.values()]);
@@ -109,7 +109,7 @@ export function createMirrorRuntime(boot: MirrorBoot) {
    *  subscriptions on close or quit. */
   const handOff = (): Promise<void> => {
     for (const a of docApps.values()) a.flushNotes();
-    for (const engine of boot.engines) engine.flush();
+    for (const replica of boot.replicas) replica.flush();
     boot.bridge.pumpOutbox();
     return boot.bridge.flushed();
   };
@@ -143,9 +143,9 @@ export function createMirrorRuntime(boot: MirrorBoot) {
    *  to the doc id once it is in `docs`. */
   const openDoc = async (docId: string): Promise<string> => {
     if (docApps.has(docId)) return docId;
-    const engine = await boot.bridge.open(docId);
-    boot.engines.push(engine);
-    docs.addDoc(mount(engine));
+    const replica = await boot.bridge.open(docId);
+    boot.replicas.push(replica);
+    docs.addDoc(mount(replica));
     return docId;
   };
 
@@ -159,8 +159,8 @@ export function createMirrorRuntime(boot: MirrorBoot) {
     if (!a) return;
     if (docs.viewDocId(view()) === docId) setView({ kind: "list", id: "inbox" });
     boot.bridge.close(docId);
-    const i = boot.engines.indexOf(a.engine);
-    if (i >= 0) boot.engines.splice(i, 1);
+    const i = boot.replicas.indexOf(a.replica);
+    if (i >= 0) boot.replicas.splice(i, 1);
     docs.removeDoc(docId);
     docApps.delete(docId);
   };

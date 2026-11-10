@@ -8,8 +8,8 @@
 //! and duplicate remote delivery (6, storage half).
 
 use monoplan_core::{
-    BootMeta, Dek, Doc, DocId, InFlightPush, LocalSeq, LocalStorage, PushId, RemoteWalRow,
-    ServerSeq, SyncEngine, boot_doc,
+    BootMeta, Dek, Doc, DocId, InFlightPush, LocalSeq, LocalStorage, PushId, RemoteWalRow, Replica,
+    ServerSeq, boot_doc,
 };
 use monoplan_protocol::EncryptedBlob;
 use monoplan_storage_sqlite::SqliteStorage;
@@ -26,8 +26,8 @@ fn blob(byte: u8) -> EncryptedBlob {
     }
 }
 
-fn engine_over(storage: SqliteStorage, dek: Dek, doc: Doc, meta: &BootMeta) -> SyncEngine {
-    let mut eng = SyncEngine::new(
+fn replica_over(storage: SqliteStorage, dek: Dek, doc: Doc, meta: &BootMeta) -> Replica {
+    let mut eng = Replica::new(
         doc,
         doc_id(),
         dek,
@@ -53,7 +53,7 @@ fn offline_mutations_stay_bounded_and_restart_exactly() {
 
     let fingerprint = {
         let storage = SqliteStorage::open(&path).unwrap();
-        let mut eng = engine_over(
+        let mut eng = replica_over(
             storage.clone(),
             dek.clone(),
             Doc::new().unwrap(),
@@ -73,7 +73,7 @@ fn offline_mutations_stay_bounded_and_restart_exactly() {
                 eng.wal_rows()
             );
         }
-        // Storage agrees with the engine's in-memory stats.
+        // Storage agrees with the replica's in-memory stats.
         let boot = storage.boot(doc_id()).unwrap();
         assert!(
             (boot.replay.len() as u64) < MAX_ROWS,
@@ -250,7 +250,7 @@ fn leased_peer_is_stable_across_restarts() {
     // Invocation 1: fresh profile, seeded doc, one mutation, persisted.
     let counter_first = {
         let storage = SqliteStorage::open(&path).unwrap();
-        let mut eng = engine_over(
+        let mut eng = replica_over(
             storage,
             dek.clone(),
             Doc::new_with_peer(PEER).unwrap(),
@@ -266,7 +266,7 @@ fn leased_peer_is_stable_across_restarts() {
     let storage = SqliteStorage::open(&path).unwrap();
     let (doc, meta) = boot_doc(&storage, &dek, doc_id(), Some(PEER)).unwrap();
     assert_eq!(doc.peer_id(), PEER);
-    let mut eng = engine_over(storage, dek, doc, &meta);
+    let mut eng = replica_over(storage, dek, doc, &meta);
     eng.doc_mut().add_item("inbox", "second run").unwrap();
     eng.capture_local_ops().unwrap();
     let vv = eng.doc().oplog_vv();

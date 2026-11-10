@@ -12,7 +12,7 @@ use tokio::process::Command;
 
 use monoplan_cli::config::{Config, Secrets};
 use monoplan_cli::daemon;
-use monoplan_cli::sync::Session;
+use monoplan_cli::sync::Engine;
 use support::{
     TEST_PASSWORD, TestServer, create_doc, login_device, materialize_profile, signup_account,
     wait_for_updates,
@@ -124,13 +124,13 @@ async fn commands_start_and_share_one_daemon() {
         false,
     )
     .await;
-    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
-    assert!(session_b.is_online());
+    let engine_b = Engine::open_with_profile(profile_b, true).await.unwrap();
+    assert!(engine_b.is_online());
     assert_eq!(
-        session_b.doc().get_item(&id).unwrap().text,
+        engine_b.doc().get_item(&id).unwrap().text,
         "hello from the cli"
     );
-    session_b.flush().await.unwrap();
+    engine_b.flush().await.unwrap();
 
     // Online replies carry no offline line.
     let out = monoplan(dir, &["item", "ls"]).await;
@@ -365,14 +365,14 @@ async fn workspace_create_opens_a_new_doc_on_the_running_daemon() {
             ],
         ))
         .unwrap();
-    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
-    assert!(session_b.is_online());
-    let work_b = session_b
+    let engine_b = Engine::open_with_profile(profile_b, true).await.unwrap();
+    assert!(engine_b.is_online());
+    let work_b = engine_b
         .doc_for(monoplan_core::DocId(work_uuid))
         .expect("the second device opened the created doc");
     assert_eq!(work_b.get_settings().doc_name.as_deref(), Some("Work"));
     assert_eq!(work_b.get_item(&work_item).unwrap().text, "in work");
-    session_b.flush().await.unwrap();
+    engine_b.flush().await.unwrap();
 
     // Delete: refused without `-w` and on Personal, then gone from the
     // running daemon (no restart) and from the server, so a fresh
@@ -562,7 +562,7 @@ async fn workspace_flag_selects_a_second_doc() {
     wait_for_updates(&server, Uuid::parse_str(&signup.primary_doc_id).unwrap(), 1).await;
 
     // A second device logs in (both keys) and has no local rows for
-    // Work: its session boots the doc empty and the server fills it.
+    // Work: its engine boots the doc empty and the server fills it.
     let login = login_device(&server.base, &signup.email, TEST_PASSWORD, "bin-w-b")
         .await
         .unwrap();
@@ -586,18 +586,15 @@ async fn workspace_flag_selects_a_second_doc() {
             login.doc_keys.iter().map(|(id, dek)| (*id, dek)),
         ))
         .unwrap();
-    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
-    assert!(session_b.is_online());
-    assert_eq!(
-        session_b.doc().get_item(&home_item).unwrap().text,
-        "in home"
-    );
-    let work_b = session_b.doc_for(work_doc_id).expect("work doc open");
+    let engine_b = Engine::open_with_profile(profile_b, true).await.unwrap();
+    assert!(engine_b.is_online());
+    assert_eq!(engine_b.doc().get_item(&home_item).unwrap().text, "in home");
+    let work_b = engine_b.doc_for(work_doc_id).expect("work doc open");
     assert_eq!(work_b.get_item(&work_item).unwrap().text, "in work");
     assert_eq!(work_b.get_settings().doc_name.as_deref(), Some("Work"));
-    assert!(session_b.doc().get_item(&work_item).is_none());
-    assert_eq!(session_b.resolve(Some("work")).unwrap(), work_doc_id);
-    session_b.flush().await.unwrap();
+    assert!(engine_b.doc().get_item(&work_item).is_none());
+    assert_eq!(engine_b.resolve(Some("work")).unwrap(), work_doc_id);
+    engine_b.flush().await.unwrap();
 
     assert_eq!(
         ok(monoplan(dir, &["daemon", "stop"]).await).trim(),

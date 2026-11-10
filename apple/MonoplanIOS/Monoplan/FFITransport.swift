@@ -1,5 +1,5 @@
-// The app's transport to its own host: `MonoplanCore.Host` as a
-// `HostTransport`, byte for byte the macOS app's `FFITransport`.
+// The app's transport to its own engine: `MonoplanCore.Engine` as a
+// `EngineTransport`, byte for byte the macOS app's `FFITransport`.
 // Requests block in Rust until the loop has answered, so they run on a
 // serial queue; the watch is a Rust thread calling the sink, and the
 // client hops to its own queue.
@@ -8,25 +8,25 @@ import Foundation
 import MonoplanCore
 import MonoplanMacKit
 
-final class FFITransport: HostTransport {
-    private let host: MonoplanCore.Host
+final class FFITransport: EngineTransport {
+    private let engine: MonoplanCore.Engine
     private var watcher: MonoplanCore.Watcher?
-    private let work = DispatchQueue(label: "app.monoplan.ios.host", qos: .userInitiated)
+    private let work = DispatchQueue(label: "app.monoplan.ios.engine", qos: .userInitiated)
 
-    init(host: MonoplanCore.Host) {
-        self.host = host
+    init(engine: MonoplanCore.Engine) {
+        self.engine = engine
     }
 
     func request(_ frame: Data, completion: @escaping (Result<Data, Error>) -> Void) {
-        work.async { [host] in
-            completion(Result { try host.request(frame: frame) })
+        work.async { [engine] in
+            completion(Result { try engine.request(frame: frame) })
         }
     }
 
     func watch(onFrame: @escaping (Data) -> Void, onStopped: @escaping () -> Void) {
         let sink = Sink(onFrame: onFrame, onStopped: onStopped)
         do {
-            watcher = try host.watch(sink: sink)
+            watcher = try engine.watch(sink: sink)
         } catch {
             onStopped()
         }
@@ -37,7 +37,7 @@ final class FFITransport: HostTransport {
         watcher = nil
     }
 
-    private final class Sink: HostSink, @unchecked Sendable {
+    private final class Sink: EngineSink, @unchecked Sendable {
         private let onFrame: (Data) -> Void
         private let onStopped: () -> Void
 

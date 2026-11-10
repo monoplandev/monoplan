@@ -1,9 +1,9 @@
 // The app's window (spec/mac-window-plan.md, phase 4): a WKWebView
 // running the web client (`js/web/mirror.html`, built into the bundle)
-// over a mirror of the in-process host's docs. Three pieces:
+// over a mirror of the in-process engine's docs. Three pieces:
 //
 // - `WebWindowController`: the NSWindow and the webview, its lifecycle
-//   (open from the tray, hand everything off to the host before it
+//   (open from the tray, hand everything off to the engine before it
 //   closes or the app quits), activation policy via `onVisibility`,
 //   and the native controls over the page: two round Liquid Glass
 //   bubbles floating in the top-right corner, search (the page's Find
@@ -17,24 +17,24 @@
 //   `undoState`, `deleteDoc`, `signIn`) and the calls
 //   back into `window.__monoplanHost` (`update`, `stopped`, `sync`,
 //   `handOff`, `settings`, `undo`, `redo`, `find`, `docAdded`,
-//   `hostState`). Without a host, `session` answers a `HostState`
+//   `engineState`). Without an engine, `session` answers an `EngineState`
 //   (signed out, or waiting on a reason) that the page shows instead
-//   of the workspace. One `Host.subscribe` per open doc; a `MirrorSink` per
+//   of the workspace. One `Engine.subscribe` per open doc; a `MirrorSink` per
 //   subscription hops to the main queue and evaluates the update into
-//   the page, never calling `Host.import` from inside `update` (the
+//   the page, never calling `Engine.import` from inside `update` (the
 //   loop is busy delivering). Requests that block in Rust (`subscribe`
 //   exports a snapshot, `import` waits for durability) run on a serial
 //   work queue, in order, off the main thread.
 // - `AppSchemeHandler`: `monoplan://app/*` serves the Vite build with
 //   the right MIME types (wasm streams, `localStorage` has a stable
-//   origin, no `file://` rules), and forwards `/api/*` to the host's
+//   origin, no `file://` rules), and forwards `/api/*` to the engine's
 //   server with `Authorization: Bearer <device token>`, so `api.ts`'s
 //   same-origin fetches work unchanged and the token never enters the
 //   page. The webview holds no DEK, no storage of its own, no socket.
 //
 // `MONOPLAN_MIRROR_URL=http://localhost:5176/mirror.html` loads the
 // Vite dev server instead (HMR for the UI); the doc still mirrors the
-// host through the handler, but `/api` then goes through Vite's proxy
+// engine through the handler, but `/api` then goes through Vite's proxy
 // without the token, so the HTTP surface (devices, members) is
 // unauthenticated there.
 
@@ -45,7 +45,7 @@ import UniformTypeIdentifiers
 import WebKit
 
 /// What the window's account button can do; all of it is the tray's
-/// (the Settings window and the host controller), handed in as
+/// (the Settings window and the engine controller), handed in as
 /// closures so the window stays ignorant of both.
 struct AccountActions {
     /// Whether the profile has an account (`ProfileLocation.hasAccount`;
@@ -62,11 +62,11 @@ struct AccountActions {
 
 final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate,
                                  WKDownloadDelegate, NSMenuDelegate {
-    /// Where the host comes from at request time: the running one, or
+    /// Where the engine comes from at request time: the running one, or
     /// nil while there is none (the page then shows its signed-out or
-    /// waiting screen, by `hostState`, and is reloaded when a host is
-    /// back, see `hostAvailable`).
-    private let hostProvider: () -> MonoplanCore.Host?
+    /// waiting screen, by `engineState`, and is reloaded when an engine is
+    /// back, see `engineAvailable`).
+    private let engineProvider: () -> MonoplanCore.Engine?
     /// The tray switches the activation policy on this: a regular app
     /// with a Dock icon and menu bar while the window is up, a bare
     /// status item otherwise.
@@ -74,7 +74,7 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     private let account: AccountActions
     private let bridge: MirrorHostBridge
     /// The email the page's session came back with, for the account
-    /// menu's header; nil until a page has booted against a host.
+    /// menu's header; nil until a page has booted against an engine.
     private var accountEmail: String?
     /// The account bubble's menu, filled in on open (`menuNeedsUpdate`).
     private let accountMenu = NSMenu()
@@ -83,7 +83,7 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// while the workspace has no account (`applyAccountBubble`).
     private var accountButton: NSButton?
     private var accountWidth: NSLayoutConstraint?
-    /// The host's latest sync status: the line under the email in the
+    /// The engine's latest sync status: the line under the email in the
     /// account bubble's menu.
     private var syncStatus: SyncStatus?
     /// The New Workspace sheet while it is up (`promptNewWorkspace`).
@@ -116,19 +116,19 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     private(set) var canUndo = false
     private(set) var canRedo = false
 
-    /// Deletes a workspace through the host (`Request.deleteWorkspace`),
+    /// Deletes a workspace through the engine (`Request.deleteWorkspace`),
     /// for the page's Delete workspace after the native confirm.
     private let deleteWorkspace: (String, @escaping (Result<Void, Error>) -> Void) -> Void
 
-    init(hostProvider: @escaping () -> MonoplanCore.Host?, hostState: @escaping () -> HostState,
+    init(engineProvider: @escaping () -> MonoplanCore.Engine?, engineState: @escaping () -> EngineState,
          onVisibility: @escaping (Bool) -> Void,
          account: AccountActions,
          deleteWorkspace: @escaping (String, @escaping (Result<Void, Error>) -> Void) -> Void) {
-        self.hostProvider = hostProvider
+        self.engineProvider = engineProvider
         self.onVisibility = onVisibility
         self.account = account
         self.deleteWorkspace = deleteWorkspace
-        self.bridge = MirrorHostBridge(hostProvider: hostProvider, hostState: hostState)
+        self.bridge = MirrorHostBridge(engineProvider: engineProvider, engineState: engineState)
         self.schemeHandler = AppSchemeHandler(
             webRoot: Bundle.main.resourceURL?.appendingPathComponent("web", isDirectory: true),
             credential: { [bridge] in bridge.apiCredential })
@@ -200,7 +200,7 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         window?.makeKeyAndOrderFront(nil)
     }
 
-    /// The host's sync status: the account menu's line here (the bubble
+    /// The engine's sync status: the account menu's line here (the bubble
     /// itself carries no indicator; the tray shows the state), and the
     /// page's copy, kept and replayed on load, pushed live afterwards.
     func pushSync(_ status: SyncStatus) {
@@ -208,28 +208,28 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         bridge.pushSync(status, into: webView)
     }
 
-    /// A host is serving again after none was: the page booted against
+    /// An engine is serving again after none was: the page booted against
     /// the old one (or showed its signed-out / waiting screen), so
     /// reload it against this one.
-    func hostAvailable() {
+    func engineAvailable() {
         applyAccountBubble()
         guard let webView, webView.url != nil else { return }
         webView.reload()
     }
 
-    /// The host the page mirrors has stopped (sign out, or a terminal
+    /// The engine the page mirrors has stopped (sign out, or a terminal
     /// command taking the profile): the page's docs are stale, so
-    /// reload it onto the screen `hostState` now describes.
-    func hostLost() {
+    /// reload it onto the screen `engineState` now describes.
+    func engineLost() {
         applyAccountBubble()
         guard let webView, webView.url != nil else { return }
         webView.reload()
     }
 
-    /// The host's state while there is none serving: what the page's
+    /// The engine's state while there is none serving: what the page's
     /// pre-boot screen shows (signed out, or waiting on a reason).
-    func pushHostState(_ state: HostState) {
-        bridge.pushHostState(state, into: webView)
+    func pushEngineState(_ state: EngineState) {
+        bridge.pushEngineState(state, into: webView)
     }
 
     /// Reload the page (the View menu).
@@ -240,7 +240,7 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// The page's Delete workspace, in the app: the confirmation is a
     /// native sheet (the workspace's name typed back, as the browser's
     /// dialog asks, since this is cross-device and final), then the
-    /// host deletes on the server and forgets its copy. `done(true)`
+    /// engine deletes on the server and forgets its copy. `done(true)`
     /// once it is gone; false on Cancel, and on a failure after it has
     /// been shown here, so the page never alerts twice.
     private func confirmDeleteWorkspace(docId: String, name: String, done: @escaping (Bool) -> Void) {
@@ -364,7 +364,7 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
         sidebarWidth * CGFloat(zoom) + glassBleed
     }
 
-    /// Hand everything the page committed to the host, then `completion`
+    /// Hand everything the page committed to the engine, then `completion`
     /// (on the main queue). What quit waits for; a no-op without a page.
     func handOff(completion: @escaping () -> Void) {
         guard let webView, webView.url != nil else {
@@ -463,7 +463,7 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     }
 
     /// Closing hands off first: the page's last flush (a notes burst on
-    /// its idle timer, the outbox) reaches the host before the
+    /// its idle timer, the outbox) reaches the engine before the
     /// subscriptions go. The first pass refuses and starts the hand-off;
     /// its completion closes for real.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -699,7 +699,7 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// account: there is nothing to report and one thing to do, so the
     /// bubble is a "Sign In" pill that opens the app's sign-in sheet
     /// directly, as the tray's Sign In… does. Re-applied whenever the
-    /// state can have changed: a page boot, a host coming or going.
+    /// state can have changed: a page boot, an engine coming or going.
     private func applyAccountBubble() {
         guard let button = accountButton else { return }
         if account.hasAccount() {
@@ -732,7 +732,7 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     }
 
     /// Built on every open: who is signed in (or that this is a local
-    /// workspace with no account), the host's sync state (built here so
+    /// workspace with no account), the engine's sync state (built here so
     /// the relative time is fresh), the Account pane, and sign out or
     /// sign in. The email is the one the page booted with, dropped once
     /// the profile is signed out.
@@ -999,30 +999,30 @@ private func jsString(_ s: String) -> String {
 final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     static let handlerName = "monoplan"
 
-    private let hostProvider: () -> MonoplanCore.Host?
-    /// What `session` answers when `hostProvider` has nothing.
-    private let hostState: () -> HostState
-    /// Blocking host calls, one at a time, in request order.
+    private let engineProvider: () -> MonoplanCore.Engine?
+    /// What `session` answers when `engineProvider` has nothing.
+    private let engineState: () -> EngineState
+    /// Blocking engine calls, one at a time, in request order.
     private let work = DispatchQueue(label: "app.monoplan.mac.mirror", qos: .userInitiated)
     /// Main-queue state: the live subscriptions of the current page.
     private var subscriptions: [String: Subscription] = [:]
     /// Bumped per page; a sink from an earlier page is ignored.
     private var generation = 0
-    /// The host the current page's session came from; `import` and
-    /// the proxy use it rather than asking again, so a host swap
-    /// mid-page fails cleanly instead of crossing hosts.
-    private var pageHost: MonoplanCore.Host?
+    /// The engine the current page's session came from; `import` and
+    /// the proxy use it rather than asking again, so an engine swap
+    /// mid-page fails cleanly instead of crossing engines.
+    private var pageEngine: MonoplanCore.Engine?
     private var lastSync: SyncStatus?
     /// Whether the window is in full screen, replayed to a new page.
     private var fullScreen = false
     /// What `/api` is forwarded with: the server from the session, the
-    /// token from the host. Read on the scheme handler's thread.
+    /// token from the engine. Read on the scheme handler's thread.
     private let credentialLock = NSLock()
     private var credential: AppSchemeHandler.Credential?
 
-    init(hostProvider: @escaping () -> MonoplanCore.Host?, hostState: @escaping () -> HostState) {
-        self.hostProvider = hostProvider
-        self.hostState = hostState
+    init(engineProvider: @escaping () -> MonoplanCore.Engine?, engineState: @escaping () -> EngineState) {
+        self.engineProvider = engineProvider
+        self.engineState = engineState
     }
 
     var apiCredential: AppSchemeHandler.Credential? {
@@ -1043,14 +1043,14 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     var onSignIn: (() -> Void)?
 
     /// A new page is loading (or the old one is going): close every
-    /// subscription so the host releases the peer slots, and let the
+    /// subscription so the engine releases the peer slots, and let the
     /// sinks of this generation fall silent.
     func resetPage() {
         generation += 1
         onUndoState?(false, false)
         let old = subscriptions
         subscriptions = [:]
-        pageHost = nil
+        pageEngine = nil
         work.async {
             for (_, sub) in old { sub.close() }
         }
@@ -1078,11 +1078,11 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
 
     /// Not replayed on load: a new page asks `session`, which answers
     /// with the state of the moment.
-    func pushHostState(_ state: HostState, into webView: WKWebView?) {
-        webView?.evaluateJavaScript(HostInbound.hostState(state).script)
+    func pushEngineState(_ state: EngineState, into webView: WKWebView?) {
+        webView?.evaluateJavaScript(HostInbound.engineState(state).script)
     }
 
-    /// Ask the page to flush to the host and wait for the imports that
+    /// Ask the page to flush to the engine and wait for the imports that
     /// causes (the promise `handOff` returns), then for the work queue
     /// to have run them. Bounded: a page that hangs must not hold the
     /// window or quit hostage.
@@ -1118,37 +1118,37 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
             DispatchQueue.main.async {
                 switch result {
                 case .success(let v): replyHandler(v, nil)
-                case .failure(let e): replyHandler(nil, hostErrorMessage(e))
+                case .failure(let e): replyHandler(nil, engineErrorMessage(e))
                 }
             }
         }
         switch request {
         case .session:
-            // The page's first request: bind this page to the host that
+            // The page's first request: bind this page to the engine that
             // is running now. Without one the page gets the state to
             // show instead of an error: waiting on a reason, until the
-            // app reloads it once a host serves. A state that says
+            // app reloads it once an engine serves. A state that says
             // running while the provider has nothing is the gap between
             // the two, so it waits.
-            guard let host = hostProvider() else {
-                var state = hostState()
+            guard let engine = engineProvider() else {
+                var state = engineState()
                 if state == .running { state = .pending(String(localized: "starting")) }
                 reply(.success(state.reply))
                 return
             }
-            pageHost = host
+            pageEngine = engine
             work.async { [weak self] in
-                let result = Result { try host.session() }
+                let result = Result { try engine.session() }
                 // The loop ended between the provider's check and the
                 // call (a sign-in's claim, a sign-out): not an error
                 // for the page, the same waiting screen; the app
-                // reloads it against the next host.
-                if case .failure(HostError.Stopped) = result {
-                    reply(.success(HostState.pending(String(localized: "the host has stopped")).reply))
+                // reloads it against the next engine.
+                if case .failure(EngineError.Stopped) = result {
+                    reply(.success(EngineState.pending(String(localized: "the engine has stopped")).reply))
                     return
                 }
                 if case .success(let s) = result {
-                    let token = host.deviceToken()
+                    let token = engine.deviceToken()
                     self?.credentialLock.lock()
                     self?.credential = token.map { AppSchemeHandler.Credential(serverURL: s.serverUrl, token: $0) }
                     self?.credentialLock.unlock()
@@ -1164,7 +1164,7 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
             }
 
         case .subscribe(let docId):
-            guard let host = pageHost else {
+            guard let engine = pageEngine else {
                 reply(.failure(ClientError.notConnected))
                 return
             }
@@ -1176,7 +1176,7 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
                 }
             }
             work.async { [weak self] in
-                let result = Result { try host.subscribe(workspace: docId, sink: sink) }
+                let result = Result { try engine.subscribe(workspace: docId, sink: sink) }
                 DispatchQueue.main.async {
                     guard let self else { return }
                     switch result {
@@ -1184,14 +1184,14 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
                         if self.generation != gen {
                             // The page went while the snapshot exported.
                             self.work.async { sub.close() }
-                            replyHandler(nil, ClientError.hostStopped.localizedDescription)
+                            replyHandler(nil, ClientError.engineStopped.localizedDescription)
                             return
                         }
                         self.subscriptions[docId]?.close()
                         self.subscriptions[docId] = sub
                         replyHandler(HostReply.subscribe(snapshot: sub.snapshot(), peer: sub.peerId()), nil)
                     case .failure(let e):
-                        replyHandler(nil, hostErrorMessage(e))
+                        replyHandler(nil, engineErrorMessage(e))
                     }
                 }
             }
@@ -1204,12 +1204,12 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
             }
 
         case .import(let docId, let bytes):
-            guard let host = pageHost, let sub = subscriptions[docId] else {
+            guard let engine = pageEngine, let sub = subscriptions[docId] else {
                 reply(.failure(ClientError.notConnected))
                 return
             }
             work.async {
-                reply(Result { try host.import(subscription: sub, bytes: bytes) }.map { NSNull() })
+                reply(Result { try engine.import(subscription: sub, bytes: bytes) }.map { NSNull() })
             }
 
         case .window(let gesture):
@@ -1255,9 +1255,9 @@ final class MirrorHostBridge: NSObject, WKScriptMessageHandlerWithReply {
     }
 }
 
-/// The uniffi callback for one subscription. Rust calls it on the host
+/// The uniffi callback for one subscription. Rust calls it on the engine
 /// loop's thread; `deliver` hops to the main queue and evaluates into
-/// the page. It never touches `Host` itself, so an `import` is never
+/// the page. It never touches `Engine` itself, so an `import` is never
 /// made from inside an `update` (the loop would be waiting on itself).
 private final class WindowSink: MirrorSink, @unchecked Sendable {
     private let docId: String
@@ -1353,11 +1353,11 @@ final class AppSchemeHandler: NSObject, WKURLSchemeHandler {
         }
     }
 
-    /// `/api/*` to the host's server as the page asked, plus the device
+    /// `/api/*` to the engine's server as the page asked, plus the device
     /// token (`spec/auth.md`: `Authorization: Bearer`, the CLI's way).
     private func proxy(_ pathAndQuery: String, task: WKURLSchemeTask) {
         guard let credential = credential(), let target = URL(string: credential.serverURL + pathAndQuery) else {
-            fail(task, status: 503, code: "no_host", message: "the app has no signed-in host to forward to")
+            fail(task, status: 503, code: "no_engine", message: "the app has no signed-in engine to forward to")
             return
         }
         var req = URLRequest(url: target)

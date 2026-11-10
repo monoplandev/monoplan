@@ -1,5 +1,5 @@
 // The Inbox tab: the primary capture list (`inbox`, spec/data-model.md)
-// as the host reports it, Open items in list order. Read-only for now:
+// as the engine reports it, Open items in list order. Read-only for now:
 // capture and lifecycle moves are the next surface.
 
 import MonoplanMacKit

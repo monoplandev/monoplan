@@ -6,23 +6,23 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { Dek, Doc, SyncEngine } from "../wasm/monoplan_core_web.js";
-import type { AppEventJs, EngineStorage } from "../wasm/monoplan_core_web.js";
-import { MemEngineStorage } from "./mem-engine-storage.ts";
+import { Dek, Doc, Replica } from "../wasm/monoplan_core_web.js";
+import type { AppEventJs, ReplicaStorage } from "../wasm/monoplan_core_web.js";
+import { MemReplicaStorage } from "./mem-replica-storage.ts";
 
 const DOC_ID = "00000000-0000-0000-0000-000000000000";
 
-function engineFrom(doc: Doc): SyncEngine {
-  return new SyncEngine(
+function replicaFrom(doc: Doc): Replica {
+  return new Replica(
     doc,
     DOC_ID,
     Dek.generate(),
     0n,
-    new MemEngineStorage() as unknown as EngineStorage,
+    new MemReplicaStorage() as unknown as ReplicaStorage,
   );
 }
 
-function drainAppEvents(eng: SyncEngine): AppEventJs[] {
+function drainAppEvents(eng: Replica): AppEventJs[] {
   const out: AppEventJs[] = [];
   while (true) {
     const ev = eng.popAppEvent();
@@ -80,9 +80,9 @@ describe("Doc.setListArchived", () => {
   });
 });
 
-describe("SyncEngine archive surface", () => {
+describe("Replica archive surface", () => {
   test("setListArchived emits listArchivedChanged both ways", () => {
-    const eng = engineFrom(Doc.create());
+    const eng = replicaFrom(Doc.create());
     const id = eng.addList("Old");
     drainAppEvents(eng);
 
@@ -105,7 +105,7 @@ describe("SyncEngine archive surface", () => {
     const active = doc.addList("Active");
     const old = doc.addList("Old");
     doc.setListArchived(old, true);
-    const eng = engineFrom(doc);
+    const eng = replicaFrom(doc);
 
     const snap = JSON.parse(eng.workspaceSnapshotJson()) as {
       lists: { id: string; archivedAt?: number }[];

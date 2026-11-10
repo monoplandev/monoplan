@@ -3,7 +3,7 @@
 // This is the sync identity row — account/device ids, server URL, and
 // the observability-only "last synced" stamp. On web it's persisted in
 // the `device` store of the `monoplan-web` IDB via `device-store.ts`,
-// alongside the engine's op log (`IdbStorage`) — one database, separate
+// alongside the replica's op log (`IdbStorage`) — one database, separate
 // stores. The DEK is never stored here — its browser lifetime is
 // in-memory only (see `DekVault`).
 
@@ -16,7 +16,7 @@ export interface DeviceConfig {
   deviceId: string;
   /** Unix millis of the last successful online sync, or null.
    *  Observability only (the "Synced …" status) — the resume cursor is
-   *  the engine's, persisted via `IdbStorage.writeAckedSeq`. */
+   *  the replica's, persisted via `IdbStorage.writeAckedSeq`. */
   lastSyncAt: number | null;
 }
 

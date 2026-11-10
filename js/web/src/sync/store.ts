@@ -1,5 +1,5 @@
-// Reactive shell around the wasm `SyncEngine`. Doc state lives in a
-// SolidJS `createStore` keyed by id; mutations go through the engine,
+// Reactive shell around the wasm `Replica`. Doc state lives in a
+// SolidJS `createStore` keyed by id; mutations go through the replica,
 // which emits domain-level `AppEvent`s that this layer mirrors into the
 // store via surgical `setState` calls. The store is the single source
 // of truth the UI reads from — `state.listOpen[listId]` for a list
@@ -14,7 +14,7 @@
 // derive lazily from `itemsById` (timestamp sorts), not CRDT order.
 // See spec/list-perf-plan.md.
 
-import type { AppEventJs, SyncEngine } from "@monoplan/core/wasm";
+import type { AppEventJs, Replica } from "@monoplan/core/wasm";
 import { ItemLifecycle } from "@monoplan/core/wasm";
 import { diffToDelta, type NotesDeltaOp } from "../notesDelta.ts";
 import { batch, createSignal, type Accessor } from "solid-js";
@@ -136,7 +136,7 @@ export interface ItemView {
 export type Lifecycle = WorkflowState | "binned";
 
 /** Map the JS lifecycle string onto the wasm `ItemLifecycle` enum the
- *  engine's `setItemLifecycle` / `setItemsLifecycle` expect. */
+ *  replica's `setItemLifecycle` / `setItemsLifecycle` expect. */
 function lifecycleEnum(l: Lifecycle): ItemLifecycle {
   switch (l) {
     case "backlog":
@@ -235,14 +235,14 @@ export interface WorkspaceState {
   /** Binned-item count, maintained incrementally so the Bin badge
    *  never needs a global scan. */
   binCount: number;
-  /** Visible Focus refs in curated order (`engine.focusRefIds()` — Open,
+  /** Visible Focus refs in curated order (`replica.focusRefIds()` — Open,
    *  local, deduped). The Focus lens iterates this; each id resolves to
    *  `itemsById`. Re-derived wholesale per non-empty event drain, since a
    *  focus mutation *or* an item lifecycle change elsewhere can alter
    *  visibility. See spec/focus.md. */
   focusOrder: string[];
   /** Every live Focus entry in curated order, foreign refs included
-   *  (`engine.focusEntriesJson()`; `spec/focus.md` §FocusRef grammar).
+   *  (`replica.focusEntriesJson()`; `spec/focus.md` §FocusRef grammar).
    *  Only meaningful on the account's Home doc, which owns Focus: the
    *  cross-doc layer resolves foreign entries against the other docs
    *  and prunes the dead ones. This is the index space `addToFocus` /
@@ -343,11 +343,11 @@ export interface ItemActions {
 }
 
 export interface DocApp extends ItemActions {
-  engine: SyncEngine;
+  replica: Replica;
   /** The doc this app projects; what every `ItemView` it emits carries. */
   docId: string;
   state: WorkspaceState;
-  /** Query surface over the engine's search index (items + lists in the
+  /** Query surface over the replica's search index (items + lists in the
    *  active account). The index lives in core and tracks the doc itself;
    *  the store neither builds nor maintains it. See `spec/search.md`. */
   search: SearchEngine;
@@ -366,15 +366,15 @@ export interface DocApp extends ItemActions {
    *  is restored, binned, removed, or moved, and pruned by age; the
    *  linger UI applies its own (shorter) expiry window on top. */
   recentDone: Accessor<readonly RecentDoneEntry[]>;
-  /** Pump the engine's AppEvent queue into the store. The WS bridge
+  /** Pump the replica's AppEvent queue into the store. The WS bridge
    *  calls this after every server frame; mutation methods call it
    *  inline so local writes flow through the same dispatcher path. */
   drainEvents(): void;
   /** Hook the WS bridge installs to push outbox bytes immediately
    *  after a local mutation rather than waiting for a server frame. */
   setOnFlush(cb: () => void): void;
-  /** Hook run *before* `engine.flush()` on every local commit. The web
-   *  host wires `engine.captureLocalOps()` here so the just-committed
+  /** Hook run *before* `replica.flush()` on every local commit. The web
+   *  host wires `replica.captureLocalOps()` here so the just-committed
    *  mutation is a durable op-log row before `flush()` triggers the
    *  outbox-driven push (which reads `storage.outbox()`). Without this
    *  the push would see an empty outbox and fall back to the legacy
@@ -600,9 +600,9 @@ interface WorkspaceSnapshotPayload {
   items: (Omit<ItemView, "state" | "docId"> & { state?: string })[];
 }
 
-function materializeEngineSnapshot(engine: SyncEngine): WorkspaceState {
-  const payload = JSON.parse(engine.workspaceSnapshotJson()) as WorkspaceSnapshotPayload;
-  const docId = engine.docId();
+function materializeReplicaSnapshot(replica: Replica): WorkspaceState {
+  const payload = JSON.parse(replica.workspaceSnapshotJson()) as WorkspaceSnapshotPayload;
+  const docId = replica.docId();
   const itemsById: Record<string, ItemView> = {};
   const listOpen: Record<string, string[]> = {};
   let binCount = 0;
@@ -633,11 +633,11 @@ function materializeEngineSnapshot(engine: SyncEngine): WorkspaceState {
     listOpen,
     binCount,
     // Not part of the workspace snapshot JSON (which is items + lists +
-    // settings only) — read straight from the engine's focus projection.
+    // settings only) — read straight from the replica's focus projection.
     // Covers the coarse / fullResync reconcile path too, since both
     // rematerialize through here.
-    focusOrder: engine.focusRefIds(),
-    focusEntries: readFocusEntries(engine),
+    focusOrder: replica.focusRefIds(),
+    focusEntries: readFocusEntries(replica),
     listsOrder: payload.lists.map((list) => list.id),
     listsById,
     settings: {
@@ -650,9 +650,9 @@ function materializeEngineSnapshot(engine: SyncEngine): WorkspaceState {
   };
 }
 
-function readFocusEntries(engine: SyncEngine): FocusEntry[] {
+function readFocusEntries(replica: Replica): FocusEntry[] {
   try {
-    const rows = JSON.parse(engine.focusEntriesJson()) as FocusEntry[];
+    const rows = JSON.parse(replica.focusEntriesJson()) as FocusEntry[];
     return rows.map((r) => ({ docId: r.docId ?? null, itemId: r.itemId }));
   } catch (e) {
     console.error("focusEntriesJson failed:", e);
@@ -669,7 +669,7 @@ function shouldUseCoarseProjection(events: readonly AppEventJs[]): boolean {
   return coarseCandidates >= events.length / 2;
 }
 
-export function createSyncedApp(engine: SyncEngine): DocApp {
+export function createSyncedApp(replica: Replica): DocApp {
   const [state, setState] = createStore<WorkspaceState>({
     itemsById: {},
     listOpen: {},
@@ -690,8 +690,8 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
   const [recentDone, setRecentDone] = createSignal<readonly RecentDoneEntry[]>(
     [],
   );
-  const search = createSearchEngine(engine);
-  const docId = engine.docId();
+  const search = createSearchEngine(replica);
+  const docId = replica.docId();
   let actionBatchDepth = 0;
   let flushDeferred = false;
   let actionBatchStartVersion = 0;
@@ -1079,7 +1079,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
   const drainEvents = (): void => {
     const events: AppEventJs[] = [];
     while (true) {
-      const ev = engine.popAppEvent();
+      const ev = replica.popAppEvent();
       if (!ev) break;
       events.push(ev);
     }
@@ -1092,7 +1092,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     // see the intermediate order and animate through it.
     batch(() => {
       if (fullResync || coarse) {
-        const next = materializeEngineSnapshot(engine);
+        const next = materializeReplicaSnapshot(replica);
         setState(reconcile(next));
         // Any per-item delta in the bucket is lost with it; subscribed
         // editors reload from the fresh state.
@@ -1108,8 +1108,8 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
         // drain is the cheapest correct approach — `reconcile` no-ops when
         // the order is unchanged. See spec/focus.md B.8.
         if (events.length > 0) {
-          setState("focusOrder", reconcile(engine.focusRefIds()));
-          setState("focusEntries", reconcile(readFocusEntries(engine)));
+          setState("focusOrder", reconcile(replica.focusRefIds()));
+          setState("focusEntries", reconcile(readFocusEntries(replica)));
         }
       }
       if (events.length > 0) setVersion((v) => v + 1);
@@ -1119,7 +1119,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
   // Initial attach is explicit materialization, not a live event replay.
   // A single compact JSON snapshot crosses the wasm boundary and the
   // historical event queue remains empty.
-  const initialState = materializeEngineSnapshot(engine);
+  const initialState = materializeReplicaSnapshot(replica);
   setState(reconcile(initialState));
 
   let onFlush: () => void = () => {};
@@ -1130,7 +1130,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       return;
     }
     beforeFlush();
-    engine.flush();
+    replica.flush();
     onFlush();
     // Local mutations enqueue AppEvents synchronously; pull them so
     // the next Solid tick sees the store update.
@@ -1205,7 +1205,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     const ops = diffToDelta(from, to);
     if (!ops) return true;
     try {
-      engine.applyNotesDelta(id, JSON.stringify(ops));
+      replica.applyNotesDelta(id, JSON.stringify(ops));
     } catch (e) {
       console.warn("notes undo step skipped:", e);
       return false;
@@ -1269,7 +1269,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       const notes = entry.notes.filter((n) => applyNotesStep(n.id, n.after, n.before));
       let applied = 0;
       for (let i = 0; i < entry.steps; i++) {
-        if (!engine.undo()) break;
+        if (!replica.undo()) break;
         applied++;
       }
       if (applied === 0 && notes.length === 0) {
@@ -1291,7 +1291,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       if (entry == null) return false;
       let applied = 0;
       for (let i = 0; i < entry.steps; i++) {
-        if (!engine.redo()) break;
+        if (!replica.redo()) break;
         applied++;
       }
       const notes = entry.notes.filter((n) => applyNotesStep(n.id, n.before, n.after));
@@ -1309,14 +1309,14 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
   };
 
   return {
-    engine,
+    replica,
     docId,
     state,
     version,
     recentDone,
     search,
     placeSuggestions(query = "", limit = 0) {
-      return JSON.parse(engine.placeSuggestionsJson(query, limit)) as PlaceSuggestion[];
+      return JSON.parse(replica.placeSuggestionsJson(query, limit)) as PlaceSuggestion[];
     },
     drainEvents,
     setOnFlush(cb) {
@@ -1332,25 +1332,25 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       return state.focusOrder.includes(id);
     },
     seedWelcome() {
-      return mutate(() => engine.seedWelcome());
+      return mutate(() => replica.seedWelcome());
     },
     addItem(listId, text) {
-      return mutate(() => engine.addItem(listId, text));
+      return mutate(() => replica.addItem(listId, text));
     },
     addItemAt(listId, text, indexInList) {
-      return mutate(() => engine.addItemAt(listId, text, indexInList));
+      return mutate(() => replica.addItemAt(listId, text, indexInList));
     },
     addItemsAt(listId, texts, indexInList) {
-      return mutate(() => engine.addItemsAt(listId, texts, indexInList));
+      return mutate(() => replica.addItemsAt(listId, texts, indexInList));
     },
     editItemText(id, text) {
-      mutate(() => engine.editItemText(id, text));
+      mutate(() => replica.editItemText(id, text));
     },
     setItemNotes(id, notes) {
       const before = state.itemsById[id]?.notes ?? "";
       const ops = diffToDelta(before, notes);
       if (!ops) return;
-      engine.applyNotesDelta(id, JSON.stringify(ops));
+      replica.applyNotesDelta(id, JSON.stringify(ops));
       // A caller-driven write: no delta notification (the caller owns
       // any editor showing this item), durable now rather than on the
       // typing idle timer.
@@ -1366,14 +1366,14 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
     },
     subscribeNotes(id) {
       endNotesSession();
-      const text = engine.subscribeNotes(id);
+      const text = replica.subscribeNotes(id);
       notesSession = { id, base: text };
       return text;
     },
     unsubscribeNotes(id) {
       endNotesSession();
       if (notesSession?.id === id) notesSession = null;
-      engine.unsubscribeNotes(id);
+      replica.unsubscribeNotes(id);
     },
     applyNotesDelta(id, ops) {
       if (ops.length === 0) return;
@@ -1381,7 +1381,7 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       // drain; core's search index tracks the doc directly) without
       // recording a workspace undo step; the durable capture + push
       // waits for the idle timer.
-      engine.applyNotesDelta(id, JSON.stringify(ops));
+      replica.applyNotesDelta(id, JSON.stringify(ops));
       drainEvents();
       notesFlushPending = true;
       clearTimeout(notesFlushTimer);
@@ -1400,28 +1400,28 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       };
     },
     setItemDeadline(id, deadline) {
-      mutate(() => engine.setItemDeadline(id, deadline ?? undefined));
+      mutate(() => replica.setItemDeadline(id, deadline ?? undefined));
     },
     setItemWhen(id, when) {
-      mutate(() => engine.setItemWhen(id, when ?? undefined));
+      mutate(() => replica.setItemWhen(id, when ?? undefined));
     },
     setItemDuration(id, minutes) {
       // The core rejects zero, negative, and over-a-year values; refuse
       // anything that is not a positive whole number here so a bad value
-      // never reaches the engine (where it would throw).
+      // never reaches the replica (where it would throw).
       if (minutes != null && (!Number.isInteger(minutes) || minutes <= 0)) return;
-      mutate(() => engine.setItemDuration(id, minutes ?? undefined));
+      mutate(() => replica.setItemDuration(id, minutes ?? undefined));
     },
     setItemPlace(id, place) {
       // `JSON.stringify` drops `undefined` members, so a label-only place
       // crosses as `{"label":...}`; the core canonicalises the rest.
-      mutate(() => engine.setItemPlace(id, place ? JSON.stringify(place) : undefined));
+      mutate(() => replica.setItemPlace(id, place ? JSON.stringify(place) : undefined));
     },
     setDone(id, done) {
-      mutate(() => engine.setItemDone(id, done));
+      mutate(() => replica.setItemDone(id, done));
     },
     setDoneMany(ids, done) {
-      mutate(() => engine.setItemsDone(ids, done));
+      mutate(() => replica.setItemsDone(ids, done));
     },
     undoneIntoFocus(ids) {
       if (ids.length === 0) return;
@@ -1429,107 +1429,107 @@ export function createSyncedApp(engine: SyncEngine): DocApp {
       const captured = recentDone().filter((r) => wanted.has(r.id));
       const capturedIds = new Set(captured.map((r) => r.id));
       withActionBatch(() => {
-        mutate(() => engine.setItemsDone(ids, false));
+        mutate(() => replica.setItemsDone(ids, false));
         // Slots were captured sequentially (each after earlier removals),
         // so re-insert newest-first to rebuild the original layout, as
         // `restoreCapturedPositions` does for the render overlay.
         for (let i = captured.length - 1; i >= 0; i--) {
           const r = captured[i];
-          mutate(() => engine.addToFocus(r.id, r.focusIndex ?? 0));
+          mutate(() => replica.addToFocus(r.id, r.focusIndex ?? 0));
         }
         for (const id of ids) {
-          if (!capturedIds.has(id)) mutate(() => engine.addToFocus(id, 0));
+          if (!capturedIds.has(id)) mutate(() => replica.addToFocus(id, 0));
         }
       });
     },
     setBinned(id, binned) {
-      mutate(() => engine.setItemBinned(id, binned));
+      mutate(() => replica.setItemBinned(id, binned));
     },
     setBinnedMany(ids, binned) {
-      mutate(() => engine.setItemsBinned(ids, binned));
+      mutate(() => replica.setItemsBinned(ids, binned));
     },
     setLifecycle(id, lifecycle) {
-      mutate(() => engine.setItemLifecycle(id, lifecycleEnum(lifecycle)));
+      mutate(() => replica.setItemLifecycle(id, lifecycleEnum(lifecycle)));
     },
     setLifecycleMany(ids, lifecycle) {
-      mutate(() => engine.setItemsLifecycle(ids, lifecycleEnum(lifecycle)));
+      mutate(() => replica.setItemsLifecycle(ids, lifecycleEnum(lifecycle)));
     },
     addItemInState(listId, text, state) {
-      return mutate(() => engine.addItemInState(listId, text, lifecycleEnum(state)));
+      return mutate(() => replica.addItemInState(listId, text, lifecycleEnum(state)));
     },
     addItemInStateAt(listId, text, state, indexInList) {
       return mutate(() =>
-        engine.addItemInStateAt(listId, text, lifecycleEnum(state), indexInList),
+        replica.addItemInStateAt(listId, text, lifecycleEnum(state), indexInList),
       );
     },
     moveItem(id, listId, indexInList) {
-      mutate(() => engine.moveItem(id, listId, indexInList));
+      mutate(() => replica.moveItem(id, listId, indexInList));
     },
     deleteBinned(id) {
-      hardDelete(() => engine.deleteBinned(id));
+      hardDelete(() => replica.deleteBinned(id));
     },
     deleteBinnedMany(ids) {
-      hardDelete(() => engine.deleteBinnedItems(ids));
+      hardDelete(() => replica.deleteBinnedItems(ids));
     },
     emptyBin() {
-      return hardDelete(() => engine.emptyBin());
+      return hardDelete(() => replica.emptyBin());
     },
     addList(name) {
-      return mutate(() => engine.addList(name));
+      return mutate(() => replica.addList(name));
     },
     renameList(id, name) {
-      mutate(() => engine.renameList(id, name));
+      mutate(() => replica.renameList(id, name));
     },
     setListIcon(id, icon) {
-      mutate(() => engine.setListIcon(id, icon));
+      mutate(() => replica.setListIcon(id, icon));
     },
     setDefaultView(id, view) {
-      mutate(() => engine.setDefaultView(id, view ?? ""));
+      mutate(() => replica.setDefaultView(id, view ?? ""));
     },
     importJson(json) {
       return mutate(() => {
-        const summaryJson = engine.importJson(json);
+        const summaryJson = replica.importJson(json);
         return JSON.parse(summaryJson) as ImportSummary;
       });
     },
     moveList(id, index) {
-      mutate(() => engine.moveList(id, index));
+      mutate(() => replica.moveList(id, index));
     },
     setListArchived(id, archived) {
-      mutate(() => engine.setListArchived(id, archived));
+      mutate(() => replica.setListArchived(id, archived));
     },
     setShowListCounts(show) {
-      mutate(() => engine.setShowListCounts(show));
+      mutate(() => replica.setShowListCounts(show));
     },
     addToFocus(id, index) {
       // Default to the top: newly-focused items are "what am I working on
       // now" and belong at the head of the lens. An explicit index (e.g.
       // drag-to-reorder) still wins.
-      mutate(() => engine.addToFocus(id, index ?? 0));
+      mutate(() => replica.addToFocus(id, index ?? 0));
     },
     addToFocusMany(ids) {
-      mutate(() => engine.addToFocusMany(ids));
+      mutate(() => replica.addToFocusMany(ids));
     },
     removeFromFocus(id) {
-      mutate(() => engine.removeFromFocus(id));
+      mutate(() => replica.removeFromFocus(id));
     },
     removeFromFocusMany(ids) {
-      mutate(() => engine.removeFromFocusMany(ids));
+      mutate(() => replica.removeFromFocusMany(ids));
     },
     moveInFocus(id, index) {
-      mutate(() => engine.moveInFocus(id, index));
+      mutate(() => replica.moveInFocus(id, index));
     },
     addForeignToFocus(docId, itemId, index) {
-      mutate(() => engine.addForeignToFocus(docId, itemId, index));
+      mutate(() => replica.addForeignToFocus(docId, itemId, index));
     },
     setDocName(name) {
-      mutate(() => engine.setDocName(name));
+      mutate(() => replica.setDocName(name));
     },
     setCalendarDocHidden(docId, hidden) {
-      mutate(() => engine.setCalendarDocHidden(docId, hidden));
+      mutate(() => replica.setCalendarDocHidden(docId, hidden));
     },
     setDoneAmalgamate(amalgamate) {
-      mutate(() => engine.setDoneAmalgamate(amalgamate));
+      mutate(() => replica.setDoneAmalgamate(amalgamate));
     },
     undo() {
       // An open session is settled first so Cmd+Z right after typing

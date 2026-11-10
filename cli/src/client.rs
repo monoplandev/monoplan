@@ -103,7 +103,7 @@ pub async fn claim(profile_dir: &Path) -> anyhow::Result<daemon::DaemonLock> {
     }
 }
 
-/// The app taking the profile over at launch (`monoplan-ffi::Host`):
+/// The app taking the profile over at launch (`monoplan-ffi::Engine`):
 /// a headless daemon is asked to exit; another app's host is left
 /// alone, since two apps taking turns would never settle. `Ok(true)`
 /// once the profile is free, `Ok(false)` when it stays held, whether

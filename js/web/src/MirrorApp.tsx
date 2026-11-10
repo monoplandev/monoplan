@@ -2,12 +2,12 @@
 // entered from `mirror.tsx`). The browser's `BrowserTabGate` → `App` →
 // `BootGate` chain is replaced by one step: ask the in-process host for
 // the session and subscribe to each of its docs through the
-// `MirrorBridge`, which seeds a mirror engine per doc. There is no
+// `MirrorBridge`, which seeds a mirror `Replica` per doc. There is no
 // IndexedDB boot gate (the snapshot is the boot), no single-tab lock
-// (the host leases the peer), and no login (the host is signed in).
+// (the engine leases the peer), and no login (the engine is signed in).
 
 import { createEffect, createMemo, createSignal, onMount, Show } from "solid-js";
-import { Doc, SyncEngine } from "@monoplan/core/wasm";
+import { Doc, Replica } from "@monoplan/core/wasm";
 import { MirrorBridge, type MirrorSeed } from "@monoplan/core/mirror-bridge";
 import { useAppI18n } from "./i18n.tsx";
 import { deletePrefs, loadPrefs, savePrefs, type Prefs } from "./prefs.ts";
@@ -16,8 +16,8 @@ import { Workspace } from "./Workspace.tsx";
 import {
   detectAppHost,
   type AppHost,
-  type HostSessionInfo,
-  type HostState,
+  type EngineSessionInfo,
+  type EngineState,
 } from "./sync/mirrorHost.ts";
 import { serverLinkBase, setLinkBase } from "./url.ts";
 import {
@@ -28,7 +28,7 @@ import {
 } from "./sync/mirrorRuntime.ts";
 
 export function MirrorApp(props: {
-  /** The host to use instead of the page's WebKit handler (tests). */
+  /** The app host to use instead of the page's WebKit handler (tests). */
   host?: AppHost;
 }) {
   const { m, locale, direction } = useAppI18n();
@@ -39,23 +39,23 @@ export function MirrorApp(props: {
   const [boot, setBoot] = createSignal<MirrorBoot | null>(null);
   const [host, setHost] = createSignal<AppHost | null>(null);
   const [error, setError] = createSignal<string | null>(null);
-  // No host to mirror yet (starting, or stopping for a sign-out): the
+  // No engine to mirror yet (starting, or stopping for a sign-out): the
   // waiting screen instead of the workspace. The app reloads the page
-  // once a host serves, so this only ever moves between reasons.
-  const [gate, setGate] = createSignal<HostState | null>(null);
-  // "Online" is two facts: the host is serving the mirrors (the bridge,
-  // from the first seeded doc until the host stops them) and the host
+  // once an engine serves, so this only ever moves between reasons.
+  const [gate, setGate] = createSignal<EngineState | null>(null);
+  // "Online" is two facts: the engine is serving the mirrors (the bridge,
+  // from the first seeded doc until the engine stops them) and the engine
   // itself reaches the server (its sync status, pushed by the app). The
   // footer shows the conjunction, as the tray does.
   const [serving, setServing] = createSignal(false);
-  const [hostOnline, setHostOnline] = createSignal(false);
-  const online = createMemo(() => serving() && hostOnline());
+  const [engineOnline, setEngineOnline] = createSignal(false);
+  const online = createMemo(() => serving() && engineOnline());
   const [lastSyncAt, setLastSyncAt] = createSignal<number | null>(null);
-  // The bridge is built before the runtime exists (it seeds the engines
+  // The bridge is built before the runtime exists (it seeds the replicas
   // the runtime is built from); its frame pulse is bound here once the
   // runtime is up. Frames before that have nothing to drain into.
   let drainFor: (docId: string) => void = () => {};
-  // Likewise the host stopping a doc (deleted, or closed by the server)
+  // Likewise the engine stopping a doc (deleted, or closed by the server)
   // drops it from the runtime once there is one.
   let closeFor: (docId: string) => void = () => {};
 
@@ -66,7 +66,7 @@ export function MirrorApp(props: {
       return;
     }
     host.onSync((status) => {
-      setHostOnline(status.online);
+      setEngineOnline(status.online);
       setLastSyncAt(status.lastSyncedAt);
     });
     try {
@@ -74,7 +74,7 @@ export function MirrorApp(props: {
       if (reply.status !== "ok") {
         setHost(host);
         setGate(reply);
-        host.onHostState(setGate);
+        host.onEngineState(setGate);
         return;
       }
       const info = reply;
@@ -84,14 +84,14 @@ export function MirrorApp(props: {
       if (!info.localOnly) setLinkBase(serverLinkBase(info.serverUrl));
       const bridge = new MirrorBridge({
         transport: host.transport,
-        createEngine: (seed: MirrorSeed) => {
+        createReplica: (seed: MirrorSeed) => {
           const doc = Doc.loadWithPeer(seed.snapshot, seed.peer);
           // Items the window creates carry the account id like any
           // authed session's (`createdBy`, spec/data-model.md "Item");
           // a local-only workspace has none, like the browser's
           // anonymous session.
           if (!info.localOnly) doc.setAuthor(info.accountId);
-          return SyncEngine.mirror(doc, seed.docId);
+          return Replica.mirror(doc, seed.docId);
         },
         onServerFrame: (docId) => drainFor(docId),
         onChange: (kind) => {
@@ -99,7 +99,7 @@ export function MirrorApp(props: {
           if (kind === "offline") setServing(false);
         },
         onStopped: (docId) => {
-          console.warn(`mirror: the host stopped serving doc ${docId}`);
+          console.warn(`mirror: the engine stopped serving doc ${docId}`);
           closeFor(docId);
         },
         onError: (message) => {
@@ -109,11 +109,11 @@ export function MirrorApp(props: {
       // Home first, so a failure there is the one reported; a non-Home
       // doc that will not open is left out rather than failing the
       // window.
-      const engines = [await bridge.open(info.primaryDocId)];
+      const replicas = [await bridge.open(info.primaryDocId)];
       for (const d of info.docs) {
         if (d.docId === info.primaryDocId) continue;
         try {
-          engines.push(await bridge.open(d.docId));
+          replicas.push(await bridge.open(d.docId));
         } catch (e) {
           console.warn(`mirror: doc ${d.docId} did not open:`, e);
         }
@@ -121,7 +121,7 @@ export function MirrorApp(props: {
       const session = sessionFromHost(info);
       const prefs = await loadBootPrefs(session.accountId, info).catch(() => null);
       setHost(host);
-      setBoot({ session, engines, bridge, prefs });
+      setBoot({ session, replicas, bridge, prefs });
     } catch (e) {
       console.error("[mirror boot] FAILED:", e);
       setError(e instanceof Error ? e.message : String(e));
@@ -137,7 +137,7 @@ export function MirrorApp(props: {
         </div>
       }
     >
-      <Show when={!gate()} fallback={<HostGate state={gate()!} />}>
+      <Show when={!gate()} fallback={<EngineGate state={gate()!} />}>
         <Show when={boot()} fallback={<div class="empty">{m().common.loading}</div>}>
           {(b) => (
           <SessionProvider
@@ -146,7 +146,7 @@ export function MirrorApp(props: {
               online,
               // The runtime never sets these on a mirror (no WebSocket
               // of its own); the app's status pushes do.
-              setOnline: setHostOnline,
+              setOnline: setEngineOnline,
               lastSyncAt,
               setLastSyncAt,
               // Signing out is the tray's; the window cannot revoke the
@@ -177,7 +177,7 @@ export function MirrorApp(props: {
  *  (same doc id), so a row the anonymous session saved under its
  *  derived account id follows the account the first time the page
  *  boots signed in, as the browser's `onAuthenticated` does. */
-async function loadBootPrefs(accountId: string, info: HostSessionInfo): Promise<Prefs | null> {
+async function loadBootPrefs(accountId: string, info: EngineSessionInfo): Promise<Prefs | null> {
   const prefs = await loadPrefs(accountId);
   if (prefs || info.localOnly) return prefs;
   const local = localAccountId(info.primaryDocId);
@@ -188,10 +188,10 @@ async function loadBootPrefs(accountId: string, info: HostSessionInfo): Promise<
   return adopted;
 }
 
-/** The window without a host yet: waiting on it, with the app's
+/** The window without an engine yet: waiting on it, with the app's
  *  reason. Centred in the window, under the title-bar strip the app
  *  draws its traffic lights over. */
-function HostGate(props: { state: HostState }) {
+function EngineGate(props: { state: EngineState }) {
   const { m } = useAppI18n();
   return (
     <div class="mirror-gate">
@@ -207,16 +207,16 @@ function MirrorMain(props: {
   boot: MirrorBoot;
   host: AppHost;
   /** Hand the parent the runtime's drain so the bridge's frame pulse
-   *  reaches the stores, and its close so a doc the host stops serving
+   *  reaches the stores, and its close so a doc the engine stops serving
    *  leaves the page. Called synchronously during setup, before any
    *  frame can arrive after the runtime materialised its stores. */
   bind: (drain: (docId: string) => void, close: (docId: string) => void) => void;
 }) {
   const runtime = createMirrorRuntime(props.boot);
   props.bind(runtime.drain, runtime.closeDoc);
-  // Delete goes through the app: a native confirm, then the host
+  // Delete goes through the app: a native confirm, then the engine
   // deletes on the server and forgets its copy; the page drops the doc
-  // once the app says it is gone (the host's `stopped` for it may have
+  // once the app says it is gone (the engine's `stopped` for it may have
   // done so already).
   const deleteDoc = async (docId: string, name: string): Promise<void> => {
     if (await props.host.deleteDoc(docId, name)) runtime.closeDoc(docId);
@@ -224,7 +224,7 @@ function MirrorMain(props: {
   // The app calls `handOff` before closing the window or quitting, then
   // waits for the imports it caused before it drops the subscriptions.
   props.host.onHandOff(runtime.handOff);
-  // The app's New Workspace… created a doc on the host: open it here
+  // The app's New Workspace… created a doc on the engine: open it here
   // and go to its Inbox, as the browser's dialog does on create.
   props.host.onDocAdded((docId) => {
     runtime

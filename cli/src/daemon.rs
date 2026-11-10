@@ -1,19 +1,19 @@
 //! `monoplan daemon start` — the resident host (`spec/daemon-plan.md`).
 //!
-//! Hold a [`Session`] open for the life of the process and drive its
-//! sans-IO engines (one per doc) from one `select!` loop over the WebSocket, client
+//! Hold a [`Engine`] open for the life of the process and drive its
+//! sans-IO replicas (one per doc) from one `select!` loop over the WebSocket, client
 //! requests arriving on a Unix socket, a persist tick, a liveness ping,
 //! and shutdown signals.
 //!
 //! - **Ownership.** The daemon holds `daemon.lock` (a kernel flock,
-//!   released on any exit path) for its lifetime. `Session::open`
+//!   released on any exit path) for its lifetime. `Engine::open`
 //!   refuses while it is held, so a one-shot command can never write
 //!   WAL rows the resident doc would not see.
 //! - **Transport policy** (host-owned per `spec/architecture.md`):
 //!   reconnect with capped exponential backoff, a ping every
 //!   `PING_INTERVAL` whose missed pong counts as a disconnect (after
 //!   laptop sleep the socket is usually dead before the OS says so),
-//!   and the engine's `OpenDoc` handshake timeout.
+//!   and the replica's `OpenDoc` handshake timeout.
 //! - **Persist cadence** mirroring the web host: capture on a ~1 s
 //!   tick and right after remote frames apply (so the Ack goes out
 //!   against durable bytes), threshold fold on the hot path, full fold
@@ -51,13 +51,13 @@ use crate::commands::run_doc;
 use crate::config::Profile;
 use crate::ipc::{self, Reply, Request, SyncStatus, WatchEvent, read_frame, write_frame};
 use crate::peer::PeerLease;
-use crate::sync::{Session, SyncError, WsStream, connect_ws, engine_options, send_outboxes};
+use crate::sync::{Engine, SyncError, WsStream, connect_ws, engine_options, send_outboxes};
 
 /// Socket connect + version handshake budget. Longer than the one-shot
 /// CLI's 2 s: the daemon is not holding up a command, and real networks
 /// (captive portals, sleepy wifi) take longer than localhost.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-/// Engine-level `OpenDoc` → `DocOpened` budget after the socket is up.
+/// Replica-level `OpenDoc` → `DocOpened` budget after the socket is up.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Reconnect backoff: doubles from `BACKOFF_MIN` to `BACKOFF_MAX` with
 /// jitter; reset on a successful handshake. While the server is
@@ -67,7 +67,7 @@ const BACKOFF_MAX: Duration = Duration::from_secs(30);
 /// Liveness ping cadence; a ping sent while the previous pong is still
 /// outstanding means the socket is dead.
 const PING_INTERVAL: Duration = Duration::from_secs(30);
-/// Persist tick: WAL capture + threshold fold + engine timeout check.
+/// Persist tick: WAL capture + threshold fold + replica timeout check.
 const PERSIST_INTERVAL: Duration = Duration::from_secs(1);
 /// Events buffered per watcher before it is deemed lagging. A lagging
 /// watcher gets one `Changed` instead of the backlog, so this only has
@@ -155,7 +155,7 @@ pub struct DaemonStatus {
     pub local_only: bool,
     /// Unconfirmed local work (see `ipc::SyncStatus`).
     pub pending: bool,
-    /// Contiguous-prefix server seq the engine has applied in memory.
+    /// Contiguous-prefix server seq the replica has applied in memory.
     pub last_contiguous_seq: u64,
     pub connects: u32,
 }
@@ -198,7 +198,7 @@ impl DaemonHandle {
 /// A host that owns the profile and is listening, but not yet serving:
 /// the output of [`start`], the input of [`serve`]. Split so the same
 /// loop runs as the headless daemon (`run`) and inside the macOS app
-/// (`monoplan-ffi::Host`, `spec/daemon-plan.md` amendment 2026-10-27).
+/// (`monoplan-ffi::Engine`, `spec/daemon-plan.md` amendment 2026-10-27).
 pub struct Started {
     lock: DaemonLock,
     /// `None` for a host with no CLI to serve (the iOS app): the loop
@@ -206,7 +206,7 @@ pub struct Started {
     /// socket file is made. On iOS the container paths also exceed
     /// `sun_path`, so a bind there would fail outright.
     listener: Option<UnixListener>,
-    session: Session,
+    engine: Engine,
 }
 
 /// Claim the profile, bind the socket and boot the doc. `Ok(None)` when
@@ -227,11 +227,11 @@ pub async fn start_with(profile: Profile, serve_socket: bool) -> anyhow::Result<
     } else {
         None
     };
-    let session = Session::open_resident(profile).await?;
+    let engine = Engine::open_resident(profile).await?;
     Ok(Some(Started {
         lock,
         listener,
-        session,
+        engine,
     }))
 }
 
@@ -245,7 +245,7 @@ pub async fn serve(
     shutdown: oneshot::Receiver<()>,
     embedded: bool,
 ) -> anyhow::Result<()> {
-    if started.session.is_local_only() {
+    if started.engine.is_local_only() {
         eprintln!("monoplan daemon: listening; local-only workspace, no server");
     } else {
         eprintln!("monoplan daemon: listening, connecting to server…");
@@ -273,7 +273,7 @@ impl Serving {
         let Started {
             lock,
             listener,
-            session,
+            engine,
         } = started;
         let (status_tx, status_rx) = watch::channel(DaemonStatus::default());
         // Unbounded: every client awaits its reply before its next
@@ -296,7 +296,7 @@ impl Serving {
             watchers: watch_tx.subscribe(),
             embedded,
         };
-        let host = Host::new(session, lock, status_tx, req_rx, watch_tx, embedded);
+        let host = Host::new(engine, lock, status_tx, req_rx, watch_tx, embedded);
         (Serving { host, accept }, client)
     }
 
@@ -913,13 +913,13 @@ pub async fn spawn_with(profile: Profile, embedded: bool) -> Result<DaemonHandle
         .map_err(crate::peer::PeerError::Io)?
         .ok_or(SyncError::DaemonRunning)?;
     let listener = bind(&profile.dir).map_err(|e| SyncError::Engine(format!("bind: {e}")))?;
-    let session = Session::open_resident(profile).await?;
+    let engine = Engine::open_resident(profile).await?;
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let (serving, client) = Serving::new(
         Started {
             lock,
             listener: Some(listener),
-            session,
+            engine,
         },
         embedded,
     );
@@ -955,7 +955,7 @@ async fn wait_for_signal() {
     }
 }
 
-/// Socket + per-connection version handshake. The engine's own
+/// Socket + per-connection version handshake. The replica's own
 /// `OpenDoc` exchange starts in `handle_connected` afterwards. A free
 /// function (not `&self`) so the host's `select!` future stays `Send`.
 async fn handshake(profile: &Profile, server_url: &str) -> Result<WsStream, SyncError> {
@@ -982,7 +982,7 @@ async fn handshake(profile: &Profile, server_url: &str) -> Result<WsStream, Sync
 }
 
 struct Host {
-    session: Session,
+    engine: Engine,
     _lock: DaemonLock,
     /// Watched on the persist tick: if the profile dir is purged from
     /// under us (logout, a test's tempdir) there is nothing left to own.
@@ -1016,17 +1016,17 @@ struct Host {
 
 impl Host {
     fn new(
-        session: Session,
+        engine: Engine,
         lock: DaemonLock,
         status: watch::Sender<DaemonStatus>,
         requests: mpsc::UnboundedReceiver<HostCmd>,
         watchers: broadcast::Sender<WatchEvent>,
         embedded: bool,
     ) -> Self {
-        let dir = session.profile_dir().to_path_buf();
-        let local_only = session.is_local_only();
+        let dir = engine.profile_dir().to_path_buf();
+        let local_only = engine.is_local_only();
         Host {
-            session,
+            engine,
             _lock: lock,
             lock_path: lock_path(&dir),
             socket_path: ipc::socket_path(&dir),
@@ -1103,8 +1103,8 @@ impl Host {
         for (_, sub) in self.subscribers.drain() {
             sub.sink.stopped();
         }
-        self.session.persist_engine_state().await?;
-        self.session.force_snapshot()?;
+        self.engine.persist_replica_state().await?;
+        self.engine.force_snapshot()?;
         if let Some(mut ws) = self.ws.take() {
             let _ = ws.close(None).await;
         }
@@ -1148,10 +1148,10 @@ impl Host {
     /// window shows as the web client's anonymous session.
     fn on_session(&self) -> Result<SessionInfo, MirrorError> {
         let account = self
-            .session
+            .engine
             .account()
             .map_err(|e| MirrorError::Failed(format!("read account: {e}")))?;
-        let (identity, server_url) = match (account.identity, self.session.connect_params()) {
+        let (identity, server_url) = match (account.identity, self.engine.connect_params()) {
             (Some(identity), Some((_, server_url))) => (Some(identity), server_url.to_string()),
             _ => (None, String::new()),
         };
@@ -1165,7 +1165,7 @@ impl Host {
             server_url,
             local_only,
             docs: self
-                .session
+                .engine
                 .candidates()
                 .into_iter()
                 .map(|c| SessionDoc {
@@ -1182,15 +1182,15 @@ impl Host {
         sink: Box<dyn MirrorSink>,
     ) -> Result<Seed, MirrorError> {
         let doc_id = self
-            .session
+            .engine
             .resolve(workspace.as_deref())
             .map_err(|e| MirrorError::Failed(e.to_string()))?;
         let lease = self
-            .session
+            .engine
             .claim_peer()
             .map_err(|e| MirrorError::Failed(format!("peer lease: {e}")))?;
         let doc = self
-            .session
+            .engine
             .doc_for(doc_id)
             .expect("resolved against open docs");
         let snapshot = doc
@@ -1229,7 +1229,7 @@ impl Host {
         let Some(doc_id) = self.subscribers.get(&id).map(|s| s.doc_id) else {
             return Ok(Err(MirrorError::Failed("unknown subscription".into())));
         };
-        let Some(doc) = self.session.doc_mut_for(doc_id) else {
+        let Some(doc) = self.engine.doc_mut_for(doc_id) else {
             return Ok(Err(MirrorError::Failed("the doc has been closed".into())));
         };
         let imported = match doc.import_mirror_update(bytes) {
@@ -1241,8 +1241,8 @@ impl Host {
         if let Some(sub) = self.subscribers.get_mut(&id) {
             sub.last_sent.merge(&imported);
         }
-        self.session.persist_engine_state().await?;
-        self.session.flush_engines();
+        self.engine.persist_replica_state().await?;
+        self.engine.flush_replicas();
         self.pump().await;
         self.notify_if_changed();
         Ok(Ok(()))
@@ -1255,7 +1255,7 @@ impl Host {
     fn fan_out(&mut self) {
         let mut closed = Vec::new();
         for (id, sub) in self.subscribers.iter_mut() {
-            let Some(doc) = self.session.doc_for(sub.doc_id) else {
+            let Some(doc) = self.engine.doc_for(sub.doc_id) else {
                 closed.push(*id);
                 continue;
             };
@@ -1308,14 +1308,14 @@ impl Host {
                     }
                 } else {
                     let docs: Vec<(crate::workspace::Candidate, &monoplan_core::Doc)> = self
-                        .session
+                        .engine
                         .candidates()
                         .into_iter()
-                        .filter_map(|c| self.session.doc_for(c.doc_id).map(|d| (c, d)))
+                        .filter_map(|c| self.engine.doc_for(c.doc_id).map(|d| (c, d)))
                         .collect();
                     let hidden = self
-                        .session
-                        .doc_for(self.session.primary_doc_id())
+                        .engine
+                        .doc_for(self.engine.primary_doc_id())
                         .map(|d| d.get_settings().calendar_hidden_docs)
                         .unwrap_or_default();
                     let mut buf = Vec::new();
@@ -1348,15 +1348,15 @@ impl Host {
                     }
                 } else {
                     let docs: Vec<(crate::workspace::Candidate, &monoplan_core::Doc)> = self
-                        .session
+                        .engine
                         .candidates()
                         .into_iter()
-                        .filter_map(|c| self.session.doc_for(c.doc_id).map(|d| (c, d)))
+                        .filter_map(|c| self.engine.doc_for(c.doc_id).map(|d| (c, d)))
                         .collect();
                     let mut buf = Vec::new();
                     match crate::commands::focus::show_all(
                         &docs,
-                        self.session.primary_doc_id(),
+                        self.engine.primary_doc_id(),
                         args.json,
                         &mut buf,
                     ) {
@@ -1371,7 +1371,7 @@ impl Host {
                 }
             }
             Request::Doc { workspace, cmd } => {
-                let doc_id = match self.session.resolve(workspace.as_deref()) {
+                let doc_id = match self.engine.resolve(workspace.as_deref()) {
                     Ok(id) => id,
                     Err(e) => {
                         let _ = reply.send(Reply::Err {
@@ -1382,14 +1382,14 @@ impl Host {
                 };
                 let mut buf = Vec::new();
                 let doc = self
-                    .session
+                    .engine
                     .doc_for(doc_id)
                     .expect("resolved against open docs");
                 let result = run_doc(cmd, doc, &mut buf);
                 // Whatever the command committed is durable before the
                 // client hears back, and on the wire right after.
-                self.session.persist_engine_state().await?;
-                self.session.flush_engines();
+                self.engine.persist_replica_state().await?;
+                self.engine.flush_replicas();
                 self.pump().await;
                 self.notify_if_changed();
                 match result {
@@ -1403,15 +1403,15 @@ impl Host {
                 }
             }
             Request::Sync => {
-                self.session.persist_engine_state().await?;
+                self.engine.persist_replica_state().await?;
                 if self.local_only {
                     // Nothing to push to; say so now rather than park
                     // the request behind a connect that never starts.
                     Reply::Synced {
                         sync: self.sync_status(),
                     }
-                } else if self.ws.is_some() && self.session.all_idle() {
-                    self.session.flush_engines();
+                } else if self.ws.is_some() && self.engine.all_idle() {
+                    self.engine.flush_replicas();
                     self.pump().await;
                     Reply::Synced {
                         sync: self.sync_status(),
@@ -1440,7 +1440,7 @@ impl Host {
                     sync: self.sync_status(),
                 }
             }
-            Request::Account => match self.session.account() {
+            Request::Account => match self.engine.account() {
                 Ok(a) => match a.identity {
                     Some(i) => Reply::Account {
                         account_id: i.account_id,
@@ -1463,7 +1463,7 @@ impl Host {
                         message: "no account: sign in to create a workspace".into(),
                     }
                 } else {
-                    match self.session.create_doc(&name).await {
+                    match self.engine.create_doc(&name).await {
                         Ok(doc_id) => {
                             // On a live socket the doc opens now, so the
                             // seed goes out with the usual OpenDoc →
@@ -1471,10 +1471,10 @@ impl Host {
                             // opens it with the rest. Durable before
                             // the client hears back, like a doc command.
                             if self.ws.is_some() {
-                                self.session.connect_doc(doc_id);
+                                self.engine.connect_doc(doc_id);
                             }
-                            self.session.persist_engine_state().await?;
-                            self.session.flush_engines();
+                            self.engine.persist_replica_state().await?;
+                            self.engine.flush_replicas();
                             self.pump().await;
                             self.notify_if_changed();
                             // Watchers list workspaces from the host
@@ -1494,12 +1494,12 @@ impl Host {
                 }
             }
             Request::DeleteWorkspace { workspace } => {
-                let resolved = self.session.resolve(Some(&workspace));
+                let resolved = self.engine.resolve(Some(&workspace));
                 match resolved {
                     Err(e) => Reply::Err {
                         message: e.to_string(),
                     },
-                    Ok(doc_id) => match self.session.delete_doc(doc_id).await {
+                    Ok(doc_id) => match self.engine.delete_doc(doc_id).await {
                         Ok(()) => {
                             // Mirrors of the doc hear `stopped` now (the
                             // fan-out finds no doc behind them), watchers
@@ -1534,7 +1534,7 @@ impl Host {
 
     fn start_connect(&mut self) {
         // Guarded by `local_only` in the loop; belt and braces here.
-        let Some((profile, server_url)) = self.session.connect_params() else {
+        let Some((profile, server_url)) = self.engine.connect_params() else {
             return;
         };
         let profile = Profile::new(profile.dir.clone());
@@ -1557,7 +1557,7 @@ impl Host {
                 self.backoff = BACKOFF_MIN;
                 self.connected_at = Some(Instant::now());
                 self.awaiting_pong = false;
-                self.session.handle_connected();
+                self.engine.handle_connected();
                 self.offline_reason = None;
                 self.status.send_modify(|s| s.connects += 1);
                 eprintln!("monoplan daemon: connected");
@@ -1577,7 +1577,7 @@ impl Host {
     fn resolve_pending_syncs(&mut self, online: bool) {
         let sync = SyncStatus {
             online,
-            last_synced_at: self.session.last_synced_at(),
+            last_synced_at: self.engine.last_synced_at(),
             offline_reason: self.offline_reason.clone(),
             local_only: self.local_only,
             pending: self.has_pending_work(),
@@ -1590,7 +1590,7 @@ impl Host {
     fn sync_status(&self) -> SyncStatus {
         SyncStatus {
             online: self.is_online(),
-            last_synced_at: self.session.last_synced_at(),
+            last_synced_at: self.engine.last_synced_at(),
             offline_reason: self.offline_reason.clone(),
             local_only: self.local_only,
             pending: self.has_pending_work(),
@@ -1598,16 +1598,16 @@ impl Host {
     }
 
     fn is_online(&self) -> bool {
-        self.ws.is_some() && self.session.home_engine().is_online()
+        self.ws.is_some() && self.engine.home_replica().is_online()
     }
 
     /// Anything the server has not confirmed: committed ops not yet
     /// pushed or a push in flight on any doc, or, while the socket is
-    /// up, an engine still opening or pulling. `online` alone flips
+    /// up, a replica still opening or pulling. `online` alone flips
     /// true at the handshake, before a byte of the doc has moved, so
     /// this is what separates "syncing" from "synced".
     fn has_pending_work(&self) -> bool {
-        self.session.any_unsynced_ops() || (self.ws.is_some() && !self.session.all_idle())
+        self.engine.any_unsynced_ops() || (self.ws.is_some() && !self.engine.all_idle())
     }
 
     async fn on_ws_message(
@@ -1616,11 +1616,11 @@ impl Host {
     ) {
         match msg {
             Some(Ok(Message::Binary(bytes))) => {
-                self.session.route_server_bytes(&bytes);
-                // Remote updates are WAL-appended by the engine as they
+                self.engine.route_server_bytes(&bytes);
+                // Remote updates are WAL-appended by the replica as they
                 // apply; persisting now advances the durable cursor,
                 // which is what queues the Ack `pump` then sends.
-                if let Err(e) = self.session.persist_engine_state().await {
+                if let Err(e) = self.engine.persist_replica_state().await {
                     self.disconnect(&format!("persist after frame: {e}"));
                     return;
                 }
@@ -1638,9 +1638,9 @@ impl Host {
     }
 
     async fn on_persist_tick(&mut self) -> Result<(), SyncError> {
-        self.session.persist_engine_state().await?;
+        self.engine.persist_replica_state().await?;
         // Hot-path fold uses the real thresholds; exit folds everything.
-        self.session.snapshot_if_wal_exceeds()?;
+        self.engine.snapshot_if_wal_exceeds()?;
         // Anything the two hot paths did not already report (there
         // should be nothing); also keeps the queue from accumulating.
         self.notify_if_changed();
@@ -1651,9 +1651,9 @@ impl Host {
                 // Escalates only while still in `Opening`; a no-op
                 // once the doc is open, so calling it every tick
                 // past the budget is harmless.
-                self.session.handle_timeout();
+                self.engine.handle_timeout();
             }
-            self.session.flush_engines();
+            self.engine.flush_replicas();
             self.pump().await;
         }
         self.publish();
@@ -1672,43 +1672,43 @@ impl Host {
         }
     }
 
-    /// Drain the engine's outbox to the wire and act on its events.
-    /// Called after every engine interaction while a socket is open.
+    /// Drain the replica's outbox to the wire and act on its events.
+    /// Called after every replica interaction while a socket is open.
     async fn pump(&mut self) {
         if let Some(ws) = self.ws.as_mut()
-            && let Err(e) = send_outboxes(ws, &mut self.session).await
+            && let Err(e) = send_outboxes(ws, &mut self.engine).await
         {
             self.disconnect(&format!("send failed: {e}"));
             return;
         }
-        let home = self.session.primary_doc_id();
+        let home = self.engine.primary_doc_id();
         let mut forget: Vec<DocId> = Vec::new();
-        for (doc_id, event) in self.session.drain_events() {
+        for (doc_id, event) in self.engine.drain_events() {
             match event {
                 // Not acted on as events: whether Home is open on the
-                // socket is read off the engine after the drain (below),
+                // socket is read off the replica after the drain (below),
                 // because a `false` here may be stale. A host-initiated
                 // `disconnect` (a `Reconnect` request, a pong timeout,
-                // an engine error in this very loop) queues one with no
+                // a replica error in this very loop) queues one with no
                 // pump before the next connect; drained *then*, beside
                 // the new `true`, it describes the old socket, and
-                // dropping the new one for it left the engine `Opening`
-                // with no socket, cycling "engine disconnected" /
+                // dropping the new one for it left the replica `Opening`
+                // with no socket, cycling "replica disconnected" /
                 // "handle_connected called while already connected".
-                // A non-Home engine going offline on its own is the
+                // A non-Home replica going offline on its own is the
                 // `DocClosed` below; the socket stays up for the rest.
                 Event::ConnStateChanged { .. } => {}
                 Event::PulledInitial => {
-                    if let Err(e) = self.session.mark_synced(doc_id) {
+                    if let Err(e) = self.engine.mark_synced(doc_id) {
                         tracing::warn!("mark_synced: {e}");
                     }
                     if doc_id == home && !self.pending_syncs.is_empty() {
-                        self.session.flush_engines();
+                        self.engine.flush_replicas();
                         self.resolve_pending_syncs(true);
                     }
                 }
                 Event::Pushed => {
-                    if let Err(e) = self.session.mark_synced(doc_id) {
+                    if let Err(e) = self.engine.mark_synced(doc_id) {
                         tracing::warn!("mark_synced: {e}");
                     }
                 }
@@ -1717,8 +1717,8 @@ impl Host {
                 // the initial pull, which stamps once on `PulledInitial`
                 // rather than once per batch.
                 Event::FrontierAdvanced { .. } => {
-                    if self.session.engine_idle(doc_id)
-                        && let Err(e) = self.session.mark_synced(doc_id)
+                    if self.engine.replica_idle(doc_id)
+                        && let Err(e) = self.engine.mark_synced(doc_id)
                     {
                         tracing::warn!("mark_synced: {e}");
                     }
@@ -1727,37 +1727,37 @@ impl Host {
                 // it yet; the web client's navbar does.
                 Event::Presence { .. } => {}
                 Event::Error(msg) => {
-                    tracing::warn!("engine {}: {msg}", doc_id.0);
-                    self.disconnect(&format!("engine error: {msg}"));
+                    tracing::warn!("replica {}: {msg}", doc_id.0);
+                    self.disconnect(&format!("replica error: {msg}"));
                 }
                 // The server will not serve this doc to this account
                 // any more (membership removed, or the invite was
                 // revoked under us): forget it, keep the socket for
                 // the rest (`spec/sharing-plan.md` §Member removal).
                 Event::DocClosed { reason } if doc_id != home => {
-                    tracing::warn!("engine: doc {} closed: {reason}; forgetting it", doc_id.0);
+                    tracing::warn!("replica: doc {} closed: {reason}; forgetting it", doc_id.0);
                     forget.push(doc_id);
                 }
                 // Home is non-leavable, so this means the server
                 // refused the account's own primary doc — a
                 // server-side fault, not something a reconnect loop
-                // will fix quickly. Treat it like any fatal engine
+                // will fix quickly. Treat it like any fatal replica
                 // error: drop the socket and let the ordinary backoff
                 // pace the retries.
                 Event::DocClosed { reason } => {
-                    tracing::warn!("engine: home doc closed: {reason}");
+                    tracing::warn!("replica: home doc closed: {reason}");
                     self.disconnect(&format!("doc closed: {reason}"));
                 }
             }
         }
         // Home went Disconnected on its own (rejected handshake, fatal
         // frame) while the socket is up: drop the socket to match.
-        if self.ws.is_some() && !self.session.home_engine().is_online() {
-            self.drop_socket("engine disconnected");
+        if self.ws.is_some() && !self.engine.home_replica().is_online() {
+            self.drop_socket("replica disconnected");
         }
         let forgot = !forget.is_empty();
         for doc_id in forget {
-            if let Err(e) = self.session.forget_doc(doc_id) {
+            if let Err(e) = self.engine.forget_doc(doc_id) {
                 tracing::warn!("forget doc {}: {e}", doc_id.0);
             }
             let _ = self.watchers.send(WatchEvent::Changed);
@@ -1770,10 +1770,10 @@ impl Host {
         self.publish();
     }
 
-    /// Host-initiated disconnect: tell the engine, drop the socket,
+    /// Host-initiated disconnect: tell the replica, drop the socket,
     /// schedule a reconnect.
     fn disconnect(&mut self, reason: &str) {
-        self.session.handle_disconnected();
+        self.engine.handle_disconnected();
         self.drop_socket(reason);
     }
 
@@ -1805,11 +1805,11 @@ impl Host {
     fn publish(&self) {
         let next = DaemonStatus {
             online: self.is_online(),
-            last_synced_at: self.session.last_synced_at(),
+            last_synced_at: self.engine.last_synced_at(),
             offline_reason: self.offline_reason.clone(),
             local_only: self.local_only,
             pending: self.has_pending_work(),
-            last_contiguous_seq: self.session.home_engine().last_contiguous_seq(),
+            last_contiguous_seq: self.engine.home_replica().last_contiguous_seq(),
             connects: self.status.borrow().connects,
         };
         let prev_sync = self.status.borrow().sync();
@@ -1833,7 +1833,7 @@ impl Host {
     /// burst of N events is one frame; a mirror gets the bytes and
     /// derives its own events from them.
     fn notify_if_changed(&mut self) {
-        if self.session.drain_app_events() {
+        if self.engine.drain_app_events() {
             let _ = self.watchers.send(WatchEvent::Changed);
         }
         self.fan_out();

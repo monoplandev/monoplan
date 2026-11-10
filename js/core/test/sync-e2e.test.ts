@@ -1,4 +1,4 @@
-// End-to-end: real `monoplan-server` process, two wasm SyncEngines,
+// End-to-end: real `monoplan-server` process, two wasm Replicas,
 // real msgpack over a real WebSocket. Exercises the server-orchestrated
 // snapshot path: device A crosses the (test-tuned) snapshot threshold,
 // server requests a snapshot, A uploads it, device B then bootstraps
@@ -27,12 +27,12 @@ import {
   helloFrame,
   parseHelloResponse,
   serverFrameDocId,
-  SyncEngine,
+  Replica,
   wrapDek,
 } from "../wasm/monoplan_core_web.js";
-import type { EngineStorage } from "../wasm/monoplan_core_web.js";
+import type { ReplicaStorage } from "../wasm/monoplan_core_web.js";
 import { SyncBridge } from "../src/sync-bridge.ts";
-import { MemEngineStorage } from "./mem-engine-storage.ts";
+import { MemReplicaStorage } from "./mem-replica-storage.ts";
 
 /** HTTP bodies are JSON with byte fields as base64 (spec/auth.md). */
 function jsonBody(body: unknown): string {
@@ -258,21 +258,21 @@ async function createDoc(s: ServerHandle, token: string): Promise<string> {
   return decoded.doc_id;
 }
 
-// Construct a bridge over `engines` with a bearer-header socket
+// Construct a bridge over `replicas` with a bearer-header socket
 // factory and resolve once it's seen "online" at least once. Tests
 // then drive mutations and let the bridge's own onmessage pump push
 // outbox bytes; explicit `pumpOutbox()` calls cover the case where
 // local mutations happen between server frames. Any bridge-level
 // error (bad handshake, unroutable frame) fails the test loudly.
-function attachEngines(
+function attachReplicas(
   s: ServerHandle,
   token: string,
-  engines: SyncEngine[],
+  replicas: Replica[],
 ): Promise<SyncBridge> {
   return new Promise((resolveOk, rejectOk) => {
     let resolved = false;
     const bridge = new SyncBridge({
-      engines,
+      replicas,
       codec: { helloFrame, parseHelloResponse, serverFrameDocId },
       clientName: "monoplan-e2e",
       clientVersion: "0.0.0",
@@ -290,9 +290,9 @@ function attachEngines(
         }
       },
       onError: (message) => rejectOk(new Error(`bridge error: ${message}`)),
-      onEngineEvent: (ev, docId) => {
+      onReplicaEvent: (ev, docId) => {
         if (ev.kind === "error") {
-          rejectOk(new Error(`engine error on doc ${docId}: ${ev.message}`));
+          rejectOk(new Error(`replica error on doc ${docId}: ${ev.message}`));
         }
       },
       reconnectBackoff: { baseMs: 50, maxMs: 50, jitter: 0 },
@@ -301,8 +301,8 @@ function attachEngines(
   });
 }
 
-function itemTexts(engine: SyncEngine): string[] {
-  const items = JSON.parse(engine.itemsInListJson(LIST_MAIN, false)) as Array<{
+function itemTexts(replica: Replica): string[] {
+  const items = JSON.parse(replica.itemsInListJson(LIST_MAIN, false)) as Array<{
     text: string;
   }>;
   return items.map((i) => i.text).sort();
@@ -353,60 +353,60 @@ describe("e2e snapshot + second-device bootstrap", () => {
     const seedDek = Dek.generate();
     const account = await signup(server, seedDek.clone());
 
-    const engineA = new SyncEngine(
+    const replicaA = new Replica(
       Doc.create(),
       account.primaryDocId,
       seedDek.clone(),
       0n,
-      new MemEngineStorage() as unknown as EngineStorage,
+      new MemReplicaStorage() as unknown as ReplicaStorage,
     );
-    const bridgeA = await attachEngines(server, account.deviceToken, [engineA]);
+    const bridgeA = await attachReplicas(server, account.deviceToken, [replicaA]);
 
     // Cross the threshold (5) by a margin so we get a SnapshotRequest
     // without ambiguity about off-by-one in the eligibility check.
     // Push one item at a time and wait for the server ack between
-    // each — the engine bundles co-pending mutations into a single op
+    // each — the replica bundles co-pending mutations into a single op
     // blob (= one server-assigned seq), so a tight batch wouldn't
     // accumulate enough seqs to cross the threshold.
     const ITEMS = SNAPSHOT_THRESHOLD + 3;
     for (let i = 0; i < ITEMS; i++) {
-      engineA.addItem(LIST_MAIN, `item ${i}`);
-      engineA.captureLocalOps();
-      engineA.flush();
+      replicaA.addItem(LIST_MAIN, `item ${i}`);
+      replicaA.captureLocalOps();
+      replicaA.flush();
       bridgeA.pumpOutbox();
       await waitFor(
-        () => engineA.lastContiguousSeq() >= BigInt(i + 1),
+        () => replicaA.lastContiguousSeq() >= BigInt(i + 1),
         `op ${i + 1} acked by server`,
       );
     }
 
     // The snapshot row landing in sqlite is the cleanest "the whole
     // server-orchestrated path completed" signal — server received
-    // PushSnapshot from the engine and committed it.
+    // PushSnapshot from the replica and committed it.
     await waitFor(() => snapshotCount(server.dbPath) > 0, "snapshot row", 10_000);
 
     // Device B comes online fresh. Its `last_acked_seq=0` is below
     // the server's snapshot floor, so the server replies with
-    // `SnapshotRequired` rather than streaming every op. The engine
+    // `SnapshotRequired` rather than streaming every op. The replica
     // transparently fetches the snapshot, loads it, and resumes.
     const tokenB = await registerDevice(server, account.deviceToken, "device-b");
-    const engineB = new SyncEngine(
+    const replicaB = new Replica(
       Doc.empty(),
       account.primaryDocId,
       seedDek.clone(),
       0n,
-      new MemEngineStorage() as unknown as EngineStorage,
+      new MemReplicaStorage() as unknown as ReplicaStorage,
     );
-    const bridgeB = await attachEngines(server, tokenB, [engineB]);
+    const bridgeB = await attachReplicas(server, tokenB, [replicaB]);
 
     await waitFor(
-      () => hex(engineA.fingerprint()) === hex(engineB.fingerprint()),
+      () => hex(replicaA.fingerprint()) === hex(replicaB.fingerprint()),
       "fingerprint convergence",
       10_000,
     );
 
-    expect(hex(engineB.fingerprint())).toBe(hex(engineA.fingerprint()));
-    expect(itemTexts(engineB)).toEqual(
+    expect(hex(replicaB.fingerprint())).toBe(hex(replicaA.fingerprint()));
+    expect(itemTexts(replicaB)).toEqual(
       Array.from({ length: ITEMS }, (_, i) => `item ${i}`).sort(),
     );
 
@@ -416,7 +416,7 @@ describe("e2e snapshot + second-device bootstrap", () => {
 
   // Two private docs on one account, one socket per device. Proves the
   // whole multiplexed path end to end: one `Hello` per socket, an
-  // `OpenDoc` per engine, inbound frames routed by `doc_id`, per-doc
+  // `OpenDoc` per replica, inbound frames routed by `doc_id`, per-doc
   // seqs and acks, and no bleed between docs — on the real server, the
   // real wasm surface, and the real transport.
   test("two private docs sync over one connection per device without bleed", async () => {
@@ -426,45 +426,45 @@ describe("e2e snapshot + second-device bootstrap", () => {
     const sideDocId = await createDoc(server, account.deviceToken);
     expect(sideDocId).not.toBe(account.primaryDocId);
 
-    const homeA = new SyncEngine(
+    const homeA = new Replica(
       Doc.create(),
       account.primaryDocId,
       dekHome.clone(),
       0n,
-      new MemEngineStorage() as unknown as EngineStorage,
+      new MemReplicaStorage() as unknown as ReplicaStorage,
     );
-    const sideA = new SyncEngine(
+    const sideA = new Replica(
       Doc.create(),
       sideDocId,
       dekSide.clone(),
       0n,
-      new MemEngineStorage() as unknown as EngineStorage,
+      new MemReplicaStorage() as unknown as ReplicaStorage,
     );
-    const bridgeA = await attachEngines(server, account.deviceToken, [homeA, sideA]);
+    const bridgeA = await attachReplicas(server, account.deviceToken, [homeA, sideA]);
     expect(bridgeA.docIds()).toEqual([account.primaryDocId, sideDocId]);
-    // "online" fires once the handshake is done and each engine has
+    // "online" fires once the handshake is done and each replica has
     // sent its OpenDoc; the per-doc open + pull completes after.
     await waitFor(() => homeA.isIdle() && sideA.isIdle(), "both docs open and pulled");
 
     // Interleave mutations across the two docs over the one socket.
-    const plan: Array<[SyncEngine, string]> = [
+    const plan: Array<[Replica, string]> = [
       [homeA, "home 0"],
       [sideA, "side 0"],
       [homeA, "home 1"],
       [sideA, "side 1"],
     ];
-    const expectedSeq = new Map<SyncEngine, bigint>([
+    const expectedSeq = new Map<Replica, bigint>([
       [homeA, 0n],
       [sideA, 0n],
     ]);
-    for (const [engine, text] of plan) {
-      engine.addItem(LIST_MAIN, text);
-      engine.captureLocalOps();
-      engine.flush();
+    for (const [replica, text] of plan) {
+      replica.addItem(LIST_MAIN, text);
+      replica.captureLocalOps();
+      replica.flush();
       bridgeA.pumpOutbox();
-      const want = expectedSeq.get(engine)! + 1n;
-      expectedSeq.set(engine, want);
-      await waitFor(() => engine.lastContiguousSeq() >= want, `${text} acked`);
+      const want = expectedSeq.get(replica)! + 1n;
+      expectedSeq.set(replica, want);
+      await waitFor(() => replica.lastContiguousSeq() >= want, `${text} acked`);
     }
     // Each doc counted on its own: two ops each, not four on one.
     expect(homeA.lastContiguousSeq()).toBe(2n);
@@ -472,21 +472,21 @@ describe("e2e snapshot + second-device bootstrap", () => {
 
     // Device B bootstraps both docs over its own single socket.
     const tokenB = await registerDevice(server, account.deviceToken, "device-b");
-    const homeB = new SyncEngine(
+    const homeB = new Replica(
       Doc.empty(),
       account.primaryDocId,
       dekHome.clone(),
       0n,
-      new MemEngineStorage() as unknown as EngineStorage,
+      new MemReplicaStorage() as unknown as ReplicaStorage,
     );
-    const sideB = new SyncEngine(
+    const sideB = new Replica(
       Doc.empty(),
       sideDocId,
       dekSide.clone(),
       0n,
-      new MemEngineStorage() as unknown as EngineStorage,
+      new MemReplicaStorage() as unknown as ReplicaStorage,
     );
-    const bridgeB = await attachEngines(server, tokenB, [homeB, sideB]);
+    const bridgeB = await attachReplicas(server, tokenB, [homeB, sideB]);
     await waitFor(
       () =>
         hex(homeA.fingerprint()) === hex(homeB.fingerprint()) &&
@@ -518,33 +518,33 @@ describe("e2e snapshot + second-device bootstrap", () => {
     bridgeB.stop();
   }, 30_000);
 
-  test("a doc created mid-session is routed by addEngine and reaches a second device", async () => {
+  test("a doc created mid-session is routed by addReplica and reaches a second device", async () => {
     const dekHome = Dek.generate();
     const dekNew = Dek.generate();
     const account = await signup(server, dekHome.clone());
-    const homeA = new SyncEngine(
+    const homeA = new Replica(
       Doc.create(),
       account.primaryDocId,
       dekHome.clone(),
       0n,
-      new MemEngineStorage() as unknown as EngineStorage,
+      new MemReplicaStorage() as unknown as ReplicaStorage,
     );
-    const bridgeA = await attachEngines(server, account.deviceToken, [homeA]);
+    const bridgeA = await attachReplicas(server, account.deviceToken, [homeA]);
     await waitFor(() => homeA.isIdle(), "home open and pulled");
 
     // The web client's create-doc flow: `POST /api/docs`, then a fresh
-    // seeded engine handed to the already-open bridge.
+    // seeded replica handed to the already-open bridge.
     const newDocId = await createDoc(server, account.deviceToken);
-    const newA = new SyncEngine(
+    const newA = new Replica(
       Doc.create(),
       newDocId,
       dekNew.clone(),
       0n,
-      new MemEngineStorage() as unknown as EngineStorage,
+      new MemReplicaStorage() as unknown as ReplicaStorage,
     );
-    bridgeA.addEngine(newA);
+    bridgeA.addReplica(newA);
     expect(bridgeA.docIds()).toEqual([account.primaryDocId, newDocId]);
-    expect(() => bridgeA.addEngine(newA)).toThrow();
+    expect(() => bridgeA.addReplica(newA)).toThrow();
     await waitFor(() => newA.isIdle(), "new doc opened on the live socket");
     newA.addItem(LIST_MAIN, "fresh 0");
     newA.captureLocalOps();
@@ -555,14 +555,14 @@ describe("e2e snapshot + second-device bootstrap", () => {
     expect(homeA.lastContiguousSeq()).toBe(0n);
 
     const tokenB = await registerDevice(server, account.deviceToken, "device-b");
-    const newB = new SyncEngine(
+    const newB = new Replica(
       Doc.empty(),
       newDocId,
       dekNew.clone(),
       0n,
-      new MemEngineStorage() as unknown as EngineStorage,
+      new MemReplicaStorage() as unknown as ReplicaStorage,
     );
-    const bridgeB = await attachEngines(server, tokenB, [newB]);
+    const bridgeB = await attachReplicas(server, tokenB, [newB]);
     await waitFor(
       () => hex(newA.fingerprint()) === hex(newB.fingerprint()),
       "new doc converges on B",
@@ -571,9 +571,9 @@ describe("e2e snapshot + second-device bootstrap", () => {
     expect(itemTexts(newB)).toEqual(["fresh 0"]);
 
     // The delete-doc flow's bridge half: the doc leaves the routing
-    // table and its engine goes offline; Home keeps syncing.
-    expect(bridgeA.removeEngine(newDocId)).toBe(true);
-    expect(bridgeA.removeEngine(newDocId)).toBe(false);
+    // table and its replica goes offline; Home keeps syncing.
+    expect(bridgeA.removeReplica(newDocId)).toBe(true);
+    expect(bridgeA.removeReplica(newDocId)).toBe(false);
     expect(bridgeA.docIds()).toEqual([account.primaryDocId]);
     homeA.addItem(LIST_MAIN, "home still live");
     homeA.captureLocalOps();

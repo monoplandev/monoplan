@@ -127,9 +127,9 @@ final class DaemonClientTests: XCTestCase {
         XCTAssertThrowsError(try Reply.parse(.map(["Nope": .nil])))
     }
 
-    /// An in-memory host: answers hello and doc requests with canned
+    /// An in-memory engine: answers hello and doc requests with canned
     /// frames, feeds the watch, and can "stop" like a loop ending.
-    final class FakeTransport: HostTransport {
+    final class FakeTransport: EngineTransport {
         var requests: [MPValue] = []
         var onFrame: ((Data) -> Void)?
         var onStopped: (() -> Void)?
@@ -175,7 +175,7 @@ final class DaemonClientTests: XCTestCase {
         var events: [WatchEvent] = []
         client.onState = { states.append($0) }
         client.onEvent = { events.append($0) }
-        client.hostProvider = { .transport(transport) }
+        client.engineProvider = { .transport(transport) }
 
         queue.sync { client.start() }
         settle(queue)
@@ -193,7 +193,7 @@ final class DaemonClientTests: XCTestCase {
         XCTAssertEqual(out, "[]")
         XCTAssertEqual(client.state, .connected(SyncStatus(online: false, lastSyncedAt: nil)))
 
-        // An `Err` reply is a failure to the caller, not a dropped host.
+        // An `Err` reply is a failure to the caller, not a dropped engine.
         transport.replies = [.map(["Err": .map(["message": .string("nope")])])]
         queue.sync { client.send(.lists) { got = $0 } }
         settle(queue)
@@ -211,7 +211,7 @@ final class DaemonClientTests: XCTestCase {
         // The loop ends: the transport is closed, the provider is asked
         // again, and what it says is the new state.
         var asked = 0
-        client.hostProvider = { asked += 1; return .pending("starting again") }
+        client.engineProvider = { asked += 1; return .pending("starting again") }
         transport.onStopped?()
         settle(queue)
         XCTAssertTrue(transport.closed)
@@ -224,9 +224,9 @@ final class DaemonClientTests: XCTestCase {
         }
         XCTAssertEqual(states.last, .connecting("starting again"))
 
-        // A poke asks straight away and reconnects when a host is back.
+        // A poke asks straight away and reconnects when an engine is back.
         let second = FakeTransport()
-        client.hostProvider = { .transport(second) }
+        client.engineProvider = { .transport(second) }
         queue.sync { client.poke() }
         settle(queue)
         XCTAssertEqual(client.state, .connected(SyncStatus(online: true, lastSyncedAt: 5)))

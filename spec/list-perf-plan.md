@@ -83,7 +83,7 @@ events. Server snapshot bootstrap persists the received encrypted blob with a
 refresh no longer replays the full history), then emits one `FullResync`. Initial
 attach and resync use one compact `workspaceSnapshotJson` crossing rather than
 thousands of wasm `AppEventJs` wrappers. Snapshot compaction is gated until the
-sync engine reaches steady-state `Idle`.
+replica reaches steady-state `Idle`.
 
 **Known remaining O(N) per-op paths:**
 - Loro's own movable-list `UndoManager::undo` work still scales with document

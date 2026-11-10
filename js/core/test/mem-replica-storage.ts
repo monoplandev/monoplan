@@ -1,11 +1,11 @@
-// Shared in-memory `EngineStorage` test double. Same shape the wasm
+// Shared in-memory `ReplicaStorage` test double. Same shape the wasm
 // extern calls, same semantics as `core::MemStorage`. Method names line
-// up with the `EngineStorage` interface generated into the wasm `.d.ts`.
+// up with the `ReplicaStorage` interface generated into the wasm `.d.ts`.
 //
-// Every test that constructs a `SyncEngine` must hand it a real
+// Every test that constructs a `Replica` must hand it a real
 // storage — WAL capture, snapshots, and the sync cursors all flow
-// through it. Cast to `EngineStorage` at the call site with `as
-// unknown as EngineStorage` (the wasm interface is structural; the
+// through it. Cast to `ReplicaStorage` at the call site with `as
+// unknown as ReplicaStorage` (the wasm interface is structural; the
 // cast keeps each test pinned to its own wasm import).
 //
 // ⚠️ Byte args (`ciphertext` / `nonce` / `pushId` / VV encodings)
@@ -35,7 +35,7 @@ function copy(bytes: Uint8Array): Uint8Array {
   return bytes.slice();
 }
 
-export class MemEngineStorage {
+export class MemReplicaStorage {
   nextLocalSeq = 0;
   ops: MirrorOp[] = [];
   snapshot: { upToLocalSeq: number; ciphertext: Uint8Array; nonce: Uint8Array } | null = null;

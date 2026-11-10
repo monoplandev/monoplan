@@ -1,4 +1,4 @@
-use monoplan_cli::sync::Session;
+use monoplan_cli::sync::Engine;
 use monoplan_core::LIST_INBOX;
 
 mod support;
@@ -29,12 +29,12 @@ async fn login_registers_second_device_and_pulls_existing_doc() {
         true,
     )
     .await;
-    let session_a = Session::open_with_profile(profile_a, true).await.unwrap();
-    let item_id = session_a
+    let engine_a = Engine::open_with_profile(profile_a, true).await.unwrap();
+    let item_id = engine_a
         .doc()
         .add_item(LIST_INBOX, "from-device-a")
         .unwrap();
-    session_a.flush().await.unwrap();
+    engine_a.flush().await.unwrap();
 
     let login = login_device(&server.base, &signup.email, TEST_PASSWORD, "auth-login-b")
         .await
@@ -56,11 +56,11 @@ async fn login_registers_second_device_and_pulls_existing_doc() {
         false,
     )
     .await;
-    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
-    assert!(session_b.is_online());
-    let item = session_b.doc().get_item(&item_id).unwrap();
+    let engine_b = Engine::open_with_profile(profile_b, true).await.unwrap();
+    assert!(engine_b.is_online());
+    let item = engine_b.doc().get_item(&item_id).unwrap();
     assert_eq!(item.text, "from-device-a");
-    session_b.flush().await.unwrap();
+    engine_b.flush().await.unwrap();
 }
 
 #[tokio::test]
@@ -81,12 +81,12 @@ async fn password_change_preserves_dek_and_existing_items_for_new_login() {
         true,
     )
     .await;
-    let session_a = Session::open_with_profile(profile_a, true).await.unwrap();
-    let item_id = session_a
+    let engine_a = Engine::open_with_profile(profile_a, true).await.unwrap();
+    let item_id = engine_a
         .doc()
         .add_item(LIST_INBOX, "password-change-item")
         .unwrap();
-    session_a.flush().await.unwrap();
+    engine_a.flush().await.unwrap();
 
     change_password(
         &server.base,
@@ -119,12 +119,12 @@ async fn password_change_preserves_dek_and_existing_items_for_new_login() {
         false,
     )
     .await;
-    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
+    let engine_b = Engine::open_with_profile(profile_b, true).await.unwrap();
     assert_eq!(
-        session_b.doc().get_item(&item_id).unwrap().text,
+        engine_b.doc().get_item(&item_id).unwrap().text,
         "password-change-item"
     );
-    session_b.flush().await.unwrap();
+    engine_b.flush().await.unwrap();
 }
 
 #[tokio::test]
@@ -145,9 +145,9 @@ async fn recovery_reset_bootstraps_fresh_device_with_existing_items() {
         true,
     )
     .await;
-    let session_a = Session::open_with_profile(profile_a, true).await.unwrap();
-    let item_id = session_a.doc().add_item(LIST_INBOX, "recover-me").unwrap();
-    session_a.flush().await.unwrap();
+    let engine_a = Engine::open_with_profile(profile_a, true).await.unwrap();
+    let item_id = engine_a.doc().add_item(LIST_INBOX, "recover-me").unwrap();
+    engine_a.flush().await.unwrap();
 
     let recovered = recover_device(
         &server.base,
@@ -174,12 +174,12 @@ async fn recovery_reset_bootstraps_fresh_device_with_existing_items() {
         false,
     )
     .await;
-    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
+    let engine_b = Engine::open_with_profile(profile_b, true).await.unwrap();
     assert_eq!(
-        session_b.doc().get_item(&item_id).unwrap().text,
+        engine_b.doc().get_item(&item_id).unwrap().text,
         "recover-me"
     );
-    session_b.flush().await.unwrap();
+    engine_b.flush().await.unwrap();
 
     let profile_b = reopen_profile(tmp_b.path());
     let storage = monoplan_cli::storage::open_storage(&profile_b).unwrap();

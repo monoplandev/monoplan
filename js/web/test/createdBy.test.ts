@@ -5,9 +5,9 @@
 
 import { describe, expect, test } from "bun:test";
 import { createRoot } from "solid-js";
-import { Dek, Doc, SyncEngine } from "@monoplan/core/wasm";
-import type { EngineStorage } from "@monoplan/core/wasm";
-import { MemEngineStorage } from "../../core/test/mem-engine-storage.ts";
+import { Dek, Doc, Replica } from "@monoplan/core/wasm";
+import type { ReplicaStorage } from "@monoplan/core/wasm";
+import { MemReplicaStorage } from "../../core/test/mem-replica-storage.ts";
 import { createSyncedApp } from "../src/sync/store.ts";
 
 const DOC_ID = "00000000-0000-0000-0000-00000000000b";
@@ -16,12 +16,12 @@ function appWith(author: string | undefined) {
   const doc = Doc.create();
   if (author !== undefined) doc.setAuthor(author);
   return createSyncedApp(
-    new SyncEngine(
+    new Replica(
       doc,
       DOC_ID,
       Dek.generate(),
       0n,
-      new MemEngineStorage() as unknown as EngineStorage,
+      new MemReplicaStorage() as unknown as ReplicaStorage,
     ),
   );
 }
@@ -54,15 +54,15 @@ describe("createdBy", () => {
       const doc = Doc.create();
       doc.setAuthor("acct-9");
       const id = doc.addItem("inbox", "from before boot");
-      // A store built over an engine whose doc already holds the item
+      // A store built over a replica whose doc already holds the item
       // materializes it from the snapshot JSON, not from an event.
       const app = createSyncedApp(
-        new SyncEngine(
+        new Replica(
           doc,
           DOC_ID,
           Dek.generate(),
           0n,
-          new MemEngineStorage() as unknown as EngineStorage,
+          new MemReplicaStorage() as unknown as ReplicaStorage,
         ),
       );
       expect(app.getItem(id)?.createdBy).toBe("acct-9");

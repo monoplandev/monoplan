@@ -8,7 +8,7 @@
 //     - `device` store  — device identity + `lastSyncAt` (`device-store.ts`)
 //     - `prefs`  store  — per-account UI preferences (`@monoplan/web`)
 //
-//   Engine data plane (high-churn op log) — the web implementation of
+//   Replica data plane (high-churn op log) — the web implementation of
 //   the Rust `LocalStorage` trait (`spec/local-storage.md`), consumed by
 //   `idb-storage.ts`:
 //     - `docs`      store — one row per doc; carries the resume cursor
@@ -22,14 +22,14 @@
 // for the schema; every caller goes through `openMonoplanDb()`.
 //
 // IDB's compound-index quirk — records where any key element is
-// `undefined` are skipped — gives the engine `ops` store a partial
+// `undefined` are skipped — gives the replica `ops` store a partial
 // unique index for free (`serverSeq` is unset on local-origin rows).
 
 const DB_NAME = "monoplan-web";
 // v1–v6 built up (and re-keyed) the config stores plus a now-defunct
 // op-log-on-OPFS data plane (`ops` / `snapshot_meta`). v7 retired that
-// data plane and briefly homed the engine op log in a *separate*
-// `monoplan-engine` database. v8 collapsed that split back in: the engine
+// data plane and briefly homed the replica op log in a *separate*
+// `monoplan-engine` database. v8 collapsed that split back in: the replica
 // stores (`docs` / `ops` / `snapshots`) were created here, and
 // `monoplan-engine` abandoned. v9 is the WAL/VV separation
 // (spec/vv-wal-separation.md): `ops` becomes the pure crash-recovery
@@ -46,7 +46,7 @@ export const STORE_VAULT = "vault";
 export const STORE_DEVICE = "device";
 export const STORE_PREFS = "prefs";
 
-// Engine-data-plane stores + indexes.
+// Replica-data-plane stores + indexes.
 export const STORE_DOCS = "docs";
 export const STORE_OPS = "ops";
 export const STORE_SNAPSHOTS = "snapshots";
@@ -55,15 +55,15 @@ export const STORE_PEER_SLOTS = "peer_slots";
 export const INDEX_OPS_SERVER_SEQ = "docIdServerSeq";
 
 // Pre-v7 oplog/OPFS stores, deleted on upgrade if present. `ops` is in
-// this list *and* recreated below as an engine store — the delete runs
-// first, so the legacy schema never survives into the engine store.
+// this list *and* recreated below as a replica store — the delete runs
+// first, so the legacy schema never survives into the replica store.
 const LEGACY_STORES = ["snapshot_meta"];
 
-// The retired separate engine database (v7 only). Deleted best-effort
+// The retired separate replica database (v7 only). Deleted best-effort
 // after the consolidated DB opens so it doesn't linger as an orphan.
 const RETIRED_ENGINE_DB = "monoplan-engine";
 
-/** One WAL row in the engine `ops` store. `serverSeq` is set on
+/** One WAL row in the replica `ops` store. `serverSeq` is set on
  *  server-delivered rows (idempotent re-delivery detection) and unset
  *  on local-origin rows. Pure crash recovery — pruned whenever a
  *  snapshot contains it; upload is derived from `serverKnownVv`, never
@@ -97,7 +97,7 @@ export interface PeerSlotRow {
 }
 
 /** One row in the `docs` store. `lastAckedServerSeq` is the persisted
- *  resume cursor — the highest *contiguous* serverSeq the engine has
+ *  resume cursor — the highest *contiguous* serverSeq the replica has
  *  durably applied. Set explicitly via `writeAckedSeq` (never derived
  *  from `MAX(serverSeq)`, which over-shoots gaps and under-shoots after
  *  a snapshot prunes rows). `serverKnownVv` is the encoded Loro
@@ -154,9 +154,9 @@ function openOnce(): Promise<IDBDatabase> {
     req.onupgradeneeded = (ev) => {
       const db = req.result;
       // Drop the retired pre-v7 oplog/OPFS stores. Pre-v9 the `ops`
-      // store also carried outbox-era rows under the engine store's
+      // store also carried outbox-era rows under the replica store's
       // name, so upgrades from before v9 delete it too (its rows are
-      // abandoned — see the version history above) before the engine
+      // abandoned — see the version history above) before the replica
       // store is recreated. From v9 on `ops` is the crash-recovery WAL
       // and MUST survive upgrades.
       const dropOps = ev.oldVersion < 9;
@@ -183,7 +183,7 @@ function openOnce(): Promise<IDBDatabase> {
         // row and vice versa.
         db.createObjectStore(STORE_PREFS, { keyPath: "account_id" });
       }
-      // Engine-data-plane stores. The logical model mirrors
+      // Replica-data-plane stores. The logical model mirrors
       // `SqliteStorage` (CLI): one `docs` row per doc, an append-only
       // WAL (`ops`) keyed by `(docId, localSeq)`, one `snapshots` row
       // per doc, one `inflight` push row per doc, one `peer_slots` row

@@ -3,7 +3,7 @@
 // Settings-scale catalogues). Four panes: General (the device
 // preferences the app owns for its window, spec/mac-window-plan.md
 // "Settings"), Account (what a user looks at), Devices (the account's
-// devices over the server API) and Advanced (the host process, the
+// devices over the server API) and Advanced (the engine process, the
 // command line, the profile on disk). Panes are SwiftUI
 // views hosted in an AppKit tab view controller, so adding one is a
 // view, a label and an SF Symbol.
@@ -19,7 +19,7 @@ import SwiftUI
 import MonoplanCore
 import MonoplanMacKit
 
-/// What the Devices pane calls the server with: the host's session and
+/// What the Devices pane calls the server with: the engine's session and
 /// device token (never shown, never stored here).
 struct APICredential {
     let serverURL: String
@@ -80,7 +80,7 @@ final class SettingsWindowController: NSWindowController {
     /// The Account pane's position among the tabs, for `showSignIn`.
     private static let accountPaneIndex = 1
 
-    /// The tray forwards host state and sync events here; the window
+    /// The tray forwards engine state and sync events here; the window
     /// does not hook the client itself, so the tray's own callbacks
     /// stay intact.
     func refresh() {
@@ -117,16 +117,16 @@ final class SettingsWindowController: NSWindowController {
 }
 
 /// What both panes show. Everything here is read from the profile
-/// files or the host's hello; nothing is editable yet, since sign-in /
+/// files or the engine's hello; nothing is editable yet, since sign-in /
 /// sign-out rewrite the profile and stay with the CLI for now.
 final class SettingsModel: ObservableObject {
     @Published var serverURL: String = "—"
     @Published var signedIn = false
-    /// From the host's account row; nil until it answers.
+    /// From the engine's account row; nil until it answers.
     @Published var email: String?
     @Published var profilePath: String
-    @Published var hostLine: String = String(localized: "Not running")
-    /// The package version. From the host's hello once it answers
+    @Published var engineLine: String = String(localized: "Not running")
+    /// The package version. From the engine's hello once it answers
     /// (`version:mtime`, the mtime being the CLI's staleness check,
     /// not something to show); the bundle's own version until then.
     /// Either way the bundle's commit follows it when the build script
@@ -142,8 +142,8 @@ final class SettingsModel: ObservableObject {
     /// (`LaunchPreference`).
     @Published var openWindowAtLaunch: Bool = LaunchPreference.openWindow()
     /// Settings › General, but doc content: the Home workspace's
-    /// `show_list_counts` through the host (`WorkspaceSettings`). Nil
-    /// until the host answers, and again when there is no host; the
+    /// `show_list_counts` through the engine (`WorkspaceSettings`). Nil
+    /// until the engine answers, and again when there is no engine; the
     /// toggle is disabled then.
     @Published var showListCounts: Bool?
     @Published var showListCountsError: String?
@@ -162,12 +162,12 @@ final class SettingsModel: ObservableObject {
     @Published var cliLine: String = "—"
     @Published var cliError: String?
     /// Settings › Devices. Nil until the first load (or without a
-    /// signed-in host); reloaded when the pane appears and after every
+    /// signed-in engine); reloaded when the pane appears and after every
     /// rename or revoke, never on doc events (it is server state).
     @Published var devices: [DeviceRow]?
     @Published var devicesError: String?
     @Published var devicesBusy = false
-    /// Whether the Devices pane is showing: a host that comes up (a
+    /// Whether the Devices pane is showing: an engine that comes up (a
     /// sign-in, a start) reloads the list only while it is.
     var devicesVisible = false
     @Published var thisDeviceId: String?
@@ -243,7 +243,7 @@ final class SettingsModel: ObservableObject {
     /// sheet warns; creating an account keeps it instead).
     var hasLocalWorkspace: Bool { location.hasProfile && !location.hasAccount }
 
-    /// Confirm, then stop the host and wipe the profile. Local state
+    /// Confirm, then stop the engine and wipe the profile. Local state
     /// only: everything is on the server, and signing in again pulls
     /// it back; a fresh local workspace takes its place meanwhile.
     func signOut() {
@@ -279,7 +279,7 @@ final class SettingsModel: ObservableObject {
             cliLine = String(localized: "No bundled binary (run the built app)")
         }
         // Devices are the account's: nothing to show once signed out,
-        // and the pane's own load again once a host serves (the
+        // and the pane's own load again once an engine serves (the
         // credential needs one).
         if !signedIn {
             devices = nil
@@ -287,13 +287,13 @@ final class SettingsModel: ObservableObject {
         }
         switch client.state {
         case .connecting(let reason):
-            hostLine = String(localized: "Not running · \(reason)")
+            engineLine = String(localized: "Not running · \(reason)")
             syncLine = "—"
             buildLine = Self.withCommit(Self.bundleVersion)
             showListCounts = nil
         case .connected(let sync):
             if signedIn, devicesVisible, devices == nil, devicesError == nil, !devicesBusy { loadDevices() }
-            hostLine = String(localized: "Running")
+            engineLine = String(localized: "Running")
             if let d = client.daemon {
                 buildLine = Self.withCommit(String(d.buildId.split(separator: ":", maxSplits: 1).first ?? ""))
             }
@@ -329,7 +329,7 @@ final class SettingsModel: ObservableObject {
     }
 
     /// "Signed in (you@example.com)", or just the state while the
-    /// host has not answered; "Local workspace (no account)" for an
+    /// engine has not answered; "Local workspace (no account)" for an
     /// accountless install, which is what a fresh app runs as.
     var statusLine: String {
         guard signedIn else { return String(localized: "Local workspace (no account)") }
@@ -399,7 +399,7 @@ final class SettingsModel: ObservableObject {
                     self.devicesError = String(localized: "Could not load devices: \(error.localizedDescription)")
                 }
             case .failure(DevicesError.notSignedIn):
-                // No signed-in host to ask with: not an error, just
+                // No signed-in engine to ask with: not an error, just
                 // nothing to list until there is one.
                 self.devices = nil
                 self.devicesError = nil
@@ -451,7 +451,7 @@ final class SettingsModel: ObservableObject {
         }
     }
 
-    /// One API call: the credential off the main thread (the host's
+    /// One API call: the credential off the main thread (the engine's
     /// `session()` blocks briefly), the request, the reply on main.
     private func request(_ build: @escaping (APICredential) -> URLRequest?,
                          completion: @escaping (Result<Data, Error>) -> Void) {
@@ -513,7 +513,7 @@ final class SettingsModel: ObservableObject {
 /// `NSApp.appearance`, which the webview follows through
 /// `prefers-color-scheme`; the page itself holds no theme in the app.
 /// The rest reach the page as `WindowSettings`, except list counts,
-/// which are the workspace's own and go through the host, and the
+/// which are the workspace's own and go through the engine, and the
 /// launch toggle, which is the tray's (`LaunchPreference`).
 struct GeneralPane: View {
     @ObservedObject var model: SettingsModel
@@ -602,7 +602,7 @@ struct AccountPane: View {
 /// changes them. The server is part of the account, not a preference,
 /// which is why it is set here and only read back on the Account pane.
 /// Creating an account adopts the local workspace the app has been
-/// hosting (`spec/auth.md` §Device pairing) and then shows the
+/// running (`spec/auth.md` §Device pairing) and then shows the
 /// recovery code once, in place of the form; signing in to an existing
 /// account replaces that workspace, which the form says.
 struct SignInSheet: View {
@@ -785,9 +785,9 @@ struct DevicesPane: View {
                 } else if !model.signedIn {
                     Text("Not signed in").foregroundStyle(.secondary)
                 } else {
-                    // Signed in but no host to ask with yet (starting);
+                    // Signed in but no engine to ask with yet (starting);
                     // `refresh` loads once it serves.
-                    Text("Waiting for the host…").foregroundStyle(.secondary)
+                    Text("Waiting for the engine…").foregroundStyle(.secondary)
                 }
             }
             if let error = model.devicesError {
@@ -900,14 +900,14 @@ struct RenameDeviceSheet: View {
     }
 }
 
-/// The process-level view: the in-app host, the bundled CLI, and
+/// The process-level view: the in-app engine, the bundled CLI, and
 /// where the profile lives. Nothing here needs touching day to day.
 struct AdvancedPane: View {
     @ObservedObject var model: SettingsModel
 
     var body: some View {
         Form {
-            LabeledContent("Host", value: model.hostLine)
+            LabeledContent("Engine", value: model.engineLine)
             LabeledContent("Build", value: model.buildLine)
             LabeledContent("Command line") {
                 HStack {

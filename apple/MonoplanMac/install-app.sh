@@ -8,8 +8,8 @@
 # that the next `rm -rf .build` or branch switch invalidates. This puts
 # a release build at a stable path instead.
 #
-# Steps: build-app.sh -c release, quit a running Monoplan (it hosts the
-# sync loop in-process, so it must exit cleanly rather than be killed),
+# Steps: build-app.sh -c release, quit a running Monoplan (it runs the engine,
+# in-process, so it must exit cleanly rather than be killed),
 # replace the bundle atomically, then launch it.
 #
 # Usage: bun run mac:install [-d <dir>] [--no-open]
@@ -43,7 +43,7 @@ fi
 "$PKG/build-app.sh" -c release
 
 # Quit the running app, if any, and wait for it to exit. A plain kill
-# would drop the in-process host mid-write; the AppleScript quit goes
+# would drop the in-process engine mid-write; the AppleScript quit goes
 # through applicationShouldTerminate like a Cmd-Q.
 if pgrep -xq MonoplanMac; then
   echo ">> quitting running Monoplan"

@@ -1,7 +1,7 @@
 // The one observable the views read: the client's state (what the
-// host says about sync), the host's identity, the session (account,
+// engine says about sync), the engine's identity, the session (account,
 // server, open docs) and the in-flight account work. It owns the
-// `DaemonClient` and the `HostController`, exactly as the macOS app's
+// `DaemonClient` and the `EngineController`, exactly as the macOS app's
 // delegate does; the views never touch either.
 
 import Combine
@@ -10,13 +10,13 @@ import MonoplanCore
 import MonoplanMacKit
 
 final class AppModel: ObservableObject {
-    /// Connected with the host's current sync status, or why not yet.
+    /// Connected with the engine's current sync status, or why not yet.
     @Published private(set) var clientState: DaemonClient.State = .connecting("starting")
-    /// What the host said in its hello: its build id and pid.
-    @Published private(set) var hostInfo: DaemonClient.DaemonInfo?
-    /// Identity, server and open docs, from `Host.session`; nil without
-    /// a host.
-    @Published private(set) var session: HostSession?
+    /// What the engine said in its hello: its build id and pid.
+    @Published private(set) var engineInfo: DaemonClient.DaemonInfo?
+    /// Identity, server and open docs, from `Engine.session`; nil without
+    /// an engine.
+    @Published private(set) var session: EngineSession?
     /// The profile on disk carries a device token.
     @Published private(set) var hasAccount = false
     /// A sign-in or sign-out in progress.
@@ -44,7 +44,7 @@ final class AppModel: ObservableObject {
 
     let location: ProfileLocation
     private let client: DaemonClient
-    private let hostController: HostController
+    private let engineController: EngineController
 
     init() {
         location = ProfileLocation.resolve()
@@ -53,7 +53,7 @@ final class AppModel: ObservableObject {
         // parents.
         try? FileManager.default.createDirectory(at: location.dir, withIntermediateDirectories: true)
         client = DaemonClient(clientId: "monoplan-ios")
-        hostController = HostController(location: location, client: client)
+        engineController = EngineController(location: location, client: client)
         hasAccount = location.hasAccount
         client.onState = { [weak self] state in self?.stateChanged(state) }
         client.onEvent = { [weak self] event in self?.eventArrived(event) }
@@ -68,7 +68,7 @@ final class AppModel: ObservableObject {
 
     private func stateChanged(_ state: DaemonClient.State) {
         clientState = state
-        hostInfo = client.daemon
+        engineInfo = client.daemon
         hasAccount = location.hasAccount
         if case .connected = state {
             loadSession()
@@ -101,7 +101,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// `starred --all --json` through the host.
+    /// `starred --all --json` through the engine.
     func refreshStarred() {
         fetch(.focus(all: true), what: "starred", parse: Focus.parse) { [weak self] rows, error in
             if let rows { self?.starred = rows }
@@ -109,7 +109,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// `item ls --list inbox --json` through the host.
+    /// `item ls --list inbox --json` through the engine.
     func refreshInbox() {
         fetch(.items(list: "inbox"), what: "inbox", parse: Items.parse) { [weak self] rows, error in
             if let rows { self?.inbox = rows }
@@ -127,8 +127,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// One read through the host, decoded. No host is not an error:
-    /// the rows stay until the next host's refresh replaces them, so
+    /// One read through the engine, decoded. No engine is not an error:
+    /// the rows stay until the next engine's refresh replaces them, so
     /// `done` gets neither rows nor an error then.
     private func fetch<T>(
         _ request: Request, what: String, parse: @escaping (String) throws -> T,
@@ -146,21 +146,21 @@ final class AppModel: ObservableObject {
                 done(nil, "unexpected reply: \(String(describing: other))")
             case .failure(let error):
                 if case ClientError.notConnected = error { return }
-                if case ClientError.hostStopped = error { return }
-                if case HostError.Stopped = error { return }
-                done(nil, hostErrorMessage(error))
+                if case ClientError.engineStopped = error { return }
+                if case EngineError.Stopped = error { return }
+                done(nil, engineErrorMessage(error))
             }
         }
     }
 
-    /// `Host.session` blocks for the loop's turn, so off the main thread.
+    /// `Engine.session` blocks for the loop's turn, so off the main thread.
     func loadSession() {
-        guard let host = hostController.runningHost else {
+        guard let engine = engineController.runningEngine else {
             session = nil
             return
         }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = try? host.session()
+            let result = try? engine.session()
             DispatchQueue.main.async { self?.session = result }
         }
     }
@@ -183,7 +183,7 @@ final class AppModel: ObservableObject {
         signingIn = true
         signInError = nil
         busy = "Signing in"
-        hostController.signIn(creds) { [weak self] error in
+        engineController.signIn(creds) { [weak self] error in
             guard let self else { return }
             signingIn = false
             busy = nil
@@ -199,7 +199,7 @@ final class AppModel: ObservableObject {
 
     func signOut() {
         busy = "Signing out"
-        hostController.signOut { [weak self] error in
+        engineController.signOut { [weak self] error in
             guard let self else { return }
             busy = nil
             hasAccount = location.hasAccount
@@ -215,7 +215,7 @@ final class AppModel: ObservableObject {
     }
 
     /// Clean exit is not a thing on iOS (the process is killed, not
-    /// quit); the host persists on its own tick and the WAL covers the
+    /// quit); the engine persists on its own tick and the WAL covers the
     /// rest. Kept for completeness and tests.
-    func stopHost() { hostController.stop() }
+    func stopEngine() { engineController.stop() }
 }

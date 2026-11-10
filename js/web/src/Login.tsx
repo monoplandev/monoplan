@@ -42,7 +42,7 @@ export interface Session {
   accountId: string;
   /** Doc id of the account's primary (Home) doc — server-assigned for
    *  authenticated sessions, locally generated for anonymous ones. Keys
-   *  the per-doc data plane (the engine op log + snapshot in IndexedDB). */
+   *  the per-doc data plane (the replica op log + snapshot in IndexedDB). */
   primaryDocId: string;
   /** Null on anonymous sessions. */
   email: string | null;
@@ -61,7 +61,7 @@ export interface Session {
   /** Every doc the account can open, keyed by doc id, primary included
    *  (its entry is `dek`). Populated from the memberships array at
    *  login/signup and vaulted one entry per doc id, so a session restored
-   *  on reload holds every membership. `BootGate` boots a doc + engine
+   *  on reload holds every membership. `BootGate` boots a doc + replica
    *  for each entry; the UI renders the primary (sharing-plan.md Phase 5). */
   docKeys: Map<string, Dek>;
   /** True iff the Home doc does not exist yet and boot must create and
@@ -78,7 +78,7 @@ export interface Session {
  *  DEK becomes the Home DEK (wrapped under the new password KEK and the
  *  recovery code). The op log and snapshot in IndexedDB are already
  *  under that id and key, so nothing is copied or re-encrypted; the
- *  engine's empty `serverKnownVv` makes the first connect push the
+ *  replica's empty `serverKnownVv` makes the first connect push the
  *  whole history to the account's empty Home doc. */
 interface AdoptedDoc {
   primaryDocId: string;

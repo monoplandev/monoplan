@@ -8,7 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import { createRoot } from "solid-js";
 
-import { Doc, SyncEngine } from "@monoplan/core/wasm";
+import { Doc, Replica } from "@monoplan/core/wasm";
 import { MirrorBridge, type MirrorSeed } from "@monoplan/core/mirror-bridge";
 import { FakeMirrorHost } from "../../core/test/fake-mirror-host.ts";
 import {
@@ -25,8 +25,8 @@ const HOME = "00000000-0000-0000-0000-000000000001";
 const OTHER = "00000000-0000-0000-0000-000000000002";
 const LIST_INBOX = "inbox";
 
-const createEngine = (seed: MirrorSeed): SyncEngine =>
-  SyncEngine.mirror(Doc.loadWithPeer(seed.snapshot, seed.peer), seed.docId);
+const createReplica = (seed: MirrorSeed): Replica =>
+  Replica.mirror(Doc.loadWithPeer(seed.snapshot, seed.peer), seed.docId);
 
 function hostDoc(peer: bigint, first: string): Doc {
   const doc = Doc.createWithPeer(peer);
@@ -59,14 +59,14 @@ async function bootRuntime(host: FakeMirrorHost) {
   let drainFor: (docId: string) => void = () => {};
   const bridge = new MirrorBridge({
     transport: host,
-    createEngine,
+    createReplica,
     onServerFrame: (id) => drainFor(id),
   });
-  const engines = [await bridge.open(HOME), await bridge.open(OTHER)];
+  const replicas = [await bridge.open(HOME), await bridge.open(OTHER)];
   const runtime = createRoot(() =>
     createMirrorRuntime({
       session: sessionFromHost(info),
-      engines,
+      replicas,
       bridge,
       prefs: null,
     }),
@@ -97,10 +97,10 @@ describe("createMirrorRuntime", () => {
     await bridge.flushed();
     const home = host.docs.get(HOME)!;
     expect(hostTexts(home)).toEqual(["home-first", "from-the-window"]);
-    expect(home.fingerprint()).toEqual(app.engine.fingerprint());
+    expect(home.fingerprint()).toEqual(app.replica.fingerprint());
     // The fake echoed the update; the store is unchanged by it.
     expect(app.state.listOpen[LIST_INBOX]).toEqual([first, mine]);
-    expect(app.engine.hasUnsyncedOps()).toBe(false);
+    expect(app.replica.hasUnsyncedOps()).toBe(false);
 
     // Host change → the bridge's frame pulse → the store.
     let cliItem = "";
@@ -119,7 +119,7 @@ describe("createMirrorRuntime", () => {
     expect(app.state.itemsById[cliItem]?.text).toBe("from-the-cli");
     await bridge.flushed();
     expect(hostTexts(home)).toEqual(["home-first", "from-the-cli"]);
-    expect(home.fingerprint()).toEqual(app.engine.fingerprint());
+    expect(home.fingerprint()).toEqual(app.replica.fingerprint());
 
     // The other doc's store routes to the other host doc.
     const other = docs.appOf(OTHER)!;
@@ -145,14 +145,14 @@ describe("createMirrorRuntime", () => {
     let drainFor: (docId: string) => void = () => {};
     const bridge = new MirrorBridge({
       transport: host,
-      createEngine,
+      createReplica,
       onServerFrame: (id) => drainFor(id),
     });
-    const engines = [await bridge.open(HOME)];
+    const replicas = [await bridge.open(HOME)];
     const runtime = createRoot(() =>
       createMirrorRuntime({
         session: sessionFromHost({ ...info, docs: [{ docId: HOME, name: null }] }),
-        engines,
+        replicas,
         bridge,
         prefs: null,
       }),
@@ -178,7 +178,7 @@ describe("createMirrorRuntime", () => {
     expect(await runtime.openDoc(OTHER)).toBe(OTHER);
     expect(host.subscribers.get(OTHER)!.length).toBe(subscribed);
     // Hand-off covers the late doc too.
-    expect(engines).toHaveLength(2);
+    expect(replicas).toHaveLength(2);
 
     // The host stops serving it (deleted, or closed by the server):
     // the view leaves it, the route and the store go, Home stays.
@@ -187,7 +187,7 @@ describe("createMirrorRuntime", () => {
     expect(runtime.docs.docs().map((d) => d.docId)).toEqual([HOME]);
     expect(runtime.view()).toEqual({ kind: "list", id: "inbox" });
     expect(host.unsubscribed).toEqual([OTHER]);
-    expect(engines).toHaveLength(1);
+    expect(replicas).toHaveLength(1);
     runtime.closeDoc(OTHER);
     runtime.closeDoc(HOME);
     expect(runtime.docs.docs().map((d) => d.docId)).toEqual([HOME]);
@@ -224,20 +224,20 @@ describe("createMirrorRuntime", () => {
     let drainFor: (docId: string) => void = () => {};
     const bridge = new MirrorBridge({
       transport: host,
-      createEngine,
+      createReplica,
       onServerFrame: (id) => drainFor(id),
     });
-    const homeEngine = await bridge.open(HOME);
-    // Lands on the engine while the second doc is still opening.
+    const homeReplica = await bridge.open(HOME);
+    // Lands on the replica while the second doc is still opening.
     let between = "";
     host.commit(HOME, (d) => {
       between = d.addItem(LIST_INBOX, "between");
     });
-    const otherEngine = await bridge.open(OTHER);
+    const otherReplica = await bridge.open(OTHER);
     const runtime = createRoot(() =>
       createMirrorRuntime({
         session: sessionFromHost(info),
-        engines: [homeEngine, otherEngine],
+        replicas: [homeReplica, otherReplica],
         bridge,
         prefs: null,
       }),
@@ -374,8 +374,8 @@ describe("the WebKit host transport", () => {
     // The app's later pushes move the screen: a sign-out finishing and
     // the fresh local workspace's host starting, say.
     const states: unknown[] = [];
-    appHost.onHostState((s) => states.push(s));
-    (target[HOST_GLOBAL] as HostInbound).hostState({ status: "pending", reason: "signing out" });
+    appHost.onEngineState((s) => states.push(s));
+    (target[HOST_GLOBAL] as HostInbound).engineState({ status: "pending", reason: "signing out" });
     expect(states).toEqual([{ status: "pending", reason: "signing out" }]);
     appHost.signIn();
     expect(requests.map((r) => r.kind)).toEqual(["session", "signIn"]);

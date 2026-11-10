@@ -6,9 +6,9 @@
 
 import { expect, test, describe } from "bun:test";
 
-import { Dek, Doc, SyncEngine } from "@monoplan/core/wasm";
-import type { EngineStorage } from "@monoplan/core/wasm";
-import { MemEngineStorage } from "../../core/test/mem-engine-storage.ts";
+import { Dek, Doc, Replica } from "@monoplan/core/wasm";
+import type { ReplicaStorage } from "@monoplan/core/wasm";
+import { MemReplicaStorage } from "../../core/test/mem-replica-storage.ts";
 import { createSyncedApp } from "../src/sync/store.ts";
 import {
   addDaysToStamp,
@@ -19,13 +19,13 @@ import {
 
 const DOC_ID = "00000000-0000-0000-0000-000000000000";
 
-function engineFrom(doc: Doc): SyncEngine {
-  return new SyncEngine(
+function replicaFrom(doc: Doc): Replica {
+  return new Replica(
     doc,
     DOC_ID,
     Dek.generate(),
     0n,
-    new MemEngineStorage() as unknown as EngineStorage,
+    new MemReplicaStorage() as unknown as ReplicaStorage,
   );
 }
 
@@ -35,14 +35,14 @@ describe("store deadline", () => {
     const id = doc.addItem("inbox", "with a deadline");
     doc.setItemDeadline(id, "2026-07-15");
 
-    const app = createSyncedApp(engineFrom(doc));
+    const app = createSyncedApp(replicaFrom(doc));
     expect(app.state.itemsById[id]?.deadline).toBe("2026-07-15");
   });
 
   test("patches deadline on set, then clears it", () => {
     const doc = Doc.create();
     const id = doc.addItem("inbox", "task");
-    const app = createSyncedApp(engineFrom(doc));
+    const app = createSyncedApp(replicaFrom(doc));
     expect(app.state.itemsById[id]?.deadline).toBeUndefined();
 
     app.setItemDeadline(id, "2026-12-01");

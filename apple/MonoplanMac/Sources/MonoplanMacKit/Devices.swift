@@ -1,6 +1,6 @@
 // The account's devices (spec/auth.md "Devices"): `GET /api/devices`,
 // `PATCH /api/devices/:id {name}`, `DELETE /api/devices/:id`, with the
-// host's device token as `Authorization: Bearer`. The Settings window's
+// engine's device token as `Authorization: Bearer`. The Settings window's
 // Devices pane (spec/mac-window-plan.md "Settings") is the caller; the
 // requests and the parsing are here so they are testable without a
 // server. The web client's Settings › Devices is the same three calls.

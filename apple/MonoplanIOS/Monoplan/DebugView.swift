@@ -1,5 +1,5 @@
-// The Debug tab: everything the host reports, as a list: sync state,
-// the host itself, and the session. Buttons for the four things this
+// The Debug tab: everything the engine reports, as a list: sync state,
+// the engine itself, and the session. Buttons for the four things this
 // surface can do: sync now, reconnect, sign in, sign out. This was the
 // whole app until the tabs (2026-11-05); account actions stay here
 // until a settings surface takes them.
@@ -16,7 +16,7 @@ struct DebugView: View {
         NavigationStack {
             List {
                 syncSection
-                hostSection
+                engineSection
                 accountSection
                 if let error = model.lastError {
                     Section("Last error") {
@@ -61,9 +61,9 @@ struct DebugView: View {
         }
     }
 
-    private var hostSection: some View {
-        Section("Host") {
-            if let info = model.hostInfo {
+    private var engineSection: some View {
+        Section("Engine") {
+            if let info = model.engineInfo {
                 LabeledContent("Serving", value: "yes")
                 LabeledContent("Build", value: info.buildId)
                 LabeledContent("PID", value: "\(info.pid)")
@@ -105,7 +105,7 @@ struct DebugView: View {
             } else {
                 LabeledContent("Signed in", value: "no")
                 if model.session?.localOnly == true {
-                    Text("A local-only workspace is being hosted. Signing in replaces it with the account's.")
+                    Text("The engine is running a local-only workspace. Signing in replaces it with the account's.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Button("Sign In…") { showSignIn = true }

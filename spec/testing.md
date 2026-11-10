@@ -10,14 +10,14 @@ Sqlite-only for now. No mocked database. No mocked server. The test pyramid skew
    - ID generation, prefix-matching
 2. **CLI/system tests** (`cli/tests/`)
    - Primary home for happy-path end-to-end coverage
-   - Real server + real sqlite + real `monoplan_cli` Rust client path (`net`, auth flows, `sync::Session`)
+   - Real server + real sqlite + real `monoplan_cli` Rust client path (`net`, auth flows, `sync::Engine`)
    - Covers account bootstrap and the normal multi-device lifecycle:
      - signup/login/recovery/password-change success paths
      - two-device sync and convergence
      - offline edits followed by catch-up
      - snapshot upload / snapshot bootstrap success paths
    - Reuse `cli/tests/support/mod.rs` as the shared harness for server startup, profile materialization, auth helpers, and bounded polling
-   - Prefer long-lived `monoplan_cli::sync::Session` tests for snapshot/sync happy paths instead of ad hoc websocket clients
+   - Prefer long-lived `monoplan_cli::sync::Engine` tests for snapshot/sync happy paths instead of ad hoc websocket clients
 3. **Server integration tests** (`server/tests/`)
    - Real server, real sqlite (temp file or `:memory:`)
    - Drives HTTP + WS via thin ad hoc clients only where that is the point of the test
@@ -28,9 +28,9 @@ Sqlite-only for now. No mocked database. No mocked server. The test pyramid skew
      - stale ack behavior
      - disconnect / timeout retry paths
      - direct broadcast / subscriber registry edge cases
-     - exact wire-level protocol seams that are awkward to observe via `Session`
+     - exact wire-level protocol seams that are awkward to observe via `Engine`
 
-`core/tests/` stays focused on shared engine correctness and sans-IO sync behavior. Do not move whole-system server/CLI ownership questions into `core/tests/`.
+`core/tests/` stays focused on shared replica correctness and sans-IO sync behavior. Do not move whole-system server/CLI ownership questions into `core/tests/`.
 
 E2E is the load-bearing surface. Required matrix:
 
@@ -47,8 +47,8 @@ Avoid duplicate happy-path coverage across `server/tests/` and `cli/tests/` unle
 
 The multiplexed connection (`sync-protocol.md` §Doc binding) is proven end to end against the real server: `server/tests/sync.rs` (two docs on one connection, per-doc broadcast isolation across three connections, per-doc lease release on disconnect) and `js/core/test/sync-e2e.test.ts` (two private docs, one socket per device, bootstrap and live broadcast without bleed). Three router behaviours are **not** exercised, because the real server never produces the condition and we chose not to add a scripted WebSocket server to fake it:
 
-1. **One doc stalls, the others proceed.** Doc A stuck in `Pulling` (server never sends `complete: true`) must not block doc B's open, pull, push, or acks on the same socket. The engines are independent state machines by construction, so this holds by inspection, but nothing asserts it.
-2. **Rejected handshake reconnects with backoff.** `HelloRejected` (or a version mismatch) must surface through `onError`, close the socket, and schedule a retry rather than bring any engine online. The real server only rejects an unknown protocol version, which the bridge never sends.
+1. **One doc stalls, the others proceed.** Doc A stuck in `Pulling` (server never sends `complete: true`) must not block doc B's open, pull, push, or acks on the same socket. The replicas are independent state machines by construction, so this holds by inspection, but nothing asserts it.
+2. **Rejected handshake reconnects with backoff.** `HelloRejected` (or a version mismatch) must surface through `onError`, close the socket, and schedule a retry rather than bring any replica online. The real server only rejects an unknown protocol version, which the bridge never sends.
 3. **Handshake timeout.** No `HelloAck` within `handshakeTimeoutMs` closes the socket and reconnects.
 
 Ways to cover these without a fake server, in order of preference:
@@ -100,4 +100,4 @@ proptest dependency (deterministic LCG seeds, no shrinking):
 What this stress-tests is *our integration* (event translation,
 projection index, sync framing) — Loro already promises logical
 convergence. Transport-level randomisation (partial syncs through the
-real engine/server rather than snapshot exchange) remains open.
+real replica/server rather than snapshot exchange) remains open.

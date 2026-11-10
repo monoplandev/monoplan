@@ -15,7 +15,7 @@
 //!   fresh Loro peer booted from the accumulated oplog rows) doing
 //!   bulk adds, multi-select moves, undos, then capture; finally a
 //!   snapshot save/load round-trip. This is the workload that used to
-//!   trap the wasm engine under the v1 global MovableList.
+//!   trap the wasm replica under the v1 global MovableList.
 
 use std::collections::{HashMap, HashSet};
 
@@ -501,7 +501,7 @@ fn randomized_multi_peer_convergence() {
 /// booted from the accumulated oplog rows (the BootGate replay loop),
 /// doing bulk adds, cross-list multi-moves, undos, and captures. This
 /// is the retired `move-undo-multipeer` repro shape that used to trap
-/// the wasm engine under the v1 schema.
+/// the wasm replica under the v1 schema.
 #[test]
 fn large_synthetic_history_many_peers_lists_moves_undos() {
     let dek = Dek::generate();

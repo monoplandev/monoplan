@@ -11,7 +11,7 @@
 //! `SqliteStorage` here is a newtype over the shared backend. It carries
 //! the CLI's inherent account/cursor queries (which reach the shared
 //! connection directly) and forwards the `LocalStorage` trait to the
-//! backend, so the engine and every command keep the same API they had
+//! backend, so the replica and every command keep the same API they had
 //! when this type was defined in-crate.
 
 use std::sync::Arc;
@@ -90,7 +90,7 @@ pub struct SyncCursor {
 /// around the shared [`SqliteBackend`].
 ///
 /// `Clone` is shallow: clones share one connection (see the backend's
-/// `Clone`), so the engine and the owning `Session` can both hold a
+/// `Clone`), so the replica and the owning `Engine` can both hold a
 /// handle to the *same* db without a second file open.
 #[derive(Clone)]
 pub struct SqliteStorage(SqliteBackend);
@@ -226,7 +226,7 @@ impl SqliteStorage {
 
     /// Persist the observability timestamp only — the "Last sync" shown
     /// by `monoplan workspace status`. Deliberately separate from the resume cursor:
-    /// the engine owns `last_acked_server_seq` (via the `LocalStorage`
+    /// the replica owns `last_acked_server_seq` (via the `LocalStorage`
     /// trait's `write_acked_seq`), while `last_sync_at` is a CLI-only
     /// stamp nothing in the sync path reads. (Creates the `docs` row if
     /// the first write lands before any op.)
@@ -286,7 +286,7 @@ impl SqliteStorage {
 }
 
 /// Forward the whole `LocalStorage` trait to the shared backend — the
-/// engine only ever sees the trait, so the newtype is transparent to it.
+/// replica only ever sees the trait, so the newtype is transparent to it.
 impl LocalStorage for SqliteStorage {
     fn boot(&self, doc_id: DocId) -> Result<BootState, StorageError> {
         self.0.boot(doc_id)

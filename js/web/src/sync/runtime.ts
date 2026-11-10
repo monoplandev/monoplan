@@ -1,7 +1,7 @@
-// The imperative runtime behind the workspace: it owns one `SyncEngine`
+// The imperative runtime behind the workspace: it owns one `Replica`
 // + synced store + op-log persistence per booted doc, the device-row
 // writes, and the single WebSocket sync bridge that multiplexes every
-// doc's engine for one booted session. `MainApp` calls this
+// doc's replica for one booted session. `MainApp` calls this
 // once during setup and renders the returned `app` / `view` — all the
 // lifecycle (effects, `onCleanup`, the visibility handler) registers
 // against the calling component's reactive owner, so this must be
@@ -14,7 +14,7 @@ import {
   onCleanup,
   runWithOwner,
 } from "solid-js";
-import { Dek, Doc, SyncEngine, wrapDekWithDek } from "@monoplan/core/wasm";
+import { Dek, Doc, Replica, wrapDekWithDek } from "@monoplan/core/wasm";
 import { IdbStorage, type InFlightPushJs, putDevice } from "@monoplan/core";
 import { api } from "../api.ts";
 import { type Prefs } from "../prefs.ts";
@@ -35,27 +35,27 @@ export type PresentAccount = { accountId: string; email: string };
  *  cursors, and the opened store. */
 export type DocBoot = {
   docId: string;
-  /** The doc's DEK as held by the session (not consumed; the engine
+  /** The doc's DEK as held by the session (not consumed; the replica
    *  gets a clone). */
   dek: Dek;
   doc: Doc;
   lastAcked: bigint;
-  /** Engine op-log store (the engine stores of IndexedDB `monoplan-web`).
+  /** Replica op-log store (the replica stores of IndexedDB `monoplan-web`).
    *  Mandatory — the
-   *  engine has no storage-less mode; if IDB can't be opened the boot
+   *  replica has no storage-less mode; if IDB can't be opened the boot
    *  fails hard (see `BootGate`) rather than running without local
    *  persistence. */
   storage: IdbStorage;
-  /** Highest `localSeq` the store has assigned — seeds the engine. */
+  /** Highest `localSeq` the store has assigned — seeds the replica. */
   lastLocalSeq: number;
   /** Encoded `serverKnownVv` (empty = never synced) — seeds the
-   *  engine's outbound-delta base. */
+   *  replica's outbound-delta base. */
   serverKnownVv: Uint8Array;
   /** Durable in-flight push left by a previous session, if any —
    *  re-sent (same pushId) after the initial pull. */
   inFlightPush: InFlightPushJs | null;
   /** Surviving WAL rows / payload bytes past the last snapshot —
-   *  seeds the engine's fold-threshold statistics. */
+   *  seeds the replica's fold-threshold statistics. */
   walRows: number;
   walBytes: number;
   /** True when the doc was freshly created (`Doc.create()`) and its
@@ -77,14 +77,14 @@ export type BootInfo = {
   prefs: Prefs | null;
 };
 
-/** The per-doc half of the runtime: one engine, one synced store, and
+/** The per-doc half of the runtime: one replica, one synced store, and
  *  the op-log persistence rhythm around them. Every doc gets one; the
- *  bridge multiplexes their engines over a single socket. */
+ *  bridge multiplexes their replicas over a single socket. */
 type DocRuntime = {
   app: DocApp;
-  engine: SyncEngine;
+  replica: Replica;
   /** Write the just-committed mutation as a durable op row. Must run
-   *  before `engine.flush()`. */
+   *  before `replica.flush()`. */
   capture: () => void;
   /** The "we just round-tripped with the server for this doc" pulse:
    *  drain events, fold if the WAL crossed the threshold, re-arm the
@@ -101,36 +101,36 @@ type DocRuntime = {
   dispose: () => void;
 };
 
-/** Build one doc's engine + store + persistence rhythm. `pumpOutbox`
+/** Build one doc's replica + store + persistence rhythm. `pumpOutbox`
  *  is resolved lazily because the bridge that owns it is constructed
  *  after every doc runtime exists. Registers `onCleanup` against the
  *  calling owner. */
 function createDocRuntime(boot: DocBoot, pumpOutbox: () => void): DocRuntime {
   const storage = boot.storage;
-  // `SyncEngine` consumes its Dek argument, and the session-level Dek
+  // `Replica` consumes its Dek argument, and the session-level Dek
   // must stay valid across MainApp remounts (anonymous → authed swap
   // remounts this whole tree on the Session key). So clone for the
-  // engine; the original on the session is untouched. The `IdbStorage`
-  // mirror is handed in as the engine's `EngineStorage` — capture / ack
+  // replica; the original on the session is untouched. The `IdbStorage`
+  // mirror is handed in as the replica's `ReplicaStorage` — capture / ack
   // / remote-apply now flow through it.
-  const engine = new SyncEngine(
+  const replica = new Replica(
     boot.doc,
     boot.docId,
     boot.dek.clone(),
     boot.lastAcked,
     storage,
   );
-  // Seed the engine's persisted cursors from what the store loaded:
+  // Seed the replica's persisted cursors from what the store loaded:
   // the localSeq counter, the WAL fold statistics, the server-known
   // VV (the outbound-delta base), and any in-flight push a previous
   // session left durable (re-sent with the same pushId after the
   // initial pull; the server deduplicates).
-  engine.setLastLocalSeq(boot.lastLocalSeq);
-  engine.seedWalStats(boot.walRows, boot.walBytes);
-  engine.seedServerKnownVv(boot.serverKnownVv);
+  replica.setLastLocalSeq(boot.lastLocalSeq);
+  replica.seedWalStats(boot.walRows, boot.walBytes);
+  replica.seedServerKnownVv(boot.serverKnownVv);
   const inFlight = boot.inFlightPush;
   if (inFlight) {
-    engine.seedInFlightPush(
+    replica.seedInFlightPush(
       inFlight.pushId,
       inFlight.ciphertext,
       inFlight.nonce,
@@ -138,26 +138,26 @@ function createDocRuntime(boot: DocBoot, pumpOutbox: () => void): DocRuntime {
       inFlight.toVv,
     );
   }
-  const app = createSyncedApp(engine);
+  const app = createSyncedApp(replica);
 
-  // ---------- Engine op-log persistence (IdbStorage) ----------
+  // ---------- Replica op-log persistence (IdbStorage) ----------
   //
-  // The engine's `LocalStorage` trait does the heavy lifting: local
+  // The replica's `LocalStorage` trait does the heavy lifting: local
   // commits become durable op rows via `captureLocalOps`, remote ops are
   // mirrored inside `handleServerBytes`, and the outbox drives the push.
-  // The web host's job is just the CLI's `persist_engine_state` rhythm,
+  // The web host's job is just the CLI's `persist_replica_state` rhythm,
   // adapted for IDB's async durability:
   //
   //   - `capture()` (before every `flush()`) writes the just-committed
   //     mutation to a durable op row *before* the outbox-driven push
-  //     reads it. This must precede `engine.flush()`.
+  //     reads it. This must precede `replica.flush()`.
   //   - `compact()` folds a fully-synced log into a fresh snapshot.
   //   - `scheduleDurable()` samples the contiguous seq, waits for the
-  //     IDB write to actually land, then tells the engine the bytes are
+  //     IDB write to actually land, then tells the replica the bytes are
   //     durable (which queues the `Ack`) and pumps it onto the wire.
   const capture = (): void => {
     try {
-      engine.captureLocalOps();
+      replica.captureLocalOps();
     } catch (e) {
       console.error("captureLocalOps failed:", e);
     }
@@ -177,14 +177,14 @@ function createDocRuntime(boot: DocBoot, pumpOutbox: () => void): DocRuntime {
   const COMPACT_IDLE_MS = 20_000;
   const compactIfWalExceeds = (): void => {
     try {
-      engine.snapshotIfWalExceeds(COMPACT_MAX_WAL_ROWS, COMPACT_MAX_WAL_BYTES);
+      replica.snapshotIfWalExceeds(COMPACT_MAX_WAL_ROWS, COMPACT_MAX_WAL_BYTES);
     } catch (e) {
       console.error("snapshotIfWalExceeds failed:", e);
     }
   };
   const foldNow = (): void => {
     try {
-      engine.forceSnapshot();
+      replica.forceSnapshot();
     } catch (e) {
       console.error("forceSnapshot failed:", e);
     }
@@ -203,11 +203,11 @@ function createDocRuntime(boot: DocBoot, pumpOutbox: () => void): DocRuntime {
   // then mark durable + ship the resulting Ack. Sampling synchronously
   // binds the notify to bytes that were actually being persisted.
   const scheduleDurable = (): void => {
-    const seq = engine.lastContiguousSeq();
+    const seq = replica.lastContiguousSeq();
     storage
       .whenFlushed()
       .then(() => {
-        engine.notifyOplogDurable(seq);
+        replica.notifyOplogDurable(seq);
         pumpOutbox();
       })
       .catch((e) => {
@@ -226,7 +226,7 @@ function createDocRuntime(boot: DocBoot, pumpOutbox: () => void): DocRuntime {
   };
   const onServerFrame = (): void => {
     app.drainEvents();
-    // The engine already mirrored remote ops into the WAL inside
+    // The replica already mirrored remote ops into the WAL inside
     // `handleServerBytes`. Fold if the WAL crossed the threshold
     // (this pulse fires one RTT after every mutation), then
     // ratchet the durable cursor once the writes land.
@@ -235,7 +235,7 @@ function createDocRuntime(boot: DocBoot, pumpOutbox: () => void): DocRuntime {
 
   return {
     app,
-    engine,
+    replica,
     capture,
     onServerFrame,
     onLocalFlush,
@@ -328,7 +328,7 @@ export function createWorkspaceRuntime(props: {
 
   // Persist the device row — identity + the "last synced" stamp
   // (observability only). The resume cursor is no longer stored here:
-  // the engine owns it and persists it itself via
+  // the replica owns it and persists it itself via
   // `IdbStorage.writeAckedSeq` (clamped to the durable contiguous
   // frontier). Anonymous sessions skip — no server identity to record.
   const persistDeviceNow = async (): Promise<void> => {
@@ -348,9 +348,9 @@ export function createWorkspaceRuntime(props: {
   // commits still persist through each runtime's `capture()`.
   if (!props.session.anonymous) {
     bridge = createSyncBridge({
-      // Every booted doc's engine; the bridge routes inbound frames by
+      // Every booted doc's replica; the bridge routes inbound frames by
       // `doc_id` and stamps outbound ones.
-      engines: [...runtimes.values()].map((r) => r.engine),
+      replicas: [...runtimes.values()].map((r) => r.replica),
       onChange: (kind) => {
         if (kind === "online") {
           props.setOnline(true);
@@ -378,7 +378,7 @@ export function createWorkspaceRuntime(props: {
       // Home is never closed by the server; if it ever were, the next
       // reconnect would surface it again rather than wipe the account's
       // own doc from under it.
-      onEngineEvent: (ev, docId) => {
+      onReplicaEvent: (ev, docId) => {
         if (ev.kind === "presence") {
           const emails = ev.presenceEmails;
           const list = ev.presenceAccountIds.map((accountId, i) => ({
@@ -415,7 +415,7 @@ export function createWorkspaceRuntime(props: {
   // ---------- Device config: light writes on each frontier change ----------
   //
   // Refreshes the "last synced" stamp (observability) on a coarse
-  // debounce. The resume cursor is persisted separately by the engine
+  // debounce. The resume cursor is persisted separately by the replica
   // (`IdbStorage.writeAckedSeq`), so this no longer carries it.
   let deviceTimer: ReturnType<typeof setTimeout> | null = null;
   const saveDeviceSoon = (): void => {
@@ -492,7 +492,7 @@ export function createWorkspaceRuntime(props: {
       r.capture();
       r.scheduleDurable();
     }
-    bridge?.addEngine(r.engine);
+    bridge?.addReplica(r.replica);
     docs.addDoc(r.app);
     return docId;
   };
@@ -533,7 +533,7 @@ export function createWorkspaceRuntime(props: {
 
   // Forget an open non-Home doc on this device, in an order where a
   // failure part-way leaves nothing half-alive: the view leaves the
-  // doc, the engine stops routing, the layer and runtime maps forget
+  // doc, the replica stops routing, the layer and runtime maps forget
   // it, and the key (session + vault) and the local op log go last.
   // Shared by `deleteDoc` (after the server agreed) and the server's
   // own `DocClosed` / `DocRejected` (membership removed, doc deleted
@@ -543,7 +543,7 @@ export function createWorkspaceRuntime(props: {
     if (docs.viewDocId(view()) === docId)
       setView({ kind: "list", id: "inbox" });
     forgetPresence(docId);
-    bridge?.removeEngine(docId);
+    bridge?.removeReplica(docId);
     docs.removeDoc(docId);
     runtimes.delete(docId);
     docApps.delete(docId);

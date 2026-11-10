@@ -2,11 +2,11 @@
 // "Swift side"; the JS half is js/web/src/sync/mirrorHost.ts): what the
 // page posts to the `monoplan` message handler, what the app replies,
 // and the calls the app makes back into `window.__monoplanHost`. Pure
-// data in and out, so it is testable without WebKit or the host:
+// data in and out, so it is testable without WebKit or the engine:
 // the window controller does the IO around it.
 //
 // Bytes cross as base64; the peer id as a decimal string (a u64 does
-// not fit a JSON number); the doc id is the `-w` selector `Host.subscribe`
+// not fit a JSON number); the doc id is the `-w` selector `Engine.subscribe`
 // resolves.
 
 import Foundation
@@ -26,7 +26,7 @@ public enum HostRequest: Equatable {
     /// page whenever either changes.
     case undoState(canUndo: Bool, canRedo: Bool)
     /// Delete a workspace: the app confirms natively (the name is for
-    /// the copy) and has the host do it; the reply is `{deleted}`.
+    /// the copy) and has the engine do it; the reply is `{deleted}`.
     case deleteDoc(docId: String, name: String)
     /// The page's Sign in (an accountless session's, as the web client
     /// offers it): open the app's sheet; the page holds no credentials
@@ -97,8 +97,8 @@ public enum HostRequest: Equatable {
     }
 }
 
-/// The `session` reply: `HostSessionInfo` on the JS side. Built by the
-/// app from `MonoplanCore.HostSession`; the device token is not in it
+/// The `session` reply: `EngineSessionInfo` on the JS side. Built by the
+/// app from `MonoplanCore.EngineSession`; the device token is not in it
 /// and never reaches the page.
 public struct WindowSession: Equatable {
     public struct Doc: Equatable {
@@ -132,8 +132,8 @@ public struct WindowSession: Equatable {
     }
 
     /// The reply body, as `WKScriptMessage` reply handlers take it.
-    /// `status: "ok"` tells it apart from a `HostState` reply, which is
-    /// what `session` answers while there is no host to bind to.
+    /// `status: "ok"` tells it apart from an `EngineState` reply, which is
+    /// what `session` answers while there is no engine to bind to.
     public var reply: [String: Any] {
         [
             "status": "ok",
@@ -157,14 +157,14 @@ public enum HostReply {
     }
 }
 
-/// Whether the page has a host to mirror, as the page sees it: the
-/// `session` reply while there is none, and `HostInbound.hostState`
+/// Whether the page has an engine to mirror, as the page sees it: the
+/// `session` reply while there is none, and `HostInbound.engineState`
 /// whenever it changes afterwards. The page shows a waiting line for
 /// `pending` (the tray's reason: starting, signing out, profile in
-/// use); it is reloaded by the app once a host serves, so `running` is
+/// use); it is reloaded by the app once an engine serves, so `running` is
 /// only ever news. There is no signed-out state: without a profile the
-/// app seeds a local-only workspace and hosts that.
-public enum HostState: Equatable {
+/// app seeds a local-only workspace and runs that.
+public enum EngineState: Equatable {
     case running
     case pending(String)
 
@@ -202,12 +202,12 @@ public enum HostInbound: Equatable {
     /// The window entered or left full screen: the page drops the
     /// title-bar padding there (no traffic lights, no drag).
     case fullScreen(Bool)
-    /// The host opened a doc after the page booted (New Workspace…):
+    /// The engine opened a doc after the page booted (New Workspace…):
     /// the page subscribes to it and shows its Inbox.
     case docAdded(docId: String)
-    /// The host came or went (sign out, sign in, a start): what the
+    /// The engine came or went (sign out, sign in, a start): what the
     /// page's pre-boot screen shows.
-    case hostState(HostState)
+    case engineState(EngineState)
 
     public static let global = "window.__monoplanHost"
 
@@ -234,8 +234,8 @@ public enum HostInbound: Equatable {
             return "\(Self.global).fullScreen(\(active ? "true" : "false"))"
         case .docAdded(let docId):
             return "\(Self.global).docAdded(\(json(docId)))"
-        case .hostState(let state):
-            return "\(Self.global).hostState(\(state.json))"
+        case .engineState(let state):
+            return "\(Self.global).engineState(\(state.json))"
         }
     }
 
@@ -251,7 +251,7 @@ public enum HostInbound: Equatable {
 
 /// What the app's URL scheme serves (spec/mac-window-plan.md "Swift
 /// side"): the Vite build out of the bundle under `monoplan://app/`,
-/// and `/api/*` forwarded to the host's server with the device token.
+/// and `/api/*` forwarded to the engine's server with the device token.
 public enum AppScheme {
     public static let scheme = "monoplan"
     public static let host = "app"

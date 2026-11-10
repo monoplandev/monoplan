@@ -2,7 +2,7 @@
 // "Decisions", 2026-10-20: one `DocApp` per doc plus a thin layer, not a
 // merged store). Everything under a `DocApp` is per doc and cannot
 // merge — core `Doc`, UndoManager, search index, notes bridge, event
-// dispatcher, storage, engine — so this layer holds only what spans
+// dispatcher, storage, replica — so this layer holds only what spans
 // docs:
 //
 //   - the doc map (Home first, then boot / creation order; reactive, so

@@ -1,8 +1,8 @@
 // Per-account device row — sync identity + the "last synced" stamp.
 //
 // Lives in the `device` store of the `monoplan-web` database (alongside
-// vault + prefs and the engine op log), keyed per account. The resume
-// cursor used to live here too, but it's now the engine's: persisted in
+// vault + prefs and the replica op log), keyed per account. The resume
+// cursor used to live here too, but it's now the replica's: persisted in
 // the `docs` store via `IdbStorage.writeAckedSeq` (clamped to the
 // durable contiguous frontier — see `spec/local-storage.md`). This row
 // carries only identity and `lastSyncAt`, which is observability for the

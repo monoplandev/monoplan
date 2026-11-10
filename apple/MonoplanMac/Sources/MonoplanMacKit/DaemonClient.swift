@@ -1,14 +1,14 @@
-// Client of the app's own host (cli/src/daemon.rs `LocalClient`, reached
-// through `MonoplanCore.Host`): the same MessagePack `Request` / `Reply`
+// Client of the app's own engine (cli/src/daemon.rs `LocalClient`, reached
+// through `MonoplanCore.Engine`): the same MessagePack `Request` / `Reply`
 // payloads the CLI sends over the Unix socket (cli/src/ipc.rs), as
-// function calls on a `HostTransport`. Hello, then a watch so the
-// host's `Event` frames arrive as they happen; requests are answered
+// function calls on an `EngineTransport`. Hello, then a watch so the
+// engine's `Event` frames arrive as they happen; requests are answered
 // one by one with their own completion.
 //
 // The socket is the CLI's path. The app never opens it
-// (spec/mac-window-plan.md): the transport is the in-process host, and
-// when there is none the app's host controller is asked for one
-// (`hostProvider`), starts it, and says what the menu should show
+// (spec/mac-window-plan.md): the transport is the in-process engine, and
+// when there is none the app's engine controller is asked for one
+// (`engineProvider`), starts it, and says what the menu should show
 // meanwhile. All callbacks run on `queue`.
 
 import Foundation
@@ -16,14 +16,14 @@ import Foundation
 public struct SyncStatus: Equatable {
     public let online: Bool
     public let lastSyncedAt: Int64?
-    /// Why the host is offline, when it knows (a failed connect, a
+    /// Why the engine is offline, when it knows (a failed connect, a
     /// dropped socket); nil while online or before the first attempt.
     public let offlineReason: String?
-    /// Local work the server has not confirmed: an engine still
+    /// Local work the server has not confirmed: a replica still
     /// pulling, a push in flight, or ops not yet pushed. Absent on the
     /// wire when false.
     public let pending: Bool
-    /// No account: the host never connects, so there is nothing to be
+    /// No account: the engine never connects, so there is nothing to be
     /// offline from (`ipc::SyncStatus::local_only`). Absent on the
     /// wire when false.
     public let localOnly: Bool
@@ -108,7 +108,7 @@ public enum Request {
     /// Push now and report whether the server is reachable
     /// (`Request::Sync`; the reply is `synced`).
     case sync
-    /// The network changed under the host (path change, wake): drop
+    /// The network changed under the engine (path change, wake): drop
     /// the socket and connect again now (`Request::Reconnect`).
     case reconnect
     /// `monoplan agenda --days N --json`; `all` is `--all`, every
@@ -132,9 +132,9 @@ public enum Request {
     /// Set `show_list_counts`; the reply is the settings after.
     case setShowListCounts(Bool)
     /// Create a workspace the account owns, by name, and open it on the
-    /// host (`Request::CreateWorkspace`; the reply is `workspaceCreated`).
+    /// engine (`Request::CreateWorkspace`; the reply is `workspaceCreated`).
     case createWorkspace(name: String)
-    /// Delete a workspace by doc id, on the server and on the host
+    /// Delete a workspace by doc id, on the server and on the engine
     /// (`Request::DeleteWorkspace`; the reply is `workspaceDeleted`).
     case deleteWorkspace(docId: String)
 
@@ -249,38 +249,38 @@ public enum Reply: Equatable {
 
 public enum ClientError: Error, LocalizedError {
     case notConnected
-    case hostStopped
+    case engineStopped
     case daemon(String)
     case protocolError(String)
 
     public var errorDescription: String? {
         switch self {
-        case .notConnected: return String(localized: "not connected to the host")
-        case .hostStopped: return String(localized: "the host has stopped")
+        case .notConnected: return String(localized: "not connected to the engine")
+        case .engineStopped: return String(localized: "the engine has stopped")
         case .daemon(let m): return m
         case .protocolError(let m): return "protocol: \(m)"
         }
     }
 }
 
-/// How the client reaches a host: one msgpack request payload in, one
+/// How the client reaches an engine: one msgpack request payload in, one
 /// reply payload out, and a watch whose frames (`Watching`, then
-/// `Event`s) arrive as the host sends them. The app's transport is the
-/// in-process host over the FFI; tests use an in-memory one. Callbacks
+/// `Event`s) arrive as the engine sends them. The app's transport is the
+/// in-process engine over the FFI; tests use an in-memory one. Callbacks
 /// may come on any thread; the client hops to its own queue.
-public protocol HostTransport: AnyObject {
+public protocol EngineTransport: AnyObject {
     func request(_ frame: Data, completion: @escaping (Result<Data, Error>) -> Void)
-    /// `onStopped` fires once when the host loop ends; nothing follows.
+    /// `onStopped` fires once when the engine loop ends; nothing follows.
     func watch(onFrame: @escaping (Data) -> Void, onStopped: @escaping () -> Void)
     /// End the watch. The transport delivers nothing after this.
     func close()
 }
 
-/// What the host controller answers when the client asks for a host:
+/// What the engine controller answers when the client asks for an engine:
 /// a transport to a running one, or what to show while it is not
 /// (starting, busy, not signed in), after which the client asks again.
-public enum HostProvision {
-    case transport(HostTransport)
+public enum EngineProvision {
+    case transport(EngineTransport)
     case pending(String)
 }
 
@@ -316,7 +316,7 @@ public struct ProfileLocation {
 
     /// A profile exists, by the CLI's own rule (`Profile::active`):
     /// `secrets.toml` is there. True for an account's device and for a
-    /// local-only workspace alike (`cli/src/bootstrap.rs`); the host
+    /// local-only workspace alike (`cli/src/bootstrap.rs`); the engine
     /// runs either. False only before the first bootstrap and between
     /// a sign-out's wipe and the next one.
     public var hasProfile: Bool {
@@ -372,7 +372,7 @@ public final class DaemonClient {
         case connected(SyncStatus)
     }
 
-    /// What the host said about itself in its `Hello`.
+    /// What the engine said about itself in its `Hello`.
     public struct DaemonInfo: Equatable {
         public let buildId: String
         public let pid: Int64
@@ -380,7 +380,7 @@ public final class DaemonClient {
 
     public var onEvent: ((WatchEvent) -> Void)?
     public var onState: ((State) -> Void)?
-    /// Set on a successful handshake, cleared when the host goes.
+    /// Set on a successful handshake, cleared when the engine goes.
     public private(set) var daemon: DaemonInfo?
     public private(set) var state: State = .connecting(String(localized: "starting")) {
         didSet { if state != oldValue { onState?(state) } }
@@ -388,17 +388,17 @@ public final class DaemonClient {
 
     private let queue: DispatchQueue
     /// What this client's hello calls itself. The CLI's build id
-    /// restarts a stale daemon; the host here is this process, so the
+    /// restarts a stale daemon; the engine here is this process, so the
     /// name only identifies the client (`monoplan-mac`, `monoplan-ios`).
     private let clientId: String
-    private var transport: HostTransport?
+    private var transport: EngineTransport?
     private var backoff: TimeInterval = 1
     private var stopped = false
     private var retryScheduled = false
-    /// Consulted whenever there is no transport. The app's host
-    /// controller starts the in-process host here and hands over a
-    /// transport once it runs; nil (tests) means nothing is hosting.
-    public var hostProvider: (() -> HostProvision)?
+    /// Consulted whenever there is no transport. The app's engine
+    /// controller starts the in-process engine here and hands over a
+    /// transport once it runs; nil (tests) means no engine.
+    public var engineProvider: (() -> EngineProvision)?
 
     public init(queue: DispatchQueue = .main, clientId: String = "monoplan-mac") {
         self.queue = queue
@@ -416,24 +416,24 @@ public final class DaemonClient {
     }
 
     /// Ask the provider now instead of waiting out the backoff: the
-    /// host just came up.
+    /// engine just came up.
     public func poke() {
         guard !stopped, transport == nil else { return }
         backoff = 1
         connect()
     }
 
-    /// The host this client is on has ended, by the caller's own doing
+    /// The engine this client is on has ended, by the caller's own doing
     /// (a sign-in, a sign-up or a sign-out stopped it): forget it now
     /// and ask the provider, without waiting for the watch to say so.
-    public func hostGone() {
+    public func engineGone() {
         if stopped { return }
         backoff = 1
-        if transport == nil { connect() } else { drop(reason: String(localized: "host stopped")) }
+        if transport == nil { connect() } else { drop(reason: String(localized: "engine stopped")) }
     }
 
     /// One request with its own reply. Fails immediately when there is
-    /// no host rather than queueing: the caller refreshes again once
+    /// no engine rather than queueing: the caller refreshes again once
     /// there is one anyway.
     public func send(_ request: Request, completion: @escaping (Result<Reply, Error>) -> Void) {
         guard let transport, case .connected = state else {
@@ -443,7 +443,7 @@ public final class DaemonClient {
         transport.request(MessagePack.encode(request.value)) { [weak self] result in
             self?.queue.async {
                 guard let self, self.transport === transport else {
-                    completion(.failure(ClientError.hostStopped))
+                    completion(.failure(ClientError.engineStopped))
                     return
                 }
                 completion(self.reply(from: result))
@@ -451,15 +451,15 @@ public final class DaemonClient {
         }
     }
 
-    // MARK: Host
+    // MARK: Engine
 
     private func connect() {
         if stopped { return }
-        guard let hostProvider else {
-            state = .connecting(String(localized: "nothing hosting the profile"))
+        guard let engineProvider else {
+            state = .connecting(String(localized: "no engine is running"))
             return
         }
-        switch hostProvider() {
+        switch engineProvider() {
         case .pending(let why):
             state = .connecting(why)
             scheduleRetry()
@@ -470,8 +470,8 @@ public final class DaemonClient {
         }
     }
 
-    private func handshake(_ t: HostTransport) {
-        // The CLI uses the build id to restart a stale daemon; the host
+    private func handshake(_ t: EngineTransport) {
+        // The CLI uses the build id to restart a stale daemon; the engine
         // is this process, so we only identify ourselves.
         t.request(MessagePack.encode(Request.hello(buildId: clientId).value)) { [weak self] result in
             self?.queue.async {
@@ -491,14 +491,14 @@ public final class DaemonClient {
                     onStopped: { [weak self] in
                         self?.queue.async {
                             guard let self, self.transport === t else { return }
-                            self.drop(reason: String(localized: "host stopped"))
+                            self.drop(reason: String(localized: "engine stopped"))
                         }
                     })
             }
         }
     }
 
-    /// The host went (its loop ended, or a frame made no sense): forget
+    /// The engine went (its loop ended, or a frame made no sense): forget
     /// it and ask the provider, which restarts it if it should run.
     private func drop(reason: String) {
         detach()
@@ -555,7 +555,7 @@ public final class DaemonClient {
         }
     }
 
-    /// A watch frame: `Watching` first, then events, or the host
+    /// A watch frame: `Watching` first, then events, or the engine
     /// announcing its exit.
     private func dispatch(_ payload: Data) {
         let reply: Reply
@@ -574,7 +574,7 @@ public final class DaemonClient {
             }
             onEvent?(ev)
         case .shuttingDown:
-            drop(reason: String(localized: "host stopped"))
+            drop(reason: String(localized: "engine stopped"))
         default:
             drop(reason: "unexpected frame on the watch")
         }

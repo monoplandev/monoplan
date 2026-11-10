@@ -1,7 +1,7 @@
-// WebSocket pump + lifecycle around a set of sans-IO `SyncEngine`s —
+// WebSocket pump + lifecycle around a set of sans-IO `Replica`s —
 // one per open doc, multiplexed over one socket. Owned by the JS host
 // (not the wasm core) so each platform — web and bun-based tests — can
-// drive the same engines with the same reconnect / auth policy by
+// drive the same replicas with the same reconnect / auth policy by
 // injecting only the bits that differ:
 //
 //   - `socketFactory` builds a fresh `WebSocket` per attempt (cookie
@@ -16,13 +16,13 @@
 //     host picks the right wasm build (bundler vs nodejs).
 //
 // Connection vs doc: the `Hello` / `HelloAck` version handshake is per
-// socket and runs here, once, before any engine goes online. Each
-// engine then binds its own doc (`OpenDoc`) and runs its own state
-// machine; inbound frames are routed to the engine whose `docId()`
-// matches the frame's `doc_id`. Engines never see each other's frames
+// socket and runs here, once, before any replica goes online. Each
+// replica then binds its own doc (`OpenDoc`) and runs its own state
+// machine; inbound frames are routed to the replica whose `docId()`
+// matches the frame's `doc_id`. Replicas never see each other's frames
 // and never see the handshake.
 //
-// The engines themselves stay sans-IO per `spec/architecture.md`; this
+// The replicas themselves stay sans-IO per `spec/architecture.md`; this
 // file is what makes the IO testable from Bun instead of only from
 // a browser.
 //
@@ -32,9 +32,9 @@
 // hook platform layers wire to visibility/online events.
 
 import type {
-  EngineEvent,
+  ReplicaEvent,
   HelloOutcome,
-  SyncEngine,
+  Replica,
 } from "../wasm/monoplan_core_web.js";
 
 export type ConnectionEvent = "online" | "offline" | "drain";
@@ -59,10 +59,10 @@ export interface HandshakeCodec {
 }
 
 export interface SyncBridgeOpts {
-  /** One engine per doc this device has open on the connection. All
+  /** One replica per doc this device has open on the connection. All
    *  are brought online together after the handshake; a frame for a
    *  doc none of them syncs is dropped and reported via `onError`. */
-  engines: SyncEngine[];
+  replicas: Replica[];
   codec: HandshakeCodec;
   /** Identity advertised in `Hello`. */
   clientName: string;
@@ -80,27 +80,27 @@ export interface SyncBridgeOpts {
    *  pre-open close happens is that the server was killed. */
   probeAuth?: () => Promise<boolean>;
   /** Connection-state flips. `online` fires once the handshake has
-   *  succeeded and every engine has been brought online; `drain`
+   *  succeeded and every replica has been brought online; `drain`
    *  fires after every outbox flush (server-triggered or host-
    *  triggered via `pumpOutbox`) — the natural pulse for "we just
    *  round-tripped with the server". */
   onChange?: (kind: ConnectionEvent) => void;
-  /** Fires after every server frame the bridge feeds to an engine
-   *  (post-pump), with that engine's doc id. Hosts drain
-   *  `popAppEvent` on the named engine and dispatch to their UI store
-   *  here. Also fires once per engine right after the handshake. */
+  /** Fires after every server frame the bridge feeds to a replica
+   *  (post-pump), with that replica's doc id. Hosts drain
+   *  `popAppEvent` on the named replica and dispatch to their UI store
+   *  here. Also fires once per replica right after the handshake. */
   onServerFrame?: (docId: string) => void;
   /** `probeAuth` resolved `false`. The bridge has stopped and will
    *  not reconnect; the host should tear down the session. */
   onAuthFailed?: () => void;
-  /** Surface protocol-level engine events (`popEvent`) — errors,
+  /** Surface protocol-level replica events (`popEvent`) — errors,
    *  protocol-version warnings, etc. — tagged with the doc. If unset,
-   *  events are still drained (so the engine queues can't grow
+   *  events are still drained (so the replica queues can't grow
    *  unbounded) but discarded. */
-  onEngineEvent?: (ev: EngineEvent, docId: string) => void;
-  /** Connection-level problems the engines never see: a rejected or
+  onReplicaEvent?: (ev: ReplicaEvent, docId: string) => void;
+  /** Connection-level problems the replicas never see: a rejected or
    *  malformed handshake, a timed-out handshake, a frame for a doc no
-   *  engine syncs. Informational — the bridge has already decided
+   *  replica syncs. Informational — the bridge has already decided
    *  what to do (drop the frame, or close and reconnect). */
   onError?: (message: string) => void;
   /** Exponential-backoff parameters. Defaults: base 500ms, cap 30s,
@@ -115,8 +115,8 @@ const DEFAULT_BASE_MS = 500;
 const DEFAULT_MAX_MS = 30_000;
 const DEFAULT_JITTER = 0.2;
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
-/** Cadence at which the bridge calls `engine.handleTimeout()` on every
- *  engine to drive the `OpenDoc` watchdog. 1s polling keeps wake-up
+/** Cadence at which the bridge calls `replica.handleTimeout()` on every
+ *  replica to drive the `OpenDoc` watchdog. 1s polling keeps wake-up
  *  cost negligible. */
 const TICK_INTERVAL_MS = 1_000;
 
@@ -138,7 +138,7 @@ export class SyncBridge {
   private tickTimer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
   private attempt = 0;
-  private readonly engines: Map<string, SyncEngine>;
+  private readonly replicas: Map<string, Replica>;
   private readonly baseMs: number;
   private readonly maxMs: number;
   private readonly jitter: number;
@@ -150,40 +150,40 @@ export class SyncBridge {
     this.maxMs = b?.maxMs ?? DEFAULT_MAX_MS;
     this.jitter = b?.jitter ?? DEFAULT_JITTER;
     this.handshakeTimeoutMs = opts.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
-    this.engines = new Map();
-    for (const engine of opts.engines) {
-      const id = engine.docId();
-      if (this.engines.has(id)) {
-        throw new Error(`SyncBridge: two engines for doc ${id}`);
+    this.replicas = new Map();
+    for (const replica of opts.replicas) {
+      const id = replica.docId();
+      if (this.replicas.has(id)) {
+        throw new Error(`SyncBridge: two replicas for doc ${id}`);
       }
-      this.engines.set(id, engine);
+      this.replicas.set(id, replica);
     }
   }
 
   /** Doc ids this bridge routes, in construction order. */
   docIds(): string[] {
-    return [...this.engines.keys()];
+    return [...this.replicas.keys()];
   }
 
   /** Route one more doc over this connection: a doc created or joined
    *  while the session is live (`spec/sharing-plan.md` Phase 5). The
-   *  engine is registered for routing immediately; if the socket is
+   *  replica is registered for routing immediately; if the socket is
    *  past the handshake it is brought online now (its `OpenDoc` goes
    *  out and `onServerFrame` pulses once, as for the initial set),
    *  otherwise it comes up with the others on the next `HelloAck`.
    *  Throws if the doc is already routed. */
-  addEngine(engine: SyncEngine): void {
-    const id = engine.docId();
-    if (this.engines.has(id)) {
-      throw new Error(`SyncBridge: two engines for doc ${id}`);
+  addReplica(replica: Replica): void {
+    const id = replica.docId();
+    if (this.replicas.has(id)) {
+      throw new Error(`SyncBridge: two replicas for doc ${id}`);
     }
-    this.engines.set(id, engine);
+    this.replicas.set(id, replica);
     if (this.phase !== "open" || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return;
     }
-    engine.handleConnected();
+    replica.handleConnected();
     this.pumpOutbox();
-    this.drainEngineEvents();
+    this.drainReplicaEvents();
     this.opts.onServerFrame?.(id);
   }
 
@@ -193,23 +193,23 @@ export class SyncBridge {
    *  side of the open stays until the socket cycles; there is no
    *  `CloseDoc` frame (`spec/sharing-plan.md`). Returns whether the
    *  doc was routed. */
-  removeEngine(docId: string): boolean {
-    const engine = this.engines.get(docId);
-    if (!engine) return false;
-    this.engines.delete(docId);
-    engine.handleDisconnected();
+  removeReplica(docId: string): boolean {
+    const replica = this.replicas.get(docId);
+    if (!replica) return false;
+    this.replicas.delete(docId);
+    replica.handleDisconnected();
     return true;
   }
 
   start(): void {
     this.connect();
     if (!this.tickTimer) {
-      // Periodic tick drives each engine's OpenDoc watchdog. Cheap —
+      // Periodic tick drives each replica's OpenDoc watchdog. Cheap —
       // outside Opening, `handleTimeout` is a no-op.
       this.tickTimer = setInterval(() => {
-        for (const engine of this.engines.values()) engine.handleTimeout();
+        for (const replica of this.replicas.values()) replica.handleTimeout();
         this.pumpOutbox();
-        this.drainEngineEvents();
+        this.drainReplicaEvents();
       }, TICK_INTERVAL_MS);
     }
   }
@@ -230,8 +230,8 @@ export class SyncBridge {
       this.ws.close();
       this.ws = null;
     }
-    // Best-effort engine notification; if already Disconnected this is a no-op.
-    for (const engine of this.engines.values()) engine.handleDisconnected();
+    // Best-effort replica notification; if already Disconnected this is a no-op.
+    for (const replica of this.replicas.values()) replica.handleDisconnected();
   }
 
   /** Cancel any pending backoff timer and reconnect immediately.
@@ -251,12 +251,12 @@ export class SyncBridge {
   }
 
   /** Caller signal: local mutations may have produced new outbox
-   *  bytes on some engine. Drain every engine and flush. */
+   *  bytes on some replica. Drain every replica and flush. */
   pumpOutbox(): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    for (const engine of this.engines.values()) {
+    for (const replica of this.replicas.values()) {
       while (true) {
-        const bytes = engine.popOutbox();
+        const bytes = replica.popOutbox();
         if (!bytes) break;
         this.ws.send(sendable(bytes));
       }
@@ -274,7 +274,7 @@ export class SyncBridge {
 
     ws.onopen = () => {
       opened = true;
-      // Version handshake first; engines come online on `HelloAck`.
+      // Version handshake first; replicas come online on `HelloAck`.
       ws.send(sendable(this.opts.codec.helloFrame(this.opts.clientName, this.opts.clientVersion)));
       this.handshakeTimer = setTimeout(() => {
         this.handshakeTimer = null;
@@ -296,8 +296,8 @@ export class SyncBridge {
         return;
       }
       const docId = this.opts.codec.serverFrameDocId(data);
-      const engine = docId === undefined ? undefined : this.engines.get(docId);
-      if (!engine) {
+      const replica = docId === undefined ? undefined : this.replicas.get(docId);
+      if (!replica) {
         // Not ours: either undecodable or for a doc this device never
         // opened on this connection. The server only sends frames for
         // open docs, so this is a routing bug on one side or the other
@@ -305,20 +305,20 @@ export class SyncBridge {
         this.opts.onError?.(
           docId === undefined
             ? "undecodable server frame dropped"
-            : `server frame for doc ${docId} dropped: no engine routes it`,
+            : `server frame for doc ${docId} dropped: no replica routes it`,
         );
         return;
       }
-      engine.handleServerBytes(data);
+      replica.handleServerBytes(data);
       this.pumpOutbox();
-      this.drainEngineEvents();
+      this.drainReplicaEvents();
       this.opts.onServerFrame?.(docId!);
     };
     ws.onclose = () => {
       this.clearHandshakeTimer();
       const wasOpen = this.phase === "open";
       this.phase = "hello";
-      for (const engine of this.engines.values()) engine.handleDisconnected();
+      for (const replica of this.replicas.values()) replica.handleDisconnected();
       if (wasOpen) this.opts.onChange?.("offline");
       this.ws = null;
       if (this.stopped) return;
@@ -348,10 +348,10 @@ export class SyncBridge {
     }
     this.phase = "open";
     this.attempt = 0;
-    for (const engine of this.engines.values()) engine.handleConnected();
+    for (const replica of this.replicas.values()) replica.handleConnected();
     this.pumpOutbox();
-    this.drainEngineEvents();
-    for (const docId of this.engines.keys()) this.opts.onServerFrame?.(docId);
+    this.drainReplicaEvents();
+    for (const docId of this.replicas.keys()) this.opts.onServerFrame?.(docId);
     this.opts.onChange?.("online");
   }
 
@@ -390,11 +390,11 @@ export class SyncBridge {
     }, delay);
   }
 
-  private drainEngineEvents(): void {
-    const cb = this.opts.onEngineEvent;
-    for (const [docId, engine] of this.engines) {
+  private drainReplicaEvents(): void {
+    const cb = this.opts.onReplicaEvent;
+    for (const [docId, replica] of this.replicas) {
       while (true) {
-        const ev = engine.popEvent();
+        const ev = replica.popEvent();
         if (!ev) break;
         cb?.(ev, docId);
       }

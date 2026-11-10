@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 
-import { Dek, Doc, EncryptedBlob, SyncEngine } from "@monoplan/core/wasm";
-import type { EngineStorage } from "@monoplan/core/wasm";
-import { MemEngineStorage } from "../../core/test/mem-engine-storage.ts";
+import { Dek, Doc, EncryptedBlob, Replica } from "@monoplan/core/wasm";
+import type { ReplicaStorage } from "@monoplan/core/wasm";
+import { MemReplicaStorage } from "../../core/test/mem-replica-storage.ts";
 import { createSyncedApp } from "../src/sync/store.ts";
 
 const DOC_ID = "00000000-0000-0000-0000-000000000000";
@@ -13,18 +13,18 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // captured WAL row without any other mutation or an explicit flush.
 test("typed notes deltas are captured to the WAL on the idle timer", async () => {
   const dek = Dek.generate();
-  const storage = new MemEngineStorage();
-  const engine = new SyncEngine(
+  const storage = new MemReplicaStorage();
+  const replica = new Replica(
     Doc.create(),
     DOC_ID,
     dek.clone(),
     0n,
-    storage as unknown as EngineStorage,
+    storage as unknown as ReplicaStorage,
   );
-  const app = createSyncedApp(engine);
+  const app = createSyncedApp(replica);
   // Same wiring as `createWorkspaceRuntime`.
   app.setBeforeFlush(() => {
-    engine.captureLocalOps();
+    replica.captureLocalOps();
   });
 
   const id = app.addItem("inbox", "item");
@@ -61,14 +61,14 @@ test("typed notes deltas are captured to the WAL on the idle timer", async () =>
 // one workspace undo step of its own. It must survive moving to another
 // item, revert exactly once, and redo.
 test("a notes editing session is one workspace undo step after blur", () => {
-  const engine = new SyncEngine(
+  const replica = new Replica(
     Doc.create(),
     DOC_ID,
     Dek.generate(),
     0n,
-    new MemEngineStorage() as unknown as EngineStorage,
+    new MemReplicaStorage() as unknown as ReplicaStorage,
   );
-  const app = createSyncedApp(engine);
+  const app = createSyncedApp(replica);
   const a = app.addItem("inbox", "a");
   const b = app.addItem("inbox", "b");
   // An earlier whole-value write put "og" there: one workspace step.
@@ -109,14 +109,14 @@ test("a notes editing session is one workspace undo step after blur", () => {
 // A session that ends where it began (undone natively while focused)
 // records nothing; a blur without any edit records nothing either.
 test("an unchanged notes session records no undo step", () => {
-  const engine = new SyncEngine(
+  const replica = new Replica(
     Doc.create(),
     DOC_ID,
     Dek.generate(),
     0n,
-    new MemEngineStorage() as unknown as EngineStorage,
+    new MemReplicaStorage() as unknown as ReplicaStorage,
   );
-  const app = createSyncedApp(engine);
+  const app = createSyncedApp(replica);
   const a = app.addItem("inbox", "a");
   // Consume the add so the stack is empty.
   expect(app.undo()).toBe(true);
@@ -145,14 +145,14 @@ test("an unchanged notes session records no undo step", () => {
 // capture that sets notes with its add) joins the batch's step: one undo
 // removes the item, one redo brings it back with its notes.
 test("notes written inside an action batch ride the batch's undo step", () => {
-  const engine = new SyncEngine(
+  const replica = new Replica(
     Doc.create(),
     DOC_ID,
     Dek.generate(),
     0n,
-    new MemEngineStorage() as unknown as EngineStorage,
+    new MemReplicaStorage() as unknown as ReplicaStorage,
   );
-  const app = createSyncedApp(engine);
+  const app = createSyncedApp(replica);
   const a = app.withActionBatch(() => {
     const id = app.addItem("inbox", "a");
     app.setItemNotes(id, "og");
@@ -182,14 +182,14 @@ test("notes written inside an action batch ride the batch's undo step", () => {
 // The capture form's shape: add, notes, deadline, focus, done inside one
 // batch. One undo removes the item; one redo restores every field.
 test("a full capture is one undo step and redo restores its fields", () => {
-  const engine = new SyncEngine(
+  const replica = new Replica(
     Doc.create(),
     DOC_ID,
     Dek.generate(),
     0n,
-    new MemEngineStorage() as unknown as EngineStorage,
+    new MemReplicaStorage() as unknown as ReplicaStorage,
   );
-  const app = createSyncedApp(engine);
+  const app = createSyncedApp(replica);
   const id = app.withActionBatch(() => {
     const id = app.addItemAt("inbox", "capture", 0);
     app.setItemNotes(id, "some notes");

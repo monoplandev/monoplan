@@ -13,7 +13,7 @@ adding a bridge migration.
 ## Problem
 
 Every CLI invocation currently mints a fresh random Loro peer id:
-`Session::open` (`cli/src/sync.rs`) -> `boot_doc` (`core/src/storage.rs`)
+`Engine::open` (`cli/src/sync.rs`) -> `boot_doc` (`core/src/storage.rs`)
 -> `Doc::empty()` -> `LoroDoc::new()`. The CLI is a one-shot process per
 command, so every *mutating* invocation adds one permanent entry to the
 doc's version vector. VVs are carried forever in retained history and
@@ -48,7 +48,7 @@ One lock file per slot in the profile directory, next to the db:
 - Claim: `open(O_CREAT)` then `flock(LOCK_EX | LOCK_NB)`. On `EWOULDBLOCK`
   try the next slot. Slot 0 succeeds in the overwhelmingly common case.
 - Hold: keep the `File` handle alive for the whole process (store it in
-  `Session`; for pre-session commands, in the command scope). Dropping it
+  `Engine`; for pre-session commands, in the command scope). Dropping it
   at exit releases the lock; on crash the kernel releases it
   unconditionally. Zero staleness bookkeeping - this is the whole reason
   flock beats a lease row in sqlite (a claimed row goes stale on crash
@@ -114,7 +114,7 @@ their counters are unobserved and reusable.
 
 ### CLI wiring (order matters)
 
-In `Session::open_with_profile` (`cli/src/sync.rs`):
+In `Engine::open_with_profile` (`cli/src/sync.rs`):
 
 1. `open_storage(&profile)` (unchanged).
 2. Claim a slot: flock scan in the profile dir, then read-or-mint the
@@ -122,7 +122,7 @@ In `Session::open_with_profile` (`cli/src/sync.rs`):
    `fn claim(profile: &Profile, store: &SqliteStorage) -> Result<PeerLease>`
    where `PeerLease { peer_id: u64, slot: u32, _lock: std::fs::File }`.
 3. `boot_doc(&storage, &dek, doc_id, Some(lease.peer_id))`.
-4. `Session` holds the `PeerLease` so the lock lives as long as the doc.
+4. `Engine` holds the `PeerLease` so the lock lives as long as the doc.
 
 Other sites:
 
@@ -138,7 +138,7 @@ Other sites:
 - flock on network filesystems is unreliable, but so is sqlite itself;
   no new constraint.
 - Read-only commands never commit, so their peer never enters the VV
-  regardless; claiming for them anyway (via `Session::open`) is
+  regardless; claiming for them anyway (via `Engine::open`) is
   harmless and keeps one code path.
 - Two processes, one slot each, both mutating: fine by construction -
   that is exactly the CRDT's job; the slots only guarantee the peers

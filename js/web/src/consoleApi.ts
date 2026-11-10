@@ -3,7 +3,7 @@
 // counts, doc id) that used to be the Settings dialog's Advanced
 // section. A console table reads better than a dialog for comparing
 // two devices, and nothing else needed the section
-// (spec/mac-window-plan.md "Settings"). Direct engine reads, no
+// (spec/mac-window-plan.md "Settings"). Direct replica reads, no
 // reactivity, so it works from the console with no owner. A debug
 // build of the app is inspectable (`isInspectable`).
 
@@ -24,15 +24,15 @@ export interface SyncFactsRow {
 export function syncFactsRows(docs: DocsLayer, online: boolean): SyncFactsRow[] {
   return docs.docs().map((entry) => {
     const app = entry.app;
-    const pending = app.engine.hasUnsyncedOps();
-    const epoch = app.engine.serverEpoch();
+    const pending = app.replica.hasUnsyncedOps();
+    const epoch = app.replica.serverEpoch();
     return {
       workspace: entry.home ? "Personal" : (app.state.settings.docName ?? "(untitled)"),
       docId: app.docId,
       status: !online ? "offline" : pending ? "pending" : "synced",
-      seq: Number(app.engine.lastContiguousSeq()),
+      seq: Number(app.replica.lastContiguousSeq()),
       epoch: epoch === undefined ? null : Number(epoch),
-      fingerprint: hex(app.engine.fingerprint()),
+      fingerprint: hex(app.replica.fingerprint()),
       items: Object.keys(app.state.itemsById).length,
       lists: app.state.listsOrder.length,
     };

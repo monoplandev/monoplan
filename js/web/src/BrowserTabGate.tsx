@@ -1,5 +1,5 @@
 // Single-tab gate + slot-0 peer anchor. Monoplan assumes one active tab
-// per browser (the engine + IDB op log aren't built for concurrent
+// per browser (the replica + IDB op log aren't built for concurrent
 // writers), so we grab a Web Lock on mount and only render `App` once
 // the outcome is known. In prod a second tab fails to acquire the lock
 // and shows an "already open elsewhere" notice; in dev (or with

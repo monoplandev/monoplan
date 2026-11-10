@@ -391,12 +391,12 @@
         }
       }
     },
-    "Host": {
+    "Engine": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Host"
+            "value": "Motor"
           }
         }
       }
@@ -1111,12 +1111,12 @@
         }
       }
     },
-    "Waiting for the host…": {
+    "Waiting for the engine…": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Esperando al host…"
+            "value": "Esperando al motor…"
           }
         }
       }
@@ -1221,22 +1221,22 @@
         }
       }
     },
-    "host failed: %@": {
+    "engine failed: %@": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "fallo del host: %@"
+            "value": "fallo del motor: %@"
           }
         }
       }
     },
-    "host stopped": {
+    "engine stopped": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "host detenido"
+            "value": "motor detenido"
           }
         }
       }
@@ -1271,22 +1271,22 @@
         }
       }
     },
-    "no profile to host": {
+    "no profile to run": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "ningún perfil que alojar"
+            "value": "ningún perfil que ejecutar"
           }
         }
       }
     },
-    "not connected to the host": {
+    "not connected to the engine": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "sin conexión con el host"
+            "value": "sin conexión con el motor"
           }
         }
       }
@@ -1301,12 +1301,12 @@
         }
       }
     },
-    "nothing hosting the profile": {
+    "no engine is running": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "nada aloja el perfil"
+            "value": "ningún motor en ejecución"
           }
         }
       }
@@ -1381,12 +1381,12 @@
         }
       }
     },
-    "the host has stopped": {
+    "the engine has stopped": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "el host se ha detenido"
+            "value": "el motor se ha detenido"
           }
         }
       }

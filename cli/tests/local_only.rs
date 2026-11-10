@@ -8,7 +8,7 @@ use monoplan_cli::bootstrap;
 use monoplan_cli::commands::signup::{self, Credentials};
 use monoplan_cli::config::Profile;
 use monoplan_cli::daemon;
-use monoplan_cli::sync::Session;
+use monoplan_cli::sync::Engine;
 use monoplan_core::{LIST_INBOX, WELCOME_ITEM};
 use support::{
     TEST_PASSWORD, TestServer, login_device, materialize_profile, reopen_profile, weak_params,
@@ -39,22 +39,22 @@ async fn fresh_install_runs_local_only_and_signup_adopts_it() {
     assert_eq!(id2, local_doc_id);
     assert_eq!(dek2.as_bytes(), local_dek.as_bytes());
 
-    // A session on it is seeded, never online, and commits locally.
-    let session = Session::open_with_profile(reopen_profile(&dir), true)
+    // An engine on it is seeded, never online, and commits locally.
+    let engine = Engine::open_with_profile(reopen_profile(&dir), true)
         .await
         .unwrap();
-    assert!(session.is_local_only());
-    assert!(!session.is_online());
-    let inbox = session.doc().items_in_list(LIST_INBOX, false);
+    assert!(engine.is_local_only());
+    assert!(!engine.is_online());
+    let inbox = engine.doc().items_in_list(LIST_INBOX, false);
     assert!(
         inbox.iter().any(|i| i.text == WELCOME_ITEM),
         "seeded with the onboarding item: {inbox:?}"
     );
-    let item_id = session
+    let item_id = engine
         .doc()
         .add_item(LIST_INBOX, "captured before signing up")
         .unwrap();
-    session.flush().await.unwrap();
+    engine.flush().await.unwrap();
 
     // Signup adopts the workspace: same doc id on the server, same
     // key, token written, and the history ships on the first connect.
@@ -87,14 +87,14 @@ async fn fresh_install_runs_local_only_and_signup_adopts_it() {
     assert_eq!(identity.account_id, outcome.account_id);
     assert!(bootstrap::local_only_doc(&profile).unwrap().is_none());
 
-    let session = Session::open_with_profile(profile, true).await.unwrap();
-    assert!(!session.is_local_only());
-    assert!(session.is_online(), "signup wrote a usable device token");
+    let engine = Engine::open_with_profile(profile, true).await.unwrap();
+    assert!(!engine.is_local_only());
+    assert!(engine.is_online(), "signup wrote a usable device token");
     assert_eq!(
-        session.doc().get_item(&item_id).unwrap().text,
+        engine.doc().get_item(&item_id).unwrap().text,
         "captured before signing up"
     );
-    session.flush().await.unwrap();
+    engine.flush().await.unwrap();
 
     // A second device of the account pulls the adopted history: the
     // pre-signup item and the seeded list, under the Home DEK that is
@@ -117,20 +117,20 @@ async fn fresh_install_runs_local_only_and_signup_adopts_it() {
         false,
     )
     .await;
-    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
-    assert!(session_b.is_online());
+    let engine_b = Engine::open_with_profile(profile_b, true).await.unwrap();
+    assert!(engine_b.is_online());
     assert_eq!(
-        session_b.doc().get_item(&item_id).unwrap().text,
+        engine_b.doc().get_item(&item_id).unwrap().text,
         "captured before signing up"
     );
     assert!(
-        session_b
+        engine_b
             .doc()
             .items_in_list(LIST_INBOX, false)
             .iter()
             .any(|i| i.text == WELCOME_ITEM)
     );
-    session_b.flush().await.unwrap();
+    engine_b.flush().await.unwrap();
 }
 
 /// Signup from a profile that is not local-only (none at all here)
@@ -154,16 +154,16 @@ async fn signup_without_a_local_workspace_seeds_a_fresh_doc() {
     .await
     .unwrap();
     assert!(!outcome.adopted);
-    let session = Session::open_with_profile(profile, true).await.unwrap();
-    assert!(session.is_online());
+    let engine = Engine::open_with_profile(profile, true).await.unwrap();
+    assert!(engine.is_online());
     assert!(
-        session
+        engine
             .doc()
             .items_in_list(LIST_INBOX, false)
             .iter()
             .any(|i| i.text == WELCOME_ITEM)
     );
-    session.flush().await.unwrap();
+    engine.flush().await.unwrap();
 }
 
 /// The macOS app hosts a local-only workspace like any other and asks
@@ -221,7 +221,9 @@ async fn login_over_a_local_only_workspace_then_host_boots() {
     .unwrap();
     assert_eq!(outcome.account_id, account.account_id);
 
-    let handle = daemon::spawn_with(reopen_profile(&dir), true).await.unwrap();
+    let handle = daemon::spawn_with(reopen_profile(&dir), true)
+        .await
+        .unwrap();
     let info = handle.client.session().await.unwrap();
     assert!(!info.local_only);
     assert_eq!(info.account_id, account.account_id);

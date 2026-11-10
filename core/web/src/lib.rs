@@ -2,7 +2,7 @@
 //!
 //! Surfaces enough of `monoplan-core` for a JS host to (a) round-trip a
 //! `Doc` through a storage adapter and (b) drive the sans-IO
-//! `SyncEngine` from a browser-owned `WebSocket`, (c) password/recovery derivation.
+//! `Replica` from a browser-owned `WebSocket`, (c) password/recovery derivation.
 
 use std::collections::VecDeque;
 
@@ -14,8 +14,8 @@ use monoplan_core::{
     ImportSummary as CoreImportSummary, InFlightPush as CoreInFlightPush,
     InviteSecret as CoreInviteSecret, ItemLifecycle as CoreItemLifecycle, Kek as CoreKek,
     LocalSeq as CoreLocalSeq, LocalStorage as CoreLocalStorage, NotesDeltaOp, PushId as CorePushId,
-    RemoteWalRow as CoreRemoteWalRow, ServerSeq as CoreServerSeq, StorageError as CoreStorageError,
-    SyncEngine as CoreSyncEngine, VersionVector, WrappedDek as CoreWrappedDek,
+    RemoteWalRow as CoreRemoteWalRow, Replica as CoreReplica, ServerSeq as CoreServerSeq,
+    StorageError as CoreStorageError, VersionVector, WrappedDek as CoreWrappedDek,
     derive_password_master, derive_recovery_master, generate_recovery_code,
     hello_frame as core_hello_frame, kek_from_master,
     parse_hello_response as core_parse_hello_response, parse_recovery_code,
@@ -58,7 +58,7 @@ fn console_error(msg: &str) {
 
 /// Search tokenizer (`spec/search.md` "Normalization"), exported so JS
 /// surfaces that fold names the same way (pickers, the emoji index) share
-/// one implementation with the engine.
+/// one implementation with the replica.
 #[wasm_bindgen]
 pub fn tokenize(input: &str) -> Vec<String> {
     monoplan_core::tokenize(input)
@@ -180,7 +180,7 @@ impl Doc {
 
     /// Set (or clear, with `undefined` / empty) the account id stamped
     /// into `createdBy` on items this doc creates from now on. Call once
-    /// at boot, after replay and before the engine takes the doc; leave
+    /// at boot, after replay and before the replica takes the doc; leave
     /// unset for anonymous sessions.
     #[wasm_bindgen(js_name = setAuthor)]
     pub fn set_author(&mut self, account_id: Option<String>) {
@@ -839,7 +839,7 @@ impl Dek {
     }
 
     /// Duplicate the DEK handle. Needed because
-    /// `new SyncEngine(doc, dek, ...)` *consumes* the JS handle, but
+    /// `new Replica(doc, dek, ...)` *consumes* the JS handle, but
     /// we also want the DEK around for encrypt-at-rest of the local op log.
     /// Named `dup` (not `clone`) to dodge the `Clone` trait clash on
     /// the wasm wrapper while still being clear about the intent.
@@ -1187,9 +1187,9 @@ impl EncryptedBlob {
     }
 }
 
-// ---------- EngineStorage (JS-implemented LocalStorage) ----------
+// ---------- ReplicaStorage (JS-implemented LocalStorage) ----------
 //
-// The engine's `LocalStorage` trait is synchronous, but IndexedDB is
+// The replica's `LocalStorage` trait is synchronous, but IndexedDB is
 // async. The JS side bridges the gap with an in-memory mirror that
 // answers these methods immediately and flushes IDB in the
 // background (see `js/core/src/storage/idb-storage.ts`). These extern
@@ -1205,25 +1205,25 @@ impl EncryptedBlob {
 //     `js_sys` reflection.
 //
 // `boot()` is intentionally absent — on web the host reconstructs the
-// `Doc` in JS directly from IDB before constructing the engine (and
-// seeds the engine's cursors via the `seed*` methods), so the engine
+// `Doc` in JS directly from IDB before constructing the replica (and
+// seeds the replica's cursors via the `seed*` methods), so the replica
 // never calls `storage.boot()` itself (verified in `core/src/sync.rs`).
 // `WebStorage::boot` returns an empty `BootState` to satisfy the trait.
 #[wasm_bindgen]
 extern "C" {
-    #[wasm_bindgen(typescript_type = "EngineStorage")]
-    pub type EngineStorage;
+    #[wasm_bindgen(typescript_type = "ReplicaStorage")]
+    pub type ReplicaStorage;
 
     #[wasm_bindgen(method, catch, js_name = appendLocalWal)]
     fn append_local_wal(
-        this: &EngineStorage,
+        this: &ReplicaStorage,
         ciphertext: &[u8],
         nonce: &[u8],
     ) -> Result<f64, JsValue>;
 
     #[wasm_bindgen(method, catch, js_name = appendRemoteWal)]
     fn append_remote_wal(
-        this: &EngineStorage,
+        this: &ReplicaStorage,
         server_seq: f64,
         ciphertext: &[u8],
         nonce: &[u8],
@@ -1232,21 +1232,21 @@ extern "C" {
 
     #[wasm_bindgen(method, catch, js_name = writeSnapshot)]
     fn write_snapshot(
-        this: &EngineStorage,
+        this: &ReplicaStorage,
         cutoff: f64,
         ciphertext: &[u8],
         nonce: &[u8],
     ) -> Result<(), JsValue>;
 
     #[wasm_bindgen(method, catch, js_name = writeAckedSeq)]
-    fn write_acked_seq(this: &EngineStorage, seq: f64) -> Result<(), JsValue>;
+    fn write_acked_seq(this: &ReplicaStorage, seq: f64) -> Result<(), JsValue>;
 
     #[wasm_bindgen(method, catch, js_name = writeServerKnownVv)]
-    fn write_server_known_vv(this: &EngineStorage, vv: &[u8]) -> Result<(), JsValue>;
+    fn write_server_known_vv(this: &ReplicaStorage, vv: &[u8]) -> Result<(), JsValue>;
 
     #[wasm_bindgen(method, catch, js_name = putInFlightPush)]
     fn put_in_flight_push(
-        this: &EngineStorage,
+        this: &ReplicaStorage,
         push_id: &[u8],
         ciphertext: &[u8],
         nonce: &[u8],
@@ -1256,15 +1256,15 @@ extern "C" {
 
     #[wasm_bindgen(method, catch, js_name = completePush)]
     fn complete_push(
-        this: &EngineStorage,
+        this: &ReplicaStorage,
         push_id: &[u8],
         server_known_vv: &[u8],
     ) -> Result<(), JsValue>;
 }
 
 #[wasm_bindgen(typescript_custom_section)]
-const TS_ENGINE_STORAGE: &'static str = r#"
-export interface EngineStorage {
+const TS_REPLICA_STORAGE: &'static str = r#"
+export interface ReplicaStorage {
   appendLocalWal(ciphertext: Uint8Array, nonce: Uint8Array): number;
   appendRemoteWal(serverSeq: number, ciphertext: Uint8Array, nonce: Uint8Array, serverKnownVv: Uint8Array): { localSeq: number; inserted: boolean };
   writeSnapshot(cutoff: number, ciphertext: Uint8Array, nonce: Uint8Array): void;
@@ -1275,12 +1275,12 @@ export interface EngineStorage {
 }
 "#;
 
-/// Rust `LocalStorage` over a JS-implemented `EngineStorage`. Every
+/// Rust `LocalStorage` over a JS-implemented `ReplicaStorage`. Every
 /// call forwards synchronously to the JS in-memory mirror; durability
 /// (the background IDB flush) is the JS side's concern and is surfaced
-/// to the engine out-of-band via `notifyOplogDurable`.
+/// to the replica out-of-band via `notifyOplogDurable`.
 struct WebStorage {
-    js: EngineStorage,
+    js: ReplicaStorage,
 }
 
 fn jsval_err(e: JsValue) -> CoreStorageError {
@@ -1308,7 +1308,7 @@ fn reflect_bool(obj: &JsValue, key: &str) -> Result<bool, CoreStorageError> {
 impl CoreLocalStorage for WebStorage {
     fn boot(&self, _doc_id: CoreDocId) -> Result<CoreBootState, CoreStorageError> {
         // Never reached: the web host rebuilds the `Doc` from IDB in JS
-        // before constructing the engine, and the engine itself never
+        // before constructing the replica, and the replica itself never
         // calls `boot()`.
         Ok(CoreBootState::default())
     }
@@ -1401,8 +1401,8 @@ impl CoreLocalStorage for WebStorage {
 // `Hello` / `HelloAck` is per socket, not per doc. The JS host
 // (`SyncBridge`) sends `helloFrame` first on every socket, feeds the
 // first reply to `parseHelloResponse`, and only then calls
-// `handleConnected` on each doc's engine. Later frames are routed to
-// the right engine by `serverFrameDocId`.
+// `handleConnected` on each doc's replica. Later frames are routed to
+// the right replica by `serverFrameDocId`.
 
 /// The `Hello` frame to send first on a fresh socket.
 #[wasm_bindgen(js_name = helloFrame)]
@@ -1465,21 +1465,21 @@ pub fn server_frame_doc_id(bytes: &[u8]) -> Option<String> {
     core_server_frame_doc_id(bytes).map(|id| id.to_string())
 }
 
-// ---------- SyncEngine ----------
+// ---------- Replica ----------
 
-/// What a [`SyncEngine`] wraps. `Synced` is the sans-IO engine the
-/// browser drives over a WebSocket with a DEK and an `EngineStorage`.
+/// What a [`Replica`] wraps. `Synced` is the sans-IO replica the
+/// browser drives over a WebSocket with a DEK and a `ReplicaStorage`.
 /// `Mirror` is the macOS app's webview (`spec/mac-window-plan.md`): a
 /// doc with no DEK, no storage and no server, seeded by the in-process
 /// host and converged with it by exchanging plaintext Loro updates. The
 /// store's mutation and read surface is identical over both; only the
 /// sync verbs differ, and in mirror mode the WebSocket ones are inert.
-enum Engine {
-    Synced(CoreSyncEngine),
-    Mirror(MirrorEngine),
+enum Inner {
+    Synced(CoreReplica),
+    Mirror(MirrorReplica),
 }
 
-struct MirrorEngine {
+struct MirrorReplica {
     doc: CoreDoc,
     doc_id: CoreDocId,
     /// The oplog frontier as of the last `flush`: the base of the next
@@ -1490,36 +1490,36 @@ struct MirrorEngine {
 }
 
 #[wasm_bindgen]
-pub struct SyncEngine {
-    inner: Engine,
+pub struct Replica {
+    inner: Inner,
 }
 
-impl SyncEngine {
+impl Replica {
     fn doc(&self) -> &CoreDoc {
         match &self.inner {
-            Engine::Synced(e) => e.doc(),
-            Engine::Mirror(m) => &m.doc,
+            Inner::Synced(e) => e.doc(),
+            Inner::Mirror(m) => &m.doc,
         }
     }
 
-    fn synced(&self) -> Option<&CoreSyncEngine> {
+    fn synced(&self) -> Option<&CoreReplica> {
         match &self.inner {
-            Engine::Synced(e) => Some(e),
-            Engine::Mirror(_) => None,
+            Inner::Synced(e) => Some(e),
+            Inner::Mirror(_) => None,
         }
     }
 
-    fn synced_mut(&mut self) -> Option<&mut CoreSyncEngine> {
+    fn synced_mut(&mut self) -> Option<&mut CoreReplica> {
         match &mut self.inner {
-            Engine::Synced(e) => Some(e),
-            Engine::Mirror(_) => None,
+            Inner::Synced(e) => Some(e),
+            Inner::Mirror(_) => None,
         }
     }
 }
 
 #[wasm_bindgen]
-impl SyncEngine {
-    /// Build a new engine. Consumes `doc` and `dek` — the JS handles
+impl Replica {
+    /// Build a new replica. Consumes `doc` and `dek` — the JS handles
     /// must not be reused after this call. `doc_id` is the server-
     /// assigned UUID for this doc (one of the session's memberships).
     /// `last_acked_seq` is the contiguous-prefix seq persisted from
@@ -1531,14 +1531,14 @@ impl SyncEngine {
         doc_id: String,
         dek: Dek,
         last_acked_seq: u64,
-        storage: EngineStorage,
-    ) -> Result<SyncEngine, JsError> {
+        storage: ReplicaStorage,
+    ) -> Result<Replica, JsError> {
         let parsed = parse_doc_id(&doc_id)?;
-        // The host always passes a JS `EngineStorage` (the `IdbStorage`
+        // The host always passes a JS `ReplicaStorage` (the `IdbStorage`
         // mirror): capture, ack, and remote-apply all flow through it.
         let dyn_storage: Box<dyn CoreLocalStorage> = Box::new(WebStorage { js: storage });
-        Ok(SyncEngine {
-            inner: Engine::Synced(CoreSyncEngine::new(
+        Ok(Replica {
+            inner: Inner::Synced(CoreReplica::new(
                 doc.inner,
                 parsed,
                 dek.inner,
@@ -1548,7 +1548,7 @@ impl SyncEngine {
         })
     }
 
-    /// A mirror engine (`spec/mac-window-plan.md` "Wasm side"): the
+    /// A mirror replica (`spec/mac-window-plan.md` "Wasm side"): the
     /// doc came from `Doc.loadWithPeer` on the host's seed. No DEK, no
     /// storage, no WebSocket; `flush` exports the doc's ops since the
     /// last flush for `takeMirrorOutbox`, and `applyMirrorUpdate` takes
@@ -1557,11 +1557,11 @@ impl SyncEngine {
     /// `popOutbox`, ...) and the persistence verbs (`captureLocalOps`,
     /// the snapshot folds, the seeds) are no-ops here.
     #[wasm_bindgen(js_name = mirror)]
-    pub fn mirror(doc: Doc, doc_id: String) -> Result<SyncEngine, JsError> {
+    pub fn mirror(doc: Doc, doc_id: String) -> Result<Replica, JsError> {
         let doc_id = parse_doc_id(&doc_id)?;
         let last_sent = doc.inner.oplog_vv();
-        Ok(SyncEngine {
-            inner: Engine::Mirror(MirrorEngine {
+        Ok(Replica {
+            inner: Inner::Mirror(MirrorReplica {
                 doc: doc.inner,
                 doc_id,
                 last_sent,
@@ -1570,10 +1570,10 @@ impl SyncEngine {
         })
     }
 
-    /// True for an engine built by [`SyncEngine::mirror`].
+    /// True for a replica built by [`Replica::mirror`].
     #[wasm_bindgen(js_name = isMirror)]
     pub fn is_mirror(&self) -> bool {
-        matches!(self.inner, Engine::Mirror(_))
+        matches!(self.inner, Inner::Mirror(_))
     }
 
     /// Persist any locally-committed mutations as a durable WAL row
@@ -1675,21 +1675,21 @@ impl SyncEngine {
         Ok(())
     }
 
-    /// The doc this engine syncs (uuid string) — the routing key the
+    /// The doc this replica syncs (uuid string) — the routing key the
     /// host matches `serverFrameDocId` against, and the one a mirror
     /// bridge routes host updates by.
     #[wasm_bindgen(js_name = docId)]
     pub fn doc_id(&self) -> String {
         match &self.inner {
-            Engine::Synced(e) => e.doc_id().0.to_string(),
-            Engine::Mirror(m) => m.doc_id.0.to_string(),
+            Inner::Synced(e) => e.doc_id().0.to_string(),
+            Inner::Mirror(m) => m.doc_id.0.to_string(),
         }
     }
 
     // -- transport callbacks --
 
     /// Caller's WebSocket is open and its `Hello` handshake succeeded.
-    /// Engine queues `OpenDoc` for its doc.
+    /// Replica queues `OpenDoc` for its doc.
     #[wasm_bindgen(js_name = handleConnected)]
     pub fn handle_connected(&mut self) {
         if let Some(e) = self.synced_mut() {
@@ -1697,7 +1697,7 @@ impl SyncEngine {
         }
     }
 
-    /// Caller's WebSocket dropped. Engine returns to `Disconnected` and
+    /// Caller's WebSocket dropped. Replica returns to `Disconnected` and
     /// clears the outbox; reconnect re-derives any pending frames.
     #[wasm_bindgen(js_name = handleDisconnected)]
     pub fn handle_disconnected(&mut self) {
@@ -1716,7 +1716,7 @@ impl SyncEngine {
         }
     }
 
-    /// Hand one binary WebSocket frame to the engine.
+    /// Hand one binary WebSocket frame to the replica.
     #[wasm_bindgen(js_name = handleServerBytes)]
     pub fn handle_server_bytes(&mut self, bytes: &[u8]) {
         if let Some(e) = self.synced_mut() {
@@ -1733,8 +1733,8 @@ impl SyncEngine {
     /// WAL in the browser.
     pub fn flush(&mut self) {
         match &mut self.inner {
-            Engine::Synced(e) => e.flush(),
-            Engine::Mirror(m) => {
+            Inner::Synced(e) => e.flush(),
+            Inner::Mirror(m) => {
                 let now = m.doc.oplog_vv();
                 if m.last_sent.includes_vv(&now) {
                     return;
@@ -1762,13 +1762,13 @@ impl SyncEngine {
 
     /// Mirror only: the next plaintext Loro update `flush` exported for
     /// the host, or `undefined` when there is none (and always on a
-    /// synced engine). The bridge drains to empty after every flush
-    /// and hands each one to `Host.import`.
+    /// synced replica). The bridge drains to empty after every flush
+    /// and hands each one to `Engine.import`.
     #[wasm_bindgen(js_name = takeMirrorOutbox)]
     pub fn take_mirror_outbox(&mut self) -> Option<Vec<u8>> {
         match &mut self.inner {
-            Engine::Synced(_) => None,
-            Engine::Mirror(m) => m.outbox.pop_front(),
+            Inner::Synced(_) => None,
+            Inner::Mirror(m) => m.outbox.pop_front(),
         }
     }
 
@@ -1778,12 +1778,12 @@ impl SyncEngine {
     /// AppEvents the way `apply_remote` queues a server frame's: the
     /// bridge drains them into the store afterwards. Ops the mirror
     /// already has (its own, echoing back) are skipped. Errors on a
-    /// synced engine, and when Loro refuses the bytes.
+    /// synced replica, and when Loro refuses the bytes.
     #[wasm_bindgen(js_name = applyMirrorUpdate)]
     pub fn apply_mirror_update(&mut self, bytes: &[u8]) -> Result<(), JsError> {
         match &mut self.inner {
-            Engine::Synced(_) => Err(JsError::new("applyMirrorUpdate: not a mirror engine")),
-            Engine::Mirror(m) => {
+            Inner::Synced(_) => Err(JsError::new("applyMirrorUpdate: not a mirror replica")),
+            Inner::Mirror(m) => {
                 let range = m.doc.import_host_update(bytes).map_err(js_err)?;
                 // The host's ops are not ours to send back: fold them
                 // into the send base so the next flush exports only
@@ -1794,13 +1794,13 @@ impl SyncEngine {
         }
     }
 
-    /// Drain the next engine event. Returns `undefined` when the queue
+    /// Drain the next replica event. Returns `undefined` when the queue
     /// is empty. A mirror has no connection and emits none.
     #[wasm_bindgen(js_name = popEvent)]
-    pub fn pop_event(&mut self) -> Option<EngineEvent> {
+    pub fn pop_event(&mut self) -> Option<ReplicaEvent> {
         self.synced_mut()
             .and_then(|e| e.pop_event())
-            .map(EngineEvent::from)
+            .map(ReplicaEvent::from)
     }
 
     /// Drain the next domain-level change event. Pair with `popEvent`
@@ -1836,7 +1836,7 @@ impl SyncEngine {
     // -- introspection --
     //
     // A mirror has no connection of its own: the link state and the
-    // server cursors below are the synced engine's and read as
+    // server cursors below are the synced replica's and read as
     // offline / zero / unknown on a mirror. The window's status comes
     // from the host (`spec/mac-window-plan.md`).
 
@@ -1850,7 +1850,7 @@ impl SyncEngine {
         self.synced().is_none_or(|e| e.is_idle())
     }
 
-    /// Contiguous-prefix seq the engine has applied **in memory**.
+    /// Contiguous-prefix seq the replica has applied **in memory**.
     /// Use for transport-layer decisions; persist `lastDurableSeq()`
     /// as the resume cursor instead so a crash never resumes from a
     /// seq the local oplog doesn't cover.
@@ -1867,7 +1867,7 @@ impl SyncEngine {
     }
 
     /// Contiguous-prefix seq the host has confirmed locally durable.
-    /// Equals the highest `last_acked_seq` the engine has shipped (or
+    /// Equals the highest `last_acked_seq` the replica has shipped (or
     /// will ship) in `Ack` frames. Persist this between sessions.
     #[wasm_bindgen(js_name = lastDurableSeq)]
     pub fn last_durable_seq(&self) -> u64 {
@@ -1888,9 +1888,9 @@ impl SyncEngine {
 
     // -- doc passthrough --
     //
-    // Engine owns the `Doc`, but JS still needs to read it (render UI)
+    // Replica owns the `Doc`, but JS still needs to read it (render UI)
     // and mutate it (user actions). Loro mutations take `&self` thanks
-    // to interior mutability, so the wrapper can share the engine's
+    // to interior mutability, so the wrapper can share the replica's
     // borrow without `&mut self` ceremony.
 
     /// Snapshot envelope to persist (loro snapshot + last-pushed VV).
@@ -1916,8 +1916,8 @@ impl SyncEngine {
     #[wasm_bindgen(js_name = hasUnsyncedOps)]
     pub fn has_unsynced_ops(&self) -> bool {
         match &self.inner {
-            Engine::Synced(e) => e.has_unsynced_ops(),
-            Engine::Mirror(m) => !m.last_sent.includes_vv(&m.doc.oplog_vv()),
+            Inner::Synced(e) => e.has_unsynced_ops(),
+            Inner::Mirror(m) => !m.last_sent.includes_vv(&m.doc.oplog_vv()),
         }
     }
 
@@ -1926,7 +1926,7 @@ impl SyncEngine {
     // After each local mutation the browser host captures the oplog
     // VV, asks for the delta since the previous capture, and pushes
     // that into the IndexedDB oplog. Replay (`importOplogUpdates`) runs
-    // on the bare `Doc` before the engine is constructed, so it lives
+    // on the bare `Doc` before the replica is constructed, so it lives
     // on `Doc` only.
 
     #[wasm_bindgen(js_name = oplogVvBytes)]
@@ -1956,7 +1956,7 @@ impl SyncEngine {
         self.doc().export_json_string()
     }
 
-    /// Additive JSON import — counterpart of `exportJson` on the engine
+    /// Additive JSON import — counterpart of `exportJson` on the replica
     /// surface. Returns a JSON string of `{ listsAdded, itemsAdded,
     /// itemsSkipped, focusAdded }`. Doesn't push or flush — caller's normal
     /// post-mutation flow (oplog append, sync push) handles the new ops
@@ -2437,7 +2437,7 @@ impl SyncEngine {
     }
 }
 
-// ---------- EngineEvent ----------
+// ---------- ReplicaEvent ----------
 
 /// Flat JS-friendly view of `monoplan_core::Event`. The host switches on
 /// `kind` and reads the payload-specific getter — exactly one of
@@ -2446,7 +2446,7 @@ impl SyncEngine {
 /// arrays, `presenceAccountIds` / `presenceEmails` (empty on every
 /// other kind).
 #[wasm_bindgen]
-pub struct EngineEvent {
+pub struct ReplicaEvent {
     kind: &'static str,
     online: Option<bool>,
     seq: Option<u64>,
@@ -2455,7 +2455,7 @@ pub struct EngineEvent {
 }
 
 #[wasm_bindgen]
-impl EngineEvent {
+impl ReplicaEvent {
     #[wasm_bindgen(getter)]
     pub fn kind(&self) -> String {
         self.kind.to_string()
@@ -2495,9 +2495,9 @@ impl EngineEvent {
     }
 }
 
-impl EngineEvent {
+impl ReplicaEvent {
     fn bare(kind: &'static str) -> Self {
-        EngineEvent {
+        ReplicaEvent {
             kind,
             online: None,
             seq: None,
@@ -2507,30 +2507,30 @@ impl EngineEvent {
     }
 }
 
-impl From<CoreEvent> for EngineEvent {
+impl From<CoreEvent> for ReplicaEvent {
     fn from(e: CoreEvent) -> Self {
         match e {
-            CoreEvent::ConnStateChanged { online } => EngineEvent {
+            CoreEvent::ConnStateChanged { online } => ReplicaEvent {
                 online: Some(online),
-                ..EngineEvent::bare("connStateChanged")
+                ..ReplicaEvent::bare("connStateChanged")
             },
-            CoreEvent::PulledInitial => EngineEvent::bare("pulledInitial"),
-            CoreEvent::Pushed => EngineEvent::bare("pushed"),
-            CoreEvent::FrontierAdvanced { seq } => EngineEvent {
+            CoreEvent::PulledInitial => ReplicaEvent::bare("pulledInitial"),
+            CoreEvent::Pushed => ReplicaEvent::bare("pushed"),
+            CoreEvent::FrontierAdvanced { seq } => ReplicaEvent {
                 seq: Some(seq),
-                ..EngineEvent::bare("frontierAdvanced")
+                ..ReplicaEvent::bare("frontierAdvanced")
             },
-            CoreEvent::Error(message) => EngineEvent {
+            CoreEvent::Error(message) => ReplicaEvent {
                 message: Some(message),
-                ..EngineEvent::bare("error")
+                ..ReplicaEvent::bare("error")
             },
-            CoreEvent::DocClosed { reason } => EngineEvent {
+            CoreEvent::DocClosed { reason } => ReplicaEvent {
                 message: Some(reason),
-                ..EngineEvent::bare("docClosed")
+                ..ReplicaEvent::bare("docClosed")
             },
-            CoreEvent::Presence { accounts } => EngineEvent {
+            CoreEvent::Presence { accounts } => ReplicaEvent {
                 presence: accounts,
-                ..EngineEvent::bare("presence")
+                ..ReplicaEvent::bare("presence")
             },
         }
     }

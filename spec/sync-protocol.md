@@ -6,14 +6,14 @@ WebSocket per device. Frames are binary, MessagePack-encoded (`rmp-serde`). Each
 
 **Status:** Implemented.
 
-The unit the server stores, sequences and relays is an **update** (`updates` table, `PushUpdates`, `UpdatesAck`, `UpdatesBatch`, `UpdatesBroadcast`; `seq`, `since_seq`, `last_acked_seq` count them). The name is Loro's: an update is the byte pack `ExportMode::Updates` produces, holding *1..N* changes, each a peer's contiguous run of *1..N* CRDT operations. On the wire and at rest it is a single `EncryptedBlob`; the server never sees inside it. It is deliberately **not** called "ops" (the row is two levels above an op) or "blobs" (snapshots are blobs too). The client engine derives one blob per push cycle (`Updates(server_known_vv)` — everything the server has no proof of, see `spec/vv-wal-separation.md`), so "1 seq" on the server ≈ "one push cycle" on the client, not "one user action".
+The unit the server stores, sequences and relays is an **update** (`updates` table, `PushUpdates`, `UpdatesAck`, `UpdatesBatch`, `UpdatesBroadcast`; `seq`, `since_seq`, `last_acked_seq` count them). The name is Loro's: an update is the byte pack `ExportMode::Updates` produces, holding *1..N* changes, each a peer's contiguous run of *1..N* CRDT operations. On the wire and at rest it is a single `EncryptedBlob`; the server never sees inside it. It is deliberately **not** called "ops" (the row is two levels above an op) or "blobs" (snapshots are blobs too). The client replica derives one blob per push cycle (`Updates(server_known_vv)` — everything the server has no proof of, see `spec/vv-wal-separation.md`), so "1 seq" on the server ≈ "one push cycle" on the client, not "one user action".
 
 Consequences worth remembering:
 
 - Server-assigned `seq` enumerates *blobs*, not user actions. A user typing 1000 characters in one session and pressing flush once = 1 seq.
 - `snapshot_threshold_blobs` (below) is in blob count, not action count or bytes.
 - Compaction by `seq ≤ snapshot.compaction_floor_seq` deletes *whole blobs* — a single fat blob is uncompactable.
-- `PushUpdates { updates: [PushBlob] }` accepts a vector, so the wire supports >1 blob per push even though the current engine sends one.
+- `PushUpdates { updates: [PushBlob] }` accepts a vector, so the wire supports >1 blob per push even though the current replica sends one.
 
 A future move to byte-based eligibility / compaction would close the asymmetry; tracked in `roadmap.md`.
 
@@ -34,7 +34,7 @@ First frame on every WS connection, before any payload exchange:
 
 All subsequent frames are interpreted under the agreed `protocol_version`. Belt-and-braces against breaking changes; MessagePack handles additive evolution within a version on its own. `HelloAck` is connection-scoped: anything about a particular doc arrives on `DocOpened`.
 
-The handshake is the **host's**, not the engine's: a socket serves every doc the device has open, so the host (CLI `sync::Session`, web `SyncBridge`) sends `Hello` once per socket and reads the reply with core's `hello_frame` / `parse_hello_response`, then brings each doc's `SyncEngine` online. An engine never sees `Hello` / `HelloAck`; its first frame out is `OpenDoc`.
+The handshake is the **host's**, not the replica's: a socket serves every doc the device has open, so the host (CLI `sync::Engine`, web `SyncBridge`) sends `Hello` once per socket and reads the reply with core's `hello_frame` / `parse_hello_response`, then brings each doc's `Replica` online. A replica never sees `Hello` / `HelloAck`; its first frame out is `OpenDoc`.
 
 Note: the per-list order-container CRDT schema (`spec/data-model.md` "Schema versioning & compatibility") shipped without a wire bump — the frames are identical and update blobs are opaque to the protocol. The doc layouts are mutually incompatible, but pre-release with a single user the cutover is handled operationally (export JSON → wipe → import), not fenced at the handshake. If a schema break ever needs to coexist with live old clients, bump this version then.
 
@@ -52,7 +52,7 @@ Rules:
 - The server subscribes **before** replying `DocOpened`, so once a client sees `DocOpened` there is no window in which a peer's push could slip past unregistered.
 - Re-opening an already-open doc is idempotent (another `DocOpened`, no second subscription).
 - A connection holds **any number** of open docs (multiplexing, `spec/sharing-plan.md`): one broadcast subscription and one snapshot-lease slot per open doc, the session loop polling every subscription. Which docs a connection opens is the client's choice; the server never assumes the full membership set is open. A closed broadcast channel on any one open doc (slow consumer) ends the whole session, and the client re-pulls every doc from its cursor on reconnect. On disconnect every open doc's subscription is dropped and any held snapshot lease is released.
-- Clients route inbound frames to the right engine by `doc_id` (core's `server_frame_doc_id`); a frame for a doc the client has no engine for is dropped and reported, never applied.
+- Clients route inbound frames to the right replica by `doc_id` (core's `server_frame_doc_id`); a frame for a doc the client has no replica for is dropped and reported, never applied.
 - Membership is checked at `OpenDoc`; a membership removed mid-session is revoked live. `DELETE /api/docs/:doc_id/members/:account_id` drops the removed account's subscriptions on the doc and sends each of its open connections `DocClosed { doc_id, reason }`; the server unbinds the doc from that connection (the snapshot lease, if held, is released) and keeps serving its other docs. A later payload frame naming the closed doc ends the session like any frame for an unopened doc; a reconnect's `OpenDoc` is refused. Clients treat `DocClosed` and `DocRejected` alike: stop routing the doc and drop the local copy (`sharing-plan.md` §Member removal). The window between the membership commit and the frame's delivery is the only time a removed member can still push or receive on the doc.
 
 ## Presence
@@ -66,7 +66,7 @@ The subscriber registry (`sessions.rs`) is also the source of truth for who has 
 - **An account's last close on a doc** (the set shrinks — a dropped socket, or live revocation via `DELETE .../members/:account_id`): every remaining subscriber gets the new set, even when that leaves one account alone, so its clients fall back to "only me".
 - **One account present**, however many connections: nothing is sent. A connection alone on a doc hears nothing, and "only me" is the client's default.
 
-The frame is a live signal only: not persisted, not acked, not part of the `seq` stream, and ignored by the sync state machine (the core engine surfaces it as `Event::Presence` in any connected state). Delivery is best-effort on the same per-subscriber channel as broadcasts; a full channel drops the frame rather than the subscriber (the next update broadcast polices slow consumers, and that session's eventual unsubscribe announces the change). Ordering: a `Presence` queued for a connection during its own `OpenDoc` is delivered after `DocOpened`, but it can land before or after the reply to any *later* client frame, so clients must accept it at any point. Clients reset to "only me" for every doc when the socket drops and when a doc is closed or forgotten; a reconnect's `OpenDoc` yields a fresh set if others are present. Emails are already visible to every member via `GET /api/docs/:doc_id/members`, so the frame reveals nothing new; Home is never shared, so it only ever lists its owner and is never announced.
+The frame is a live signal only: not persisted, not acked, not part of the `seq` stream, and ignored by the sync state machine (the core replica surfaces it as `Event::Presence` in any connected state). Delivery is best-effort on the same per-subscriber channel as broadcasts; a full channel drops the frame rather than the subscriber (the next update broadcast polices slow consumers, and that session's eventual unsubscribe announces the change). Ordering: a `Presence` queued for a connection during its own `OpenDoc` is delivered after `DocOpened`, but it can land before or after the reply to any *later* client frame, so clients must accept it at any point. Clients reset to "only me" for every doc when the socket drops and when a doc is closed or forgotten; a reconnect's `OpenDoc` yields a fresh set if others are present. Emails are already visible to every member via `GET /api/docs/:doc_id/members`, so the frame reveals nothing new; Home is never shared, so it only ever lists its owner and is never announced.
 
 The web client shows the *other* present accounts as avatars beside the workspace name in the sidebar (`nav.tsx`, `Avatar.tsx`), capped at three plus a "+N" disc. The CLI daemon receives the event and ignores it.
 
@@ -116,7 +116,7 @@ Every pushed blob carries a client-minted **`push_id`** (uuid, 16 raw bytes unde
 
 ## Ordering & ack flow
 
-**Status:** Implemented. `last_contiguous_seq` advances only over the contiguous next seq. Because per-doc seqs are dense and gap-free at the server and delivered in order over a single connection, that always equals the max seq seen — so no reorder buffering or gap detection is needed. (A forward gap is structurally impossible here; the engine `debug_assert!`s against one rather than carrying recovery machinery for a case that can't arise under this deployment.)
+**Status:** Implemented. `last_contiguous_seq` advances only over the contiguous next seq. Because per-doc seqs are dense and gap-free at the server and delivered in order over a single connection, that always equals the max seq seen — so no reorder buffering or gap detection is needed. (A forward gap is structurally impossible here; the replica `debug_assert!`s against one rather than carrying recovery machinery for a case that can't arise under this deployment.)
 
 - Server orders updates by per-doc `seq` of arrival. Per-doc FIFO is the only ordering that matters — different docs' streams are independent.
 - Client decrypts updates and applies via Loro **immediately on receipt**, regardless of seq contiguity. Server `seq` is a *delivery* sequence, not a *causal* one; Loro's CRDT handles real causal ordering off the encoded VV. Applying out-of-order is safe and keeps the UI responsive under replica-lag conditions.
@@ -128,7 +128,7 @@ Every pushed blob carries a client-minted **`push_id`** (uuid, 16 raw bytes unde
 
 **Status:** Implemented. `apply_remote` and oplog replay set origin `"remote"`; notes delta writes set `"notes:<item id>"`; `reconcile` sets `"sweep"`; `UndoManager` excludes all three prefixes.
 
-Every Loro commit carries an origin string. The engine uses four values:
+Every Loro commit carries an origin string. The replica uses four values:
 
 - **`""`** (Loro default) — local mutations from the user. No explicit tag needed; `LoroDoc::commit()` already passes empty.
 - **`"remote"`** — updates applied via `apply_remote()` after decrypting an inbound `UpdatesBatch`/`UpdatesBroadcast`. Set with `LoroDoc::import_with(bytes, "remote")`.
@@ -139,7 +139,7 @@ This exists so a future `UndoManager` can `exclude_origin_prefixes(["remote"])` 
 
 ## Backpressure
 
-**Status:** Implemented. Chunk caps (500 updates / 256 KiB) are enforced in `server::sync::queries::fetch_updates_batch`; ack decoupling is the engine's normal behavior.
+**Status:** Implemented. Chunk caps (500 updates / 256 KiB) are enforced in `server::sync::queries::fetch_updates_batch`; ack decoupling is the replica's normal behavior.
 
 `UpdatesBatch` chunks are sent **fire-and-forget** — the server emits them back-to-back without waiting for client acknowledgement. WebSocket sits on TCP, which has its own flow control: if the client can't drain its receive buffer fast enough (slow decrypt, low memory, paused tab), the TCP window closes and the server's `send` blocks. No application-level pacing required. This avoids paying RTT × chunk-count on catch-up — for a 10-chunk catch-up at 100 ms RTT, request-ack-request would burn 1 s of pure waiting; fire-and-forget burns 0.
 
@@ -261,7 +261,7 @@ The `up_to_seq` carried by `SnapshotRequired` is informational; the authoritativ
 
 ## Reconnect
 
-**Status:** Partial. Resume-from-`last_acked_seq` is implemented in both CLI and web engines. Exponential backoff with jitter is implemented in the JS sync bridge (`js/core/src/sync-bridge.ts`); the CLI runs one-shot so backoff doesn't apply there.
+**Status:** Partial. Resume-from-`last_acked_seq` is implemented in both CLI and web replicas. Exponential backoff with jitter is implemented in the JS sync bridge (`js/core/src/sync-bridge.ts`); the CLI runs one-shot so backoff doesn't apply there.
 
 Client maintains `last_acked_seq` in local state. On reconnect: WS upgrade with token → `Hello` / `HelloAck` → `OpenDoc` / `DocOpened` → `PullUpdates { since_seq: last_acked_seq }` → resume.
 

@@ -3,7 +3,7 @@
 // Distinct from `DeviceConfig` (sync identity + frontier in the
 // `device` store) — these are purely "where was I" / "how do I like
 // the UI" state that shouldn't be rewritten every time the sync
-// engine ticks, and conversely shouldn't drag the frontier write
+// replica ticks, and conversely shouldn't drag the frontier write
 // every time the user changes view.
 //
 // One row per account in the `prefs` store of the shared `monoplan-web`

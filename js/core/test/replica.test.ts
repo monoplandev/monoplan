@@ -1,14 +1,14 @@
-// FFI smoke for the wasm SyncEngine surface.
+// FFI smoke for the wasm Replica surface.
 //
 // The deep state-machine coverage lives in `core/src/sync.rs` Rust
 // tests; this file only verifies the wasm-bindgen contract holds:
 // constructor consumes Doc/Dek, transport callbacks queue bytes,
 // events come out as flat objects with the documented shape, doc
-// mutations through the engine are observable, and a save/load round
-// trip reconstructs an engine without losing state.
+// mutations through the replica are observable, and a save/load round
+// trip reconstructs a replica without losing state.
 //
 // "Stub WebSocket" here is the test itself: it pushes connect, drains
-// the outbox, and asserts what the engine produced. The real protocol
+// the outbox, and asserts what the replica produced. The real protocol
 // round trip is `sync-e2e.test.ts`.
 
 import { describe, expect, test } from "bun:test";
@@ -20,10 +20,10 @@ import {
   helloFrame,
   parseHelloResponse,
   serverFrameDocId,
-  SyncEngine,
+  Replica,
 } from "../wasm/monoplan_core_web.js";
-import type { EngineStorage } from "../wasm/monoplan_core_web.js";
-import { MemEngineStorage } from "./mem-engine-storage.ts";
+import type { ReplicaStorage } from "../wasm/monoplan_core_web.js";
+import { MemReplicaStorage } from "./mem-replica-storage.ts";
 
 const LIST_MAIN = "inbox";
 const DOC_ID = "00000000-0000-0000-0000-000000000000";
@@ -37,13 +37,13 @@ function uuidBytes(id: string): Uint8Array {
   return out;
 }
 
-function memStorage(): EngineStorage {
-  return new MemEngineStorage() as unknown as EngineStorage;
+function memStorage(): ReplicaStorage {
+  return new MemReplicaStorage() as unknown as ReplicaStorage;
 }
 
-/** Drain the engine's AppEvent queue into plain objects — the wasm
+/** Drain the replica's AppEvent queue into plain objects — the wasm
  *  getters are only readable while the event is alive. */
-function drainAppEvents(eng: SyncEngine): Array<{
+function drainAppEvents(eng: Replica): Array<{
   kind: string;
   id: string;
   defaultView?: string;
@@ -63,16 +63,16 @@ function drainAppEvents(eng: SyncEngine): Array<{
   return out;
 }
 
-function newEngine(): SyncEngine {
+function newReplica(): Replica {
   // Doc.create() builds a fresh doc with no commits (no seeded user
-  // lists). Mutations through the engine are what put it in a
+  // lists). Mutations through the replica are what put it in a
   // pending state.
-  return new SyncEngine(Doc.create(), DOC_ID, Dek.generate(), 0n, memStorage());
+  return new Replica(Doc.create(), DOC_ID, Dek.generate(), 0n, memStorage());
 }
 
-describe("SyncEngine construction", () => {
+describe("Replica construction", () => {
   test("starts offline, non-idle, with a fresh frontier", () => {
-    const eng = newEngine();
+    const eng = newReplica();
     expect(eng.isOnline()).toBe(false);
     expect(eng.isIdle()).toBe(false);
     expect(eng.lastContiguousSeq()).toBe(0n);
@@ -130,7 +130,7 @@ describe("connection-level handshake helpers", () => {
 
 describe("transport callbacks", () => {
   test("handleConnected queues OpenDoc for its doc and emits online event", () => {
-    const eng = newEngine();
+    const eng = newReplica();
     eng.handleConnected();
 
     expect(eng.isOnline()).toBe(true);
@@ -153,7 +153,7 @@ describe("transport callbacks", () => {
   });
 
   test("a frame for another doc is reported, not applied", () => {
-    const eng = newEngine();
+    const eng = newReplica();
     eng.handleConnected();
     eng.popOutbox(); // discard OpenDoc
     eng.popEvent(); // discard online event
@@ -170,7 +170,7 @@ describe("transport callbacks", () => {
   });
 
   test("handleDisconnected from Opening clears outbox and emits offline", () => {
-    const eng = newEngine();
+    const eng = newReplica();
     eng.handleConnected();
     eng.popOutbox(); // discard OpenDoc
     eng.popEvent(); // discard online event
@@ -185,7 +185,7 @@ describe("transport callbacks", () => {
   });
 
   test("handleServerBytes while disconnected surfaces an error event", () => {
-    const eng = newEngine();
+    const eng = newReplica();
     eng.handleServerBytes(new Uint8Array([0x00, 0x01]));
     const evt = eng.popEvent();
     expect(evt!.kind).toBe("error");
@@ -194,7 +194,7 @@ describe("transport callbacks", () => {
   });
 
   test("handleTimeout in Opening produces a handshake error", () => {
-    const eng = newEngine();
+    const eng = newReplica();
     eng.handleConnected();
     eng.popOutbox();
     eng.popEvent();
@@ -207,8 +207,8 @@ describe("transport callbacks", () => {
 });
 
 describe("doc passthrough", () => {
-  test("addItem through the engine is visible via itemsInListJson", () => {
-    const eng = newEngine();
+  test("addItem through the replica is visible via itemsInListJson", () => {
+    const eng = newReplica();
     const id = eng.addItem(LIST_MAIN, "buy milk");
     const items = JSON.parse(
       eng.itemsInListJson(LIST_MAIN, false),
@@ -218,8 +218,8 @@ describe("doc passthrough", () => {
     expect(items[0].text).toBe("buy milk");
   });
 
-  test("allListsJson on a fresh engine is empty; main is not a ListMeta", () => {
-    const eng = newEngine();
+  test("allListsJson on a fresh replica is empty; main is not a ListMeta", () => {
+    const eng = newReplica();
     const lists = JSON.parse(eng.allListsJson()) as Array<{
       id: string;
       name: string;
@@ -231,7 +231,7 @@ describe("doc passthrough", () => {
   });
 
   test("hasUncapturedOps reflects uncaptured mutations", () => {
-    const eng = newEngine();
+    const eng = newReplica();
     // Fresh doc has no commits → nothing uncaptured.
     expect(eng.hasUncapturedOps()).toBe(false);
     eng.addItem(LIST_MAIN, "later");
@@ -239,14 +239,14 @@ describe("doc passthrough", () => {
   });
 
   test("flush before connect is a queued no-op (no outbox bytes)", () => {
-    const eng = newEngine();
+    const eng = newReplica();
     eng.addItem(LIST_MAIN, "later");
     eng.flush();
     expect(eng.popOutbox()).toBeUndefined();
   });
 
   test("setDefaultView surfaces on the snapshot and as an event", () => {
-    const eng = newEngine();
+    const eng = newReplica();
     const listId = eng.addList("Work");
     drainAppEvents(eng);
 
@@ -274,7 +274,7 @@ describe("doc passthrough", () => {
   });
 
   test("inbox's default view rides on settings, not a ListMeta row", () => {
-    const eng = newEngine();
+    const eng = newReplica();
     drainAppEvents(eng);
 
     // The reserved list has no ListMeta row, so its default lands in the
@@ -294,7 +294,7 @@ describe("doc passthrough", () => {
   });
 
   test("setDefaultView rejects a view it can't encode", () => {
-    const eng = newEngine();
+    const eng = newReplica();
     const listId = eng.addList("Work");
     // A typo must surface rather than silently clearing the default.
     expect(() => eng.setDefaultView(listId, "hologram")).toThrow();
@@ -302,16 +302,16 @@ describe("doc passthrough", () => {
 });
 
 describe("save / load round trip", () => {
-  test("engine.save() → Doc.load() → new SyncEngine preserves fingerprint", () => {
-    const a = newEngine();
+  test("replica.save() → Doc.load() → new Replica preserves fingerprint", () => {
+    const a = newReplica();
     a.addItem(LIST_MAIN, "persist me");
     const fingerprintBefore = a.fingerprint();
     const snapshot = a.save();
 
-    // Same DEK so the reconstructed engine could in principle decrypt
+    // Same DEK so the reconstructed replica could in principle decrypt
     // remote updates; not exercised here, just locking down the API.
     const dek = Dek.generate();
-    const restored = new SyncEngine(Doc.load(snapshot), DOC_ID, dek, 0n, memStorage());
+    const restored = new Replica(Doc.load(snapshot), DOC_ID, dek, 0n, memStorage());
     const fingerprintAfter = restored.fingerprint();
 
     expect(fingerprintAfter).toEqual(fingerprintBefore);

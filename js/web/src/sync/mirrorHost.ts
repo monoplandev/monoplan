@@ -1,34 +1,36 @@
-// The macOS app's host as the webview reaches it (`spec/mac-window-plan.md`
-// "JS side" / "Swift side"): a `MirrorTransport` over a WebKit message
-// handler, plus the session the host holds (account, device, doc list),
-// which replaces `Login.tsx` in the window. Bytes cross as base64.
+// The macOS app's engine (the Rust loop the app runs in process) as the
+// webview reaches it, through the app, which is the page's host
+// (`spec/mac-window-plan.md` "JS side" / "Swift side"): a `MirrorTransport`
+// over a WebKit message handler, plus the session the engine holds
+// (account, device, doc list), which replaces `Login.tsx` in the window.
+// Bytes cross as base64.
 //
 // Outbound (JS → Swift): `window.webkit.messageHandlers.monoplan
 // .postMessage(request)`, registered on the Swift side with a reply
 // handler (`WKScriptMessageHandlerWithReply`), so `postMessage` resolves
-// with the reply or rejects with the host's error message:
+// with the reply or rejects with the engine's error message:
 //
-//   { kind: "session" }                       → HostSessionReply: the session
-//                                               (`status: "ok"`), or the host's
+//   { kind: "session" }                       → EngineSessionReply: the session
+//                                               (`status: "ok"`), or the engine's
 //                                               state while there is none to
-//                                               bind to (`HostState`)
+//                                               bind to (`EngineState`)
 //   { kind: "signIn" }                        → null   (opens the app's sign-in sheet;
 //                                               an anonymous session's way to an account)
 //   { kind: "subscribe", docId }              → { snapshot: b64, peer: "u64 decimal" }
 //   { kind: "unsubscribe", docId }            → null
-//   { kind: "import", docId, bytes: b64 }     → null   (`Host.import`)
+//   { kind: "import", docId, bytes: b64 }     → null   (`Engine.import`)
 //   { kind: "window", action }                → null   (a title-bar gesture,
 //                                                       see `postWindowGesture`)
 //   { kind: "undoState", canUndo, canRedo }   → null   (enables Edit › Undo / Redo)
 //
 // Inbound (Swift → JS, by `evaluateJavaScript`), on `window.__monoplanHost`:
 //
-//   .update(docId, b64)   one host → mirror update (`MirrorSink.update`)
+//   .update(docId, b64)   one engine → mirror update (`MirrorSink.update`)
 //   .stopped(docId)       no update follows (`MirrorSink.stopped`)
-//   .sync(status)         the host's sync status, for the footer: sent
+//   .sync(status)         the engine's sync status, for the footer: sent
 //                         once the page is up and on every change
-//   .handOff()            flush everything committed to the host now;
-//                         resolves once the host has answered the
+//   .handOff()            flush everything committed to the engine now;
+//                         resolves once the engine has answered the
 //                         imports it caused. The app awaits it before
 //                         it closes the window or quits.
 //   .settings(obj)        the app's device settings changed
@@ -38,17 +40,17 @@
 //                         surface (`setUndoRedoHandler`)
 //   .find()               the window's search bubble: open the Find
 //                         palette (`setFindHandler`)
-//   .hostState(state)     the host came or went while there was none
+//   .engineState(state)     the engine came or went while there was none
 //                         serving this page (a sign out finishing, a
 //                         sign in starting): what the pre-boot screen
-//                         shows. The app reloads the page once a host
+//                         shows. The app reloads the page once an engine
 //                         serves, so the page never boots from here.
 //
-// The doc id is the `workspace` selector the host resolves (`-w` accepts
+// The doc id is the `workspace` selector the engine resolves (`-w` accepts
 // a doc uuid, `spec/cli.md`). The peer id travels as a decimal string
 // because a u64 does not fit a JSON number. HTTP (`api.ts`) is not
 // here: the app serves the page from its own scheme and proxies `/api`
-// to the host's server with the device token, so the client's
+// to the engine's server with the device token, so the client's
 // same-origin fetches work unchanged and the credential never enters
 // the page.
 
@@ -60,41 +62,41 @@ export const HOST_HANDLER = "monoplan";
 /** Name of the global the app calls back into. */
 export const HOST_GLOBAL = "__monoplanHost";
 
-export interface HostDocInfo {
+export interface EngineDocInfo {
   docId: string;
-  /** The doc's name as the host last saw it, if it has one. */
+  /** The doc's name as the engine last saw it, if it has one. */
   name: string | null;
 }
 
-/** What the host knows about the profile. */
-export interface HostSessionInfo {
+/** What the engine knows about the profile. */
+export interface EngineSessionInfo {
   /** Empty for a local-only workspace, as are `email`, `deviceId` and
    *  `serverUrl`. */
   accountId: string;
   email: string;
   deviceId: string;
   primaryDocId: string;
-  /** The server the host syncs with: where `api.ts` should point. */
+  /** The server the engine syncs with: where `api.ts` should point. */
   serverUrl: string;
   /** No account behind the profile (the CLI's local-only workspace,
    *  `spec/cli.md`): the page runs it as the web client's anonymous
    *  session, with sign-in offered through the app. */
   localOnly: boolean;
   /** Every doc the profile has open, Home included. */
-  docs: HostDocInfo[];
+  docs: EngineDocInfo[];
 }
 
-/** The host as the page sees it while there is none to mirror
- *  (`HostState` on the Swift side): waiting with the tray's reason
+/** The engine as the page sees it while there is none to mirror
+ *  (`EngineState` on the Swift side): waiting with the tray's reason
  *  (`pending`: starting, signing out, profile in use by another
  *  process). `running` is the moment in between; the app reloads the
  *  page on it. There is no signed-out state: the app seeds a local-only
- *  workspace when there is no profile and hosts that, so the page
+ *  workspace when there is no profile and runs that, so the page
  *  always has a session (an anonymous one then, `localOnly`). */
-export type HostState = { status: "running" } | { status: "pending"; reason: string };
+export type EngineState = { status: "running" } | { status: "pending"; reason: string };
 
 /** The `session` reply: the session, or the state while there is none. */
-export type HostSessionReply = ({ status: "ok" } & HostSessionInfo) | HostState;
+export type EngineSessionReply = ({ status: "ok" } & EngineSessionInfo) | EngineState;
 
 export type HostRequest =
   | { kind: "session" }
@@ -106,7 +108,7 @@ export type HostRequest =
   | { kind: "window"; action: WindowGesture }
   | { kind: "undoState"; canUndo: boolean; canRedo: boolean }
   /** Delete a workspace: the app confirms natively (with `name` in the
-   *  copy) and has the host delete it; the reply says whether it did. */
+   *  copy) and has the engine delete it; the reply says whether it did. */
   | { kind: "deleteDoc"; docId: string; name: string };
 
 /** What the sidebar's title strip (`.nav-titlebar`) forwards: the
@@ -126,13 +128,13 @@ export interface HostMessageHandler {
   postMessage(request: HostRequest): Promise<unknown>;
 }
 
-/** The host's view of the server link, as `ipc::SyncStatus` has it. */
-export interface HostSyncStatus {
+/** The engine's view of the server link, as `ipc::SyncStatus` has it. */
+export interface EngineSyncStatus {
   online: boolean;
   /** Unix millis of the last completed exchange, on any run of the
-   *  host, or null if it never synced. */
+   *  engine, or null if it never synced. */
   lastSyncedAt: number | null;
-  /** Local work the server has not confirmed (an engine still pulling,
+  /** Local work the server has not confirmed (a replica still pulling,
    *  a push in flight, ops not yet pushed): the footer's "syncing". */
   pending: boolean;
 }
@@ -141,7 +143,7 @@ export interface HostSyncStatus {
 export interface HostInbound {
   update(docId: string, bytes: string): void;
   stopped(docId: string): void;
-  sync(status: HostSyncStatus): void;
+  sync(status: EngineSyncStatus): void;
   handOff(): Promise<void>;
   settings(settings: HostSettings): void;
   undo(): void;
@@ -151,32 +153,32 @@ export interface HostInbound {
    *  the root drops the title-bar strips (styles.css), since there are
    *  no traffic lights to clear and nothing to drag. */
   fullScreen(active: boolean): void;
-  /** The host opened a doc after this page booted (the app's New
+  /** The engine opened a doc after this page booted (the app's New
    *  Workspace…): subscribe to it and show it. */
   docAdded(docId: string): void;
-  /** The host came or went while this page has none (`HostState`). */
-  hostState(state: HostState): void;
+  /** The engine came or went while this page has none (`EngineState`). */
+  engineState(state: EngineState): void;
 }
 
 export interface AppHost {
-  session(): Promise<HostSessionReply>;
+  session(): Promise<EngineSessionReply>;
   /** Open the app's sign-in sheet (an anonymous session's Sign in). */
   signIn(): void;
-  /** The host's state while this page has none, whenever the app
+  /** The engine's state while this page has none, whenever the app
    *  reports it; the pre-boot screen follows it. */
-  onHostState(cb: (state: HostState) => void): void;
+  onEngineState(cb: (state: EngineState) => void): void;
   transport: MirrorTransport;
-  /** The host's sync status, whenever the app reports it. The last one
+  /** The engine's sync status, whenever the app reports it. The last one
    *  is replayed to a late subscriber, so the footer never misses the
    *  status the app pushed while the page was still booting. */
-  onSync(cb: (status: HostSyncStatus) => void): void;
+  onSync(cb: (status: EngineSyncStatus) => void): void;
   /** What `handOff()` runs; the runtime binds its own once it exists. */
   onHandOff(cb: () => Promise<void>): void;
-  /** A doc the host opened after boot (`docAdded`); the runtime opens
+  /** A doc the engine opened after boot (`docAdded`); the runtime opens
    *  it over the bridge. */
   onDocAdded(cb: (docId: string) => void): void;
   /** Ask the app to delete a workspace: it confirms natively and has
-   *  the host do it. Resolves true once the doc is gone, false when the
+   *  the engine do it. Resolves true once the doc is gone, false when the
    *  user cancelled or the app already showed the failure. */
   deleteDoc(docId: string, name: string): Promise<boolean>;
 }
@@ -246,17 +248,17 @@ function post(request: HostRequest): void {
   });
 }
 
-/** Build the host over a message handler, installing the inbound global
+/** Build the app host over a message handler, installing the inbound global
  *  on `target`. Exposed for tests, which pass a fake handler and a plain
  *  object. */
 export function createAppHost(handler: HostMessageHandler, target: object): AppHost {
   let onUpdate: ((docId: string, bytes: Uint8Array) => void) | null = null;
   let onStopped: ((docId: string) => void) | null = null;
-  let onSync: ((status: HostSyncStatus) => void) | null = null;
-  let lastSync: HostSyncStatus | null = null;
+  let onSync: ((status: EngineSyncStatus) => void) | null = null;
+  let lastSync: EngineSyncStatus | null = null;
   let onHandOff: (() => Promise<void>) | null = null;
   let onDocAdded: ((docId: string) => void) | null = null;
-  let onHostState: ((state: HostState) => void) | null = null;
+  let onEngineState: ((state: EngineState) => void) | null = null;
   const inbound: HostInbound = {
     update(docId, bytes) {
       onUpdate?.(docId, decodeBytes(bytes));
@@ -290,8 +292,8 @@ export function createAppHost(handler: HostMessageHandler, target: object): AppH
     docAdded(docId) {
       onDocAdded?.(docId);
     },
-    hostState(state) {
-      onHostState?.(state);
+    engineState(state) {
+      onEngineState?.(state);
     },
   };
   (target as Record<string, unknown>)[HOST_GLOBAL] = inbound;
@@ -325,14 +327,14 @@ export function createAppHost(handler: HostMessageHandler, target: object): AppH
 
   return {
     transport,
-    session: async () => (await post({ kind: "session" })) as HostSessionReply,
+    session: async () => (await post({ kind: "session" })) as EngineSessionReply,
     signIn() {
       void post({ kind: "signIn" }).catch((e) => {
         console.warn("mirror: signIn failed:", e);
       });
     },
-    onHostState(cb) {
-      onHostState = cb;
+    onEngineState(cb) {
+      onEngineState = cb;
     },
     onSync(cb) {
       onSync = cb;
@@ -353,7 +355,7 @@ export function createAppHost(handler: HostMessageHandler, target: object): AppH
 
 // A snapshot can run to megabytes; `String.fromCharCode` over a whole
 // buffer blows the argument limit and a per-byte string append is
-// quadratic in some engines, so encode in chunks.
+// quadratic in some replicas, so encode in chunks.
 const CHUNK = 0x8000;
 
 export function encodeBytes(bytes: Uint8Array): string {

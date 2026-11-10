@@ -2,15 +2,15 @@
 //!
 //! What crosses: the profile's lifecycle (`ensure_local_workspace`,
 //! `login`, `signup` and `logout`: the local-only bootstrap and the
-//! bodies of the CLI commands of the same names), `Host`, the daemon
+//! bodies of the CLI commands of the same names), `Engine`, the daemon
 //! loop embedded in the app's process (`spec/daemon-plan.md`, amended
-//! 2026-10-27), and the app's client path into it: `Host::request`
-//! and `Host::watch`, the socket's request and watch frames as
+//! 2026-10-27), and the app's client path into it: `Engine::request`
+//! and `Engine::watch`, the socket's request and watch frames as
 //! function calls (`spec/mac-window-plan.md`, phase 1), and the mirror
-//! for the window: `Host::subscribe` (a snapshot, a leased peer id, and
-//! updates streamed to a `MirrorSink`) and `Host::import` (the
+//! for the window: `Engine::subscribe` (a snapshot, a leased peer id, and
+//! updates streamed to a `MirrorSink`) and `Engine::import` (the
 //! window's ops applied as local), phase 2 of the same plan. The app
-//! is a client of its own host here and never over the socket, which
+//! is a client of its own engine here and never over the socket, which
 //! stays the CLI's. The earlier offline `MonoplanStore`
 //! prototype (`spec/swift-ffi-plan.md`) was removed on 2026-10-27: it
 //! booted a second doc under a fake doc id with a caller-held DEK, and
@@ -26,8 +26,8 @@ use std::sync::{Arc, Mutex};
 uniffi::setup_scaffolding!();
 
 // ---------------------------------------------------------------------
-// Host: the daemon loop, embedded (spec/daemon-plan.md, amended
-// 2026-10-27). On macOS the app is the host whenever it runs: it runs
+// Engine: the daemon loop, embedded (spec/daemon-plan.md, amended
+// 2026-10-27). On macOS the app runs the engine whenever it runs: it runs
 // `daemon::start` / `daemon::Serving` on its own thread and its UI is
 // an in-process client of that loop (`daemon::LocalClient`), the same
 // loop the CLI reaches over the socket. The headless
@@ -38,28 +38,28 @@ uniffi::setup_scaffolding!();
 // ---------------------------------------------------------------------
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
-pub enum HostError {
-    /// No `secrets.toml` in the profile dir: nothing to host.
+pub enum EngineError {
+    /// No `secrets.toml` in the profile dir: nothing to run.
     #[error("not logged in")]
     NotLoggedIn,
     /// Something `start` will not take over holds `daemon.lock`:
-    /// another app's host, a host still starting, or a CLI command
+    /// another app's engine, an engine still starting, or a CLI command
     /// rewriting the profile (`client::claim`). Try again later.
     #[error("another process holds this profile")]
     Busy,
     /// The loop has ended (`shutdown`, or a client's `Shutdown`): no
     /// request is answered and no watch is served until the app
-    /// starts a new host.
-    #[error("the host has stopped")]
+    /// starts a new engine.
+    #[error("the engine has stopped")]
     Stopped,
     #[error("{message}")]
     Failed { message: String },
 }
 
-/// Where the embedded host's `tracing` output goes: `daemon.log` in
+/// Where the embedded engine's `tracing` output goes: `daemon.log` in
 /// the profile dir, the file the headless daemon's stderr is appended
 /// to, so there is one place to look on a Mac. A GUI process has no
-/// terminal, and the host's connect failures (`warn`) would otherwise
+/// terminal, and the engine's connect failures (`warn`) would otherwise
 /// vanish. `RUST_LOG` overrides the level. Set once per process; the
 /// file is reopened per write, so it survives a sign-out purge and
 /// comes back with the next profile.
@@ -90,17 +90,17 @@ fn init_log(profile_dir: &std::path::Path) {
         .try_init();
 }
 
-/// Whether the embedded host serves the CLI's Unix socket. Every
+/// Whether the embedded engine serves the CLI's Unix socket. Every
 /// platform with a terminal, except iOS: no CLI runs there, nothing
 /// else can hold the profile, and the app container's paths are longer
 /// than a socket path may be (`daemon::start_with`).
 const SERVE_SOCKET: bool = !cfg!(target_os = "ios");
 
-fn runtime() -> Result<tokio::runtime::Runtime, HostError> {
+fn runtime() -> Result<tokio::runtime::Runtime, EngineError> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|e| HostError::Failed {
+        .map_err(|e| EngineError::Failed {
             message: e.to_string(),
         })
 }
@@ -109,17 +109,17 @@ fn runtime() -> Result<tokio::runtime::Runtime, HostError> {
 /// there is none (`monoplan_cli::bootstrap`: a doc id and DEK minted
 /// locally, the onboarding doc as the baseline, no device token). What
 /// the first doc command does on a fresh CLI install, for the app to
-/// do before it hosts: accountless use on a Mac is the web client's
+/// do before it starts the engine: accountless use on a Mac is the web client's
 /// anonymous session (`spec/auth.md` §Device pairing). Nothing to do
 /// when a profile exists. Blocks briefly (the seed is written and the
 /// profile held meanwhile), so call it off the main thread.
 #[uniffi::export]
-pub fn ensure_local_workspace(profile_dir: String) -> Result<(), HostError> {
+pub fn ensure_local_workspace(profile_dir: String) -> Result<(), EngineError> {
     use monoplan_cli::bootstrap::open_or_init_at;
     runtime()?
         .block_on(open_or_init_at(PathBuf::from(profile_dir)))
         .map(|_| ())
-        .map_err(|e| HostError::Failed {
+        .map_err(|e| EngineError::Failed {
             message: format!("{e:#}"),
         })
 }
@@ -161,7 +161,7 @@ pub struct SignupOutcome {
 /// profile is adopted as the account's Home doc (`spec/auth.md` §Device
 /// pairing). Blocks for the key derivation and the round trips, so
 /// call it off the main thread. On success the profile is written and
-/// released; the app's host controller then hosts it, and the first
+/// released; the app's engine controller then starts an engine on it, and the first
 /// connect pushes the local history.
 #[uniffi::export]
 pub fn signup(
@@ -170,14 +170,14 @@ pub fn signup(
     email: String,
     password: String,
     device_name: String,
-) -> Result<SignupOutcome, HostError> {
+) -> Result<SignupOutcome, EngineError> {
     use monoplan_cli::{
         commands::signup::{Credentials, signup},
         config::Profile,
     };
     use monoplan_protocol::KdfParams;
     let profile =
-        Profile::create_at(PathBuf::from(profile_dir)).map_err(|e| HostError::Failed {
+        Profile::create_at(PathBuf::from(profile_dir)).map_err(|e| EngineError::Failed {
             message: e.to_string(),
         })?;
     runtime()?
@@ -196,7 +196,7 @@ pub fn signup(
             recovery_code: o.recovery_code,
             adopted: o.adopted,
         })
-        .map_err(|e| HostError::Failed {
+        .map_err(|e| EngineError::Failed {
             message: format!("{e:#}"),
         })
 }
@@ -204,7 +204,7 @@ pub fn signup(
 /// Sign in: what `monoplan auth login` does once it has the credentials,
 /// for the app's sign-in sheet. Blocks for the key derivation and two
 /// round trips, so call it off the main thread. On success the profile
-/// is written and released; the app's host controller then hosts it.
+/// is written and released; the app's engine controller then starts an engine on it.
 /// A local-only workspace in the profile is replaced, as the CLI's
 /// login does after its confirmation: the app asks first.
 #[uniffi::export]
@@ -214,19 +214,19 @@ pub fn login(
     email: String,
     password: String,
     device_name: String,
-) -> Result<(), HostError> {
+) -> Result<(), EngineError> {
     use monoplan_cli::{
         commands::login::{Credentials, login},
         config::Profile,
     };
     let profile =
-        Profile::create_at(PathBuf::from(profile_dir)).map_err(|e| HostError::Failed {
+        Profile::create_at(PathBuf::from(profile_dir)).map_err(|e| EngineError::Failed {
             message: e.to_string(),
         })?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|e| HostError::Failed {
+        .map_err(|e| EngineError::Failed {
             message: e.to_string(),
         })?;
     rt.block_on(login(
@@ -239,54 +239,54 @@ pub fn login(
         },
     ))
     .map(|_| ())
-    .map_err(|e| HostError::Failed {
+    .map_err(|e| EngineError::Failed {
         message: format!("{e:#}"),
     })
 }
 
-/// Sign out: stop whatever hosts the profile, hold it, wipe it. What
+/// Sign out: stop whatever holds the profile, hold it, wipe it. What
 /// `monoplan auth logout` does, for the app's Settings. The app stops its
-/// own host first and keeps its host controller from restarting one
+/// own engine first and keeps its engine controller from restarting one
 /// until this returns; `NotLoggedIn` when there was no profile.
 #[uniffi::export]
-pub fn logout(profile_dir: String) -> Result<(), HostError> {
+pub fn logout(profile_dir: String) -> Result<(), EngineError> {
     use monoplan_cli::{commands::logout, config::Profile};
-    let profile = Profile::active_at(PathBuf::from(profile_dir)).ok_or(HostError::NotLoggedIn)?;
+    let profile = Profile::active_at(PathBuf::from(profile_dir)).ok_or(EngineError::NotLoggedIn)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|e| HostError::Failed {
+        .map_err(|e| EngineError::Failed {
             message: e.to_string(),
         })?;
     rt.block_on(logout::logout(&profile))
-        .map_err(|e| HostError::Failed {
+        .map_err(|e| EngineError::Failed {
             message: format!("{e:#}"),
         })
 }
 
-/// One running host loop. Dropping it does *not* stop the loop; call
+/// One running engine loop. Dropping it does *not* stop the loop; call
 /// `shutdown` (clean exit: persist, fold, close the socket, release the
 /// lock). A client's `Shutdown` request (`daemon stop`, `logout`,
 /// `login`, `password`) ends the loop too, after which `is_running` is
 /// false and the app starts a new one once the profile is free.
 #[derive(uniffi::Object)]
-pub struct Host {
+pub struct Engine {
     shutdown: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     thread: Mutex<Option<std::thread::JoinHandle<()>>>,
     /// The in-process client path (`daemon::LocalClient`).
     client: monoplan_cli::daemon::LocalClient,
-    /// The profile being hosted, for `device_token`.
+    /// The profile this engine runs, for `device_token`.
     profile_dir: PathBuf,
 }
 
-/// Where a watch's frames go: the app's object, called from the host's
+/// Where a watch's frames go: the app's object, called from the engine's
 /// threads, so the app hops to its own queue inside. The first frame is
 /// `Reply::Watching`, then one `Reply::Event` per event, each msgpack-
 /// encoded exactly as the socket would carry it after the length prefix.
 #[uniffi::export(with_foreign)]
-pub trait HostSink: Send + Sync {
+pub trait EngineSink: Send + Sync {
     fn frame(&self, frame: Vec<u8>);
-    /// The host loop has ended. No frame follows.
+    /// The engine loop has ended. No frame follows.
     fn stopped(&self);
 }
 
@@ -310,18 +310,18 @@ impl Drop for Watcher {
     }
 }
 
-/// Where a mirror's updates go (`spec/mac-window-plan.md` "Host to
-/// mirror"): the app's object, called on the host loop's thread, so the
+/// Where a mirror's updates go (`spec/mac-window-plan.md` "Engine to
+/// mirror"): the app's object, called on the engine loop's thread, so the
 /// app hops to the webview's queue inside and never calls back into
-/// `Host` synchronously (the loop is busy delivering; an `import` from
+/// `Engine` synchronously (the loop is busy delivering; an `import` from
 /// inside `update` would wait on itself). Each `update` is Loro update
 /// bytes since the previous one (or since the snapshot), to import into
 /// the mirror doc tagged `remote`.
 #[uniffi::export(with_foreign)]
 pub trait MirrorSink: Send + Sync {
     fn update(&self, bytes: Vec<u8>);
-    /// The host loop has ended, or the doc was closed under the mirror.
-    /// No update follows; subscribe again once there is a host.
+    /// The engine loop has ended, or the doc was closed under the mirror.
+    /// No update follows; subscribe again once there is an engine.
     fn stopped(&self);
 }
 
@@ -339,7 +339,7 @@ impl monoplan_cli::daemon::MirrorSink for ForeignSink {
 
 /// One live mirror of one doc (`spec/mac-window-plan.md`): the seed the
 /// webview loads and the handle its ops go back through
-/// (`Host::import`). Dropping it, or `close`, ends the subscription and
+/// (`Engine::import`). Dropping it, or `close`, ends the subscription and
 /// releases the peer slot; the sink hears nothing more.
 #[derive(uniffi::Object)]
 pub struct Subscription {
@@ -374,39 +374,39 @@ impl Subscription {
     }
 }
 
-impl From<monoplan_cli::daemon::MirrorError> for HostError {
+impl From<monoplan_cli::daemon::MirrorError> for EngineError {
     fn from(e: monoplan_cli::daemon::MirrorError) -> Self {
         use monoplan_cli::daemon::MirrorError;
         match e {
-            MirrorError::Stopped => HostError::Stopped,
-            MirrorError::Failed(message) => HostError::Failed { message },
+            MirrorError::Stopped => EngineError::Stopped,
+            MirrorError::Failed(message) => EngineError::Failed { message },
         }
     }
 }
 
 /// The profile as the window should see it (`spec/mac-window-plan.md`
-/// "Swift side", the `session` request): what `Host::session` answers.
+/// "Swift side", the `session` request): what `Engine::session` answers.
 /// No credential: the device token stays with the app
-/// (`Host::device_token`) and never reaches the webview.
+/// (`Engine::device_token`) and never reaches the webview.
 #[derive(Debug, Clone, uniffi::Record)]
-pub struct HostSession {
+pub struct EngineSession {
     /// Empty for a local-only workspace, as are `email`, `device_id`
     /// and `server_url`.
     pub account_id: String,
     pub email: String,
     pub device_id: String,
     pub primary_doc_id: String,
-    /// The server the host syncs with: where the window's HTTP calls go.
+    /// The server the engine syncs with: where the window's HTTP calls go.
     pub server_url: String,
     /// No account behind the profile: the window runs it as the web
     /// client runs an anonymous session (`spec/auth.md`).
     pub local_only: bool,
-    /// Every doc the host has open, Home first.
-    pub docs: Vec<HostDoc>,
+    /// Every doc the engine has open, Home first.
+    pub docs: Vec<EngineDoc>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
-pub struct HostDoc {
+pub struct EngineDoc {
     pub doc_id: String,
     /// The doc's name; nil for Home and for an unnamed doc.
     pub name: Option<String>,
@@ -419,23 +419,23 @@ fn encode(reply: &monoplan_cli::ipc::Reply) -> Vec<u8> {
 }
 
 #[uniffi::export]
-impl Host {
+impl Engine {
     /// Claim the profile (stopping a headless daemon that holds it),
     /// bind the socket, boot the doc, and serve on a background thread.
     /// Returns once the socket is listening (or the start failed), so
     /// call it off the main thread: booting a large doc takes a moment.
     #[uniffi::constructor]
-    pub fn start(profile_dir: String) -> Result<Arc<Host>, HostError> {
+    pub fn start(profile_dir: String) -> Result<Arc<Engine>, EngineError> {
         use monoplan_cli::{client, config::Profile, daemon};
         let profile =
-            Profile::active_at(PathBuf::from(profile_dir)).ok_or(HostError::NotLoggedIn)?;
+            Profile::active_at(PathBuf::from(profile_dir)).ok_or(EngineError::NotLoggedIn)?;
         init_log(&profile.dir);
         let profile_dir = profile.dir.clone();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-        type Ready = Result<daemon::LocalClient, HostError>;
+        type Ready = Result<daemon::LocalClient, EngineError>;
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Ready>();
         let thread = std::thread::Builder::new()
-            .name("monoplan-host".into())
+            .name("monoplan-engine".into())
             .spawn(move || {
                 let rt = match tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
@@ -443,7 +443,7 @@ impl Host {
                 {
                     Ok(rt) => rt,
                     Err(e) => {
-                        let _ = ready_tx.send(Err(HostError::Failed {
+                        let _ = ready_tx.send(Err(EngineError::Failed {
                             message: e.to_string(),
                         }));
                         return;
@@ -452,18 +452,18 @@ impl Host {
                 rt.block_on(async move {
                     // On iOS nothing else can hold the profile (no CLI,
                     // no headless daemon, one process per container),
-                    // and the host serves no socket: the app is its
+                    // and the engine serves no socket: the app is its
                     // only client, and the container paths are longer
                     // than `sun_path` allows anyway.
                     if SERVE_SOCKET {
                         match client::take_over(&profile.dir).await {
                             Ok(true) => {}
                             Ok(false) => {
-                                let _ = ready_tx.send(Err(HostError::Busy));
+                                let _ = ready_tx.send(Err(EngineError::Busy));
                                 return;
                             }
                             Err(e) => {
-                                let _ = ready_tx.send(Err(HostError::Failed {
+                                let _ = ready_tx.send(Err(EngineError::Failed {
                                     message: format!("{e:#}"),
                                 }));
                                 return;
@@ -475,11 +475,11 @@ impl Host {
                         // Lost the lock to someone between the takeover
                         // and the claim; the app tries again later.
                         Ok(None) => {
-                            let _ = ready_tx.send(Err(HostError::Busy));
+                            let _ = ready_tx.send(Err(EngineError::Busy));
                             return;
                         }
                         Err(e) => {
-                            let _ = ready_tx.send(Err(HostError::Failed {
+                            let _ = ready_tx.send(Err(EngineError::Failed {
                                 message: format!("{e:#}"),
                             }));
                             return;
@@ -488,15 +488,15 @@ impl Host {
                     let (serving, client) = daemon::Serving::new(started, true);
                     let _ = ready_tx.send(Ok(client));
                     if let Err(e) = serving.run(shutdown_rx).await {
-                        eprintln!("monoplan host: {e:#}");
+                        eprintln!("monoplan engine: {e:#}");
                     }
                 });
             })
-            .map_err(|e| HostError::Failed {
+            .map_err(|e| EngineError::Failed {
                 message: e.to_string(),
             })?;
         match ready_rx.recv() {
-            Ok(Ok(client)) => Ok(Arc::new(Host {
+            Ok(Ok(client)) => Ok(Arc::new(Engine {
                 shutdown: Mutex::new(Some(shutdown_tx)),
                 thread: Mutex::new(Some(thread)),
                 client,
@@ -506,8 +506,8 @@ impl Host {
                 let _ = thread.join();
                 Err(e)
             }
-            Err(_) => Err(HostError::Failed {
-                message: "host thread exited before reporting".into(),
+            Err(_) => Err(EngineError::Failed {
+                message: "engine thread exited before reporting".into(),
             }),
         }
     }
@@ -527,12 +527,12 @@ impl Host {
     /// length prefix. Blocks until the loop has answered (a doc command
     /// runs inline there), so call it off the main thread. `Hello` is
     /// answered without the loop; `Watch` is `watch` below.
-    pub fn request(&self, frame: Vec<u8>) -> Result<Vec<u8>, HostError> {
+    pub fn request(&self, frame: Vec<u8>) -> Result<Vec<u8>, EngineError> {
         use monoplan_cli::ipc::{Request, decode_payload};
         if self.client.is_stopped() {
-            return Err(HostError::Stopped);
+            return Err(EngineError::Stopped);
         }
-        let req: Request = decode_payload(&frame).map_err(|e| HostError::Failed {
+        let req: Request = decode_payload(&frame).map_err(|e| EngineError::Failed {
             message: e.to_string(),
         })?;
         Ok(encode(&self.client.request_blocking(req)))
@@ -544,18 +544,18 @@ impl Host {
     /// would carry it after the length prefix, and `stopped` once when
     /// the loop ends.
     ///
-    /// The forwarder is a plain thread, not a task on the host's
+    /// The forwarder is a plain thread, not a task on the engine's
     /// runtime: that runtime is dropped as soon as the loop returns,
     /// which cancels its tasks, and a forwarder cancelled between the
     /// channel closing and its next poll would never deliver the one
-    /// event the app's client depends on to notice the host is gone
+    /// event the app's client depends on to notice the engine is gone
     /// (a sign-in's claim or a terminal command ending it). A blocking
     /// receive sees `Closed` whatever happened to the runtime.
-    pub fn watch(&self, sink: Arc<dyn HostSink>) -> Result<Arc<Watcher>, HostError> {
+    pub fn watch(&self, sink: Arc<dyn EngineSink>) -> Result<Arc<Watcher>, EngineError> {
         use monoplan_cli::ipc::{Reply, WatchEvent};
         use tokio::sync::broadcast::error::RecvError;
         if self.client.is_stopped() {
-            return Err(HostError::Stopped);
+            return Err(EngineError::Stopped);
         }
         let (sync, mut rx) = self.client.watch();
         sink.frame(encode(&Reply::Watching { sync }));
@@ -585,7 +585,7 @@ impl Host {
                     sink.frame(encode(&Reply::Event(ev)));
                 }
             })
-            .map_err(|e| HostError::Failed {
+            .map_err(|e| EngineError::Failed {
                 message: e.to_string(),
             })?;
         Ok(Arc::new(Watcher { cancelled }))
@@ -594,7 +594,7 @@ impl Host {
     /// Mirror a doc in the window (`spec/mac-window-plan.md`, phase 2):
     /// `workspace` is a `-w` selector or nil for Home. The returned
     /// subscription carries the snapshot and the leased peer id; from
-    /// then on `sink.update` gets every change the host applies (a CLI
+    /// then on `sink.update` gets every change the engine applies (a CLI
     /// command, a remote frame, another window's import) until the
     /// subscription is closed or released. Blocks for the snapshot
     /// export, so call it off the main thread.
@@ -602,9 +602,9 @@ impl Host {
         &self,
         workspace: Option<String>,
         sink: Arc<dyn MirrorSink>,
-    ) -> Result<Arc<Subscription>, HostError> {
+    ) -> Result<Arc<Subscription>, EngineError> {
         if self.client.is_stopped() {
-            return Err(HostError::Stopped);
+            return Err(EngineError::Stopped);
         }
         let sub = self
             .client
@@ -618,16 +618,20 @@ impl Host {
     }
 
     /// Apply the window's ops (Loro update bytes since its last send)
-    /// to the host's doc: local from here, WALed on the next capture,
+    /// to the engine's doc: local from here, WALed on the next capture,
     /// pushed, and fanned out to any other mirror. Blocks until they
     /// are durable, so call it off the main thread. `Failed` after
     /// `close`, or for bytes Loro will not import.
-    pub fn import(&self, subscription: Arc<Subscription>, bytes: Vec<u8>) -> Result<(), HostError> {
+    pub fn import(
+        &self,
+        subscription: Arc<Subscription>,
+        bytes: Vec<u8>,
+    ) -> Result<(), EngineError> {
         // Held for the call, so a concurrent `close` waits for the
         // import to land rather than racing it.
         let guard = subscription.inner.lock().unwrap();
         let Some(sub) = guard.as_ref() else {
-            return Err(HostError::Failed {
+            return Err(EngineError::Failed {
                 message: "subscription closed".into(),
             });
         };
@@ -639,12 +643,12 @@ impl Host {
     /// Blocks for the loop's turn, so call it off the main thread.
     /// A local-only workspace answers with `local_only` set and empty
     /// identity fields.
-    pub fn session(&self) -> Result<HostSession, HostError> {
+    pub fn session(&self) -> Result<EngineSession, EngineError> {
         if self.client.is_stopped() {
-            return Err(HostError::Stopped);
+            return Err(EngineError::Stopped);
         }
         let info = self.client.session_blocking()?;
-        Ok(HostSession {
+        Ok(EngineSession {
             account_id: info.account_id,
             email: info.email,
             device_id: info.device_id,
@@ -654,7 +658,7 @@ impl Host {
             docs: info
                 .docs
                 .into_iter()
-                .map(|d| HostDoc {
+                .map(|d| EngineDoc {
                     doc_id: d.doc_id.0.to_string(),
                     name: d.name,
                 })
@@ -678,7 +682,7 @@ impl Host {
     /// Still serving? False once the loop has ended (a client's
     /// `Shutdown`, a command's `claim`), from the moment it ends: the
     /// thread is still unwinding then, and a request to it would only
-    /// get `Stopped`, so the app must not hand this host to a new page
+    /// get `Stopped`, so the app must not hand this engine to a new page
     /// or client meanwhile.
     pub fn is_running(&self) -> bool {
         !self.client.is_stopped()

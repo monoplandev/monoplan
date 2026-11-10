@@ -10,7 +10,7 @@ use monoplan_cli::commands::DocCmd;
 use monoplan_cli::config::Profile;
 use monoplan_cli::daemon;
 use monoplan_cli::ipc::{self, Reply, Request, WatchEvent, read_frame, write_frame};
-use monoplan_cli::sync::{Session, SyncError};
+use monoplan_cli::sync::{Engine, SyncError};
 use monoplan_core::{Doc, LIST_INBOX};
 use monoplan_server::sync::queries;
 use support::{
@@ -62,7 +62,7 @@ async fn daemon_owns_profile_and_applies_peer_ops_live() {
     wait_until(&mut handle.status, "daemon online", |s| s.online).await;
 
     // While it runs, a one-shot on the same profile is refused.
-    let err = Session::open_with_profile(reopen_profile(tmp_a.path()), false)
+    let err = Engine::open_with_profile(reopen_profile(tmp_a.path()), false)
         .await
         .err()
         .expect("one-shot must be refused while the daemon holds the profile");
@@ -86,13 +86,13 @@ async fn daemon_owns_profile_and_applies_peer_ops_live() {
         false,
     )
     .await;
-    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
-    assert!(session_b.is_online());
-    let item_id = session_b
+    let engine_b = Engine::open_with_profile(profile_b, true).await.unwrap();
+    assert!(engine_b.is_online());
+    let item_id = engine_b
         .doc()
         .add_item(LIST_INBOX, "from-device-b")
         .unwrap();
-    session_b.flush().await.unwrap();
+    engine_b.flush().await.unwrap();
     let primary_doc_id = Uuid::parse_str(&signup.primary_doc_id).unwrap();
     let batch = queries::fetch_updates_batch(&server.state.db, primary_doc_id, 0)
         .await
@@ -113,10 +113,10 @@ async fn daemon_owns_profile_and_applies_peer_ops_live() {
     // Clean shutdown releases the profile; the applied op is on disk.
     handle.shutdown().await.unwrap();
     assert!(!daemon::is_running(tmp_a.path()).unwrap());
-    let session_a = Session::open_with_profile(reopen_profile(tmp_a.path()), false)
+    let engine_a = Engine::open_with_profile(reopen_profile(tmp_a.path()), false)
         .await
         .unwrap();
-    let item = session_a
+    let item = engine_a
         .doc()
         .get_item(&item_id)
         .expect("peer item persisted by the daemon");
@@ -257,12 +257,12 @@ async fn watcher_hears_sync_local_and_remote_changes() {
         false,
     )
     .await;
-    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
-    session_b
+    let engine_b = Engine::open_with_profile(profile_b, true).await.unwrap();
+    engine_b
         .doc()
         .add_item(LIST_INBOX, "from-device-b")
         .unwrap();
-    session_b.flush().await.unwrap();
+    engine_b.flush().await.unwrap();
     expect_frame(&mut watcher, "changed after remote push", |r| {
         matches!(r, Reply::Event(WatchEvent::Changed))
     })
@@ -684,12 +684,12 @@ async fn mirror_converges_both_ways_through_the_host() {
         false,
     )
     .await;
-    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
-    session_b
+    let engine_b = Engine::open_with_profile(profile_b, true).await.unwrap();
+    engine_b
         .doc()
         .add_item(LIST_INBOX, "from-device-b")
         .unwrap();
-    session_b.flush().await.unwrap();
+    engine_b.flush().await.unwrap();
     let bytes = next_update(&mut rx, "remote push").await;
     mirror.import_oplog_updates(&bytes).unwrap();
     assert!(texts(&mirror).contains(&"from-device-b".to_string()));
@@ -722,11 +722,11 @@ async fn mirror_converges_both_ways_through_the_host() {
     }
     // Pushed: the server has a new blob and another device pulls it.
     wait_for_updates(&server, primary_doc_id, blobs_before + 1).await;
-    let session_b = Session::open_with_profile(reopen_profile(tmp_b.path()), true)
+    let engine_b = Engine::open_with_profile(reopen_profile(tmp_b.path()), true)
         .await
         .unwrap();
     assert_eq!(
-        session_b.doc().get_item(&window_item).map(|i| i.text),
+        engine_b.doc().get_item(&window_item).map(|i| i.text),
         Some("from-the-window".to_string()),
         "device B pulled the window's op"
     );
@@ -800,11 +800,11 @@ async fn mirror_converges_both_ways_through_the_host() {
 /// `Request::Reconnect` (the app's wake / foreground / network-change
 /// path) drops a live socket and dials again. The host must come back
 /// online on that second socket and keep applying peer broadcasts: a
-/// host-initiated disconnect leaves the engine's `ConnStateChanged {
+/// host-initiated disconnect leaves the replica's `ConnStateChanged {
 /// online: false }` queued, and the pump after the next connect must
-/// not mistake that stale event for the *new* socket's engine going
-/// offline (which once dropped the fresh socket and left the engine
-/// `Opening` with no socket, cycling "engine disconnected" /
+/// not mistake that stale event for the *new* socket's replica going
+/// offline (which once dropped the fresh socket and left the replica
+/// `Opening` with no socket, cycling "replica disconnected" /
 /// "handle_connected called while already connected" forever).
 #[tokio::test]
 async fn reconnect_request_comes_back_online_and_stays_live() {
@@ -857,12 +857,12 @@ async fn reconnect_request_comes_back_online_and_stays_live() {
         false,
     )
     .await;
-    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
-    session_b
+    let engine_b = Engine::open_with_profile(profile_b, true).await.unwrap();
+    engine_b
         .doc()
         .add_item(LIST_INBOX, "after-reconnect")
         .unwrap();
-    session_b.flush().await.unwrap();
+    engine_b.flush().await.unwrap();
     let primary_doc_id = Uuid::parse_str(&signup.primary_doc_id).unwrap();
     let batch = queries::fetch_updates_batch(&server.state.db, primary_doc_id, 0)
         .await

@@ -1,6 +1,6 @@
 # Plan: separate local WAL from VV-based sync
 
-**Status: Implemented.** Landed across `core/` (Doc VV cursors, storage trait, sync engine), `crates/storage-sqlite`, `crates/protocol` (`PushBlob`/`PushAck`), `server/` (push_id dedup), `cli/`, and the web stack (`core/web`, `js/core`, `js/web`). The test list below is covered by `core/src/sync.rs`, `crates/storage-sqlite/tests/wal.rs`, `server/tests/sync.rs`, and `js/core/test/*`. Terminology note: the implementation renamed the capture cursor to `last_persisted_vv` (per §Core model) and the local snapshot trigger is `snapshot_if_wal_exceeds(max_rows, max_bytes)` / `force_snapshot`.
+**Status: Implemented.** Landed across `core/` (Doc VV cursors, storage trait, replica), `crates/storage-sqlite`, `crates/protocol` (`PushBlob`/`PushAck`), `server/` (push_id dedup), `cli/`, and the web stack (`core/web`, `js/core`, `js/web`). The test list below is covered by `core/src/sync.rs`, `crates/storage-sqlite/tests/wal.rs`, `server/tests/sync.rs`, and `js/core/test/*`. Terminology note: the implementation renamed the capture cursor to `last_persisted_vv` (per §Core model) and the local snapshot trigger is `snapshot_if_wal_exceeds(max_rows, max_bytes)` / `force_snapshot`.
 
   ## Objective
 

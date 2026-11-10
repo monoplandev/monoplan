@@ -146,7 +146,7 @@ CREATE INDEX snapshots_doc_id_idx ON snapshots (doc_id, id DESC);
 
 Snapshot rows form one linear **chain** per doc: a full snapshot (`from_seq IS NULL`) followed by zero or more deltas, each linking to the row before it (`from_seq = previous.up_to_seq`, enforced in the insert transaction). The bootstrap payload is the chain from the latest full row onward, in `id` order. The latest row's `compaction_floor_seq` is the doc's floor. See `sync-protocol.md` §"Snapshot orchestration" for shapes and cadence.
 
-`updates.seq` is per-doc, dense, and gap-free. The client relies on this: seqs arrive contiguous and in order over a single connection, so the engine only ever advances its frontier over the contiguous next seq (no reorder buffering). The composite `(doc_id, seq)` PK doubles as the per-doc ordering index — no separate index needed.
+`updates.seq` is per-doc, dense, and gap-free. The client relies on this: seqs arrive contiguous and in order over a single connection, so the replica only ever advances its frontier over the contiguous next seq (no reorder buffering). The composite `(doc_id, seq)` PK doubles as the per-doc ordering index — no separate index needed.
 
 The `doc_sequences` row for a doc is created on first `insert_updates` via `INSERT … ON CONFLICT DO UPDATE`, so signup doesn't need a separate seed step. Reads (`SELECT seq … ORDER BY seq`) never touch the counter; only writers contend on the per-doc row.
 
@@ -185,7 +185,7 @@ Where it lives and what each copy is for:
 
 `seq` never resets at an epoch boundary; `since_seq`, acks and the push_id dedup index all keep working across epochs.
 
-Compatibility rule: superseded by `spec/trim-plan.md`. The rule previously written here assumed an "ack-after-push" client invariant that the engine does not have (acks fire during `Pulling`, before the post-reconnect push), so a seq-based check on push cannot tell a stale device from a fresh one. Under the trim plan every device wipes and bootstraps on an epoch change, pushes carry the epoch, and the server rejects mismatches.
+Compatibility rule: superseded by `spec/trim-plan.md`. The rule previously written here assumed an "ack-after-push" client invariant that the replica does not have (acks fire during `Pulling`, before the post-reconnect push), so a seq-based check on push cannot tell a stale device from a fresh one. Under the trim plan every device wipes and bootstraps on an epoch change, pushes carry the epoch, and the server rejects mismatches.
 
 ## Sqlite settings
 

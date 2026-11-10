@@ -2,7 +2,7 @@
 //! §Workspaces). A selector names a doc by its `doc_name` or its full
 //! doc id; absent, `personal` and `home` are the Home doc, which is
 //! never named inside the doc. Resolution is a pure function over the
-//! `(doc id, name)` pairs a caller has: the daemon's open engines, or
+//! `(doc id, name)` pairs a caller has: the daemon's open replicas, or
 //! the docs a client loads from storage when it runs without one.
 
 use monoplan_core::DocId;

@@ -1,8 +1,8 @@
-// The web client drives the engine through a JS-implemented
-// `EngineStorage` (`spec/local-storage.md`) — the in-memory mirror
+// The web client drives the replica through a JS-implemented
+// `ReplicaStorage` (`spec/local-storage.md`) — the in-memory mirror
 // behind `IdbStorage`. This test exercises that wasm boundary —
 // `captureLocalOps` / `snapshotIfWalExceeds` / the seed setters plus
-// the `EngineStorage` extern — without IndexedDB or a server, using a
+// the `ReplicaStorage` extern — without IndexedDB or a server, using a
 // hand-rolled in-memory mirror that mirrors `core::MemStorage`'s
 // semantics. It locks in the contract the real `IdbStorage` satisfies
 // (spec/vv-wal-separation.md):
@@ -20,9 +20,9 @@
 import { describe, expect, test } from "bun:test";
 import { decode, encode } from "@msgpack/msgpack";
 
-import { Dek, Doc, EncryptedBlob, SyncEngine } from "../wasm/monoplan_core_web.js";
-import type { EngineStorage } from "../wasm/monoplan_core_web.js";
-import { MemEngineStorage, unhex } from "./mem-engine-storage.ts";
+import { Dek, Doc, EncryptedBlob, Replica } from "../wasm/monoplan_core_web.js";
+import type { ReplicaStorage } from "../wasm/monoplan_core_web.js";
+import { MemReplicaStorage, unhex } from "./mem-replica-storage.ts";
 
 const LIST_MAIN = "inbox";
 const DOC_ID = "00000000-0000-0000-0000-000000000000";
@@ -49,7 +49,7 @@ function ackBytesFor(pushFrame: Uint8Array, seq: number): Uint8Array {
     updates: { push_id: Uint8Array; blob: unknown }[];
   };
   if (decoded.type !== "PushUpdates") throw new Error(`expected PushUpdates, got ${decoded.type}`);
-  if (decoded.updates.length !== 1) throw new Error("engine ships one blob per push");
+  if (decoded.updates.length !== 1) throw new Error("replica ships one blob per push");
   return encode({
     type: "UpdatesAck",
     doc_id: DOC_ID_BYTES,
@@ -58,8 +58,8 @@ function ackBytesFor(pushFrame: Uint8Array, seq: number): Uint8Array {
 }
 
 /** OpenDoc → DocOpened → PullUpdates → empty UpdatesBatch → Idle. (The
- *  `Hello` handshake is the host's, per socket — not the engine's.) */
-function driveToIdle(eng: SyncEngine): void {
+ *  `Hello` handshake is the host's, per socket — not the replica's.) */
+function driveToIdle(eng: Replica): void {
   eng.handleConnected();
   eng.popOutbox(); // OpenDoc
   eng.handleServerBytes(docOpenedBytes());
@@ -67,35 +67,35 @@ function driveToIdle(eng: SyncEngine): void {
   eng.handleServerBytes(emptyBatchCompleteBytes());
 }
 
-describe("engine ↔ EngineStorage (VV-derived web push path)", () => {
+describe("replica ↔ ReplicaStorage (VV-derived web push path)", () => {
   test("capture → durable in-flight push → UpdatesAck → threshold fold", () => {
     const dek = Dek.generate();
-    const storage = new MemEngineStorage();
+    const storage = new MemReplicaStorage();
     const doc = Doc.create();
-    const engine = new SyncEngine(
+    const replica = new Replica(
       doc,
       DOC_ID,
       dek.clone(),
       0n,
-      storage as unknown as EngineStorage,
+      storage as unknown as ReplicaStorage,
     );
-    engine.setLastLocalSeq(0);
-    driveToIdle(engine);
-    // Fresh doc: nothing pending, engine is Idle.
-    if (!engine.isIdle()) throw new Error("expected engine idle after empty pull");
+    replica.setLastLocalSeq(0);
+    driveToIdle(replica);
+    // Fresh doc: nothing pending, replica is Idle.
+    if (!replica.isIdle()) throw new Error("expected replica idle after empty pull");
 
     // A local mutation, then capture it as one durable WAL row.
-    engine.addItem(LIST_MAIN, "task one");
-    const seq = engine.captureLocalOps();
+    replica.addItem(LIST_MAIN, "task one");
+    const seq = replica.captureLocalOps();
     expect(seq).toBe(1);
     expect(storage.ops.length).toBe(1);
     // Nothing uncaptured in the doc now — the capture cursor advanced.
-    expect(engine.hasUncapturedOps()).toBe(false);
+    expect(replica.hasUncapturedOps()).toBe(false);
 
     // Flush derives the delta from serverKnownVv, persists the
     // in-flight record BEFORE the frame is queued, and ships it.
-    engine.flush();
-    const frame = engine.popOutbox();
+    replica.flush();
+    const frame = replica.popOutbox();
     expect(frame).toBeDefined();
     const decoded = decode(frame!) as {
       type: string;
@@ -110,49 +110,49 @@ describe("engine ↔ EngineStorage (VV-derived web push path)", () => {
 
     // Server assigns seq=1; the UpdatesAck (by pushId) clears the record
     // and persists the merged serverKnownVv.
-    engine.handleServerBytes(ackBytesFor(frame!, 1));
+    replica.handleServerBytes(ackBytesFor(frame!, 1));
     expect(storage.inFlight).toBeNull();
     expect(storage.serverKnownVv.length).toBeGreaterThan(0);
-    expect(engine.lastContiguousSeq()).toBe(1n);
+    expect(replica.lastContiguousSeq()).toBe(1n);
 
     // Nothing further to push.
-    engine.flush();
-    expect(engine.popOutbox()).toBeUndefined();
+    replica.flush();
+    expect(replica.popOutbox()).toBeUndefined();
 
     // WAL row count 1 ≥ threshold 1 → fold; prunes the whole prefix.
-    const wrote = engine.snapshotIfWalExceeds(1, Number.MAX_SAFE_INTEGER);
+    const wrote = replica.snapshotIfWalExceeds(1, Number.MAX_SAFE_INTEGER);
     expect(wrote).toBe(true);
     expect(storage.snapshot).not.toBeNull();
     expect(storage.snapshot!.upToLocalSeq).toBe(1);
     expect(storage.ops.length).toBe(0);
 
     // A second fold with nothing new is a no-op.
-    expect(engine.snapshotIfWalExceeds(1, Number.MAX_SAFE_INTEGER)).toBe(false);
+    expect(replica.snapshotIfWalExceeds(1, Number.MAX_SAFE_INTEGER)).toBe(false);
   });
 
   test("folding an UNSENT op still pushes it (VV-derived upload)", () => {
     const dek = Dek.generate();
-    const storage = new MemEngineStorage();
+    const storage = new MemReplicaStorage();
     const doc = Doc.create();
-    const engine = new SyncEngine(
+    const replica = new Replica(
       doc,
       DOC_ID,
       dek.clone(),
       0n,
-      storage as unknown as EngineStorage,
+      storage as unknown as ReplicaStorage,
     );
-    engine.setLastLocalSeq(0);
+    replica.setLastLocalSeq(0);
 
     // Offline: mutate, capture, force-fold — the pending WAL row is
     // pruned into the snapshot.
-    engine.addItem(LIST_MAIN, "offline work");
-    engine.captureLocalOps();
-    expect(engine.forceSnapshot()).toBe(true);
+    replica.addItem(LIST_MAIN, "offline work");
+    replica.captureLocalOps();
+    expect(replica.forceSnapshot()).toBe(true);
     expect(storage.ops.length).toBe(0);
 
     // Going online still derives the unsent op from Loro history.
-    driveToIdle(engine);
-    const frame = engine.popOutbox();
+    driveToIdle(replica);
+    const frame = replica.popOutbox();
     expect(frame).toBeDefined();
     const decoded = decode(frame!) as { type: string };
     expect(decoded.type).toBe("PushUpdates");
@@ -168,32 +168,32 @@ describe("engine ↔ EngineStorage (VV-derived web push path)", () => {
     const blob = peer.pendingExport(dek)!;
     expect(blob).toBeDefined();
 
-    const storage = new MemEngineStorage();
+    const storage = new MemReplicaStorage();
     const doc = Doc.empty();
     doc.markPersisted();
-    const engine = new SyncEngine(
+    const replica = new Replica(
       doc,
       DOC_ID,
       dek.clone(),
       0n,
-      storage as unknown as EngineStorage,
+      storage as unknown as ReplicaStorage,
     );
-    engine.setLastLocalSeq(0);
-    driveToIdle(engine);
+    replica.setLastLocalSeq(0);
+    driveToIdle(replica);
 
-    engine.handleServerBytes(broadcastBytes(1, blob));
+    replica.handleServerBytes(broadcastBytes(1, blob));
 
     expect(storage.ops.length).toBe(1);
     expect(storage.ops[0]!.serverSeq).toBe(1);
     // The VV write landed atomically with the row.
     expect(storage.serverKnownVv.length).toBeGreaterThan(0);
-    expect(engine.lastContiguousSeq()).toBe(1n);
+    expect(replica.lastContiguousSeq()).toBe(1n);
 
     // The remote op materialised into the doc, and nothing pends: the
     // remote history is server-known, so a flush ships nothing.
-    const items = JSON.parse(engine.itemsInListJson(LIST_MAIN, false)) as Array<{ text: string }>;
+    const items = JSON.parse(replica.itemsInListJson(LIST_MAIN, false)) as Array<{ text: string }>;
     expect(items.map((i) => i.text)).toContain("from-peer");
-    engine.flush();
-    expect(engine.popOutbox()).toBeUndefined();
+    replica.flush();
+    expect(replica.popOutbox()).toBeUndefined();
   });
 });

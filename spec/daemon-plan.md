@@ -1,11 +1,11 @@
 # Daemon plan
 
-Status: phases 1 to 3 built 2026-10-21 (`cli/src/daemon.rs` host + socket server, `cli/src/ipc.rs`, `cli/src/client.rs`, every doc verb ported, `-s` removed, `daemon stop|status`; tests in `cli/tests/daemon.rs` and `cli/tests/cli_bin.rs`). Phase 5's projection tier built 2026-10-26 (`Watch` / `Watching` / `Event`; first watcher is the macOS menubar app in `apple/MonoplanMac`). `daemon install|uninstall` built 2026-10-27 (`cli/src/service.rs`: the headless path for Linux and CLI-only Macs). Amended 2026-10-27 (see "Decision", amendment): on macOS the app hosts the loop in-process (`monoplan-ffi::Host`, `apple/MonoplanMac/Sources/MonoplanMac/HostController.swift`) for its whole life, the headless daemon is the alternative rather than a partner, and login uses the Login Items API; the mirror tier is no longer needed for the macOS window. Amended 2026-10-29 (`spec/mac-window-plan.md`): the mirror is an FFI surface on `Host`, never socket frames; the window is a webview running the web client over a mirror doc with its own peer; the tray moved to the FFI the same day (`daemon::LocalClient`, `Host.request` / `Host.watch`), so the socket is the CLI's alone; the mirror's host side (`HostCmd`, `Host.subscribe` / `Host.import`) built 2026-11-03. Not built: the locked state, wake notifications. Written 2026-10-21. The built behaviour is documented in `spec/cli.md` "Process model"; this file keeps the reasoning and the remaining plan. Supersedes the deleted
+Status: phases 1 to 3 built 2026-10-21 (`cli/src/daemon.rs` host + socket server, `cli/src/ipc.rs`, `cli/src/client.rs`, every doc verb ported, `-s` removed, `daemon stop|status`; tests in `cli/tests/daemon.rs` and `cli/tests/cli_bin.rs`). Phase 5's projection tier built 2026-10-26 (`Watch` / `Watching` / `Event`; first watcher is the macOS menubar app in `apple/MonoplanMac`). `daemon install|uninstall` built 2026-10-27 (`cli/src/service.rs`: the headless path for Linux and CLI-only Macs). Amended 2026-10-27 (see "Decision", amendment): on macOS the app runs the loop in-process (`monoplan-ffi::Engine`, `apple/MonoplanMac/Sources/MonoplanMac/EngineController.swift`) for its whole life, the headless daemon is the alternative rather than a partner, and login uses the Login Items API; the mirror tier is no longer needed for the macOS window. Amended 2026-10-29 (`spec/mac-window-plan.md`): the mirror is an FFI surface on `Engine`, never socket frames; the window is a webview running the web client over a mirror doc with its own peer; the tray moved to the FFI the same day (`daemon::LocalClient`, `Engine.request` / `Engine.watch`), so the socket is the CLI's alone; the mirror's engine side (`HostCmd`, `Engine.subscribe` / `Engine.import`) built 2026-11-03. Not built: the locked state, wake notifications. Written 2026-10-21. The built behaviour is documented in `spec/cli.md` "Process model"; this file keeps the reasoning and the remaining plan. Supersedes the deleted
 `spec/tui-plan.md` (its "no daemon" conclusion rested on boot time,
 which is no longer the question) and answers the daemon question that
 `spec/cli.md` "Sync lifecycle" deferred.
 
-Read first: `spec/architecture.md` (sans-IO engine, host
+Read first: `spec/architecture.md` (sans-IO replica, host
 responsibilities), `spec/peer-id-plan.md` (the slot lease this plan
 reuses as its election), `spec/vv-wal-separation.md` (what a host must
 persist and when), `spec/shared-worker.md` (the web's version of the
@@ -63,45 +63,45 @@ on demand), not two; the daemon makes this a packaging choice only. It
 lives in `apple/MonoplanMac/` (`bun run mac`).
 
 **Amended 2026-10-27: on macOS the normal path is one process.** The
-app hosts the doc in-process: the same Rust host loop, split into
+app runs the engine in-process: the same Rust loop, split into
 `daemon::start` / `daemon::serve` and exposed through `monoplan-ffi` as
-`Host` (a background thread with its own tokio runtime). The tray and
-the window are clients of the app's own `Host` through the FFI
+`Engine` (a background thread with its own tokio runtime). The tray and
+the window are clients of the app's own `Engine` through the FFI
 (`daemon::LocalClient` through `monoplan-ffi`, built 2026-10-29; until
 then the tray was a socket client of its own process). The socket is
 served for the CLI only. The window is a
-webview running the web client over a mirror doc that `Host` seeds and
+webview running the web client over a mirror doc that `Engine` seeds and
 converges (`spec/mac-window-plan.md`); the mirror tier below is that
 FFI surface and is never carried by the socket. The headless `monoplan daemon` remains the
 host for CLI-only use, Linux and servers (`daemon install` writes the
 systemd unit or launchd agent for that path) and is what the CLI
 auto-spawns when nothing holds the profile. Rules:
 
-The app hosts whenever it runs (revised 2026-10-27, replacing the
+The engine runs whenever the app does (revised 2026-10-27, replacing the
 "alternatives, not partners" rules under which the app stayed a client
 of a foreign daemon and refused `Shutdown`; that branch was code for a
 case nobody needs, and the refusals it forced on the CLI were the only
-user-visible friction). The app only ever talks to its own host.
+user-visible friction). The app only ever talks to its own engine.
 
 1. Whenever its socket is down and the profile is signed in, the app
-   starts its host. `Host.start` first takes a headless `monoplan
+   starts its engine. `Engine.start` first takes a headless `monoplan
    daemon` over: asks it to exit over the socket, waits for the lock,
    then claims the profile (`client::take_over`). The headless daemon
    fills in on a Mac only while the app is not running, which is what
    the CLI's auto-spawn does after the app quits.
-2. The app's host honours `Shutdown` like any host. `logout`, `login`,
+2. The app's engine honours `Shutdown` like any daemon. `logout`, `login`,
    `recover`, `signup` and `password` from the terminal stop it and
    hold `daemon.lock` while they rewrite the profile (`client::claim`,
    dropped before anything that needs a host, such as `login`'s
    initial sync), so neither the app nor a client's auto-spawn boots a
-   half-written profile; the app re-hosts once the lock is free.
-3. The app never takes over another app's host (two copies taking turns
-   would never settle), a host still starting, or a profile held by a
-   command: `Host.start` reports `Busy`, the menu says "profile in use"
+   half-written profile; the app starts its engine again once the lock is free.
+3. The app never takes over another app's engine (two copies taking turns
+   would never settle), an engine still starting, or a profile held by a
+   command: `Engine.start` reports `Busy`, the menu says "profile in use"
    and the client's reconnect backoff retries. `daemon install` refuses
-   while the app hosts: the agent is for Macs without the app.
-4. A client never restarts an embedded host for staleness. The build-id
-   check applies to headless daemons only; against an embedded host the
+   while the app's engine runs: the agent is for Macs without the app.
+4. A client never restarts an embedded engine for staleness. The build-id
+   check applies to headless daemons only; against an embedded engine the
    package version must match, else the command fails naming both
    versions. The bundled CLI, symlinked onto `PATH` from Settings, is
    how the terminal stays at the app's version.
@@ -124,7 +124,7 @@ monoplan item add ──UDS──┐
 monoplan item ls  ──UDS──┤
 monoplan tui      ──UDS──┼──>  host loop ──WS──> server
 tray / window     ──FFI──┘        │   (`monoplan daemon`, or the macOS app's
-                  (in-process)    │    `monoplan-ffi::Host`; the FFI edge exists only there:
+                  (in-process)    │    `monoplan-ffi::Engine`; the FFI edge exists only there:
                                   │    request / watch for the tray, subscribe / import /
                                   │    session for the window's mirror, spec/mac-window-plan.md)
                                   ├── <profile>/monoplan.sqlite
@@ -279,7 +279,7 @@ implementation of every view, in core, shared by CLI, web, macOS and
 iOS.
 
 Two things changed on 2026-10-29 (`spec/mac-window-plan.md`). The
-mirror is an FFI surface on the in-process `Host` (`subscribe`,
+mirror is an FFI surface on the in-process `Engine` (`subscribe`,
 `import`), never socket frames: the only full-view client is the app's
 own webview, the headless daemon has no such client, and the socket
 stays the CLI's. And the mirror **writes**, under a peer id of its own
@@ -345,11 +345,11 @@ sticks until login. The agent and the CLI should be one file on disk
 below otherwise has a rebuilt CLI replace the agent's daemon with its
 own, and the agent take over again at the next login.
 
-The host is `Session` held open instead of torn down after one command
+The host is `Engine` held open instead of torn down after one command
 (`cli/src/sync.rs`). Concretely:
 
 - `flush(self)` splits into `persist()` (the existing
-  `persist_engine_state`, run on a tick) and `drain_outbox()`.
+  `persist_replica_state`, run on a tick) and `drain_outbox()`.
 - One `select!` over: client requests (one task per connection feeds
   them through a channel; the loop runs each inline against the doc),
   the in-flight connect task, inbound WS frames, a ~1 s persist tick,
@@ -401,7 +401,7 @@ lid-open is synced in about a second rather than after a ping timeout.
 ### Mobile hosts (context; first iOS host built 2026-11-05)
 
 Built so far (`apple/MonoplanIOS`, `apple/README.md`): the iOS app
-hosts in process through `monoplan-ffi::Host` exactly as the Mac app
+runs the engine in process through `monoplan-ffi::Engine` exactly as the Mac app
 does, with two differences. It serves **no Unix socket**
 (`daemon::start_with(profile, false)`; `Started::listener` is
 optional): nothing on iOS would dial one, and the container paths
@@ -414,7 +414,7 @@ iOS suspends backgrounded apps within seconds and permits no persistent
 socket; `BGAppRefreshTask` and silent push are both budgeted and
 best-effort. The mobile host therefore syncs as a short exchange on
 every launch and return-to-foreground (hello, pull since acked seq,
-push, ack, close), exactly the one-shot `Session` exchange, which stays
+push, ack, close), exactly the one-shot `Engine` exchange, which stays
 the library primitive. Reminders are local notifications scheduled from
 synced state. Server-initiated push (APNs/FCM poke, content-free, dumb-
 server compatible) is deferred; it would be additive, and its real
@@ -435,7 +435,7 @@ a `watch` of `DaemonStatus` (online, last contiguous seq) and a clean
 binary-level `spawn_daemon` that execs `monoplan daemon --ready-fd`
 joins it in phase 2. CLI tests then drive the real binary (or the client
 code path in-process) against it. The two tests that use
-`Session::open` directly keep working: `Session` remains the library
+`Engine::open` directly keep working: `Engine` remains the library
 type the daemon host wraps.
 
 The convergence matrix in `spec/testing.md` is unchanged; "two clients
@@ -444,9 +444,9 @@ about the product.
 
 ## Phases
 
-1. **Host loop** (built). `monoplan daemon` runs `Session` in the
+1. **Host loop** (built). `monoplan daemon` runs `Engine` in the
    select loop with WS reconnect, liveness ping and the persist tick,
-   attached to the terminal. No socket yet. `Session::open` refuses
+   attached to the terminal. No socket yet. `Engine::open` refuses
    with `DaemonRunning` while `daemon.lock` is held, so the mixed-mode
    hazard cannot occur during the transition. Wake notifications are
    not hooked yet; the pong timeout covers sleep for now.
@@ -454,7 +454,7 @@ about the product.
    auto-spawn with the readiness line, `--no-spawn`.
 3. **Port the verbs** (built). Every doc command is a pure function
    over `(doc, args, out)` (`commands::run_doc`); `-s` and
-   `Session::open` are gone; account commands stop the daemon first;
+   `Engine::open` are gone; account commands stop the daemon first;
    `db clear` refuses while it runs. Phases 2 and 3 had to land
    together: once the daemon auto-starts and holds the lock, any
    un-ported one-shot verb would simply be refused.
@@ -468,7 +468,7 @@ about the product.
    macOS menubar app, since 2026-10-29 through `daemon::LocalClient`
    and the FFI rather than the socket. The
    mirror tier is not a socket feature (decided 2026-10-29): it is
-   `Host::subscribe` / `Host::import` on the FFI, specified and tested
+   `Engine::subscribe` / `Engine::import` on the FFI, specified and tested
    in `spec/mac-window-plan.md` and built 2026-11-03, reached through
    the internal `HostCmd` enum the socket handler cannot construct.
 

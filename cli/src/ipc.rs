@@ -51,7 +51,7 @@ pub enum Request {
     /// no db (the menubar app) still gets the email.
     Account,
     /// Create a workspace the account owns and open it now
-    /// (`spec/sharing-plan.md` Phase 5; `Session::create_doc`): a fresh
+    /// (`spec/sharing-plan.md` Phase 5; `Engine::create_doc`): a fresh
     /// DEK wrapped under the Home DEK is registered with `POST
     /// /api/docs`, stored in `secrets.toml`, and the doc is seeded with
     /// its name and opened on the live socket. The reply is
@@ -59,10 +59,10 @@ pub enum Request {
     /// no server to own the doc. `monoplan workspace create` and the
     /// app's New Workspace… send it.
     CreateWorkspace { name: String },
-    /// Delete a workspace the account owns (`Session::delete_doc`):
+    /// Delete a workspace the account owns (`Engine::delete_doc`):
     /// `DELETE /api/docs/:id` on the server (owner only; never Home;
     /// refused while other members remain), then the local copy, key
-    /// and engine are forgotten, as after a `DocClosed`. `workspace`
+    /// and replica are forgotten, as after a `DocClosed`. `workspace`
     /// is the `-w` selector (name or doc id). The reply is
     /// `WorkspaceDeleted`. `monoplan workspace delete` and the app's
     /// native confirm send it.
@@ -163,9 +163,9 @@ pub struct SyncStatus {
     /// so an account's replies are byte-for-byte what they were.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub local_only: bool,
-    /// Local work the server has not confirmed yet: an engine still
+    /// Local work the server has not confirmed yet: a replica still
     /// opening or pulling, a push in flight, or committed ops not yet
-    /// pushed (`SyncEngine::has_unsynced_ops`). With `online` this
+    /// pushed (`Replica::has_unsynced_ops`). With `online` this
     /// gives a client the browser footer's four states: offline,
     /// syncing, synced. Absent on the wire when false.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

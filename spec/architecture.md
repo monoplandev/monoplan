@@ -6,7 +6,7 @@
 Cargo.toml         workspace root
 crates/
   protocol/        shared wire types (serde; JSON on HTTP, rmp-serde on WS)
-core/              rust lib — loro, e2ee, sync engine. native + wasm targets.
+core/              rust lib — loro, e2ee, replica (per-doc sync). native + wasm targets.
 core/web/          wasm-bindgen surface (excluded from default-members)
 server/            rust bin — http + ws, sqlite-backed, dumb relay
 cli/               rust bin — depends on core, integration test surface
@@ -22,24 +22,37 @@ Single workspace. Always invoke wasm builds as `wasm-pack build core/` (never ba
 - WASM build via `wasm-pack`; web bindings live in `core/web/`.
 - `server` and `cli` are native-only.
 
+## Vocabulary
+
+Four words, one meaning each. Use them this way in code, specs and UI.
+
+| Name | What it is | Count |
+|---|---|---|
+| `Doc` | Plaintext Loro state and the domain rules (`core/src/doc.rs`). Knows nothing about crypto, storage or network. | one per replica |
+| `Replica` | This device's copy of one doc plus what keeps it converged: the `Doc`, the DEK, `LocalStorage`, the sync cursors and the push / pull / ack state machine (`core/src/sync.rs`). Sans-IO. A mirror (`spec/mac-window-plan.md`) is a replica too, fed by an engine instead of the server. | one per open doc, plus mirrors |
+| Engine | What owns the IO for a profile: the one WebSocket, the storage handle, the peer lease, and N replicas it routes frames to by `doc_id`. Defined by what it owns, not by a type: `cli::sync::Engine` on native, `monoplan-ffi::Engine` as the Apple handle to it, and `SyncBridge` + `createWorkspaceRuntime` on web. | one per profile |
+| host | An engine that also serves local clients and holds `daemon.lock`: the `monoplan daemon` loop (`cli/src/daemon.rs` `Host`) and the Mac app running that loop in-process. Also still the ordinary word for the webview's host app and URL hosts. | CLI daemon, Mac app |
+
+The server sits outside all of this: it sees `(doc_id, seq, ciphertext)` and nothing else.
+
 ## Cross-platform client boundary
 
-Monoplan's sync protocol state machine lives in shared Rust, not reimplemented per client. The shared `core::sync::SyncEngine` is **sans-IO**:
+Monoplan's sync protocol state machine lives in shared Rust, not reimplemented per client. The shared `core::sync::Replica` is **sans-IO**:
 
 - it owns protocol state, doc application, encryption framing, and push/pull/ack sequencing
 - it does **not** own the socket, timers, reconnect policy, auth transport, or debounce policy
-- callers feed transport events in (`handle_connected`, inbound frame bytes, disconnects, timeouts) and drain outbound frame bytes / engine events out
+- callers feed transport events in (`handle_connected`, inbound frame bytes, disconnects, timeouts) and drain outbound frame bytes / replica events out
 
 This keeps Loro + crypto + protocol behavior identical across clients while letting each host platform own transport policy:
 
 - CLI: native Rust + `tokio-tungstenite`
-- Web: wasm-bindgen surface over the same engine, browser `WebSocket` owned by JS
+- Web: wasm-bindgen surface over the same replica, browser `WebSocket` owned by JS
 - Future native clients: the same `core` crate exposed over UniFFI to Swift / Kotlin transport shells
 
 Two boundary rules matter:
 
-- **No push pipelining.** The engine serializes pushes: at most one durable in-flight push at a time, identified by its `push_id`. If local mutations happen while a push is in flight, the engine marks itself dirty and derives the next delta (from `server_known_vv`) only after the server ack arrives. This avoids duplicate export windows and keeps host adapters simple.
-- **Auth stays outside the engine.** The engine starts from "socket is authenticated and usable". Whether that came from a bearer header, cookie-backed browser session, or future ticket exchange is a client / transport concern documented in `auth.md`.
+- **No push pipelining.** The replica serializes pushes: at most one durable in-flight push at a time, identified by its `push_id`. If local mutations happen while a push is in flight, the replica marks itself dirty and derives the next delta (from `server_known_vv`) only after the server ack arrives. This avoids duplicate export windows and keeps host adapters simple.
+- **Auth stays outside the replica.** The replica starts from "socket is authenticated and usable". Whether that came from a bearer header, cookie-backed browser session, or future ticket exchange is a client / transport concern documented in `auth.md`.
 
 Platform policy stays outside `core`:
 
@@ -50,12 +63,12 @@ Platform policy stays outside `core`:
 
 ## Local persistence
 
-Persistence is **inside** the engine's contract, via one Rust trait — `core::LocalStorage` (`core/src/storage.rs`). Crash recovery and outbound sync are separate concerns (`spec/vv-wal-separation.md`): the engine appends an encrypted WAL row on each local commit (`capture_local_ops`) and each applied remote op, folds the WAL into a full-history snapshot when it crosses the host's threshold (regardless of sync state), and derives what to push from Loro history against `server_known_vv` — never from which WAL rows exist. It rebuilds the doc from snapshot + replay on boot. Storage is mandatory: there is no storage-less engine mode.
+Persistence is **inside** the replica's contract, via one Rust trait — `core::LocalStorage` (`core/src/storage.rs`). Crash recovery and outbound sync are separate concerns (`spec/vv-wal-separation.md`): the replica appends an encrypted WAL row on each local commit (`capture_local_ops`) and each applied remote op, folds the WAL into a full-history snapshot when it crosses the host's threshold (regardless of sync state), and derives what to push from Loro history against `server_known_vv` — never from which WAL rows exist. It rebuilds the doc from snapshot + replay on boot. Storage is mandatory: there is no storage-less replica mode.
 
 Two implementations satisfy the same semantics on different substrates:
 
 - **CLI / server-side single-account flows:** `SqliteStorage` (`crates/storage-sqlite`, `rusqlite`, file on disk; synchronously durable).
-- **Web:** `IdbStorage` (`js/core/src/storage/idb-storage.ts`) behind a wasm-bindgen `EngineStorage` extern (`core/web/src/lib.rs`). The trait is synchronous; IDB is async, so `IdbStorage` keeps a synchronous in-memory mirror the engine reads/writes immediately and flushes IDB in the background, signalling real durability back via `notify_oplog_durable`. The engine stays on the main thread (no Worker).
+- **Web:** `IdbStorage` (`js/core/src/storage/idb-storage.ts`) behind a wasm-bindgen `ReplicaStorage` extern (`core/web/src/lib.rs`). The trait is synchronous; IDB is async, so `IdbStorage` keeps a synchronous in-memory mirror the replica reads/writes immediately and flushes IDB in the background, signalling real durability back via `notify_oplog_durable`. The replica stays on the main thread (no Worker).
 
 The rationale and history — including why web uses IDB rather than sqlite-wasm — live in `spec/local-storage.md`.
 
@@ -86,7 +99,7 @@ replica, and the core already speaks Loro's native VV-to-VV sync
 (`export_updates_since`), so a direct transport is two messages: your
 VV, my VV, missing updates each way. Everything on that wire is sealed
 under the DEK, so peer auth falls out of E2EE. The server-shaped part of
-the client is confined to the engine's seq bookkeeping; a direct
+the client is confined to the replica's seq bookkeeping; a direct
 transport would feed the same `Doc` and leave `server_known_vv` alone, so
 reconnect behaves as today (pull, then push everything the server lacks;
 duplicate rows from both sides pushing LAN-received updates are harmless and

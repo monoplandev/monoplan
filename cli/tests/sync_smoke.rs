@@ -2,7 +2,7 @@
 //!
 //! Bypasses the interactive auth UI by signing up via direct HTTP and
 //! materializing the on-disk profile that the CLI would have written.
-//! Then drives `Session` directly to verify the sync lifecycle:
+//! Then drives `Engine` directly to verify the sync lifecycle:
 //!
 //!   open → mutate → flush → re-open → next pull observes nothing new.
 //!
@@ -16,7 +16,7 @@ use monoplan_cli::commands::agenda::{build_agenda, unscheduled_events};
 use monoplan_cli::commands::export::{deliver, render};
 use monoplan_cli::config::{Config, Profile, Secrets};
 use monoplan_cli::storage::{Account, Identity};
-use monoplan_cli::sync::Session;
+use monoplan_cli::sync::Engine;
 use monoplan_core::{Dek, Doc, LIST_EVENTS, LIST_INBOX, NotesDeltaOp};
 use monoplan_server::sync::queries;
 use uuid::Uuid;
@@ -29,7 +29,7 @@ use support::{
 };
 
 #[tokio::test]
-async fn session_pushes_and_acks_then_reopen_is_clean() {
+async fn engine_pushes_and_acks_then_reopen_is_clean() {
     let server = TestServer::start().await;
     let dek = Dek::generate();
     let signup = signup_via_http(&server, &dek, "smoke-test").await;
@@ -48,10 +48,10 @@ async fn session_pushes_and_acks_then_reopen_is_clean() {
     // First open: connect, handshake, pull (empty). The seeded doc is
     // already persisted locally; only the user's new mutation should
     // ship on flush.
-    let session = Session::open_with_profile(profile, true).await.unwrap();
-    assert!(session.is_online(), "expected to connect to local server");
-    let item_id = session.doc().add_item(LIST_INBOX, "hello world").unwrap();
-    session.flush().await.unwrap();
+    let engine = Engine::open_with_profile(profile, true).await.unwrap();
+    assert!(engine.is_online(), "expected to connect to local server");
+    let item_id = engine.doc().add_item(LIST_INBOX, "hello world").unwrap();
+    engine.flush().await.unwrap();
 
     let primary_doc_id = Uuid::parse_str(&signup.primary_doc_id).unwrap();
     let batch = wait_for_updates(&server, primary_doc_id, 1).await;
@@ -72,17 +72,17 @@ async fn session_pushes_and_acks_then_reopen_is_clean() {
     // Re-open. last_acked_seq is persisted, so the pull is empty,
     // and `pending_export` should be `None`.
     let profile2 = reopen_profile(tmp.path());
-    let session2 = Session::open_with_profile(profile2, true).await.unwrap();
-    assert!(session2.is_online());
+    let engine2 = Engine::open_with_profile(profile2, true).await.unwrap();
+    assert!(engine2.is_online());
     assert!(
-        session2.doc().get_item(&item_id).is_some(),
+        engine2.doc().get_item(&item_id).is_some(),
         "item survived round-trip"
     );
     assert!(
-        !session2.doc().has_uncaptured_ops(),
+        !engine2.doc().has_uncaptured_ops(),
         "no new local mutations"
     );
-    session2.flush().await.unwrap();
+    engine2.flush().await.unwrap();
 
     // No new update blobs should have been pushed.
     let after = queries::fetch_updates_batch(&server.state.db, primary_doc_id, 0)
@@ -113,38 +113,38 @@ async fn offline_add_survives_restart_then_syncs() {
     .await;
 
     // Offline add — no connect; the mutation is captured to the op log.
-    let session = Session::open_with_profile(profile, false).await.unwrap();
-    assert!(!session.is_online());
-    let item_id = session.doc().add_item(LIST_INBOX, "offline item").unwrap();
-    session.flush().await.unwrap();
+    let engine = Engine::open_with_profile(profile, false).await.unwrap();
+    assert!(!engine.is_online());
+    let item_id = engine.doc().add_item(LIST_INBOX, "offline item").unwrap();
+    engine.flush().await.unwrap();
 
     // Restart (still offline): the captured op replays from storage.
-    let session2 = Session::open_with_profile(reopen_profile(tmp.path()), false)
+    let engine2 = Engine::open_with_profile(reopen_profile(tmp.path()), false)
         .await
         .unwrap();
     assert!(
-        session2.doc().get_item(&item_id).is_some(),
+        engine2.doc().get_item(&item_id).is_some(),
         "offline add survived a restart"
     );
-    session2.flush().await.unwrap();
+    engine2.flush().await.unwrap();
 
     // Now sync: the outbox op ships to the server.
-    let session3 = Session::open_with_profile(reopen_profile(tmp.path()), true)
+    let engine3 = Engine::open_with_profile(reopen_profile(tmp.path()), true)
         .await
         .unwrap();
-    assert!(session3.is_online());
-    session3.flush().await.unwrap();
+    assert!(engine3.is_online());
+    engine3.flush().await.unwrap();
 
     let primary_doc_id = Uuid::parse_str(&signup.primary_doc_id).unwrap();
     let batch = wait_for_updates(&server, primary_doc_id, 1).await;
     assert_eq!(batch.updates.len(), 1, "the offline op reached the server");
 
     // Reopen once more: clean, nothing re-pushes (op acked + compacted).
-    let session4 = Session::open_with_profile(reopen_profile(tmp.path()), true)
+    let engine4 = Engine::open_with_profile(reopen_profile(tmp.path()), true)
         .await
         .unwrap();
-    assert!(session4.doc().get_item(&item_id).is_some());
-    session4.flush().await.unwrap();
+    assert!(engine4.doc().get_item(&item_id).is_some());
+    engine4.flush().await.unwrap();
     let after = queries::fetch_updates_batch(&server.state.db, primary_doc_id, 0)
         .await
         .unwrap();
@@ -175,10 +175,10 @@ async fn last_sync_at_set_only_after_online_sync() {
     let doc_id = monoplan_core::DocId(Uuid::parse_str(&signup.primary_doc_id).unwrap());
 
     // Offline flush, even with a mutation, must not stamp last_sync_at.
-    let session = Session::open_with_profile(profile, false).await.unwrap();
-    assert!(!session.is_online());
-    session.doc().add_item(LIST_INBOX, "offline item").unwrap();
-    session.flush().await.unwrap();
+    let engine = Engine::open_with_profile(profile, false).await.unwrap();
+    assert!(!engine.is_online());
+    engine.doc().add_item(LIST_INBOX, "offline item").unwrap();
+    engine.flush().await.unwrap();
     {
         let storage = monoplan_cli::storage::open_storage(&reopen_profile(tmp.path())).unwrap();
         assert!(
@@ -192,11 +192,11 @@ async fn last_sync_at_set_only_after_online_sync() {
     }
 
     // A real online sync stamps it.
-    let session2 = Session::open_with_profile(reopen_profile(tmp.path()), true)
+    let engine2 = Engine::open_with_profile(reopen_profile(tmp.path()), true)
         .await
         .unwrap();
-    assert!(session2.is_online());
-    session2.flush().await.unwrap();
+    assert!(engine2.is_online());
+    engine2.flush().await.unwrap();
     {
         let storage = monoplan_cli::storage::open_storage(&reopen_profile(tmp.path())).unwrap();
         assert!(
@@ -241,10 +241,10 @@ async fn default_open_skips_connect() {
 
     // Without --sync the open call is fast — no 2s timeout penalty.
     let started = std::time::Instant::now();
-    let session = Session::open_with_profile(profile, false).await.unwrap();
+    let engine = Engine::open_with_profile(profile, false).await.unwrap();
     assert!(started.elapsed() < Duration::from_millis(500));
-    assert!(!session.is_online());
-    session.flush().await.unwrap();
+    assert!(!engine.is_online());
+    engine.flush().await.unwrap();
 }
 
 #[tokio::test]
@@ -323,18 +323,18 @@ async fn second_device_observes_first_devices_items_via_pull() {
     monoplan_cli::storage::seed_snapshot(&storage_b, &dek, doc_id_b, &Doc::empty()).unwrap();
 
     // A pushes a new item.
-    let session_a = Session::open_with_profile(profile_a, true).await.unwrap();
-    let item_id = session_a.doc().add_item(LIST_INBOX, "from-A").unwrap();
-    session_a.flush().await.unwrap();
+    let engine_a = Engine::open_with_profile(profile_a, true).await.unwrap();
+    let item_id = engine_a.doc().add_item(LIST_INBOX, "from-A").unwrap();
+    engine_a.flush().await.unwrap();
 
-    // B opens a session — its pull should ingest A's seed + add_item
+    // B opens an engine — its pull should ingest A's seed + add_item
     // blob and surface the item.
-    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
-    assert!(session_b.is_online());
-    let view = session_b.doc().get_item(&item_id).unwrap();
+    let engine_b = Engine::open_with_profile(profile_b, true).await.unwrap();
+    assert!(engine_b.is_online());
+    let view = engine_b.doc().get_item(&item_id).unwrap();
     assert_eq!(view.text, "from-A");
     assert_eq!(view.list_id, LIST_INBOX);
-    session_b.flush().await.unwrap();
+    engine_b.flush().await.unwrap();
 }
 
 /// Focus lens convergence across two devices (`spec/focus.md`). Device A
@@ -380,74 +380,74 @@ async fn focus_curation_converges_across_devices() {
 
     // A curates: three inbox items, all pinned to Focus, then reorder the
     // third to the front → focus order [i3, i1, i2].
-    let session_a = Session::open_with_profile(profile_a, true).await.unwrap();
-    let i1 = session_a.doc().add_item(LIST_INBOX, "one").unwrap();
-    let i2 = session_a.doc().add_item(LIST_INBOX, "two").unwrap();
-    let i3 = session_a.doc().add_item(LIST_INBOX, "three").unwrap();
+    let engine_a = Engine::open_with_profile(profile_a, true).await.unwrap();
+    let i1 = engine_a.doc().add_item(LIST_INBOX, "one").unwrap();
+    let i2 = engine_a.doc().add_item(LIST_INBOX, "two").unwrap();
+    let i3 = engine_a.doc().add_item(LIST_INBOX, "three").unwrap();
     for id in [&i1, &i2, &i3] {
-        session_a.doc().add_to_focus(id, usize::MAX).unwrap();
+        engine_a.doc().add_to_focus(id, usize::MAX).unwrap();
     }
-    session_a.doc().move_in_focus(&i3, 0).unwrap();
+    engine_a.doc().move_in_focus(&i3, 0).unwrap();
     assert_eq!(
-        session_a.doc().focus_refs(),
+        engine_a.doc().focus_refs(),
         vec![i3.clone(), i1.clone(), i2.clone()],
         "A's local focus order after reorder"
     );
-    let fp_curated = session_a.doc().fingerprint();
-    session_a.flush().await.unwrap();
+    let fp_curated = engine_a.doc().fingerprint();
+    engine_a.flush().await.unwrap();
 
     // B pulls on open: identical focus order, identical fingerprint.
-    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
-    assert!(session_b.is_online());
+    let engine_b = Engine::open_with_profile(profile_b, true).await.unwrap();
+    assert!(engine_b.is_online());
     assert_eq!(
-        session_b.doc().focus_refs(),
+        engine_b.doc().focus_refs(),
         vec![i3.clone(), i1.clone(), i2.clone()],
         "B observes A's curated focus order via pull"
     );
     assert_eq!(
-        session_b.doc().fingerprint(),
+        engine_b.doc().fingerprint(),
         fp_curated,
         "fingerprint parity (focus order is hashed)"
     );
-    session_b.flush().await.unwrap();
+    engine_b.flush().await.unwrap();
 
     // A reopens and marks the focused i1 Done: it self-removes from Focus in
     // the same commit → [i3, i2]. Un-doing it back to Backlog must NOT re-add
     // it.
-    let session_a2 = Session::open_with_profile(reopen_profile(tmp_a.path()), true)
+    let engine_a2 = Engine::open_with_profile(reopen_profile(tmp_a.path()), true)
         .await
         .unwrap();
-    session_a2.doc().set_item_done(&i1, true).unwrap();
+    engine_a2.doc().set_item_done(&i1, true).unwrap();
     assert_eq!(
-        session_a2.doc().focus_refs(),
+        engine_a2.doc().focus_refs(),
         vec![i3.clone(), i2.clone()],
         "Done auto-removes the focus ref"
     );
-    session_a2.doc().set_item_done(&i1, false).unwrap();
+    engine_a2.doc().set_item_done(&i1, false).unwrap();
     assert_eq!(
-        session_a2.doc().focus_refs(),
+        engine_a2.doc().focus_refs(),
         vec![i3.clone(), i2.clone()],
         "un-done does not reappear in Focus"
     );
-    let fp_compacted = session_a2.doc().fingerprint();
-    session_a2.flush().await.unwrap();
+    let fp_compacted = engine_a2.doc().fingerprint();
+    engine_a2.flush().await.unwrap();
 
     // B reopens to pull the Done + un-done updates; converges to [i3, i2] with
     // matching fingerprint.
-    let session_b2 = Session::open_with_profile(reopen_profile(tmp_b.path()), true)
+    let engine_b2 = Engine::open_with_profile(reopen_profile(tmp_b.path()), true)
         .await
         .unwrap();
     assert_eq!(
-        session_b2.doc().focus_refs(),
+        engine_b2.doc().focus_refs(),
         vec![i3, i2],
         "B converges to the self-compacted focus order"
     );
     assert_eq!(
-        session_b2.doc().fingerprint(),
+        engine_b2.doc().fingerprint(),
         fp_compacted,
         "fingerprint parity after Done self-clean + un-done"
     );
-    session_b2.flush().await.unwrap();
+    engine_b2.flush().await.unwrap();
 }
 
 #[tokio::test]
@@ -483,50 +483,50 @@ async fn when_converges_across_devices() {
     .await;
 
     // A: one timed `when`, one all-day, and a deadline beside the first.
-    let session_a = Session::open_with_profile(profile_a, true).await.unwrap();
-    let timed = session_a.doc().add_item(LIST_INBOX, "timed").unwrap();
-    let allday = session_a.doc().add_item(LIST_INBOX, "all day").unwrap();
-    session_a
+    let engine_a = Engine::open_with_profile(profile_a, true).await.unwrap();
+    let timed = engine_a.doc().add_item(LIST_INBOX, "timed").unwrap();
+    let allday = engine_a.doc().add_item(LIST_INBOX, "all day").unwrap();
+    engine_a
         .doc()
         .set_item_when(&timed, Some("2026-09-12T14:00"))
         .unwrap();
-    session_a
+    engine_a
         .doc()
         .set_item_deadline(&timed, Some("2026-10-31"))
         .unwrap();
-    session_a
+    engine_a
         .doc()
         .set_item_when(&allday, Some("2026-09-12"))
         .unwrap();
-    let fp_set = session_a.doc().fingerprint();
-    session_a.flush().await.unwrap();
+    let fp_set = engine_a.doc().fingerprint();
+    engine_a.flush().await.unwrap();
 
     // B pulls on open: both values present, fingerprint parity.
-    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
-    assert!(session_b.is_online());
-    let b_timed = session_b.doc().get_item(&timed).unwrap();
+    let engine_b = Engine::open_with_profile(profile_b, true).await.unwrap();
+    assert!(engine_b.is_online());
+    let b_timed = engine_b.doc().get_item(&timed).unwrap();
     assert_eq!(b_timed.when.as_deref(), Some("2026-09-12T14:00"));
     assert_eq!(b_timed.deadline.as_deref(), Some("2026-10-31"));
     assert_eq!(
-        session_b.doc().get_item(&allday).unwrap().when.as_deref(),
+        engine_b.doc().get_item(&allday).unwrap().when.as_deref(),
         Some("2026-09-12")
     );
-    assert_eq!(session_b.doc().fingerprint(), fp_set, "when is hashed");
+    assert_eq!(engine_b.doc().fingerprint(), fp_set, "when is hashed");
 
     // B clears the timed one's `when`; the deadline must survive.
-    session_b.doc().set_item_when(&timed, None).unwrap();
-    let fp_cleared = session_b.doc().fingerprint();
-    session_b.flush().await.unwrap();
+    engine_b.doc().set_item_when(&timed, None).unwrap();
+    let fp_cleared = engine_b.doc().fingerprint();
+    engine_b.flush().await.unwrap();
 
     // A reopens and observes the clear.
-    let session_a2 = Session::open_with_profile(reopen_profile(tmp_a.path()), true)
+    let engine_a2 = Engine::open_with_profile(reopen_profile(tmp_a.path()), true)
         .await
         .unwrap();
-    let a_timed = session_a2.doc().get_item(&timed).unwrap();
+    let a_timed = engine_a2.doc().get_item(&timed).unwrap();
     assert_eq!(a_timed.when, None, "A observes B's clear");
     assert_eq!(a_timed.deadline.as_deref(), Some("2026-10-31"));
-    assert_eq!(session_a2.doc().fingerprint(), fp_cleared);
-    session_a2.flush().await.unwrap();
+    assert_eq!(engine_a2.doc().fingerprint(), fp_cleared);
+    engine_a2.flush().await.unwrap();
 }
 
 #[tokio::test]
@@ -562,22 +562,22 @@ async fn events_converge_across_devices() {
     .await;
 
     // A: a dated event and an undated one, straight into `events`.
-    let session_a = Session::open_with_profile(profile_a, true).await.unwrap();
-    let gig = session_a.doc().add_item(LIST_EVENTS, "gig").unwrap();
-    let dinner = session_a.doc().add_item(LIST_EVENTS, "dinner").unwrap();
-    session_a
+    let engine_a = Engine::open_with_profile(profile_a, true).await.unwrap();
+    let gig = engine_a.doc().add_item(LIST_EVENTS, "gig").unwrap();
+    let dinner = engine_a.doc().add_item(LIST_EVENTS, "dinner").unwrap();
+    engine_a
         .doc()
         .set_item_when(&gig, Some("2026-09-12T19:00"))
         .unwrap();
-    let fp_added = session_a.doc().fingerprint();
-    session_a.flush().await.unwrap();
+    let fp_added = engine_a.doc().fingerprint();
+    engine_a.flush().await.unwrap();
 
     // B pulls on open: the dated event is on its agenda day, the undated
     // one is Unscheduled, and neither is in any list view.
-    let session_b = Session::open_with_profile(profile_b, true).await.unwrap();
-    assert!(session_b.is_online());
-    assert_eq!(session_b.doc().fingerprint(), fp_added);
-    let items = session_b.doc().all_items();
+    let engine_b = Engine::open_with_profile(profile_b, true).await.unwrap();
+    assert!(engine_b.is_online());
+    assert_eq!(engine_b.doc().fingerprint(), fp_added);
+    let items = engine_b.doc().all_items();
     let days = build_agenda(&items, "2026-09-09", "2026-09-23");
     let placed: Vec<(&str, &str)> = days
         .iter()
@@ -591,7 +591,7 @@ async fn events_converge_across_devices() {
         .collect();
     assert_eq!(unscheduled, vec![dinner.as_str()]);
     assert!(
-        session_b
+        engine_b
             .doc()
             .items_in_list(LIST_INBOX, false)
             .iter()
@@ -599,18 +599,18 @@ async fn events_converge_across_devices() {
     );
 
     // B moves the gig out of `events`: an ordinary inbox item, date intact.
-    session_b.doc().move_item(&gig, LIST_INBOX, 0).unwrap();
-    let fp_moved = session_b.doc().fingerprint();
-    session_b.flush().await.unwrap();
+    engine_b.doc().move_item(&gig, LIST_INBOX, 0).unwrap();
+    let fp_moved = engine_b.doc().fingerprint();
+    engine_b.flush().await.unwrap();
 
-    let session_a2 = Session::open_with_profile(reopen_profile(tmp_a.path()), true)
+    let engine_a2 = Engine::open_with_profile(reopen_profile(tmp_a.path()), true)
         .await
         .unwrap();
-    let a_gig = session_a2.doc().get_item(&gig).unwrap();
+    let a_gig = engine_a2.doc().get_item(&gig).unwrap();
     assert!(!a_gig.is_event(), "A observes B's move");
     assert_eq!(a_gig.list_id, LIST_INBOX);
     assert_eq!(a_gig.when.as_deref(), Some("2026-09-12T19:00"));
-    assert!(session_a2.doc().get_item(&dinner).unwrap().is_event());
-    assert_eq!(session_a2.doc().fingerprint(), fp_moved);
-    session_a2.flush().await.unwrap();
+    assert!(engine_a2.doc().get_item(&dinner).unwrap().is_event());
+    assert_eq!(engine_a2.doc().fingerprint(), fp_moved);
+    engine_a2.flush().await.unwrap();
 }

@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 
-import { Dek, Doc, SyncEngine } from "@monoplan/core/wasm";
-import type { EngineStorage } from "@monoplan/core/wasm";
-import { MemEngineStorage } from "../../core/test/mem-engine-storage.ts";
+import { Dek, Doc, Replica } from "@monoplan/core/wasm";
+import type { ReplicaStorage } from "@monoplan/core/wasm";
+import { MemReplicaStorage } from "../../core/test/mem-replica-storage.ts";
 import { createSyncedApp } from "../src/sync/store.ts";
 
 const DOC_ID = "00000000-0000-0000-0000-000000000000";
@@ -20,28 +20,28 @@ test("bulk bootstrap crosses the app boundary as one full resync", () => {
 
   const target = Doc.empty();
   target.applyRemote(dek, blob!);
-  const targetEngine = new SyncEngine(
+  const targetReplica = new Replica(
     target,
     DOC_ID,
     dek.clone(),
     0n,
-    new MemEngineStorage() as unknown as EngineStorage,
+    new MemReplicaStorage() as unknown as ReplicaStorage,
   );
-  const first = targetEngine.popAppEvent();
+  const first = targetReplica.popAppEvent();
   expect(first?.kind).toBe("fullResync");
-  expect(targetEngine.popAppEvent()).toBeUndefined();
+  expect(targetReplica.popAppEvent()).toBeUndefined();
 
   // Recreate the same queued control event for the app-level assertion.
   const secondTarget = Doc.empty();
   secondTarget.applyRemote(dek, blob!);
-  const engine = new SyncEngine(
+  const replica = new Replica(
     secondTarget,
     DOC_ID,
     dek.clone(),
     0n,
-    new MemEngineStorage() as unknown as EngineStorage,
+    new MemReplicaStorage() as unknown as ReplicaStorage,
   );
-  const app = createSyncedApp(engine);
+  const app = createSyncedApp(replica);
   expect(Object.keys(app.state.itemsById)).toHaveLength(100);
   app.drainEvents();
   expect(Object.keys(app.state.itemsById)).toHaveLength(100);
@@ -53,29 +53,29 @@ test("bulk bootstrap crosses the app boundary as one full resync", () => {
 // that carried the original save. Regression: the snapshot materializer
 // dropped `defaultView`, so every reload fell back to the list lens.
 test("a saved default view survives materializing a fresh store", () => {
-  const newEngine = () =>
-    new SyncEngine(
+  const newReplica = () =>
+    new Replica(
       Doc.create(),
       DOC_ID,
       Dek.generate(),
       0n,
-      new MemEngineStorage() as unknown as EngineStorage,
+      new MemReplicaStorage() as unknown as ReplicaStorage,
     );
 
-  const engine = newEngine();
-  const listId = engine.addList("Work");
-  engine.setDefaultView(listId, "board:backlog,todo,in_progress,review");
-  engine.setDefaultView("inbox", "board");
-  const saved = engine.save();
+  const replica = newReplica();
+  const listId = replica.addList("Work");
+  replica.setDefaultView(listId, "board:backlog,todo,in_progress,review");
+  replica.setDefaultView("inbox", "board");
+  const saved = replica.save();
 
   // Reload the way a returning session does: rebuild the doc from the
-  // persisted snapshot, then materialize the store off the fresh engine.
-  const reloaded = new SyncEngine(
+  // persisted snapshot, then materialize the store off the fresh replica.
+  const reloaded = new Replica(
     Doc.load(saved),
     DOC_ID,
     Dek.generate(),
     0n,
-    new MemEngineStorage() as unknown as EngineStorage,
+    new MemReplicaStorage() as unknown as ReplicaStorage,
   );
   const app = createSyncedApp(reloaded);
   expect(app.state.listsById[listId]?.defaultView).toBe("board:backlog,todo,in_progress,review");

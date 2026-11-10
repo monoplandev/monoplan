@@ -1,7 +1,7 @@
 //! CLI-side sync runtime — a thin tokio-tungstenite adapter that
-//! drives the sans-IO `monoplan_core::SyncEngine`.
+//! drives the sans-IO `monoplan_core::Replica`.
 //!
-//! `Session` is the docs-plus-engines handle (one engine per doc in
+//! `Engine` is the docs-plus-replicas handle (one replica per doc in
 //! `secrets.toml`, one socket). Two hosts use it:
 //! - the daemon (`crate::daemon`) holds one open for its lifetime and
 //!   drives the socket itself;
@@ -18,7 +18,7 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use http::header::AUTHORIZATION;
 use monoplan_core::{
-    Dek, Doc, DocId, EngineOptions, Event, SyncEngine, hello_frame, parse_hello_response,
+    Dek, Doc, DocId, EngineOptions, Event, Replica, hello_frame, parse_hello_response,
 };
 use monoplan_protocol::{CreateDocRequest, CreateDocResponse};
 use tokio::net::TcpStream;
@@ -80,9 +80,9 @@ impl From<tokio_tungstenite::tungstenite::Error> for SyncError {
 
 pub(crate) type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-/// One doc's engine plus the CLI-only `last_sync_at` stamp.
+/// One doc's replica plus the CLI-only `last_sync_at` stamp.
 pub struct DocState {
-    pub(crate) engine: SyncEngine,
+    pub(crate) replica: Replica,
     /// In-memory copy of the persisted `last_sync_at` stamp, seeded at
     /// boot and advanced by `mark_synced`, so hosts can report it
     /// without a db read.
@@ -90,10 +90,10 @@ pub struct DocState {
 }
 
 /// The profile's docs plus the one socket they share: every doc in
-/// `secrets.toml` booted under one peer lease, one engine each
-/// (`spec/cli.md` §Workspaces). Hosts route server frames to engines by
-/// doc id and drive every engine the same way.
-pub struct Session {
+/// `secrets.toml` booted under one peer lease, one replica each
+/// (`spec/cli.md` §Workspaces). Hosts route server frames to replicas by
+/// doc id and drive every replica the same way.
+pub struct Engine {
     profile: Profile,
     /// `None` for a local-only workspace (`crate::bootstrap`): no
     /// account, so no server to connect to. Hosts skip the socket
@@ -104,21 +104,21 @@ pub struct Session {
     primary: DocId,
     docs: BTreeMap<DocId, DocState>,
     /// Handle for persisting the `last_sync_at` observability stamp — a
-    /// clone of the storage the engines own (same connection, see
-    /// `SqliteStorage`'s `Clone`). The engine persists the *resume
+    /// clone of the storage the replicas own (same connection, see
+    /// `SqliteStorage`'s `Clone`). The replica persists the *resume
     /// cursor* itself via the `LocalStorage` trait; this clone exists
     /// only because `last_sync_at` is a CLI-only concern the time-free
-    /// engine can't stamp.
+    /// replica can't stamp.
     store: SqliteStorage,
     ws: Option<WsStream>,
-    /// Exclusive claim on the device's peer id — held for the session's
+    /// Exclusive claim on the device's peer id — held for the engine's
     /// lifetime so no concurrent invocation can commit under the same
     /// peer (see `crate::peer`). Every doc commits under it: the rule
     /// is one live instance per (doc, peer), and each doc has one.
     peer: crate::peer::PeerLease,
 }
 
-impl Session {
+impl Engine {
     /// One-shot open on an explicit profile: boot the docs and, with
     /// `sync`, connect and run the initial pull inline. Refused while a
     /// daemon holds the profile. This is the library primitive the
@@ -157,13 +157,13 @@ impl Session {
         // local commit this process makes carries the leased peer
         // (spec/peer-id-plan.md).
         let peer = crate::peer::claim(&profile.dir, &storage)?;
-        // `store` shares the engines' connection (see `SqliteStorage`'s
-        // `Clone`) — used only for the `last_sync_at` stamp; the engine
+        // `store` shares the replicas' connection (see `SqliteStorage`'s
+        // `Clone`) — used only for the `last_sync_at` stamp; the replica
         // persists the resume cursor itself.
         let store = storage.clone();
 
         // Home first, so a missing primary key is the error rather
-        // than a half-booted session.
+        // than a half-booted engine.
         let mut doc_ids: Vec<DocId> = vec![primary];
         for key in secrets.docs.keys() {
             if let Ok(id) = crate::keystore::parse_doc_id(key)
@@ -181,7 +181,7 @@ impl Session {
             docs.insert(doc_id, state);
         }
 
-        let mut session = Session {
+        let mut engine = Engine {
             profile,
             server_url,
             primary,
@@ -191,16 +191,16 @@ impl Session {
             peer,
         };
 
-        if !sync || session.is_local_only() {
-            return Ok(session);
+        if !sync || engine.is_local_only() {
+            return Ok(engine);
         }
 
-        match session.try_connect_and_pull().await {
-            Ok(()) => Ok(session),
+        match engine.try_connect_and_pull().await {
+            Ok(()) => Ok(engine),
             Err(e) => {
                 eprintln!("offline — sync deferred ({e})");
-                session.ws = None;
-                Ok(session)
+                engine.ws = None;
+                Ok(engine)
             }
         }
     }
@@ -229,24 +229,24 @@ impl Session {
     /// own methods take `&self` (loro uses interior mutability) so a
     /// shared reference is enough for both reads and writes.
     pub fn doc(&self) -> &Doc {
-        self.home().engine.doc()
+        self.home().replica.doc()
     }
 
-    /// The doc behind `doc_id`, if this session has it open.
+    /// The doc behind `doc_id`, if this engine has it open.
     pub fn doc_for(&self, doc_id: DocId) -> Option<&Doc> {
-        self.docs.get(&doc_id).map(|d| d.engine.doc())
+        self.docs.get(&doc_id).map(|d| d.replica.doc())
     }
 
     /// Mutable form of [`doc_for`](Self::doc_for), for the import paths
     /// that are `&mut` on `Doc` (the host's mirror import).
     pub(crate) fn doc_mut_for(&mut self, doc_id: DocId) -> Option<&mut Doc> {
-        self.docs.get_mut(&doc_id).map(|d| d.engine.doc_mut())
+        self.docs.get_mut(&doc_id).map(|d| d.replica.doc_mut())
     }
 
-    /// Lease a further peer slot in this profile, beside the session's
+    /// Lease a further peer slot in this profile, beside the engine's
     /// own: what the host hands an in-process mirror so it writes under
     /// a peer of its own (`spec/mac-window-plan.md`, `spec/peer-id-plan.md`).
-    /// The session holds slot 0 (or the lowest it got), so the first
+    /// The engine holds slot 0 (or the lowest it got), so the first
     /// call here takes the next free one.
     pub(crate) fn claim_peer(&self) -> Result<crate::peer::PeerLease, crate::peer::PeerError> {
         crate::peer::claim(&self.profile.dir, &self.store)
@@ -268,7 +268,7 @@ impl Session {
                 name: if doc_id == self.primary {
                     None
                 } else {
-                    self.docs[&doc_id].engine.doc().get_settings().doc_name
+                    self.docs[&doc_id].replica.doc().get_settings().doc_name
                 },
             })
             .collect()
@@ -288,32 +288,32 @@ impl Session {
             .expect("home doc is always open")
     }
 
-    /// The Home engine: what the host's status describes.
-    pub(crate) fn home_engine(&self) -> &SyncEngine {
-        &self.home().engine
+    /// The Home replica: what the host's status describes.
+    pub(crate) fn home_replica(&self) -> &Replica {
+        &self.home().replica
     }
 
-    pub(crate) fn engines_mut(&mut self) -> impl Iterator<Item = (DocId, &mut SyncEngine)> {
-        self.docs.iter_mut().map(|(id, d)| (*id, &mut d.engine))
+    pub(crate) fn replicas_mut(&mut self) -> impl Iterator<Item = (DocId, &mut Replica)> {
+        self.docs.iter_mut().map(|(id, d)| (*id, &mut d.replica))
     }
 
     /// Persist the docs, push any pending ops, ack the frontier, close
     /// the socket. Local persistence runs first so a network failure
     /// after a mutation can't silently drop the change.
     pub async fn flush(mut self) -> Result<(), SyncError> {
-        self.persist_engine_state().await?;
+        self.persist_replica_state().await?;
 
         if let Some(mut ws) = self.ws.take() {
-            self.flush_engines();
+            self.flush_replicas();
             drive_until_idle(&mut ws, &mut self).await?;
-            // `drive_until_idle` returned with every engine Idle. Any
+            // `drive_until_idle` returned with every replica Idle. Any
             // server frame applied during the drive advanced the
-            // engine's in-memory frontier but **did not** queue an
+            // replica's in-memory frontier but **did not** queue an
             // Ack (gated on `notify_oplog_durable`). Persist now —
             // that writes the doc and calls `notify_oplog_durable`,
             // which queues the Ack — then flush the outbox before
             // closing so the ack actually leaves the wire.
-            self.persist_engine_state().await?;
+            self.persist_replica_state().await?;
             send_outboxes(&mut ws, &mut self).await?;
 
             // Best-effort close — server will disconnect on its own
@@ -333,7 +333,7 @@ impl Session {
             .await
             .map_err(|_| SyncError::Ws(format!("connect timed out after {CONNECT_TIMEOUT:?}")))??;
         // The version handshake is per socket, not per doc: run it
-        // once here, then bring every doc's engine online.
+        // once here, then bring every doc's replica online.
         ws.send(Message::Binary(
             hello_frame(&engine_options("monoplan-cli")).into(),
         ))
@@ -360,59 +360,59 @@ impl Session {
     }
 
     /// Borrow what a host needs to open its own socket (the daemon
-    /// does this from a `select!` loop without holding `&Session`).
+    /// does this from a `select!` loop without holding `&Engine`).
     /// `None` for a local-only workspace.
     pub(crate) fn connect_params(&self) -> Option<(&Profile, &str)> {
         self.server_url.as_deref().map(|url| (&self.profile, url))
     }
 
-    // ---- every-engine operations ----
+    // ---- every-replica operations ----
 
     /// Socket up and the version handshake done: open every doc.
     pub(crate) fn handle_connected(&mut self) {
-        for (_, e) in self.engines_mut() {
+        for (_, e) in self.replicas_mut() {
             e.handle_connected();
         }
     }
 
     pub(crate) fn handle_disconnected(&mut self) {
-        for (_, e) in self.engines_mut() {
+        for (_, e) in self.replicas_mut() {
             e.handle_disconnected();
         }
     }
 
     pub(crate) fn handle_timeout(&mut self) {
-        for (_, e) in self.engines_mut() {
+        for (_, e) in self.replicas_mut() {
             e.handle_timeout();
         }
     }
 
-    /// Tell every engine local mutations may be waiting.
-    pub(crate) fn flush_engines(&mut self) {
-        for (_, e) in self.engines_mut() {
+    /// Tell every replica local mutations may be waiting.
+    pub(crate) fn flush_replicas(&mut self) {
+        for (_, e) in self.replicas_mut() {
             e.flush();
         }
     }
 
-    /// Every engine idle: nothing in flight on any doc.
+    /// Every replica idle: nothing in flight on any doc.
     pub(crate) fn all_idle(&self) -> bool {
-        self.docs.values().all(|d| d.engine.is_idle())
+        self.docs.values().all(|d| d.replica.is_idle())
     }
 
-    /// Whether `doc_id`'s engine is idle (past its initial pull, no
-    /// push in flight); false for a doc this session does not hold.
-    pub(crate) fn engine_idle(&self, doc_id: DocId) -> bool {
-        self.docs.get(&doc_id).is_some_and(|d| d.engine.is_idle())
+    /// Whether `doc_id`'s replica is idle (past its initial pull, no
+    /// push in flight); false for a doc this engine does not hold.
+    pub(crate) fn replica_idle(&self, doc_id: DocId) -> bool {
+        self.docs.get(&doc_id).is_some_and(|d| d.replica.is_idle())
     }
 
     /// Committed ops the server has not acked, or a push in flight, on
     /// any doc: the browser footer's "pending" (`hasUnsyncedOps`).
     pub(crate) fn any_unsynced_ops(&self) -> bool {
-        self.docs.values().any(|d| d.engine.has_unsynced_ops())
+        self.docs.values().any(|d| d.replica.has_unsynced_ops())
     }
 
-    /// Hand a post-handshake server frame to the engine it is about.
-    /// A frame for a doc this session does not hold is dropped (the
+    /// Hand a post-handshake server frame to the replica it is about.
+    /// A frame for a doc this engine does not hold is dropped (the
     /// server only sends frames for docs we opened, so this is a race
     /// with a just-forgotten doc at worst); undecodable bytes go to
     /// Home, which reports the decode error as an event.
@@ -422,31 +422,31 @@ impl Session {
             None => self.primary,
         };
         match self.docs.get_mut(&target) {
-            Some(d) => d.engine.handle_server_bytes(bytes),
+            Some(d) => d.replica.handle_server_bytes(bytes),
             None => tracing::debug!("frame for unknown doc {}; dropped", target.0),
         }
     }
 
-    /// Fold every engine's WAL past the hot-path thresholds.
+    /// Fold every replica's WAL past the hot-path thresholds.
     pub(crate) fn snapshot_if_wal_exceeds(&mut self) -> Result<(), SyncError> {
-        for (_, e) in self.engines_mut() {
+        for (_, e) in self.replicas_mut() {
             e.snapshot_if_wal_exceeds(SNAPSHOT_MAX_WAL_ROWS, SNAPSHOT_MAX_WAL_BYTES)?;
         }
         Ok(())
     }
 
-    /// Fold every engine's WAL unconditionally (clean exit).
+    /// Fold every replica's WAL unconditionally (clean exit).
     pub(crate) fn force_snapshot(&mut self) -> Result<(), SyncError> {
-        for (_, e) in self.engines_mut() {
+        for (_, e) in self.replicas_mut() {
             e.force_snapshot()?;
         }
         Ok(())
     }
 
-    /// Drain every engine's events, tagged by doc.
+    /// Drain every replica's events, tagged by doc.
     pub(crate) fn drain_events(&mut self) -> Vec<(DocId, Event)> {
         let mut out = Vec::new();
-        for (id, e) in self.engines_mut() {
+        for (id, e) in self.replicas_mut() {
             while let Some(ev) = e.pop_event() {
                 out.push((id, ev));
             }
@@ -457,7 +457,7 @@ impl Session {
     /// Drain every doc's `AppEvent` queue; true if any held something.
     pub(crate) fn drain_app_events(&mut self) -> bool {
         let mut changed = false;
-        for (_, e) in self.engines_mut() {
+        for (_, e) in self.replicas_mut() {
             while e.pop_app_event().is_some() {
                 changed = true;
             }
@@ -465,25 +465,25 @@ impl Session {
         changed
     }
 
-    pub(crate) async fn persist_engine_state(&mut self) -> Result<(), SyncError> {
+    pub(crate) async fn persist_replica_state(&mut self) -> Result<(), SyncError> {
         // Capture any locally-committed mutations into a durable WAL
         // row first — on disk before any Ack leaves the wire. Then fold
         // the WAL into a snapshot if it crossed the threshold; this is
         // independent of sync state (unsent ops survive folding — the
         // push derives them from `server_known_vv`). `SqliteStorage` is
         // synchronously durable, so by the time these return every
-        // applied seq is on disk and we can tell the engine "everything
+        // applied seq is on disk and we can tell the replica "everything
         // up to `last_contiguous_seq` is durable" — which advances the
         // durable cursor and queues an Ack. Callers needing the ack on
         // the wire (`flush`) must `send_outbox` next.
-        for (_, engine) in self.engines_mut() {
-            engine.capture_local_ops()?;
-            engine.snapshot_if_wal_exceeds(SNAPSHOT_MAX_WAL_ROWS, SNAPSHOT_MAX_WAL_BYTES)?;
-            let contiguous = engine.last_contiguous_seq();
-            // `notify_oplog_durable` advances the engine's durable
+        for (_, replica) in self.replicas_mut() {
+            replica.capture_local_ops()?;
+            replica.snapshot_if_wal_exceeds(SNAPSHOT_MAX_WAL_ROWS, SNAPSHOT_MAX_WAL_BYTES)?;
+            let contiguous = replica.last_contiguous_seq();
+            // `notify_oplog_durable` advances the replica's durable
             // frontier and persists the resume cursor itself (via the
             // `LocalStorage` trait).
-            engine.notify_oplog_durable(contiguous);
+            replica.notify_oplog_durable(contiguous);
         }
         Ok(())
     }
@@ -508,13 +508,13 @@ impl Session {
         self.home().last_synced_at
     }
 
-    /// Create a doc this account owns and open it in this session
+    /// Create a doc this account owns and open it in this engine
     /// (`spec/sharing-plan.md` Phase 5; the web runtime's `createDoc`):
     /// a fresh DEK wrapped under the Home DEK is registered with the
     /// server (`POST /api/docs`) and stored in `secrets.toml`, then the
     /// doc is seeded like any new workspace (the built-ins, `Doc::new`),
     /// named, written as its baseline snapshot and booted into an
-    /// engine of its own under the session's peer. The engine starts
+    /// replica of its own under the engine's peer. The replica starts
     /// Disconnected with an empty `server_known_vv`, so its first open
     /// pushes the seed: a host with a socket up calls
     /// [`connect_doc`](Self::connect_doc) next, otherwise the next
@@ -579,7 +579,7 @@ impl Session {
     /// runtime's `deleteDoc`): `DELETE /api/docs/:id` first, which the
     /// server refuses for Home (403, and the guard here says so), for a
     /// doc the caller does not own (404) and while other members remain
-    /// (409), so a refusal leaves everything in place; then the engine,
+    /// (409), so a refusal leaves everything in place; then the replica,
     /// the key and the local rows go the way they do after a
     /// `DocClosed` (`forget_doc`). The server spares this device the
     /// `DocClosed` frame and unbinds the doc silently, which is why the
@@ -611,18 +611,18 @@ impl Session {
     /// Open one doc on a socket that is already up and past its version
     /// handshake: the per-doc half of
     /// [`handle_connected`](Self::handle_connected), for a doc that
-    /// joined the session after it (`create_doc`). Nothing for a doc
-    /// this session does not hold.
+    /// joined the engine after it (`create_doc`). Nothing for a doc
+    /// this engine does not hold.
     pub(crate) fn connect_doc(&mut self, doc_id: DocId) {
         if let Some(d) = self.docs.get_mut(&doc_id) {
-            d.engine.handle_connected();
+            d.replica.handle_connected();
         }
     }
 
     /// The server will not serve `doc_id` to this account any more
-    /// (`Event::DocClosed`): drop the engine, the key and the local
+    /// (`Event::DocClosed`): drop the replica, the key and the local
     /// rows, so nothing reopens it. Never Home — the caller keeps that
-    /// as a fatal engine error.
+    /// as a fatal replica error.
     pub(crate) fn forget_doc(&mut self, doc_id: DocId) -> Result<(), SyncError> {
         if doc_id == self.primary {
             return Err(SyncError::Engine("refusing to forget the Home doc".into()));
@@ -650,20 +650,20 @@ fn boot_doc_state(
     let (mut doc, boot_meta) = crate::storage::boot_doc(storage, &dek, doc_id, Some(peer_id))?;
     doc.set_author(author);
     let last_synced_at = storage.read_sync_cursor(doc_id)?.last_sync_at;
-    let mut engine = SyncEngine::new(
+    let mut replica = Replica::new(
         doc,
         doc_id,
         dek,
         boot_meta.last_acked_server_seq.0,
         Box::new(storage.clone()),
     );
-    engine.seed_boot(&boot_meta);
+    replica.seed_boot(&boot_meta);
     // Boot-time threshold check: if a previous run crashed after
     // filling the WAL but before folding it, self-heal now instead
     // of replaying an ever-growing log on every boot.
-    engine.snapshot_if_wal_exceeds(SNAPSHOT_MAX_WAL_ROWS, SNAPSHOT_MAX_WAL_BYTES)?;
+    replica.snapshot_if_wal_exceeds(SNAPSHOT_MAX_WAL_ROWS, SNAPSHOT_MAX_WAL_BYTES)?;
     Ok(DocState {
-        engine,
+        replica,
         last_synced_at,
     })
 }
@@ -693,23 +693,23 @@ pub(crate) fn engine_options(client_name: &str) -> EngineOptions {
     }
 }
 
-/// Shuffle bytes between the WS and the session's engines until every
-/// engine reports `Idle`. Drains the outboxes after every step so a
-/// stalled engine can't sit on a frame the server is waiting for.
+/// Shuffle bytes between the WS and the engine's replicas until every
+/// replica reports `Idle`. Drains the outboxes after every step so a
+/// stalled replica can't sit on a frame the server is waiting for.
 ///
-/// Engine `Error` events become `SyncError::Engine` — they're how the
-/// engine surfaces handshake rejection and frame-decode failures.
-async fn drive_until_idle(ws: &mut WsStream, session: &mut Session) -> Result<(), SyncError> {
+/// Replica `Error` events become `SyncError::Engine` — they're how the
+/// replica surfaces handshake rejection and frame-decode failures.
+async fn drive_until_idle(ws: &mut WsStream, engine: &mut Engine) -> Result<(), SyncError> {
     loop {
-        send_outboxes(ws, session).await?;
-        for (id, event) in session.drain_events() {
+        send_outboxes(ws, engine).await?;
+        for (id, event) in engine.drain_events() {
             match event {
                 Event::Error(msg) => return Err(SyncError::Engine(msg)),
-                Event::DocClosed { reason } if id != session.primary => {
+                Event::DocClosed { reason } if id != engine.primary => {
                     // One-shot hosts get the same contract as the
                     // daemon: a closed doc is forgotten, not retried.
                     tracing::warn!("doc {} closed: {reason}; forgetting it", id.0);
-                    session.forget_doc(id)?;
+                    engine.forget_doc(id)?;
                 }
                 Event::DocClosed { reason } => {
                     return Err(SyncError::Engine(format!("home doc closed: {reason}")));
@@ -717,36 +717,30 @@ async fn drive_until_idle(ws: &mut WsStream, session: &mut Session) -> Result<()
                 _ => {}
             }
         }
-        if !session.home_engine().is_online() {
-            return Err(SyncError::Engine("engine disconnected mid-drive".into()));
+        if !engine.home_replica().is_online() {
+            return Err(SyncError::Engine("replica disconnected mid-drive".into()));
         }
-        if session.all_idle() {
+        if engine.all_idle() {
             // One last sweep: handling earlier bytes might have queued
             // an Ack that hasn't been flushed yet.
-            send_outboxes(ws, session).await?;
+            send_outboxes(ws, engine).await?;
             return Ok(());
         }
         let bytes = recv_bytes(ws).await?;
-        session.route_server_bytes(&bytes);
+        engine.route_server_bytes(&bytes);
     }
 }
 
-/// Every engine's outbox to the wire.
-pub(crate) async fn send_outboxes(
-    ws: &mut WsStream,
-    session: &mut Session,
-) -> Result<(), SyncError> {
-    for (_, engine) in session.engines_mut() {
-        send_outbox(ws, engine).await?;
+/// Every replica's outbox to the wire.
+pub(crate) async fn send_outboxes(ws: &mut WsStream, engine: &mut Engine) -> Result<(), SyncError> {
+    for (_, replica) in engine.replicas_mut() {
+        send_outbox(ws, replica).await?;
     }
     Ok(())
 }
 
-pub(crate) async fn send_outbox(
-    ws: &mut WsStream,
-    engine: &mut SyncEngine,
-) -> Result<(), SyncError> {
-    while let Some(bytes) = engine.pop_outbox() {
+pub(crate) async fn send_outbox(ws: &mut WsStream, replica: &mut Replica) -> Result<(), SyncError> {
+    while let Some(bytes) = replica.pop_outbox() {
         ws.send(Message::Binary(bytes.into())).await?;
     }
     Ok(())

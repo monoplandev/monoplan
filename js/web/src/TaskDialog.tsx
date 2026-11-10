@@ -3,7 +3,7 @@
 // purely by an item id, so the same component can later back a native
 // detached window. Notes live here only — the inline row editor is
 // text-only "quick entry". The title is buffered locally and flushed to
-// the engine when its editor blurs, on close and before stepping to a
+// the replica when its editor blurs, on close and before stepping to a
 // neighbour (last write wins). A capture becomes a real item the moment
 // its title blurs with text in it (`promote`), so the notes stream from
 // the start and nothing is lost to a closed tab. Notes stream as deltas

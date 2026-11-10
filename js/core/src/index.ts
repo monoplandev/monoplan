@@ -1,5 +1,5 @@
 // @monoplan/core — storage adapters + types. The wasm-bindgen surface
-// (`Doc`, `Dek`, `SyncEngine`, ...) lives at `@monoplan/core/wasm` so
+// (`Doc`, `Dek`, `Replica`, ...) lives at `@monoplan/core/wasm` so
 // the conditional export resolves to the bundler-target build under
 // Vite and the nodejs-target build under Bun without callers
 // thinking about it.
@@ -7,7 +7,7 @@
 export type { DeviceConfig } from "./storage/adapter.ts";
 export {
   IdbStorage,
-  type EngineBootRows,
+  type ReplicaBootRows,
   type InFlightPushJs,
 } from "./storage/idb-storage.ts";
 export { openMonoplanDb, _resetMonoplanDbForTests } from "./storage/web-db.ts";
