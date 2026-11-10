@@ -1582,11 +1582,12 @@ export function TaskDialog(props: {
 
           {/* Activity log under the notes: the item's timeline as plain
               sentences, unheaded (the section's name is its aria-label).
-              When it was created, and once done, when it was completed
-              and, on a line of its own, how long that took. The
-              completion stamp is the reflection `doneAt` (last entry
+              When it was created, and once closed, when it was completed
+              or cancelled and, on a line of its own, how long that took.
+              The completion stamp is the reflection `doneAt` (last entry
               into Done), falling back to the register's transition
-              time. Only once the item exists. */}
+              time; cancelling stamps nothing, so its instant is the
+              register's own. Only once the item exists. */}
           <Show when={item()}>
             {(it) => (
               <section
@@ -1628,6 +1629,11 @@ export function TaskDialog(props: {
                     <li title={formatDateTime(it().lifecycleAt, locale())}>
                       {m().workspace.activityCancelled(
                         formatDialogStamp(it().lifecycleAt, nowMs(), locale(), { inline: true }),
+                      )}
+                    </li>
+                    <li>
+                      {m().workspace.activityElapsed(
+                        formatElapsed(it().lifecycleAt - it().createdAt, locale()),
                       )}
                     </li>
                   </Show>
