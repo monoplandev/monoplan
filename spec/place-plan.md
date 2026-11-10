@@ -131,18 +131,37 @@ server-configured, then none.
 
 ## Reuse
 
-The doc is the cache. Every pick is stored on an item, encrypted and
+The docs are the cache. Every pick is stored on an item, encrypted and
 synced, so "the places I use" is a derived view, the same on every
-device, with no registry and no per-device history to drift. The web
+device, with no registry and no per-device history to drift.
+
+**Scope: the account, not the doc** (revised 2026-11-10; before, each
+doc suggested only its own places). The view spans every doc the
+client has open, Home and shared alike: a Gym geocoded in Personal is
+offered on an item in a shared workspace and the other way round. It is
+a local read, so nothing crosses docs until the user picks a row, at
+which point the place is written to that item like any typed value;
+other members of a shared doc see only what was picked. A doc that is
+closed (left, removed, deleted) stops contributing. The web
 geocoder cache (above) still spares the service a repeated query within
 a tab; this is what spares the user the query at all.
 
-**Core query.** `Doc::place_suggestions(query, limit) ->
+**Core query.** `place_suggestions(docs, query, limit) ->
 Vec<PlaceSuggestion { place, count, last_used }>` (`places.rs`), a
-sibling of `Doc::search`. A full scan per call, not an index: distinct
-places are few, and the view is derived from the `ItemView`s the doc
-already produces. wasm: `placeSuggestionsJson(query, limit)` on `Doc`
-and `Replica`, JSON out.
+free function above `Doc` taking every open doc. A full scan per call,
+not an index: distinct places are few, and the view is derived from the
+`ItemView`s the docs already produce. It is built in two steps so the
+web, whose docs live in separate wasm replicas, gets the identical
+answer: `Doc::place_uses()` returns one doc's raw buckets (per folded
+label and rounded coordinates, label-only uses kept apart, nothing
+folded or ranked), and `merge_place_uses(uses, query, limit)` adds
+buckets together, then folds, filters and ranks. Adding buckets is
+associative, so merging per-doc uses equals one scan over every item;
+merging per-doc *suggestions* would not, since each doc would already
+have lent its label-only uses to its own newest coordinated bucket.
+wasm: `placeUsesJson()` on `Doc` and `Replica`, and the module-level
+`placeSuggestionsJson(uses[], query, limit)`, JSON in and out. There is
+no per-doc suggestion query.
 
 - **Which items count.** Everything not binned. Done items count: last
   week's done gym visit still makes "Gym" current. Archived lists count.
@@ -164,8 +183,9 @@ and `Replica`, JSON out.
 - **Query.** Every query token must prefix a token of the label or the
   address (`matches_name`), so "geo" finds a place at "1 George St".
   Empty matches all. Used by the web
-  field's narrowing (the web calls once per popover open with an empty
-  query and narrows the result with the same `matchesName`).
+  field's narrowing (the web calls `DocsLayer.placeSuggestions` once per
+  popover open with an empty query and narrows the result with the same
+  `matchesName`).
 
 **Web field.** Two tiers in one popover, known rows (a small clock glyph
 after the label) above lookup rows, ruled off when both show; the
@@ -190,7 +210,8 @@ OpenStreetMap credit only with lookup rows.
 2026-11-03 as unused; label resolution stays.) `item set <id> --place
 <label>` with no `--at` / `--address` and a label that folds equal
 to a known place's writes that place whole; `--new` writes the label as
-given. So the CLI, which has no geocoder, still gets coordinates for
+given. Known means on an item of any workspace the daemon has open, not
+only the `-w` one being written. So the CLI, which has no geocoder, still gets coordinates for
 anything the web client has looked up once.
 
 ## Web
@@ -248,11 +269,15 @@ anything the web client has looked up once.
   (`places.rs`): `when` to millis, ranking by newest use then count,
   label folding, label-only folding into the coordinated bucket,
   distinct coordinates kept apart, bin skipped, query on label or
-  address; a doc-level check through `set_item_place` / `set_item_when`.
-- CLI: `parse_coords`; `known_place` needs a whole-label match.
+  address; merged per-doc uses equal one scan over every item; a
+  doc-level check through `set_item_place` / `set_item_when`.
+- CLI: `parse_coords`; `known_place` needs a whole-label match; a label
+  resolves against a place in another open doc.
 - Web: `photonToPlace` mapping; clip round-trip; store event handling
-  via the wasm doc test; `placeSuggestionsJson` round trip; the field's
-  narrowing and lookup dedup (`placeSuggest.test.ts`).
+  via the wasm doc test; `placeUsesJson` / `placeSuggestionsJson` round
+  trip, one doc and two; `DocsLayer.placeSuggestions` across two docs
+  (`docs.test.ts`); the field's narrowing and lookup dedup
+  (`placeSuggest.test.ts`).
 
 ## Phases
 

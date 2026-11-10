@@ -79,6 +79,21 @@ fn suggestions_to_json(rows: &[monoplan_core::PlaceSuggestion]) -> String {
     serde_json::to_string(rows).unwrap_or_else(|_| "[]".to_string())
 }
 
+/// The account's known places (`spec/place-plan.md` "Reuse"): every
+/// open doc's `placeUsesJson()` merged, deduped and ranked newest use
+/// first, as a JSON array of `{place, count, lastUsed}`. `query`
+/// narrows by label or address prefix; `limit` 0 = unlimited. An
+/// unparseable entry contributes nothing.
+#[wasm_bindgen(js_name = placeSuggestionsJson)]
+pub fn place_suggestions_json(uses: Vec<String>, query: &str, limit: usize) -> String {
+    let uses: Vec<monoplan_core::PlaceSuggestion> = uses
+        .iter()
+        .filter_map(|json| serde_json::from_str::<Vec<monoplan_core::PlaceSuggestion>>(json).ok())
+        .flatten()
+        .collect();
+    suggestions_to_json(&monoplan_core::merge_place_uses(&uses, query, limit))
+}
+
 // ---------- lifecycle ----------
 
 /// Resolved item lifecycle (`spec/data-model.md` "Lifecycle"), mirrored
@@ -608,12 +623,13 @@ impl Doc {
         search_to_json(&self.inner.search(query, limit))
     }
 
-    /// Places already on items, deduped and ranked newest use first
-    /// (`spec/place-plan.md` "Reuse"), as a JSON array of
-    /// `{place, count, lastUsed}`; `limit` 0 = unlimited.
-    #[wasm_bindgen(js_name = placeSuggestionsJson)]
-    pub fn place_suggestions_json(&self, query: &str, limit: usize) -> String {
-        suggestions_to_json(&self.inner.place_suggestions(query, limit))
+    /// This doc's raw place uses (`spec/place-plan.md` "Reuse") as a
+    /// JSON array of `{place, count, lastUsed}`: one input to the
+    /// module-level `placeSuggestionsJson`, which merges every open
+    /// doc's into the account's known places.
+    #[wasm_bindgen(js_name = placeUsesJson)]
+    pub fn place_uses_json(&self) -> String {
+        suggestions_to_json(&self.inner.place_uses())
     }
 
     /// The Focus lens as a JSON array of `ItemView`s in curated order —
@@ -2354,12 +2370,13 @@ impl Replica {
         search_to_json(&self.doc().search(query, limit))
     }
 
-    /// Places already on items, deduped and ranked newest use first
-    /// (`spec/place-plan.md` "Reuse"), as a JSON array of
-    /// `{place, count, lastUsed}`; `limit` 0 = unlimited.
-    #[wasm_bindgen(js_name = placeSuggestionsJson)]
-    pub fn place_suggestions_json(&self, query: &str, limit: usize) -> String {
-        suggestions_to_json(&self.doc().place_suggestions(query, limit))
+    /// This doc's raw place uses (`spec/place-plan.md` "Reuse") as a
+    /// JSON array of `{place, count, lastUsed}`: one input to the
+    /// module-level `placeSuggestionsJson`, which merges every open
+    /// doc's into the account's known places.
+    #[wasm_bindgen(js_name = placeUsesJson)]
+    pub fn place_uses_json(&self) -> String {
+        suggestions_to_json(&self.doc().place_uses())
     }
 
     /// The Focus lens as a JSON array of `ItemView`s in curated order —

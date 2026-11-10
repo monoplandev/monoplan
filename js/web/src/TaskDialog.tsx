@@ -30,6 +30,7 @@ import { Portal } from "solid-js/web";
 import { Avatar } from "./Avatar.tsx";
 import { DeadlineField } from "./DeadlineField.tsx";
 import { PlaceField } from "./PlaceField.tsx";
+import type { PlaceSuggestion } from "./placeSuggest.ts";
 import { WhenField } from "./WhenField.tsx";
 import { ListPicker, type ListOption } from "./ListPicker.tsx";
 import checkSvg from "./icons/check.svg?raw";
@@ -168,6 +169,10 @@ export function TaskDialog(props: {
   /** Name of the shared workspace the item lives in, shown in the list
    *  picker; null for Personal, which is the default and goes unsaid. */
   docLabel?: () => string | null;
+  /** The account's known places, newest use first, at most `limit`.
+   *  Account-scoped like the star, so not read through `app`: a place
+   *  used in any workspace is suggested in every other. */
+  knownPlaces: (limit: number) => PlaceSuggestion[];
   /** The star. Focus lives in the Home doc for every workspace
    *  (spec/focus.md: a shared doc's item is a foreign ref), so neither
    *  the read nor the writes can go through `app` when it is not Home.
@@ -1549,7 +1554,7 @@ export function TaskDialog(props: {
               place={vPlace}
               muted={muted}
               onChange={onPlaceChange}
-              knownPlaces={() => props.app.placeSuggestions("", KNOWN_PLACES_LIMIT)}
+              knownPlaces={() => props.knownPlaces(KNOWN_PLACES_LIMIT)}
             />
           </section>
 

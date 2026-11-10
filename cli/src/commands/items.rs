@@ -10,6 +10,7 @@ use std::io::{BufRead, IsTerminal, Write};
 use clap::{ArgGroup, Parser, ValueEnum};
 use monoplan_core::{
     Doc, ItemLifecycle, ItemView, LIST_INBOX, Place, PlaceSuggestion, WorkflowState, fold_label,
+    place_suggestions,
 };
 use serde::{Deserialize, Serialize};
 
@@ -347,7 +348,15 @@ pub struct SetArgs {
     pub unstar: bool,
 }
 
-pub fn set(doc: &Doc, args: SetArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+/// `open_docs` is every open doc, `doc` included: known places are
+/// account-scoped (`spec/place-plan.md` "Reuse"), so `--place gym` in
+/// one workspace finds the Gym geocoded in another.
+pub fn set(
+    doc: &Doc,
+    open_docs: &[&Doc],
+    args: SetArgs,
+    out: &mut dyn Write,
+) -> anyhow::Result<()> {
     let id = args.item_id.as_str();
     // Parse first, so a typo in one flag writes nothing.
     let duration = match args.duration.as_deref().map(clear_or) {
@@ -382,6 +391,7 @@ pub fn set(doc: &Doc, args: SetArgs, out: &mut dyn Write) -> anyhow::Result<()> 
         let value = match clear_or(label) {
             None => None,
             // A bare label that matches a place already on some item
+            // of any open workspace
             // (case-insensitively, `spec/place-plan.md` "Reuse") takes
             // that place whole, coordinates and address included, so
             // `--place gym` finds the Gym the web client geocoded;
@@ -389,7 +399,10 @@ pub fn set(doc: &Doc, args: SetArgs, out: &mut dyn Write) -> anyhow::Result<()> 
             // given. Validation lives in the core.
             Some(label) => {
                 let known = if coords.is_none() && args.address.is_none() && !args.new_place {
-                    known_place(&doc.place_suggestions(label, 0), label)
+                    known_place(
+                        &place_suggestions(open_docs.iter().copied(), label, 0),
+                        label,
+                    )
                 } else {
                     None
                 };
@@ -535,6 +548,7 @@ mod tests {
         let mut out = Vec::new();
         set(
             &doc,
+            &[&doc],
             SetArgs {
                 text: Some("final".into()),
                 lifecycle: Some(LifecycleState::InProgress),
@@ -565,6 +579,7 @@ mod tests {
         let mut out = Vec::new();
         set(
             &doc,
+            &[&doc],
             SetArgs {
                 when: Some("-".into()),
                 deadline: Some("-".into()),
@@ -590,6 +605,7 @@ mod tests {
         let mut out = Vec::new();
         let err = set(
             &doc,
+            &[&doc],
             SetArgs {
                 text: Some("changed".into()),
                 duration: Some("soon".into()),
@@ -619,6 +635,40 @@ mod tests {
             count,
             last_used: 0,
         }
+    }
+
+    #[test]
+    fn place_label_resolves_against_every_open_doc() {
+        let home = Doc::new().unwrap();
+        let work = Doc::new().unwrap();
+        let geocoded = work.add_item(LIST_INBOX, "standup").unwrap();
+        work.set_item_place(
+            &geocoded,
+            Some(&Place {
+                label: "Office".into(),
+                lat: Some(-33.87),
+                lon: Some(151.21),
+                address: Some("1 George St".into()),
+                reference: None,
+            }),
+        )
+        .unwrap();
+        let id = home.add_item(LIST_INBOX, "drop off keys").unwrap();
+        let mut out = Vec::new();
+        set(
+            &home,
+            &[&home, &work],
+            SetArgs {
+                place: Some("office".into()),
+                ..set_args(&id)
+            },
+            &mut out,
+        )
+        .unwrap();
+        let place = home.get_item(&id).unwrap().place.unwrap();
+        assert_eq!(place.label, "Office");
+        assert_eq!(place.lat, Some(-33.87));
+        assert_eq!(place.address.as_deref(), Some("1 George St"));
     }
 
     #[test]

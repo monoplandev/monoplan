@@ -20,7 +20,10 @@ pub use events::AppEvent;
 /// Loro's version vector, re-exported so hosts that keep one per
 /// consumer (the daemon's mirror fan-out) need no `loro` dependency.
 pub use loro::VersionVector;
-pub use places::{PlaceSuggestion, fold_label, place_matches, suggest_places};
+pub use places::{
+    PlaceSuggestion, fold_label, merge_place_uses, place_matches, place_suggestions, place_uses,
+    suggest_places,
+};
 pub use search::{SearchIndex, SearchKind, SearchResult, matches_name, tokenize};
 pub use storage::{
     BootError, BootMeta, BootState, DocId, InFlightPush, LocalSeq, LocalStorage, MemStorage,

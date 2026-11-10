@@ -36,6 +36,30 @@ function setup(): { home: DocApp; other: DocApp; layer: DocsLayer; dispose: () =
 }
 
 describe("docs layer", () => {
+  test("placeSuggestions spans every open doc, and forgets a removed one", () => {
+    const { home, other, layer, dispose } = setup();
+    const a = home.addItem("inbox", "a");
+    home.setItemPlace(a, { label: "gym" });
+    const b = other.addItem("inbox", "b");
+    other.setItemPlace(b, { label: "Gym", lat: -33.8688, lon: 151.2093 });
+    const c = other.addItem("inbox", "c");
+    other.setItemPlace(c, { label: "Office" });
+    other.setItemWhen(c, "2099-01-01");
+
+    const rows = layer.placeSuggestions();
+    expect(rows.map((r) => r.place.label)).toEqual(["Office", "Gym"]);
+    // Home's label-only "gym" and the other doc's geocoded Gym are one
+    // place, the one with coordinates.
+    expect(rows[1].count).toBe(2);
+    expect(rows[1].place.lat).toBe(-33.8688);
+    expect(layer.placeSuggestions("off").map((r) => r.place.label)).toEqual(["Office"]);
+    expect(layer.placeSuggestions("", 1)).toHaveLength(1);
+
+    layer.removeDoc(OTHER);
+    expect(layer.placeSuggestions().map((r) => r.place.label)).toEqual(["gym"]);
+    dispose();
+  });
+
   test("removeDoc forgets a non-Home doc and drops its Focus pins; Home stays", () => {
     const { home, other, layer, dispose } = setup();
     const mine = home.addItem("inbox", "mine");

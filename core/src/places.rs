@@ -1,23 +1,26 @@
 //! Place suggestions (`spec/place-plan.md` "Reuse"): the places already
 //! on items, deduped and ranked by recency, so a field can offer "Home"
-//! or "Gym" before any geocoder is asked. There is no registry; the doc
-//! is the cache. Every pick is stored on an item, encrypted and synced,
-//! so the same list comes up on every device.
+//! or "Gym" before any geocoder is asked. There is no registry; the
+//! docs are the cache. Every pick is stored on an item, encrypted and
+//! synced, so the same list comes up on every device. The list is
+//! account-scoped: it spans every doc the account has open.
 //!
 //! A full scan per call: distinct places are few, and the view is
 //! derived from `ItemView`s the doc already produces, so no index or
-//! dirty-set is kept. `Doc::place_suggestions` is the entry point;
-//! [`suggest_places`] is the pure function under it.
+//! dirty-set is kept. [`place_suggestions`] over the open docs is the
+//! entry point and [`suggest_places`] the pure function under it;
+//! [`place_uses`] + [`merge_place_uses`] are the same thing in two
+//! steps for the web, whose docs live in separate wasm replicas.
 
 use std::collections::HashMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use crate::doc::{ItemView, Place};
+use crate::doc::{Doc, ItemView, Place};
 use crate::search::{matches_name, tokenize};
 
 /// One deduped place with its usage.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaceSuggestion {
     pub place: Place,
@@ -102,8 +105,8 @@ struct Bucket {
 }
 
 impl Bucket {
-    fn absorb(&mut self, place: &Place, at: i64) {
-        self.count += 1;
+    fn absorb(&mut self, place: &Place, count: usize, at: i64) {
+        self.count += count;
         if at > self.last_used {
             self.last_used = at;
             self.place = place.clone();
@@ -114,6 +117,51 @@ impl Bucket {
 /// One folded label's uses: coordinated buckets keyed by rounded
 /// coordinates, and the label-only bucket, if any.
 type LabelGroup = (Vec<((i64, i64), Bucket)>, Option<Bucket>);
+
+/// Uses grouped by folded label. Adding is associative (counts sum,
+/// the newest use supplies the value), so buckets built per doc and
+/// added again here give exactly what one scan over every item would.
+#[derive(Default)]
+struct Groups(HashMap<String, LabelGroup>);
+
+impl Groups {
+    fn add(&mut self, place: &Place, count: usize, at: i64) {
+        let key = fold_label(&place.label);
+        if key.is_empty() {
+            return;
+        }
+        let group = self.0.entry(key).or_insert_with(|| (Vec::new(), None));
+        let fresh = || Bucket {
+            place: place.clone(),
+            count,
+            last_used: at,
+        };
+        match (place.lat, place.lon) {
+            (Some(lat), Some(lon)) => {
+                let bucket = coord_bucket(lat, lon);
+                match group.0.iter_mut().find(|(b, _)| *b == bucket) {
+                    Some((_, existing)) => existing.absorb(place, count, at),
+                    None => group.0.push((bucket, fresh())),
+                }
+            }
+            _ => match group.1.as_mut() {
+                Some(existing) => existing.absorb(place, count, at),
+                None => group.1 = Some(fresh()),
+            },
+        }
+    }
+
+    fn add_items<'a>(&mut self, items: impl IntoIterator<Item = &'a ItemView>) {
+        for item in items {
+            if item.is_binned() {
+                continue;
+            }
+            if let Some(place) = item.place.as_ref() {
+                self.add(place, 1, use_time(item));
+            }
+        }
+    }
+}
 
 /// Whether a suggestion matches a typed query: every query token must
 /// prefix a token of the label or the address, so "geo" finds both
@@ -146,48 +194,61 @@ pub fn suggest_places<'a>(
     query: &str,
     limit: usize,
 ) -> Vec<PlaceSuggestion> {
-    let mut groups: HashMap<String, LabelGroup> = HashMap::new();
-    for item in items {
-        if item.is_binned() {
-            continue;
-        }
-        let Some(place) = item.place.as_ref() else {
-            continue;
-        };
-        let key = fold_label(&place.label);
-        if key.is_empty() {
-            continue;
-        }
-        let at = use_time(item);
-        let group = groups.entry(key).or_insert_with(|| (Vec::new(), None));
-        match (place.lat, place.lon) {
-            (Some(lat), Some(lon)) => {
-                let bucket = coord_bucket(lat, lon);
-                match group.0.iter_mut().find(|(b, _)| *b == bucket) {
-                    Some((_, existing)) => existing.absorb(place, at),
-                    None => group.0.push((
-                        bucket,
-                        Bucket {
-                            place: place.clone(),
-                            count: 1,
-                            last_used: at,
-                        },
-                    )),
-                }
-            }
-            _ => match group.1.as_mut() {
-                Some(existing) => existing.absorb(place, at),
-                None => {
-                    group.1 = Some(Bucket {
-                        place: place.clone(),
-                        count: 1,
-                        last_used: at,
-                    })
-                }
-            },
-        }
-    }
+    let mut groups = Groups::default();
+    groups.add_items(items);
+    rank(groups, query, limit)
+}
 
+/// One doc's raw place uses: a bucket per folded label and rounded
+/// coordinates, plus one per label used without coordinates, unranked
+/// and with nothing folded together yet. The mergeable half of
+/// [`suggest_places`], for a host that cannot hand every doc's items to
+/// one call (the web, one wasm replica per doc): collect each doc's
+/// uses and pass them to [`merge_place_uses`].
+pub fn place_uses<'a>(items: impl IntoIterator<Item = &'a ItemView>) -> Vec<PlaceSuggestion> {
+    let mut groups = Groups::default();
+    groups.add_items(items);
+    let bucket = |b: Bucket| PlaceSuggestion {
+        place: b.place,
+        count: b.count,
+        last_used: b.last_used,
+    };
+    let mut out = Vec::new();
+    for (_, (coordinated, plain)) in groups.0 {
+        out.extend(coordinated.into_iter().map(|(_, b)| bucket(b)));
+        out.extend(plain.map(bucket));
+    }
+    out
+}
+
+/// Suggestions from several docs' [`place_uses`]: the same result as
+/// [`suggest_places`] over all of those docs' items at once.
+pub fn merge_place_uses<'a>(
+    uses: impl IntoIterator<Item = &'a PlaceSuggestion>,
+    query: &str,
+    limit: usize,
+) -> Vec<PlaceSuggestion> {
+    let mut groups = Groups::default();
+    for u in uses {
+        groups.add(&u.place, u.count, u.last_used);
+    }
+    rank(groups, query, limit)
+}
+
+/// The account's known places: every doc's uses merged, the same as
+/// [`suggest_places`] over all of their items. Suggestions are personal, not per workspace: a
+/// place used in one doc is offered while editing an item of another.
+pub fn place_suggestions<'a>(
+    docs: impl IntoIterator<Item = &'a Doc>,
+    query: &str,
+    limit: usize,
+) -> Vec<PlaceSuggestion> {
+    let uses: Vec<PlaceSuggestion> = docs.into_iter().flat_map(Doc::place_uses).collect();
+    merge_place_uses(&uses, query, limit)
+}
+
+fn rank(groups: Groups, query: &str, limit: usize) -> Vec<PlaceSuggestion> {
+    let groups = groups.0;
     let mut out: Vec<PlaceSuggestion> = Vec::new();
     for (_, (mut coordinated, plain)) in groups {
         if let Some(plain) = plain {
@@ -261,6 +322,38 @@ mod tests {
 
     fn labels(s: &[PlaceSuggestion]) -> Vec<&str> {
         s.iter().map(|s| s.place.label.as_str()).collect()
+    }
+
+    #[test]
+    fn merged_per_doc_uses_equal_one_scan_over_every_item() {
+        // Doc A: a label-only "gym" and an older geocoded Gym. Doc B: a
+        // newer Gym elsewhere, the same Gym as A's with other casing,
+        // and a Home. One scan lends the label-only use to the newest
+        // coordinated Gym, which lives in B: a merge of per-doc
+        // *suggestions* would have lent it inside A.
+        let a = [
+            item("a1", 50, Some(place("gym", None))),
+            item("a2", 10, Some(place("Gym", Some((1.0, 2.0))))),
+        ];
+        let mut binned = item("b4", 99, Some(place("Secret", None)));
+        binned.binned_at = Some(99);
+        let b = [
+            item("b1", 40, Some(place("Gym", Some((5.0, 6.0))))),
+            item("b2", 20, Some(place("GYM", Some((1.0, 2.0))))),
+            item("b3", 30, Some(place("Home", None))),
+            binned,
+        ];
+        let scan = suggest_places(a.iter().chain(b.iter()), "", 0);
+        let uses: Vec<PlaceSuggestion> = place_uses(&a).into_iter().chain(place_uses(&b)).collect();
+        assert_eq!(merge_place_uses(&uses, "", 0), scan);
+        assert_eq!(labels(&scan), ["Gym", "Home", "GYM"]);
+        assert_eq!(scan[0].count, 2);
+        assert_eq!(scan[0].last_used, 50);
+        assert_eq!(scan[2].count, 2);
+        assert_eq!(
+            merge_place_uses(&uses, "ho", 1),
+            suggest_places(a.iter().chain(b.iter()), "ho", 1)
+        );
     }
 
     #[test]

@@ -17,7 +17,9 @@
 //     Focus (the Home doc's entries, foreign refs resolved against their
 //     docs, `spec/focus.md`), Done (Home alone, or every doc when the
 //     personal amalgamate pref is on) and the Bin (always every doc:
-//     a binned row must stay reachable to restore or delete).
+//     a binned row must stay reachable to restore or delete), and the
+//     known places a place field suggests (always every doc: they are
+//     the account's, `spec/place-plan.md` "Reuse").
 //
 // Focus is personal and lives in the Home doc's `focus` container. A
 // foreign ref is `<doc_id>:<item_id>`; the core keeps every one through
@@ -42,7 +44,9 @@
 // build, where memos compute once). The one reactive computation here
 // is the foreign-ref prune effect, which the tests drive directly.
 
+import { placeSuggestionsJson } from "@monoplan/core/wasm";
 import { createEffect, createSignal, type Accessor } from "solid-js";
+import type { PlaceSuggestion } from "../placeSuggest.ts";
 import type { ViewKey } from "../prefs.ts";
 import {
   isBinned,
@@ -114,6 +118,12 @@ export interface DocsLayer {
    *  when amalgamated, newest transition first. */
   doneItems(): ItemView[];
   doneAmalgamate(): boolean;
+  /** The account's known places (`spec/place-plan.md` "Reuse"): every
+   *  open doc's uses merged by core, deduped and ranked newest use
+   *  first, so a place used in one workspace is offered in another.
+   *  `query` narrows by label or address prefix, `limit` 0 means all.
+   *  A scan per call: call it on demand, not reactively. */
+  placeSuggestions(query?: string, limit?: number): PlaceSuggestion[];
   /** The Bin: every doc's binned items, newest first. */
   binnedItems(): ItemView[];
   binCount(): number;
@@ -219,6 +229,14 @@ export function createDocsLayer(home: DocApp, initial: readonly DocApp[]): DocsL
     }
     return out;
   };
+  const placeSuggestions = (query = "", limit = 0): PlaceSuggestion[] =>
+    JSON.parse(
+      placeSuggestionsJson(
+        docs().map((d) => d.app.placeUsesJson()),
+        query,
+        limit,
+      ),
+    ) as PlaceSuggestion[];
   const calendarHiddenDocs = (): string[] => home.state.settings.calendarHiddenDocs;
   const calendarItems = (): ItemView[] => {
     const hidden = new Set(calendarHiddenDocs());
@@ -513,6 +531,7 @@ export function createDocsLayer(home: DocApp, initial: readonly DocApp[]): DocsL
     listView,
     version,
     allItems,
+    placeSuggestions,
     calendarItems,
     calendarHiddenDocs,
     focusItems,

@@ -1385,7 +1385,13 @@ impl Host {
                     .engine
                     .doc_for(doc_id)
                     .expect("resolved against open docs");
-                let result = run_doc(cmd, doc, &mut buf);
+                let open_docs: Vec<&monoplan_core::Doc> = self
+                    .engine
+                    .doc_ids()
+                    .into_iter()
+                    .filter_map(|id| self.engine.doc_for(id))
+                    .collect();
+                let result = run_doc(cmd, doc, &open_docs, &mut buf);
                 // Whatever the command committed is durable before the
                 // client hears back, and on the wire right after.
                 self.engine.persist_replica_state().await?;

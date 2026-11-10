@@ -3018,6 +3018,8 @@ export function Workspace(props: {
         docLabel={() =>
           tApp.docId === docs.homeDocId ? null : docLabel(tApp.docId)
         }
+        // Known places are the account's, not the item's doc's.
+        knownPlaces={(limit) => docs.placeSuggestions("", limit)}
         // Focus is Home's regardless of the item's doc: a shared doc's
         // item is pinned as a foreign ref, and the star reads Home's
         // entries so it lights for both. Written through Home directly

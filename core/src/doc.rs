@@ -60,7 +60,7 @@ use uuid::Uuid;
 
 use crate::crypto::{AEAD_NONCE_LEN, Dek};
 use crate::events::AppEvent;
-use crate::places::{PlaceSuggestion, suggest_places};
+use crate::places::{PlaceSuggestion, place_uses};
 use crate::search::{SearchIndex, SearchResult};
 use monoplan_protocol::EncryptedBlob;
 
@@ -4184,14 +4184,14 @@ impl Doc {
 
     // ---------- places ----------
 
-    /// The places already on items, deduped and ranked newest use first
-    /// (`spec/place-plan.md` "Reuse"), filtered by `query` (every token a
-    /// prefix of the label or address; empty matches all), at most
-    /// `limit` (0 = unlimited). A scan, not an index: distinct places
-    /// are few.
-    pub fn place_suggestions(&self, query: &str, limit: usize) -> Vec<PlaceSuggestion> {
+    /// This doc's raw place uses (`spec/place-plan.md` "Reuse"), to be
+    /// merged with the other open docs' by `merge_place_uses`. Known
+    /// places are account-scoped, so there is no per-doc suggestion
+    /// query: native hosts call `places::place_suggestions` over their
+    /// docs. A scan, not an index: distinct places are few.
+    pub fn place_uses(&self) -> Vec<PlaceSuggestion> {
         let items: Vec<ItemView> = self.iter_items().collect();
-        suggest_places(&items, query, limit)
+        place_uses(&items)
     }
 
     /// Per-list nav view: ids of items in this list that are neither
@@ -10807,13 +10807,13 @@ mod tests {
         // Planning around Home makes it the newest use.
         doc.set_item_when(&c, Some("2099-01-01")).unwrap();
 
-        let got = doc.place_suggestions("", 0);
+        let got = crate::places::place_suggestions([&doc], "", 0);
         let labels: Vec<&str> = got.iter().map(|s| s.place.label.as_str()).collect();
         assert_eq!(labels, ["Home", "Gym"]);
         assert_eq!(got[1].count, 2);
         assert_eq!(got[1].place.lat, Some(-33.8688));
         assert_eq!(
-            doc.place_suggestions("gy", 0)
+            crate::places::place_suggestions([&doc], "gy", 0)
                 .iter()
                 .map(|s| s.place.label.as_str())
                 .collect::<Vec<_>>(),

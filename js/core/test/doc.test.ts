@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { Dek, Doc, EncryptedBlob } from "../wasm/monoplan_core_web.js";
+import { Dek, Doc, EncryptedBlob, placeSuggestionsJson } from "../wasm/monoplan_core_web.js";
 
 const LIST_MAIN = "inbox";
 
@@ -17,30 +17,45 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 describe("Doc place suggestions", () => {
+  const withPlace = (doc: Doc, place: object, when?: string): void => {
+    const id = doc.addItem(LIST_MAIN, "x");
+    doc.setItemPlace(id, JSON.stringify(place));
+    if (when) doc.setItemWhen(id, when);
+  };
+  type Row = { place: { label: string; lat?: number }; count: number; lastUsed: number };
+
   test("placeSuggestionsJson dedupes, ranks newest use first, and narrows by query", () => {
     const doc = Doc.create();
-    const a = doc.addItem(LIST_MAIN, "a");
-    const b = doc.addItem(LIST_MAIN, "b");
-    const c = doc.addItem(LIST_MAIN, "c");
-    doc.setItemPlace(a, JSON.stringify({ label: "gym" }));
-    doc.setItemPlace(b, JSON.stringify({ label: "Gym", lat: -33.8688, lon: 151.2093 }));
-    doc.setItemPlace(c, JSON.stringify({ label: "Home" }));
-    doc.setItemWhen(c, "2099-01-01");
+    withPlace(doc, { label: "gym" });
+    withPlace(doc, { label: "Gym", lat: -33.8688, lon: 151.2093 });
+    withPlace(doc, { label: "Home" }, "2099-01-01");
 
-    const rows = JSON.parse(doc.placeSuggestionsJson("", 0)) as Array<{
-      place: { label: string; lat?: number };
-      count: number;
-      lastUsed: number;
-    }>;
+    const uses = [doc.placeUsesJson()];
+    const rows = JSON.parse(placeSuggestionsJson(uses, "", 0)) as Row[];
     expect(rows.map((r) => r.place.label)).toEqual(["Home", "Gym"]);
     expect(rows[1].count).toBe(2);
     expect(rows[1].place.lat).toBe(-33.8688);
     expect(rows[0].lastUsed).toBeGreaterThan(rows[1].lastUsed);
 
-    const narrowed = JSON.parse(doc.placeSuggestionsJson("gy", 0)) as Array<{
-      place: { label: string };
-    }>;
+    const narrowed = JSON.parse(placeSuggestionsJson(uses, "gy", 0)) as Row[];
     expect(narrowed.map((r) => r.place.label)).toEqual(["Gym"]);
+  });
+
+  test("placeSuggestionsJson merges every doc's uses into one account-wide list", () => {
+    const home = Doc.create();
+    const work = Doc.create();
+    withPlace(home, { label: "gym" });
+    withPlace(work, { label: "Gym", lat: -33.8688, lon: 151.2093 });
+    withPlace(work, { label: "Office" }, "2099-01-01");
+
+    const rows = JSON.parse(
+      placeSuggestionsJson([home.placeUsesJson(), work.placeUsesJson()], "", 0),
+    ) as Row[];
+    expect(rows.map((r) => r.place.label)).toEqual(["Office", "Gym"]);
+    // Home's label-only use folds into Work's geocoded Gym.
+    expect(rows[1].count).toBe(2);
+    expect(rows[1].place.lat).toBe(-33.8688);
+    expect(JSON.parse(placeSuggestionsJson([], "", 0))).toEqual([]);
   });
 });
 

@@ -206,12 +206,20 @@ pub enum DocCmd {
 
 /// Execute a doc command. Pure over `doc` + `out`: no I/O of its own,
 /// so the daemon can run it inline on its loop and the one-shot test
-/// path can run it against any `Doc`.
-pub fn run_doc(cmd: DocCmd, doc: &Doc, out: &mut dyn Write) -> anyhow::Result<()> {
+/// path can run it against any `Doc`. `open_docs` is every doc the
+/// install has open (`doc` among them), for the reads that are
+/// account-scoped though the command writes one doc: the known places
+/// `item set --place` resolves a label against.
+pub fn run_doc(
+    cmd: DocCmd,
+    doc: &Doc,
+    open_docs: &[&Doc],
+    out: &mut dyn Write,
+) -> anyhow::Result<()> {
     match cmd {
         DocCmd::Add { list, texts } => items::add(doc, &list, &texts, out),
         DocCmd::Ls(a) => items::ls(doc, a, out),
-        DocCmd::Set(a) => items::set(doc, *a, out),
+        DocCmd::Set(a) => items::set(doc, open_docs, *a, out),
         DocCmd::ItemBin(a) => items::bin(doc, a, out),
         DocCmd::Restore(a) => items::restore(doc, a, out),
         DocCmd::Bin(a) => bin::run(doc, a, out),

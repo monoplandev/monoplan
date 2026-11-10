@@ -20,7 +20,6 @@ import { diffToDelta, type NotesDeltaOp } from "../notesDelta.ts";
 import { batch, createSignal, type Accessor } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
 import { createSearchEngine, type SearchEngine } from "../search.ts";
-import type { PlaceSuggestion } from "../placeSuggest.ts";
 
 /** Workflow register state (`spec/data-model.md` "Lifecycle"): the
  *  four-step open ladder plus the two terminal (closed) states, Done and
@@ -351,11 +350,12 @@ export interface DocApp extends ItemActions {
    *  active account). The index lives in core and tracks the doc itself;
    *  the store neither builds nor maintains it. See `spec/search.md`. */
   search: SearchEngine;
-  /** The places already on items, deduped and ranked newest use first
-   *  (`spec/place-plan.md` "Reuse"); `query` narrows by label or address
-   *  prefix, `limit` 0 means all. Computed by core on each call (a scan,
-   *  not an index), so call it on demand, not reactively. */
-  placeSuggestions(query?: string, limit?: number): PlaceSuggestion[];
+  /** This doc's raw place uses as JSON (`spec/place-plan.md` "Reuse"),
+   *  one input to the cross-doc layer's `placeSuggestions`: known
+   *  places are account-scoped, so no doc answers the question alone.
+   *  Computed by core on each call (a scan, not an index), so call it
+   *  on demand, not reactively. */
+  placeUsesJson(): string;
   /** Bumps every time at least one event is dispatched (local or
    *  remote). The persistence layer reads this to debounce-save the
    *  doc. The UI doesn't read it — Solid's store gives it granular
@@ -1315,8 +1315,8 @@ export function createSyncedApp(replica: Replica): DocApp {
     version,
     recentDone,
     search,
-    placeSuggestions(query = "", limit = 0) {
-      return JSON.parse(replica.placeSuggestionsJson(query, limit)) as PlaceSuggestion[];
+    placeUsesJson() {
+      return replica.placeUsesJson();
     },
     drainEvents,
     setOnFlush(cb) {
