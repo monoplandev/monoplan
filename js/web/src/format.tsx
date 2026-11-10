@@ -365,6 +365,26 @@ export function durationBetween(
   return Math.min(total > 0 ? total : total + DAY_MINUTES, MAX_DURATION_MINUTES);
 }
 
+/** The length that pulls a span back onto its start day, for dropping
+ *  the end date. All-day: null, a single day. Timed: the end's clock time
+ *  is kept when it falls after the start on the clock (Mon 14:00 to Wed
+ *  16:00 becomes 14:00 to 16:00); otherwise the default slot, shortened
+ *  so a late start still ends before midnight. A span already on its
+ *  start day is returned unchanged. */
+export function sameDayDuration(
+  start: Required<TimeParts> | null,
+  minutes: number | null | undefined,
+): number | null {
+  if (!start) return null;
+  const startMinutes = start.hour * 60 + start.minute;
+  if (minutes && endDayOffset(start, minutes) === 0) return minutes;
+  if (minutes) {
+    const end = endTimeOf(start, minutes);
+    if (isValidEndDayOffset(start, end, 0)) return durationBetween(start, end, 0);
+  }
+  return Math.max(1, Math.min(DEFAULT_DURATION_MINUTES, DAY_MINUTES - 1 - startMinutes));
+}
+
 /** Whether a span from `start` to `end` on the clock, ending `dayOffset`
  *  days on, is a length the register can hold: at least a minute (so the
  *  start day is out while the end is not past the start on the clock) and

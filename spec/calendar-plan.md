@@ -390,8 +390,20 @@ for the month grid). `groupByDeadline` becomes
     plan, and a done item has none to make. A standing token still
     commits. Off everywhere under Settings › General › "Recognise dates
     as you type", a device preference in a cookie beside the time format.
-  - Not built: typing a phrase into the When / Deadline fields themselves
-    (both are read-only popover anchors), and any client outside the web.
+  - The When field's date input takes a typed phrase too (2026-11-11):
+    while the text names a date its popover swaps the calendar for a
+    list of the first few days it could mean (`dateSuggest.ts`: the text
+    as typed, a trailing partial word completed to "today" / "tomorrow" /
+    a weekday / a month, a bare day number in each coming month, a lone
+    repeating phrase as its next three occurrences). It writes the day
+    only; a typed time is dropped, the time row owns that.
+    The end-date input does the same, reading phrases from the start
+    day once that is ahead of today and leaving out days the span
+    cannot end on. Enter on its emptied text drops the end date: the
+    span returns to the start day, keeping the end's clock time when
+    that is after the start, else the default hour.
+  - Not built: typing a phrase into the Deadline field (still a
+    read-only popover anchor), and any client outside the web.
 
 ## URLs
 

@@ -3547,6 +3547,13 @@ input.task-check:hover {
   outline: none;
 }
 
+/* The typed date input is a real text field: caret and I-beam back. The
+   read-only ones (end date, deadline) keep the button manner above. */
+.task-dialog-when-input:not([readonly]) {
+  caret-color: auto;
+  cursor: text;
+}
+
 .task-dialog-when-input::placeholder {
   color: var(--text-empty);
 }
@@ -3856,6 +3863,19 @@ input.task-check:hover {
   max-height: calc(100dvh - 16px);
   box-sizing: border-box;
   overflow-y: auto;
+}
+
+/* The date input's typed suggestions, standing in for the calendar in
+   the same popover: a short column of days in the time picker's row
+   style, wide enough that the card does not collapse around it. */
+.date-suggest {
+  min-width: 13em;
+}
+
+.date-suggest .palette__item {
+  padding: 4px 10px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Today / Tomorrow quick actions heading the when popover, ruled off from

@@ -31,6 +31,7 @@ import {
   MAX_ALL_DAY_OFFSET,
   spanEndOffset,
   durationForTimedStart,
+  sameDayDuration,
   whenTime,
 } from "../src/format.tsx";
 
@@ -115,6 +116,20 @@ describe("duration ⇄ end-time bridge", () => {
     expect(formatDurationShort(24 * 60)).toBe("1d");
     expect(formatDurationShort(2 * 24 * 60 + 180)).toBe("2d 3h");
     expect(formatDurationShort(24 * 60 + 30)).toBe("1d 30m");
+  });
+
+  test("sameDayDuration pulls a span back onto its start day", () => {
+    const two = { hour: 14, minute: 0 };
+    // All-day: a single day, nothing stored.
+    expect(sameDayDuration(null, 3 * 24 * 60)).toBe(null);
+    // Mon 14:00 to Wed 16:00 keeps the 16:00.
+    expect(sameDayDuration(two, 2 * 24 * 60 + 120)).toBe(120);
+    // Mon 14:00 to Wed 10:00 has no same-day reading: the default slot.
+    expect(sameDayDuration(two, 2 * 24 * 60 - 240)).toBe(60);
+    // A late start still ends before midnight.
+    expect(sameDayDuration({ hour: 23, minute: 30 }, 24 * 60)).toBe(29);
+    // Already on the start day: unchanged.
+    expect(sameDayDuration(two, 90)).toBe(90);
   });
 
   test("durationBetween treats an end at or before the start as next day", () => {

@@ -2,9 +2,12 @@
 // that reads the set `when` as a day ("Wed 23 Sept"; "Date" as its
 // placeholder when unset) and opens a popover: Today / Tomorrow quick
 // actions on top (they keep any time part and close), then the shared
-// calendar picker (`CalendarPicker`; Remove). The input is read-only for now: typed dates are a later step,
-// so the popover is the only writer. Anchored on the input rather than a
-// Popover.Trigger button so it can become editable without changing shape.
+// calendar picker (`CalendarPicker`; Remove). The input is typed into as
+// well (`dateTyping.tsx`): once what is typed names a date
+// (`dateSuggest.ts`, over the title tokens' parser) the popover's body
+// turns from the calendar into a listbox of the first few days it could
+// mean. A row keeps any time part, as a calendar pick does, and Enter on
+// emptied text removes the date.
 // The time row (`WhenTimeRow`: start picker, ✕, end picker) sits below
 // the input and shows only once a date is set: without one the section
 // is just the date input, and there is no day for a time to belong to.
@@ -22,7 +25,12 @@
 // end's clock time and writes the length to it; beside an all-day date
 // the length counts whole days (Tue–Thu is three days), and picking the
 // start day drops it. Its own popover is a plain calendar, no quick
-// actions or Remove: the end is never absent, only implied. Days the
+// actions or Remove: the end is never absent, only implied. It is typed
+// into like the start input, with phrases read from the start day once
+// that is ahead of today and unreachable days left out of the list.
+// Enter on emptied text drops the end date: the span comes back onto the
+// start day, keeping the end's clock time where that is after the start
+// and falling back to the default slot where it is not. Days the
 // register cannot reach are dimmed and inert: before the start day; with
 // a timed start, the start day itself while the end is not past the start
 // on the clock (that end would be a day later, not earlier); and past the
@@ -31,6 +39,7 @@
 import { Popover } from "@kobalte/core/popover";
 import { createMemo, createSignal, Show } from "solid-js";
 import { CalendarPicker } from "./CalendarPicker.tsx";
+import { createDateTyping, DateSuggestList } from "./dateTyping.tsx";
 import {
   addDaysToStamp,
   allDayDurationFor,
@@ -41,6 +50,7 @@ import {
   isValidEndDayOffset,
   MAX_ALL_DAY_OFFSET,
   nowMs,
+  sameDayDuration,
   spanEndOffset,
   parseLocalDateParts,
   todayStamp,
@@ -66,11 +76,33 @@ export function WhenField(props: {
   const { m, locale } = useAppI18n();
   let inputRef: HTMLInputElement | undefined;
   let endInputRef: HTMLInputElement | undefined;
+  let contentRef: HTMLElement | undefined;
+  let endContentRef: HTMLElement | undefined;
   const [endOpen, setEndOpen] = createSignal(false);
 
   const pickDay = (day: string) => {
     props.onChange(whenFromParts(day, whenTime(props.when() ?? "")));
     props.setOpen(false);
+  };
+
+  // The typed side of the start input (`dateTyping.tsx`): its list stands
+  // in for the calendar while the text names a date.
+  const typing = createDateTyping({
+    open: props.open,
+    setOpen: props.setOpen,
+    input: () => inputRef,
+    content: () => contentRef,
+    reference: () => new Date(nowMs()),
+    locale,
+    onPick: pickDay,
+    onClear: () => {
+      if (props.when()) props.onChange(null);
+    },
+  });
+  const todayOrTomorrow = (day: string) => {
+    const today = todayStamp(nowMs());
+    if (day === today) return m().when.today;
+    return day === addDaysToStamp(today, 1) ? m().when.tomorrow : null;
   };
 
   // The picker hands back a complete hour + minute, or null for all-day,
@@ -164,12 +196,34 @@ export function WhenField(props: {
     props.onDurationChange(durationBetween(start, endTimeOf(start, d), offset));
   };
 
-  const openOnKey = (open: () => void) => (e: KeyboardEvent) => {
-    if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
-      e.preventDefault();
-      open();
-    }
-  };
+  // The end input is typed into the same way. Phrases are read from the
+  // start day once that is ahead of today, so "friday" is the Friday the
+  // span could end on rather than one before it begins; days the register
+  // cannot reach (as the calendar dims them) are left out of the list.
+  const endTyping = createDateTyping({
+    open: endOpen,
+    setOpen: setEndOpen,
+    input: () => endInputRef,
+    content: () => endContentRef,
+    reference: () => {
+      const now = new Date(nowMs());
+      const w = props.when();
+      const start = w ? parseLocalDateParts(whenDay(w)) : null;
+      return start && start > now ? start : now;
+    },
+    locale,
+    allowed: (stamp) => {
+      const day = parseLocalDateParts(stamp);
+      return day !== null && !endDayDisabled(day);
+    },
+    onPick: pickEndDay,
+    // Emptied and entered: drop the end date, back onto the start day.
+    onClear: () => {
+      const d = props.duration();
+      const next = sameDayDuration(time(), d);
+      if (next !== d) props.onDurationChange(next);
+    },
+  });
 
   return (
     <>
@@ -203,18 +257,12 @@ export function WhenField(props: {
             />
             <input
               ref={inputRef}
-              type="text"
+              {...typing.inputProps}
               class="task-dialog-when-input"
-              readOnly
-              inputMode="none"
-              value={label()}
+              value={typing.query() ?? label()}
               placeholder={m().when.placeholder}
               aria-label={m().when.label}
-              aria-haspopup="dialog"
-              aria-expanded={props.open()}
               data-muted={props.muted() ? "" : undefined}
-              onClick={() => props.setOpen(true)}
-              onKeyDown={openOnKey(() => props.setOpen(true))}
             />
             {/* Inset ✕ at the input's right edge. mousedown is cancelled
                 so the click never moves focus off the input. */}
@@ -235,9 +283,17 @@ export function WhenField(props: {
           </Popover.Anchor>
           <Popover.Portal>
             <Popover.Content
+              ref={contentRef}
               class="deadline-dialog when-popover"
+              // Focus belongs to the input, so typing works the moment the
+              // popover is up, whichever way it was opened.
+              onOpenAutoFocus={(e) => {
+                e.preventDefault();
+                inputRef?.focus();
+              }}
               // A click on the input while open would otherwise dismiss on
-              // pointerdown and reopen on click; keep it open instead.
+              // pointerdown and reopen on click; keep it open instead. The
+              // same for focus arriving in the input.
               onInteractOutside={(e) => {
                 if (
                   inputRef &&
@@ -252,31 +308,44 @@ export function WhenField(props: {
                 inputRef?.focus();
               }}
             >
-              <div class="when-popover-quick">
-                <button
-                  type="button"
-                  class="when-popover-quick-action"
-                  onClick={() => pickDay(todayStamp(nowMs()))}
-                >
-                  {m().when.today}
-                </button>
-                <button
-                  type="button"
-                  class="when-popover-quick-action"
-                  onClick={() =>
-                    pickDay(addDaysToStamp(todayStamp(nowMs()), 1))
-                  }
-                >
-                  {m().when.tomorrow}
-                </button>
-              </div>
-              <CalendarPicker
-                kind="when"
-                setOpen={props.setOpen}
-                value={props.when}
-                onPick={props.onChange}
-                onRemove={() => props.onChange(null)}
-              />
+              <Show
+                when={typing.listShown()}
+                fallback={
+                  <>
+                    <div class="when-popover-quick">
+                      <button
+                        type="button"
+                        class="when-popover-quick-action"
+                        onClick={() => pickDay(todayStamp(nowMs()))}
+                      >
+                        {m().when.today}
+                      </button>
+                      <button
+                        type="button"
+                        class="when-popover-quick-action"
+                        onClick={() =>
+                          pickDay(addDaysToStamp(todayStamp(nowMs()), 1))
+                        }
+                      >
+                        {m().when.tomorrow}
+                      </button>
+                    </div>
+                    <CalendarPicker
+                      kind="when"
+                      setOpen={props.setOpen}
+                      value={props.when}
+                      onPick={props.onChange}
+                      onRemove={() => props.onChange(null)}
+                    />
+                  </>
+                }
+              >
+                <DateSuggestList
+                  typing={typing}
+                  format={formatDay}
+                  hint={todayOrTomorrow}
+                />
+              </Show>
             </Popover.Content>
           </Popover.Portal>
         </Popover>
@@ -297,23 +366,27 @@ export function WhenField(props: {
               />
               <input
                 ref={endInputRef}
-                type="text"
+                {...endTyping.inputProps}
                 class="task-dialog-when-input task-dialog-end-date-input"
-                readOnly
-                inputMode="none"
-                value={endLabel()}
+                value={endTyping.query() ?? endLabel()}
                 aria-label={m().when.endDate}
-                aria-haspopup="dialog"
-                aria-expanded={endOpen()}
                 data-muted={props.muted() ? "" : undefined}
-                data-implied={endOffset() === 0 ? "" : undefined}
-                onClick={() => setEndOpen(true)}
-                onKeyDown={openOnKey(() => setEndOpen(true))}
+                // Dim only while it shows the implied day, not typed text.
+                data-implied={
+                  endOffset() === 0 && endTyping.query() === null
+                    ? ""
+                    : undefined
+                }
               />
             </Popover.Anchor>
             <Popover.Portal>
               <Popover.Content
+                ref={endContentRef}
                 class="deadline-dialog when-popover"
+                onOpenAutoFocus={(e) => {
+                  e.preventDefault();
+                  endInputRef?.focus();
+                }}
                 onInteractOutside={(e) => {
                   if (
                     endInputRef &&
@@ -328,12 +401,23 @@ export function WhenField(props: {
                   endInputRef?.focus();
                 }}
               >
-                <CalendarPicker
-                  setOpen={setEndOpen}
-                  value={endDay}
-                  onPick={pickEndDay}
-                  disabled={endDayDisabled}
-                />
+                <Show
+                  when={endTyping.listShown()}
+                  fallback={
+                    <CalendarPicker
+                      setOpen={setEndOpen}
+                      value={endDay}
+                      onPick={pickEndDay}
+                      disabled={endDayDisabled}
+                    />
+                  }
+                >
+                  <DateSuggestList
+                    typing={endTyping}
+                    format={formatDay}
+                    hint={todayOrTomorrow}
+                  />
+                </Show>
               </Popover.Content>
             </Popover.Portal>
           </Popover>

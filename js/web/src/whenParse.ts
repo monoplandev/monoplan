@@ -60,6 +60,10 @@ export interface WhenPhrase {
   when: string;
   /** The time part came from a time-of-day word, not a clock time. */
   estimated: boolean;
+  /** How the phrase comes round again: a weekday with no date ("friday")
+   *  every week, a day and month with no year ("14 nov") every year;
+   *  null for a phrase that names one day only ("tomorrow"). */
+  repeat: "week" | "year" | null;
 }
 
 export interface FindWhenOptions {
@@ -122,6 +126,13 @@ function anchored(r: ParsedResult): boolean {
   // A lone three-letter weekday is a word of the title until it is
   // qualified ("sat 3pm", "next sat") or spelled out.
   return !(s.isCertain("weekday") && !s.isCertain("day") && WEEKDAY_ABBREVIATION.test(r.text));
+}
+
+function repeatOf(r: ParsedResult): WhenPhrase["repeat"] {
+  const s = r.start;
+  if (s.isCertain("year")) return null;
+  if (s.isCertain("day")) return s.isCertain("month") ? "year" : null;
+  return s.isCertain("weekday") ? "week" : null;
 }
 
 /** The preposition that makes a duration a date, per grammar. */
@@ -197,7 +208,7 @@ export function findWhenPhrase(text: string, opts: FindWhenOptions): WhenPhrase 
         : end > best.end || (end === best.end && r.text.length > best.text.length);
       if (!better) continue;
     }
-    best = { start, end, text: r.text, ...value };
+    best = { start, end, text: r.text, ...value, repeat: repeatOf(r) };
   }
   return best;
 }
