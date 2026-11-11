@@ -23,8 +23,14 @@
   --bg-hover: rgba(0, 0, 0, 0.04);
   --bg-active: #e5e7eb;
   /* Badge pill: a faintly cool grey; text tokens share its hue so the
-     pill reads as one tinted surface rather than neutral grey on lilac. */
-  --bg-badge: #f3f2f7;
+     pill reads as one tinted surface rather than neutral grey on lilac.
+     Translucent, so the pill takes on the ground under it (a selected
+     row's fill, a highlighted menu item) instead of sitting on it as a
+     grey patch; the alpha is tuned to land on `--bg-badge-solid` over
+     the plain surface. The solid twin is for marks that must stay
+     opaque (avatars, which overlap). */
+  --bg-badge: rgba(55, 38, 122, 0.06);
+  --bg-badge-solid: #f3f2f7;
   --text-badge: #5e5c68;
   --text-badge-faint: #8c8a96;
   /* Date token inline in title text (`.when-token`): the badge hue, a
@@ -73,7 +79,8 @@
   --surface: #1a1a1d;
   --bg-hover: rgba(255, 255, 255, 0.05);
   --bg-active: #2a2a2e;
-  --bg-badge: #24232a;
+  --bg-badge: rgba(193, 176, 246, 0.06);
+  --bg-badge-solid: #24232a;
   --text-badge: #aaa8b2;
   --text-badge-faint: #7a7884;
   --bg-token: #36353f;
@@ -5153,7 +5160,7 @@ input.task-check:hover {
   line-height: 1;
   text-transform: uppercase;
   color: var(--text-badge);
-  background: var(--avatar-bg, color-mix(in srgb, var(--text-badge) 18%, var(--bg-badge)));
+  background: var(--avatar-bg, color-mix(in srgb, var(--text-badge) 18%, var(--bg-badge-solid)));
   user-select: none;
 }
 
@@ -5163,7 +5170,7 @@ input.task-check:hover {
 
 .avatar[data-unknown] {
   color: var(--text-badge-faint);
-  background: var(--bg-badge);
+  background: var(--bg-badge-solid);
   border: 1px dashed var(--text-badge-faint);
 }
 
