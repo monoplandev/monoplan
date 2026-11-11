@@ -544,6 +544,19 @@ body {
   background: var(--dnd-select-bg);
 }
 
+/* A run of selected rows reads as one block: square the corners where
+   two selected rows meet, keeping the radius on the run's outer edges.
+   Runs never cross a day, since the day header sits between. */
+.upcoming-row[aria-selected="true"]:has(+ .upcoming-row[aria-selected="true"]) {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.upcoming-row[aria-selected="true"] + .upcoming-row[aria-selected="true"] {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
 /* Hairline between rows within a day (none under the day's last row),
    drawn as a pseudo so it stays square under the rounded hover ground. */
 .upcoming-row:not(:last-child)::after {
