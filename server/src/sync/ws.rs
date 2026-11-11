@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::task::Poll;
 use std::time::Instant;
 
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Extension, Query, State};
 use axum::http::{Extensions, HeaderMap};
 use axum::response::Response;
@@ -40,7 +40,7 @@ use crate::auth::tokens::{decode_token, sha256};
 use crate::error::ApiError;
 use crate::http::request_id::RequestId;
 use crate::state::AppState;
-use crate::sync::sessions::{Outbound, Subscription};
+use crate::sync::sessions::{Connection, Outbound, Subscription};
 use crate::sync::snapshot::{Decision, PrevSnapshot, ReleaseResult};
 
 use super::queries;
@@ -127,9 +127,20 @@ pub async fn ws_handler(
         .ok_or(ApiError::Unauthorized)?;
     let raw = decode_token(&raw_hex).ok_or(ApiError::Unauthorized)?;
     let hash = sha256(&raw).to_vec();
-    let lookup = find_device_by_token_hash(&state.db, hash)
+    let lookup = find_device_by_token_hash(&state.db, hash.clone())
         .await?
         .ok_or(ApiError::Unauthorized)?;
+    // Registered for the socket's lifetime so a revoke can end it
+    // (`spec/sync-protocol.md` §Revocation). The token is checked once
+    // more after registering: a revoke that slipped in between the
+    // lookup above and the registration found nothing to close, and
+    // this is what refuses it.
+    let conn = state
+        .sync_sessions
+        .connect(lookup.device_id, lookup.account_id);
+    if find_device_by_token_hash(&state.db, hash).await?.is_none() {
+        return Err(ApiError::Unauthorized);
+    }
     let ip = client_ip(&headers, peer_ip(&extensions));
     let _ = touch_device_last_seen(&state.db, lookup.device_id, ip).await;
     let auth = DeviceAuth {
@@ -150,7 +161,7 @@ pub async fn ws_handler(
         );
         async move {
             tracing::info!("ws session started");
-            match run_session(socket, state, auth).await {
+            match run_session(socket, state, auth, conn).await {
                 Ok(()) => tracing::info!("ws session closed"),
                 Err(SessionError::Closed) => tracing::info!("ws session closed"),
                 Err(e) => tracing::warn!(error = %e, "ws session ended with error"),
@@ -160,6 +171,10 @@ pub async fn ws_handler(
         .await
     }))
 }
+
+/// WS close code sent when the connection's device token is revoked
+/// mid-session (private-use range; mirrors HTTP 401).
+pub const CLOSE_DEVICE_REVOKED: u16 = 4401;
 
 #[derive(Debug, thiserror::Error)]
 enum SessionError {
@@ -189,6 +204,7 @@ async fn run_session(
     mut socket: WebSocket,
     state: AppState,
     auth: DeviceAuth,
+    conn: Connection,
 ) -> Result<(), SessionError> {
     let handshake_span = tracing::info_span!("ws.handshake");
     let _hello: Hello = async {
@@ -237,7 +253,21 @@ async fn run_session(
 
     let result = loop {
         tokio::select! {
+            // The device's token was revoked: the socket was only
+            // authenticated at upgrade, so it ends here. The close
+            // frame is a courtesy; the client's reconnect is refused
+            // with 401 either way, which is what tells it why.
+            _ = conn.revoked() => {
+                close_revoked(&mut socket).await;
+                break Ok(());
+            }
             client_frame = recv_msgpack::<ClientFrame>(&mut socket) => {
+                // Nothing is served on a dead token, even a frame that
+                // raced the revoke.
+                if conn.is_revoked() {
+                    close_revoked(&mut socket).await;
+                    break Ok(());
+                }
                 match client_frame {
                     Ok(frame) => handle_frame(&mut socket, &state, &mut ws_session, frame).await?,
                     Err(SessionError::Closed) => break Ok(()),
@@ -249,6 +279,10 @@ async fn run_session(
             // on any one doc ends the whole session: the client
             // reconnects and re-pulls every doc from its cursor.
             (doc_id, broadcast) = std::future::poll_fn(|cx| ws_session.poll_broadcast(cx)) => {
+                if conn.is_revoked() {
+                    close_revoked(&mut socket).await;
+                    break Ok(());
+                }
                 match broadcast.ok_or(SessionError::BroadcastLagged(doc_id))? {
                     Outbound::Frame(bytes) => {
                         let broadcast_span = tracing::info_span!(
@@ -290,6 +324,17 @@ async fn run_session(
         }
     }
     result
+}
+
+/// End a connection whose device token was revoked.
+async fn close_revoked(socket: &mut WebSocket) {
+    tracing::info!("ws session closed: device revoked");
+    let _ = socket
+        .send(Message::Close(Some(CloseFrame {
+            code: CLOSE_DEVICE_REVOKED,
+            reason: "device revoked".into(),
+        })))
+        .await;
 }
 
 /// Drop a doc from the connection: the subscription goes with the entry

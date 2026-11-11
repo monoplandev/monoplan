@@ -22,11 +22,11 @@
 //! when peers are live, so dropping a frame is safe.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use monoplan_protocol::{PresentAccount, ServerFrame, StoredBlob};
-use tokio::sync::mpsc;
+use tokio::sync::{Notify, mpsc};
 use uuid::Uuid;
 
 /// Per-subscriber buffer. 256 frames × ~256 KiB worst case = ~64 MiB
@@ -43,6 +43,70 @@ pub struct SyncSessions {
 #[derive(Default)]
 struct Inner {
     docs: HashMap<Uuid, Vec<Subscriber>>,
+    /// Every live connection by device, whether or not it has a doc
+    /// open: what a credential revoke closes (`close_device`).
+    connections: HashMap<Uuid, Vec<LiveConnection>>,
+}
+
+struct LiveConnection {
+    conn_id: u64,
+    account_id: Uuid,
+    revoked: Arc<Revoked>,
+}
+
+/// A connection's revocation signal: the flag is the fact, the notify
+/// wakes a session parked in its select.
+#[derive(Default)]
+struct Revoked {
+    flag: AtomicBool,
+    wake: Notify,
+}
+
+impl Revoked {
+    fn set(&self) {
+        self.flag.store(true, Ordering::SeqCst);
+        self.wake.notify_one();
+    }
+}
+
+/// RAII handle for one live WebSocket, registered against its device
+/// for the connection's whole lifetime. Dropping deregisters it.
+pub struct Connection {
+    sessions: SyncSessions,
+    device_id: Uuid,
+    conn_id: u64,
+    revoked: Arc<Revoked>,
+}
+
+impl Connection {
+    /// Resolves once the device's credential has been revoked
+    /// (`close_device` / `close_account`). The wakeup is a stored
+    /// permit, so a revoke that lands while the session is busy with a
+    /// frame is seen at its next poll, not lost.
+    pub async fn revoked(&self) {
+        self.revoked.wake.notified().await
+    }
+
+    /// Whether the credential is already revoked. The session checks
+    /// this before serving anything else that became ready at the same
+    /// time (a client frame, a queued `DocClosed`), so a revoked
+    /// connection always ends with the revocation close and nothing
+    /// after it.
+    pub fn is_revoked(&self) -> bool {
+        self.revoked.flag.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        let mut inner = self.sessions.inner.lock().unwrap();
+        if let Some(conns) = inner.connections.get_mut(&self.device_id) {
+            conns.retain(|c| c.conn_id != self.conn_id);
+            if conns.is_empty() {
+                inner.connections.remove(&self.device_id);
+            }
+        }
+    }
 }
 
 struct Subscriber {
@@ -146,6 +210,65 @@ impl Drop for Subscription {
 impl SyncSessions {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Register a live connection for `device_id`, before any doc is
+    /// open. The WS upgrade re-checks the token after this call, so a
+    /// revoke either finds the connection here or fails that re-check.
+    pub fn connect(&self, device_id: Uuid, account_id: Uuid) -> Connection {
+        let conn_id = next_sub_id();
+        let revoked = Arc::new(Revoked::default());
+        self.inner
+            .lock()
+            .unwrap()
+            .connections
+            .entry(device_id)
+            .or_default()
+            .push(LiveConnection {
+                conn_id,
+                account_id,
+                revoked: revoked.clone(),
+            });
+        Connection {
+            sessions: self.clone(),
+            device_id,
+            conn_id,
+            revoked,
+        }
+    }
+
+    /// The device's token is dead (`POST /api/account/logout`,
+    /// `DELETE /api/devices/:id`): end every live connection that
+    /// authenticated with it, every tab of a browser included, since
+    /// the socket is only authenticated at upgrade. Returns the number
+    /// of connections told to close.
+    pub fn close_device(&self, device_id: Uuid) -> usize {
+        let inner = self.inner.lock().unwrap();
+        let conns = inner.connections.get(&device_id);
+        for c in conns.into_iter().flatten() {
+            c.revoked.set();
+        }
+        conns.map_or(0, Vec::len)
+    }
+
+    /// The account is gone (`DELETE /api/account`): end every live
+    /// connection of every one of its devices.
+    pub fn close_account(&self, account_id: Uuid) -> usize {
+        let inner = self.inner.lock().unwrap();
+        let mut told = 0;
+        for c in inner.connections.values().flatten() {
+            if c.account_id == account_id {
+                c.revoked.set();
+                told += 1;
+            }
+        }
+        told
+    }
+
+    /// Live connections of `device_id`. Test barrier.
+    pub fn connection_count(&self, device_id: Uuid) -> usize {
+        let inner = self.inner.lock().unwrap();
+        inner.connections.get(&device_id).map_or(0, Vec::len)
     }
 
     /// Register a connection on `doc_id`. Presence: if this is the

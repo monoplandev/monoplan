@@ -87,7 +87,22 @@ export function App(props: {
   // next login of the same account resume as a long-offline device.
   // The sync runtime's `onAuthFailed` (expired or revoked cookie) calls
   // this bare, so it only forgets keys and never destroys unsynced work.
+  //
+  // The server ends this device's sockets when it revokes the token
+  // (close 4401), this tab's included, so a user sign-out can provoke
+  // the runtime's `onAuthFailed` while it is still running. The bare
+  // call is dropped then: the sign-out in flight already does more.
+  let signingOut = false;
   const logout = async (opts?: { wipeLocal?: boolean; serverGone?: boolean }) => {
+    if (signingOut) return;
+    signingOut = true;
+    try {
+      await runLogout(opts);
+    } finally {
+      signingOut = false;
+    }
+  };
+  const runLogout = async (opts?: { wipeLocal?: boolean; serverGone?: boolean }) => {
     const current = session();
     const storages = (boot()?.docs ?? []).map((d) => d.storage);
     if (current && !current.anonymous && !opts?.serverGone) {

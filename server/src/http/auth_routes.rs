@@ -320,6 +320,11 @@ pub async fn logout(State(state): State<AppState>, auth: DeviceAuth) -> ApiResul
     let _ = revoke_device(&state.db, auth.account_id, auth.device_id)
         .await
         .context("auth.logout revoke_device")?;
+    // The token is only checked at WS upgrade, so the device's live
+    // sockets (this tab's and every other tab sharing the cookie) are
+    // ended here; their reconnect is refused.
+    let closed = state.sync_sessions.close_device(auth.device_id);
+    tracing::info!(live_sessions_closed = closed, "device logged out");
     Ok((
         cookie_headers(cookie::clear_cookie(state.secure_cookies)),
         (),
@@ -362,6 +367,10 @@ pub async fn delete(
             .sync_sessions
             .close_for_account(*doc_id, account.id, "account deleted");
     }
+    // Every device of the account is gone with it: end their sockets
+    // (code 4401). That supersedes any `DocClosed` queued for them just
+    // above; other accounts' members still get theirs.
+    state.sync_sessions.close_account(account.id);
     tracing::info!(
         account_id = %account.id,
         purged_docs = deleted.purged_docs.len(),

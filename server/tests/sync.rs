@@ -2275,14 +2275,10 @@ async fn deleting_an_account_closes_its_docs_on_live_connections() {
         }
         other => panic!("expected DocClosed on the member, got {other:?}"),
     }
-    match recv_msgpack::<ServerFrame>(&mut ws_extra).await {
-        ServerFrame::DocClosed { doc_id, reason } => {
-            assert_eq!(doc_id, owner.primary_doc_id);
-            assert!(reason.contains("account deleted"), "reason: {reason}");
-        }
-        other => panic!("expected DocClosed on the other device, got {other:?}"),
-    }
-    assert_no_frame(&mut ws_owner, std::time::Duration::from_millis(200)).await;
+    // The account's own devices are revoked with it: their sockets end
+    // with the revocation close, not a `DocClosed`.
+    expect_revoked_close(&mut ws_extra).await;
+    expect_revoked_close(&mut ws_owner).await;
     assert_eq!(owner.server.state.sync_sessions.subscriber_count(shared), 0);
     assert_eq!(
         owner
@@ -2300,4 +2296,109 @@ async fn deleting_an_account_closes_its_docs_on_live_connections() {
         .await
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
+}
+
+/// The close a revoked connection receives: code 4401, then the end of
+/// the stream.
+async fn expect_revoked_close(ws: &mut WsStream) {
+    let deadline = std::time::Duration::from_secs(2);
+    loop {
+        match tokio::time::timeout(deadline, ws.next()).await {
+            Ok(Some(Ok(Message::Close(Some(frame))))) => {
+                assert_eq!(u16::from(frame.code), 4401, "close code");
+                return;
+            }
+            Ok(Some(Ok(Message::Ping(_)))) | Ok(Some(Ok(Message::Pong(_)))) => continue,
+            Ok(other) => panic!("expected a 4401 close, got {other:?}"),
+            Err(_) => panic!("socket still open after {deadline:?}"),
+        }
+    }
+}
+
+/// `POST /api/account/logout` (`spec/sync-protocol.md` §Revocation):
+/// the token is only checked at upgrade, so signing out ends every live
+/// socket that authenticated with it: both tabs of the device, one of
+/// which never opened a doc. Another device of the account is left
+/// alone, and the dead token cannot reconnect.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn logout_closes_every_live_socket_of_the_device() {
+    let acc = signup_account().await;
+    let device_b = register_second_device(&acc, "device-b").await;
+    let doc = acc.primary_doc_id;
+    let sessions = &acc.server.state.sync_sessions;
+
+    let mut tab_a = connect_ws(&acc.server, &acc.device_token).await;
+    handshake(&mut tab_a, doc).await;
+    let mut tab_b = connect_ws(&acc.server, &acc.device_token).await;
+    hello(&mut tab_b).await;
+    let mut other = connect_ws(&acc.server, &device_b.device_token).await;
+    handshake(&mut other, doc).await;
+    assert_eq!(sessions.connection_count(acc.device_id), 2);
+
+    let resp = http()
+        .post(format!("{}/api/account/logout", acc.server.base))
+        .bearer_auth(&acc.device_token)
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success(), "logout: {}", resp.status());
+
+    expect_revoked_close(&mut tab_a).await;
+    expect_revoked_close(&mut tab_b).await;
+    assert_no_frame(&mut other, std::time::Duration::from_millis(200)).await;
+    assert_eq!(sessions.connection_count(device_b.device_id), 1);
+
+    // The registry forgets the closed connections, and the token is
+    // refused at the next upgrade.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while sessions.connection_count(acc.device_id) != 0 {
+        assert!(std::time::Instant::now() < deadline, "connections linger");
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let url = format!("{}/api/sync", acc.server.ws_base);
+    let mut req = url.into_client_request().unwrap();
+    req.headers_mut().insert(
+        AUTHORIZATION,
+        format!("Bearer {}", acc.device_token).parse().unwrap(),
+    );
+    let err = tokio_tungstenite::connect_async(req).await.unwrap_err();
+    assert!(err.to_string().contains("401"), "{err}");
+}
+
+/// `DELETE /api/devices/:id`: revoking another device ends its live
+/// socket at once; the device that asked keeps its own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn revoking_a_device_closes_its_live_socket() {
+    let acc = signup_account().await;
+    let device_b = register_second_device(&acc, "device-b").await;
+    let doc = acc.primary_doc_id;
+
+    let mut ws_a = connect_ws(&acc.server, &acc.device_token).await;
+    handshake(&mut ws_a, doc).await;
+    let mut ws_b = connect_ws(&acc.server, &device_b.device_token).await;
+    handshake(&mut ws_b, doc).await;
+
+    let resp = http()
+        .delete(format!(
+            "{}/api/devices/{}",
+            acc.server.base, device_b.device_id
+        ))
+        .bearer_auth(&acc.device_token)
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success(), "revoke: {}", resp.status());
+
+    expect_revoked_close(&mut ws_b).await;
+    assert_no_frame(&mut ws_a, std::time::Duration::from_millis(200)).await;
+    // A still syncs.
+    send_msgpack(
+        &mut ws_a,
+        &ClientFrame::PushUpdates {
+            doc_id: doc,
+            updates: fake_pushes(1..2),
+        },
+    )
+    .await;
+    assert_eq!(ack_seqs(recv_msgpack(&mut ws_a).await), vec![1]);
 }

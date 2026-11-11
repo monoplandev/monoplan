@@ -70,6 +70,10 @@ pub async fn revoke(
     if !removed {
         return Err(ApiError::NotFound);
     }
+    // The token is only checked at WS upgrade: end the revoked
+    // device's live sockets so it stops syncing now, not at its next
+    // reconnect.
+    state.sync_sessions.close_device(target);
     Ok(())
 }
 
