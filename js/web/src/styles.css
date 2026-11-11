@@ -668,6 +668,24 @@ body {
   height: 13px;
 }
 
+/* Starred mark right after the title text: the list row's star
+   (`.row-focus-badge svg`). It never shrinks, so a long title
+   ellipsises ahead of it. */
+.upcoming-row-star {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: -2px;
+}
+
+.upcoming-row-star svg {
+  width: 12px;
+  height: 12px;
+  fill: #ffe785;
+  stroke: #4e4e4e;
+  stroke-width: 6px;
+}
+
 .upcoming-row-meta {
   display: flex;
   align-items: center;

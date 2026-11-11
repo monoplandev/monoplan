@@ -58,6 +58,7 @@ import {
 } from "./format.tsx";
 import { useAppI18n } from "./i18n.tsx";
 import mapPinSvg from "./icons/map-pin.svg?raw";
+import starFilledSvg from "./icons/star-filled.svg?raw";
 import usersSvg from "./icons/users.svg?raw";
 import {
   isCancelled,
@@ -338,6 +339,10 @@ export function Upcoming(props: {
                   // Keeps the "…" button showing while its menu is up
                   // (`.upcoming-row[data-menu-open]`), as list rows do.
                   const [menuOpen, setMenuOpen] = createSignal(false);
+                  // Starred (pinned to Focus): a star follows the title.
+                  const starred = createMemo(() =>
+                    props.app.isFocused(r.item.id),
+                  );
                   return (
                   <ItemContextMenu
                     item={() => r.item}
@@ -384,6 +389,14 @@ export function Upcoming(props: {
                     <span class="upcoming-row-body">
                       <span class="upcoming-row-title">
                         <span class="upcoming-row-text">{r.item.text}</span>
+                        <Show when={starred()}>
+                          <span
+                            class="upcoming-row-star"
+                            title={m().focus.badge}
+                            aria-label={m().focus.badge}
+                            innerHTML={starFilledSvg}
+                          />
+                        </Show>
                       </span>
                       {/* Sub line under the title: the shared workspace a
                           foreign row comes from (people glyph + name),
