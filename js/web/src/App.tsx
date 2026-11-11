@@ -18,6 +18,7 @@ import { api } from "./api.ts";
 import { dekVault } from "./sync/dekVault.ts";
 import { unwrapNewMemberships } from "./sync/docKeys.ts";
 import { useAppI18n } from "./i18n.tsx";
+import { Splash } from "./Splash.tsx";
 import { type Session } from "./Login.tsx";
 import { Workspace } from "./Workspace.tsx";
 import { createWorkspaceRuntime, type BootInfo, type DocBoot } from "./sync/runtime.ts";
@@ -29,7 +30,7 @@ export function App(props: {
    *  claim on peer slot 0. Without it, boot minted a random peer. */
   singleTabLockHeld: boolean;
 }) {
-  const { m, locale, direction } = useAppI18n();
+  const { locale, direction } = useAppI18n();
   createEffect(() => {
     document.documentElement.lang = locale();
     document.documentElement.dir = direction();
@@ -174,7 +175,7 @@ export function App(props: {
   return (
     <Show
       when={session() !== null}
-      fallback={<div class="empty">{m().common.loading}</div>}
+      fallback={<Splash />}
     >
       <Show keyed when={session()}>
         {(s) => (
@@ -323,7 +324,6 @@ function BootGate(props: {
   setBoot: (b: BootInfo | null) => void;
   setBootError: (m: string | null) => void;
 }) {
-  const { m } = useAppI18n();
   // Rebuild every doc the session can open from its replica WAL
   // (`spec/local-storage.md` §"Web boot"), mirroring the CLI's `boot_doc`:
   // load the snapshot (a bare Loro snapshot) and replay every WAL row after
@@ -451,7 +451,7 @@ function BootGate(props: {
       when={!props.bootError}
       fallback={<div class="empty">Failed to start: {props.bootError}</div>}
     >
-      <Show when={props.boot} fallback={<div class="empty">{m().common.loading}</div>}>
+      <Show when={props.boot} fallback={<Splash />}>
         {(b) => <MainApp session={props.session} boot={b()} />}
       </Show>
     </Show>

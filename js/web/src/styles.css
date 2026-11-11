@@ -1760,6 +1760,38 @@ input.task-check:hover {
   color: var(--text-empty);
 }
 
+/* Boot splash (Splash.tsx): the wordmark, fixed to the viewport so it
+   sits at the exact centre whatever wraps it. Black artwork, inverted
+   for the dark theme. */
+.splash {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  pointer-events: none;
+  user-select: none;
+}
+
+.splash-wordmark {
+  display: block;
+  height: 30px;
+  width: auto;
+  opacity: 0.5;
+  animation: splash-in 0.2s ease-out;
+}
+
+@keyframes splash-in {
+  from {
+    opacity: 0;
+  }
+}
+
+[data-theme="dark"] .splash-wordmark {
+  filter: invert(1);
+}
+
 /* The app window without a host yet (MirrorApp's HostGate): waiting
    on it. Fills the window and centres its two lines; the reason is
    secondary. */

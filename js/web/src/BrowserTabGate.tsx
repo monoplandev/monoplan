@@ -16,13 +16,12 @@
 // peer, or two live docs share a peer and corrupt the CRDT.
 
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
-import { useAppI18n } from "./i18n.tsx";
+import { Splash } from "./Splash.tsx";
 import { App } from "./App.tsx";
 
 const SINGLE_TAB_LOCK_NAME = "monoplan-single-tab";
 
 export function BrowserTabGate() {
-  const { m } = useAppI18n();
   const [gate, setGate] = createSignal<"checking" | "allowed" | "blocked">(
     "checking",
   );
@@ -61,7 +60,7 @@ export function BrowserTabGate() {
   });
 
   return (
-    <Show when={gate() !== "checking"} fallback={<div class="empty">{m().common.loading}</div>}>
+    <Show when={gate() !== "checking"} fallback={<Splash />}>
       <Show
         when={gate() === "allowed"}
         fallback={

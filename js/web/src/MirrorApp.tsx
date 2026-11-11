@@ -10,6 +10,7 @@ import { createEffect, createMemo, createSignal, onMount, Show } from "solid-js"
 import { Doc, Replica } from "@monoplan/core/wasm";
 import { MirrorBridge, type MirrorSeed } from "@monoplan/core/mirror-bridge";
 import { useAppI18n } from "./i18n.tsx";
+import { Splash } from "./Splash.tsx";
 import { deletePrefs, loadPrefs, savePrefs, type Prefs } from "./prefs.ts";
 import { SessionProvider } from "./SessionContext.tsx";
 import { Workspace } from "./Workspace.tsx";
@@ -138,7 +139,7 @@ export function MirrorApp(props: {
       }
     >
       <Show when={!gate()} fallback={<EngineGate state={gate()!} />}>
-        <Show when={boot()} fallback={<div class="empty">{m().common.loading}</div>}>
+        <Show when={boot()} fallback={<Splash />}>
           {(b) => (
           <SessionProvider
             value={{
