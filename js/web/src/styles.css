@@ -1760,36 +1760,38 @@ input.task-check:hover {
   color: var(--text-empty);
 }
 
-/* Boot splash (Splash.tsx): the wordmark, fixed to the viewport so it
-   sits at the exact centre whatever wraps it. Black artwork, inverted
-   for the dark theme. */
+/* Boot splash (Splash.tsx): the app's empty panes on the real layout
+   classes, fixed to the viewport whatever wraps it. Paints
+   nothing itself: the nav and content panes carry their own fills (and
+   the macOS window's sidebar stays see-through). */
 .splash {
   position: fixed;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg);
+  height: auto;
   pointer-events: none;
   user-select: none;
 }
 
-.splash-wordmark {
-  display: block;
-  height: 30px;
-  width: auto;
-  opacity: 0.5;
-  animation: splash-in 0.2s ease-out;
+/* The idle side panel, by the viewport alone as in the workspace
+   (`sidePanelShown` in Workspace.tsx: neither narrow nor mobile). */
+.splash .side-panel {
+  display: none;
 }
 
-@keyframes splash-in {
-  from {
-    opacity: 0;
+@media (min-width: 920px) {
+  .app.splash {
+    grid-template-columns: var(--nav-width, 260px) 1fr 300px;
+  }
+
+  .splash .side-panel {
+    display: flex;
   }
 }
 
-[data-theme="dark"] .splash-wordmark {
-  filter: invert(1);
+@media (max-width: 768px) and (pointer: coarse) {
+  .splash .nav {
+    display: none;
+  }
 }
 
 /* The app window without a host yet (MirrorApp's HostGate): waiting
