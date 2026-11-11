@@ -293,6 +293,9 @@ export function createWorkspaceRuntime(props: {
   // is what the workspace renders today; the others sync headlessly
   // until the cross-doc lenses land (`spec/sharing-plan.md` Phase 5).
   const runtimes = new Map<string, DocRuntime>();
+  // Docs this device is leaving right now (`leaveDoc`): the server's
+  // `DocClosed` for one of these is our own doing, not a removal.
+  const leaving = new Set<string>();
   // The Home doc is the one with Focus, so it alone gets the Home app.
   let home: DocRuntime<HomeApp> | undefined;
   for (const b of props.boot.docs) {
@@ -408,9 +411,11 @@ export function createWorkspaceRuntime(props: {
         const r = runtimes.get(docId);
         if (!r) return;
         const name = r.app.state.settings.docName ?? null;
-        console.warn(`sync: doc ${docId} closed by the server:`, ev.message);
+        // Our own leave (`leaveDoc`): expected, so no notice.
+        const own = leaving.has(docId);
+        if (!own) console.warn(`sync: doc ${docId} closed by the server:`, ev.message);
         void forgetOpenDoc(docId, r);
-        props.onDocClosed?.(docId, name);
+        if (!own) props.onDocClosed?.(docId, name);
       },
     });
     const b = bridge;
@@ -594,6 +599,34 @@ export function createWorkspaceRuntime(props: {
     await forgetOpenDoc(docId, r);
   };
 
+  // Leave a shared doc this account does not own and forget it on this
+  // device (`spec/sharing-plan.md` §Member removal): the member removes
+  // themself on the server, which refuses a sole owner (409), then the
+  // local teardown is the same as after a delete. Unlike delete, the
+  // server sends `DocClosed` to every session of the leaver, this
+  // one's included (in the macOS app the engine shares this device's
+  // token and has to hear it), so the doc is marked as leaving for the
+  // duration: the handler above forgets it without the "you were
+  // removed" notice, and whichever of the frame and the HTTP reply
+  // lands first does the forgetting.
+  const leaveDoc = async (docId: string): Promise<void> => {
+    if (props.session.anonymous) {
+      throw new Error("sign in to leave a workspace");
+    }
+    if (docId === props.session.primaryDocId) {
+      throw new Error("the Home workspace cannot be left");
+    }
+    if (!runtimes.has(docId)) throw new Error(`leaveDoc: no open doc ${docId}`);
+    leaving.add(docId);
+    try {
+      await api.removeMember(docId, props.session.accountId);
+      const r = runtimes.get(docId);
+      if (r) await forgetOpenDoc(docId, r);
+    } finally {
+      leaving.delete(docId);
+    }
+  };
+
   // Freshly-created Home doc (signup, or a brand-new anonymous doc): drop
   // the core's single welcome item into Inbox (`seedWelcome`, the same
   // seed the CLI and macOS host write) and persist as the first op row so a
@@ -647,6 +680,7 @@ export function createWorkspaceRuntime(props: {
     createDoc,
     joinDoc,
     deleteDoc,
+    leaveDoc,
     presence: presenceOf,
   };
 }

@@ -407,10 +407,12 @@ export const api = {
     return get(`/api/docs/${encodeURIComponent(docId)}/members`);
   },
 
-  /** Owner removes a member. 403 for a non-owner member, 404 for a
-   *  non-member caller or a target who is not a member, 409 for
-   *  oneself or the last owner. Forward-only: the removed account
-   *  keeps what it already synced. Their live connections get
+  /** Owner removes a member, or a member leaves by naming themself
+   *  (`runtime.leaveDoc`). 403 for a non-owner removing someone else,
+   *  404 for a non-member caller or a target who is not a member, 409
+   *  for the last owner (a sole owner cannot leave). Forward-only: the
+   *  removed account keeps what it already synced. Their live
+   *  connections, the caller's own included when leaving, get
    *  `DocClosed` and drop the doc. */
   async removeMember(docId: string, accountId: string): Promise<void> {
     await del<unknown>(

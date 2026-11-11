@@ -20,6 +20,11 @@ export interface MemberDirectory {
    *  member removed before this session loaded the list). Reactive: a
    *  read inside a memo re-runs when the list lands. */
   emailOf(docId: string, accountId: string): string | undefined;
+  /** Role of `accountId` on `docId` as of the last fetched list, or
+   *  undefined while the list is not loaded or the account is not in
+   *  it. Decides Delete (owner) versus Leave (member) in the nav's
+   *  workspace menu. Presence never sets it. Reactive. */
+  roleOf(docId: string, accountId: string): Member["role"] | undefined;
   /** Number of active members of `docId`, or undefined while its list is
    *  not loaded: the count in the nav's shared-marker tooltip. Reactive. */
   countOf(docId: string): number | undefined;
@@ -46,6 +51,7 @@ export function createMemberDirectory(fetchMembers: FetchMembers = defaultFetch)
   // Docs whose list has been fetched at least once. Separate from
   // `byDoc` so a presence seed landing before the fetch neither skips
   // the fetch nor reads as a (partial) member count.
+  const [roles, setRoles] = createSignal<Record<string, Record<string, Member["role"]>>>({});
   const [loaded, setLoaded] = createSignal<ReadonlySet<string>>(new Set());
   const inflight = new Set<string>();
 
@@ -55,8 +61,13 @@ export function createMemberDirectory(fetchMembers: FetchMembers = defaultFetch)
     try {
       const list = await fetchMembers(docId);
       const emails: Record<string, string> = {};
-      for (const mb of list) emails[mb.account_id] = mb.email;
+      const docRoles: Record<string, Member["role"]> = {};
+      for (const mb of list) {
+        emails[mb.account_id] = mb.email;
+        docRoles[mb.account_id] = mb.role;
+      }
       setByDoc((prev) => ({ ...prev, [docId]: emails }));
+      setRoles((prev) => ({ ...prev, [docId]: docRoles }));
       setLoaded((prev) => (prev.has(docId) ? prev : new Set(prev).add(docId)));
     } catch (e) {
       console.warn("members: load failed:", e);
@@ -68,6 +79,9 @@ export function createMemberDirectory(fetchMembers: FetchMembers = defaultFetch)
   return {
     emailOf(docId, accountId) {
       return byDoc()[docId]?.[accountId];
+    },
+    roleOf(docId, accountId) {
+      return roles()[docId]?.[accountId];
     },
     countOf(docId) {
       if (!loaded().has(docId)) return undefined;

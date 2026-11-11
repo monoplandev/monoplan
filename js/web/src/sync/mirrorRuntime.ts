@@ -24,6 +24,7 @@ import { onCleanup } from "solid-js";
 import type { Replica } from "@monoplan/core/wasm";
 import type { MirrorBridge } from "@monoplan/core/mirror-bridge";
 import type { Session } from "../Login.tsx";
+import { api } from "../api.ts";
 import type { Prefs } from "../prefs.ts";
 import { createDocsLayer, type DocsLayer } from "./docs.ts";
 import { createHomeApp, createSyncedApp, type DocApp, type HomeApp } from "./store.ts";
@@ -189,6 +190,18 @@ export function createMirrorRuntime(boot: MirrorBoot) {
     /** The app deletes through the host (`MirrorMain`); this is the
      *  fallback when no app is wired. */
     deleteDoc: unavailable("deleting a workspace") as (docId: string) => Promise<void>,
+    /** Leave a shared doc the account does not own: the member removes
+     *  themself over the proxied `/api`, the server's `DocClosed` makes
+     *  the engine forget its copy (it shares this device's token), and
+     *  the page drops the doc here without waiting for the engine's
+     *  `stopped`. */
+    leaveDoc: async (docId: string): Promise<void> => {
+      if (docId === boot.session.primaryDocId) {
+        throw new Error("the Home workspace cannot be left");
+      }
+      await api.removeMember(docId, boot.session.accountId);
+      closeDoc(docId);
+    },
     openDoc,
     closeDoc,
     /** Presence is a server fact the host has not relayed yet. */

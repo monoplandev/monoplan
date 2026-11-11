@@ -1892,9 +1892,8 @@ async fn invite_expires_and_is_not_spent_by_an_existing_member() {
 
 /// `DELETE /api/docs/:doc_id/members/:account_id`: the refusal matrix
 /// around removal, then one real removal. A non-member learns nothing
-/// (404), a non-owner member is told no (403), the owner cannot remove
-/// themself (409: leaving is a different verb) nor the last owner
-/// (409, by way of the same rule), and the primary doc is refused
+/// (404), a non-owner member is told no (403), the sole owner cannot
+/// remove themself (409: the last owner cannot leave), and the primary doc is refused
 /// before any lookup (403). After the owner removes the invitee, the
 /// member list and the invitee's own doc list drop the doc, a second
 /// removal reads as 404, and a fresh link lets the invitee back in on
@@ -1933,8 +1932,7 @@ async fn member_removal_is_owner_only_never_self_nor_last_owner() {
         delete_status(&member_url(&doc_id, &acc.account_id), &second.device_token).await,
         reqwest::StatusCode::FORBIDDEN
     );
-    // The owner cannot remove themself: that would be "leave", and
-    // with one owner it would also orphan the doc.
+    // The sole owner cannot leave: it would orphan the doc.
     assert_eq!(
         delete_status(&member_url(&doc_id, &acc.account_id), &acc.device_token).await,
         reqwest::StatusCode::CONFLICT
@@ -2000,6 +1998,55 @@ async fn member_removal_is_owner_only_never_self_nor_last_owner() {
     )
     .await;
     assert_eq!(members.members.len(), 2);
+}
+
+/// A member who is not an owner leaves by naming themself on the
+/// removal route: their membership goes (member list, their own doc
+/// list), the owner's stays, a second leave finds nothing, and a fresh
+/// link lets them back in.
+#[tokio::test]
+async fn member_leaves_a_shared_doc() {
+    let acc = signup().await;
+    let base = acc.server.base.clone();
+    let (doc_id, doc_dek) = create_doc(&acc, &acc.dek).await;
+    let (secret, _) = issue_invite(&acc, &doc_id, &doc_dek, None).await;
+    let second = signup_on(&base).await;
+    accept_invite(&base, &secret, &second.device_token, &second.dek).await;
+    let leave_url = format!("{base}/api/docs/{doc_id}/members/{}", second.account_id);
+
+    assert!(
+        delete_status(&leave_url, &second.device_token)
+            .await
+            .is_success()
+    );
+    let members: MembersListResponse = get_json_authed(
+        &format!("{base}/api/docs/{doc_id}/members"),
+        &acc.device_token,
+    )
+    .await;
+    assert_eq!(
+        members
+            .members
+            .iter()
+            .map(|m| m.account_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![acc.account_id.as_str()]
+    );
+    let docs: DocsListResponse =
+        get_json_authed(&format!("{base}/api/docs"), &second.device_token).await;
+    assert!(
+        docs.memberships.iter().all(|m| m.doc_id != doc_id),
+        "the member who left still lists the doc"
+    );
+    // Gone: leaving again finds no membership.
+    assert_eq!(
+        delete_status(&leave_url, &second.device_token).await,
+        reqwest::StatusCode::NOT_FOUND
+    );
+    // The owner's doc is untouched and a fresh link lets them back in.
+    let (again, _) = issue_invite(&acc, &doc_id, &doc_dek, None).await;
+    let (rejoined, _) = accept_invite(&base, &again, &second.device_token, &second.dek).await;
+    assert_eq!(rejoined, doc_id);
 }
 
 /// `DELETE /api/account` with the account's current `auth_secret`.

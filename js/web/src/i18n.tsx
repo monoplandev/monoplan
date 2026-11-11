@@ -166,6 +166,13 @@ export type Messages = {
     /** Prompt above the type-the-name field in the delete confirmation. */
     deleteDocTypeName: (name: string) => string;
     deleteDocFailed: string;
+    /** "..." menu leave on a shared doc the account does not own (shown
+     *  in place of delete), its confirmation, the confirm button and
+     *  the failure alert. */
+    leaveDoc: string;
+    leaveDocConfirm: (name: string) => string;
+    leaveDocAction: string;
+    leaveDocFailed: string;
     createDocFailed: string;
     /** Non-Home workspace menu item opening `SharingDialog`. */
     sharing: string;
@@ -677,6 +684,11 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         `¿Eliminar «${name}»? Sus listas y elementos se eliminarán de todos los dispositivos y quienes lo compartan perderán el acceso. Esta acción no se puede deshacer.`,
       deleteDocTypeName: (name) => `Escribe «${name}» para confirmar.`,
       deleteDocFailed: "No se pudo eliminar el espacio",
+      leaveDoc: "Salir del espacio",
+      leaveDocConfirm: (name) =>
+        `¿Salir de «${name}»? Se eliminará de tus dispositivos y perderás el acceso. Los demás miembros lo conservan; para volver necesitarás un nuevo enlace de invitación.`,
+      leaveDocAction: "Salir",
+      leaveDocFailed: "No se pudo salir del espacio",
       createDocFailed: "No se pudo crear el espacio",
       sharing: "Compartir…",
       connected: "Conectado",
@@ -1054,6 +1066,11 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         `Delete “${name}”? Its lists and items are removed from every device, and anyone it is shared with loses access. This cannot be undone.`,
       deleteDocTypeName: (name) => `Type “${name}” to confirm.`,
       deleteDocFailed: "Could not delete workspace",
+      leaveDoc: "Leave workspace",
+      leaveDocConfirm: (name) =>
+        `Leave “${name}”? It is removed from your devices and you lose access. The other members keep it; you will need a new invite link to rejoin.`,
+      leaveDocAction: "Leave",
+      leaveDocFailed: "Could not leave workspace",
       createDocFailed: "Could not create workspace",
       sharing: "Sharing…",
       connected: "Connected",

@@ -320,6 +320,10 @@ export function Nav(props: {
   /** Delete a non-Home doc (`runtime.deleteDoc`), or null when this
    *  session can't (anonymous). Drives the heading menu's Delete item. */
   onDeleteDoc: ((docId: string, name: string) => Promise<void>) | null;
+  /** Leave a shared doc the account does not own (`runtime.leaveDoc`),
+   *  or null when this session can't. The heading menu offers it in
+   *  place of Delete to a member who is not the owner. */
+  onLeaveDoc: ((docId: string) => Promise<void>) | null;
   /** Who has a doc open on the server right now (`runtime.presence`).
    *  Each heading shows the *other* accounts as avatars. */
   presence: (docId: string) => PresentAccount[];
@@ -480,6 +484,7 @@ export function Nav(props: {
             mobile={navIsMobile()}
             onToggled={() => setSectionTick((n) => n + 1)}
             onDeleteDoc={props.onDeleteDoc}
+            onLeaveDoc={props.onLeaveDoc}
             presence={props.presence}
             members={props.members}
           />
@@ -565,6 +570,7 @@ function DocSection(props: {
   mobile: boolean;
   onToggled: () => void;
   onDeleteDoc: ((docId: string, name: string) => Promise<void>) | null;
+  onLeaveDoc: ((docId: string) => Promise<void>) | null;
   presence: (docId: string) => PresentAccount[];
   members: MemberDirectory;
 }) {
@@ -585,8 +591,26 @@ function DocSection(props: {
   const sharedTitle = (): string => m().nav.sharedWorkspace(props.members.countOf(docId) ?? null);
   // Delete runs through a confirmation: it is server-side, cross-device
   // and not undoable. Home never offers it (`spec/sharing-plan.md`: the
-  // primary doc is non-deletable), nor does an anonymous session.
-  const canDelete = (): boolean => !props.entry.home && props.onDeleteDoc !== null;
+  // primary doc is non-deletable), nor does an anonymous session. Only
+  // the owner can delete (the server refuses anyone else); a member
+  // who is not the owner is offered Leave instead. The role comes from
+  // the member directory, so neither shows until its list has loaded.
+  const myRole = () => props.members.roleOf(docId, session.session().accountId);
+  const canDelete = (): boolean =>
+    !props.entry.home && props.onDeleteDoc !== null && myRole() === "owner";
+  const canLeave = (): boolean =>
+    !props.entry.home && props.onLeaveDoc !== null && myRole() === "member";
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = createSignal(false);
+  const leaveDoc = (): void => {
+    const run = props.onLeaveDoc;
+    if (!run || props.entry.home) return;
+    run(docId)
+      .then(() => saveSectionCollapsed(docId, false, false))
+      .catch((err) => {
+        console.error("leave workspace failed:", err);
+        alert(m().nav.leaveDocFailed);
+      });
+  };
   const [deleteConfirmOpen, setDeleteConfirmOpen] = createSignal(false);
   // The confirmation gates on the user typing the workspace's name: a
   // click-through dialog is too easy to confirm by reflex for something
@@ -950,6 +974,15 @@ function DocSection(props: {
                 {m().nav.deleteDoc}
               </DropdownMenu.Item>
             </Show>
+            <Show when={canLeave()}>
+              <DropdownMenu.Separator class="dropdown-menu-separator" />
+              <DropdownMenu.Item
+                class="dropdown-menu-item"
+                onSelect={() => setLeaveConfirmOpen(true)}
+              >
+                {m().nav.leaveDoc}
+              </DropdownMenu.Item>
+            </Show>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu>
@@ -1030,6 +1063,16 @@ function DocSection(props: {
             }}
           />
         </ConfirmDialog>
+      </Show>
+      <Show when={canLeave()}>
+        <ConfirmDialog
+          open={leaveConfirmOpen()}
+          onOpenChange={setLeaveConfirmOpen}
+          title={m().nav.leaveDoc}
+          message={m().nav.leaveDocConfirm(label())}
+          confirmLabel={m().nav.leaveDocAction}
+          onConfirm={leaveDoc}
+        />
       </Show>
       {archive.dialog()}
       <Show when={!props.entry.home}>

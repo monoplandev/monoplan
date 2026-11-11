@@ -461,7 +461,7 @@ function BootGate(props: {
 function MainApp(props: { session: Session; boot: BootInfo }) {
   const { setOnline, setLastSyncAt, logout } = useSession();
   const { m } = useAppI18n();
-  const { docs, view, setView, createDoc, joinDoc, deleteDoc, presence } =
+  const { docs, view, setView, createDoc, joinDoc, deleteDoc, leaveDoc, presence } =
     createWorkspaceRuntime({
     session: props.session,
     boot: props.boot,
@@ -483,6 +483,7 @@ function MainApp(props: { session: Session; boot: BootInfo }) {
       createDoc={createDoc}
       joinDoc={joinDoc}
       deleteDoc={deleteDoc}
+      leaveDoc={leaveDoc}
       presence={presence}
     />
   );

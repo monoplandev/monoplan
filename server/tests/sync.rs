@@ -2056,6 +2056,65 @@ async fn removing_a_member_closes_the_doc_on_its_live_connection() {
     expect_closed(&mut ws_again).await;
 }
 
+/// Leave (`spec/sharing-plan.md` §Member removal): a member removes
+/// themself over HTTP while they have the doc open. Their own
+/// connection, the one whose device asked, gets `DocClosed` (reason
+/// "left") like every other session of theirs; the owner stays
+/// subscribed and sees them leave the present set; a reconnect is
+/// refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn leaving_a_doc_closes_it_on_the_leavers_live_connection() {
+    let owner = signup_account().await;
+    let shared = create_doc(&owner).await;
+    let (member_id, member_token) = signup_second(&owner).await;
+    seed_member_row(&owner, shared, member_id).await;
+
+    let mut ws_owner = connect_ws(&owner.server, &owner.device_token).await;
+    handshake(&mut ws_owner, shared).await;
+    let mut ws_member = connect_ws(&owner.server, &member_token).await;
+    hello(&mut ws_member).await;
+    open_doc(&mut ws_member, shared).await;
+    expect_presence(&mut ws_member, shared).await;
+    expect_presence(&mut ws_owner, shared).await;
+    wait_for_subscribers_on(&owner, shared, 2).await;
+
+    let status = http()
+        .delete(format!(
+            "{}/api/docs/{shared}/members/{member_id}",
+            owner.server.base
+        ))
+        .bearer_auth(&member_token)
+        .send()
+        .await
+        .unwrap()
+        .status();
+    assert!(status.is_success(), "leave: {status}");
+
+    match recv_msgpack::<ServerFrame>(&mut ws_member).await {
+        ServerFrame::DocClosed { doc_id, reason } => {
+            assert_eq!(doc_id, shared);
+            assert_eq!(reason, "left");
+        }
+        other => panic!("expected DocClosed, got {other:?}"),
+    }
+    assert_eq!(
+        owner.server.state.sync_sessions.subscriber_count(shared),
+        1,
+        "only the owner's session stays subscribed"
+    );
+    let present = expect_presence(&mut ws_owner, shared).await;
+    assert_eq!(account_ids(&present), vec![owner.account_id]);
+
+    let mut ws_again = connect_ws(&owner.server, &member_token).await;
+    hello(&mut ws_again).await;
+    send_msgpack(&mut ws_again, &ClientFrame::OpenDoc { doc_id: shared }).await;
+    match recv_msgpack::<ServerFrame>(&mut ws_again).await {
+        ServerFrame::DocRejected { doc_id, .. } => assert_eq!(doc_id, shared),
+        other => panic!("expected DocRejected, got {other:?}"),
+    }
+    expect_closed(&mut ws_again).await;
+}
+
 /// Unilateral delete (`spec/sharing-plan.md` §Deletion): the owner
 /// deletes a shared doc over HTTP while a member has it open. The
 /// member's connection gets `DocClosed` for that doc and keeps serving

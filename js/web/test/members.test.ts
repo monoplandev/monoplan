@@ -25,12 +25,15 @@ describe("member directory", () => {
         return [member("a1", "ann@example.com"), member("b2", "bob@example.com")];
       });
       expect(dir.emailOf(DOC, "a1")).toBeUndefined();
+      expect(dir.roleOf(DOC, "a1")).toBeUndefined();
       dir.ensure(DOC);
       dir.ensure(DOC); // in flight: no second fetch
       await tick();
       expect(dir.emailOf(DOC, "a1")).toBe("ann@example.com");
       expect(dir.emailOf(DOC, "b2")).toBe("bob@example.com");
       expect(dir.emailOf(DOC, "zz")).toBeUndefined();
+      expect(dir.roleOf(DOC, "a1")).toBe(member("a1", "").role);
+      expect(dir.roleOf(DOC, "zz")).toBeUndefined();
       dir.ensure(DOC); // loaded: no refetch
       await tick();
       expect(calls).toEqual([DOC]);

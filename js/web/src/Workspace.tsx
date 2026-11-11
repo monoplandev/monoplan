@@ -258,6 +258,9 @@ export function Workspace(props: {
    *  (`runtime.deleteDoc`); rejects on Home or anonymous sessions. The
    *  shown name rides along for the app's native confirm. */
   deleteDoc: (docId: string, name: string) => Promise<void>;
+  /** Leave a shared doc the account is a member of but does not own,
+   *  and forget it here (`runtime.leaveDoc`). */
+  leaveDoc: (docId: string) => Promise<void>;
 }) {
   const { m, locale } = useAppI18n();
   const session = useSession();
@@ -2969,6 +2972,7 @@ export function Workspace(props: {
         view={view()}
         setView={navigateTo}
         onDeleteDoc={canDeleteDocs() ? props.deleteDoc : null}
+        onLeaveDoc={canDeleteDocs() ? props.leaveDoc : null}
         presence={props.presence}
         members={members}
         // No footer at all in the app's window (spec/mac-window-plan.md

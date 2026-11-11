@@ -240,6 +240,7 @@ function MirrorMain(props: {
       createDoc={runtime.createDoc}
       joinDoc={runtime.joinDoc}
       deleteDoc={deleteDoc}
+      leaveDoc={runtime.leaveDoc}
       presence={runtime.presence}
     />
   );

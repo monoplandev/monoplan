@@ -195,10 +195,12 @@ pub async fn members(
 /// is stamped removed, then every live connection of that account with
 /// the doc open gets `DocClosed` and is unbound from it. Refused for the
 /// primary doc before any lookup (it has no other members to remove;
-/// the guard keeps Home out of every sharing path). Self-removal is
-/// not "leave" — that is a separate verb, not built — and the last
-/// owner is never removable. Revocation is forward-only: the removed
-/// account keeps what it already pulled.
+/// the guard keeps Home out of every sharing path). A member naming
+/// themself leaves: no ownership needed, and every one of their live
+/// connections, the calling device's included, gets the `DocClosed`
+/// (the client expects it and forgets the doc quietly). The last
+/// owner is never removable, so a sole owner cannot leave. Revocation
+/// is forward-only: the removed account keeps what it already pulled.
 pub async fn remove_member_route(
     State(state): State<AppState>,
     auth: DeviceAuth,
@@ -214,12 +216,15 @@ pub async fn remove_member_route(
         .map_err(|_| ApiError::BadRequest("invalid account id".into()))?;
     match remove_member(&state.db, auth.account_id, doc_id, target).await? {
         RemoveMemberOutcome::Removed => {
+            let left = target == auth.account_id;
+            let reason = if left { "left" } else { "membership removed" };
             let told = state
                 .sync_sessions
-                .close_for_account(doc_id, target, "membership removed");
+                .close_for_account(doc_id, target, reason);
             tracing::info!(
                 doc_id = %doc_id,
                 removed_account_id = %target,
+                left,
                 live_sessions_closed = told,
                 "member removed"
             );
@@ -230,9 +235,6 @@ pub async fn remove_member_route(
         }
         RemoveMemberOutcome::CallerNotOwner => Err(ApiError::Forbidden(
             "only an owner can remove members".into(),
-        )),
-        RemoveMemberOutcome::SelfRemoval => Err(ApiError::Conflict(
-            "cannot remove yourself from a doc".into(),
         )),
         RemoveMemberOutcome::LastOwner => Err(ApiError::Conflict(
             "cannot remove the last owner of a doc".into(),

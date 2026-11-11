@@ -404,16 +404,17 @@ pub enum RemoveMemberOutcome {
     CallerNotMember,
     /// The caller is a member but not an owner (403).
     CallerNotOwner,
-    /// The target is the caller: leaving is a separate verb (409).
-    SelfRemoval,
-    /// The target is the doc's only active owner (409).
+    /// The target is the doc's only active owner (409), the caller
+    /// themself included: a sole owner cannot leave.
     LastOwner,
     /// The target holds no active membership (404).
     TargetNotMember,
 }
 
-/// Owner removes a member (`spec/sharing-plan.md` §Member removal):
-/// stamps `removed_at` on the target's row. Forward-only: the row
+/// Owner removes a member, or a member leaves (`target == caller`;
+/// `spec/sharing-plan.md` §Member removal): stamps `removed_at` on the
+/// target's row. Leaving needs no ownership, only that the caller is
+/// not the doc's last owner. Forward-only: the row
 /// stays (an accepted invite reactivates it) and the removed account
 /// keeps whatever it already pulled. The horizon, `is_member` and the
 /// member list all filter on `removed_at IS NULL`, so the server
@@ -438,24 +439,28 @@ pub async fn remove_member(
                 |r| r.get(0),
             )
             .optional()?;
-        match caller_role.as_deref().and_then(MemberRole::parse) {
-            None => return Ok(RemoveMemberOutcome::CallerNotMember),
-            Some(MemberRole::Member) => return Ok(RemoveMemberOutcome::CallerNotOwner),
-            Some(MemberRole::Owner) => {}
-        }
-        if caller == target {
-            return Ok(RemoveMemberOutcome::SelfRemoval);
-        }
-        let target_role: Option<String> = tx
-            .query_row(
-                "SELECT role FROM doc_members
-                 WHERE doc_id = ? AND account_id = ? AND removed_at IS NULL",
-                params![&doc_bytes, &target_bytes],
-                |r| r.get(0),
-            )
-            .optional()?;
-        let Some(target_role) = target_role.as_deref().and_then(MemberRole::parse) else {
-            return Ok(RemoveMemberOutcome::TargetNotMember);
+        let Some(caller_role) = caller_role.as_deref().and_then(MemberRole::parse) else {
+            return Ok(RemoveMemberOutcome::CallerNotMember);
+        };
+        let target_role = if caller == target {
+            // Leaving: any member may, subject to the last-owner rule.
+            caller_role
+        } else {
+            if caller_role != MemberRole::Owner {
+                return Ok(RemoveMemberOutcome::CallerNotOwner);
+            }
+            let target_role: Option<String> = tx
+                .query_row(
+                    "SELECT role FROM doc_members
+                     WHERE doc_id = ? AND account_id = ? AND removed_at IS NULL",
+                    params![&doc_bytes, &target_bytes],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let Some(target_role) = target_role.as_deref().and_then(MemberRole::parse) else {
+                return Ok(RemoveMemberOutcome::TargetNotMember);
+            };
+            target_role
         };
         if target_role == MemberRole::Owner {
             let owners: i64 = tx.query_row(
