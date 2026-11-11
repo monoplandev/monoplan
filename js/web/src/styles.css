@@ -1285,7 +1285,10 @@ body {
    board card, task dialog, find palette). One look — 14px box, 5px radius,
    tick as a background image so a non-<input> mirror (the palette's span)
    renders identically via [data-checked]. Interaction affordances (cursor,
-   hover) are scoped to input.task-check so the mirror stays inert. */
+   hover) are scoped to input.task-check so the mirror stays inert.
+   The tick path is the app's one tick: `icons/check.svg` carries the same
+   path in currentColor for everywhere else a tick is drawn — change both
+   together. */
 .task-check {
   appearance: none;
   -webkit-appearance: none;
@@ -4630,6 +4633,26 @@ input.task-check:hover {
   font-size: 13px;
   line-height: 1;
   color: inherit;
+}
+
+/* Trailing gutter of a move-target row (ListPicker / MovePalette): holds
+   a tick on the list the item already lives in, and stays as an empty
+   slot on the rest so workspace tags line up. Narrow, and pulled in
+   against the row's gap so it reads as a margin rather than a column. */
+.palette__item-tick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 12px;
+  height: 14px;
+  margin-left: -2px;
+  color: var(--text-muted);
+}
+
+.palette__item-tick svg {
+  width: 13px;
+  height: 13px;
 }
 
 .palette__item--binned .palette__item-name {

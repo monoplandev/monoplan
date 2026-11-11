@@ -1507,12 +1507,28 @@ export function Workspace(props: {
     const first = moveIds()?.[0];
     return (first !== undefined ? docs.docIdOf(first) : undefined) ?? viewDocId();
   };
-  // The list the move palette annotates as "Current": only the list /
-  // board views have one — in the cross-list views (Focus / Done / Bin)
-  // the acted-on rows may come from anywhere.
+  // The list a block of rows all live in, or null when they span lists
+  // or docs. Read off the rows themselves rather than the view, so it
+  // holds in the cross-list lenses (Starred / Upcoming / Done / Bin) too.
+  const housingList = (
+    ids: readonly string[],
+  ): { docId: string; listId: string } | null => {
+    let found: { docId: string; listId: string } | null = null;
+    for (const id of ids) {
+      const it = docs.getItem(id);
+      const docId = docs.docIdOf(id);
+      if (!it || docId === undefined) continue;
+      if (found === null) found = { docId, listId: it.listId };
+      else if (found.docId !== docId || found.listId !== it.listId) return null;
+    }
+    return found;
+  };
+  // The list the move palette ticks as current: the one housing every
+  // acted-on row; none when the selection spans lists.
+  const moveHousing = createMemo(() => housingList(moveIds() ?? []));
   const moveIsCurrent = (opt: ListOption): boolean => {
-    const v = view();
-    return v.kind === "list" && v.id === opt.id && viewDocId() === opt.docId;
+    const h = moveHousing();
+    return h !== null && h.listId === opt.id && h.docId === opt.docId;
   };
 
   // Move destinations, per doc: Inbox, Events (moving there makes an
@@ -1631,19 +1647,26 @@ export function Workspace(props: {
   // first, then land as the first items of the target list in visible
   // order, all one undo step. A cross-list move is a relocation only: Done
   // items stay Done and land in the target's Done lane (`spec/board.md`).
-  // Picking the view's own list is a no-op (not a reorder-to-top
-  // surprise), matching the task dialog's picker.
+  // Picking the list the rows already live in (the ticked one) is a
+  // no-op (not a reorder-to-top surprise), matching the task dialog's
+  // picker — unless a row is binned, where the pick restores it.
   const moveBlockToList = (
     sourceIds: readonly string[],
     targetDocId: string,
     targetListId: string,
   ) => {
-    const v = view();
     const mApp = docs.appOf(targetDocId);
     if (!mApp) return;
-    if (v.kind === "list" && v.id === targetListId && viewDocId() === mApp.docId) return;
     const ids = sourceIds.filter((id) => docs.getItem(id) !== undefined);
     if (ids.length === 0) return;
+    const h = housingList(ids);
+    const anyBinned = ids.some((id) => {
+      const it = docs.getItem(id);
+      return it !== undefined && isBinned(it);
+    });
+    if (h !== null && h.listId === targetListId && h.docId === mApp.docId && !anyBinned) {
+      return;
+    }
     confirmingCrossDoc(ids, mApp.docId, () => landBlock(ids, mApp, targetListId));
   };
   const landBlock = (ids: readonly string[], mApp: DocApp, targetListId: string) => {

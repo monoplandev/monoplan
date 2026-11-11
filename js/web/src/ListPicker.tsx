@@ -27,6 +27,7 @@ import { Portal } from "solid-js/web";
 import archiveSvg from "./icons/archive.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
 import caretSortSvg from "./icons/caret-sort.svg?raw";
+import checkSvg from "./icons/check.svg?raw";
 import fileSvg from "./icons/file.svg?raw";
 import usersSvg from "./icons/users.svg?raw";
 import { useAppI18n } from "./i18n.tsx";
@@ -79,6 +80,27 @@ export function WorkspaceTag(props: { option: ListOption }) {
           <span class="palette__item-doc-name">{workspace()}</span>
         </span>
       )}
+    </Show>
+  );
+}
+
+/** The trailing gutter of a move-target row: a tick on the list that
+ *  already houses the item, an empty slot of the same width on every
+ *  other row so the workspace tags stay aligned. The tick carries the
+ *  "Current" label for assistive tech. Shared with the move palette. */
+export function CurrentTick(props: { current: boolean }) {
+  const { m } = useAppI18n();
+  return (
+    <Show
+      when={props.current}
+      fallback={<span class="palette__item-tick" aria-hidden="true" />}
+    >
+      <span
+        class="palette__item-tick"
+        role="img"
+        aria-label={m().workspace.currentList}
+        innerHTML={checkSvg}
+      />
     </Show>
   );
 }
@@ -413,11 +435,9 @@ export function ListPicker(props: {
                     </Show>
                     <span class="palette__item-name">{opt.name}</span>
                     <WorkspaceTag option={opt} />
-                    <Show when={!isForeign(opt) && opt.id === props.value()}>
-                      <span class="palette__item-list">
-                        {m().workspace.currentList}
-                      </span>
-                    </Show>
+                    <CurrentTick
+                      current={!isForeign(opt) && opt.id === props.value()}
+                    />
                   </div>
                 )}
               </For>

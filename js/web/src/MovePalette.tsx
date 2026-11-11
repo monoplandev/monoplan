@@ -17,7 +17,12 @@ import {
 } from "solid-js";
 import { Portal } from "solid-js/web";
 import { useAppI18n } from "./i18n.tsx";
-import { listGlyph, WorkspaceTag, type ListOption } from "./ListPicker.tsx";
+import {
+  CurrentTick,
+  listGlyph,
+  WorkspaceTag,
+  type ListOption,
+} from "./ListPicker.tsx";
 import { trackOverlay } from "./overlay.ts";
 import { PaletteFooter } from "./PaletteFooter.tsx";
 import { matchesName } from "./search.ts";
@@ -27,9 +32,9 @@ export function MovePalette(props: {
   onOpenChange: (open: boolean) => void;
   options: () => ListOption[];
   /** Whether an option is the list the acted-on rows already live in
-   *  (list / board views; none in the cross-list views Focus / Done /
-   *  Bin). Highlighted on open so Enter straight after opening is a
-   *  no-op rather than a surprise move. */
+   *  (none when they span lists). Ticked, and highlighted on open so
+   *  Enter straight after opening is a no-op rather than a surprise
+   *  move. */
   isCurrent: (opt: ListOption) => boolean;
   /** Number of rows the pick acts on — drives the singular / plural
    *  placeholder. */
@@ -225,11 +230,7 @@ export function MovePalette(props: {
                   </Show>
                   <span class="palette__item-name">{opt.name}</span>
                   <WorkspaceTag option={opt} />
-                  <Show when={props.isCurrent(opt)}>
-                    <span class="palette__item-list">
-                      {m().workspace.currentList}
-                    </span>
-                  </Show>
+                  <CurrentTick current={props.isCurrent(opt)} />
                 </div>
               )}
             </For>
