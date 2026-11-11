@@ -309,27 +309,29 @@ export function Workspace(props: {
   // The Done view's filter (`doneFilter.ts`): checked workspaces and
   // lists, device-local. The stored choice is kept verbatim; what the
   // view and its menu read is `doneFilterNow`, narrowed to the docs that
-  // are open and the lists on offer. Archived lists are offered too:
-  // their closed items are still in the Done view. Declared ahead of
+  // are open and the lists on offer. Archived lists are offered too
+  // (their closed items are still in the Done view), flagged so the menu
+  // can hold them back until searched for. Declared ahead of
   // the `items` memo, which reads it on its first run.
   const [doneFilter, setDoneFilter] = createSignal<DoneFilter>(loadDoneFilter());
   const doneAllLists = createMemo((): DoneListOption[] =>
     docs.docs().flatMap((d) => {
       const docId = d.docId;
       const workspace = docId === docs.homeDocId ? undefined : docLabel(docId);
-      const option = (listId: string, name: string): DoneListOption => ({
+      const option = (listId: string, name: string, archived = false): DoneListOption => ({
         key: doneListKey(docId, listId),
         docId,
         listId,
         name,
         workspace,
+        archived,
       });
       return [
         option("inbox", m().nav.inbox),
         option(LIST_EVENTS, m().nav.events),
         ...d.app.state.listsOrder.flatMap((id) => {
           const l = d.app.state.listsById[id];
-          return l ? [option(l.id, l.name)] : [];
+          return l ? [option(l.id, l.name, l.archivedAt != null)] : [];
         }),
       ];
     }),

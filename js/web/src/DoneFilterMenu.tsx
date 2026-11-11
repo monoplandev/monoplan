@@ -2,7 +2,9 @@
 // two submenus, Workspaces and Lists, each a set of checkboxes. The state
 // and its semantics live in `doneFilter.ts`; this is the surface.
 //
-// The Lists submenu leads with a text box that narrows the rows. A text
+// The Lists submenu leads with a text box that narrows the rows. Archived
+// lists are left out until the box has a query (or they are checked), and
+// carry an Archived badge when shown (`shownDoneLists`). A text
 // field inside a Kobalte menu fights the menu's own keyboard model
 // (typeahead on printable keys, focus following the pointer), so:
 //   - keys typed in the box stop there, except the arrows (which step into
@@ -15,7 +17,7 @@
 import { DropdownMenu } from "@kobalte/core/dropdown-menu";
 import { Tooltip } from "@kobalte/core/tooltip";
 import { createMemo, createSignal, For, Show } from "solid-js";
-import type { DoneListOption } from "./doneFilter.ts";
+import { shownDoneLists, type DoneListOption } from "./doneFilter.ts";
 import { useAppI18n } from "./i18n.tsx";
 import checkSvg from "./icons/check.svg?raw";
 import filterSvg from "./icons/filter.svg?raw";
@@ -45,10 +47,9 @@ export function DoneFilterMenu(props: {
   const [query, setQuery] = createSignal("");
   let inputEl: HTMLInputElement | undefined;
   const active = () => props.docCount + props.listCount > 0;
-  const shownLists = createMemo(() => {
-    const q = query().trim();
-    return q === "" ? props.lists : props.lists.filter((l) => matchesName(l.name, q));
-  });
+  const shownLists = createMemo(() =>
+    shownDoneLists(props.lists, query().trim(), props.listChecked, matchesName),
+  );
   return (
     <DropdownMenu {...guard.popover} placement="bottom-end" gutter={6}>
       <Tooltip {...guard.tooltip} openDelay={200} closeDelay={0} placement="bottom">
@@ -151,6 +152,9 @@ export function DoneFilterMenu(props: {
                       >
                         <CheckBox />
                         <span class="done-filter-item-name">{l.name}</span>
+                        <Show when={l.archived}>
+                          <span class="badge">{m().nav.archived}</span>
+                        </Show>
                         <Show when={l.workspace}>
                           <span class="done-filter-item-doc" title={l.workspace}>
                             <SharedGlyph />

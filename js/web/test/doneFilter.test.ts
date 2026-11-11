@@ -5,6 +5,7 @@ import {
   doneListKey,
   effectiveDoneFilter,
   offeredDoneLists,
+  shownDoneLists,
   toggled,
   type DoneListOption,
 } from "../src/doneFilter.ts";
@@ -62,6 +63,18 @@ describe("done filter", () => {
       doneListKey("home", "l1"),
     ]);
     expect(doneFilterAdmits(f)(item("home", "l1"))).toBe(true);
+  });
+
+  test("archived lists show only when searched for or checked", () => {
+    const old = { ...list("home", "old"), archived: true };
+    const offered = [...LISTS, old];
+    const matches = (name: string, q: string) => name.includes(q);
+    const keys = (q: string, checked: string[] = []) =>
+      shownDoneLists(offered, q, (k) => checked.includes(k), matches).map((l) => l.key);
+    expect(keys("")).toEqual(LISTS.map((l) => l.key));
+    expect(keys("ol")).toEqual([old.key]);
+    expect(keys("l1")).toEqual([doneListKey("home", "l1")]);
+    expect(keys("", [old.key])).toEqual(offered.map((l) => l.key));
   });
 
   test("toggled flips membership", () => {

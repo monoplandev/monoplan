@@ -25,6 +25,8 @@ export interface DoneListOption {
   name: string;
   /** Name of the list's shared workspace; absent for Personal. */
   workspace?: string;
+  /** The list is archived (`spec/data-model.md` "Archived lists"). */
+  archived?: boolean;
 }
 
 export const EMPTY_DONE_FILTER: DoneFilter = { docs: [], lists: [] };
@@ -75,6 +77,21 @@ export function offeredDoneLists(
   all: readonly DoneListOption[],
 ): DoneListOption[] {
   return docs.length === 0 ? [...all] : all.filter((l) => docs.includes(l.docId));
+}
+
+/** The rows the Lists submenu shows for `query` (already trimmed). With no
+ *  query, archived lists stay out of the way unless checked: a checked
+ *  one must remain visible to be unchecked. A query searches every list,
+ *  archived included. */
+export function shownDoneLists(
+  offered: readonly DoneListOption[],
+  query: string,
+  checked: (key: string) => boolean,
+  matches: (name: string, query: string) => boolean,
+): DoneListOption[] {
+  return query === ""
+    ? offered.filter((l) => !l.archived || checked(l.key))
+    : offered.filter((l) => matches(l.name, query));
 }
 
 /** The filter narrowed to what exists: open docs, and checked lists that
