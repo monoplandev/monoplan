@@ -514,7 +514,8 @@ export function formatDoneStamp(ts: number, now: number, locale: string): string
 
 // Task-dialog stamp: the dialog has room for the full picture, so every
 // stamp carries its time of day. Today → time only; yesterday → "Yesterday
-// HH:MM"; otherwise the date (with the year once it differs) plus time.
+// HH:MM"; otherwise the short weekday and date (with the year once it
+// differs) plus time: "Thu, Nov 5 8:19 AM".
 //
 // `inline` marks a stamp that continues a sentence ("Created yesterday
 // 8:06 PM"), where "Yesterday" drops its capital; standalone stamps keep it.
@@ -534,7 +535,13 @@ export function formatDialogStamp(
     const label = m.yesterdayAt(time);
     return opts?.inline ? label.charAt(0).toLocaleLowerCase(locale) + label.slice(1) : label;
   }
-  return `${compactDate(tsDate, nowDate, locale)} ${time}`;
+  const date = new Intl.DateTimeFormat(locale, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    ...(tsDate.getFullYear() === nowDate.getFullYear() ? {} : { year: "numeric" }),
+  }).format(tsDate);
+  return `${date} ${time}`;
 }
 
 // Elapsed span between two instants, for the task dialog's activity
