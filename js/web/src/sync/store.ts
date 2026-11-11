@@ -293,9 +293,6 @@ export interface SettingsView {
   /** Doc ids hidden from the merged calendar lens. A personal cross-doc
    *  preference: only the Home doc's value is ever read. */
   calendarHiddenDocs: string[];
-  /** Whether the Done view amalgamates every open doc's closed items.
-   *  Personal, Home doc only. Default false. */
-  doneAmalgamate: boolean;
 }
 
 /** The item-keyed half of a `DocApp`: the per-doc item mutations.
@@ -538,8 +535,6 @@ export interface DocApp extends DocItemActions {
   setDocName(name: string): void;
   /** Hide / show a doc on the merged calendar. Personal: Home doc only. */
   setCalendarDocHidden(docId: string, hidden: boolean): void;
-  /** Whether the Done view spans every open doc. Personal: Home doc only. */
-  setDoneAmalgamate(amalgamate: boolean): void;
   /** Per-session local undo. Returns whether a step was applied so the
    *  caller can decide whether to `preventDefault()` the keybinding.
    *  Remote-applied ops are excluded by origin tag — see
@@ -691,7 +686,6 @@ function materializeReplicaSnapshot(replica: Replica, home: boolean): HomeState 
       inboxView: payload.settings.inboxView ?? null,
       docName: payload.settings.docName ?? null,
       calendarHiddenDocs: payload.settings.calendarHiddenDocs ?? [],
-      doneAmalgamate: payload.settings.doneAmalgamate ?? false,
     },
   };
 }
@@ -741,7 +735,6 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
       inboxView: null,
       docName: null,
       calendarHiddenDocs: [],
-      doneAmalgamate: false,
     },
   });
   const [version, setVersion] = createSignal(0);
@@ -1121,7 +1114,6 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
           inboxView: ev.inboxView ?? null,
           docName: ev.docName ?? null,
           calendarHiddenDocs: ev.calendarHiddenDocs ?? [],
-          doneAmalgamate: ev.doneAmalgamate ?? false,
         });
         break;
       }
@@ -1284,7 +1276,7 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
   };
 
   // A display-setting write (saved default view, list counts, calendar
-  // hidden docs, Done amalgamation). The core commits these under its
+  // hidden docs). The core commits these under its
   // undo-excluded `view` origin, so no step is counted and no entry
   // recorded: undo after a view change reverses the last edit instead.
   const mutateView = (fn: () => void): void => {
@@ -1587,9 +1579,6 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
     },
     setCalendarDocHidden(docId, hidden) {
       mutateView(() => replica.setCalendarDocHidden(docId, hidden));
-    },
-    setDoneAmalgamate(amalgamate) {
-      mutateView(() => replica.setDoneAmalgamate(amalgamate));
     },
     undo() {
       // An open session is settled first so Cmd+Z right after typing

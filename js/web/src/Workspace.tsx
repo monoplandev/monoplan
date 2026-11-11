@@ -54,6 +54,19 @@ import { attentionBadge, groupByDay, type DayGroup } from "./dayGroups.ts";
 import { nowMs, todayStamp } from "./format.tsx";
 import { restoreCapturedPositions } from "./linger.ts";
 import { createPopoverTooltipGuard } from "./popoverTooltip.ts";
+import { DoneFilterMenu } from "./DoneFilterMenu.tsx";
+import {
+  doneFilterAdmits,
+  doneListKey,
+  effectiveDoneFilter,
+  EMPTY_DONE_FILTER,
+  loadDoneFilter,
+  offeredDoneLists,
+  saveDoneFilter,
+  toggled,
+  type DoneFilter,
+  type DoneListOption,
+} from "./doneFilter.ts";
 import type { ListOption } from "./ListPicker.tsx";
 import { MovePalette } from "./MovePalette.tsx";
 import { EditableNavLabel, Nav, NavFindButton, NavMenu, FirstRunAuthPrompt, StatusSlot } from "./nav.tsx";
@@ -292,6 +305,49 @@ export function Workspace(props: {
     docId === docs.homeDocId
       ? m().nav.personal
       : (docs.appOf(docId)?.state.settings.docName ?? m().nav.untitledDoc);
+
+  // The Done view's filter (`doneFilter.ts`): checked workspaces and
+  // lists, device-local. The stored choice is kept verbatim; what the
+  // view and its menu read is `doneFilterNow`, narrowed to the docs that
+  // are open and the lists on offer. Archived lists are offered too:
+  // their closed items are still in the Done view. Declared ahead of
+  // the `items` memo, which reads it on its first run.
+  const [doneFilter, setDoneFilter] = createSignal<DoneFilter>(loadDoneFilter());
+  const doneAllLists = createMemo((): DoneListOption[] =>
+    docs.docs().flatMap((d) => {
+      const docId = d.docId;
+      const workspace = docId === docs.homeDocId ? undefined : docLabel(docId);
+      const option = (listId: string, name: string): DoneListOption => ({
+        key: doneListKey(docId, listId),
+        docId,
+        listId,
+        name,
+        workspace,
+      });
+      return [
+        option("inbox", m().nav.inbox),
+        option(LIST_EVENTS, m().nav.events),
+        ...d.app.state.listsOrder.flatMap((id) => {
+          const l = d.app.state.listsById[id];
+          return l ? [option(l.id, l.name)] : [];
+        }),
+      ];
+    }),
+  );
+  const openDocIds = (): string[] => docs.docs().map((d) => d.docId);
+  const doneFilterNow = createMemo(
+    (): DoneFilter => effectiveDoneFilter(doneFilter(), openDocIds(), doneAllLists()),
+  );
+  const doneOfferedLists = createMemo((): DoneListOption[] =>
+    offeredDoneLists(doneFilterNow().docs, doneAllLists()),
+  );
+  // Edits start from the effective filter, so a toggle also drops the
+  // stale ids (a closed doc, a deleted list) it was carrying.
+  const updateDoneFilter = (edit: (f: DoneFilter) => DoneFilter): void => {
+    const next = edit(doneFilterNow());
+    setDoneFilter(next);
+    saveDoneFilter(next);
+  };
   // Open-item count for the list view's header, read off the projection
   // array like the nav's per-list count (not `items()`, whose linger
   // overlay briefly keeps a just-completed row). Zero off a list.
@@ -766,10 +822,10 @@ export function Workspace(props: {
     if (v.kind === "done") {
       // Done view holds the closed items (done and cancelled) and
       // excludes binned ones: a closed-then-binned item lives in the Bin
-      // (see context menu — Bin owns the next transition). Home's own
-      // by default, every doc's when amalgamated; sorted by the
-      // workflow register's transition time desc.
-      return docs.doneItems();
+      // (see context menu — Bin owns the next transition). Every open
+      // doc's, narrowed by the header filter; sorted by the workflow
+      // register's transition time desc.
+      return docs.doneItems().filter(doneFilterAdmits(doneFilterNow()));
     }
     // Upcoming renders its own day-grouped surface (`Upcoming.tsx`), not
     // the flat listbox; its rows in agenda order are what the list
@@ -3536,27 +3592,30 @@ export function Workspace(props: {
               </DisplayOptionsPopover>
             </Show>
             {/* The Done view always badges each item with its origin list
-                (like Focus). Its only display option is doc amalgamation:
-                personal by default (Home's closed items); the switch
-                amalgamates every open doc. A synced personal pref on the
-                Home doc (`spec/sharing-plan.md`), so every device agrees.
-                Only offered once there is more than one doc. */}
-            <Show when={view().kind === "done" && docs.docs().length > 1}>
-              <DisplayOptionsPopover>
-                <Switch
-                  class="done-switch"
-                  checked={docs.doneAmalgamate()}
-                  onChange={(checked) => home.setDoneAmalgamate(checked)}
-                >
-                  <Switch.Label class="done-switch-label">
-                    {m().workspace.allDocs}
-                  </Switch.Label>
-                  <Switch.Input class="done-switch-input" />
-                  <Switch.Control class="done-switch-control">
-                    <Switch.Thumb class="done-switch-thumb" />
-                  </Switch.Control>
-                </Switch>
-              </DisplayOptionsPopover>
+                (like Focus). Its header control is a filter over which
+                workspaces and lists the closed items come from
+                (`doneFilter.ts`): device-local, both facets empty by
+                default, which is every open doc. */}
+            <Show when={view().kind === "done"}>
+              <DoneFilterMenu
+                workspaces={docs.docs().map((d) => ({
+                  docId: d.docId,
+                  label: docLabel(d.docId),
+                  shared: !d.home,
+                }))}
+                lists={doneOfferedLists()}
+                docChecked={(id) => doneFilterNow().docs.includes(id)}
+                toggleDoc={(id) =>
+                  updateDoneFilter((f) => ({ ...f, docs: toggled(f.docs, id) }))
+                }
+                listChecked={(key) => doneFilterNow().lists.includes(key)}
+                toggleList={(key) =>
+                  updateDoneFilter((f) => ({ ...f, lists: toggled(f.lists, key) }))
+                }
+                docCount={doneFilterNow().docs.length}
+                listCount={doneFilterNow().lists.length}
+                clear={() => updateDoneFilter(() => EMPTY_DONE_FILTER)}
+              />
               <Tooltip openDelay={200} closeDelay={0} placement="bottom">
                 <Tooltip.Trigger
                   as="button"

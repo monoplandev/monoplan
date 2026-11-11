@@ -15,8 +15,8 @@
 //   - the merged read views the cross-doc lenses render from: the
 //     calendar (every doc, minus the ones hidden by a personal pref),
 //     Focus (the Home doc's entries, foreign refs resolved against their
-//     docs, `spec/focus.md`), Done (Home alone, or every doc when the
-//     personal amalgamate pref is on) and the Bin (always every doc:
+//     docs, `spec/focus.md`), Done (every doc; the view narrows it by
+//     its device-local filter) and the Bin (always every doc:
 //     a binned row must stay reachable to restore or delete), and the
 //     known places a place field suggests (always every doc: they are
 //     the account's, `spec/place-plan.md` "Reuse").
@@ -35,7 +35,7 @@
 // its doc. A ref whose item is missing is never pruned here: the doc
 // may simply not have synced yet.
 //
-// Personal cross-doc preferences (calendar toggles, Done amalgamation)
+// Personal cross-doc preferences (the calendar toggles)
 // live in the Home doc's `settings` map, which syncs across the
 // account's devices and is never shared.
 //
@@ -149,10 +149,10 @@ export interface DocsLayer {
    *  closed, Home's and foreign alike, in capture order. Feeds the
    *  lens's linger overlay, which applies its own (shorter) window. */
   focusRecentDone: Accessor<readonly FocusDoneEntry[]>;
-  /** The Done view: closed, not-binned items of Home, or of every doc
-   *  when amalgamated, newest transition first. */
+  /** The Done view's input: closed, not-binned items of every open doc,
+   *  newest transition first. The view narrows it by its device-local
+   *  filter (`doneFilter.ts`). */
   doneItems(): ItemView[];
-  doneAmalgamate(): boolean;
   /** The account's known places (`spec/place-plan.md` "Reuse"): every
    *  open doc's uses merged by core, deduped and ranked newest use
    *  first, so a place used in one workspace is offered in another.
@@ -363,13 +363,10 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
   };
   createEffect(pruneDeadForeignRefs);
 
-  const doneAmalgamate = (): boolean => home.state.settings.doneAmalgamate;
-  const doneItems = (): ItemView[] => {
-    const source = doneAmalgamate() ? allItems() : Object.values(home.state.itemsById);
-    return source
+  const doneItems = (): ItemView[] =>
+    allItems()
       .filter((it) => isClosed(it) && !isBinned(it))
       .sort((a, b) => b.lifecycleAt - a.lifecycleAt);
-  };
   const binnedItems = (): ItemView[] =>
     allItems()
       .filter(isBinned)
@@ -762,7 +759,6 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
     focusEntryIndex,
     focusRecentDone,
     doneItems,
-    doneAmalgamate,
     binnedItems,
     binCount,
     pruneDeadForeignRefs,

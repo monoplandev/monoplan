@@ -5873,3 +5873,131 @@ input.task-check:hover {
   font-size: 12px;
   color: var(--error-text);
 }
+
+/* ---------- Done view filter menu (DoneFilterMenu.tsx) ---------- */
+/* The trigger wears the link colour while any check is in effect, so a
+   narrowed Done view is never mistaken for the whole of it. */
+.done-filter-trigger[data-filtered] {
+  color: var(--link);
+}
+
+.done-filter-tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.done-filter-sub {
+  min-width: 200px;
+  max-width: 300px;
+}
+
+.done-filter-input {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 4px;
+  padding: 6px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.done-filter-input::placeholder {
+  color: var(--text-faint);
+}
+
+.done-filter-list {
+  max-height: min(320px, 50vh);
+  overflow-y: auto;
+}
+
+/* Checkbox rows read left to right (box, name, workspace), not the
+   menu item's default space-between. */
+.done-filter-item {
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+/* While the filter box holds focus a hovered row is not focused (see
+   DoneFilterMenu.tsx), so hover carries the highlight itself. */
+.done-filter-item:hover {
+  background: var(--bg-active);
+}
+
+.done-filter-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--text-faint);
+  border-radius: 3px;
+}
+
+.done-filter-item[data-checked] .done-filter-box {
+  border-color: var(--link);
+  background: var(--link);
+}
+
+.done-filter-tick {
+  display: inline-flex;
+  color: #fff;
+}
+
+.done-filter-tick svg {
+  width: 12px;
+  height: 12px;
+}
+
+.done-filter-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A shared workspace's list: the people glyph then the workspace name,
+   the name alone truncating (the move palette's tag at menu scale). */
+.done-filter-item-doc {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  max-width: 45%;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.done-filter-item-doc-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.done-filter-shared {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--text-faint);
+}
+
+.done-filter-shared svg {
+  width: 12px;
+  height: 12px;
+}
+
+.done-filter-empty {
+  padding: 6px 10px;
+  color: var(--text-faint);
+  font-size: 13px;
+}

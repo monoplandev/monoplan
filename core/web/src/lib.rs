@@ -469,13 +469,6 @@ impl Doc {
             .map_err(js_err)
     }
 
-    /// Whether the Done view spans every open doc. Personal: call on the
-    /// Home doc only.
-    #[wasm_bindgen(js_name = setDoneAmalgamate)]
-    pub fn set_done_amalgamate(&self, amalgamate: bool) -> Result<(), JsError> {
-        self.inner.set_done_amalgamate(amalgamate).map_err(js_err)
-    }
-
     // ---------- lifecycle (spec/board.md, spec/data-model.md) ----------
 
     /// Move one item to `lifecycle` in a single commit (the board's
@@ -2223,12 +2216,6 @@ impl Replica {
             .map_err(js_err)
     }
 
-    /// See [`Doc::set_done_amalgamate`].
-    #[wasm_bindgen(js_name = setDoneAmalgamate)]
-    pub fn set_done_amalgamate(&self, amalgamate: bool) -> Result<(), JsError> {
-        self.doc().set_done_amalgamate(amalgamate).map_err(js_err)
-    }
-
     // ---------- lifecycle (spec/board.md, spec/data-model.md) ----------
 
     /// Move one item to `lifecycle` in a single commit (the board's
@@ -2633,7 +2620,7 @@ impl From<CoreEvent> for ReplicaEvent {
 /// - `listDefaultViewChanged` — id, defaultView? (undefined = cleared)
 /// - `listArchivedChanged` — id, archivedAt? (undefined = unarchived)
 /// - `settingsChanged` — showListCounts, inboxView?, docName?,
-///   calendarHiddenDocs, doneAmalgamate
+///   calendarHiddenDocs
 /// - `focusChanged` — no fields; re-derive the Focus projection
 #[wasm_bindgen]
 pub struct AppEventJs {
@@ -2693,9 +2680,6 @@ pub struct AppEventJs {
     /// Settings (`settingsChanged`): doc ids hidden from the merged
     /// calendar (personal, Home doc only). `None` off every other kind.
     calendar_hidden_docs: Option<Vec<String>>,
-    /// Settings (`settingsChanged`): whether the Done view spans every
-    /// open doc (personal, Home doc only).
-    done_amalgamate: Option<bool>,
     /// List-event ordering position (`listAdded` / `listMoved`). Item
     /// events no longer carry a doc-wide index in the v2 schema — use
     /// `open_index`.
@@ -2789,10 +2773,6 @@ impl AppEventJs {
     pub fn calendar_hidden_docs(&self) -> Option<Vec<String>> {
         self.calendar_hidden_docs.clone()
     }
-    #[wasm_bindgen(getter, js_name = doneAmalgamate)]
-    pub fn done_amalgamate(&self) -> Option<bool> {
-        self.done_amalgamate
-    }
     #[wasm_bindgen(getter)]
     pub fn state(&self) -> Option<String> {
         self.state.map(str::to_string)
@@ -2861,7 +2841,6 @@ impl From<CoreAppEvent> for AppEventJs {
             inbox_view: None,
             doc_name: None,
             calendar_hidden_docs: None,
-            done_amalgamate: None,
             index: None,
             open_index: None,
         };
@@ -3049,14 +3028,12 @@ impl From<CoreAppEvent> for AppEventJs {
                 inbox_view,
                 doc_name,
                 calendar_hidden_docs,
-                done_amalgamate,
             } => AppEventJs {
                 kind: "settingsChanged",
                 show_list_counts: Some(show_list_counts),
                 inbox_view: inbox_view.map(|v| v.encode()),
                 doc_name,
                 calendar_hidden_docs: Some(calendar_hidden_docs),
-                done_amalgamate: Some(done_amalgamate),
                 ..blank
             },
         }
@@ -3117,7 +3094,6 @@ fn settings_to_json(s: &monoplan_core::SettingsView) -> String {
         out.push_str(&json_string(d));
     }
     out.push(']');
-    out.push_str(&format!(",\"doneAmalgamate\":{}", s.done_amalgamate));
     out.push('}');
     out
 }

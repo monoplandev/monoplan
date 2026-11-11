@@ -271,8 +271,15 @@ export type Messages = {
     /** Switch label (list display options) toggling the per-row lifecycle
      *  state badge on the flat list view. */
     showState: string;
-    /** Done view display option: span every open doc, not Home alone. */
-    allDocs: string;
+    /** Done view header filter (`DoneFilterMenu`): the trigger's name,
+     *  its two submenus, the Lists submenu's text box and empty state,
+     *  and the item dropping every check. */
+    filter: string;
+    filterWorkspaces: string;
+    filterLists: string;
+    filterListsPlaceholder: string;
+    filterNoLists: string;
+    clearFilters: string;
     /** Done-view header button that opens the modal to record a completed
      *  item directly (defaults to Inbox). */
     log: string;
@@ -757,7 +764,12 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         `${count > 1 ? "Se quitarán" : "Se quitará"} de ${source} para todos sus miembros.`,
       displayOptions: "Opciones de visualización",
       showState: "Mostrar estado",
-      allDocs: "Todos los espacios",
+      filter: "Filtrar",
+      filterWorkspaces: "Espacios",
+      filterLists: "Listas",
+      filterListsPlaceholder: "Filtrar listas",
+      filterNoLists: "Sin listas",
+      clearFilters: "Quitar filtros",
       log: "Registrar",
       logCompleted: "Registrar elemento completado",
       listIcon: "Icono de la lista",
@@ -1140,7 +1152,12 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         `${count > 1 ? "They" : "It"} will be removed from ${source} for everyone there.`,
       displayOptions: "Display options",
       showState: "Show state",
-      allDocs: "All workspaces",
+      filter: "Filter",
+      filterWorkspaces: "Workspaces",
+      filterLists: "Lists",
+      filterListsPlaceholder: "Filter lists",
+      filterNoLists: "No lists",
+      clearFilters: "Clear filters",
       log: "Log",
       logCompleted: "Log completed item",
       listIcon: "List icon",

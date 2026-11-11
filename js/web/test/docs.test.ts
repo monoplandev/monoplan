@@ -219,15 +219,12 @@ describe("docs layer", () => {
     dispose();
   });
 
-  test("Done is Home's unless amalgamated; the calendar hides docs by pref", () => {
+  test("Done spans every doc; the calendar hides docs by pref", () => {
     const { home, other, layer, dispose } = setup();
     const a = home.addItem("inbox", "a");
     const b = other.addItem("inbox", "b");
     home.setDone(a, true);
     other.setDone(b, true);
-    expect(layer.doneAmalgamate()).toBe(false);
-    expect(layer.doneItems().map((it) => it.id)).toEqual([a]);
-    home.setDoneAmalgamate(true);
     expect(layer.doneItems().map((it) => it.id).sort()).toEqual([a, b].sort());
 
     const e1 = home.addItem("events", "home event");

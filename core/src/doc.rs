@@ -107,9 +107,8 @@ pub const NOTES_ORIGIN_PREFIX: &str = "notes:";
 /// undo step (`spec/sync-protocol.md` "Commit origin tagging").
 pub const SWEEP_ORIGIN: &str = "sweep";
 /// Commit origin for display settings: a list's saved default view,
-/// the list-count toggle, the calendar's hidden docs, Done
-/// amalgamation. They change how the workspace is shown, not what is in
-/// it, so they are excluded from the workspace `UndoManager`: undo
+/// the list-count toggle, the calendar's hidden docs. They change how
+/// the workspace is shown, not what is in it, so they are excluded from the workspace `UndoManager`: undo
 /// after a view change reverses the user's last edit, never the view
 /// (`spec/sync-protocol.md` "Commit origin tagging").
 pub const VIEW_ORIGIN: &str = "view";
@@ -344,11 +343,6 @@ const KEY_DOC_NAME: &str = "doc_name";
 /// shared. Absent / empty ≡ every doc shown. Unknown ids (a doc the
 /// account left) are harmless and dropped on the next toggle.
 const KEY_CALENDAR_HIDDEN_DOCS: &str = "calendar_hidden_docs";
-/// Whether the Done view amalgamates every open doc's closed items
-/// rather than the Home doc's alone. Personal, Home-doc-only like
-/// `KEY_CALENDAR_HIDDEN_DOCS`. Absent ≡ false; the off path deletes the
-/// key so a never-toggled doc carries no trace.
-const KEY_DONE_AMALGAMATE: &str = "done_amalgamate";
 /// Batch lifecycle mutations at/above this many ids stop emitting
 /// surgical per-item events and fall back to one whole-doc rebuild +
 /// diff. Matches the web store's coarse-projection threshold so both
@@ -778,9 +772,6 @@ pub struct SettingsView {
     /// Doc ids hidden from the merged calendar (personal, Home doc
     /// only). Deduped, in insertion order. Empty ≡ every doc shown.
     pub calendar_hidden_docs: Vec<String>,
-    /// Whether the Done view spans every open doc (personal, Home doc
-    /// only). Default false: Done is the Home doc's own.
-    pub done_amalgamate: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3285,25 +3276,6 @@ impl Doc {
         Ok(())
     }
 
-    /// Toggle whether the Done view amalgamates every open doc's closed
-    /// items (`KEY_DONE_AMALGAMATE`, personal, Home doc only). The off
-    /// path deletes the key. One commit; a no-op when unchanged.
-    pub fn set_done_amalgamate(&self, amalgamate: bool) -> Result<(), DocError> {
-        let settings = self.settings_map();
-        let current = read_bool(&settings, KEY_DONE_AMALGAMATE).unwrap_or(false);
-        if current == amalgamate {
-            return Ok(());
-        }
-        if amalgamate {
-            settings.insert(KEY_DONE_AMALGAMATE, true)?;
-        } else {
-            settings.delete(KEY_DONE_AMALGAMATE)?;
-        }
-        self.commit_view();
-        self.push_event(settings_changed(&settings_view(&settings)));
-        Ok(())
-    }
-
     pub fn rename_list(&self, list_id: &str, name: &str) -> Result<(), DocError> {
         if is_reserved_list(list_id) {
             return Err(DocError::CannotRenameBuiltin(list_id.into()));
@@ -5572,7 +5544,6 @@ impl Doc {
         for d in &settings.calendar_hidden_docs {
             hash_str(&mut hasher, d);
         }
-        hasher.update([settings.done_amalgamate as u8]);
         // Lists: walk by stored order because ordering is part of the
         // logical state surfaced to users.
         let lists = self.all_lists();
@@ -6268,7 +6239,6 @@ fn settings_view(map: &LoroMap) -> SettingsView {
             .map(|n| n.trim().to_string())
             .filter(|n| !n.is_empty()),
         calendar_hidden_docs: read_string_list(map, KEY_CALENDAR_HIDDEN_DOCS),
-        done_amalgamate: read_bool(map, KEY_DONE_AMALGAMATE).unwrap_or(false),
     }
 }
 
@@ -6842,7 +6812,6 @@ fn settings_changed(s: &SettingsView) -> AppEvent {
         inbox_view: s.inbox_view,
         doc_name: s.doc_name.clone(),
         calendar_hidden_docs: s.calendar_hidden_docs.clone(),
-        done_amalgamate: s.done_amalgamate,
     }
 }
 
@@ -7180,7 +7149,6 @@ mod tests {
         doc.set_default_view(LIST_INBOX, Some(board)).unwrap();
         doc.set_show_list_counts(false).unwrap();
         doc.set_calendar_doc_hidden("other-doc", true).unwrap();
-        doc.set_done_amalgamate(true).unwrap();
 
         // Undo reverses the rename, the last edit, and leaves every
         // display setting as it was set.
@@ -7192,7 +7160,6 @@ mod tests {
         assert_eq!(settings.inbox_view, Some(board));
         assert!(!settings.show_list_counts);
         assert_eq!(settings.calendar_hidden_docs, vec!["other-doc".to_string()]);
-        assert!(settings.done_amalgamate);
 
         // And they did not clear the redo stack either.
         assert!(doc.redo().unwrap());
@@ -7993,7 +7960,6 @@ mod tests {
         let s = doc.get_settings();
         assert_eq!(s.doc_name, None);
         assert!(s.calendar_hidden_docs.is_empty());
-        assert!(!s.done_amalgamate);
     }
 
     #[test]
@@ -8062,28 +8028,6 @@ mod tests {
     }
 
     #[test]
-    fn done_amalgamate_round_trips_and_off_leaves_no_key() {
-        let doc = Doc::new().unwrap();
-        let _ = doc.drain_events();
-        doc.set_done_amalgamate(false).unwrap();
-        assert!(doc.drain_events().is_empty(), "default is off; no-op");
-        doc.set_done_amalgamate(true).unwrap();
-        assert!(doc.get_settings().done_amalgamate);
-        assert!(matches!(
-            doc.drain_events().as_slice(),
-            [AppEvent::SettingsChanged {
-                done_amalgamate: true,
-                ..
-            }]
-        ));
-        let restored = Doc::load(&doc.save().unwrap()).unwrap();
-        assert!(restored.get_settings().done_amalgamate);
-        doc.set_done_amalgamate(false).unwrap();
-        assert!(!doc.get_settings().done_amalgamate);
-        assert!(doc.settings_map().get(KEY_DONE_AMALGAMATE).is_none());
-    }
-
-    #[test]
     fn personal_settings_sync_between_peers() {
         let dek = Dek::generate();
         let a = Doc::new().unwrap();
@@ -8091,17 +8035,14 @@ mod tests {
         let _ = b.drain_events();
         a.set_doc_name(Some("Shared")).unwrap();
         a.set_calendar_doc_hidden("other", true).unwrap();
-        a.set_done_amalgamate(true).unwrap();
         let blob = a.pending_export(&dek).unwrap().unwrap();
         b.apply_remote(&dek, &blob).unwrap();
         let s = b.get_settings();
         assert_eq!(s.doc_name.as_deref(), Some("Shared"));
         assert_eq!(s.calendar_hidden_docs, vec!["other".to_string()]);
-        assert!(s.done_amalgamate);
         assert!(b.drain_events().iter().any(|e| matches!(
             e,
             AppEvent::SettingsChanged {
-                done_amalgamate: true,
                 doc_name: Some(_),
                 ..
             }
