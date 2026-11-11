@@ -19,7 +19,7 @@ No account is needed to use the CLI. The first doc command on a fresh install cr
 ### Account (`monoplan auth …`)
 - `monoplan auth signup [--server URL]` — interactive: email, password, recovery code shown once and typed back; then syncs. The body is `signup::signup` (`Credentials` → `Outcome { account_id, recovery_code, adopted }`), the same split as `login`
 - `monoplan auth login [--server URL]` — interactive: email, password. `--server` defaults to `https://alpha.monoplan.app` (or `MONOPLAN_SERVER`); the dev stack is `MONOPLAN_SERVER=http://127.0.0.1:8000`. The body is `login::login`, shared with the app's sign-in sheet (`monoplan-ffi::login`)
-- `monoplan auth logout`
+- `monoplan auth logout` — stop the host, revoke this device on the server (`POST /api/account/logout`, `auth.md` §Token model), wipe the profile. The revoke is best-effort with a 10 s bound: if the server cannot be reached the wipe still happens and a warning says the device stays listed until it is removed from another device. A token the server no longer knows (401) counts as revoked. The apps' Sign Out is the same call through `monoplan-ffi::logout`.
 - `monoplan auth recover` — interactive: email, recovery code, set new password
 - `monoplan auth password` — change password (logged in)
 - `monoplan auth delete-account` — delete the account on the server (`auth.md` §Account deletion). Prints what goes (every owned workspace for everyone, membership in shared ones, every device) and the `workspace export-json` hint, asks for the email typed back and the password, re-verifies the password with the server, then wipes the profile like `logout`. A wrong password or a mismatched email changes nothing.

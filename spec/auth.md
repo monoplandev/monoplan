@@ -107,6 +107,8 @@ Client cannot derive `auth_secret` without the salt. Standard pattern:
 
 **Web sign-out (built 2026-10-27)** is a wipe, behind a confirmation with the macOS app's wording plus a clause naming unsynced changes: it revokes the device, clears the vault and deletes the local copy of every doc (op log, snapshot, in-flight push, device row, prefs), then starts a fresh anonymous session. Returning to the pre-signup state is not possible once signup has adopted the doc, and a signed-out browser must not keep readable account data. Only the user's sign-out wipes; the sync runtime's auth-failure path (expired or revoked cookie) just forgets keys, so it can never destroy unsynced work.
 
+**CLI and app sign-out** (`monoplan auth logout`, and the macOS / iOS Sign Out through `monoplan-ffi::logout`) revokes the same way since 2026-11-11: the host is stopped, `POST /api/account/logout` is sent with the bearer token, then the profile is wiped. Before that it only wiped, leaving the forever-lived token valid on the server. Best-effort like the web: an unreachable server does not block the wipe (the CLI warns; the apps do not surface it yet), and the device row then stays until revoked from another device.
+
 ### Device 2 (existing account)
 1. POST `/api/account/prelogin { email }` → returns `password_salt`.
 2. Client derives `master` → `kek`, `auth_secret` from password + salt.

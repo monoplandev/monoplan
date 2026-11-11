@@ -601,3 +601,78 @@ async fn workspace_flag_selects_a_second_doc() {
         "stopped"
     );
 }
+
+/// `monoplan auth logout` (`spec/auth.md` §Token model): the device is
+/// revoked on the server before the profile is wiped, so the token a
+/// signed-out machine held is dead, not merely forgotten locally.
+#[tokio::test]
+async fn logout_revokes_the_device_on_the_server() {
+    let server = TestServer::start().await;
+    let signup = signup_account(&server, "bin-logout").await;
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("profile");
+    materialize_profile(
+        &dir,
+        &server.base,
+        &signup.account_id,
+        &signup.primary_doc_id,
+        &signup.device_id,
+        &signup.device_token,
+        &signup.dek,
+        &signup.email,
+        true,
+    )
+    .await;
+    let devices = || async {
+        support::http()
+            .get(format!("{}/api/devices", server.base))
+            .bearer_auth(&signup.device_token)
+            .send()
+            .await
+            .unwrap()
+            .status()
+    };
+
+    // A running host holds the token on a live socket; logout stops it.
+    ok(monoplan(&dir, &["item", "ls"]).await);
+    assert!(devices().await.is_success());
+
+    let out = ok(monoplan(&dir, &["auth", "logout"]).await);
+    assert!(out.contains("device revoked"), "{out}");
+    assert!(!dir.exists(), "profile should be wiped");
+    assert_eq!(devices().await, reqwest::StatusCode::UNAUTHORIZED);
+}
+
+/// An unreachable server does not block the wipe: the local token goes
+/// either way, and the command says the device row is still there.
+#[tokio::test]
+async fn logout_wipes_and_warns_when_the_server_is_unreachable() {
+    let server = TestServer::start().await;
+    let signup = signup_account(&server, "bin-logout-offline").await;
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("profile");
+    // A port nothing listens on.
+    let dead = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        format!("http://{}", l.local_addr().unwrap())
+    };
+    materialize_profile(
+        &dir,
+        &dead,
+        &signup.account_id,
+        &signup.primary_doc_id,
+        &signup.device_id,
+        &signup.device_token,
+        &signup.dek,
+        &signup.email,
+        true,
+    )
+    .await;
+
+    let out = monoplan(&dir, &["auth", "logout"]).await;
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    let stdout = ok(out);
+    assert!(stdout.contains("local state wiped"), "{stdout}");
+    assert!(stderr.contains("could not reach the server"), "{stderr}");
+    assert!(!dir.exists(), "profile should be wiped");
+}

@@ -78,7 +78,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     // The server has already forgotten this device, so this is the
     // local half of `logout`: stop the host, drop the agent, wipe.
-    super::logout::logout(&profile).await?;
+    super::logout::logout_local(&profile).await?;
     println!("Account deleted. Local state wiped.");
     Ok(())
 }

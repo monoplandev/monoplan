@@ -205,7 +205,9 @@ replaces the local workspace (the form says so); Create Account runs
 the local workspace as the account's Home doc, and shows the recovery
 code once. The tray shows "Sign In…" while there is no account. Sign
 Out is confirmed and runs `monoplan-ffi::logout`, the same as
-`monoplan auth logout`: it stops the in-app engine and wipes the profile,
+`monoplan auth logout`: it stops the in-app engine, revokes this device on
+the server (best-effort; an unreachable server does not block it) and wipes
+the profile,
 and a fresh local workspace takes its place.
 Advanced: the
 Engine row (running, or why not), the Build row (package version, then

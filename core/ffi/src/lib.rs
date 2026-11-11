@@ -244,8 +244,10 @@ pub fn login(
     })
 }
 
-/// Sign out: stop whatever holds the profile, hold it, wipe it. What
-/// `monoplan auth logout` does, for the app's Settings. The app stops its
+/// Sign out: stop whatever holds the profile, hold it, revoke this
+/// device on the server, wipe it. What `monoplan auth logout` does, for
+/// the app's Settings. The revoke is best-effort (an unreachable server
+/// does not block the wipe) and its outcome is not surfaced here yet. The app stops its
 /// own engine first and keeps its engine controller from restarting one
 /// until this returns; `NotLoggedIn` when there was no profile.
 #[uniffi::export]
@@ -259,6 +261,7 @@ pub fn logout(profile_dir: String) -> Result<(), EngineError> {
             message: e.to_string(),
         })?;
     rt.block_on(logout::logout(&profile))
+        .map(|_| ())
         .map_err(|e| EngineError::Failed {
             message: format!("{e:#}"),
         })
