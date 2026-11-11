@@ -17,14 +17,16 @@ docker run -d \
 
 ```
 📁 monorepo
-├── 📂 cli  → CLI app
-├── 📂 ios          → iOS app placeholder
-├── 📂 js           → JavaScript packages and web app
-├── 📂 core         → Rust shared core
-├── 📂 crates         → Rust packages
-├── 📂 server       → Server
-├── 📂 sqlite       → Sqlite migration & notes
-└── 📂 telemetry    → Jaeger & OTLP collector for dev envs (may upgrade to clickstack)
+├── 📂 apple        → macOS & iOS apps, Swift package over the core FFI
+├── 📂 cli          → CLI app & daemon
+├── 📂 core         → Rust shared core (CRDT, E2EE, sync), plus wasm (core/web) and FFI (core/ffi) bindings
+├── 📂 crates       → Rust support crates (protocol, storage-sqlite)
+├── 📂 deploy       → Dockerfile, systemd units, bootstrap & CI scripts
+├── 📂 js           → JavaScript packages (config, core, tracer) and web app
+├── 📂 scripts      → Dev helper scripts
+├── 📂 server       → Sync server
+├── 📂 spec         → Specs & plans
+└── 📂 telemetry    → Jaeger & OTLP collector for dev envs (wip)
 ```
 
 ## Development Requirements
