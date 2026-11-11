@@ -117,3 +117,4 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - figure out safari scroll state issue - autoscroll up/down while dragging to top/bottom is not super reliable - and sometimes the scroll gets stuck esp. on first open it seems?
 - location & time badges within lists are ugly and maybe over the top.
 - Cal adapter / Event RSVPs?
+- signing out while offline and failing a server token revocation never re-attempts
