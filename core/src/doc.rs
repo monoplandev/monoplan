@@ -106,6 +106,13 @@ pub const NOTES_ORIGIN_PREFIX: &str = "notes:";
 /// `UndoManager` so a background sweep never becomes the user's next
 /// undo step (`spec/sync-protocol.md` "Commit origin tagging").
 pub const SWEEP_ORIGIN: &str = "sweep";
+/// Commit origin for display settings: a list's saved default view,
+/// the list-count toggle, the calendar's hidden docs, Done
+/// amalgamation. They change how the workspace is shown, not what is in
+/// it, so they are excluded from the workspace `UndoManager`: undo
+/// after a view change reverses the user's last edit, never the view
+/// (`spec/sync-protocol.md` "Commit origin tagging").
+pub const VIEW_ORIGIN: &str = "view";
 /// Commit origin for updates imported from an in-process mirror doc
 /// (`spec/mac-window-plan.md`): the macOS window's own doc, writing
 /// under a peer the host leased for it. Excluded from the host's
@@ -1689,6 +1696,7 @@ fn make_undo_manager(inner: &LoroDoc) -> UndoManager {
     um.add_exclude_origin_prefix(MIRROR_ORIGIN);
     um.add_exclude_origin_prefix(NOTES_ORIGIN_PREFIX);
     um.add_exclude_origin_prefix(SWEEP_ORIGIN);
+    um.add_exclude_origin_prefix(VIEW_ORIGIN);
     um
 }
 
@@ -3196,11 +3204,18 @@ impl Doc {
         Ok(id)
     }
 
+    /// Commit a display-setting write under `VIEW_ORIGIN`, keeping it
+    /// off the undo stack.
+    fn commit_view(&self) {
+        self.inner
+            .commit_with(CommitOptions::new().origin(VIEW_ORIGIN));
+    }
+
     /// Toggle the global "show counts on non-Inbox lists" setting. Inbox
     /// is unaffected — its count is always visible (subject to count >
     /// 0) and is not gated by this flag. No-op when the value is
     /// unchanged, so flicking the menu twice doesn't emit phantom
-    /// events or undo steps.
+    /// events. Never an undo step (`VIEW_ORIGIN`).
     pub fn set_show_list_counts(&self, show: bool) -> Result<(), DocError> {
         let settings = self.settings_map();
         let current = read_bool(&settings, KEY_SHOW_LIST_COUNTS).unwrap_or(true);
@@ -3214,7 +3229,7 @@ impl Doc {
         } else {
             settings.insert(KEY_SHOW_LIST_COUNTS, false)?;
         }
-        self.inner.commit();
+        self.commit_view();
         self.push_event(settings_changed(&settings_view(&settings)));
         Ok(())
     }
@@ -3265,7 +3280,7 @@ impl Doc {
         } else {
             settings.insert(KEY_CALENDAR_HIDDEN_DOCS, ids)?;
         }
-        self.inner.commit();
+        self.commit_view();
         self.push_event(settings_changed(&settings_view(&settings)));
         Ok(())
     }
@@ -3284,7 +3299,7 @@ impl Doc {
         } else {
             settings.delete(KEY_DONE_AMALGAMATE)?;
         }
-        self.inner.commit();
+        self.commit_view();
         self.push_event(settings_changed(&settings_view(&settings)));
         Ok(())
     }
@@ -3349,7 +3364,8 @@ impl Doc {
     /// default is written to the doc-level settings map instead and
     /// surfaces as a `SettingsChanged` event rather than
     /// `ListDefaultViewChanged`. No-op when the value is unchanged, so
-    /// re-saving the same view emits no phantom event or undo step.
+    /// re-saving the same view emits no phantom event. Never an undo step
+    /// (`VIEW_ORIGIN`).
     /// Refuses for the reserved `events`: it has no list or board view to
     /// save (`spec/events-plan.md`).
     pub fn set_default_view(
@@ -3373,7 +3389,7 @@ impl Doc {
                     settings.delete(KEY_INBOX_VIEW)?;
                 }
             }
-            self.inner.commit();
+            self.commit_view();
             self.push_event(settings_changed(&settings_view(&settings)));
             return Ok(());
         }
@@ -3387,7 +3403,7 @@ impl Doc {
                 map.delete(KEY_VIEW)?;
             }
         }
-        self.inner.commit();
+        self.commit_view();
         self.push_event(AppEvent::ListDefaultViewChanged {
             id: list_id.to_string(),
             view,
@@ -7148,6 +7164,39 @@ mod tests {
             e,
             AppEvent::ListDefaultViewChanged { id, view: None } if id == &list
         )));
+    }
+
+    #[test]
+    fn display_settings_are_excluded_from_workspace_undo() {
+        let doc = Doc::new().unwrap();
+        let list = doc.add_list("Work").unwrap();
+        doc.rename_list(&list, "Renamed").unwrap();
+
+        let board = DefaultView {
+            board: true,
+            lanes: LaneSet::ALL,
+        };
+        doc.set_default_view(&list, Some(board)).unwrap();
+        doc.set_default_view(LIST_INBOX, Some(board)).unwrap();
+        doc.set_show_list_counts(false).unwrap();
+        doc.set_calendar_doc_hidden("other-doc", true).unwrap();
+        doc.set_done_amalgamate(true).unwrap();
+
+        // Undo reverses the rename, the last edit, and leaves every
+        // display setting as it was set.
+        assert!(doc.undo().unwrap());
+        let meta = doc.get_list_meta(&list).unwrap();
+        assert_eq!(meta.name, "Work");
+        assert_eq!(meta.default_view, Some(board));
+        let settings = doc.get_settings();
+        assert_eq!(settings.inbox_view, Some(board));
+        assert!(!settings.show_list_counts);
+        assert_eq!(settings.calendar_hidden_docs, vec!["other-doc".to_string()]);
+        assert!(settings.done_amalgamate);
+
+        // And they did not clear the redo stack either.
+        assert!(doc.redo().unwrap());
+        assert_eq!(doc.get_list_meta(&list).unwrap().name, "Renamed");
     }
 
     #[test]

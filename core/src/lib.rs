@@ -14,7 +14,8 @@ pub use doc::{
     ExportSettings, FocusRef, FocusRetarget, INBOX_NAME, ImportSummary, ItemLifecycle, ItemView,
     JsonExport, LIST_EVENTS, LIST_INBOX, LaneSet, ListView, MAX_DURATION_MINUTES,
     MAX_PLACE_DETAIL_CHARS, MAX_PLACE_LABEL_CHARS, MIRROR_ORIGIN, NOTES_ORIGIN_PREFIX,
-    NotesDeltaOp, Place, SettingsView, WELCOME_ITEM, WorkflowState, move_items_across_docs,
+    NotesDeltaOp, Place, SettingsView, VIEW_ORIGIN, WELCOME_ITEM, WorkflowState,
+    move_items_across_docs,
 };
 pub use events::AppEvent;
 /// Loro's version vector, re-exported so hosts that keep one per

@@ -94,7 +94,7 @@ pub fn ls(doc: &Doc, args: LsArgs, out: &mut dyn Write) -> anyhow::Result<()> {
 }
 
 #[derive(Serialize)]
-struct ItemJson<'a> {
+pub(super) struct ItemJson<'a> {
     id: &'a str,
     text: &'a str,
     list_id: &'a str,
@@ -123,7 +123,7 @@ struct ItemJson<'a> {
     place: Option<&'a Place>,
 }
 
-fn item_json(item: &ItemView) -> ItemJson<'_> {
+pub(super) fn item_json(item: &ItemView) -> ItemJson<'_> {
     ItemJson {
         id: &item.id,
         text: &item.text,

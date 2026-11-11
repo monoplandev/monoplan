@@ -344,6 +344,9 @@ export type Messages = {
     saveAsDefault: string;
     /** Disabled state of that action: this view already is the default. */
     savedAsDefault: string;
+    /** Popover action dropping this device's display choices for the
+     *  list, back to its saved default view. */
+    restoreDefaults: string;
   };
   deadline: {
     /** Section label / accessible name for the deadline control. */
@@ -798,6 +801,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       hideLane: (lane) => `Ocultar ${lane}`,
       saveAsDefault: "Guardar como predeterminada",
       savedAsDefault: "Vista predeterminada",
+      restoreDefaults: "Restaurar valores predeterminados",
     },
     deadline: {
       label: "Fecha límite",
@@ -1180,6 +1184,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       hideLane: (lane) => `Hide ${lane}`,
       saveAsDefault: "Save as default",
       savedAsDefault: "Default view",
+      restoreDefaults: "Restore defaults",
     },
     deadline: {
       label: "Deadline",

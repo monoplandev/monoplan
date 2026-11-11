@@ -1283,6 +1283,15 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
     return result;
   };
 
+  // A display-setting write (saved default view, list counts, calendar
+  // hidden docs, Done amalgamation). The core commits these under its
+  // undo-excluded `view` origin, so no step is counted and no entry
+  // recorded: undo after a view change reverses the last edit instead.
+  const mutateView = (fn: () => void): void => {
+    fn();
+    flush();
+  };
+
   const withActionBatch = <T,>(fn: () => T): T => {
     const outermost = actionBatchDepth === 0;
     actionBatchDepth++;
@@ -1532,7 +1541,7 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
       mutate(() => replica.setListIcon(id, icon));
     },
     setDefaultView(id, view) {
-      mutate(() => replica.setDefaultView(id, view ?? ""));
+      mutateView(() => replica.setDefaultView(id, view ?? ""));
     },
     importJson(json) {
       return mutate(() => {
@@ -1547,7 +1556,7 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
       mutate(() => replica.setListArchived(id, archived));
     },
     setShowListCounts(show) {
-      mutate(() => replica.setShowListCounts(show));
+      mutateView(() => replica.setShowListCounts(show));
     },
     addToFocus(id, index) {
       // Default to the top: newly-focused items are "what am I working on
@@ -1577,10 +1586,10 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
       mutate(() => replica.setDocName(name));
     },
     setCalendarDocHidden(docId, hidden) {
-      mutate(() => replica.setCalendarDocHidden(docId, hidden));
+      mutateView(() => replica.setCalendarDocHidden(docId, hidden));
     },
     setDoneAmalgamate(amalgamate) {
-      mutate(() => replica.setDoneAmalgamate(amalgamate));
+      mutateView(() => replica.setDoneAmalgamate(amalgamate));
     },
     undo() {
       // An open session is settled first so Cmd+Z right after typing

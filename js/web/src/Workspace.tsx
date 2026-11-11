@@ -540,6 +540,19 @@ export function Workspace(props: {
       // Quota/private-mode failures just lose the preference.
     }
   };
+  // Whether this client shows the list any differently from its
+  // defaults: a local view override, or the local "show state" flag.
+  const hasLocalDisplay = (listId: string): boolean =>
+    listKey(viewDocId(), listId) in viewOverrides() || showState(listId);
+  // Drop this client's display choices for the list, so it renders the
+  // saved default view (the flat list when none is saved) with state
+  // badges off. Local only: the saved default itself is untouched.
+  const restoreViewDefaults = (listId: string) => {
+    const map = { ...viewOverrides() };
+    delete map[listKey(viewDocId(), listId)];
+    putViewOverrides(map);
+    setShowState(listId, false);
+  };
   // Draft state: a transient ItemView injected into dndItems but not into
   // the store. `insertIndex` is captured at draft-start time so collapse
   // commits at the same slot the user originally clicked from (e.g. after
@@ -3490,11 +3503,23 @@ export function Workspace(props: {
                     </>
                   )}
                 </Show>
-                {/* Publish this view as the list's default for every
-                    device. Disabled once it already is the default —
-                    the label then reads as a state, not an action. */}
+                {/* Restore defaults drops this client's display choices
+                    for the list (disabled when there are none). Below
+                    it, publish this view as the list's default for
+                    every device. Disabled once it already is the
+                    default — the label then reads as a state, not an
+                    action. */}
                 <Show when={currentListId()}>
                   {(listId) => (
+                    <>
+                    <button
+                      type="button"
+                      class="view-default-button"
+                      disabled={!hasLocalDisplay(listId())}
+                      onClick={() => restoreViewDefaults(listId())}
+                    >
+                      {m().board.restoreDefaults}
+                    </button>
                     <button
                       type="button"
                       class="view-default-button"
@@ -3505,6 +3530,7 @@ export function Workspace(props: {
                         ? m().board.savedAsDefault
                         : m().board.saveAsDefault}
                     </button>
+                    </>
                   )}
                 </Show>
               </DisplayOptionsPopover>

@@ -15,6 +15,7 @@ pub mod agenda;
 pub mod bin;
 pub mod db;
 mod delete_account;
+pub mod done;
 pub mod export;
 pub mod focus;
 pub mod items;
@@ -74,6 +75,8 @@ enum Cmd {
     Starred(focus::FocusArgs),
     /// Open items by day: Today (with overdue and past-dated folded in), then the coming days.
     Agenda(agenda::AgendaArgs),
+    /// Done items, newest first, by the day they were finished: the last 20, or `-n N` / `--since DATE`.
+    Done(done::DoneArgs),
     /// The bin: show, empty, rm.
     Bin(bin::BinArgs),
     /// Manage account and login.
@@ -186,6 +189,7 @@ pub enum DocCmd {
     /// The bin namespace (`bin show` / `empty` / `rm`).
     Bin(bin::BinArgs),
     Agenda(agenda::AgendaArgs),
+    Done(done::DoneArgs),
     Focus(focus::FocusArgs),
     Lists(lists::ListsArgs),
     /// The Home doc's account-wide UI settings (`settings.rs`): read,
@@ -224,6 +228,7 @@ pub fn run_doc(
         DocCmd::Restore(a) => items::restore(doc, a, out),
         DocCmd::Bin(a) => bin::run(doc, a, out),
         DocCmd::Agenda(a) => agenda::run(doc, a, out),
+        DocCmd::Done(a) => done::run(doc, a, out),
         DocCmd::Focus(a) => focus::run(doc, a, out),
         DocCmd::Lists(a) => lists::run(doc, a, out),
         DocCmd::Settings { show_list_counts } => settings::run(doc, show_list_counts, out),
@@ -359,6 +364,7 @@ impl Cli {
             Cmd::Item(ItemCmd::Restore(a)) => DocCmd::Restore(a),
             Cmd::Bin(a) => DocCmd::Bin(a),
             Cmd::Agenda(a) => DocCmd::Agenda(a),
+            Cmd::Done(a) => DocCmd::Done(a),
             Cmd::Starred(a) => DocCmd::Focus(a),
             Cmd::List(a) => DocCmd::Lists(a),
         };

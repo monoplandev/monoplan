@@ -2384,9 +2384,9 @@ input.task-check:hover {
   box-shadow: 0 0 0 2px var(--dnd-select-bg);
 }
 
-/* "Save as default" action at the foot of the view-mode popover. Reads
-   as a quiet link until hovered; disabled once this view already is the
-   list's saved default. */
+/* "Restore defaults" / "Save as default" actions at the foot of the
+   view-mode popover. Each reads as a quiet link until hovered, and is
+   disabled when it would do nothing. */
 .view-default-button {
   display: block;
   width: 100%;
@@ -2400,6 +2400,12 @@ input.task-check:hover {
   text-align: left;
   color: var(--text-muted);
   cursor: pointer;
+}
+
+/* Two stacked ("Restore defaults" over "Save as default"): only the
+   first keeps the gap from the options above. */
+.view-default-button + .view-default-button {
+  margin-top: 0;
 }
 
 .view-default-button:hover:not(:disabled) {
