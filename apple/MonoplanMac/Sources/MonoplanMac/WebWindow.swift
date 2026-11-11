@@ -95,8 +95,9 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// The Liquid Glass under the page's sidebar (macOS 26 and later,
     /// nil before), retinted as the window gains and loses key.
     private var sidebarGlass: NSView?
-    /// The glass's width: the page's sidebar column at the current
-    /// zoom (CSS pixels scale with `pageZoom`), plus the bleed.
+    /// The glass's width: the page's sidebar column at its widest and
+    /// at the current zoom (CSS pixels scale with `pageZoom`), plus
+    /// the bleed.
     private var sidebarGlassWidth: NSLayoutConstraint?
     /// Re-styles the glass when the app's appearance changes (Settings
     /// › General › Appearance, or the system).
@@ -528,13 +529,18 @@ final class WebWindowController: NSWindowController, NSWindowDelegate, WKNavigat
     /// The webview edge to edge with the bubbles floating over its
     /// top-right corner. They are added last so they draw (and
     /// hit-test) above the page.
-    /// The page's sidebar column, which the glass below it must match:
-    /// `.app`'s first grid column in `styles.css`.
-    private static let sidebarWidth: CGFloat = 260
+    /// The widest the page's sidebar column gets, which the glass below
+    /// it must cover: the column is user-resizable up to
+    /// `NAV_WIDTH_MAX` in `js/web/src/navWidth.ts` (`.app`'s first grid
+    /// column in `styles.css`). The glass stays at this width whatever
+    /// the column is dragged to; what runs past a narrower sidebar
+    /// hides under the opaque main column.
+    private static let sidebarWidth: CGFloat = 320
     /// How far the glass runs past the window's top, bottom and
     /// leading edges, so its rim highlight (the bright hairline glass
     /// draws around its shape) falls outside the window on those
-    /// sides; the trailing rim sits under the nav's border.
+    /// sides; the trailing rim sits under the nav's border at the
+    /// sidebar's widest, and under the main column otherwise.
     private static let glassBleed: CGFloat = 24
     /// The glass's tint by appearance and key state: none in light,
     /// where the frosting alone matches Finder, and in dark the page's

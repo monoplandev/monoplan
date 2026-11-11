@@ -160,10 +160,48 @@ body {
    The app chrome (menu, account/sync widget) lives in the nav's own
    footer strip. */
 .app {
+  position: relative;
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: var(--nav-width, 260px) 1fr;
   grid-template-rows: 1fr;
   height: 100%;
+}
+
+/* Drag handle over the nav's right edge (Workspace.tsx sets
+   `--nav-width`, navWidth.ts bounds and stores it). Out of the grid's
+   flow so it takes no column; a few px either side of the hairline so
+   it's easy to hit, with only a thin line drawn, on hover or mid-drag.
+   Under the macOS drag strip (`.app-titlebar`, z-index 30). */
+.nav-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--nav-width, 260px) - 4px);
+  width: 8px;
+  z-index: 20;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.nav-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: var(--border-surface);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.nav-resizer:hover::after {
+  opacity: 1;
+  transition-delay: 0.15s;
+}
+
+.nav-resizer-active::after {
+  opacity: 1;
 }
 
 .nav {
@@ -263,7 +301,7 @@ body {
    class. The panel hosts the open task surface (`.task-panel`, portaled
    into `.side-panel-task`); idle, it sits blank. */
 .app.side-panel-open {
-  grid-template-columns: 260px 1fr 300px;
+  grid-template-columns: var(--nav-width, 260px) 1fr 300px;
 }
 
 /* The column carries the surface frame (hairline left edge against the

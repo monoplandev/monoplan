@@ -106,6 +106,14 @@ import {
   type WorkflowState,
 } from "./sync/store.ts";
 import { createTheme, type ThemePreference } from "./theme.ts";
+import {
+  NAV_WIDTH_DEFAULT,
+  NAV_WIDTH_MAX,
+  NAV_WIDTH_MIN,
+  clampNavWidth,
+  loadNavWidth,
+  saveNavWidth,
+} from "./navWidth.ts";
 import { namesItem, parseHash, stateHash, type Route } from "./url.ts";
 import {
   encodeView,
@@ -2948,12 +2956,44 @@ export function Workspace(props: {
       });
   };
 
+  // Sidebar width: dragged from the nav's right edge, saved per device
+  // (navWidth.ts). The drag tracks the pointer's travel from where it
+  // went down, so the edge doesn't jump to the pointer on grab; the
+  // width is written once, on release. Double-click restores the default.
+  const [navWidth, setNavWidth] = createSignal(loadNavWidth());
+  const [navResizing, setNavResizing] = createSignal(false);
+  let navDrag: { pointerId: number; startX: number; startWidth: number } | null =
+    null;
+  const onNavResizeDown = (e: PointerEvent) => {
+    if (e.button !== 0) return;
+    // No text selection (or window drag in the macOS shell) underneath.
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    navDrag = { pointerId: e.pointerId, startX: e.clientX, startWidth: navWidth() };
+    setNavResizing(true);
+  };
+  const onNavResizeMove = (e: PointerEvent) => {
+    if (!navDrag || e.pointerId !== navDrag.pointerId) return;
+    setNavWidth(clampNavWidth(navDrag.startWidth + e.clientX - navDrag.startX));
+  };
+  const onNavResizeEnd = (e: PointerEvent) => {
+    if (!navDrag || e.pointerId !== navDrag.pointerId) return;
+    navDrag = null;
+    setNavResizing(false);
+    saveNavWidth(navWidth());
+  };
+  const onNavResizeReset = () => {
+    setNavWidth(NAV_WIDTH_DEFAULT);
+    saveNavWidth(NAV_WIDTH_DEFAULT);
+  };
+
   return (
     <div
       class="app"
       classList={{
         "side-panel-open": sidePanelShown(),
       }}
+      style={{ "--nav-width": `${navWidth()}px` }}
     >
       {/* The macOS app's window has no title bar: a thin strip across the
           top of every pane drags it (the sidebar's own `.nav-titlebar`
@@ -2963,6 +3003,20 @@ export function Workspace(props: {
         <div class="app-titlebar" onMouseDown={onTitlebarMouseDown} />
       </Show>
       <Show when={!isMobile()}>
+      <div
+        class="nav-resizer"
+        classList={{ "nav-resizer-active": navResizing() }}
+        role="separator"
+        aria-orientation="vertical"
+        aria-valuemin={NAV_WIDTH_MIN}
+        aria-valuemax={NAV_WIDTH_MAX}
+        aria-valuenow={navWidth()}
+        onPointerDown={onNavResizeDown}
+        onPointerMove={onNavResizeMove}
+        onPointerUp={onNavResizeEnd}
+        onPointerCancel={onNavResizeEnd}
+        onDblClick={onNavResizeReset}
+      />
       <Nav
         docs={docs}
         binCount={docs.binCount()}
