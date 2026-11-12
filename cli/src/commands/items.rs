@@ -396,7 +396,8 @@ pub fn restore(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()
 
 // ---------- set ----------
 
-/// Where `--star` puts the item: the end of Starred, or a 1-based slot.
+/// Where `--star` puts the item: a 1-based slot (the top when none is
+/// given, as every client's star does), or the end of Starred.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StarPos {
     Append,
@@ -453,8 +454,8 @@ pub struct SetArgs {
     /// Write --place as given, even if a known place matches it.
     #[arg(long, requires = "place")]
     pub new_place: bool,
-    /// Star the item: append to Starred, or insert at a 1-based POS. No-op if already starred.
-    #[arg(long, group = "field", value_name = "POS", num_args = 0..=1, default_missing_value = "end", value_parser = parse_star_pos, conflicts_with = "unstar")]
+    /// Star the item: at the top of Starred, or at a 1-based POS (`end` appends). No-op if already starred.
+    #[arg(long, group = "field", value_name = "POS", num_args = 0..=1, default_missing_value = "1", value_parser = parse_star_pos, conflicts_with = "unstar")]
     pub star: Option<StarPos>,
     /// Unstar the item (the item itself is untouched).
     #[arg(long, group = "field")]

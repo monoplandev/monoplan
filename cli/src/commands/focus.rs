@@ -55,7 +55,7 @@ pub enum FocusCmd {
     #[command(hide = true)]
     Add {
         item_id: String,
-        /// 1-based position to insert at (default: append).
+        /// 1-based position to insert at (default: the top).
         pos: Option<usize>,
     },
     /// Hidden pre-rename spelling of `item set --unstar`.
@@ -251,9 +251,9 @@ pub fn show_all(
 }
 
 fn add(doc: &Doc, item_id: &str, pos: Option<usize>, out: &mut dyn Write) -> anyhow::Result<()> {
-    // Absent position appends; a 1-based position converts to the 0-based
-    // visible index the doc layer expects.
-    let index = pos.map(one_based_to_index).unwrap_or(usize::MAX);
+    // Absent position is the top; a 1-based position converts to the
+    // 0-based visible index the doc layer expects.
+    let index = pos.map(one_based_to_index).unwrap_or(0);
     doc.add_to_focus(item_id, index)?;
     writeln!(out, "{item_id}")?;
     Ok(())
