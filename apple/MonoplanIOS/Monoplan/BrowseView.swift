@@ -2,7 +2,8 @@
 // first, as `Engine.session` orders them), each with its Inbox and then
 // its active lists in the doc's order; a list opens its Open items.
 // Underneath, the pages that are not worth a tab: Done and Debug.
-// Read-only, like the lenses. Archived lists and the reserved `events`
+// The tab keeps its place across tab switches; tapping it again pops to
+// the index (the system's behaviour). Read-only, like the lenses. Archived lists and the reserved `events`
 // list (calendar-only, spec/events-plan.md) are left out.
 
 import MonoplanCore

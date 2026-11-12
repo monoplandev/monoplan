@@ -1,7 +1,8 @@
 // The Starred tab: the Focus lens (spec/focus.md; "Starred" is the UI
 // name) as the daemon resolves it with `starred --all`: Home's curated
 // order, entries from other workspaces included, each row naming its
-// list and, when not Personal's, its workspace. Read-only markup.
+// list and, when not Personal's, its workspace. The order is the
+// position; no number is shown. Read-only markup.
 
 import MonoplanMacKit
 import SwiftUI
@@ -48,24 +49,18 @@ struct StarredView: View {
     }
 }
 
-/// One starred row: its position, the text, and underneath the list it
-/// lives in with the workspace after it when that is not Personal.
+/// One starred row: the text, and underneath the list it lives in with
+/// the workspace after it when that is not Personal.
 struct StarredRowView: View {
     let row: FocusRow
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text("\(row.pos)")
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 24, alignment: .trailing)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.text)
-                if let note {
-                    Text(note)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+        VStack(alignment: .leading, spacing: 2) {
+            Text(row.text)
+            if let note {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 2)

@@ -325,7 +325,9 @@ one fetch per doc, refetched with the session on every `Changed`;
 `Lists.active` drops archived and reserved rows). A list pushes its Open
 items (`Request.items(list:workspace:)`), refetched on `Changed` while
 shown; read-only. Under the workspaces sit the two pages that lost their
-tabs, pushed onto Browse's navigation stack. **Done** (`DoneView.swift`) is the
+tabs, pushed onto Browse's navigation stack. The tab keeps
+its place across tab switches, and tapping it again pops to the index
+(the system's behaviour, nothing of ours). **Done** (`DoneView.swift`) is the
 Personal workspace's Done items across every list, newest first, in a
 section per day ticked (`Request.done(limit:)`, i.e. `done -n N --json`,
 grouped by `Done.days`), each row with its list name. It is a window,
