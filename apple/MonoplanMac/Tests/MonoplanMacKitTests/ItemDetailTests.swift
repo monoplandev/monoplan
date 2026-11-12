@@ -34,6 +34,17 @@ final class ItemDetailTests: XCTestCase {
         XCTAssertNil(item.closedAt)
     }
 
+    func testParsesKnownPlaces() throws {
+        let rows = try KnownPlace.parse("""
+        [{"label":"Gym","lat":1.5,"lon":2.5,"address":"1 High St","count":3,"last_used":99},
+         {"label":"Office","count":1,"last_used":5}]
+        """)
+        XCTAssertEqual(rows.map(\.label), ["Gym", "Office"])
+        XCTAssertEqual(rows[0].place, PlaceInfo(label: "Gym", lat: 1.5, lon: 2.5, address: "1 High St"))
+        XCTAssertEqual(rows[1].place, PlaceInfo(label: "Office"))
+        XCTAssertEqual(rows[0].count, 3)
+    }
+
     func testCancelledClosesAtTheRegistersInstant() throws {
         let item = try ItemDetail.parse("""
         {"id":"i3","text":"x","list_id":"inbox","state":"cancelled","lifecycle_at":40,

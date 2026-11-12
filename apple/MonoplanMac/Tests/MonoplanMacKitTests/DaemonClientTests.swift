@@ -60,6 +60,35 @@ final class DaemonClientTests: XCTestCase {
                 "star": .nil, "unstar": .bool(false),
             ])])])])
         )
+        func setArgs(_ request: Request) -> [String: MPValue]? {
+            guard case .map(let frame) = request.value, case .map(let doc)? = frame["Doc"],
+                  case .map(let cmd)? = doc["cmd"], case .map(let args)? = cmd["Set"] else { return nil }
+            return args
+        }
+        let timed = setArgs(.setWhen(id: "i1", when: "2026-09-12T14:00", duration: .minutes(90)))
+        XCTAssertEqual(timed?["when"], .string("2026-09-12T14:00"))
+        XCTAssertEqual(timed?["duration"], .string("90"))
+        let cleared = setArgs(.setWhen(id: "i1", when: nil))
+        XCTAssertEqual(cleared?["when"], .string("-"))
+        XCTAssertEqual(cleared?["duration"], .nil)
+        XCTAssertEqual(setArgs(.setWhen(id: "i1", when: "2026-09-12", duration: .clear))?["duration"], .string("-"))
+        XCTAssertEqual(setArgs(.setDuration(id: "i1", minutes: 45))?["duration"], .string("45"))
+        XCTAssertEqual(setArgs(.setDuration(id: "i1", minutes: nil))?["duration"], .string("-"))
+        let placed = setArgs(.setPlace(id: "i1", place: PlaceInfo(label: "Gym", lat: 1.5, lon: -2.25, address: "1 High St")))
+        XCTAssertEqual(placed?["place"], .string("Gym"))
+        XCTAssertEqual(placed?["coords"], .string("1.5,-2.25"))
+        XCTAssertEqual(placed?["address"], .string("1 High St"))
+        XCTAssertEqual(placed?["new_place"], .bool(false))
+        let bare = setArgs(.setPlace(id: "i1", place: PlaceInfo(label: "Gym"), exact: true))
+        XCTAssertEqual(bare?["coords"], .nil)
+        XCTAssertEqual(bare?["new_place"], .bool(true))
+        XCTAssertEqual(setArgs(.setPlace(id: "i1", place: nil))?["place"], .string("-"))
+        XCTAssertEqual(
+            Request.places(query: "gy", limit: 8).value,
+            .map(["Doc": .map(["cmd": .map(["Places": .map([
+                "query": .string("gy"), "limit": .int(8), "json": .bool(true),
+            ])])])])
+        )
         XCTAssertEqual(
             Request.done(limit: 50).value,
             .map(["Doc": .map(["cmd": .map(["Done": .map([

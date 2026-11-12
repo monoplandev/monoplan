@@ -280,6 +280,60 @@ pub fn show(doc: &Doc, args: ShowArgs, out: &mut dyn Write) -> anyhow::Result<()
     Ok(())
 }
 
+// ---------- places ----------
+
+#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
+pub struct PlacesArgs {
+    /// Only places matching this text (label or address); all when omitted.
+    pub query: Option<String>,
+    /// At most this many; 0 is no limit.
+    #[arg(short = 'n', long = "limit", default_value_t = 0)]
+    pub limit: usize,
+    /// Machine-parseable output.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Serialize)]
+struct KnownPlaceJson<'a> {
+    #[serde(flatten)]
+    place: &'a Place,
+    /// Items (not binned) carrying this place.
+    count: usize,
+    /// Unix millis of the newest use.
+    last_used: i64,
+}
+
+/// The account's known places (`spec/place-plan.md` "Reuse"): the
+/// places already on items of every open doc, deduped, most recently
+/// used first. What a place field offers before any geocoder is asked.
+pub fn places(open_docs: &[&Doc], args: PlacesArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+    let rows = place_suggestions(
+        open_docs.iter().copied(),
+        args.query.as_deref().unwrap_or(""),
+        args.limit,
+    );
+    if args.json {
+        let json: Vec<KnownPlaceJson> = rows
+            .iter()
+            .map(|r| KnownPlaceJson {
+                place: &r.place,
+                count: r.count,
+                last_used: r.last_used,
+            })
+            .collect();
+        write_json(out, &json)?;
+    } else {
+        for r in &rows {
+            match &r.place.address {
+                Some(address) => writeln!(out, "{}  ({address})  x{}", r.place.label, r.count)?,
+                None => writeln!(out, "{}  x{}", r.place.label, r.count)?,
+            }
+        }
+    }
+    Ok(())
+}
+
 // ---------- lifecycle / bin / restore ----------
 
 #[derive(Parser, Debug, Clone, Serialize, Deserialize)]
@@ -593,6 +647,79 @@ mod tests {
     }
 
     #[test]
+    fn places_lists_the_known_places_across_open_docs() {
+        let home = Doc::new().unwrap();
+        let work = Doc::new().unwrap();
+        let a = home.add_item(LIST_INBOX, "lift").unwrap();
+        home.set_item_place(
+            &a,
+            Some(&Place {
+                label: "Gym".into(),
+                lat: Some(1.5),
+                lon: Some(2.5),
+                address: Some("1 High St".into()),
+                reference: None,
+            }),
+        )
+        .unwrap();
+        let b = work.add_item(LIST_INBOX, "standup").unwrap();
+        work.set_item_place(
+            &b,
+            Some(&Place {
+                label: "Office".into(),
+                lat: None,
+                lon: None,
+                address: None,
+                reference: None,
+            }),
+        )
+        .unwrap();
+
+        let run = |query: Option<&str>| {
+            let mut out = Vec::new();
+            places(
+                &[&home, &work],
+                PlacesArgs {
+                    query: query.map(str::to_string),
+                    limit: 0,
+                    json: true,
+                },
+                &mut out,
+            )
+            .unwrap();
+            serde_json::from_slice::<serde_json::Value>(&out).unwrap()
+        };
+        let all = run(None);
+        let mut labels: Vec<&str> = all
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["label"].as_str().unwrap())
+            .collect();
+        labels.sort();
+        assert_eq!(labels, ["Gym", "Office"]);
+
+        let gym = run(Some("gy"));
+        assert_eq!(gym.as_array().unwrap().len(), 1);
+        assert_eq!(gym[0]["label"], "Gym");
+        assert_eq!(gym[0]["lat"], 1.5);
+        assert_eq!(gym[0]["address"], "1 High St");
+        assert_eq!(gym[0]["count"], 1);
+        assert!(gym[0]["last_used"].is_i64());
+    }
+
+    /// The frame `Request.places` hand-encodes.
+    #[test]
+    fn places_frame_from_the_apps_decodes() {
+        use crate::commands::DocCmd;
+        let cmd: DocCmd = serde_json::from_value(
+            serde_json::json!({"Places": {"query": "gy", "limit": 8, "json": true}}),
+        )
+        .unwrap();
+        assert!(matches!(cmd, DocCmd::Places(a) if a.query.as_deref() == Some("gy") && a.limit == 8));
+    }
+
+    #[test]
     fn show_prints_one_item_with_its_notes_and_list_name() {
         let doc = Doc::new().unwrap();
         let list = doc.add_list("Work").unwrap();
@@ -694,6 +821,36 @@ mod tests {
         };
         set(&doc, &[&doc], *args, &mut Vec::new()).unwrap();
         assert_eq!(doc.get_item(&id).unwrap().list_id, list);
+        // `Request.setWhen` / `setDuration`: strings as the flags take
+        // them, `-` to clear.
+        let frame = |when: Option<&str>, duration: Option<&str>| {
+            let cmd: DocCmd = serde_json::from_value(serde_json::json!({"Set": {
+                "item_id": id, "text": null, "list": null, "lifecycle": null,
+                "when": when, "duration": duration, "deadline": null, "place": null,
+                "coords": null, "address": null, "new_place": false,
+                "star": null, "unstar": false,
+            }}))
+            .unwrap();
+            let DocCmd::Set(args) = cmd else {
+                panic!("not a Set frame")
+            };
+            set(&doc, &[&doc], *args, &mut Vec::new()).unwrap();
+            let item = doc.get_item(&id).unwrap();
+            (item.when, item.duration)
+        };
+        assert_eq!(
+            frame(Some("2026-09-12T14:00"), Some("90")),
+            (Some("2026-09-12T14:00".into()), Some(90))
+        );
+        assert_eq!(
+            frame(None, Some("-")),
+            (Some("2026-09-12T14:00".into()), None)
+        );
+        assert_eq!(
+            frame(Some("2026-09-12"), Some("4320")),
+            (Some("2026-09-12".into()), Some(4320))
+        );
+        assert_eq!(frame(Some("-"), None), (None, None));
     }
 
     #[test]

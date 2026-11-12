@@ -5,7 +5,9 @@
 // It comes up as a sheet over whatever list the row was in (half height,
 // draggable to full), as the dialog floats over the web's lists, rather
 // than as a pushed page. The checkbox ticks and reopens the item and
-// the list field moves it; everything else is display only.
+// the list field moves it, the date and place rows hand the sheet to their editors
+// (`ItemDateEditor`, `ItemPlaceEditor`);
+// everything else is display only.
 
 import MapKit
 import MonoplanMacKit
@@ -44,14 +46,20 @@ extension View {
 private struct ItemSheet: ViewModifier {
     @EnvironmentObject private var model: AppModel
     @State private var open: ItemRef?
+    /// The sheet's height: half to start, full once a field expands
+    /// (`ItemView` raises it) or the user drags it up.
+    @State private var detent: PresentationDetent = .medium
 
     func body(content: Content) -> some View {
         content
-            .environment(\.openItem) { open = $0 }
+            .environment(\.openItem) {
+                detent = .medium
+                open = $0
+            }
             .sheet(item: $open) { ref in
-                ItemView(ref: ref)
+                ItemView(ref: ref, detent: $detent)
                     .environmentObject(model)
-                    .presentationDetents([.medium, .large])
+                    .presentationDetents([.medium, .large], selection: $detent)
                     .presentationDragIndicator(.visible)
             }
     }
@@ -90,10 +98,50 @@ struct ItemLink<Label: View>: View {
 struct ItemView: View {
     @EnvironmentObject private var model: AppModel
     let ref: ItemRef
+    @Binding var detent: PresentationDetent
+    /// The field editor that has the sheet, if one does.
+    @State private var editing: Editor?
+    @State private var detentBeforeEditing: PresentationDetent = .medium
+
+    private enum Editor {
+        case date
+        case place
+    }
+
+    /// An editor takes the sheet over, at full height; closing it gives
+    /// the sheet back at the height it had.
+    private func edit(_ editor: Editor) {
+        detentBeforeEditing = detent
+        detent = .large
+        withAnimation(.easeOut(duration: 0.15)) { editing = editor }
+    }
+
+    private func endEditing() {
+        detent = detentBeforeEditing
+        withAnimation(.easeOut(duration: 0.15)) { editing = nil }
+    }
 
     private var item: ItemDetail? { model.itemDetails[ref.key] }
 
     var body: some View {
+        ZStack {
+            if let editing, let item {
+                Group {
+                    switch editing {
+                    case .date: ItemDateEditor(ref: ref, item: item, done: endEditing)
+                    case .place: ItemPlaceEditor(ref: ref, item: item, done: endEditing)
+                    }
+                }
+                .transition(.opacity)
+            } else {
+                page.transition(.opacity)
+            }
+        }
+        .onAppear { model.refreshItem(ref) }
+        .onChange(of: model.changeCount) { model.refreshItem(ref) }
+    }
+
+    private var page: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 status
@@ -104,6 +152,7 @@ struct ItemView: View {
                     .textSelection(.enabled)
                 if let item {
                     fields(item)
+                    Divider()
                     notes(item)
                     Divider()
                     activity(item)
@@ -123,8 +172,6 @@ struct ItemView: View {
         // sheet down". Content that fits does not scroll at all, so the
         // same drag works from anywhere on it.
         .scrollBounceBehavior(.basedOnSize)
-        .onAppear { model.refreshItem(ref) }
-        .onChange(of: model.changeCount) { model.refreshItem(ref) }
     }
 
     /// The checkbox with the workflow state beside it, as one status
@@ -153,26 +200,29 @@ struct ItemView: View {
     private func fields(_ item: ItemDetail) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             listField(item)
-            if let when = item.when {
-                FieldRow("calendar", text: Self.whenText(when), note: Self.lengthText(item))
-            } else {
-                FieldRow("calendar", text: "Date", empty: true)
-            }
+            ItemDateField(item: item) { edit(.date) }
             if let deadline = item.deadline {
                 FieldRow("timer", text: "Due \(Self.dayText(deadline))")
             }
-            if let place = item.place {
-                FieldRow("map", text: place.label, note: place.address)
-                if let lat = place.lat, let lon = place.lon {
-                    PlaceMapCard(label: place.label, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
+            Divider()
+            // As the date: a display row with the round button that
+            // opens the editor; the map card stays under it.
+            HStack(spacing: 8) {
+                if let place = item.place {
+                    FieldRow("map", text: place.label, note: place.address)
+                } else {
+                    FieldRow("map", text: "Place", empty: true)
                 }
-            } else {
-                FieldRow("map", text: "Place", empty: true)
+                Spacer(minLength: 8)
+                EditBubble(adding: item.place == nil, what: "place") { edit(.place) }
+                    .disabled(item.binnedAt != nil)
+            }
+            .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+            if let place = item.place, let lat = place.lat, let lon = place.lon {
+                PlaceMapCard(label: place.label, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
             }
         }
     }
-
-    private static let fieldInset: CGFloat = 12
 
     /// The menu's rows: the workspace's lists, plus the item's own list
     /// when it is not among them (archived, or the calendar's), so the
@@ -218,14 +268,11 @@ struct ItemView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, Self.fieldInset)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .itemField()
         }
         .buttonStyle(.plain)
         .disabled(item.binnedAt != nil)
-        .padding(.horizontal, -Self.fieldInset)
+        .itemFieldOutset()
     }
 
     @ViewBuilder
@@ -368,7 +415,7 @@ private struct PlaceMapCard: View {
 
 /// One field of the page: its icon, its value, and a secondary line
 /// under it when there is one. `empty` mutes a field that is unset.
-private struct FieldRow<Icon: View>: View {
+struct FieldRow<Icon: View>: View {
     let text: String
     var note: String? = nil
     var empty = false
@@ -389,9 +436,29 @@ private struct FieldRow<Icon: View>: View {
     }
 }
 
-private extension FieldRow where Icon == Image {
+extension FieldRow where Icon == Image {
     /// A field led by an SF Symbol.
     init(_ systemImage: String, text: String, note: String? = nil, empty: Bool = false) {
         self.init(text: text, note: note, empty: empty) { Image(systemName: systemImage) }
+    }
+}
+
+/// How far an editable field's box reaches past the plain rows.
+let itemFieldInset: CGFloat = 12
+
+extension View {
+    /// An editable field's box: full width, a faint fill, a full-height
+    /// (44pt) tap target.
+    func itemField() -> some View {
+        padding(.horizontal, itemFieldInset)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    /// Outset by the box's own padding, so a field's icon and text stay
+    /// in line with the plain rows around it.
+    func itemFieldOutset() -> some View {
+        padding(.horizontal, -itemFieldInset)
     }
 }

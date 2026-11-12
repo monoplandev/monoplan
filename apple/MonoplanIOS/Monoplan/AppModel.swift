@@ -154,6 +154,33 @@ final class AppModel: ObservableObject {
         write(.moveItem(id: ref.itemId, list: listId, workspace: selector(ref.docId)), to: ref)
     }
 
+    /// Set or clear (nil) an item's planned date, with what to do to
+    /// its duration in the same call (`item set --when [--duration]`).
+    func setWhen(_ ref: ItemRef, when: String?, duration: DurationEdit = .keep) {
+        write(.setWhen(id: ref.itemId, when: when, duration: duration, workspace: selector(ref.docId)), to: ref)
+    }
+
+    /// Set or clear (nil) an item's duration in minutes.
+    func setDuration(_ ref: ItemRef, minutes: Int?) {
+        write(.setDuration(id: ref.itemId, minutes: minutes, workspace: selector(ref.docId)), to: ref)
+    }
+
+    /// Set an item's place, or clear it (nil). `exact` writes a bare
+    /// label as just that, instead of letting the engine take a known
+    /// place of the same label (`item set --place`).
+    func setPlace(_ ref: ItemRef, place: PlaceInfo?, exact: Bool = false) {
+        write(.setPlace(id: ref.itemId, place: place, exact: exact, workspace: selector(ref.docId)), to: ref)
+    }
+
+    /// The account's known places matching `query` (all when empty),
+    /// most recently used first: what the place editor offers before
+    /// any lookup leaves the device. Nothing comes back on failure.
+    func knownPlaces(matching query: String, limit: Int = 8, completion: @escaping ([KnownPlace]) -> Void) {
+        fetch(.places(query: query, limit: limit), what: "places", parse: KnownPlace.parse) { rows, _ in
+            if let rows { completion(rows) }
+        }
+    }
+
     /// The lists an item of this workspace can be in: its Inbox, then
     /// its active lists in the doc's order.
     func lists(inDoc docId: String?) -> [ListRef] {

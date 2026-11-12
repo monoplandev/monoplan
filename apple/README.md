@@ -318,7 +318,20 @@ deadline when set, place, notes, activity log), read through
 `Changed` while shown; its checkbox ticks too, and its list field is a
 pull-down `Menu` of the workspace's lists that moves the item
 (`Request.moveItem`, i.e. `item set <id> --list <list>`; same workspace
-only, the engine has no cross-doc move). The rest is display only. A place
+only, the engine has no cross-doc move). Its date field
+(`ItemDateField.swift`) hands the whole sheet to an editor
+(`ItemDateEditor`, Done returns to the item): quick picks (Today, Tomorrow), a month calendar, and once a date is set a Time switch, a
+Length menu and Clear, each pick written at once (`Request.setWhen` /
+`setDuration`, i.e. `item set --when / --duration`). Its place row
+does the same (`ItemPlaceEditor.swift`): one text box, then the typed
+text as a bare label, the account's known places that match
+(`Request.places`, i.e. `places --json`, `spec/cli.md` §Items; nothing
+leaves the device), and from three characters Apple's search
+(`MKLocalSearchCompleter`, resolved to coordinates by `MKLocalSearch`;
+the query goes to Apple, not E2EE, as the web's goes to Photon). A pick
+is written at once (`Request.setPlace`, i.e. `item set --place
+[--coords] [--address] [--new-place]`). Deadline and notes are display
+only. A place
 with coordinates also shows a small non-interactive MapKit map with a
 pin (`PlaceMapCard`); tapping it opens the spot in Apple Maps under the
 place's label. Tiles come from Apple, so this is a second non-E2EE

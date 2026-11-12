@@ -9,6 +9,34 @@ public struct PlaceInfo: Decodable, Equatable {
     public let lat: Double?
     public let lon: Double?
     public let address: String?
+
+    public init(label: String, lat: Double? = nil, lon: Double? = nil, address: String? = nil) {
+        self.label = label
+        self.lat = lat
+        self.lon = lon
+        self.address = address
+    }
+}
+
+/// A known place as `monoplan places --json` returns it
+/// (cli/src/commands/items.rs `KnownPlaceJson`): a place already on
+/// some item of the account, with how often and how recently it is used.
+public struct KnownPlace: Decodable, Hashable {
+    public let label: String
+    public let lat: Double?
+    public let lon: Double?
+    public let address: String?
+    public let count: Int
+    /// Unix millis of the newest use.
+    public let lastUsed: Int64
+
+    public var place: PlaceInfo { PlaceInfo(label: label, lat: lat, lon: lon, address: address) }
+
+    public static func parse(_ json: String) throws -> [KnownPlace] {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return try decoder.decode([KnownPlace].self, from: Data(json.utf8))
+    }
 }
 
 public struct ItemDetail: Decodable, Equatable {

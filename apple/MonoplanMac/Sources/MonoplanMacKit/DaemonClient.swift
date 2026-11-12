@@ -102,6 +102,15 @@ public struct SyncStatus: Equatable {
     }
 }
 
+/// What a `Request.setWhen` does to the item's duration alongside.
+public enum DurationEdit: Equatable {
+    /// Leave it to the engine (a first timed `when` defaults it to 60
+    /// minutes; clearing `when` clears it).
+    case keep
+    case clear
+    case minutes(Int)
+}
+
 public enum Request {
     case hello(buildId: String)
     case watch
@@ -134,6 +143,24 @@ public enum Request {
     /// `monoplan item set <id> --list <list>`: move the item to another
     /// list of the same workspace (appended). `workspace` as for `items`.
     case moveItem(id: String, list: String, workspace: String? = nil)
+    /// `monoplan item set <id> --when <when|-> [--duration <minutes|->]`:
+    /// set the planned date (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`,
+    /// floating) or clear it (nil), and in the same call optionally the
+    /// duration (applied after `when`). `workspace` as for `items`.
+    case setWhen(id: String, when: String?, duration: DurationEdit = .keep, workspace: String? = nil)
+    /// `monoplan item set <id> --duration <minutes|->`: set the
+    /// duration in whole minutes, or clear it (nil).
+    case setDuration(id: String, minutes: Int?, workspace: String? = nil)
+    /// `monoplan item set <id> --place <label|-> [--coords] [--address]
+    /// [--new-place]`: set the place, or clear it (nil). A place with
+    /// coordinates or an address is written as given. A bare label
+    /// takes a known place of that label whole (the engine's rule)
+    /// unless `exact`, which writes just the label.
+    case setPlace(id: String, place: PlaceInfo?, exact: Bool = false, workspace: String? = nil)
+    /// `monoplan places [query] -n <limit> --json`: the account's known
+    /// places, most recently used first (`KnownPlace.parse`). Spans
+    /// every open doc, so it takes no workspace.
+    case places(query: String, limit: Int)
     /// `monoplan done -n <limit> --json`: the Personal workspace's Done
     /// items across every list, newest first by the moment they entered
     /// Done (`Items.parse`; `Done.days` groups them). A full window
@@ -191,6 +218,28 @@ public enum Request {
             return Self.set(id, workspace, ["lifecycle": .string(done ? "Done" : "Backlog")])
         case .moveItem(let id, let list, let workspace):
             return Self.set(id, workspace, ["list": .string(list)])
+        case .setWhen(let id, let when, let duration, let workspace):
+            // `-` is the CLI's "clear" for both flags.
+            var fields: [String: MPValue] = ["when": .string(when ?? "-")]
+            switch duration {
+            case .keep: break
+            case .clear: fields["duration"] = .string("-")
+            case .minutes(let n): fields["duration"] = .string(String(n))
+            }
+            return Self.set(id, workspace, fields)
+        case .setPlace(let id, let place, let exact, let workspace):
+            guard let place else { return Self.set(id, workspace, ["place": .string("-")]) }
+            var fields: [String: MPValue] = ["place": .string(place.label), "new_place": .bool(exact)]
+            if let lat = place.lat, let lon = place.lon { fields["coords"] = .string("\(lat),\(lon)") }
+            if let address = place.address, !address.isEmpty { fields["address"] = .string(address) }
+            return Self.set(id, workspace, fields)
+        case .places(let query, let limit):
+            return Self.doc(nil, .map(["Places": .map([
+                "query": query.isEmpty ? .nil : .string(query),
+                "limit": .int(Int64(limit)), "json": .bool(true),
+            ])]))
+        case .setDuration(let id, let minutes, let workspace):
+            return Self.set(id, workspace, ["duration": .string(minutes.map(String.init) ?? "-")])
         case .done(let limit):
             return .map(["Doc": .map(["cmd": .map(["Done": .map([
                 "limit": .int(Int64(limit)), "since": .nil, "json": .bool(true),
