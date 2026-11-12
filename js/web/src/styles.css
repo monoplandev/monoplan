@@ -1162,12 +1162,11 @@ body {
   margin-left: 2px;
 }
 
-/* Open-item count after a list title, in the nav count's faint tabular
-   style. */
+/* Item count after a view title, faint and tabular like the nav count,
+   at the title's own size. */
 .main-header-count {
   margin-left: 6px;
   color: var(--text-faint);
-  font-size: 0.9em;
   font-variant-numeric: tabular-nums;
 }
 

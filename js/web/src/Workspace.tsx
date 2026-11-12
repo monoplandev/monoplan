@@ -350,14 +350,6 @@ export function Workspace(props: {
     setDoneFilter(next);
     saveDoneFilter(next);
   };
-  // Open-item count for the list view's header, read off the projection
-  // array like the nav's per-list count (not `items()`, whose linger
-  // overlay briefly keeps a just-completed row). Zero off a list.
-  const headerOpenCount = createMemo((): number => {
-    const v = view();
-    if (v.kind !== "list") return 0;
-    return viewApp().state.listOpen[v.id]?.length ?? 0;
-  });
   const [dndItems, setDndItems] = createSignal<ItemView[]>([]);
   const [themePref, setThemePref] = createSignal<ThemePreference>(theme.get());
   const [settingsOpen, setSettingsOpen] = createSignal(false);
@@ -848,6 +840,18 @@ export function Workspace(props: {
     }
     // The Bin spans every doc: a binned row must stay reachable.
     return docs.binnedItems();
+  });
+
+  // Item count for the header of a list, Starred or Done. A list and
+  // Starred read the projection like the nav's counts (not `items()`,
+  // whose linger overlay briefly keeps a just-completed row); Done has
+  // no overlay and counts the rows its filter admits. Zero elsewhere.
+  const headerCount = createMemo((): number => {
+    const v = view();
+    if (v.kind === "list") return viewApp().state.listOpen[v.id]?.length ?? 0;
+    if (v.kind === "focus") return docs.focusItems().length;
+    if (v.kind === "done") return items().length;
+    return 0;
   });
 
   // Every user list in CRDT order — archived included. Use this for
@@ -3444,11 +3448,10 @@ export function Workspace(props: {
               )}
             </Show>
           </h1>
-            {/* Open-item count beside a list title: the same number the
-                nav shows per list, hidden at zero so an empty list reads
-                clean. */}
-            <Show when={headerOpenCount() > 0}>
-              <span class="main-header-count">{headerOpenCount()}</span>
+            {/* Item count beside a list, Starred or Done title, hidden at
+                zero so an empty view reads clean. */}
+            <Show when={headerCount() > 0}>
+              <span class="main-header-count">{headerCount()}</span>
             </Show>
             <Show when={archivedViewListId()}>
               <span class="badge archived-badge">{m().nav.archived}</span>
