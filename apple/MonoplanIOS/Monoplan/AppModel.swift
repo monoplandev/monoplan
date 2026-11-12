@@ -59,6 +59,8 @@ final class AppModel: ObservableObject {
     /// its page appears and again on each `Changed` while it is shown.
     @Published private(set) var listItems: [String: [ItemRow]] = [:]
     @Published private(set) var listErrors: [String: String] = [:]
+    /// The lists opened so far, to reread after a write of ours.
+    private var browsedLists: [String: ListRef] = [:]
     /// An opened item (`item show --json`), keyed by `ItemRef.key`,
     /// fetched when its page appears and on each `Changed` while shown.
     @Published private(set) var itemDetails: [String: ItemDetail] = [:]
@@ -122,13 +124,39 @@ final class AppModel: ObservableObject {
         refreshQueued = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
             self?.refreshQueued = false
-            self?.refreshInbox()
-            self?.refreshAgenda()
-            self?.refreshStarred()
-            self?.refreshDone()
+            self?.refreshLenses()
             // Workspaces come and go (created, shared, closed) and lists
             // are renamed: the index follows the same events.
             self?.loadSession()
+        }
+    }
+
+    private func refreshLenses() {
+        refreshInbox()
+        refreshAgenda()
+        refreshStarred()
+        refreshDone()
+    }
+
+    /// Tick an item, or reopen a closed one (`item set --lifecycle`).
+    /// Nothing is assumed about the result: once the engine has applied
+    /// it, everything on screen is read again at once rather than after
+    /// the `Changed` coalescing delay, so the tick lands in the same
+    /// frame or two. In process, the write and the reads are
+    /// milliseconds.
+    func setDone(_ ref: ItemRef, done: Bool) {
+        client.send(.setDone(id: ref.itemId, done: done, workspace: selector(ref.docId))) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(.output):
+                refreshLenses()
+                if itemDetails[ref.key] != nil { refreshItem(ref) }
+                for list in browsedLists.values { refreshList(list) }
+            case .success(let other):
+                lastError = "could not update item: \(String(describing: other))"
+            case .failure(let error):
+                lastError = "could not update item: \(engineErrorMessage(error))"
+            }
         }
     }
 
@@ -162,6 +190,7 @@ final class AppModel: ObservableObject {
     /// `item ls --list <list> -w <doc> --json`: one browsed list's Open
     /// items.
     func refreshList(_ ref: ListRef) {
+        browsedLists[ref.key] = ref
         fetch(.items(list: ref.listId, workspace: selector(ref.docId)), what: ref.name, parse: Items.parse) { [weak self] rows, error in
             if let rows { self?.listItems[ref.key] = rows }
             self?.listErrors[ref.key] = error

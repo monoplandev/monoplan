@@ -4,8 +4,9 @@
 // when it has none); a list opens its Open items.
 // Underneath, the pages that are not worth a tab: Done and Debug.
 // The tab keeps its place across tab switches; tapping it again pops to
-// the index (the system's behaviour). Read-only, like the lenses. Archived lists and the reserved `events`
-// list (calendar-only, spec/events-plan.md) are left out.
+// the index (the system's behaviour). Item rows tick and open as in the
+// lenses. Archived lists and the reserved `events` list (calendar-only,
+// spec/events-plan.md) are left out.
 
 import MonoplanCore
 import MonoplanMacKit
@@ -109,6 +110,7 @@ struct ListItemsView: View {
                     }
                 }
                 .listStyle(.plain)
+                .animation(.default, value: items)
             } else {
                 emptyState
             }

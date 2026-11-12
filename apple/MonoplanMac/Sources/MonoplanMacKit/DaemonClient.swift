@@ -125,6 +125,12 @@ public enum Request {
     /// `monoplan item show <id> --json`: one item with its notes and
     /// list name (`ItemDetail.parse`). `workspace` as for `items`.
     case item(id: String, workspace: String? = nil)
+    /// `monoplan item set <id> --lifecycle done|backlog`: tick an item,
+    /// or reopen a closed one into Backlog (what the core's un-done
+    /// writes, `spec/data-model.md` "Set lifecycle"). `workspace` as for
+    /// `items`. The frame is pinned on the Rust side by
+    /// `set_lifecycle_frame_from_the_apps_decodes_and_applies`.
+    case setDone(id: String, done: Bool, workspace: String? = nil)
     /// `monoplan done -n <limit> --json`: the Personal workspace's Done
     /// items across every list, newest first by the moment they entered
     /// Done (`Items.parse`; `Done.days` groups them). A full window
@@ -177,6 +183,13 @@ public enum Request {
         case .item(let id, let workspace):
             return Self.doc(workspace, .map(["Show": .map([
                 "item_id": .string(id), "json": .bool(true),
+            ])]))
+        case .setDone(let id, let done, let workspace):
+            return Self.doc(workspace, .map(["Set": .map([
+                "item_id": .string(id), "lifecycle": .string(done ? "Done" : "Backlog"),
+                "text": .nil, "list": .nil, "when": .nil, "duration": .nil, "deadline": .nil,
+                "place": .nil, "coords": .nil, "address": .nil, "new_place": .bool(false),
+                "star": .nil, "unstar": .bool(false),
             ])]))
         case .done(let limit):
             return .map(["Doc": .map(["cmd": .map(["Done": .map([

@@ -4,7 +4,8 @@
 // `item show --json` and refetched on every doc change while shown.
 // It comes up as a sheet over whatever list the row was in (half height,
 // draggable to full), as the dialog floats over the web's lists, rather
-// than as a pushed page. Display only: nothing here edits yet.
+// than as a pushed page. The checkbox ticks and reopens the item;
+// everything else is display only.
 
 import MonoplanMacKit
 import SwiftUI
@@ -55,10 +56,23 @@ private struct ItemSheet: ViewModifier {
     }
 }
 
-/// A list row that opens its item's sheet: a plain button over the
-/// whole row, so there is no disclosure chevron (nothing is pushed).
+private struct ItemRefKey: EnvironmentKey {
+    static let defaultValue: ItemRef? = nil
+}
+
+extension EnvironmentValues {
+    /// The item a row stands for; set by `ItemLink`, read by the row's
+    /// `CheckboxRow` for its two taps.
+    var itemRef: ItemRef? {
+        get { self[ItemRefKey.self] }
+        set { self[ItemRefKey.self] = newValue }
+    }
+}
+
+/// Names the item a list row stands for. The row itself (`CheckboxRow`)
+/// does the work: its checkbox ticks the item, the rest of it opens the
+/// item's sheet. No disclosure chevron: nothing is pushed.
 struct ItemLink<Label: View>: View {
-    @Environment(\.openItem) private var openItem
     let ref: ItemRef
     @ViewBuilder let label: Label
 
@@ -68,16 +82,7 @@ struct ItemLink<Label: View>: View {
     }
 
     var body: some View {
-        Button {
-            openItem(ref)
-        } label: {
-            label
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        // As `CheckboxRow`: the separator spans the checkbox.
-        .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
+        label.environment(\.itemRef, ref)
     }
 }
 
@@ -125,7 +130,14 @@ struct ItemView: View {
     /// control; a binned item says so instead (the bin masks the state).
     private var status: some View {
         HStack(spacing: 10) {
-            ItemCheckbox(state: item?.state ?? "backlog")
+            // Ticking a binned item makes no sense (the bin masks the
+            // state; Restore is the way out), and neither does ticking
+            // one that has not loaded.
+            if let item, item.binnedAt == nil {
+                ItemCheckButton(ref: ref, state: item.state)
+            } else {
+                ItemCheckbox(state: item?.state ?? "backlog")
+            }
             if let item {
                 Text(item.binnedAt != nil ? "Binned" : ItemRowView.stateLabel(item.state))
                     .font(.subheadline.weight(.medium))

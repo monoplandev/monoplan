@@ -2,7 +2,8 @@
 // name) as the daemon resolves it with `starred --all`: Home's curated
 // order, entries from other workspaces included, each row naming its
 // list and, when not Personal's, its workspace. The order is the
-// position; no number is shown. Read-only markup.
+// position; no number is shown. A row's checkbox ticks the item
+// (which drops it from Starred); the row opens its sheet.
 
 import MonoplanMacKit
 import SwiftUI
@@ -22,6 +23,7 @@ struct StarredView: View {
                         }
                     }
                     .listStyle(.plain)
+                    .animation(.default, value: model.starred)
                 }
             }
             .navigationTitle("Starred")

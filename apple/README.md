@@ -301,8 +301,13 @@ needed once the app wants named colours or images of its own.
 
 Four tabs in a system `TabView` (`ContentView.swift`; the floating
 glass pill on iOS 26, the flat bar before). Item rows outside the
-Agenda lead with a display-only checkbox (`ItemCheckbox.swift`: empty
-while open, ticked when Done, crossed when Cancelled); ticking is next. Every such row opens the
+Agenda lead with a checkbox (`ItemCheckbox.swift`: empty while open,
+ticked when Done, crossed when Cancelled). Tapping it ticks an open item
+or reopens a closed one into Backlog (`AppModel.setDone` →
+`Request.setDone`, i.e. `item set <id> --lifecycle done|backlog`; the
+hand-encoded frame is pinned by a test in `cli/src/commands/items.rs`),
+after which every loaded read is fetched again at once: no optimistic
+state. The first write from the iOS app. Every such row opens the
 item as a sheet over its list (`ItemView.swift`, 2026-11-13; half
 height, draggable to full; `opensItems()` on each tab's stack presents
 it): the web task dialog's
@@ -310,7 +315,7 @@ content in its order (status, title, list, planned date and length,
 deadline when set, place, notes, activity log), read through
 `Request.item(id:workspace:)`, i.e. `item show <id> --json`
 (`spec/cli.md` §Items; decoded by `ItemDetail.parse`), and refetched on
-`Changed` while shown; display only. **Inbox** (`InboxView.swift`)
+`Changed` while shown; its checkbox ticks too, the rest is display only. **Inbox** (`InboxView.swift`)
 is the capture list's Open items in list order, read through the Kit's
 `Request.items` (`item ls --list inbox --json`, decoded by
 `Items.parse`) and refetched on every `Changed` event, coalesced over

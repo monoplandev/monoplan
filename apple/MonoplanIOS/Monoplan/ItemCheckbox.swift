@@ -1,9 +1,10 @@
 // The checkbox an item row leads with: an empty rounded square while the
 // item is open, filled and ticked once Done, crossed when Cancelled
-// (spec/data-model.md "Lifecycle"). Display only for now: ticking is
-// the next surface, and this is where its tap will land.
+// (spec/data-model.md "Lifecycle"). `ItemCheckbox` is the drawing,
+// `ItemCheckButton` the control that ticks and reopens.
 
 import SwiftUI
+import UIKit
 
 struct ItemCheckbox: View {
     /// The workflow state name, as the engine's JSON carries it.
@@ -50,16 +51,52 @@ struct ItemCheckbox: View {
     }
 }
 
+/// The checkbox as a control: a tap ticks an open item and reopens a
+/// closed one. The hit area is larger than the drawn box.
+struct ItemCheckButton: View {
+    @EnvironmentObject private var model: AppModel
+    let ref: ItemRef
+    let state: String
+
+    private var closed: Bool { state == "done" || state == "cancelled" }
+
+    var body: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            model.setDone(ref, done: !closed)
+        } label: {
+            ItemCheckbox(state: state)
+                .padding(10)
+                .contentShape(Rectangle())
+                .padding(-10)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(state == "cancelled" ? "Reopen" : closed ? "Mark not done" : "Mark done")
+    }
+}
+
 /// An item row's layout: the checkbox, then whatever the row says,
-/// aligned to its first line.
+/// aligned to its first line. Two taps: the checkbox ticks, the rest of
+/// the row opens the item's sheet. The item is the enclosing
+/// `ItemLink`'s; without one the row is inert.
 struct CheckboxRow<Content: View>: View {
+    @Environment(\.itemRef) private var ref
+    @Environment(\.openItem) private var openItem
     let state: String
     @ViewBuilder let content: Content
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            ItemCheckbox(state: state)
+            if let ref {
+                ItemCheckButton(ref: ref, state: state)
+            } else {
+                ItemCheckbox(state: state)
+            }
             content
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture { if let ref { openItem(ref) } }
+                .accessibilityAddTraits(.isButton)
         }
         .padding(.vertical, 2)
         // A list starts its separator at the row's first text by

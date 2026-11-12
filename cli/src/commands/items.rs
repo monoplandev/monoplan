@@ -658,6 +658,30 @@ mod tests {
         assert_eq!(err.to_string(), "item not found: nope");
     }
 
+    /// The frame the native clients hand-encode to tick and reopen an
+    /// item (`Request.setDone` in MonoplanMacKit): unset fields as nil,
+    /// the state by its variant name.
+    #[test]
+    fn set_lifecycle_frame_from_the_apps_decodes_and_applies() {
+        use crate::commands::DocCmd;
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "tick me").unwrap();
+        for (state, done) in [("Done", true), ("Backlog", false)] {
+            let cmd: DocCmd = serde_json::from_value(serde_json::json!({"Set": {
+                "item_id": id, "text": null, "list": null, "lifecycle": state,
+                "when": null, "duration": null, "deadline": null, "place": null,
+                "coords": null, "address": null, "new_place": false,
+                "star": null, "unstar": false,
+            }}))
+            .unwrap();
+            let DocCmd::Set(args) = cmd else {
+                panic!("not a Set frame")
+            };
+            set(&doc, &[&doc], *args, &mut Vec::new()).unwrap();
+            assert_eq!(doc.get_item(&id).unwrap().is_done(), done);
+        }
+    }
+
     #[test]
     fn set_applies_every_field_in_one_call() {
         let doc = Doc::new().unwrap();

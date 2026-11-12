@@ -2,7 +2,8 @@
 // what got finished in the Personal workspace, newest first, a section
 // per day ticked (`done --json`, spec/cli.md §Items).
 // A window that grows on scroll rather than the whole history: the
-// trailing spinner row asks for more as it comes into sight. Read-only.
+// trailing spinner row asks for more as it comes into sight. A row's
+// checkbox reopens the item; the row opens its sheet.
 
 import MonoplanMacKit
 import SwiftUI
@@ -37,6 +38,7 @@ struct DoneView: View {
                     }
                 }
                 .listStyle(.insetGrouped)
+                .animation(.default, value: model.doneDays)
             }
         }
         .navigationTitle("Done")
