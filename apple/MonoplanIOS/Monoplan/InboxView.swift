@@ -53,15 +53,17 @@ struct ItemRowView: View {
     let item: ItemRow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(item.text)
-            if !tags.isEmpty {
-                Text(tags.joined(separator: "  ·  "))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+        CheckboxRow(state: item.state) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.text)
+                    .itemTextSlot()
+                if !tags.isEmpty {
+                    Text(tags.joined(separator: "  ·  "))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
-        .padding(.vertical, 2)
     }
 
     private var tags: [String] {

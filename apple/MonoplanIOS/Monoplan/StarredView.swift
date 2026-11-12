@@ -55,15 +55,17 @@ struct StarredRowView: View {
     let row: FocusRow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(row.text)
-            if let note {
-                Text(note)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        CheckboxRow(state: row.state) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.text)
+                    .itemTextSlot()
+                if let note {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
-        .padding(.vertical, 2)
     }
 
     private var note: String? {

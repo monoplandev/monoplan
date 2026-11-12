@@ -300,7 +300,9 @@ PNGs for iOS 17 and 18. There is no `Assets.xcassets`; one is only
 needed once the app wants named colours or images of its own.
 
 Four tabs in a system `TabView` (`ContentView.swift`; the floating
-glass pill on iOS 26, the flat bar before). **Inbox** (`InboxView.swift`)
+glass pill on iOS 26, the flat bar before). Item rows outside the
+Agenda lead with a display-only checkbox (`ItemCheckbox.swift`: empty
+while open, ticked when Done, crossed when Cancelled); ticking is next. **Inbox** (`InboxView.swift`)
 is the capture list's Open items in list order, read through the Kit's
 `Request.items` (`item ls --list inbox --json`, decoded by
 `Items.parse`) and refetched on every `Changed` event, coalesced over

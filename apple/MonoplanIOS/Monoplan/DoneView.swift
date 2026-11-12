@@ -83,14 +83,16 @@ struct DoneRowView: View {
     let listName: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(item.text)
-            if let listName {
-                Text(listName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        CheckboxRow(state: item.state) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.text)
+                    .itemTextSlot()
+                if let listName {
+                    Text(listName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
-        .padding(.vertical, 2)
     }
 }
