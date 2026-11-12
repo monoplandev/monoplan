@@ -310,9 +310,10 @@ Focus lens as the daemon resolves it (`Request.focus(all: true)`, i.e.
 `starred --all --json`, `spec/cli.md` §Focus: Home's curated order with
 its cross-workspace entries resolved), each row with its list name and,
 when not Personal's, its workspace; read-only. **Agenda** (`AgendaView.swift`) is the
-daemon's merged agenda (`Request.agenda(days: 14, all: true)`, i.e.
+daemon's merged agenda (`Request.agenda(days: AppModel.agendaDays, all: true)`, i.e.
 `agenda --all --json`, `spec/cli.md` §Items: every open workspace in
-one placement, the Home doc's hidden-from-calendar docs left out), every
+one placement, the Home doc's hidden-from-calendar docs left out; the
+horizon is a century, so the whole future in one fetch, no paging), every
 group as a section: Today, Unscheduled events, then each non-empty
 day, with the row's time, its workspace under the text when it is not
 Personal's, and the duration or overdue / due-today tone; read-only

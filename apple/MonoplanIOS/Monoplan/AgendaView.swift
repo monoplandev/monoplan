@@ -1,5 +1,6 @@
-// The Agenda tab: the daemon's agenda projection (`agenda --days 14
-// --json`, spec/cli.md) as sections: Today first (overdue deadlines
+// The Agenda tab: the daemon's agenda projection (`agenda --json`,
+// spec/cli.md, with a horizon far enough out to be the whole future,
+// `AppModel.agendaDays`) as sections: Today first (overdue deadlines
 // and tasks whose planned day has passed folded in), Unscheduled events, then each non-empty day. Read-only
 // markup; rows do nothing when tapped yet.
 
@@ -49,7 +50,7 @@ struct AgendaView: View {
                 ContentUnavailableView(
                     "Nothing scheduled",
                     systemImage: "calendar",
-                    description: Text("Items with a date or deadline in the next two weeks will show here.")
+                    description: Text("Items with a date or deadline will show here.")
                 )
             }
         }

@@ -29,8 +29,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var inbox: [ItemRow] = []
     /// Why the last Inbox fetch failed, until one succeeds.
     @Published private(set) var inboxError: String?
-    /// The agenda's day groups (`agenda --days 14 --json`), refetched
-    /// on `Changed` beside the Inbox.
+    /// The agenda's day groups (`agenda --days <agendaDays> --json`),
+    /// refetched on `Changed` beside the Inbox.
     @Published private(set) var agenda: [AgendaDay] = []
     @Published private(set) var agendaError: String?
     /// The Starred lens (`starred --all --json`): Home's curated order
@@ -168,11 +168,18 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// `agenda --days 14 --all --json`: every workspace merged, Today
-    /// first, then each non-empty day. Workspaces hidden from the
-    /// calendar (the Home doc's setting) are already left out.
+    /// How far ahead the agenda reaches: far enough to be the whole
+    /// future. There is no recurrence, so dated items are a finite set,
+    /// the builder walks every item whatever the horizon, and the list
+    /// builds its rows lazily; a window would save nothing.
+    static let agendaDays = 36_500
+
+    /// `agenda --days <agendaDays> --all --json`: every workspace
+    /// merged, Today first, then each non-empty day to the end of what
+    /// is dated. Workspaces hidden from the calendar (the Home doc's
+    /// setting) are already left out.
     func refreshAgenda() {
-        fetch(.agenda(days: 14, all: true), what: "agenda", parse: Agenda.parse) { [weak self] days, error in
+        fetch(.agenda(days: Self.agendaDays, all: true), what: "agenda", parse: Agenda.parse) { [weak self] days, error in
             if let days { self?.agenda = days }
             self?.agendaError = error
         }
