@@ -291,6 +291,23 @@ Needs `bun run build:apple` first. DerivedData goes to
 `apple/MonoplanIOS/.build/` (gitignored). A device build needs a
 signing team: set `DEVELOPMENT_TEAM` in the environment or in Xcode.
 
+A second target, `MonoplanWidgetExtension` (2026-11-13; sources in the
+synchronized folder `MonoplanWidget/`, embedded in the app), is the
+home-screen Agenda widget: today's open rows, then what is next, in
+the small, medium and large sizes, display only. It runs no engine
+and links only the Kit. The app leaves it the agenda projection's
+JSON in the container of the app group `group.app.monoplan.ios`
+(`AgendaSnapshot` in the Kit; written by `AppModel.refreshAgenda`
+when the read changed, with a `WidgetCenter` reload, and removed on
+sign-out), so the widget is as fresh as the app's last read: a change
+from another device shows once the app has been opened. That file is
+item text in the clear outside the encrypted store, under iOS data
+protection only. Both targets carry the app group entitlement
+(`Config/*.entitlements`; the widget's `NSExtension` plist is beside
+them), so a device build has to register the group with the team:
+automatic signing in Xcode does it, `xcodebuild` needs
+`-allowProvisioningUpdates`.
+
 The app icon is the same `apple/icon.icon` the Mac bundle uses, added
 to the project as a file reference (`../icon.icon`) in the Resources
 phase with `ASSETCATALOG_COMPILER_APPICON_NAME = icon`; Xcode runs

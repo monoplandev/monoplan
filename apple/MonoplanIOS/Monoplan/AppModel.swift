@@ -8,6 +8,7 @@ import Combine
 import Foundation
 import MonoplanCore
 import MonoplanMacKit
+import WidgetKit
 
 final class AppModel: ObservableObject {
     /// Connected with the engine's current sync status, or why not yet.
@@ -324,9 +325,31 @@ final class AppModel: ObservableObject {
     /// is dated. Workspaces hidden from the calendar (the Home doc's
     /// setting) are already left out.
     func refreshAgenda() {
-        fetch(.agenda(days: Self.agendaDays, all: true), what: "agenda", parse: Agenda.parse) { [weak self] days, error in
-            if let days { self?.agenda = days }
+        fetch(.agenda(days: Self.agendaDays, all: true), what: "agenda", parse: { (json: $0, days: try Agenda.parse($0)) }) { [weak self] read, error in
+            if let read {
+                self?.agenda = read.days
+                Self.leaveWidgetSnapshot(read.json)
+            }
             self?.agendaError = error
+        }
+    }
+
+    /// Leave the home-screen widget what was just read (`AgendaSnapshot`
+    /// in the Kit: the widget runs no engine, it draws this file), and
+    /// have it redraw when that changed. Nothing to do in a build
+    /// without the app group.
+    private static func leaveWidgetSnapshot(_ json: String) {
+        guard let url = AgendaSnapshot.url() else { return }
+        if (try? AgendaSnapshot.write(json, to: url)) == true {
+            WidgetCenter.shared.reloadTimelines(ofKind: AgendaSnapshot.widgetKind)
+        }
+    }
+
+    /// Signed out: the widget's copy of the agenda goes too.
+    private static func clearWidgetSnapshot() {
+        guard let url = AgendaSnapshot.url() else { return }
+        if AgendaSnapshot.clear(at: url) {
+            WidgetCenter.shared.reloadTimelines(ofKind: AgendaSnapshot.widgetKind)
         }
     }
 
@@ -410,6 +433,7 @@ final class AppModel: ObservableObject {
             busy = nil
             hasAccount = location.hasAccount
             if let error { lastError = error.localizedDescription }
+            if !hasAccount { Self.clearWidgetSnapshot() }
         }
     }
 
