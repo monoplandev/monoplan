@@ -145,6 +145,9 @@ public enum Request {
     /// reads carry (`backlog`, `todo`, `in_progress`, `review`, `done`,
     /// `cancelled`); the same frame as `setDone`.
     case setLifecycle(id: String, state: String, workspace: String? = nil)
+    /// `monoplan item set <id> --text <text>`: retitle the item.
+    /// `workspace` as for `items`.
+    case setText(id: String, text: String, workspace: String? = nil)
     /// `monoplan item set <id> --list <list>`: move the item to another
     /// list of the same workspace (appended). `workspace` as for `items`.
     case moveItem(id: String, list: String, workspace: String? = nil)
@@ -229,6 +232,8 @@ public enum Request {
             return Self.set(id, workspace, ["lifecycle": .string(done ? "Done" : "Backlog")])
         case .setLifecycle(let id, let state, let workspace):
             return Self.set(id, workspace, ["lifecycle": .string(Self.lifecycleVariant(state))])
+        case .setText(let id, let text, let workspace):
+            return Self.set(id, workspace, ["text": .string(text)])
         case .moveItem(let id, let list, let workspace):
             return Self.set(id, workspace, ["list": .string(list)])
         case .setStarred(let id, let starred, let workspace):

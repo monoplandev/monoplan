@@ -29,7 +29,10 @@ struct EditBubble: View {
 /// item's title, a tick on the right.
 struct EditorHeader: View {
     let title: String
-    let itemTitle: String
+    /// Nil where the editor shows the item's title itself.
+    var itemTitle: String? = nil
+    /// The tick is off while there is nothing valid to keep.
+    var canFinish = true
     let cancel: () -> Void
     let done: () -> Void
 
@@ -39,14 +42,17 @@ struct EditorHeader: View {
                 button("xmark", label: "Cancel", action: cancel)
                 VStack(spacing: 2) {
                     Text(title).font(.headline)
-                    Text(itemTitle)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    if let itemTitle {
+                        Text(itemTitle)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
                 .frame(maxWidth: .infinity)
                 button("checkmark", label: "Done", action: done)
                     .tint(.accentColor)
+                    .disabled(!canFinish)
             }
             .padding(.horizontal)
             .padding(.top, 20)

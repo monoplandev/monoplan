@@ -5,7 +5,8 @@
 // It comes up as a sheet over whatever list the row was in (half height,
 // draggable to full), as the dialog floats over the web's lists, rather
 // than as a pushed page. The checkbox ticks and reopens the item, the
-// state label beside it opens a menu of the workflow states, the
+// state label beside it opens a menu of the workflow states, a tap on
+// the title hands the sheet to the title editor (`ItemTitleEditor`), the
 // star at the top right stars and unstars it,
 // the list field moves it, the date and place rows hand the sheet to their editors
 // (`ItemDateEditor`, `ItemPlaceEditor`);
@@ -106,6 +107,7 @@ struct ItemView: View {
     @State private var detentBeforeEditing: PresentationDetent = .medium
 
     private enum Editor {
+        case title
         case date
         case place
     }
@@ -130,6 +132,7 @@ struct ItemView: View {
             if let editing, let item {
                 Group {
                     switch editing {
+                    case .title: ItemTitleEditor(ref: ref, item: item, done: endEditing)
                     case .date: ItemDateEditor(ref: ref, item: item, done: endEditing)
                     case .place: ItemPlaceEditor(ref: ref, item: item, done: endEditing)
                     }
@@ -151,7 +154,14 @@ struct ItemView: View {
                     .font(.title2.weight(.semibold))
                     .strikethrough(item?.state == "done")
                     .foregroundStyle(item?.closedAt == nil ? .primary : .secondary)
-                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    // A tap edits the title (a binned item's stays as
+                    // it is, like its other fields).
+                    .onTapGesture {
+                        if let item, item.binnedAt == nil { edit(.title) }
+                    }
+                    .accessibilityHint("Edits the title")
                 if let item {
                     fields(item)
                     Divider()
@@ -416,6 +426,68 @@ struct ItemView: View {
         formatter.maximumUnitCount = 2
         formatter.allowedUnits = [.year, .month, .day, .hour, .minute, .second]
         return formatter.string(from: TimeInterval(max(0, end - start)) / 1000)
+    }
+}
+
+/// The title editor, in place of the item's page for as long as it is
+/// open: the title as a text field with the keyboard up, and the notes
+/// under it, display only for now. Nothing is written until the tick
+/// (or Return: a title is one line, as on the web); the cross drops
+/// what was typed. An empty title cannot be kept.
+struct ItemTitleEditor: View {
+    @EnvironmentObject private var model: AppModel
+    let ref: ItemRef
+    let item: ItemDetail
+    let done: () -> Void
+    @State private var text: String
+    @FocusState private var focused: Bool
+
+    init(ref: ItemRef, item: ItemDetail, done: @escaping () -> Void) {
+        self.ref = ref
+        self.item = item
+        self.done = done
+        _text = State(initialValue: item.text)
+    }
+
+    private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private func commit() {
+        guard !trimmed.isEmpty else { return }
+        if trimmed != item.text { model.setText(ref, text: trimmed) }
+        done()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            EditorHeader(title: "Title", canFinish: !trimmed.isEmpty, cancel: done, done: commit)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    // Wraps like the title it replaces. A wrapping
+                    // field takes Return as a line break, so Return is
+                    // caught as it lands and commits instead.
+                    TextField("Title", text: $text, axis: .vertical)
+                        .font(.title2.weight(.semibold))
+                        .focused($focused)
+                        .submitLabel(.done)
+                        .onChange(of: text) {
+                            guard text.contains(where: \.isNewline) else { return }
+                            text = text.split(whereSeparator: \.isNewline).joined(separator: " ")
+                            commit()
+                        }
+                    Divider()
+                    if item.notes.isEmpty {
+                        Text("Notes").foregroundStyle(.tertiary)
+                    } else {
+                        Text(item.notes).textSelection(.enabled)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollDismissesKeyboard(.interactively)
+        }
+        .onAppear { focused = true }
     }
 }
 

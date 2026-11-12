@@ -154,6 +154,12 @@ final class AppModel: ObservableObject {
         write(.setLifecycle(id: ref.itemId, state: state, workspace: selector(ref.docId)), to: ref)
     }
 
+    /// Retitle an item (`item set --text`), then reread as `setDone`
+    /// does.
+    func setText(_ ref: ItemRef, text: String) {
+        write(.setText(id: ref.itemId, text: text, workspace: selector(ref.docId)), to: ref)
+    }
+
     /// Move an item to another list of its own workspace
     /// (`item set --list`), then reread as `setDone` does.
     func moveItem(_ ref: ItemRef, toList listId: String) {
