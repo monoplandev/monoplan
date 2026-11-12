@@ -46,7 +46,7 @@
   --border-surface: #ebebeb;
   --border-input: #d4d4d4;
   --border-row: #efefef;
-  --row-divider: #f1f1f1;
+  --row-divider: #f5f5f5;
   --link: #2563eb;
   --switch-on: #1d4ed8;
   --switch-off: #d1d1d6;
@@ -93,7 +93,7 @@
   --border-surface: #2e2e2e;
   --border-input: #464646;
   --border-row: #222;
-  --row-divider: #303030;
+  --row-divider: #2a2a2a;
   --link: #60a5fa;
   --switch-on: #2563eb;
   --switch-off: #48484c;
@@ -5875,10 +5875,23 @@ input.task-check:hover {
 }
 
 /* ---------- Done view filter menu (DoneFilterMenu.tsx) ---------- */
-/* The trigger wears the link colour while any check is in effect, so a
+/* The trigger widens to carry a count while any check is in effect, so a
    narrowed Done view is never mistaken for the whole of it. */
 .done-filter-trigger[data-filtered] {
-  color: var(--link);
+  width: auto;
+  min-width: 28px;
+  padding: 0 7px;
+  gap: 4px;
+}
+.done-filter-trigger-icon {
+  display: inline-flex;
+}
+/* How many checks are in effect, beside the glyph; only while filtered. */
+.done-filter-trigger-count {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
 .done-filter-tail {

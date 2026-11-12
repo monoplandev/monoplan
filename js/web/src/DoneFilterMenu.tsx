@@ -1,5 +1,6 @@
 // The Done view's header filter: a funnel-lines trigger opening a menu of
-// two submenus, Workspaces and Lists, each a set of checkboxes. The state
+// two submenus, Workspaces and Lists, each a set of checkboxes. While any
+// check is in effect the trigger also shows how many there are. The state
 // and its semantics live in `doneFilter.ts`; this is the surface.
 //
 // The Lists submenu leads with a text box that narrows the rows. Archived
@@ -46,7 +47,8 @@ export function DoneFilterMenu(props: {
   const guard = createPopoverTooltipGuard();
   const [query, setQuery] = createSignal("");
   let inputEl: HTMLInputElement | undefined;
-  const active = () => props.docCount + props.listCount > 0;
+  const count = () => props.docCount + props.listCount;
+  const active = () => count() > 0;
   const shownLists = createMemo(() =>
     shownDoneLists(props.lists, query().trim(), props.listChecked, matchesName),
   );
@@ -59,8 +61,12 @@ export function DoneFilterMenu(props: {
           tabIndex={-1}
           aria-label={m().workspace.filter}
           data-filtered={active() ? "" : undefined}
-          innerHTML={filterSvg}
-        />
+        >
+          <span class="done-filter-trigger-icon" aria-hidden="true" innerHTML={filterSvg} />
+          <Show when={active()}>
+            <span class="done-filter-trigger-count">{count()}</span>
+          </Show>
+        </Tooltip.Trigger>
         <Tooltip.Portal>
           <Tooltip.Content class="tooltip-content">
             {m().workspace.filter}
