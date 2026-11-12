@@ -4,7 +4,8 @@
 // `item show --json` and refetched on every doc change while shown.
 // It comes up as a sheet over whatever list the row was in (half height,
 // draggable to full), as the dialog floats over the web's lists, rather
-// than as a pushed page. The checkbox ticks and reopens the item and
+// than as a pushed page. The checkbox ticks and reopens the item, the
+// star at the top right stars and unstars it,
 // the list field moves it, the date and place rows hand the sheet to their editors
 // (`ItemDateEditor`, `ItemPlaceEditor`);
 // everything else is display only.
@@ -191,6 +192,12 @@ struct ItemView: View {
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
             }
+            Spacer(minLength: 8)
+            // Only an Open item can be starred (spec/focus.md): a
+            // closed or binned one has no star to show or set.
+            if let item, item.binnedAt == nil, item.closedAt == nil {
+                StarButton(starred: item.starred) { model.setStarred(ref, starred: !item.starred) }
+            }
         }
     }
 
@@ -347,6 +354,31 @@ struct ItemView: View {
         formatter.maximumUnitCount = 2
         formatter.allowedUnits = [.year, .month, .day, .hour, .minute, .second]
         return formatter.string(from: TimeInterval(max(0, end - start)) / 1000)
+    }
+}
+
+/// The star at the top right of an item's page: gold and filled when
+/// the item is starred, an outline when it is not; a tap flips it.
+private struct StarButton: View {
+    let starred: Bool
+    let action: () -> Void
+
+    static let gold = Color(red: 1.0, green: 0.76, blue: 0.03)
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: starred ? "star.fill" : "star")
+                .font(.title3)
+                .foregroundStyle(starred ? AnyShapeStyle(Self.gold) : AnyShapeStyle(.secondary))
+                // A full 44pt target around the glyph, without pushing
+                // the status row taller or the star in from the edge.
+                .frame(width: 44, height: 44, alignment: .trailing)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, -10)
+        .sensoryFeedback(.selection, trigger: starred)
+        .accessibilityLabel(starred ? "Unstar" : "Star")
     }
 }
 

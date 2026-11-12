@@ -220,18 +220,21 @@ pub enum DocCmd {
 /// path can run it against any `Doc`. `open_docs` is every doc the
 /// install has open (`doc` among them), for the reads that are
 /// account-scoped though the command writes one doc: the known places
-/// `item set --place` resolves a label against.
+/// `item set --place` resolves a label against. `lens` is Starred as
+/// seen from `doc`: Home's, so starring an item of another workspace
+/// writes Home.
 pub fn run_doc(
     cmd: DocCmd,
     doc: &Doc,
     open_docs: &[&Doc],
+    lens: &focus::Lens,
     out: &mut dyn Write,
 ) -> anyhow::Result<()> {
     match cmd {
         DocCmd::Add { list, texts } => items::add(doc, &list, &texts, out),
         DocCmd::Ls(a) => items::ls(doc, a, out),
-        DocCmd::Show(a) => items::show(doc, a, out),
-        DocCmd::Set(a) => items::set(doc, open_docs, *a, out),
+        DocCmd::Show(a) => items::show(doc, lens, a, out),
+        DocCmd::Set(a) => items::set(doc, open_docs, lens, *a, out),
         DocCmd::ItemBin(a) => items::bin(doc, a, out),
         DocCmd::Restore(a) => items::restore(doc, a, out),
         DocCmd::Bin(a) => bin::run(doc, a, out),

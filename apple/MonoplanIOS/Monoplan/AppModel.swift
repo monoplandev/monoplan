@@ -154,6 +154,13 @@ final class AppModel: ObservableObject {
         write(.moveItem(id: ref.itemId, list: listId, workspace: selector(ref.docId)), to: ref)
     }
 
+    /// Star an item (to the top of Starred) or unstar it
+    /// (`item set --star 1` / `--unstar`). The ref is the Home doc's
+    /// whichever workspace the item is in; the engine sees to that.
+    func setStarred(_ ref: ItemRef, starred: Bool) {
+        write(.setStarred(id: ref.itemId, starred: starred, workspace: selector(ref.docId)), to: ref)
+    }
+
     /// Set or clear (nil) an item's planned date, with what to do to
     /// its duration in the same call (`item set --when [--duration]`).
     func setWhen(_ ref: ItemRef, when: String?, duration: DurationEdit = .keep) {

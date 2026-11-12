@@ -1391,7 +1391,15 @@ impl Host {
                     .into_iter()
                     .filter_map(|id| self.engine.doc_for(id))
                     .collect();
-                let result = run_doc(cmd, doc, &open_docs, &mut buf);
+                // Starred is Home's alone; a command on another
+                // workspace stars through a foreign ref there.
+                let primary = self.engine.primary_doc_id();
+                let lens = if doc_id == primary {
+                    crate::commands::focus::Lens::home(doc)
+                } else {
+                    crate::commands::focus::Lens::foreign(self.engine.doc(), doc_id)
+                };
+                let result = run_doc(cmd, doc, &open_docs, &lens, &mut buf);
                 // Whatever the command committed is durable before the
                 // client hears back, and on the wire right after.
                 self.engine.persist_replica_state().await?;

@@ -242,7 +242,8 @@ pub struct ShowArgs {
 /// The `ls --json` row plus what only a single item's page needs: its
 /// notes (plain text) and its list's name and emoji. `list_name` is
 /// absent for the reserved lists, which have no `ListMeta` row; clients
-/// label those. `list_icon` is absent when the list has none.
+/// label those. `list_icon` is absent when the list has none. `starred`
+/// is whether the item shows in Starred (`focus::Lens::has`).
 #[derive(Serialize)]
 struct ItemDetailJson<'a> {
     #[serde(flatten)]
@@ -252,11 +253,17 @@ struct ItemDetailJson<'a> {
     list_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     list_icon: Option<String>,
+    starred: bool,
 }
 
 /// One item, whatever its state (open, closed or binned): the `ls` row,
 /// then its notes under a blank line when it has any.
-pub fn show(doc: &Doc, args: ShowArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+pub fn show(
+    doc: &Doc,
+    lens: &super::focus::Lens,
+    args: ShowArgs,
+    out: &mut dyn Write,
+) -> anyhow::Result<()> {
     let Some(item) = doc.get_item(&args.item_id) else {
         anyhow::bail!("item not found: {}", args.item_id);
     };
@@ -269,6 +276,7 @@ pub fn show(doc: &Doc, args: ShowArgs, out: &mut dyn Write) -> anyhow::Result<()
                 notes: &item.notes,
                 list_icon: list.as_ref().and_then(|l| l.icon.clone()),
                 list_name: list.map(|l| l.name),
+                starred: lens.has(&item),
             },
         )?;
     } else {
@@ -455,10 +463,12 @@ pub struct SetArgs {
 
 /// `open_docs` is every open doc, `doc` included: known places are
 /// account-scoped (`spec/place-plan.md` "Reuse"), so `--place gym` in
-/// one workspace finds the Gym geocoded in another.
+/// one workspace finds the Gym geocoded in another. `lens` is where
+/// `--star` / `--unstar` write: Starred is Home's, whatever `doc` is.
 pub fn set(
     doc: &Doc,
     open_docs: &[&Doc],
+    lens: &super::focus::Lens,
     args: SetArgs,
     out: &mut dyn Write,
 ) -> anyhow::Result<()> {
@@ -527,10 +537,10 @@ pub fn set(
             StarPos::Append => usize::MAX,
             StarPos::At(p) => super::focus::one_based_to_index(p),
         };
-        doc.add_to_focus(id, index)?;
+        lens.star(doc, id, index)?;
     }
     if args.unstar {
-        doc.remove_from_focus(id)?;
+        lens.unstar(id)?;
     }
     writeln!(out, "{id}")?;
     Ok(())
@@ -626,6 +636,7 @@ pub fn known_place(suggestions: &[PlaceSuggestion], label: &str) -> Option<Place
 
 #[cfg(test)]
 mod tests {
+    use super::super::focus::Lens;
     use super::*;
 
     fn set_args(item_id: &str) -> SetArgs {
@@ -738,7 +749,7 @@ mod tests {
             item_id: id.clone(),
             json,
         };
-        show(&doc, args(true), &mut out).unwrap();
+        show(&doc, &Lens::home(&doc), args(true), &mut out).unwrap();
         let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(v["id"], id.as_str());
         assert_eq!(v["text"], "draft");
@@ -747,13 +758,13 @@ mod tests {
         assert!(v.get("list_icon").is_none());
         doc.set_list_icon(&list, "🧰").unwrap();
         let mut out = Vec::new();
-        show(&doc, args(true), &mut out).unwrap();
+        show(&doc, &Lens::home(&doc), args(true), &mut out).unwrap();
         let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(v["list_icon"], "🧰");
         assert_eq!(v["when"], "2026-09-12");
 
         let mut out = Vec::new();
-        show(&doc, args(false), &mut out).unwrap();
+        show(&doc, &Lens::home(&doc), args(false), &mut out).unwrap();
         let text = String::from_utf8(out).unwrap();
         assert!(text.ends_with("\n\nline one\nline two\n"), "{text:?}");
 
@@ -762,6 +773,7 @@ mod tests {
         let mut out = Vec::new();
         show(
             &doc,
+            &Lens::home(&doc),
             ShowArgs {
                 item_id: inbox,
                 json: true,
@@ -775,6 +787,7 @@ mod tests {
 
         let err = show(
             &doc,
+            &Lens::home(&doc),
             ShowArgs {
                 item_id: "nope".into(),
                 json: true,
@@ -804,7 +817,7 @@ mod tests {
             let DocCmd::Set(args) = cmd else {
                 panic!("not a Set frame")
             };
-            set(&doc, &[&doc], *args, &mut Vec::new()).unwrap();
+            set(&doc, &[&doc], &Lens::home(&doc), *args, &mut Vec::new()).unwrap();
             assert_eq!(doc.get_item(&id).unwrap().is_done(), done);
         }
         // `Request.moveItem`: the same frame with `list` set instead.
@@ -819,7 +832,7 @@ mod tests {
         let DocCmd::Set(args) = cmd else {
             panic!("not a Set frame")
         };
-        set(&doc, &[&doc], *args, &mut Vec::new()).unwrap();
+        set(&doc, &[&doc], &Lens::home(&doc), *args, &mut Vec::new()).unwrap();
         assert_eq!(doc.get_item(&id).unwrap().list_id, list);
         // `Request.setWhen` / `setDuration`: strings as the flags take
         // them, `-` to clear.
@@ -834,7 +847,7 @@ mod tests {
             let DocCmd::Set(args) = cmd else {
                 panic!("not a Set frame")
             };
-            set(&doc, &[&doc], *args, &mut Vec::new()).unwrap();
+            set(&doc, &[&doc], &Lens::home(&doc), *args, &mut Vec::new()).unwrap();
             let item = doc.get_item(&id).unwrap();
             (item.when, item.duration)
         };
@@ -853,6 +866,59 @@ mod tests {
         assert_eq!(frame(Some("-"), None), (None, None));
     }
 
+    /// `Request.setStarred` in MonoplanMacKit: `star` at slot 1 (the
+    /// top of Starred), or `unstar` true. In a workspace other than Home the ref
+    /// is Home's (`focus::Lens`), and `item show` reports it.
+    #[test]
+    fn star_frame_from_the_apps_writes_home_from_any_workspace() {
+        use crate::commands::DocCmd;
+        let home = Doc::new().unwrap();
+        let work = Doc::new().unwrap();
+        let work_id = monoplan_core::DocId(uuid::Uuid::from_u128(2));
+        let id = work.add_item(LIST_INBOX, "shared task").unwrap();
+        // Already starred, to be starred above.
+        let first = home.add_item(LIST_INBOX, "older star").unwrap();
+        home.add_to_focus(&first, usize::MAX).unwrap();
+        let lens = Lens::foreign(&home, work_id);
+        let starred = |lens: &Lens| {
+            let mut out = Vec::new();
+            let args = ShowArgs {
+                item_id: id.clone(),
+                json: true,
+            };
+            show(&work, lens, args, &mut out).unwrap();
+            let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+            v["starred"].as_bool().unwrap()
+        };
+        assert!(!starred(&lens));
+        let top = serde_json::json!({"At": 1});
+        for (star, unstar, want) in [(Some(top), false, true), (None, true, false)] {
+            let cmd: DocCmd = serde_json::from_value(serde_json::json!({"Set": {
+                "item_id": id, "text": null, "list": null, "lifecycle": null,
+                "when": null, "duration": null, "deadline": null, "place": null,
+                "coords": null, "address": null, "new_place": false,
+                "star": star, "unstar": unstar,
+            }}))
+            .unwrap();
+            let DocCmd::Set(args) = cmd else {
+                panic!("not a Set frame")
+            };
+            set(&work, &[&home, &work], &lens, *args, &mut Vec::new()).unwrap();
+            assert_eq!(starred(&lens), want);
+            let order: Vec<String> = home
+                .focus_entries()
+                .into_iter()
+                .map(|e| e.item_id)
+                .collect();
+            if want {
+                assert_eq!(order, vec![id.clone(), first.clone()]);
+            } else {
+                assert_eq!(order, vec![first.clone()]);
+            }
+            assert!(work.focus_entries().is_empty());
+        }
+    }
+
     #[test]
     fn set_applies_every_field_in_one_call() {
         let doc = Doc::new().unwrap();
@@ -861,6 +927,7 @@ mod tests {
         set(
             &doc,
             &[&doc],
+            &Lens::home(&doc),
             SetArgs {
                 text: Some("final".into()),
                 lifecycle: Some(LifecycleState::InProgress),
@@ -892,6 +959,7 @@ mod tests {
         set(
             &doc,
             &[&doc],
+            &Lens::home(&doc),
             SetArgs {
                 when: Some("-".into()),
                 deadline: Some("-".into()),
@@ -918,6 +986,7 @@ mod tests {
         let err = set(
             &doc,
             &[&doc],
+            &Lens::home(&doc),
             SetArgs {
                 text: Some("changed".into()),
                 duration: Some("soon".into()),
@@ -970,6 +1039,7 @@ mod tests {
         set(
             &home,
             &[&home, &work],
+            &Lens::home(&home),
             SetArgs {
                 place: Some("office".into()),
                 ..set_args(&id)

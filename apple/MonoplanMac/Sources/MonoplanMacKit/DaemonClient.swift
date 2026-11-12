@@ -143,6 +143,12 @@ public enum Request {
     /// `monoplan item set <id> --list <list>`: move the item to another
     /// list of the same workspace (appended). `workspace` as for `items`.
     case moveItem(id: String, list: String, workspace: String? = nil)
+    /// `monoplan item set <id> --star 1` / `--unstar`: put the item at
+    /// the top of Starred (as the web's star does), or take it out. Starred is the Home doc's
+    /// whatever `workspace` the item is in; the engine writes the ref
+    /// there (`focus::Lens`). The frame is pinned on the Rust side by
+    /// `star_frame_from_the_apps_writes_home_from_any_workspace`.
+    case setStarred(id: String, starred: Bool, workspace: String? = nil)
     /// `monoplan item set <id> --when <when|-> [--duration <minutes|->]`:
     /// set the planned date (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`,
     /// floating) or clear it (nil), and in the same call optionally the
@@ -218,6 +224,8 @@ public enum Request {
             return Self.set(id, workspace, ["lifecycle": .string(done ? "Done" : "Backlog")])
         case .moveItem(let id, let list, let workspace):
             return Self.set(id, workspace, ["list": .string(list)])
+        case .setStarred(let id, let starred, let workspace):
+            return Self.set(id, workspace, starred ? ["star": .map(["At": .int(1)])] : ["unstar": .bool(true)])
         case .setWhen(let id, let when, let duration, let workspace):
             // `-` is the CLI's "clear" for both flags.
             var fields: [String: MPValue] = ["when": .string(when ?? "-")]

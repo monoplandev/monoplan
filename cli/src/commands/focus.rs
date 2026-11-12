@@ -65,6 +65,73 @@ pub enum FocusCmd {
     Mv { item_id: String, pos: usize },
 }
 
+/// Starred as seen from the doc a command runs on. The lens lives in
+/// the Home doc alone (`spec/focus.md` "Foreign refs"): an item of any
+/// other workspace is starred by a foreign ref in Home, never by a
+/// write to its own doc. This is the host's half of that rule for
+/// `item set --star` / `--unstar` and `item show`.
+pub struct Lens<'a> {
+    home: &'a Doc,
+    /// The id of the doc the command runs on, when it is not Home.
+    foreign: Option<String>,
+}
+
+impl<'a> Lens<'a> {
+    /// The command runs on Home itself.
+    pub fn home(home: &'a Doc) -> Self {
+        Lens {
+            home,
+            foreign: None,
+        }
+    }
+
+    /// The command runs on `doc_id`, another workspace than `home`.
+    pub fn foreign(home: &'a Doc, doc_id: DocId) -> Self {
+        Lens {
+            home,
+            foreign: Some(doc_id.0.to_string()),
+        }
+    }
+
+    /// Whether `item` (of the command's doc) shows in Starred: Open and
+    /// referenced. A foreign ref outlives its item closing until a
+    /// client prunes it, hence the Open check here.
+    pub fn has(&self, item: &ItemView) -> bool {
+        item.is_open()
+            && self
+                .home
+                .focus_entries()
+                .iter()
+                .any(|e| e.item_id == item.id)
+    }
+
+    /// Star `item_id` of `doc` (the command's doc) at entry `index`
+    /// (`usize::MAX` appends). No-op when already starred or not Open,
+    /// as `Doc::add_to_focus`; an unknown item is an error.
+    pub fn star(&self, doc: &Doc, item_id: &str, index: usize) -> anyhow::Result<()> {
+        let Some(doc_id) = &self.foreign else {
+            self.home.add_to_focus(item_id, index)?;
+            return Ok(());
+        };
+        // Home cannot see the item, so the checks its own
+        // `add_to_focus` makes are made here against the item's doc.
+        let Some(item) = doc.get_item(item_id) else {
+            anyhow::bail!("item not found: {item_id}");
+        };
+        if item.is_open() {
+            self.home.add_foreign_to_focus(doc_id, item_id, index)?;
+        }
+        Ok(())
+    }
+
+    /// Unstar `item_id`, whichever doc it lives in (refs dedup by item
+    /// id across both forms). The item is untouched.
+    pub fn unstar(&self, item_id: &str) -> anyhow::Result<()> {
+        self.home.remove_from_focus(item_id)?;
+        Ok(())
+    }
+}
+
 pub fn run(doc: &Doc, args: FocusArgs, out: &mut dyn Write) -> anyhow::Result<()> {
     match args.cmd {
         None => show(doc, args.json, out),
@@ -329,5 +396,53 @@ mod tests {
         );
         // The single-doc view stays local: Home's own item only.
         assert_eq!(home.focus_view().len(), 1);
+    }
+
+    #[test]
+    fn lens_stars_another_workspaces_item_by_a_foreign_ref_in_home() {
+        let home = Doc::new().unwrap();
+        let work = Doc::new().unwrap();
+        let work_id = DocId(Uuid::from_u128(2));
+        let h = home.add_item(LIST_INBOX, "home item").unwrap();
+        let w = work.add_item(LIST_INBOX, "work item").unwrap();
+        let w_done = work.add_item(LIST_INBOX, "work done").unwrap();
+        work.set_item_lifecycle(&w_done, ItemLifecycle::Done)
+            .unwrap();
+
+        let lens = Lens::foreign(&home, work_id);
+        lens.star(&work, &w, usize::MAX).unwrap();
+        // Closed items cannot be starred; unknown ones are an error.
+        lens.star(&work, &w_done, usize::MAX).unwrap();
+        assert_eq!(
+            lens.star(&work, "nope", usize::MAX)
+                .unwrap_err()
+                .to_string(),
+            "item not found: nope"
+        );
+        Lens::home(&home).star(&home, &h, 0).unwrap();
+
+        // Both refs are Home's, in order; Work's doc was never written.
+        let entries: Vec<(Option<String>, String)> = home
+            .focus_entries()
+            .into_iter()
+            .map(|e| (e.doc_id, e.item_id))
+            .collect();
+        assert_eq!(
+            entries,
+            vec![(None, h.clone()), (Some(work_id.0.to_string()), w.clone())]
+        );
+        assert!(work.focus_entries().is_empty());
+        assert!(lens.has(&work.get_item(&w).unwrap()));
+        assert!(!lens.has(&work.get_item(&w_done).unwrap()));
+        assert!(Lens::home(&home).has(&home.get_item(&h).unwrap()));
+
+        // A foreign ref whose item has since closed no longer counts.
+        work.set_item_lifecycle(&w, ItemLifecycle::Done).unwrap();
+        assert!(!lens.has(&work.get_item(&w).unwrap()));
+        work.set_item_lifecycle(&w, ItemLifecycle::Backlog).unwrap();
+
+        lens.unstar(&w).unwrap();
+        assert!(!lens.has(&work.get_item(&w).unwrap()));
+        assert_eq!(home.focus_entries().len(), 1);
     }
 }

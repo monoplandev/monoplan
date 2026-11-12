@@ -67,6 +67,9 @@ public struct ItemDetail: Decodable, Equatable {
     /// Whole minutes, when set.
     public let duration: Int?
     public let place: PlaceInfo?
+    /// The item shows in Starred: Open, and referenced by the Home
+    /// doc's lens (spec/focus.md), whichever workspace it lives in.
+    public let starred: Bool
 
     public var isTimed: Bool { (when?.count ?? 0) >= 16 }
 

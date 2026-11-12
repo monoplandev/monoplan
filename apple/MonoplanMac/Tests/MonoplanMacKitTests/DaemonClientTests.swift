@@ -65,6 +65,12 @@ final class DaemonClientTests: XCTestCase {
                   case .map(let cmd)? = doc["cmd"], case .map(let args)? = cmd["Set"] else { return nil }
             return args
         }
+        let starred = setArgs(.setStarred(id: "i1", starred: true))
+        XCTAssertEqual(starred?["star"], .map(["At": .int(1)]))
+        XCTAssertEqual(starred?["unstar"], .bool(false))
+        let unstarred = setArgs(.setStarred(id: "i1", starred: false))
+        XCTAssertEqual(unstarred?["star"], .nil)
+        XCTAssertEqual(unstarred?["unstar"], .bool(true))
         let timed = setArgs(.setWhen(id: "i1", when: "2026-09-12T14:00", duration: .minutes(90)))
         XCTAssertEqual(timed?["when"], .string("2026-09-12T14:00"))
         XCTAssertEqual(timed?["duration"], .string("90"))
