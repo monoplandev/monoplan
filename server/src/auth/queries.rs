@@ -251,15 +251,40 @@ pub struct NewDoc {
     pub wrapped_dek_nonce: Vec<u8>,
 }
 
+/// Result of [`create_doc`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CreateDocOutcome {
+    Created(Uuid),
+    /// The account already owns `max_owned` docs (Home included).
+    LimitReached,
+}
+
 /// Mint a doc and its `owner` membership for `account_id` in one
-/// transaction. Returns the new doc id.
-pub async fn create_doc(db: &Db, account_id: Uuid, new: NewDoc) -> anyhow::Result<Uuid> {
+/// transaction, unless the account already owns `max_owned` docs
+/// (active `owner` rows, Home included; joined docs do not count).
+/// The count and the insert share the transaction, so concurrent
+/// creates cannot overshoot the cap.
+pub async fn create_doc(
+    db: &Db,
+    account_id: Uuid,
+    new: NewDoc,
+    max_owned: u32,
+) -> anyhow::Result<CreateDocOutcome> {
     let doc_id = Uuid::now_v7();
     let now = now_millis();
     let acc_bytes = account_id.as_bytes().to_vec();
     let doc_bytes = doc_id.as_bytes().to_vec();
     db.call(move |c| {
         let tx = c.transaction()?;
+        let owned: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM doc_members
+             WHERE account_id = ? AND role = ? AND removed_at IS NULL",
+            params![acc_bytes, MemberRole::Owner.as_str()],
+            |r| r.get(0),
+        )?;
+        if owned >= i64::from(max_owned) {
+            return Ok(CreateDocOutcome::LimitReached);
+        }
         tx.execute(
             "INSERT INTO docs (id, created_at) VALUES (?, ?)",
             params![doc_bytes, now],
@@ -280,10 +305,10 @@ pub async fn create_doc(db: &Db, account_id: Uuid, new: NewDoc) -> anyhow::Resul
             ],
         )?;
         tx.commit()?;
-        Ok(())
+        Ok(CreateDocOutcome::Created(doc_id))
     })
-    .await?;
-    Ok(doc_id)
+    .await
+    .map_err(Into::into)
 }
 
 /// Result of [`delete_doc`].

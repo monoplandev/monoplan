@@ -2242,3 +2242,51 @@ async fn account_deletion_purges_owned_docs_ends_memberships_and_frees_the_email
         get_json_authed(&format!("{base}/api/docs"), &again.device_token).await;
     assert_eq!(docs.memberships.len(), 1);
 }
+
+/// `POST /api/docs` stops at `max_workspaces` owned docs (Home
+/// included) with 403 `workspace_limit`; deleting one frees a slot.
+#[tokio::test]
+async fn create_doc_is_capped_at_max_workspaces() {
+    let acc = signup().await;
+    let max = monoplan_server::config::DEFAULT_MAX_WORKSPACES;
+    assert_eq!(acc.server.state.max_workspaces, max);
+    let docs_url = format!("{}/api/docs", acc.server.base);
+
+    // Home is the first owned doc, so `max - 1` creates fill the cap.
+    let mut last = String::new();
+    for _ in 1..max {
+        last = create_doc(&acc, &acc.dek).await.0;
+    }
+
+    let over = || async {
+        let w = acc.dek.wrap_dek(&Dek::generate()).unwrap();
+        let body = serde_json::to_vec(&CreateDocRequest {
+            wrapped_dek: w.ciphertext,
+            wrapped_dek_nonce: w.nonce.to_vec(),
+        })
+        .unwrap();
+        http()
+            .post(&docs_url)
+            .header(CONTENT_TYPE, JSON)
+            .bearer_auth(&acc.device_token)
+            .body(body)
+            .send()
+            .await
+            .unwrap()
+    };
+    let resp = over().await;
+    assert_eq!(resp.status(), reqwest::StatusCode::FORBIDDEN);
+    let body: serde_json::Value = serde_json::from_slice(&resp.bytes().await.unwrap()).unwrap();
+    assert_eq!(body["code"], "workspace_limit");
+
+    // Nothing was inserted by the refused call.
+    let list: DocsListResponse = get_json_authed(&docs_url, &acc.device_token).await;
+    assert_eq!(list.memberships.len(), max as usize);
+
+    // Deleting an owned doc frees a slot.
+    assert_eq!(
+        delete_status(&format!("{docs_url}/{last}"), &acc.device_token).await,
+        reqwest::StatusCode::OK
+    );
+    assert!(over().await.status().is_success());
+}

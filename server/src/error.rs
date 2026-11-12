@@ -29,6 +29,9 @@ pub enum ApiError {
     #[error("gone: {0}")]
     Gone(String),
 
+    #[error("workspace limit reached: an account can own at most {0} workspaces")]
+    WorkspaceLimit(u32),
+
     #[error("recovery not enrolled")]
     RecoveryNotEnrolled,
 
@@ -53,6 +56,7 @@ impl ApiError {
             Forbidden(_) => (StatusCode::FORBIDDEN, "forbidden"),
             Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             Gone(_) => (StatusCode::GONE, "gone"),
+            WorkspaceLimit(_) => (StatusCode::FORBIDDEN, "workspace_limit"),
             RecoveryNotEnrolled => (StatusCode::FORBIDDEN, "recovery_not_enrolled"),
             RecoverySessionInvalid => (StatusCode::FORBIDDEN, "recovery_session_invalid"),
             Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),

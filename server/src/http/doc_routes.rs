@@ -18,7 +18,9 @@ use monoplan_protocol::{CreateDocRequest, CreateDocResponse, DocsListResponse, M
 
 use super::json::Json;
 use crate::auth::DeviceAuth;
-use crate::auth::queries::{DeleteDocOutcome, NewDoc, create_doc, delete_doc, list_memberships};
+use crate::auth::queries::{
+    CreateDocOutcome, DeleteDocOutcome, NewDoc, create_doc, delete_doc, list_memberships,
+};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use uuid::Uuid;
@@ -51,18 +53,22 @@ pub async fn create(
     if req.wrapped_dek.is_empty() || req.wrapped_dek_nonce.is_empty() {
         return Err(ApiError::BadRequest("wrapped_dek is required".into()));
     }
-    let doc_id = create_doc(
+    let outcome = create_doc(
         &state.db,
         auth.account_id,
         NewDoc {
             wrapped_dek: req.wrapped_dek,
             wrapped_dek_nonce: req.wrapped_dek_nonce,
         },
+        state.max_workspaces,
     )
     .await?;
-    Ok(Json(CreateDocResponse {
-        doc_id: doc_id.to_string(),
-    }))
+    match outcome {
+        CreateDocOutcome::Created(doc_id) => Ok(Json(CreateDocResponse {
+            doc_id: doc_id.to_string(),
+        })),
+        CreateDocOutcome::LimitReached => Err(ApiError::WorkspaceLimit(state.max_workspaces)),
+    }
 }
 
 pub async fn delete(

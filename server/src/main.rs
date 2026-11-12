@@ -65,7 +65,8 @@ async fn main() -> anyhow::Result<()> {
     let mut state = AppState::open(&cfg.db)
         .await?
         .with_secure_cookies(cfg.secure_cookies)
-        .with_snapshot_threshold_blobs(cfg.snapshot_threshold_blobs);
+        .with_snapshot_threshold_blobs(cfg.snapshot_threshold_blobs)
+        .with_max_workspaces(cfg.max_workspaces);
     if let Some(password_hash) = cfg.admin_password_hash.as_deref() {
         state = state.with_admin_password_hash(password_hash)?;
     }

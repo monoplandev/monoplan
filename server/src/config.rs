@@ -12,6 +12,9 @@ use crate::sync::snapshot::SNAPSHOT_THRESHOLD_BLOBS;
 
 const DEFAULT_CONFIG_PATH: &str = "local/server.toml";
 
+/// Default for [`Config::max_workspaces`].
+pub const DEFAULT_MAX_WORKSPACES: u32 = 25;
+
 /// How `Config::load` resolved the config path. The caller is expected
 /// to log this *after* the tracing subscriber is initialized — we can't
 /// log it from `load` itself because `log_level` comes from the config.
@@ -47,6 +50,12 @@ pub struct Config {
     /// When absent, admin routes are not mounted.
     #[serde(default)]
     pub admin_password_hash: Option<String>,
+    /// Most workspaces (docs) one account may own, Home included.
+    /// `POST /api/docs` refuses with 403 `workspace_limit` at the cap.
+    /// Workspaces an account merely joined do not count, and lowering
+    /// the value never touches workspaces that already exist.
+    #[serde(default = "default_max_workspaces")]
+    pub max_workspaces: u32,
 }
 
 impl Default for Config {
@@ -58,6 +67,7 @@ impl Default for Config {
             secure_cookies: default_secure_cookies(),
             snapshot_threshold_blobs: default_snapshot_threshold_blobs(),
             admin_password_hash: None,
+            max_workspaces: default_max_workspaces(),
         }
     }
 }
@@ -93,6 +103,10 @@ fn default_secure_cookies() -> bool {
 
 fn default_snapshot_threshold_blobs() -> u64 {
     SNAPSHOT_THRESHOLD_BLOBS
+}
+
+fn default_max_workspaces() -> u32 {
+    DEFAULT_MAX_WORKSPACES
 }
 
 impl Config {
@@ -132,6 +146,11 @@ impl Config {
         }
         if let Ok(v) = std::env::var("MONOPLAN_ADMIN_PASSWORD_HASH") {
             config.admin_password_hash = (!v.is_empty()).then_some(v);
+        }
+        if let Ok(v) = std::env::var("MONOPLAN_MAX_WORKSPACES") {
+            config.max_workspaces = v
+                .parse()
+                .unwrap_or_else(|e| panic!("invalid MONOPLAN_MAX_WORKSPACES={v:?}: {e}"));
         }
 
         (config, source)

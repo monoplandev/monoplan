@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 
+use crate::config::DEFAULT_MAX_WORKSPACES;
 use crate::db::Db;
 use crate::sync::{SnapshotCoordinator, SyncSessions};
 
@@ -15,6 +16,9 @@ pub struct AppState {
     /// Mirror of `Config::secure_cookies`. Lives on state because the
     /// cookie helpers run from request handlers, not at startup.
     pub secure_cookies: bool,
+    /// Mirror of `Config::max_workspaces`: the most docs one account
+    /// may own, Home included.
+    pub max_workspaces: u32,
     admin_auth: Option<AdminAuth>,
 }
 
@@ -50,6 +54,7 @@ impl AppState {
             sync_sessions: SyncSessions::new(),
             snapshot_coordinator: SnapshotCoordinator::new(),
             secure_cookies: true,
+            max_workspaces: DEFAULT_MAX_WORKSPACES,
             admin_auth: None,
         })
     }
@@ -61,12 +66,18 @@ impl AppState {
             sync_sessions: SyncSessions::new(),
             snapshot_coordinator: SnapshotCoordinator::new(),
             secure_cookies: true,
+            max_workspaces: DEFAULT_MAX_WORKSPACES,
             admin_auth: None,
         })
     }
 
     pub fn with_secure_cookies(mut self, secure: bool) -> Self {
         self.secure_cookies = secure;
+        self
+    }
+
+    pub fn with_max_workspaces(mut self, max: u32) -> Self {
+        self.max_workspaces = max;
         self
     }
 
