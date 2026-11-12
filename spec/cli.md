@@ -50,6 +50,7 @@ The set of workspaces the CLI can open is `secrets.toml`'s `[docs]` table: one e
 ### Items
 - `monoplan item add <text> [--list <list>]` — `<text>` of `-` reads from stdin; one item per non-blank line. New items are created in **Backlog** (the workflow register is omitted).
 - `monoplan item ls [--list <list>] [--done] [--json]` — `--list events` lists events (`spec/events-plan.md`). Rows carry a trailing ` @<when>` (with `+<len>` glued on when a timed `when` has a duration, e.g. `@2026-09-12T14:00+1h30m`, or an all-day one spans more than a day, in whole days: `@2026-09-12+3d`), ` !<deadline>` and ` at:<place label>` when set; `--json` adds `when` / `duration` (minutes) / `deadline` / `place` (`{label, lat?, lon?, address?, ref?}`) fields (omitted when unset)
+- `monoplan item show <item_id> [--json]` (built 2026-11-13) — one item, whatever its state (open, closed or binned): the `ls` row, then its notes under a blank line when it has any. `--json` is one object of the `item ls --json` row shape plus `notes` (plain text, `""` when empty), `list_name` (omitted for the reserved lists, which have no `ListMeta` row) and `list_icon` (the list's emoji, omitted when it has none). An unknown id is an error (`item not found: <id>`). The native clients' item page reads this.
 - `monoplan item set <item_id> <flags…>` — every per-item field as a flag, so one call can set several; at least one is required. Each flag is its own core setter and its own commit, applied in the order below; the first error stops the sequence and the writes before it stand. Duration and coordinates are parsed before anything is written; dates are validated by the core at write time.
   - `--text <text>`
   - `--list <list>` — move (append) to that list; `--list events` makes the item an event, moving it back out makes it a task again, dates intact
@@ -79,7 +80,7 @@ The curated single-tier Focus lens (`spec/focus.md`), named "Starred" on every u
 Marking a starred item `done` removes it from Starred automatically; binning/deleting drops it from the view.
 
 ### Lists
-- `monoplan list ls` — active lists only by default; `--archived` shows only archived lists, `--all` shows both. `--json` output includes `archived_at` (null for active lists).
+- `monoplan list ls` — active lists only by default; `--archived` shows only archived lists, `--all` shows both. `--json` output includes `archived_at` (null for active lists) and `icon` (the list's emoji, omitted when it has none).
 - `monoplan list add <name>`
 - `monoplan list rename <list> <name>`
 - `monoplan list archive <list>` — remove a list from the active workspace without touching its items, ordering, or metadata (`spec/data-model.md` "Archived lists"). Refuses for `inbox` and `events`.

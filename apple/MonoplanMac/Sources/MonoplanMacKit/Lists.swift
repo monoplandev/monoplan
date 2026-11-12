@@ -9,11 +9,13 @@ import Foundation
 public struct ListRow: Decodable, Equatable, Identifiable {
     public let id: String
     public let name: String
+    /// The list's emoji, when the user picked one.
+    public let icon: String?
     /// Unix millis the list was archived; nil while it is active.
     public let archivedAt: Int64?
 
     enum CodingKeys: String, CodingKey {
-        case id, name
+        case id, name, icon
         case archivedAt = "archived_at"
     }
 }

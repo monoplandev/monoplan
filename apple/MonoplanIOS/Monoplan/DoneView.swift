@@ -19,7 +19,9 @@ struct DoneView: View {
                     ForEach(model.doneDays) { day in
                         Section(Self.title(for: day.day)) {
                             ForEach(day.rows) { item in
-                                DoneRowView(item: item, listName: model.listNames[item.listId])
+                                ItemLink(ItemRef(docId: nil, itemId: item.id, title: item.text)) {
+                                    DoneRowView(item: item, listName: model.listNames[item.listId])
+                                }
                             }
                         }
                     }

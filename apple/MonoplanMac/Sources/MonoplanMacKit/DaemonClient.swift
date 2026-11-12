@@ -122,6 +122,9 @@ public enum Request {
     /// (`Items.parse`); Open only unless `done`. `workspace` is the
     /// `-w` selector (a doc id here); nil is the Personal workspace.
     case items(list: String, done: Bool = false, workspace: String? = nil)
+    /// `monoplan item show <id> --json`: one item with its notes and
+    /// list name (`ItemDetail.parse`). `workspace` as for `items`.
+    case item(id: String, workspace: String? = nil)
     /// `monoplan done -n <limit> --json`: the Personal workspace's Done
     /// items across every list, newest first by the moment they entered
     /// Done (`Items.parse`; `Done.days` groups them). A full window
@@ -170,6 +173,10 @@ public enum Request {
         case .items(let list, let done, let workspace):
             return Self.doc(workspace, .map(["Ls": .map([
                 "list": .string(list), "done": .bool(done), "json": .bool(true),
+            ])]))
+        case .item(let id, let workspace):
+            return Self.doc(workspace, .map(["Show": .map([
+                "item_id": .string(id), "json": .bool(true),
             ])]))
         case .done(let limit):
             return .map(["Doc": .map(["cmd": .map(["Done": .map([

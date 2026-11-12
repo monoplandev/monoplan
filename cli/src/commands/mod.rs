@@ -164,6 +164,8 @@ enum ItemCmd {
     Add(items::AddArgs),
     /// List items.
     Ls(items::LsArgs),
+    /// Show one item: its row, then its notes.
+    Show(items::ShowArgs),
     /// Set one or more fields on an item: --text, --list, --lifecycle, --when, --duration, --deadline, --place, --star, --unstar.
     Set(Box<items::SetArgs>),
     /// Send an item to the bin (its workflow state is preserved).
@@ -183,6 +185,7 @@ pub enum DocCmd {
         texts: Vec<String>,
     },
     Ls(items::LsArgs),
+    Show(items::ShowArgs),
     Set(Box<items::SetArgs>),
     ItemBin(items::IdArg),
     Restore(items::IdArg),
@@ -223,6 +226,7 @@ pub fn run_doc(
     match cmd {
         DocCmd::Add { list, texts } => items::add(doc, &list, &texts, out),
         DocCmd::Ls(a) => items::ls(doc, a, out),
+        DocCmd::Show(a) => items::show(doc, a, out),
         DocCmd::Set(a) => items::set(doc, open_docs, *a, out),
         DocCmd::ItemBin(a) => items::bin(doc, a, out),
         DocCmd::Restore(a) => items::restore(doc, a, out),
@@ -359,6 +363,7 @@ impl Cli {
                 list: a.list,
             },
             Cmd::Item(ItemCmd::Ls(a)) => DocCmd::Ls(a),
+            Cmd::Item(ItemCmd::Show(a)) => DocCmd::Show(a),
             Cmd::Item(ItemCmd::Set(a)) => DocCmd::Set(a),
             Cmd::Item(ItemCmd::Bin(a)) => DocCmd::ItemBin(a),
             Cmd::Item(ItemCmd::Restore(a)) => DocCmd::Restore(a),

@@ -1,6 +1,7 @@
 // The Browse tab: the index. A section per open workspace (Personal
 // first, as `Engine.session` orders them), each with its Inbox and then
-// its active lists in the doc's order; a list opens its Open items.
+// its active lists in the doc's order, each led by its emoji (a folder
+// when it has none); a list opens its Open items.
 // Underneath, the pages that are not worth a tab: Done and Debug.
 // The tab keeps its place across tab switches; tapping it again pops to
 // the index (the system's behaviour). Read-only, like the lenses. Archived lists and the reserved `events`
@@ -15,8 +16,25 @@ struct ListRef: Hashable {
     let docId: String
     let listId: String
     let name: String
+    /// The list's emoji, when it has one.
+    var icon: String? = nil
 
     var key: String { "\(docId)/\(listId)" }
+}
+
+/// A list's icon: its emoji when the user picked one, else the built-in
+/// glyph (a tray for the Inbox, a folder for any other list).
+struct ListIcon: View {
+    let listId: String
+    let emoji: String?
+
+    var body: some View {
+        if let emoji, !emoji.isEmpty {
+            Text(emoji)
+        } else {
+            Image(systemName: listId == "inbox" ? "tray" : "folder")
+        }
+    }
 }
 
 struct BrowseView: View {
@@ -32,9 +50,9 @@ struct BrowseView: View {
             List {
                 ForEach(model.session?.docs ?? [], id: \.docId) { doc in
                     Section(doc.name ?? "Personal") {
-                        row(ListRef(docId: doc.docId, listId: "inbox", name: "Inbox"), systemImage: "tray")
+                        row(ListRef(docId: doc.docId, listId: "inbox", name: "Inbox"))
                         ForEach(Lists.active(model.listsByDoc[doc.docId] ?? [])) { list in
-                            row(ListRef(docId: doc.docId, listId: list.id, name: list.name), systemImage: "list.bullet")
+                            row(ListRef(docId: doc.docId, listId: list.id, name: list.name, icon: list.icon))
                         }
                     }
                 }
@@ -62,11 +80,16 @@ struct BrowseView: View {
             .refreshable { model.loadSession() }
             .onAppear { model.loadSession() }
         }
+        .opensItems()
     }
 
-    private func row(_ ref: ListRef, systemImage: String) -> some View {
+    private func row(_ ref: ListRef) -> some View {
         NavigationLink(value: ref) {
-            Label(ref.name, systemImage: systemImage)
+            Label {
+                Text(ref.name)
+            } icon: {
+                ListIcon(listId: ref.listId, emoji: ref.icon)
+            }
         }
     }
 }
@@ -81,18 +104,26 @@ struct ListItemsView: View {
         Group {
             if let items = model.listItems[list.key], !items.isEmpty {
                 List(items) { item in
-                    ItemRowView(item: item)
+                    ItemLink(ItemRef(docId: list.docId, itemId: item.id, title: item.text)) {
+                        ItemRowView(item: item)
+                    }
                 }
                 .listStyle(.plain)
             } else {
                 emptyState
             }
         }
-        .navigationTitle(list.name)
+        .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { model.refreshList(list) }
         .onAppear { model.refreshList(list) }
         .onChange(of: model.changeCount) { model.refreshList(list) }
+    }
+
+    /// The header: the list's emoji, when it has one, before its name.
+    private var title: String {
+        guard let icon = list.icon, !icon.isEmpty else { return list.name }
+        return "\(icon) \(list.name)"
     }
 
     private var emptyState: some View {
@@ -108,7 +139,7 @@ struct ListItemsView: View {
             } else {
                 ContentUnavailableView(
                     "Nothing open",
-                    systemImage: "list.bullet",
+                    systemImage: "folder",
                     description: Text("Open items in \(list.name) show here.")
                 )
             }

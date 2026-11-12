@@ -37,6 +37,12 @@ final class DaemonClientTests: XCTestCase {
             ])])])])
         )
         XCTAssertEqual(
+            Request.item(id: "i1", workspace: "d1").value,
+            .map(["Doc": .map(["workspace": .string("d1"), "cmd": .map(["Show": .map([
+                "item_id": .string("i1"), "json": .bool(true),
+            ])])])])
+        )
+        XCTAssertEqual(
             Request.done(limit: 50).value,
             .map(["Doc": .map(["cmd": .map(["Done": .map([
                 "limit": .int(50), "since": .nil, "json": .bool(true),

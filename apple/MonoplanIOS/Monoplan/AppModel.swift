@@ -59,6 +59,10 @@ final class AppModel: ObservableObject {
     /// its page appears and again on each `Changed` while it is shown.
     @Published private(set) var listItems: [String: [ItemRow]] = [:]
     @Published private(set) var listErrors: [String: String] = [:]
+    /// An opened item (`item show --json`), keyed by `ItemRef.key`,
+    /// fetched when its page appears and on each `Changed` while shown.
+    @Published private(set) var itemDetails: [String: ItemDetail] = [:]
+    @Published private(set) var itemErrors: [String: String] = [:]
     private var refreshQueued = false
     @Published var lastError: String?
     @Published var signingIn = false
@@ -130,8 +134,16 @@ final class AppModel: ObservableObject {
 
     /// The `-w` selector for a doc: nil for the Personal workspace, the
     /// frame every other read already sends.
-    private func selector(_ docId: String) -> String? {
+    private func selector(_ docId: String?) -> String? {
         docId == session?.primaryDocId ? nil : docId
+    }
+
+    /// `item show <id> -w <doc> --json`: one item's page.
+    func refreshItem(_ ref: ItemRef) {
+        fetch(.item(id: ref.itemId, workspace: selector(ref.docId)), what: "item", parse: ItemDetail.parse) { [weak self] item, error in
+            if let item { self?.itemDetails[ref.key] = item }
+            self?.itemErrors[ref.key] = error
+        }
     }
 
     /// The Browse index: every open workspace's lists, one fetch per

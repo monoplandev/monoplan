@@ -17,7 +17,9 @@ struct StarredView: View {
                     emptyState
                 } else {
                     List(model.starred, id: \.id) { row in
-                        StarredRowView(row: row)
+                        ItemLink(ItemRef(docId: row.docId, itemId: row.id, title: row.text)) {
+                            StarredRowView(row: row)
+                        }
                     }
                     .listStyle(.plain)
                 }
@@ -26,6 +28,7 @@ struct StarredView: View {
             .refreshable { model.refreshStarred() }
             .onAppear { model.refreshStarred() }
         }
+        .opensItems()
     }
 
     private var emptyState: some View {

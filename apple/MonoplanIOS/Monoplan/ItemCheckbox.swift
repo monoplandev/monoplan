@@ -9,19 +9,36 @@ struct ItemCheckbox: View {
     /// The workflow state name, as the engine's JSON carries it.
     let state: String
 
+    /// Drawn rather than an SF Symbol, whose corner radius and stroke
+    /// are not ours to set. Sized with the text (Dynamic Type).
+    @ScaledMetric(relativeTo: .body) private var side: CGFloat = 20
+    private static let radius: CGFloat = 0.32
+    private static let border: CGFloat = 1.25
+
     var body: some View {
-        Image(systemName: symbol)
-            .font(.title3)
-            .foregroundStyle(state == "done" ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
-            .accessibilityLabel(label)
+        let shape = RoundedRectangle(cornerRadius: side * Self.radius, style: .continuous)
+        ZStack {
+            if state == "done" {
+                shape.fill(.tint)
+                mark("checkmark").foregroundStyle(.white)
+            } else {
+                shape.strokeBorder(.tertiary, lineWidth: Self.border)
+                if state == "cancelled" {
+                    mark("xmark").foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .frame(width: side, height: side)
+        // A shape has no baseline of its own: sit the box so its middle
+        // is level with the middle of the first line's capitals.
+        .alignmentGuide(.firstTextBaseline) { $0[.bottom] - side * 0.2 }
+        .accessibilityElement()
+        .accessibilityLabel(label)
     }
 
-    private var symbol: String {
-        switch state {
-        case "done": return "checkmark.square.fill"
-        case "cancelled": return "xmark.square"
-        default: return "square"
-        }
+    private func mark(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.system(size: side * 0.55, weight: .semibold))
     }
 
     private var label: String {

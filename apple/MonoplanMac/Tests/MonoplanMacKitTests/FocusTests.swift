@@ -28,9 +28,10 @@ final class FocusTests: XCTestCase {
         [{"id":"work","name":"Work","archived_at":null,"created_at":1},
          {"id":"old","name":"Old","archived_at":5,"created_at":1},
          {"id":"inbox","name":"stray","archived_at":null,"created_at":1},
-         {"id":"home","name":"Home","archived_at":null,"created_at":2}]
+         {"id":"home","name":"Home","icon":"🏠","archived_at":null,"created_at":2}]
         """)
         XCTAssertEqual(Lists.active(rows).map(\.id), ["work", "home"])
+        XCTAssertEqual(Lists.active(rows).map(\.icon), [nil, "🏠"])
     }
 
     func testListNamesBecomeTheMutedNote() throws {

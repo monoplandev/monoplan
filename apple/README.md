@@ -302,7 +302,15 @@ needed once the app wants named colours or images of its own.
 Four tabs in a system `TabView` (`ContentView.swift`; the floating
 glass pill on iOS 26, the flat bar before). Item rows outside the
 Agenda lead with a display-only checkbox (`ItemCheckbox.swift`: empty
-while open, ticked when Done, crossed when Cancelled); ticking is next. **Inbox** (`InboxView.swift`)
+while open, ticked when Done, crossed when Cancelled); ticking is next. Every such row opens the
+item as a sheet over its list (`ItemView.swift`, 2026-11-13; half
+height, draggable to full; `opensItems()` on each tab's stack presents
+it): the web task dialog's
+content in its order (status, title, list, planned date and length,
+deadline when set, place, notes, activity log), read through
+`Request.item(id:workspace:)`, i.e. `item show <id> --json`
+(`spec/cli.md` §Items; decoded by `ItemDetail.parse`), and refetched on
+`Changed` while shown; display only. **Inbox** (`InboxView.swift`)
 is the capture list's Open items in list order, read through the Kit's
 `Request.items` (`item ls --list inbox --json`, decoded by
 `Items.parse`) and refetched on every `Changed` event, coalesced over
@@ -324,7 +332,9 @@ markup, nothing tappable yet. **Browse** (`BrowseView.swift`,
 docs, Personal first), each with its Inbox and then its active lists
 (`Request.lists(workspace:)`, i.e. `list ls --json --all -w <doc id>`,
 one fetch per doc, refetched with the session on every `Changed`;
-`Lists.active` drops archived and reserved rows). A list pushes its Open
+`Lists.active` drops archived and reserved rows). A list shows its
+emoji (`ListIcon`: the `icon` the list JSON carries, a folder without
+one) on its Browse row, in its page's title and on the item sheet. A list pushes its Open
 items (`Request.items(list:workspace:)`), refetched on `Changed` while
 shown; read-only. Under the workspaces sit the two pages that lost their
 tabs, pushed onto Browse's navigation stack. The tab keeps

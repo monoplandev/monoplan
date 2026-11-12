@@ -116,6 +116,9 @@ fn set_archived(
 struct ListJson<'a> {
     id: &'a str,
     name: &'a str,
+    /// The list's emoji, when the user picked one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    icon: Option<&'a str>,
     archived_at: Option<i64>,
     created_at: i64,
 }
@@ -124,6 +127,7 @@ fn list_json(l: &ListView) -> ListJson<'_> {
     ListJson {
         id: &l.id,
         name: &l.name,
+        icon: l.icon.as_deref(),
         archived_at: l.archived_at,
         created_at: l.created_at,
     }

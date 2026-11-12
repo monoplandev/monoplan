@@ -229,6 +229,57 @@ pub fn print_json<T: Serialize>(value: &T) -> anyhow::Result<()> {
     write_json(&mut std::io::stdout().lock(), value)
 }
 
+// ---------- show ----------
+
+#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
+pub struct ShowArgs {
+    pub item_id: String,
+    /// Machine-parseable output.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// The `ls --json` row plus what only a single item's page needs: its
+/// notes (plain text) and its list's name and emoji. `list_name` is
+/// absent for the reserved lists, which have no `ListMeta` row; clients
+/// label those. `list_icon` is absent when the list has none.
+#[derive(Serialize)]
+struct ItemDetailJson<'a> {
+    #[serde(flatten)]
+    item: ItemJson<'a>,
+    notes: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    list_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    list_icon: Option<String>,
+}
+
+/// One item, whatever its state (open, closed or binned): the `ls` row,
+/// then its notes under a blank line when it has any.
+pub fn show(doc: &Doc, args: ShowArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+    let Some(item) = doc.get_item(&args.item_id) else {
+        anyhow::bail!("item not found: {}", args.item_id);
+    };
+    if args.json {
+        let list = doc.get_list_meta(&item.list_id);
+        write_json(
+            out,
+            &ItemDetailJson {
+                item: item_json(&item),
+                notes: &item.notes,
+                list_icon: list.as_ref().and_then(|l| l.icon.clone()),
+                list_name: list.map(|l| l.name),
+            },
+        )?;
+    } else {
+        print_items(out, std::slice::from_ref(&item))?;
+        if !item.notes.is_empty() {
+            writeln!(out, "\n{}", item.notes.trim_end())?;
+        }
+    }
+    Ok(())
+}
+
 // ---------- lifecycle / bin / restore ----------
 
 #[derive(Parser, Debug, Clone, Serialize, Deserialize)]
@@ -539,6 +590,72 @@ mod tests {
             star: None,
             unstar: false,
         }
+    }
+
+    #[test]
+    fn show_prints_one_item_with_its_notes_and_list_name() {
+        let doc = Doc::new().unwrap();
+        let list = doc.add_list("Work").unwrap();
+        let id = doc.add_item(&list, "draft").unwrap();
+        doc.apply_notes_delta(
+            &id,
+            &[monoplan_core::NotesDeltaOp::Insert {
+                insert: "line one\nline two".into(),
+            }],
+        )
+        .unwrap();
+        doc.set_item_when(&id, Some("2026-09-12")).unwrap();
+
+        let mut out = Vec::new();
+        let args = |json| ShowArgs {
+            item_id: id.clone(),
+            json,
+        };
+        show(&doc, args(true), &mut out).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v["id"], id.as_str());
+        assert_eq!(v["text"], "draft");
+        assert_eq!(v["notes"], "line one\nline two");
+        assert_eq!(v["list_name"], "Work");
+        assert!(v.get("list_icon").is_none());
+        doc.set_list_icon(&list, "🧰").unwrap();
+        let mut out = Vec::new();
+        show(&doc, args(true), &mut out).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v["list_icon"], "🧰");
+        assert_eq!(v["when"], "2026-09-12");
+
+        let mut out = Vec::new();
+        show(&doc, args(false), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.ends_with("\n\nline one\nline two\n"), "{text:?}");
+
+        // The Inbox has no ListMeta row: no name on the wire.
+        let inbox = doc.add_item(LIST_INBOX, "loose").unwrap();
+        let mut out = Vec::new();
+        show(
+            &doc,
+            ShowArgs {
+                item_id: inbox,
+                json: true,
+            },
+            &mut out,
+        )
+        .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert!(v.get("list_name").is_none());
+        assert_eq!(v["notes"], "");
+
+        let err = show(
+            &doc,
+            ShowArgs {
+                item_id: "nope".into(),
+                json: true,
+            },
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        assert_eq!(err.to_string(), "item not found: nope");
     }
 
     #[test]

@@ -1,5 +1,6 @@
 // The Inbox tab: the primary capture list (`inbox`, spec/data-model.md)
-// as the engine reports it, Open items in list order. Read-only for now:
+// as the engine reports it, Open items in list order; a row opens the
+// item's sheet (`ItemView`). Read-only for now:
 // capture and lifecycle moves are the next surface.
 
 import MonoplanMacKit
@@ -15,7 +16,9 @@ struct InboxView: View {
                     emptyState
                 } else {
                     List(model.inbox) { item in
-                        ItemRowView(item: item)
+                        ItemLink(ItemRef(docId: nil, itemId: item.id, title: item.text)) {
+                            ItemRowView(item: item)
+                        }
                     }
                     .listStyle(.plain)
                 }
@@ -24,6 +27,7 @@ struct InboxView: View {
             .refreshable { model.refreshInbox() }
             .onAppear { model.refreshInbox() }
         }
+        .opensItems()
     }
 
     private var emptyState: some View {
