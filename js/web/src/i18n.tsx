@@ -450,9 +450,12 @@ export type Messages = {
     /** Beside a timed row later today: how long until it starts,
      *  `span` already formatted ("2h 15m"). */
     startsIn: (span: string) => string;
-    /** Time-lane label of a row of a multi-day span: which day of the
-     *  span this is ("Day 2"). Kept short: the lane is clock-time wide. */
+    /** Sub-line label of a row of a multi-day span: which day of the
+     *  span this is ("Day 2"). */
     spanDay: (day: number) => string;
+    /** Time-lane label on the last day of a timed span: its end clock,
+     *  `time` already formatted. Kept short: the lane is clock-time wide. */
+    spanUntil: (time: string) => string;
   };
   sidePanel: {
     /** Accessible name of the desktop side panel. */
@@ -862,6 +865,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       due: "Vence",
       startsIn: (span) => `en ${span}`,
       spanDay: (day) => `Día ${day}`,
+      spanUntil: (time) => `hasta ${time}`,
     },
     sidePanel: {
       title: "Barra de contexto",
@@ -1250,6 +1254,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       due: "Due",
       startsIn: (span) => `in ${span}`,
       spanDay: (day) => `Day ${day}`,
+      spanUntil: (time) => `until ${time}`,
     },
     sidePanel: {
       title: "Context sidebar",

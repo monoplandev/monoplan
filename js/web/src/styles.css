@@ -591,7 +591,8 @@ body {
 .upcoming-row-time {
   order: 1;
   flex-shrink: 0;
-  width: 4.5em;
+  /* Fits the longest label: a span's end clock, "until 12:30 PM". */
+  width: 6.5em;
   height: var(--upcoming-line);
   display: inline-flex;
   align-items: center;
@@ -601,11 +602,11 @@ body {
   color: var(--text-muted);
 }
 
-/* Spanish's "Todo el día" runs past the 12-hour lane; its clock times are
-   24-hour and short, so the lane only needs the label's width. The
-   document's lang tracks the UI locale (App.tsx). */
+/* Spanish's longest label is a span's end clock, "hasta 23:30" (its
+   clock times are 24-hour). The document's lang tracks the UI locale
+   (App.tsx). */
 .upcoming-row-time:lang(es) {
-  width: 5.5em;
+  width: 6em;
 }
 
 /* Body column: the title on the first line, and under it the place

@@ -51,6 +51,7 @@ import {
 } from "./dnd";
 import {
   addDaysToStamp,
+  endTimeOf,
   formatClockTime,
   formatDeadlineBadge,
   formatDurationShort,
@@ -274,12 +275,22 @@ export function Upcoming(props: {
     return date;
   };
 
+  // The end clock of a timed span, on the row of its last day only.
+  const spanEnd = (r: DayRow): string | null => {
+    if (!r.span || r.span.day !== r.span.total || !r.item.duration) return null;
+    const start = whenTime(r.item.when!);
+    if (!start) return null;
+    return formatClockTime(endTimeOf(start, r.item.duration), locale());
+  };
+
   // Start time only: the agenda is a glance at the day, the end sits on
   // the task surface. An all-day item says so in the lane, and a row
-  // here on its deadline says "Due". A multi-day span counts its days
-  // instead ("Day 2/3"): on the first day too when it is all-day, since
-  // the count says "all day" and more; a timed start keeps its clock. A
-  // task in Overdue by its `when` shows the day it was planned for
+  // here on its deadline says "Due". A multi-day span reads by what the
+  // day holds of it: every day of an all-day span is "All day"; a timed
+  // one shows its start clock on the first day, "All day" on the days it
+  // runs clean through, and its end clock on the last ("until 03:00"). Which
+  // day of the span a row is sits on the sub line (`spanDay`), not here.
+  // A task in Overdue by its `when` shows the day it was planned for
   // ("7 Sept"): Overdue has no day header to carry it.
   const timeLabel = (r: DayRow): string => {
     if (r.placedBy === "deadline") return m().upcoming.due;
@@ -295,11 +306,22 @@ export function Upcoming(props: {
       return info?.label ?? "";
     }
     const start = whenTime(r.item.when!);
-    if (r.span && (!start || r.span.day > 1)) {
-      return m().upcoming.spanDay(r.span.day);
-    }
     if (!start) return m().when.allDay;
+    if (r.span && r.span.day > 1) {
+      const end = spanEnd(r);
+      return end ? m().upcoming.spanUntil(end) : m().when.allDay;
+    }
     return formatClockTime(start, locale());
+  };
+
+  // "Day 2" under the title of every row of a multi-day span, the first
+  // day included. Not in Overdue, where a span is one row, and not on a
+  // timed span under 24 hours: an evening that runs past midnight is one
+  // occasion, and its rows already read "22:00" and "until 03:00".
+  const spanDayLabel = (r: DayRow): string | null => {
+    if (!r.span || r.placedBy !== "when" || r.tone === "overdue") return null;
+    if (whenTime(r.item.when!) && (r.item.duration ?? 0) < 1440) return null;
+    return m().upcoming.spanDay(r.span.day);
   };
 
   // "in 2h 15m" beside a timed row later today: how soon it starts, read
@@ -414,12 +436,27 @@ export function Upcoming(props: {
                           />
                         </Show>
                       </span>
-                      {/* Sub line under the title: the shared workspace a
-                          foreign row comes from (people glyph + name),
-                          then the place. Home rows carry no workspace
-                          marker; the task surface names the list. */}
-                      <Show when={props.workspaceLabel(r.item.docId) || r.item.place}>
+                      {/* Sub line under the title: which day of a
+                          multi-day span this row is ("Day 2"), the shared
+                          workspace a foreign row comes from (people glyph
+                          + name), then the place. Home rows carry no
+                          workspace marker; the task surface names the
+                          list. */}
+                      <Show
+                        when={
+                          spanDayLabel(r) ||
+                          props.workspaceLabel(r.item.docId) ||
+                          r.item.place
+                        }
+                      >
                         <span class="upcoming-row-sub">
+                          <Show when={spanDayLabel(r)}>
+                            {(label) => (
+                              <span class="upcoming-row-place upcoming-row-span">
+                                {label()}
+                              </span>
+                            )}
+                          </Show>
                           <Show when={props.workspaceLabel(r.item.docId)}>
                             {(name) => (
                               <span class="upcoming-row-place upcoming-row-workspace" title={name()}>

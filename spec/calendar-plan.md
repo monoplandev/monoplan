@@ -269,9 +269,15 @@ for the month grid). `groupByDeadline` becomes
   `whenSpan` days (`dayGroups.ts`: whole days beside an all-day start,
   the clock end beside a timed one, so 23:00 + 2h is two days). A row
   placed by such a `when` is repeated on every day of the span from
-  today onward, each copy stamped with its position (`DayRow.span`, "Day
-  2/3" in the time lane; the first day of an all-day span reads the same
-  way, a timed first day keeps its start clock). A span already under
+  today onward, each copy stamped with its position (`DayRow.span`),
+  shown as "Day 2" on the sub line under the title, beside the workspace
+  and place, on every day including the first; the total is not shown, and a timed
+  span shorter than 24 hours (an evening that runs past midnight) carries
+  no day label at all.
+  The time lane reads what the day holds of the span: "All day" on every
+  day of an all-day span; for a timed one the start clock on the first
+  day, "All day" on the days it runs through, and the end clock on the
+  last ("until 03:00", since 2026-11-13). A span already under
   way starts on Today with its count intact. A row placed by its
   deadline, or sent to Overdue, is one row: the deadline is one day. The
   same id therefore appears down several days; the selection order and
