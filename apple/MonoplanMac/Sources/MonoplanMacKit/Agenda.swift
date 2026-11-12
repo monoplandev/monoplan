@@ -70,7 +70,8 @@ public struct MenuLine: Equatable {
     /// Dimmed trailing note: "in 2h 15m", "now", "due today", "overdue".
     public let note: String?
     public let done: Bool
-    /// The row is past its deadline: the note is drawn in red.
+    /// The row is past its deadline, or a task past its planned day:
+    /// the note is drawn in red.
     public let overdue: Bool
 }
 

@@ -2,12 +2,14 @@
 // deadline, bucketed by day (`dayGroups.ts`, grouped by the Workspace so
 // the same rows feed its selection-scoped shortcuts), Today always
 // anchored so the surface reads as "the days ahead" even when nothing is
-// due. Overdue deadlines sit in an Overdue section above Today. A past
-// `when` is over and places nothing here. Rows carry no date pills: the
+// due. Overdue deadlines sit in an Overdue section above Today, and so
+// does an Open task whose `when` has passed; an event's past `when` is
+// over and places nothing here. Rows carry no date pills: the
 // day header is the date, and the task surface shows the rest. The
 // checkbox leads each row, then a fixed-width lane carries the start time
-// ("All day", or "Due" on a deadline); the place is a muted line under
-// the title.
+// ("All day", "Due" on a deadline, or the planned date on a task that
+// slipped into Overdue, which has no day header to say it); the place is
+// a muted line under the title.
 // Rows tick off in place and stay where they are on their `when` day once
 // done or cancelled, muted (tick or cross), so the day still records what
 // happened and what was called off.
@@ -50,9 +52,11 @@ import {
 import {
   addDaysToStamp,
   formatClockTime,
+  formatDeadlineBadge,
   formatDurationShort,
   nowMs,
   todayStamp,
+  whenDay,
   whenStartMs,
   whenTime,
 } from "./format.tsx";
@@ -274,10 +278,22 @@ export function Upcoming(props: {
   // the task surface. An all-day item says so in the lane, and a row
   // here on its deadline says "Due". A multi-day span counts its days
   // instead ("Day 2/3"): on the first day too when it is all-day, since
-  // the count says "all day" and more; a timed start keeps its clock.
+  // the count says "all day" and more; a timed start keeps its clock. A
+  // task in Overdue by its `when` shows the day it was planned for
+  // ("7 Sept"): Overdue has no day header to carry it.
   const timeLabel = (r: DayRow): string => {
     if (r.placedBy === "deadline") return m().upcoming.due;
     if (r.placedBy !== "when") return "";
+    if (r.tone === "overdue") {
+      const info = formatDeadlineBadge(
+        whenDay(r.item.when!),
+        todayStamp(nowMs()),
+        m().deadline,
+        locale(),
+        { pastAsDate: true },
+      );
+      return info?.label ?? "";
+    }
     const start = whenTime(r.item.when!);
     if (r.span && (!start || r.span.day > 1)) {
       return m().upcoming.spanDay(r.span.day);

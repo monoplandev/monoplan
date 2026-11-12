@@ -23,7 +23,7 @@ lands; this file is the design record.
 | Time zone? | **Floating only, now.** A `when` is a wall-clock intent, the devices travel together, and floating keeps sorting a string compare. The grammar reserves an RFC 9557 bracketed IANA suffix (`...T14:00[Europe/London]`) for fixed-instant values. Writers may later default to appending the device zone; untouched values stay floating, so nothing migrates. Note this is the task-manager default, not the calendar default: Apple and Google pin timed events to a zone. |
 | Recurrence? | **Not in the first cut.** No `repeat` field, no hint of one in the doc. Repeat-on-done (clone with the date advanced when ticked Done) is the likely first form; RRULE-style schedules are a calendar app's job. |
 | Does the clock ever write? | **Never.** A past `when` stays where it was set, on its day in the past. Nothing promotes an item to Live, adds it to Focus, or moves it because a day arrived: every device would race to do it. |
-| What does a past `when` mean? | **It went by, like an event** (decided 2026-09-30). `when` is fixed and does not roll over: it is never rewritten, never reinterpreted as "today", never red, and never "slipped". A `when` from a previous day is in the past, and the agenda, which renders no past days, does not select it. A later calendar view, or scrolling this one backwards, is how past days get seen. |
+| What does a past `when` mean? | **On an event, it went by; on a task, it is overdue** (decided 2026-11-13, narrowing 2026-09-30, which let every past `when` go by). `when` is fixed and does not roll over: it is never rewritten and never reinterpreted as "today". An event's `when` from a previous day is in the past, and the agenda, which renders no past days, does not select it. An Open task's is still to do: it was planned and not done, so it sits in Overdue until it is ticked, re-planned or cleared. The 2026-09-30 rule predates the `events` list (2026-10-02): once things that merely happen had a home of their own, a dated item outside it is work, and work that silently left the agenda when its day passed was lost. |
 | Calendar surface | **One lens: Upcoming becomes the agenda** (day sections, both dates). Day granularity only: no hour grid, no overlap. Items carry an optional `duration` (added 2026-09-16, see "Field: `duration`"), which the agenda reads for multi-day all-day spans and the end-time display but never lays out on an hour axis. A month grid and drag-to-reschedule are deferred; the agenda's shape does not change when they land. |
 | Time input | **Typed time picker** (`TimePicker.tsx`): a text input with a suggestion list, 12 or 24-hour cycle from the existing time-format preference. Empty means all-day. See "Task surface and rows". |
 | Export / CalDAV | **Deferred.** Mapping is recorded below. A subscribable feed needs a server that can read items, which the E2EE server cannot; a non-E2EE CalDAV carve-out is a separate conversation. |
@@ -34,20 +34,31 @@ lands; this file is the design record.
 | | before the day | on the day | after the day, still Open |
 |---|---|---|---|
 | `deadline` | upcoming | Today, warning tone | Overdue section, overdue tone (red) |
-| `when` | upcoming | Today, neutral tone | in the past: not on the agenda, never red |
+| `when` on a task | upcoming | Today, neutral tone | Overdue section, overdue tone |
+| `when` on an event | upcoming | Today, neutral tone | in the past: not on the agenda, never red |
 
 An overdue deadline moves the row to an Overdue section above Today
 (decided 2026-09-16, replacing the earlier fold into Today): what is owed
 is visible at a glance and Today reads as today's plan. The section exists
-only while a deadline is overdue.
+only while something is overdue.
 
-A past `when` is not judged and not surfaced (decided 2026-09-30, replacing
-the earlier rule that listed it under Overdue for the user to decide). It
-went by like an event and lives on its day in the past: it does not roll
-over into Today, is not rewritten by the clock, and places nothing on the
-agenda, which renders no past days. An item with a past `when` and a
-deadline is placed by the deadline alone. There is deliberately no
-"slipped" state. Past days become visible when a calendar view that can
+**A task's past `when` is overdue** (decided 2026-11-13). An Open item
+outside the `events` list whose `when` is over (its whole span ended
+before today) joins the Overdue section, placed by its `when`, overdue
+tone, whether or not it has a deadline still ahead: the placement day is
+the earlier of the two dates and that one is behind us. If its deadline is
+overdue as well, the deadline places the row, as for any overdue deadline.
+Nothing is written: the `when` keeps its value, and the row leaves Overdue
+when the task is ticked, cancelled, re-planned, or has its `when` cleared.
+Moving the item into `events` takes it out too, since an event goes by.
+
+**An event's past `when` is not judged and not surfaced** (decided
+2026-09-30 for every item, replacing an earlier rule that listed it under
+Overdue for the user to decide; narrowed to events 2026-11-13). It went by
+and lives on its day in the past: it does not roll over into Today, is not
+rewritten by the clock, and places nothing on the agenda, which renders no
+past days. An event with a past `when` and a deadline is placed by the
+deadline alone. Past days become visible when a calendar view that can
 reach them is built, or when the agenda learns to scroll backwards.
 
 Done and binned items keep both fields untouched, as they keep `deadline`
@@ -234,7 +245,8 @@ for the month grid). `groupByDeadline` becomes
 - **Rows** are Open items with a `deadline` or a `when` of today or later
   (or both), plus closed (Done or Cancelled) items with a `when` of today
   or later (see "`when` survives Done" above). A `when` before today places
-  nothing, closed or not, unless its span (below) still reaches today.
+  nothing on a closed item or an event, unless its span (below) still
+  reaches today; on an Open task it places the row in Overdue.
   Binned items never appear.
 - **Closed rows** place by `when` only, on that day, neutral tone, in the
   same within-day order as everything else, so ticking never moves a row.
@@ -244,8 +256,12 @@ for the month grid). `groupByDeadline` becomes
   completed" toggle if the noise warrants one.
 - **Overdue** (web): any Open row with a `deadline` day before today goes
   to an Overdue section above Today, placed by the deadline whatever `when`
-  says (it is owed now), oldest first, then `created_at`. Rendered only
-  when non-empty. The CLI `agenda` still folds these into Today.
+  says (it is owed now). An Open task (not an event) whose `when` span
+  ended before today goes there too, placed by its `when` (built
+  2026-11-13, `isSlippedTask` in `dayGroups.ts`). Oldest first by the
+  raw string of the placing field, then `created_at`, the two kinds
+  interleaved. Rendered only when non-empty. The CLI `agenda` still folds
+  these into Today.
 - **Placement** of every other row: an item is placed on its *placement
   day*, the earlier of its `when` day and its `deadline` day, ignoring a
   `when` whose span is over.
@@ -263,22 +279,24 @@ for the month grid). `groupByDeadline` becomes
   selected span draws its highlight on one copy only: the one the pointer
   picked, else its earliest day on the page. The CLI `agenda` still places on
   the start day only.
-- **Tone** of a row is the most urgent of: overdue (deadline day < today),
-  today-warning (deadline day = today), neutral.
+- **Tone** of a row is the most urgent of: overdue (deadline day < today,
+  or a task's `when` over), today-warning (deadline day = today), neutral.
 - **Within a day**, order by the raw string of the field that placed the row,
   then `created_at`.
 - **Badges**: the placing date is carried by the day header and not repeated,
   except in Overdue, where the deadline shows its actual date (existing
-  `pastAsDate` rule). The other field, when present, shows as its own badge so a row
+  `pastAsDate` rule). A task there by its `when` shows the planned day
+  in the time lane ("7 Sept") in place of the clock or "All day". The other field, when present, shows as its own badge so a row
   reads "Sat 13 · due 31 Oct". Timed rows show the time as a leading label.
 - Today is always present (after Overdue, when that exists), empty if
   nothing is due, so the surface anchors on the current day.
 - **Nav badge** (web, built): the Upcoming entry carries a count of Open
-  items owed or on today: an overdue deadline, a deadline today, or a `when`
+  items owed or on today: an overdue deadline, a task `when` that is over
+  (overdue tone), a deadline today, or a `when`
   on today, a span covering today included. Its tone is the most urgent counted (overdue red, deadline-today
   warning, otherwise the ordinary faint count); hidden at zero and not gated
   by `showListCounts`. Future days and done rows do not count, and neither
-  does a past `when`: it has gone by like an event (`attentionBadge` in
+  does an event's past `when`: it has gone by (`attentionBadge` in
   `dayGroups.ts`).
 - Not a `Dnd` listbox (day sections, rows of two heights, nothing
   virtualised: the agenda is bounded to overdue plus today onward), but a

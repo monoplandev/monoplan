@@ -1,6 +1,6 @@
 // The Agenda tab: the daemon's agenda projection (`agenda --days 14
 // --json`, spec/cli.md) as sections: Today first (overdue deadlines
-// folded in), Unscheduled events, then each non-empty day. Read-only
+// and tasks whose planned day has passed folded in), Unscheduled events, then each non-empty day. Read-only
 // markup; rows do nothing when tapped yet.
 
 import MonoplanMacKit

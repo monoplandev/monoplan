@@ -34,8 +34,10 @@ CLI, plus a close action. Against that list:
 - **Board.** `events` has no board and no list view, so lanes never see an
   event. Nothing in `board.md` changes for user lists.
 - **Focus.** Unchanged. An event can be pinned like any Open item.
-- **Overdue.** Unchanged. Overdue is overdue deadlines only, and a
-  deadline on an event behaves as it does anywhere.
+- **Overdue.** Unchanged for events: a deadline on an event behaves as
+  it does anywhere, and an event's past `when` never lands there. (Since
+  2026-11-13 a task's past `when` does, `calendar-plan.md` "Semantics";
+  `is_event` is what tells the two apart.)
 - **Close action.** Not needed. Since 2026-09-30 a past `when` is simply
   in the past.
 - **CLI.** `events` is a list id; the existing verbs take it.

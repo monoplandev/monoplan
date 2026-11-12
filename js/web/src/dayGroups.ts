@@ -2,8 +2,10 @@
 // "Agenda"): every Open item carrying a `when` or a `deadline`, placed
 // once on the earlier of the two days. An overdue deadline leads in an
 // Overdue group so what is owed is visible at a glance and Today reads as
-// today's plan; the group only exists while something is overdue. A past
-// `when` has gone by like an event: it places nothing, and an item with
+// today's plan; the group only exists while something is overdue. A
+// task whose `when` has passed while it is still Open joins that group
+// too (it was planned and did not happen, so it is still to do). An
+// event's past `when` has gone by: it places nothing, and an event with
 // only that is not selected for this view. Closed items (done or
 // cancelled) keep their calendar day via `when` only ("happens on"
 // outlives the tick or the cross, "owed by" does not): they keep their
@@ -92,9 +94,19 @@ export interface DayGroupLabels {
 const isUnscheduledEvent = (it: ItemView): boolean =>
   isEvent(it) && isOpen(it) && !it.when && !it.deadline;
 
+/** An Open task (anything outside the events list) whose `when` is over:
+ *  its whole span ended before `today`. Planned, not done, so it is
+ *  overdue. An event in the same position simply went by. */
+export const isSlippedTask = (it: ItemView, today: string): boolean =>
+  isOpen(it) &&
+  !isEvent(it) &&
+  !!it.when &&
+  whenSpan(it.when, it.duration).end < today;
+
 /** Bucket `items` by placement day. `today` is the local `YYYY-MM-DD`
  *  stamp everything is judged against. An Overdue group leads when any
- *  deadline is past, oldest first, then `createdAt`. An Unscheduled
+ *  deadline is past or any Open task's `when` is over, oldest first by
+ *  the date that put the row there, then `createdAt`. An Unscheduled
  *  group follows when any Open event has no date, oldest first. Today is
  *  always present after them, empty if nothing is due, so the surface
  *  anchors on the current day.
@@ -167,7 +179,17 @@ export function groupByDay(
       });
       continue;
     }
-    // Only a past `when`: over, nothing to place.
+    // A task planned for a day that has passed is still to do: Overdue,
+    // by its `when`, even with a deadline still ahead (the earlier of
+    // the two dates places a row, and that one is behind us).
+    if (isSlippedTask(it, today)) {
+      overdueRows.push({
+        raw: it.when!,
+        row: { item: it, placedBy: "when", tone: "overdue" },
+      });
+      continue;
+    }
+    // Only a past `when`, on an event: over, nothing to place.
     if (wDay === null && dDay === null) continue;
     // What is left is today or later: place on the earlier. `when` wins a
     // tie: it is the "happens on" date and renders first.
@@ -242,10 +264,11 @@ export interface AttentionBadge {
 }
 
 /** Count what is owed or on today: Open items with an overdue deadline, a
- *  deadline today, or a `when` on today, a span covering it included.
- *  Tone is the most urgent counted: overdue, else warning (a deadline
- *  today), else neutral. A past `when` has gone by like an event and
- *  counts for nothing; future days are the view's business, not the
+ *  task `when` that is over, a deadline today, or a `when` on today, a
+ *  span covering it included. Tone is the most urgent counted: overdue,
+ *  else warning (a deadline today), else neutral. An event's past `when`
+ *  has gone by and counts for nothing; future days are the view's
+ *  business, not the
  *  badge's. Unscheduled events count too, at neutral tone: the calendar
  *  is the only place they show. */
 export function attentionBadge(
@@ -258,7 +281,7 @@ export function attentionBadge(
   for (const it of items) {
     if (!isOpen(it)) continue;
     const dDay = it.deadline ?? null;
-    if (dDay !== null && dDay < today) {
+    if ((dDay !== null && dDay < today) || isSlippedTask(it, today)) {
       count++;
       overdue = true;
     } else if (dDay === today) {
