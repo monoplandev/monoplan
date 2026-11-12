@@ -119,16 +119,18 @@ public enum Request {
     /// resolved, rows tagged with `doc_id` / `doc_name` / `list_name`.
     case focus(all: Bool = false)
     /// `monoplan item ls --list <list> [--done] --json`: a list's items
-    /// (`Items.parse`); Open only unless `done`.
-    case items(list: String, done: Bool = false)
+    /// (`Items.parse`); Open only unless `done`. `workspace` is the
+    /// `-w` selector (a doc id here); nil is the Personal workspace.
+    case items(list: String, done: Bool = false, workspace: String? = nil)
     /// `monoplan done -n <limit> --json`: the Personal workspace's Done
     /// items across every list, newest first by the moment they entered
     /// Done (`Items.parse`; `Done.days` groups them). A full window
     /// (`limit` rows back) means there may be more.
     case done(limit: Int)
     /// `monoplan list ls --json --all`: id → name, archived included so
-    /// every list id an item can carry resolves.
-    case lists
+    /// every list id an item can carry resolves. `workspace` as for
+    /// `items`.
+    case lists(workspace: String? = nil)
     /// Who is logged in, from the daemon's account row.
     case account
     /// The Home doc's account-wide UI settings (`WorkspaceSettings`;
@@ -165,18 +167,18 @@ public enum Request {
             var args: [String: MPValue] = ["cmd": .nil, "json": .bool(true)]
             if all { args["all"] = .bool(true) }
             return .map(["Doc": .map(["cmd": .map(["Focus": .map(args)])])])
-        case .items(let list, let done):
-            return .map(["Doc": .map(["cmd": .map(["Ls": .map([
+        case .items(let list, let done, let workspace):
+            return Self.doc(workspace, .map(["Ls": .map([
                 "list": .string(list), "done": .bool(done), "json": .bool(true),
-            ])])])])
+            ])]))
         case .done(let limit):
             return .map(["Doc": .map(["cmd": .map(["Done": .map([
                 "limit": .int(Int64(limit)), "since": .nil, "json": .bool(true),
             ])])])])
-        case .lists:
-            return .map(["Doc": .map(["cmd": .map(["Lists": .map(["cmd": .map(["Ls": .map([
+        case .lists(let workspace):
+            return Self.doc(workspace, .map(["Lists": .map(["cmd": .map(["Ls": .map([
                 "json": .bool(true), "archived": .bool(false), "all": .bool(true),
-            ])])])])])])
+            ])])])]))
         case .account:
             return .string("Account")
         case .settings:
@@ -188,6 +190,17 @@ public enum Request {
         case .deleteWorkspace(let docId):
             return .map(["DeleteWorkspace": .map(["workspace": .string(docId)])])
         }
+    }
+}
+
+extension Request {
+    /// `Doc { workspace?, cmd }`. `workspace` absent on the wire means
+    /// the Personal workspace (`serde(default)`), so the frames that
+    /// never name one are unchanged.
+    static func doc(_ workspace: String?, _ cmd: MPValue) -> MPValue {
+        var frame: [String: MPValue] = ["cmd": cmd]
+        if let workspace { frame["workspace"] = .string(workspace) }
+        return .map(["Doc": .map(frame)])
     }
 }
 

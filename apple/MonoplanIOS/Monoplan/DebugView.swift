@@ -1,5 +1,5 @@
-// The Debug tab: everything the engine reports, as a list: sync state,
-// the engine itself, and the session. Buttons for the four things this
+// The Debug page, pushed from Browse (which owns the navigation stack):
+// everything the engine reports, as a list: sync state, the engine itself, and the session. Buttons for the four things this
 // surface can do: sync now, reconnect, sign in, sign out. This was the
 // whole app until the tabs (2026-11-05); account actions stay here
 // until a settings surface takes them.
@@ -13,26 +13,24 @@ struct DebugView: View {
     @State private var showSignIn = false
 
     var body: some View {
-        NavigationStack {
-            List {
-                syncSection
-                engineSection
-                accountSection
-                if let error = model.lastError {
-                    Section("Last error") {
-                        Text(error).foregroundStyle(.red)
-                    }
+        List {
+            syncSection
+            engineSection
+            accountSection
+            if let error = model.lastError {
+                Section("Last error") {
+                    Text(error).foregroundStyle(.red)
                 }
             }
-            .navigationTitle("Debug")
-            .refreshable {
-                model.syncNow()
-                model.loadSession()
-            }
-            .sheet(isPresented: $showSignIn) {
-                SignInView()
-                    .environmentObject(model)
-            }
+        }
+        .navigationTitle("Debug")
+        .refreshable {
+            model.syncNow()
+            model.loadSession()
+        }
+        .sheet(isPresented: $showSignIn) {
+            SignInView()
+                .environmentObject(model)
         }
     }
 

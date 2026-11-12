@@ -218,7 +218,7 @@ final class TrayController: NSObject, NSMenuDelegate {
             }
             self.rebuildMenu()
         }
-        client.send(.lists) { [weak self] result in
+        client.send(.lists()) { [weak self] result in
             guard let self else { return }
             if case .success(.output(let stdout, _)) = result,
                let rows = try? Lists.parse(stdout) {

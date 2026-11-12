@@ -43,10 +43,23 @@ final class DaemonClientTests: XCTestCase {
             ])])])])
         )
         XCTAssertEqual(
-            Request.lists.value,
+            Request.lists().value,
             .map(["Doc": .map(["cmd": .map(["Lists": .map(["cmd": .map(["Ls": .map([
                 "json": .bool(true), "archived": .bool(false), "all": .bool(true),
             ])])])])])])
+        )
+        // A workspace selector rides beside `cmd`, as `-w` does.
+        XCTAssertEqual(
+            Request.lists(workspace: "d1").value,
+            .map(["Doc": .map(["workspace": .string("d1"), "cmd": .map(["Lists": .map(["cmd": .map(["Ls": .map([
+                "json": .bool(true), "archived": .bool(false), "all": .bool(true),
+            ])])])])])])
+        )
+        XCTAssertEqual(
+            Request.items(list: "work", workspace: "d1").value,
+            .map(["Doc": .map(["workspace": .string("d1"), "cmd": .map(["Ls": .map([
+                "list": .string("work"), "done": .bool(false), "json": .bool(true),
+            ])])])])
         )
         XCTAssertEqual(
             Request.agenda(days: 0).value,
@@ -201,7 +214,7 @@ final class DaemonClientTests: XCTestCase {
 
         // An `Err` reply is a failure to the caller, not a dropped engine.
         transport.replies = [.map(["Err": .map(["message": .string("nope")])])]
-        queue.sync { client.send(.lists) { got = $0 } }
+        queue.sync { client.send(.lists()) { got = $0 } }
         settle(queue)
         guard case .failure(let e) = got, case ClientError.daemon("nope") = e else {
             return XCTFail("\(String(describing: got))")

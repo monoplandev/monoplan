@@ -6,9 +6,16 @@
 
 import Foundation
 
-public struct ListRow: Decodable, Equatable {
+public struct ListRow: Decodable, Equatable, Identifiable {
     public let id: String
     public let name: String
+    /// Unix millis the list was archived; nil while it is active.
+    public let archivedAt: Int64?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case archivedAt = "archived_at"
+    }
 }
 
 public enum Lists {
@@ -24,5 +31,12 @@ public enum Lists {
             names[row.id] = row.name
         }
         return names
+    }
+
+    /// The lists a workspace's index shows: active ones, in the doc's
+    /// order, without the reserved ids (which have no `ListMeta` row of
+    /// their own; a row carrying one is not a second Inbox).
+    public static func active(_ rows: [ListRow]) -> [ListRow] {
+        rows.filter { $0.archivedAt == nil && $0.id != "inbox" && $0.id != "events" }
     }
 }

@@ -1,5 +1,6 @@
-// The Done tab: what got finished in the Personal workspace, newest
-// first, a section per day ticked (`done --json`, spec/cli.md §Items).
+// The Done page, pushed from Browse (which owns the navigation stack):
+// what got finished in the Personal workspace, newest first, a section
+// per day ticked (`done --json`, spec/cli.md §Items).
 // A window that grows on scroll rather than the whole history: the
 // trailing spinner row asks for more as it comes into sight. Read-only.
 
@@ -10,37 +11,35 @@ struct DoneView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if model.doneDays.isEmpty {
-                    emptyState
-                } else {
-                    List {
-                        ForEach(model.doneDays) { day in
-                            Section(Self.title(for: day.day)) {
-                                ForEach(day.rows) { item in
-                                    DoneRowView(item: item, listName: model.listNames[item.listId])
-                                }
+        Group {
+            if model.doneDays.isEmpty {
+                emptyState
+            } else {
+                List {
+                    ForEach(model.doneDays) { day in
+                        Section(Self.title(for: day.day)) {
+                            ForEach(day.rows) { item in
+                                DoneRowView(item: item, listName: model.listNames[item.listId])
                             }
                         }
-                        if model.doneHasMore {
-                            // A fresh identity per loaded window, so the
-                            // row asks again if it is still in sight
-                            // after a load.
-                            ProgressView()
-                                .frame(maxWidth: .infinity)
-                                .listRowBackground(Color.clear)
-                                .id(model.doneLoadedLimit)
-                                .onAppear { model.loadMoreDone() }
-                        }
                     }
-                    .listStyle(.insetGrouped)
+                    if model.doneHasMore {
+                        // A fresh identity per loaded window, so the
+                        // row asks again if it is still in sight
+                        // after a load.
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                            .listRowBackground(Color.clear)
+                            .id(model.doneLoadedLimit)
+                            .onAppear { model.loadMoreDone() }
+                    }
                 }
+                .listStyle(.insetGrouped)
             }
-            .navigationTitle("Done")
-            .refreshable { model.refreshDone() }
-            .onAppear { model.refreshDone() }
         }
+        .navigationTitle("Done")
+        .refreshable { model.refreshDone() }
+        .onAppear { model.refreshDone() }
     }
 
     private var emptyState: some View {

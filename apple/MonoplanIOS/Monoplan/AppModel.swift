@@ -52,6 +52,13 @@ final class AppModel: ObservableObject {
     static let donePage = 50
     /// List id → display name, for the rows of lenses that span lists.
     @Published private(set) var listNames = Lists.names(from: [])
+    /// Each open workspace's lists (`list ls --json --all` per doc),
+    /// keyed by doc id: the Browse index. Refetched with the session.
+    @Published private(set) var listsByDoc: [String: [ListRow]] = [:]
+    /// A browsed list's Open items, keyed by `ListRef.key`, fetched when
+    /// its page appears and again on each `Changed` while it is shown.
+    @Published private(set) var listItems: [String: [ItemRow]] = [:]
+    @Published private(set) var listErrors: [String: String] = [:]
     private var refreshQueued = false
     @Published var lastError: String?
     @Published var signingIn = false
@@ -115,6 +122,37 @@ final class AppModel: ObservableObject {
             self?.refreshAgenda()
             self?.refreshStarred()
             self?.refreshDone()
+            // Workspaces come and go (created, shared, closed) and lists
+            // are renamed: the index follows the same events.
+            self?.loadSession()
+        }
+    }
+
+    /// The `-w` selector for a doc: nil for the Personal workspace, the
+    /// frame every other read already sends.
+    private func selector(_ docId: String) -> String? {
+        docId == session?.primaryDocId ? nil : docId
+    }
+
+    /// The Browse index: every open workspace's lists, one fetch per
+    /// doc. Docs no longer open drop out.
+    func refreshLists() {
+        guard let session else { return }
+        let open = Set(session.docs.map(\.docId))
+        listsByDoc = listsByDoc.filter { open.contains($0.key) }
+        for doc in session.docs {
+            fetch(.lists(workspace: selector(doc.docId)), what: "lists", parse: Lists.parse) { [weak self] rows, _ in
+                if let rows { self?.listsByDoc[doc.docId] = rows }
+            }
+        }
+    }
+
+    /// `item ls --list <list> -w <doc> --json`: one browsed list's Open
+    /// items.
+    func refreshList(_ ref: ListRef) {
+        fetch(.items(list: ref.listId, workspace: selector(ref.docId)), what: ref.name, parse: Items.parse) { [weak self] rows, error in
+            if let rows { self?.listItems[ref.key] = rows }
+            self?.listErrors[ref.key] = error
         }
     }
 
@@ -135,7 +173,7 @@ final class AppModel: ObservableObject {
             }
             doneError = error
         }
-        fetch(.lists, what: "lists", parse: Lists.parse) { [weak self] rows, _ in
+        fetch(.lists(), what: "lists", parse: Lists.parse) { [weak self] rows, _ in
             if let rows { self?.listNames = Lists.names(from: rows) }
         }
     }
@@ -219,7 +257,10 @@ final class AppModel: ObservableObject {
         }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = try? engine.session()
-            DispatchQueue.main.async { self?.session = result }
+            DispatchQueue.main.async {
+                self?.session = result
+                self?.refreshLists()
+            }
         }
     }
 

@@ -23,6 +23,16 @@ final class FocusTests: XCTestCase {
         XCTAssertTrue(StarredMenu.lines(from: []).isEmpty)
     }
 
+    func testActiveListsDropArchivedAndReservedRows() throws {
+        let rows = try Lists.parse("""
+        [{"id":"work","name":"Work","archived_at":null,"created_at":1},
+         {"id":"old","name":"Old","archived_at":5,"created_at":1},
+         {"id":"inbox","name":"stray","archived_at":null,"created_at":1},
+         {"id":"home","name":"Home","archived_at":null,"created_at":2}]
+        """)
+        XCTAssertEqual(Lists.active(rows).map(\.id), ["work", "home"])
+    }
+
     func testListNamesBecomeTheMutedNote() throws {
         let names = Lists.names(from: try Lists.parse("""
         [{"id":"work","name":"Work","archived_at":null,"created_at":1},
