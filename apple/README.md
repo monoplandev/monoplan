@@ -315,7 +315,11 @@ content in its order (status, title, list, planned date and length,
 deadline when set, place, notes, activity log), read through
 `Request.item(id:workspace:)`, i.e. `item show <id> --json`
 (`spec/cli.md` §Items; decoded by `ItemDetail.parse`), and refetched on
-`Changed` while shown; its checkbox ticks too, the rest is display only. **Inbox** (`InboxView.swift`)
+`Changed` while shown; its checkbox ticks too, the rest is display only. A place
+with coordinates also shows a small non-interactive MapKit map with a
+pin (`PlaceMapCard`); tapping it opens the spot in Apple Maps under the
+place's label. Tiles come from Apple, so this is a second non-E2EE
+lookup beside Photon (`spec/place-plan.md`). **Inbox** (`InboxView.swift`)
 is the capture list's Open items in list order, read through the Kit's
 `Request.items` (`item ls --list inbox --json`, decoded by
 `Items.parse`) and refetched on every `Changed` event, coalesced over

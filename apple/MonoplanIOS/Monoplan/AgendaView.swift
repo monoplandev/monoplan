@@ -1,8 +1,9 @@
 // The Agenda tab: the daemon's agenda projection (`agenda --json`,
 // spec/cli.md, with a horizon far enough out to be the whole future,
 // `AppModel.agendaDays`) as sections: Today first (overdue deadlines
-// and tasks whose planned day has passed folded in), Unscheduled events, then each non-empty day. Read-only
-// markup; rows do nothing when tapped yet.
+// and tasks whose planned day has passed folded in), Unscheduled
+// events, then each non-empty day. A row opens the item's sheet
+// (`ItemView`); there is no checkbox here yet.
 
 import MonoplanMacKit
 import SwiftUI
@@ -34,6 +35,7 @@ struct AgendaView: View {
             .refreshable { model.refreshAgenda() }
             .onAppear { model.refreshAgenda() }
         }
+        .opensItems()
     }
 
     private var emptyState: some View {
@@ -69,9 +71,19 @@ struct AgendaView: View {
 /// under it when the row is not Personal's, and a trailing note for
 /// the tone (overdue in red, due today in orange) or the duration.
 struct AgendaRowView: View {
+    @Environment(\.openItem) private var openItem
     let row: AgendaRow
 
+    /// The whole row opens the item's sheet.
     var body: some View {
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture { openItem(ItemRef(docId: row.docId, itemId: row.id, title: row.text)) }
+            .accessibilityAddTraits(.isButton)
+    }
+
+    private var content: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             if row.isTimed, let when = row.when {
                 Text(String(when.dropFirst(11).prefix(5)))

@@ -7,6 +7,7 @@
 // than as a pushed page. The checkbox ticks and reopens the item;
 // everything else is display only.
 
+import MapKit
 import MonoplanMacKit
 import SwiftUI
 
@@ -141,9 +142,7 @@ struct ItemView: View {
             if let item {
                 Text(item.binnedAt != nil ? "Binned" : ItemRowView.stateLabel(item.state))
                     .font(.subheadline.weight(.medium))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(.quaternary, in: Capsule())
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -157,15 +156,18 @@ struct ItemView: View {
             if let when = item.when {
                 FieldRow("calendar", text: Self.whenText(when), note: Self.lengthText(item))
             } else {
-                FieldRow("calendar", text: "No date", empty: true)
+                FieldRow("calendar", text: "Date", empty: true)
             }
             if let deadline = item.deadline {
                 FieldRow("timer", text: "Due \(Self.dayText(deadline))")
             }
             if let place = item.place {
-                FieldRow("mappin.and.ellipse", text: place.label, note: place.address)
+                FieldRow("map", text: place.label, note: place.address)
+                if let lat = place.lat, let lon = place.lon {
+                    PlaceMapCard(label: place.label, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
+                }
             } else {
-                FieldRow("mappin.and.ellipse", text: "No place", empty: true)
+                FieldRow("map", text: "Place", empty: true)
             }
         }
     }
@@ -242,6 +244,51 @@ struct ItemView: View {
         formatter.maximumUnitCount = 2
         formatter.allowedUnits = [.year, .month, .day, .hour, .minute, .second]
         return formatter.string(from: TimeInterval(max(0, end - start)) / 1000)
+    }
+}
+
+/// A place with coordinates as a small map: a pin at the spot, a few
+/// streets around it. The map is a picture, not a control (no pan or
+/// zoom, so it never fights the sheet's drag); a tap anywhere on it
+/// opens the spot in Apple Maps under the place's own label. Map tiles
+/// come from Apple, so showing the card tells Apple roughly where the
+/// place is (as the web's lookup tells Komoot what was typed).
+private struct PlaceMapCard: View {
+    @Environment(\.openURL) private var openURL
+    let label: String
+    let coordinate: CLLocationCoordinate2D
+
+    var body: some View {
+        Map(
+            initialPosition: .region(MKCoordinateRegion(
+                center: coordinate, latitudinalMeters: 600, longitudinalMeters: 600)),
+            interactionModes: []
+        ) {
+            Marker(label, coordinate: coordinate)
+        }
+        // A new place is a new map: `initialPosition` is read once.
+        .id("\(coordinate.latitude),\(coordinate.longitude)")
+        .allowsHitTesting(false)
+        .frame(height: 150)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture { if let url = Self.mapsURL(label: label, coordinate: coordinate) { openURL(url) } }
+        .accessibilityElement()
+        .accessibilityLabel("Map of \(label)")
+        .accessibilityHint("Opens in Maps")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    /// Apple Maps at the coordinates, the pin named by our label
+    /// (`ll` places it, `q` names it): our place, not a search for
+    /// Apple's.
+    static func mapsURL(label: String, coordinate: CLLocationCoordinate2D) -> URL? {
+        var parts = URLComponents(string: "https://maps.apple.com/")
+        parts?.queryItems = [
+            URLQueryItem(name: "ll", value: "\(coordinate.latitude),\(coordinate.longitude)"),
+            URLQueryItem(name: "q", value: label),
+        ]
+        return parts?.url
     }
 }
 
