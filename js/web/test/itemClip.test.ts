@@ -4,6 +4,7 @@ import {
   clipFromHtml,
   ITEM_CLIP_TYPE,
   readClip,
+  closedLogLine,
   renderClip,
   toClipItem,
   type ClipItem,
@@ -177,5 +178,29 @@ describe("readClip", () => {
       { text: "F", state: "backlog" },
       { text: "G", state: "backlog", place: { label: "Extra" } },
     ]);
+  });
+});
+
+describe("closedLogLine", () => {
+  // Local-time constructor, so the expectation holds in any timezone.
+  const at = new Date(2026, 2, 7, 12, 34).getTime();
+
+  test("done item is a ticked task line stamped in local ISO time", () => {
+    expect(
+      closedLogLine({ text: "Replace minio with rustfs", state: "done", lifecycleAt: at }),
+    ).toBe("- [x] (2026-03-07 12:34) Replace minio with rustfs");
+  });
+
+  test("cancelled item is marked [-]", () => {
+    expect(closedLogLine({ text: "Old idea", state: "cancelled", lifecycleAt: at })).toBe(
+      "- [-] (2026-03-07 12:34) Old idea",
+    );
+  });
+
+  test("renderClip uses the lines for plain text only", () => {
+    const items: ClipItem[] = [{ text: "A", state: "done" }];
+    const p = renderClip(items, ["- [x] (2026-03-07 12:34) A"]);
+    expect(p.text).toBe("- [x] (2026-03-07 12:34) A");
+    expect(p.html).toContain("<li>A</li>");
   });
 });

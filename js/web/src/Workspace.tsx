@@ -48,7 +48,7 @@ import { FindPalette } from "./FindPalette.tsx";
 import { FindSheet } from "./FindSheet.tsx";
 import type { FindResult } from "./findResults.tsx";
 import { laneLabel, useAppI18n } from "./i18n.tsx";
-import { readClip, toClipItem, writeClip, type ClipItem } from "./itemClip.ts";
+import { closedLogLine, readClip, toClipItem, writeClip, type ClipItem } from "./itemClip.ts";
 import { ListIconPicker } from "./ListIconPicker.tsx";
 import { attentionBadge, groupByDay, type DayGroup } from "./dayGroups.ts";
 import { nowMs, todayStamp } from "./format.tsx";
@@ -1965,7 +1965,8 @@ export function Workspace(props: {
   };
 
   // Copy items to the clipboard, in visible order. Plain text is just the
-  // titles, one per line; the html and custom types carry the full items
+  // titles, one per line (in the Done view, a stamped task line each:
+  // `closedLogLine`); the html and custom types carry the full items
   // so a paste back into Monoplan clones them (itemClip.ts). With the
   // `copy` event's DataTransfer every type is set synchronously; without
   // one (context menu, palette) the async API takes the standard two.
@@ -1988,7 +1989,11 @@ export function Workspace(props: {
       }
     }
     if (inOrder.length === 0) return;
-    writeClip(inOrder.map(toClipItem), dt);
+    writeClip(
+      inOrder.map(toClipItem),
+      dt,
+      view().kind === "done" ? inOrder.map(closedLogLine) : undefined,
+    );
   };
 
   // Cmd/Ctrl+D: duplicate the current selection.

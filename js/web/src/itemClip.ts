@@ -8,6 +8,8 @@
 // - `text/plain`: bare titles, one per line. This is what lands in Slack,
 //   a commit message, or a text editor. Pasted back into Monoplan it still
 //   works through the plain line splitter, just without the details.
+//   A copy from the Done view is a log instead (`closedLogLine`): a
+//   Markdown task line stamped with when the item was closed.
 // - `text/html`: a real `<ul>` of titles, so rich-text apps render a list,
 //   with the full structured payload stashed as a `data-monoplan`
 //   attribute on the wrapper. Every browser writes and reads `text/html`
@@ -139,10 +141,33 @@ export interface ClipPayloads {
   json: string;
 }
 
-export const renderClip = (items: readonly ClipItem[]): ClipPayloads => {
+const pad2 = (n: number): string => String(n).padStart(2, "0");
+
+/** The Done view's plain-text line for a closed item: a Markdown task
+ *  line carrying when it was closed, in local time, e.g.
+ *  `- [x] (2026-03-07 12:34) Replace minio with rustfs`. A cancelled item
+ *  is marked `[-]`, since it was closed without being done. */
+export const closedLogLine = (it: {
+  text: string;
+  state: WorkflowState;
+  lifecycleAt: number;
+}): string => {
+  const d = new Date(it.lifecycleAt);
+  const stamp =
+    `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ` +
+    `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  return `- [${it.state === "cancelled" ? "-" : "x"}] (${stamp}) ${it.text}`;
+};
+
+/** `lines`, when given, replaces the bare titles as the plain-text
+ *  representation (one per item); html and json are unaffected. */
+export const renderClip = (
+  items: readonly ClipItem[],
+  lines?: readonly string[],
+): ClipPayloads => {
   const clip: ItemClip = { v: 1, items: [...items] };
   const json = JSON.stringify(clip);
-  const text = items.map((it) => it.text).join("\n");
+  const text = (lines ?? items.map((it) => it.text)).join("\n");
   const html =
     `<ul data-monoplan="${escapeHtml(json)}">` +
     items.map((it) => `<li>${escapeHtml(it.text)}</li>`).join("") +
@@ -238,8 +263,9 @@ const readClipInner = (dt: DataTransfer): ClipItem[] | null => {
 export const writeClip = (
   items: readonly ClipItem[],
   dt?: DataTransfer | null,
+  lines?: readonly string[],
 ): void => {
-  const p = renderClip(items);
+  const p = renderClip(items, lines);
   if (dt) {
     dt.setData("text/plain", p.text);
     dt.setData("text/html", p.html);
