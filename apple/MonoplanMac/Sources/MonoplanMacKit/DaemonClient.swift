@@ -140,6 +140,11 @@ public enum Request {
     /// `items`. The frame is pinned on the Rust side by
     /// `set_lifecycle_frame_from_the_apps_decodes_and_applies`.
     case setDone(id: String, done: Bool, workspace: String? = nil)
+    /// `monoplan item set <id> --lifecycle <state>`: move the item to
+    /// any of the six workflow states. `state` is the name the JSON
+    /// reads carry (`backlog`, `todo`, `in_progress`, `review`, `done`,
+    /// `cancelled`); the same frame as `setDone`.
+    case setLifecycle(id: String, state: String, workspace: String? = nil)
     /// `monoplan item set <id> --list <list>`: move the item to another
     /// list of the same workspace (appended). `workspace` as for `items`.
     case moveItem(id: String, list: String, workspace: String? = nil)
@@ -222,6 +227,8 @@ public enum Request {
             ])]))
         case .setDone(let id, let done, let workspace):
             return Self.set(id, workspace, ["lifecycle": .string(done ? "Done" : "Backlog")])
+        case .setLifecycle(let id, let state, let workspace):
+            return Self.set(id, workspace, ["lifecycle": .string(Self.lifecycleVariant(state))])
         case .moveItem(let id, let list, let workspace):
             return Self.set(id, workspace, ["list": .string(list)])
         case .setStarred(let id, let starred, let workspace):
@@ -271,6 +278,20 @@ public enum Request {
 }
 
 extension Request {
+    /// A workflow state's JSON name as the frame spells it: the Rust
+    /// `LifecycleState` variant. An unknown name reads as Backlog, as
+    /// it does everywhere else in the apps.
+    static func lifecycleVariant(_ state: String) -> String {
+        switch state {
+        case "todo": return "Todo"
+        case "in_progress": return "InProgress"
+        case "review": return "Review"
+        case "done": return "Done"
+        case "cancelled": return "Cancelled"
+        default: return "Backlog"
+        }
+    }
+
     /// `Doc { Set(SetArgs) }` with `fields` set and every other field
     /// at its unset value (nil, or false for the flags).
     static func set(_ id: String, _ workspace: String?, _ fields: [String: MPValue]) -> MPValue {

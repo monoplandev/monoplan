@@ -148,6 +148,12 @@ final class AppModel: ObservableObject {
         write(.setDone(id: ref.itemId, done: done, workspace: selector(ref.docId)), to: ref)
     }
 
+    /// Move an item to any workflow state, by its JSON name
+    /// (`item set --lifecycle <state>`), then reread as `setDone` does.
+    func setLifecycle(_ ref: ItemRef, state: String) {
+        write(.setLifecycle(id: ref.itemId, state: state, workspace: selector(ref.docId)), to: ref)
+    }
+
     /// Move an item to another list of its own workspace
     /// (`item set --list`), then reread as `setDone` does.
     func moveItem(_ ref: ItemRef, toList listId: String) {

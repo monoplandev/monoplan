@@ -5,6 +5,7 @@
 // It comes up as a sheet over whatever list the row was in (half height,
 // draggable to full), as the dialog floats over the web's lists, rather
 // than as a pushed page. The checkbox ticks and reopens the item, the
+// state label beside it opens a menu of the workflow states, the
 // star at the top right stars and unstars it,
 // the list field moves it, the date and place rows hand the sheet to their editors
 // (`ItemDateEditor`, `ItemPlaceEditor`);
@@ -175,22 +176,33 @@ struct ItemView: View {
         .scrollBounceBehavior(.basedOnSize)
     }
 
-    /// The checkbox with the workflow state beside it, as one status
-    /// control; a binned item says so instead (the bin masks the state).
+    /// The checkbox and the workflow state beside it, drawn as one
+    /// status control with two halves: the checkbox ticks and reopens,
+    /// the label opens a menu of the states (the web dialog's status
+    /// badge). A binned item just says so (the bin masks the state;
+    /// Restore is the way out), and one that has not loaded shows an
+    /// inert box.
     private var status: some View {
         HStack(spacing: 10) {
-            // Ticking a binned item makes no sense (the bin masks the
-            // state; Restore is the way out), and neither does ticking
-            // one that has not loaded.
             if let item, item.binnedAt == nil {
-                ItemCheckButton(ref: ref, state: item.state)
+                HStack(spacing: 0) {
+                    ItemCheckButton(ref: ref, state: item.state)
+                        .padding(.leading, 8)
+                        .padding(.trailing, 8)
+                    stateMenu(item)
+                }
+                .frame(minHeight: 36)
+                .background(.quaternary.opacity(0.5), in: Capsule())
+                // The capsule's own inset, taken back so the checkbox
+                // stays in line with the title under it.
+                .padding(.leading, -8)
             } else {
                 ItemCheckbox(state: item?.state ?? "backlog")
-            }
-            if let item {
-                Text(item.binnedAt != nil ? "Binned" : ItemRowView.stateLabel(item.state))
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
+                if item != nil {
+                    Text("Binned")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer(minLength: 8)
             // Only an Open item can be starred (spec/focus.md): a
@@ -229,6 +241,56 @@ struct ItemView: View {
                 PlaceMapCard(label: place.label, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
             }
         }
+    }
+
+    /// The states a status menu offers. A task gets all six, in ladder
+    /// order. An event (an item of the reserved `events` list) has no
+    /// lanes, so its four open states are one choice, "Event", standing
+    /// in as `backlog` (what reopening writes), beside the two closed
+    /// ones (spec/events-plan.md).
+    private static let taskStates = ["backlog", "todo", "in_progress", "review", "done", "cancelled"]
+    private static let eventStates = ["backlog", "done", "cancelled"]
+
+    private static func isClosed(_ state: String) -> Bool { state == "done" || state == "cancelled" }
+
+    private static func statusLabel(_ state: String, event: Bool) -> String {
+        event && !isClosed(state) ? "Event" : ItemRowView.stateLabel(state)
+    }
+
+    /// The state label as a pull-down menu: the current state ticked, a
+    /// pick moves the item there in one write. On an Open event the
+    /// single open choice is ticked whatever open state the item holds
+    /// underneath, and picking it changes nothing, so a state the item
+    /// brought in from a list is kept.
+    private func stateMenu(_ item: ItemDetail) -> some View {
+        let event = item.listId == "events"
+        let picked = event && !Self.isClosed(item.state) ? "backlog" : item.state
+        return Menu {
+            Picker("Status", selection: Binding(
+                get: { picked },
+                set: { if $0 != picked { model.setLifecycle(ref, state: $0) } }
+            )) {
+                ForEach(event ? Self.eventStates : Self.taskStates, id: \.self) { state in
+                    Text(Self.statusLabel(state, event: event)).tag(state)
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(Self.statusLabel(item.state, event: event))
+                    .font(.subheadline.weight(.medium))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.trailing, 12)
+            // The capsule's full height, and out to its trailing edge.
+            .frame(minHeight: 36)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .sensoryFeedback(.selection, trigger: item.state)
+        .accessibilityLabel("Status")
+        .accessibilityValue(Self.statusLabel(item.state, event: event))
     }
 
     /// The menu's rows: the workspace's lists, plus the item's own list

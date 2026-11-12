@@ -821,6 +821,27 @@ mod tests {
             set(&doc, &[&doc], &Lens::home(&doc), *args, &mut Vec::new()).unwrap();
             assert_eq!(doc.get_item(&id).unwrap().is_done(), done);
         }
+        // `Request.setLifecycle`: every variant name the apps send.
+        for (state, want) in [
+            ("Todo", "todo"),
+            ("InProgress", "in_progress"),
+            ("Review", "review"),
+            ("Cancelled", "cancelled"),
+            ("Backlog", "backlog"),
+        ] {
+            let cmd: DocCmd = serde_json::from_value(serde_json::json!({"Set": {
+                "item_id": id, "text": null, "list": null, "lifecycle": state,
+                "when": null, "duration": null, "deadline": null, "place": null,
+                "coords": null, "address": null, "new_place": false,
+                "star": null, "unstar": false,
+            }}))
+            .unwrap();
+            let DocCmd::Set(args) = cmd else {
+                panic!("not a Set frame")
+            };
+            set(&doc, &[&doc], &Lens::home(&doc), *args, &mut Vec::new()).unwrap();
+            assert_eq!(doc.get_item(&id).unwrap().state.name(), want);
+        }
         // `Request.moveItem`: the same frame with `list` set instead.
         let list = doc.add_list("Work").unwrap();
         let cmd: DocCmd = serde_json::from_value(serde_json::json!({"Set": {
