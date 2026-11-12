@@ -268,7 +268,11 @@ event — so the web store must re-derive `focus_view` on **item events too**
   visible slot (top when nothing is selected). This is the one place the client
   composes `add_item*` + `add_to_focus` rather than mutating Focus in isolation;
   the item lives in the inbox and merely *appears* in Focus, exactly as if it had
-  been captured in Home and then pinned.
+  been captured in Home and then pinned. One exception: a **structured paste**
+  (items copied from Monoplan, `itemClip.ts`) files each clone at the end of the
+  list its source was copied from, when that doc is open and the list still
+  exists, falling back to the inbox otherwise. Plain-text paste always uses the
+  inbox.
 
 ## Sync protocol
 

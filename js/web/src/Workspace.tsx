@@ -1306,14 +1306,21 @@ export function Workspace(props: {
     // `lane` overrides the copied state wholesale (the board's anchor).
     // Written through `target` directly: inside the batch the store has
     // not seen the new ids yet, so the routed layer could not place them.
+    const fillOne = (
+      app: DocApp,
+      id: string,
+      c: ClipItem,
+      lane?: WorkflowState,
+    ): void => {
+      copyItemDetails(app, id, c);
+      const st =
+        lane ?? (structured && !isClosedState(c.state) ? c.state : "backlog");
+      if (st !== "backlog") app.setLifecycle(id, st);
+    };
     const fillFromClip = (ids: string[], lane?: WorkflowState): void => {
       ids.forEach((id, i) => {
         const c = entries[i];
-        if (!c) return;
-        copyItemDetails(pasteApp, id, c);
-        const st =
-          lane ?? (structured && !isClosedState(c.state) ? c.state : "backlog");
-        if (st !== "backlog") pasteApp.setLifecycle(id, st);
+        if (c) fillOne(pasteApp, id, c, lane);
       });
     };
 
@@ -1354,14 +1361,40 @@ export function Workspace(props: {
       .filter((idx) => idx >= 0);
     const insertAt =
       selectedHere.length === 0 ? visible.length : Math.max(...selectedHere) + 1;
-    const ids = pasteApp.withActionBatch(() => {
-      const created =
-        v.kind === "focus"
-          ? captureToFocus(texts, insertAt)
-          : pasteApp.addItemsAt(v.id, texts, insertAt);
-      fillFromClip(created);
-      return created;
-    });
+    let ids: string[];
+    if (v.kind === "focus") {
+      // Focus owns no items. A clone is filed at the end of the list its
+      // source was copied from when that doc is open and the list still
+      // exists, else (and for plain text) in Home's inbox, then pinned as
+      // a contiguous block at the paste slot. One undo step.
+      const entryAt = docs.focusEntryIndex(insertAt);
+      // `state.listOpen` only updates on flush: track each touched list's
+      // append slot locally (keyed by doc too, every doc has an `inbox`).
+      const appendAt: Record<string, number> = {};
+      ids = routed.withActionBatch(() =>
+        entries.map((c, i) => {
+          const app = (c.origin && docs.appOf(c.origin.docId)) || home;
+          const listId =
+            c.origin && app.docId === c.origin.docId
+              ? homeListId(app.docId, c.origin.listId)
+              : "inbox";
+          const key = `${app.docId}/${listId}`;
+          const at = (appendAt[key] ??= app.state.listOpen[listId]?.length ?? 0);
+          appendAt[key] = at + 1;
+          const id = app.addItemAt(listId, c.text, at);
+          fillOne(app, id, c);
+          if (app === home) home.addToFocus(id, entryAt + i);
+          else home.addForeignToFocus(app.docId, id, entryAt + i);
+          return id;
+        }),
+      );
+    } else {
+      ids = pasteApp.withActionBatch(() => {
+        const created = pasteApp.addItemsAt(v.id, texts, insertAt);
+        fillFromClip(created);
+        return created;
+      });
+    }
     if (ids.length === 0) return;
     // Wait for the dnd's source to absorb the new ids — see the
     // matching note in onDuplicate.

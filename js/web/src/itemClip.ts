@@ -22,9 +22,11 @@
 //
 // Paste prefers the custom type, then the html payload, then plain lines.
 // The payload carries the fields that define a clone (title, notes, the
-// dates, duration, workflow state) and nothing that ties an item to where
-// it came from: no id, no list, no timestamps. A structured paste is a
-// duplicate into the target view.
+// dates, duration, workflow state) and no identity: no id, no timestamps.
+// A structured paste is a duplicate into the target view. The one trace of
+// where an item came from is `origin`, its doc and list, which only a
+// paste into a view that owns no items (Starred) reads, to file the clone
+// where its source lives instead of in the inbox.
 import { type ItemView, type Place, type WorkflowState } from "./sync/store.ts";
 
 export const ITEM_CLIP_TYPE = "application/x-monoplan+json";
@@ -42,6 +44,9 @@ export interface ClipItem {
   duration?: number;
   place?: Place;
   state: WorkflowState;
+  /** Where the copied item was filed. A hint, not a reference: the paste
+   *  checks the doc is open and the list still exists before using it. */
+  origin?: { docId: string; listId: string };
 }
 
 /** The serialised payload. Bump `v` on any incompatible shape change so an
@@ -68,6 +73,8 @@ export const toClipItem = (it: ItemView): ClipItem => {
   if (it.when) out.when = it.when;
   if (it.when && it.duration) out.duration = it.duration;
   if (it.place) out.place = { ...it.place };
+  if (it.docId && it.listId)
+    out.origin = { docId: it.docId, listId: it.listId };
   return out;
 };
 
@@ -210,6 +217,16 @@ const parseClip = (raw: string): ClipItem[] | null => {
       item.duration = e.duration;
     const place = parseClipPlace(e.place);
     if (place) item.place = place;
+    const origin = e.origin as Record<string, unknown> | null | undefined;
+    if (
+      typeof origin === "object" &&
+      origin !== null &&
+      typeof origin.docId === "string" &&
+      origin.docId &&
+      typeof origin.listId === "string" &&
+      origin.listId
+    )
+      item.origin = { docId: origin.docId, listId: origin.listId };
     items.push(item);
   }
   return items;

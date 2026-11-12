@@ -30,9 +30,16 @@ const transfer = (types: Record<string, string>): DataTransfer =>
     getData: (t: string) => types[t] ?? "",
   }) as unknown as DataTransfer;
 
+/** Where the `item()` fixture is filed. */
+const origin = { docId: "doc-1", listId: "inbox" };
+
 describe("toClipItem", () => {
   test("carries only the clone-defining fields, dropping empties", () => {
-    expect(toClipItem(item({}))).toEqual({ text: "Buy milk", state: "backlog" });
+    expect(toClipItem(item({}))).toEqual({
+      text: "Buy milk",
+      state: "backlog",
+      origin,
+    });
     expect(
       toClipItem(
         item({
@@ -51,6 +58,14 @@ describe("toClipItem", () => {
       when: "2026-09-30T09:00",
       duration: 30,
       state: "in_progress",
+      origin,
+    });
+  });
+
+  test("carries the list the item is filed in as its origin", () => {
+    expect(toClipItem(item({ docId: "doc-2", listId: "l9" })).origin).toEqual({
+      docId: "doc-2",
+      listId: "l9",
     });
   });
 
@@ -58,6 +73,7 @@ describe("toClipItem", () => {
     expect(toClipItem(item({ duration: 30 }))).toEqual({
       text: "Buy milk",
       state: "backlog",
+      origin,
     });
   });
 
@@ -73,6 +89,7 @@ describe("toClipItem", () => {
       text: "Buy milk",
       state: "backlog",
       place,
+      origin,
     });
   });
 });
@@ -151,6 +168,26 @@ describe("readClip", () => {
       { text: "A", state: "backlog" },
       { text: "B", state: "done", when: "2026-10-02" },
       { text: "C", state: "cancelled" },
+    ]);
+  });
+
+  test("origin round-trips, and a malformed origin is dropped", () => {
+    const raw = JSON.stringify({
+      v: 1,
+      items: [
+        { text: "A", state: "backlog", origin: { docId: "d", listId: "l", x: 1 } },
+        { text: "B", state: "backlog", origin: { docId: "d" } },
+        { text: "C", state: "backlog", origin: { docId: "", listId: "l" } },
+        { text: "D", state: "backlog", origin: "inbox" },
+        { text: "E", state: "backlog", origin: null },
+      ],
+    });
+    expect(readClip(transfer({ [ITEM_CLIP_TYPE]: raw }))).toEqual([
+      { text: "A", state: "backlog", origin: { docId: "d", listId: "l" } },
+      { text: "B", state: "backlog" },
+      { text: "C", state: "backlog" },
+      { text: "D", state: "backlog" },
+      { text: "E", state: "backlog" },
     ]);
   });
 
