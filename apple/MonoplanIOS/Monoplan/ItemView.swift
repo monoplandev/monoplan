@@ -4,8 +4,8 @@
 // `item show --json` and refetched on every doc change while shown.
 // It comes up as a sheet over whatever list the row was in (half height,
 // draggable to full), as the dialog floats over the web's lists, rather
-// than as a pushed page. The checkbox ticks and reopens the item;
-// everything else is display only.
+// than as a pushed page. The checkbox ticks and reopens the item and
+// the list field moves it; everything else is display only.
 
 import MapKit
 import MonoplanMacKit
@@ -152,7 +152,7 @@ struct ItemView: View {
     /// empty: they are where setting one will happen.
     private func fields(_ item: ItemDetail) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            FieldRow(text: item.listLabel) { ListIcon(listId: item.listId, emoji: item.listIcon) }
+            listField(item)
             if let when = item.when {
                 FieldRow("calendar", text: Self.whenText(when), note: Self.lengthText(item))
             } else {
@@ -170,6 +170,62 @@ struct ItemView: View {
                 FieldRow("map", text: "Place", empty: true)
             }
         }
+    }
+
+    private static let fieldInset: CGFloat = 12
+
+    /// The menu's rows: the workspace's lists, plus the item's own list
+    /// when it is not among them (archived, or the calendar's), so the
+    /// picker always has a row to tick.
+    private func listOptions(_ item: ItemDetail) -> [ListRef] {
+        let lists = model.lists(inDoc: ref.docId)
+        if lists.contains(where: { $0.listId == item.listId }) { return lists }
+        let own = ListRef(docId: ref.docId ?? "", listId: item.listId, name: item.listLabel, icon: item.listIcon)
+        return lists + [own]
+    }
+
+    /// The item's list, as a pull-down menu of the workspace's lists
+    /// (the web dialog's list picker): the current one ticked, a pick
+    /// moves the item there. Lists of other workspaces are not offered:
+    /// the engine has no cross-doc move yet. A binned item stays put.
+    private func listField(_ item: ItemDetail) -> some View {
+        Menu {
+            // A `Picker` in a menu is the system's single-choice menu:
+            // it draws the tick for the current list itself, which
+            // leaves each row's image slot for the list's icon.
+            Picker("List", selection: Binding(
+                get: { item.listId },
+                set: { if $0 != item.listId { model.moveItem(ref, toList: $0) } }
+            )) {
+                ForEach(listOptions(item), id: \.listId) { list in
+                    Label {
+                        Text(list.name)
+                    } icon: {
+                        ListMenuIcon.image(listId: list.listId, emoji: list.icon)
+                    }
+                    .tag(list.listId)
+                }
+            }
+        } label: {
+            // Drawn as a field: full width, a faint fill, the picker
+            // chevrons at its trailing edge, and a full-height (44pt)
+            // tap target. Outset by its own padding so its icon and
+            // text stay in line with the plain rows under it.
+            HStack(spacing: 6) {
+                FieldRow(text: item.listLabel) { ListIcon(listId: item.listId, emoji: item.listIcon) }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, Self.fieldInset)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(item.binnedAt != nil)
+        .padding(.horizontal, -Self.fieldInset)
     }
 
     @ViewBuilder
@@ -244,6 +300,24 @@ struct ItemView: View {
         formatter.maximumUnitCount = 2
         formatter.allowedUnits = [.year, .month, .day, .hour, .minute, .second]
         return formatter.string(from: TimeInterval(max(0, end - start)) / 1000)
+    }
+}
+
+/// A list's icon for a menu row. Menus take images only, so an emoji is
+/// drawn into one (kept in its own colours); a list without an emoji
+/// gets the same built-in glyphs as `ListIcon`.
+private enum ListMenuIcon {
+    static func image(listId: String, emoji: String?) -> Image {
+        guard let emoji, !emoji.isEmpty else {
+            return Image(systemName: listId == "inbox" ? "tray" : "folder")
+        }
+        let font = UIFont.systemFont(ofSize: 17)
+        let text = emoji as NSString
+        let size = text.size(withAttributes: [.font: font])
+        let drawn = UIGraphicsImageRenderer(size: size).image { _ in
+            text.draw(at: .zero, withAttributes: [.font: font])
+        }
+        return Image(uiImage: drawn.withRenderingMode(.alwaysOriginal))
     }
 }
 

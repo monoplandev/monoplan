@@ -52,6 +52,15 @@ final class DaemonClientTests: XCTestCase {
             ])])])])
         )
         XCTAssertEqual(
+            Request.moveItem(id: "i1", list: "l2", workspace: "d1").value,
+            .map(["Doc": .map(["workspace": .string("d1"), "cmd": .map(["Set": .map([
+                "item_id": .string("i1"), "list": .string("l2"), "lifecycle": .nil,
+                "text": .nil, "when": .nil, "duration": .nil, "deadline": .nil,
+                "place": .nil, "coords": .nil, "address": .nil, "new_place": .bool(false),
+                "star": .nil, "unstar": .bool(false),
+            ])])])])
+        )
+        XCTAssertEqual(
             Request.done(limit: 50).value,
             .map(["Doc": .map(["cmd": .map(["Done": .map([
                 "limit": .int(50), "since": .nil, "json": .bool(true),

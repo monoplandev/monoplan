@@ -131,6 +131,9 @@ public enum Request {
     /// `items`. The frame is pinned on the Rust side by
     /// `set_lifecycle_frame_from_the_apps_decodes_and_applies`.
     case setDone(id: String, done: Bool, workspace: String? = nil)
+    /// `monoplan item set <id> --list <list>`: move the item to another
+    /// list of the same workspace (appended). `workspace` as for `items`.
+    case moveItem(id: String, list: String, workspace: String? = nil)
     /// `monoplan done -n <limit> --json`: the Personal workspace's Done
     /// items across every list, newest first by the moment they entered
     /// Done (`Items.parse`; `Done.days` groups them). A full window
@@ -185,12 +188,9 @@ public enum Request {
                 "item_id": .string(id), "json": .bool(true),
             ])]))
         case .setDone(let id, let done, let workspace):
-            return Self.doc(workspace, .map(["Set": .map([
-                "item_id": .string(id), "lifecycle": .string(done ? "Done" : "Backlog"),
-                "text": .nil, "list": .nil, "when": .nil, "duration": .nil, "deadline": .nil,
-                "place": .nil, "coords": .nil, "address": .nil, "new_place": .bool(false),
-                "star": .nil, "unstar": .bool(false),
-            ])]))
+            return Self.set(id, workspace, ["lifecycle": .string(done ? "Done" : "Backlog")])
+        case .moveItem(let id, let list, let workspace):
+            return Self.set(id, workspace, ["list": .string(list)])
         case .done(let limit):
             return .map(["Doc": .map(["cmd": .map(["Done": .map([
                 "limit": .int(Int64(limit)), "since": .nil, "json": .bool(true),
@@ -214,6 +214,19 @@ public enum Request {
 }
 
 extension Request {
+    /// `Doc { Set(SetArgs) }` with `fields` set and every other field
+    /// at its unset value (nil, or false for the flags).
+    static func set(_ id: String, _ workspace: String?, _ fields: [String: MPValue]) -> MPValue {
+        var args: [String: MPValue] = [
+            "item_id": .string(id),
+            "text": .nil, "list": .nil, "lifecycle": .nil, "when": .nil, "duration": .nil,
+            "deadline": .nil, "place": .nil, "coords": .nil, "address": .nil,
+            "new_place": .bool(false), "star": .nil, "unstar": .bool(false),
+        ]
+        args.merge(fields) { _, new in new }
+        return doc(workspace, .map(["Set": .map(args)]))
+    }
+
     /// `Doc { workspace?, cmd }`. `workspace` absent on the wire means
     /// the Personal workspace (`serde(default)`), so the frames that
     /// never name one are unchanged.

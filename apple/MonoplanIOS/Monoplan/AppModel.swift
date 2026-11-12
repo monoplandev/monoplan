@@ -145,7 +145,27 @@ final class AppModel: ObservableObject {
     /// frame or two. In process, the write and the reads are
     /// milliseconds.
     func setDone(_ ref: ItemRef, done: Bool) {
-        client.send(.setDone(id: ref.itemId, done: done, workspace: selector(ref.docId))) { [weak self] result in
+        write(.setDone(id: ref.itemId, done: done, workspace: selector(ref.docId)), to: ref)
+    }
+
+    /// Move an item to another list of its own workspace
+    /// (`item set --list`), then reread as `setDone` does.
+    func moveItem(_ ref: ItemRef, toList listId: String) {
+        write(.moveItem(id: ref.itemId, list: listId, workspace: selector(ref.docId)), to: ref)
+    }
+
+    /// The lists an item of this workspace can be in: its Inbox, then
+    /// its active lists in the doc's order.
+    func lists(inDoc docId: String?) -> [ListRef] {
+        guard let docId = docId ?? session?.primaryDocId else { return [] }
+        return [ListRef(docId: docId, listId: "inbox", name: "Inbox")]
+            + Lists.active(listsByDoc[docId] ?? []).map {
+                ListRef(docId: docId, listId: $0.id, name: $0.name, icon: $0.icon)
+            }
+    }
+
+    private func write(_ request: Request, to ref: ItemRef) {
+        client.send(request) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success(.output):

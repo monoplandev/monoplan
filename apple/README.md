@@ -315,7 +315,10 @@ content in its order (status, title, list, planned date and length,
 deadline when set, place, notes, activity log), read through
 `Request.item(id:workspace:)`, i.e. `item show <id> --json`
 (`spec/cli.md` §Items; decoded by `ItemDetail.parse`), and refetched on
-`Changed` while shown; its checkbox ticks too, the rest is display only. A place
+`Changed` while shown; its checkbox ticks too, and its list field is a
+pull-down `Menu` of the workspace's lists that moves the item
+(`Request.moveItem`, i.e. `item set <id> --list <list>`; same workspace
+only, the engine has no cross-doc move). The rest is display only. A place
 with coordinates also shows a small non-interactive MapKit map with a
 pin (`PlaceMapCard`); tapping it opens the spot in Apple Maps under the
 place's label. Tiles come from Apple, so this is a second non-E2EE
