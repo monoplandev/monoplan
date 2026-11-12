@@ -12,6 +12,9 @@ public struct ItemRow: Decodable, Equatable, Identifiable {
     /// Workflow state name (`spec/data-model.md` "Lifecycle"):
     /// `backlog`, `todo`, `in_progress`, `review`, `done`, `cancelled`.
     public let state: String
+    /// Unix millis the workflow state was entered: for a Done item, the
+    /// moment it was ticked.
+    public let lifecycleAt: Int64
     /// Unix millis.
     public let createdAt: Int64
     /// `YYYY-MM-DD`, when set.
@@ -19,12 +22,13 @@ public struct ItemRow: Decodable, Equatable, Identifiable {
     /// `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, when set.
     public let when: String?
 
-    public init(id: String, text: String, listId: String, state: String, createdAt: Int64,
-                deadline: String? = nil, when: String? = nil) {
+    public init(id: String, text: String, listId: String, state: String, lifecycleAt: Int64 = 0,
+                createdAt: Int64, deadline: String? = nil, when: String? = nil) {
         self.id = id
         self.text = text
         self.listId = listId
         self.state = state
+        self.lifecycleAt = lifecycleAt
         self.createdAt = createdAt
         self.deadline = deadline
         self.when = when

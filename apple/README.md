@@ -299,7 +299,7 @@ icon in `Assets.car` for iOS 26 and flat `icon60x60` / `icon76x76`
 PNGs for iOS 17 and 18. There is no `Assets.xcassets`; one is only
 needed once the app wants named colours or images of its own.
 
-Four tabs in a system `TabView` (`ContentView.swift`; the floating
+Five tabs in a system `TabView` (`ContentView.swift`; the floating
 glass pill on iOS 26, the flat bar before). **Inbox** (`InboxView.swift`)
 is the capture list's Open items in list order, read through the Kit's
 `Request.items` (`item ls --list inbox --json`, decoded by
@@ -316,7 +316,13 @@ one placement, the Home doc's hidden-from-calendar docs left out), every
 group as a section: Today, Unscheduled events, then each non-empty
 day, with the row's time, its workspace under the text when it is not
 Personal's, and the duration or overdue / due-today tone; read-only
-markup, nothing tappable yet. **Debug**
+markup, nothing tappable yet. **Done** (`DoneView.swift`) is the
+Personal workspace's Done items across every list, newest first, in a
+section per day ticked (`Request.done(limit:)`, i.e. `done -n N --json`,
+grouped by `Done.days`), each row with its list name. It is a window,
+not the history: 50 rows to start, doubled each time the end of the
+list scrolls into sight (`AppModel.loadMoreDone`), and a `Changed`
+refetches only the window reached; read-only. **Debug**
 (`DebugView.swift`) is the original surface: the `SyncStatus` the engine
 publishes (online, pending, local-only, last synced, offline reason),
 `Changed` events counted as they arrive, the engine's build id and pid,

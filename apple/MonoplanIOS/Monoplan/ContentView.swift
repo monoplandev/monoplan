@@ -11,6 +11,7 @@ struct ContentView: View {
         case inbox
         case starred
         case agenda
+        case done
         case debug
     }
 
@@ -28,6 +29,9 @@ struct ContentView: View {
                 Tab("Agenda", systemImage: "calendar", value: .agenda) {
                     AgendaView()
                 }
+                Tab("Done", systemImage: "checkmark.circle", value: .done) {
+                    DoneView()
+                }
                 Tab("Debug", systemImage: "ladybug", value: .debug) {
                     DebugView()
                 }
@@ -43,6 +47,9 @@ struct ContentView: View {
                 AgendaView()
                     .tabItem { Label("Agenda", systemImage: "calendar") }
                     .tag(Page.agenda)
+                DoneView()
+                    .tabItem { Label("Done", systemImage: "checkmark.circle") }
+                    .tag(Page.done)
                 DebugView()
                     .tabItem { Label("Debug", systemImage: "ladybug") }
                     .tag(Page.debug)

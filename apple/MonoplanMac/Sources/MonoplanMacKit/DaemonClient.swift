@@ -121,6 +121,11 @@ public enum Request {
     /// `monoplan item ls --list <list> [--done] --json`: a list's items
     /// (`Items.parse`); Open only unless `done`.
     case items(list: String, done: Bool = false)
+    /// `monoplan done -n <limit> --json`: the Personal workspace's Done
+    /// items across every list, newest first by the moment they entered
+    /// Done (`Items.parse`; `Done.days` groups them). A full window
+    /// (`limit` rows back) means there may be more.
+    case done(limit: Int)
     /// `monoplan list ls --json --all`: id → name, archived included so
     /// every list id an item can carry resolves.
     case lists
@@ -163,6 +168,10 @@ public enum Request {
         case .items(let list, let done):
             return .map(["Doc": .map(["cmd": .map(["Ls": .map([
                 "list": .string(list), "done": .bool(done), "json": .bool(true),
+            ])])])])
+        case .done(let limit):
+            return .map(["Doc": .map(["cmd": .map(["Done": .map([
+                "limit": .int(Int64(limit)), "since": .nil, "json": .bool(true),
             ])])])])
         case .lists:
             return .map(["Doc": .map(["cmd": .map(["Lists": .map(["cmd": .map(["Ls": .map([

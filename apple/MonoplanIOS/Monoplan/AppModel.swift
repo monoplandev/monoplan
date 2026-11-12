@@ -37,6 +37,21 @@ final class AppModel: ObservableObject {
     /// with its cross-workspace entries resolved.
     @Published private(set) var starred: [FocusRow] = []
     @Published private(set) var starredError: String?
+    /// The Done lens (`done -n <limit> --json`): the Personal
+    /// workspace's newest `doneLimit` Done items, grouped by the day
+    /// each was ticked. A window, never the whole history: the view
+    /// grows it as the end scrolls into sight (`loadMoreDone`), and a
+    /// `Changed` refetches only as far as has been scrolled.
+    @Published private(set) var doneDays: [DoneDay] = []
+    @Published private(set) var doneError: String?
+    /// The window `doneDays` was fetched with, and how many rows came
+    /// back: a full window means there may be more.
+    @Published private(set) var doneLoadedLimit = 0
+    private var doneCount = 0
+    private var doneLimit = AppModel.donePage
+    static let donePage = 50
+    /// List id → display name, for the rows of lenses that span lists.
+    @Published private(set) var listNames = Lists.names(from: [])
     private var refreshQueued = false
     @Published var lastError: String?
     @Published var signingIn = false
@@ -75,6 +90,7 @@ final class AppModel: ObservableObject {
             refreshInbox()
             refreshAgenda()
             refreshStarred()
+            refreshDone()
         } else {
             session = nil
         }
@@ -98,7 +114,42 @@ final class AppModel: ObservableObject {
             self?.refreshInbox()
             self?.refreshAgenda()
             self?.refreshStarred()
+            self?.refreshDone()
         }
+    }
+
+    /// The loaded window came back full, so older items may follow.
+    var doneHasMore: Bool { doneLoadedLimit > 0 && doneCount >= doneLoadedLimit }
+
+    /// `done -n <limit> --json` through the engine, with the list names
+    /// its rows are labelled by. A reply for a window that has since
+    /// grown is dropped: the larger fetch is already on its way.
+    func refreshDone() {
+        let limit = doneLimit
+        fetch(.done(limit: limit), what: "done", parse: Items.parse) { [weak self] rows, error in
+            guard let self, limit == doneLimit else { return }
+            if let rows {
+                doneDays = Done.days(from: rows)
+                doneCount = rows.count
+                doneLoadedLimit = limit
+            }
+            doneError = error
+        }
+        fetch(.lists, what: "lists", parse: Lists.parse) { [weak self] rows, _ in
+            if let rows { self?.listNames = Lists.names(from: rows) }
+        }
+    }
+
+    /// The end of the Done list scrolled into sight: double the window
+    /// and refetch it whole. Refetching the top N stays consistent while
+    /// items are ticked and reopened underneath, where a cursor would
+    /// skip or repeat rows; doubling keeps the total refetched linear in
+    /// how far the user scrolls. A no-op while a larger window is
+    /// already being fetched.
+    func loadMoreDone() {
+        guard doneHasMore, doneLoadedLimit == doneLimit else { return }
+        doneLimit *= 2
+        refreshDone()
     }
 
     /// `starred --all --json` through the engine.
