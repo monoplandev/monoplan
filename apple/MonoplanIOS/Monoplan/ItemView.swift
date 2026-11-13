@@ -221,7 +221,6 @@ struct ItemView: View {
                 status
                 Text(item?.text ?? ref.title)
                     .font(.title2.weight(.semibold))
-                    .strikethrough(item?.state == "done")
                     .foregroundStyle(item?.closedAt == nil ? .primary : .secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
