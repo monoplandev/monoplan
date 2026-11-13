@@ -50,7 +50,7 @@ final class AppModel: ObservableObject {
     /// List id → display name, for the rows of lenses that span lists.
     @Published private(set) var listNames = Lists.names(from: [])
     /// Each open workspace's lists (`list ls --json --all` per doc),
-    /// keyed by doc id: the Browse index. Refetched with the session.
+    /// keyed by doc id: the Home index. Refetched with the session.
     @Published private(set) var listsByDoc: [String: [ListRow]] = [:]
     /// A browsed list's Open items, keyed by `ListRef.key`, fetched when
     /// its page appears and again on each `Changed` while it is shown.
@@ -235,7 +235,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// The Browse index: every open workspace's lists, one fetch per
+    /// The Home index: every open workspace's lists, one fetch per
     /// doc. Docs no longer open drop out.
     func refreshLists() {
         guard let session else { return }

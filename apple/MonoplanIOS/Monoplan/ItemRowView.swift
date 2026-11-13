@@ -1,4 +1,4 @@
-// The row every plain item list shows (a list's page in Browse): the
+// The row every plain item list shows (a list's page in Home): the
 // checkbox, the text, and the tags worth saying.
 
 import MonoplanMacKit

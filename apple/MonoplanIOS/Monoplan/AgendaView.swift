@@ -1,4 +1,4 @@
-// The Agenda page, pushed from Browse (which owns the navigation stack
+// The Agenda page, pushed from Home (which owns the navigation stack
 // and the item sheet): the daemon's agenda projection (`agenda --json`,
 // spec/cli.md, with a horizon far enough out to be the whole future,
 // `AppModel.agendaDays`) as sections: Today first (overdue deadlines

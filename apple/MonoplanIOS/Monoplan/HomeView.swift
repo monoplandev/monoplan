@@ -1,4 +1,4 @@
-// Browse: the root page and the app's one navigation stack; there is
+// Home: the root page and the app's one navigation stack; there is
 // no tab bar. First the pages that are not one list: Starred, Agenda
 // and Done. Then a section per open workspace (Personal first, as
 // `Engine.session` orders them), each with its Inbox and then its
@@ -15,7 +15,7 @@ import MonoplanCore
 import MonoplanMacKit
 import SwiftUI
 
-/// One list in one workspace: what a Browse row opens.
+/// One list in one workspace: what a Home row opens.
 struct ListRef: Hashable {
     let docId: String
     let listId: String
@@ -41,7 +41,7 @@ struct ListIcon: View {
     }
 }
 
-struct BrowseView: View {
+struct HomeView: View {
     @EnvironmentObject private var model: AppModel
 
     private enum Page: Hashable {
@@ -99,6 +99,10 @@ struct BrowseView: View {
             .onAppear { model.loadSession() }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { BottomBar() }
+        // The inset on the stack does not reach the scroll views inside
+        // it, so every page's content gets the bar's height as a bottom
+        // margin: the last row scrolls clear of the bar.
+        .contentMargins(.bottom, BottomBar.clearance, for: .scrollContent)
         .opensItems()
     }
 

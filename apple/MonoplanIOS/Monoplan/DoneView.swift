@@ -1,4 +1,4 @@
-// The Done page, pushed from Browse (which owns the navigation stack):
+// The Done page, pushed from Home (which owns the navigation stack):
 // what got finished in the Personal workspace, newest first, a section
 // per day ticked (`done --json`, spec/cli.md §Items).
 // A window that grows on scroll rather than the whole history: the

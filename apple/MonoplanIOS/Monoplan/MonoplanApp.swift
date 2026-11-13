@@ -18,7 +18,7 @@ struct MonoplanApp: App {
 
     var body: some Scene {
         WindowGroup {
-            BrowseView()
+            HomeView()
                 .environmentObject(model)
         }
         .onChange(of: scenePhase) { _, phase in

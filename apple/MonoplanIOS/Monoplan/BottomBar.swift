@@ -1,6 +1,6 @@
 // The floating bar at the foot of every page: a search field and, to
 // its right, an add button. Placed as the bottom safe-area inset of
-// Browse's navigation stack, so it stays put across pushed pages and
+// Home's navigation stack, so it stays put across pushed pages and
 // lists scroll under it. Liquid Glass on iOS 26, material before.
 // While the field has focus the add button becomes a cross that
 // cancels the search: clears the text and drops the keyboard. Nothing
@@ -14,6 +14,11 @@ struct BottomBar: View {
     @FocusState private var searching: Bool
 
     private static let height: CGFloat = 48
+    private static let bottomPadding: CGFloat = 8
+
+    /// The room a scroll view leaves at its foot so its last row
+    /// clears the bar: the bar, its padding, and a gap above it.
+    static let clearance: CGFloat = height + bottomPadding + 8
 
     var body: some View {
         HStack(spacing: 10) {
@@ -51,7 +56,7 @@ struct BottomBar: View {
             .animation(.default, value: searching)
         }
         .padding(.horizontal, 16)
-        .padding(.bottom, 8)
+        .padding(.bottom, Self.bottomPadding)
     }
 }
 

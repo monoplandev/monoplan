@@ -1,4 +1,4 @@
-// The Starred page, pushed from Browse (which owns the navigation stack
+// The Starred page, pushed from Home (which owns the navigation stack
 // and the item sheet): the Focus lens (spec/focus.md; "Starred" is the UI
 // name) as the daemon resolves it with `starred --all`: Home's curated
 // order, entries from other workspaces included, each row naming its

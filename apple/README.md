@@ -316,7 +316,7 @@ icon in `Assets.car` for iOS 26 and flat `icon60x60` / `icon76x76`
 PNGs for iOS 17 and 18. There is no `Assets.xcassets`; one is only
 needed once the app wants named colours or images of its own.
 
-One navigation stack rooted at Browse, no tab bar (2026-11-13; the
+One navigation stack rooted at Home, no tab bar (2026-11-13; the
 four-tab `TabView` and `ContentView.swift` went with it): the app opens
 on the index and every other page is pushed from it. A floating bar
 (`BottomBar.swift`: a search field with an add button to its right,
@@ -332,7 +332,7 @@ hand-encoded frame is pinned by a test in `cli/src/commands/items.rs`),
 after which every loaded read is fetched again at once: no optimistic
 state. The first write from the iOS app. Every such row opens the
 item as a sheet over its list (`ItemView.swift`, 2026-11-13; half
-height, draggable to full; `opensItems()` on Browse's stack presents
+height, draggable to full; `opensItems()` on Home's stack presents
 it): the web task dialog's
 content in its order (status, title, list, planned date and length,
 deadline when set, place, notes, activity log), read through
@@ -359,7 +359,7 @@ with coordinates also shows a small non-interactive MapKit map with a
 pin (`PlaceMapCard`); tapping it opens the spot in Apple Maps under the
 place's label. Tiles come from Apple, so this is a second non-E2EE
 lookup beside Photon (`spec/place-plan.md`). There is no Inbox page of its own: Personal's Inbox is the first row of
-its workspace section in Browse, a list page like any other. The lens
+its workspace section in Home, a list page like any other. The lens
 reads are refetched on every `Changed` event, coalesced over 250 ms as
 the Mac tray's agenda is. **Starred** (`StarredView.swift`) is the
 Focus lens as the daemon resolves it (`Request.focus(all: true)`, i.e.
@@ -373,14 +373,14 @@ horizon is a century, so the whole future in one fetch, no paging), every
 group as a section: Today, Unscheduled events, then each non-empty
 day, with the row's time, its workspace under the text when it is not
 Personal's, and the duration or overdue / due-today tone; read-only
-markup, nothing tappable yet. **Browse** (`BrowseView.swift`,
+markup, nothing tappable yet. **Home** (`HomeView.swift`,
 2026-11-13) is the root and the index: first a section with Starred, Agenda and Done, then a section per open workspace (`Engine.session`'s
 docs, Personal first), each with its Inbox and then its active lists
 (`Request.lists(workspace:)`, i.e. `list ls --json --all -w <doc id>`,
 one fetch per doc, refetched with the session on every `Changed`;
 `Lists.active` drops archived and reserved rows). A list shows its
 emoji (`ListIcon`: the `icon` the list JSON carries, a folder without
-one) on its Browse row, in its page's title and on the item sheet. A list pushes its Open
+one) on its Home row, in its page's title and on the item sheet. A list pushes its Open
 items (`Request.items(list:workspace:)`), refetched on `Changed` while
 shown; read-only. A gear at the top right of the index opens Debug (the settings
 button, until there are settings), pushed onto the same stack. **Done** (`DoneView.swift`) is the
