@@ -32,7 +32,6 @@ describe("hash routes", () => {
     // The calendar anchored on an item: the same item, opened over the agenda.
     expect(parseHash(`#upcoming_${ID}`)).toEqual({ kind: "item", id: ID, on: "upcoming" });
     expect(parseHash(agendaItemHash(ID))).toEqual({ kind: "item", id: ID, on: "upcoming" });
-    expect(parseHash("#menu")).toEqual({ kind: "menu" });
     // Leading `#` is optional.
     expect(parseHash(`item_${ID}`)).toEqual({ kind: "item", id: ID });
   });
@@ -41,6 +40,7 @@ describe("hash routes", () => {
     expect(parseHash("")).toBeNull();
     expect(parseHash("#")).toBeNull();
     expect(parseHash("#home")).toBeNull();
+    expect(parseHash("#menu")).toBeNull();
     expect(parseHash("#item_")).toBeNull();
     expect(parseHash("#item_abc")).toBeNull();
     expect(parseHash(`#item_${ID.toUpperCase()}`)).toBeNull();
@@ -92,12 +92,6 @@ describe("hash routes", () => {
     expect(namesItem(`#upcoming_${OTHER}`, ID)).toBe(false);
     expect(namesItem("#upcoming", ID)).toBe(false);
     expect(namesItem("", ID)).toBe(false);
-  });
-
-  test("the menu page wins over both", () => {
-    expect(stateHash({ kind: "focus" }, null, true)).toBe("#menu");
-    expect(stateHash({ kind: "focus" }, ID, true)).toBe("#menu");
-    expect(stateHash({ kind: "focus" }, ID, false)).toBe(`#item_${ID}`);
   });
 });
 

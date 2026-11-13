@@ -147,8 +147,7 @@ The agenda in `calendar-plan.md` is unchanged for tasks. Additions:
 - **Nav badge.** `attentionBadge` counts unscheduled events at neutral
   tone, alongside what is owed or on today. Otherwise they would be
   discoverable only by opening the calendar.
-- **Capture.** The calendar's Add button (desktop header and mobile
-  pill) captures into `events` with `when` prefilled to today, all-day.
+- **Capture.** The calendar's Add button (in the header) captures into `events` with `when` prefilled to today, all-day.
   The dialog's list picker switches the new item to Inbox or a list when
   it is a task. A capture left untouched lands on Today, never out of
   sight. Re-filing any capture to Events in the picker prefills today the

@@ -1,8 +1,7 @@
 // The planned time row in the task dialog's dates band (`WhenField`): the
 // typed start picker (`TimePicker`) reading a dim "All day" while no time
 // is set, an inset ✕ that strips the time part (the picker's panel offers
-// the same as a Remove row, the only route on the mobile page, which
-// hides the ✕), and, once a start exists,
+// the same as a Remove row), and, once a start exists,
 // an end picker after an arrow. The end is derived: start + the stored
 // `duration` (a length, not an end, so moving the start keeps it). Typing
 // an end writes the difference in minutes on the day the end already

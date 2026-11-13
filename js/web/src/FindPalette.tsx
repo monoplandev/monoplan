@@ -2,9 +2,9 @@
 // navigable result list. Backed by the local SearchEngine attached to
 // the workspace's DocApp — the palette is a thin view over it. See
 // spec/search.md for index semantics and ranking. The query / result-set
-// policy and row anatomy live in findResults.tsx, shared with the mobile
-// FindSheet; this file owns the desktop interaction model (a keyboard
-// cursor, hover-to-select, the footer key legend).
+// policy and row anatomy live in findResults.tsx; this file owns the
+// interaction model (a keyboard cursor, hover-to-select, the footer key
+// legend).
 
 import { createEffect, createSignal, onCleanup, For, Show } from "solid-js";
 import { Portal } from "solid-js/web";

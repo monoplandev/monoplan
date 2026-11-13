@@ -1,10 +1,8 @@
-// Shared machinery for the Find surfaces: the desktop palette
-// (FindPalette.tsx) and the mobile switcher sheet (FindSheet.tsx). Both
-// are thin views over the local SearchEngine (spec/search.md); this
-// module owns what they have in common — the debounced query, the
+// The Find palette's machinery (FindPalette.tsx), a thin view over the
+// local SearchEngine (spec/search.md): the debounced query, the
 // result-set policy (built-in view synthesis, the empty-query default
-// menu, lists floated above items) and the row's leading-glyph anatomy —
-// so each surface is left holding only its own interaction model.
+// menu, lists floated above items) and the row's leading-glyph anatomy.
+// The palette itself holds only its interaction model.
 
 import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js";
 import type { DocsLayer } from "./sync/docs.ts";
@@ -32,12 +30,6 @@ export interface ViewResult {
   title: string;
 }
 export type FindResult = SearchResult | ViewResult;
-
-/** A fixed nav view (Focus / Upcoming / Done / Bin) as opposed to Inbox, which
- *  sits with the lists. Lets a surface draw the sidebar's group break. */
-export function isFixedView(item: FindResult): boolean {
-  return item.kind === "view" && item.id !== "inbox";
-}
 
 // Fixed nav icons, mirrored so a built-in reads the same here as in the
 // sidebar.

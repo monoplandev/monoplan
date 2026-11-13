@@ -96,8 +96,8 @@ export function Row(props: {
   /** Open this item in the detail dialog. `focus` picks which field the
    *  dialog lands the caret in — the note badge opens straight to notes. */
   onOpen?: (id: string) => void;
-  /** When true (mobile), a plain tap on the row opens the dialog instead
-   *  of only selecting — inline editing is unpleasant on touch. */
+  /** When true (a touch device), a plain tap on the row opens the dialog
+   *  instead of only selecting — inline editing is unpleasant on touch. */
   openOnTap?: () => boolean;
   /** Board cards pin the deadline badge to a footer at the bottom of the card;
    *  list rows show it inline after the title instead. */
@@ -340,7 +340,7 @@ export function Row(props: {
           props.onOpen?.(props.item().id);
         }}
         on:click={(e) => {
-          // Mobile: a plain tap opens the detail dialog. Selection still
+          // Touch: a plain tap opens the detail dialog. Selection still
           // happens via the dnd's own touch handling; we just add the
           // open. Skip drafts, expanded rows, and taps that land on their
           // own controls (checkbox, links, the open/note buttons).

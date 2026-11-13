@@ -99,7 +99,7 @@ export function Upcoming(props: {
    *  people glyph; null for Home rows, which carry no marker. */
   workspaceLabel: (docId: string) => string | null;
   onOpen: (id: string) => void;
-  /** Touch: a tap opens the row (there is no pane to follow a selection). */
+  /** Touch: a tap opens the row. */
   openOnTap?: () => boolean;
   ref?: (handle: UpcomingImperative) => void;
   /** Context menu wiring, as the list rows take it (`ItemContextMenu`). */

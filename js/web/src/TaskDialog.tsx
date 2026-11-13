@@ -1,5 +1,5 @@
-// The "open task" detail surface: a centered dialog (full-screen sheet on
-// mobile, or an inline pane when the desktop side panel is showing) driven
+// The "open task" detail surface: a centered dialog (or an inline pane
+// when the side panel is showing) driven
 // purely by an item id, so the same component can later back a native
 // detached window. Notes live here only — the inline row editor is
 // text-only "quick entry". The title is buffered locally and flushed to
@@ -19,11 +19,9 @@ import {
   createMemo,
   createSignal,
   For,
-  Match,
   on,
   onCleanup,
   Show,
-  Switch,
   untrack,
 } from "solid-js";
 import { Portal } from "solid-js/web";
@@ -237,8 +235,7 @@ export function TaskDialog(props: {
   onCreated?: (id: string) => void;
   /** Desktop side panel host. When it resolves to an element the surface
    *  renders inline there (non-modal: the list stays live, clicking another
-   *  row swaps the open item in place) instead of as the centred dialog.
-   *  Ignored on mobile, which keeps its page shell. */
+   *  row swaps the open item in place) instead of as the centred dialog. */
   panelMount?: () => HTMLElement | null;
   /** Jump to the view that shows this item (the Workspace reveal path:
    *  switch view, select + scroll the row). The dialog closes so the
@@ -248,18 +245,10 @@ export function TaskDialog(props: {
   const { m, locale } = useAppI18n();
   const canCopyLink = useCanCopyLink();
 
-  // Shell selection, by viewport alone (never a preference). Mobile: a
-  // plain full-screen page under the floating pills. Desktop with room
-  // for the side panel: an inline pane portaled into it. Narrow desktop:
-  // the modal Dialog, styled as a floating sheet over the content.
-  const isMobileMq = window.matchMedia("(max-width: 768px) and (pointer: coarse)");
-  const [isMobile, setIsMobile] = createSignal(isMobileMq.matches);
-  const onMq = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-  isMobileMq.addEventListener("change", onMq);
-  onCleanup(() => isMobileMq.removeEventListener("change", onMq));
-  const panelHost = createMemo(() =>
-    isMobile() ? null : (props.panelMount?.() ?? null),
-  );
+  // Shell selection, by viewport alone (never a preference). With room
+  // for the side panel: an inline pane portaled into it. Narrower: the
+  // modal Dialog, styled as a floating sheet over the content.
+  const panelHost = createMemo(() => props.panelMount?.() ?? null);
   const panelMode = () => panelHost() !== null;
 
   // A plain read, not a memo: the cleanup `settle` (the surface remounting
@@ -1046,7 +1035,7 @@ export function TaskDialog(props: {
     if (titleTokens?.onKeyDown(e)) return;
     // Enter commits (the title is one line); Shift+Enter is left to the
     // browser, but the title never wraps to multiple lines in use. The
-    // modal / mobile shells close on commit. The side pane stays open on
+    // modal shell closes on commit. The side pane stays open on
     // the item and just returns focus to the list/board — the pane is
     // ambient, so "done editing" shouldn't blank it. An unpromoted
     // capture in the pane still commits via close() (there's no item to
@@ -1139,14 +1128,13 @@ export function TaskDialog(props: {
     });
   };
 
-  // Cmd/Ctrl+Enter anywhere in the surface = save & close. The non-modal
-  // shells (mobile page, side pane) also take Escape, which Kobalte
-  // handles for the dialog. In the side pane Escape on an existing item
+  // Cmd/Ctrl+Enter anywhere in the surface = save & close. The side
+  // pane also takes Escape, which Kobalte handles for the dialog. In the side pane Escape on an existing item
   // steps out rather than closing: the edit is flushed and focus returns
   // to the list with the row still selected, so the pane keeps showing
   // it. A second Escape on the list clears the selection, and the
   // workspace closes the pane behind it. A capture in the pane still
-  // closes (there's no item to stay on yet), as does the mobile page.
+  // closes (there's no item to stay on yet).
   const onShellKeyDown = (e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
       e.preventDefault();
@@ -1160,7 +1148,7 @@ export function TaskDialog(props: {
       close();
       return;
     }
-    if (e.key === "Escape" && (isMobile() || panelMode())) {
+    if (e.key === "Escape" && panelMode()) {
       e.preventDefault();
       e.stopPropagation();
       if (panelMode() && !isNew()) {
@@ -1194,27 +1182,6 @@ export function TaskDialog(props: {
       return;
     sel.removeAllRanges();
   };
-
-  // Header button shared by the new-item and edit forms: the close ✕,
-  // mobile page only. The page has no overlay and no outside to tap, so
-  // it needs an exit of its own. The pane is dismissed by leaving the
-  // selection (Escape steps out to the list first, and a second Escape
-  // clears it); the floating sheet by Escape or a click on the overlay,
-  // like the pane it stands in for.
-  const shellButtons = () => (
-    <>
-      <Show when={isMobile()}>
-        <button
-          type="button"
-          class="icon-button task-dialog-close"
-          aria-label={m().common.close}
-          onClick={close}
-        >
-          ✕
-        </button>
-      </Show>
-    </>
-  );
 
   // Completion instant for the activity log: the reflection stamp
   // (last entry into Done), or the register's transition time for an
@@ -1469,7 +1436,20 @@ export function TaskDialog(props: {
               </DropdownMenu>
             )}
           </Show>
-          {shellButtons()}
+          {/* Touch only (styles.css shows it under `pointer: coarse`):
+              with no Escape key, and no overlay to tap once the sheet
+              fills a small screen, the modal needs an exit of its own.
+              The pane is left through the list, so it takes none. */}
+          <Show when={!panelMode()}>
+            <button
+              type="button"
+              class="icon-button task-dialog-close"
+              aria-label={m().common.close}
+              onClick={close}
+            >
+              ✕
+            </button>
+          </Show>
         </div>
       </header>
       <div class="task-dialog-body">
@@ -1702,20 +1682,17 @@ export function TaskDialog(props: {
     </>
   );
 
-  // Three shells around one body. Narrow desktop: a modal Dialog (focus
-  // trap, overlay, Escape from Kobalte) floating over the content. Mobile: a plain
-  // full-screen page under the floating pills — no modal, no portal, so
-  // the pills stay live and nothing counts as an "outside" interaction.
-  // Desktop with the side panel showing: an inline pane portaled into
-  // the panel's host element, non-modal like the page.
+  // Two shells around one body. Narrow window: a modal Dialog (focus
+  // trap, overlay, Escape from Kobalte) floating over the content. With
+  // the side panel showing: an inline, non-modal pane portaled into the
+  // panel's host element.
 
-  // Non-modal shells: focus the editor whenever the target changes (the
-  // dialog does this via onOpenAutoFocus, but it can't swap targets while
-  // open) and hand focus back once nothing is open. A followed (not
-  // entered) item skips the focus so keyboard nav stays on the list.
-  const nonModal = () => isMobile() || panelMode();
+  // The pane: focus the editor whenever the target changes (the dialog
+  // does this via onOpenAutoFocus, but it can't swap targets while open)
+  // and hand focus back once nothing is open. A followed (not entered)
+  // item skips the focus so keyboard nav stays on the list.
   createEffect(() => {
-    if (!nonModal() || !open()) return;
+    if (!panelMode() || !open()) return;
     // Re-run per target, not just per open: a row click while the pane
     // shows another item lands the caret in the new title. Also re-runs
     // when the same item is re-entered (`entered` notifies).
@@ -1747,87 +1724,72 @@ export function TaskDialog(props: {
     focusOnOpen();
   });
   createEffect(() => {
-    if (!nonModal() || !open()) return;
+    if (!panelMode() || !open()) return;
     onCleanup(() => props.onClosed?.());
   });
 
   return (
-    <Switch
+    <Show
+      when={panelHost()}
       fallback={
-        <Show when={open()}>
-          <section
-            ref={shellRef}
-            class="task-dialog task-page"
-            role="region"
-            aria-label={m().common.close}
-            data-shortcuts-inert=""
-            onKeyDown={onShellKeyDown}
-          >
-            {body()}
-          </section>
-        </Show>
-      }
-    >
-      <Match when={panelHost()}>
-        {(host) => (
-          <Show when={open()}>
-            <Portal mount={host()}>
-              <section
-                ref={shellRef}
-                class="task-dialog task-panel"
-                role="region"
-                aria-label={m().common.close}
-                data-shortcuts-inert=""
+        <Dialog
+          open={open()}
+          onOpenChange={(o) => {
+            if (!o) close();
+          }}
+          modal
+        >
+          <Dialog.Portal>
+            <Dialog.Overlay class="dialog-overlay" />
+            <div class="dialog-positioner">
+              <Dialog.Content
+                class="task-dialog task-modal"
                 onKeyDown={onShellKeyDown}
-                onFocusIn={() => {
-                  if (props.entered?.() === false) props.onFocused?.();
+                onCloseAutoFocus={(e) => {
+                  // Kobalte would restore focus to whatever opened the dialog
+                  // (a row's open icon, the note badge, …). Take over and send
+                  // focus to the list so keyboard nav resumes there.
+                  e.preventDefault();
+                  props.onClosed?.();
                 }}
-                onFocusOut={onShellFocusOut}
+                onOpenAutoFocus={(e) => {
+                  // Kobalte would focus the first tabbable (the close button);
+                  // take over and land the caret, unless the surface opened
+                  // straight onto a date popover, which takes focus itself
+                  // (a caret landing in the title after it would read as an
+                  // outside interaction and dismiss it).
+                  e.preventDefault();
+                  if (!props.whenOpen() && !props.deadlineOpen()) focusOnOpen();
+                }}
               >
                 {body()}
-              </section>
-            </Portal>
-          </Show>
-        )}
-      </Match>
-      <Match when={!isMobile()}>
-      <Dialog
-        open={open()}
-        onOpenChange={(o) => {
-          if (!o) close();
-        }}
-        modal
-      >
-        <Dialog.Portal>
-          <Dialog.Overlay class="dialog-overlay" />
-          <div class="dialog-positioner">
-            <Dialog.Content
-              class="task-dialog task-modal"
+              </Dialog.Content>
+            </div>
+          </Dialog.Portal>
+        </Dialog>
+      }
+    >
+      {(host) => (
+        <Show when={open()}>
+          <Portal mount={host()}>
+            <section
+              ref={shellRef}
+              class="task-dialog task-panel"
+              role="region"
+              aria-label={m().common.close}
+              data-shortcuts-inert=""
               onKeyDown={onShellKeyDown}
-              onCloseAutoFocus={(e) => {
-                // Kobalte would restore focus to whatever opened the dialog
-                // (a row's open icon, the note badge, …). Take over and send
-                // focus to the list so keyboard nav resumes there.
-                e.preventDefault();
-                props.onClosed?.();
+              onFocusIn={() => {
+                if (props.entered?.() === false) props.onFocused?.();
               }}
-              onOpenAutoFocus={(e) => {
-                // Kobalte would focus the first tabbable (the close button);
-                // take over and land the caret, unless the surface opened
-                // straight onto a date popover, which takes focus itself
-                // (a caret landing in the title after it would read as an
-                // outside interaction and dismiss it).
-                e.preventDefault();
-                if (!props.whenOpen() && !props.deadlineOpen()) focusOnOpen();
-              }}
+              onFocusOut={onShellFocusOut}
             >
               {body()}
-            </Dialog.Content>
-          </div>
-        </Dialog.Portal>
-      </Dialog>
-      </Match>
-    </Switch>
+            </section>
+          </Portal>
+        </Show>
+      )}
+    </Show>
   );
 }
 

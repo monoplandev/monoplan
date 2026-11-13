@@ -304,8 +304,7 @@ body {
 }
 
 /* Desktop side panel: `side-panel-open` adds a third column on the right
-   of the main surface. Mobile never sets the
-   class. The panel hosts the open task surface (`.task-panel`, portaled
+   of the main surface. The panel hosts the open task surface (`.task-panel`, portaled
    into `.side-panel-task`); idle, it sits blank. */
 .app.side-panel-open {
   grid-template-columns: var(--nav-width, 260px) 1fr 300px;
@@ -455,13 +454,11 @@ body {
   background: var(--bg-badge);
 }
 
-/* Fixed-height hosts (the side pane, the floating sheet, the mobile
-   page): the body grows to fill the leftover height. `flex-grow` only,
+/* Fixed-height hosts (the side pane, the floating sheet): the body grows to fill the leftover height. `flex-grow` only,
    no shrink, so once the content outgrows the host the surface scrolls
    as before. */
 .task-panel .task-dialog-body,
-.task-modal .task-dialog-body,
-.task-page .task-dialog-body {
+.task-modal .task-dialog-body {
   flex: 1 0 auto;
 }
 
@@ -469,8 +466,7 @@ body {
    `flex: 1; min-width: 0` (which is what lets the title wrap); stretch
    gives it the body's full height instead. */
 .task-panel .task-dialog-body,
-.task-modal .task-dialog-body,
-.task-page .task-dialog-body {
+.task-modal .task-dialog-body {
   align-items: stretch;
 }
 
@@ -718,51 +714,13 @@ body {
   color: var(--text-muted);
 }
 
-@media (max-width: 768px) and (pointer: coarse) {
-  /* Bump the inherited base size on phones; chrome elements with
-     explicit px sizes (section labels, chips) keep theirs. ≥16px also
-     suppresses iOS Safari's auto-zoom on input focus — don't go lower. */
-  #root {
-    font-size: 16px;
-  }
-
-  /* Single pane: the desktop sidebar isn't rendered on phones
-     (Workspace.tsx swaps it for MobileBar + ListSheet), so the grid
-     collapses to main alone; the pills float over it. */
-  .app {
-    grid-template-columns: 100vw;
-    grid-template-rows: 1fr;
-  }
-
-  .content {
-    grid-area: 1 / 1;
-  }
-
-  /* The pills float over the content rather than owning a band beneath
-     it: `.main` reserves nothing, and each view's *scroller* carries
-     scroll-end clearance (`--mobile-bar-clearance`) so its last row can
-     still be scrolled clear of the pills. Padding on `.main` itself
-     would sit below the inner scrollers as a permanent blank footer. */
-  .main .dnd-host .dnd-parent {
-    padding-bottom: var(--mobile-bar-clearance);
-  }
-
-  .upcoming {
-    padding-bottom: var(--mobile-bar-clearance);
-  }
-}
-
 .nav-group {
   margin-bottom: 4px;
 }
 
 /* The one square icon button on desktop: the nav footer menu, the list
    header's menu / display options / add, the list-icon picker and the
-   task surface's menu / close. Marker
-   classes beside it (`view-mode-trigger`, `list-icon-trigger`,
-   `task-dialog-close`, `header-add-button`) carry no desktop styling of
-   their own; the mobile media queries below re-size some instances to
-   thumb scale. */
+   task surface's menu. */
 .icon-button {
   appearance: none;
   -webkit-appearance: none;
@@ -885,12 +843,6 @@ body {
   height: 14px;
 }
 
-@media (max-width: 768px) and (pointer: coarse) {
-  .nav-section-toggle {
-    height: 40px;
-  }
-}
-
 .nav-section-toggle:hover {
   background: var(--bg-hover);
 }
@@ -945,22 +897,6 @@ body {
   }
 }
 
-@media (max-width: 768px) and (pointer: coarse) {
-  .nav-section-caret,
-  .nav-section-add,
-  .nav-section-menu {
-    width: 40px;
-    height: 40px;
-  }
-
-  .nav-section-caret svg,
-  .nav-section-add svg,
-  .nav-section-menu svg {
-    width: 16px;
-    height: 16px;
-  }
-}
-
 .nav-item {
   display: flex;
   align-items: center;
@@ -1004,12 +940,6 @@ body {
   font-size: 14px;
   line-height: 1;
   color: inherit;
-}
-
-@media (max-width: 768px) and (pointer: coarse) {
-  .nav-item {
-    height: 40px;
-  }
 }
 
 .nav-item:hover {
@@ -1077,15 +1007,6 @@ body {
   color: var(--text-faint);
   font-size: 0.9em;
   font-variant-numeric: tabular-nums;
-}
-/* The Find sheet's Upcoming count takes the agenda's urgency tones: an
-   overdue deadline reads danger, one due today warning; anything else
-   stays faint. The sidebar's count stays faint regardless. */
-.find-sheet__count[data-tone="overdue"] {
-  color: var(--overdue-text);
-}
-.find-sheet__count[data-tone="warning"] {
-  color: var(--due-today-text);
 }
 .nav-item-input {
   border: 0;
@@ -1257,33 +1178,6 @@ body {
 .add-button:disabled {
   opacity: 0.5;
   cursor: default;
-}
-
-/* Mobile-only floating action buttons, fixed to the viewport. They live
-   inside .main, so the full-screen drawer hides them along with main when
-   the nav is open — leaving the nav's own rows as the only tap targets.
-   Liquid-glass: translucent fill + heavy backdrop blur + thin border +
-   inset top highlight for the wet/specular feel. */
-@media (max-width: 768px) and (pointer: coarse) {
-  /* The bottom bar carries Add on mobile, so the header drops its own.
-     Display options stays: it has no other home on a phone and sits to
-     the right of the title in the header's glass bubble. */
-  .main-header .header-add-button {
-    display: none;
-  }
-
-  /* The title keeps the desktop's size and weight (a page-heading scale
-     overflowed the phone's width once a workspace prefix was in front
-     of it); only the header's own box changes. */
-  .main-header {
-    height: auto;
-    padding: 16px 12px 8px;
-    /* The glass bubble's shadow must paint over the list below;
-       .dnd-parent is positioned at z-index 2 and would otherwise sit on
-       top of it. */
-    position: relative;
-    z-index: 3;
-  }
 }
 
 .dnd-host {
@@ -1762,7 +1656,7 @@ input.task-check:hover {
 }
 
 /* The idle side panel, by the viewport alone as in the workspace
-   (`sidePanelShown` in Workspace.tsx: neither narrow nor mobile). */
+   (`sidePanelShown` in Workspace.tsx: not narrow). */
 .splash .side-panel {
   display: none;
 }
@@ -1774,12 +1668,6 @@ input.task-check:hover {
 
   .splash .side-panel {
     display: flex;
-  }
-}
-
-@media (max-width: 768px) and (pointer: coarse) {
-  .splash .nav {
-    display: none;
   }
 }
 
@@ -2016,8 +1904,7 @@ input.task-check:hover {
 
 /* Board/list view-mode switcher: the display-options trigger in the header
    opens a popover with a segmented control (reusing .theme-segment*). The
-   trigger itself is a plain `.icon-button` on desktop and styled by the
-   mobile glass-disc rules below. */
+   trigger itself is a plain `.icon-button`. */
 .view-mode-popover {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -3073,11 +2960,9 @@ input.task-check:hover {
 }
 
 /* Task detail dialog — the "open task" surface. Modelled on the shared
-   elevated-card treatment; becomes a full-screen sheet on small touch
-   screens (see the media query below). */
+   elevated-card treatment. */
 /* Shared task surface: layout only. Each host adds its own chrome —
-   `.task-modal` (floating card), `.task-panel` (inline side pane),
-   `.task-page` (mobile full-screen). */
+   `.task-modal` (floating card), `.task-panel` (inline side pane). */
 .task-dialog {
   display: flex;
   flex-direction: column;
@@ -3115,6 +3000,17 @@ input.task-check:hover {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+}
+
+/* The modal's close ✕: touch only, where there is no Escape key. */
+.task-dialog-close {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .task-dialog-close {
+    display: inline-flex;
+  }
 }
 
 /* The ⋮ menu is portaled to <body>; lift it above the dialog overlay /
@@ -3432,18 +3328,16 @@ input.task-check:hover {
   background: var(--bg-badge);
 }
 
-/* Narrow shells (the side pane, the mobile page): one row, no wrap. The
+/* The side pane, a narrow shell: one row, no wrap. The
    list picker takes the width and the glyph pill after it (the "more"
    menu) keeps its natural width. The picker drops its fit-content
    width and 10em cap, and the sort caret moves to the far edge,
    Select-style. */
-.task-panel .task-dialog-badges,
-.task-page .task-dialog-badges {
+.task-panel .task-dialog-badges {
   flex-wrap: nowrap;
 }
 
-.task-panel .task-dialog-badges .task-dialog-list,
-.task-page .task-dialog-badges .task-dialog-list {
+.task-panel .task-dialog-badges .task-dialog-list {
   flex: 1 1 auto;
   width: auto;
   min-width: 0;
@@ -3451,8 +3345,7 @@ input.task-check:hover {
   box-sizing: border-box;
 }
 
-.task-panel .task-dialog-badges .task-dialog-list-caret,
-.task-page .task-dialog-badges .task-dialog-list-caret {
+.task-panel .task-dialog-badges .task-dialog-list-caret {
   margin-left: auto;
 }
 
@@ -4228,129 +4121,6 @@ input.task-check:hover {
   outline-offset: -2px;
 }
 
-/* Full-screen sheet on small touch screens: the dialog fills the viewport
-   (the positioner's padding is dropped) so the on-screen keyboard has room
-   and the task reads as its own page — the mobile "tap opens the task"
-   model. */
-@media (max-width: 768px) and (pointer: coarse) {
-  .dialog-positioner:has(.task-dialog),
-  .dialog-positioner:has(.settings-dialog) {
-    padding: 0;
-  }
-
-  .task-dialog {
-    width: 100%;
-    height: 100%;
-    max-height: 100%;
-  }
-
-  /* Mobile page shell (TaskDialog's non-modal variant): a fixed full-screen
-     surface over the list, beneath the floating pills (z 50) so they stay
-     live; room at the bottom so the notes never end under them. */
-  .task-page {
-    position: fixed;
-    inset: 0;
-    z-index: 40;
-    background: var(--bg-elevated);
-    padding-bottom: 0;
-  }
-
-  /* The activity section is the page's last child, so the scroll-end
-     clearance lives on it: it runs under the pills, and only the log
-     keeps clear of them. */
-  .task-page .task-dialog-activity {
-    padding-bottom: var(--mobile-bar-clearance);
-  }
-
-  /* Wider pills: extra side padding over the desktop 8px (height is
-     pinned at 32px by the shared control rule). */
-  .task-page .task-dialog-list,
-  .task-page .task-dialog-add-chip {
-    padding: 4px 10px;
-  }
-
-  .task-page .task-dialog-badges {
-    gap: 6px;
-  }
-
-  /* No inset ✕ on the page's date and deadline inputs: it is far under a
-     tap target, and the picker's Remove already does the job. The input
-     takes the plain right inset back. */
-  .task-page .task-dialog-when-clear {
-    display: none;
-  }
-
-  .task-page .task-dialog-when-input {
-    padding: 6px 10px 6px 30px;
-  }
-
-  .task-page .task-dialog-when-icon {
-    left: 10px;
-  }
-
-  /* Nor on the start time: the picker's panel carries a Remove row. With
-     no ✕ to clear, start and end share the plain right inset. */
-  .task-page .time-picker-clear {
-    display: none;
-  }
-
-  /* Nor on the place: its results card carries a Remove row. The input
-     and the link face already take the date input's plain inset above. */
-  .task-page .task-dialog-place-action {
-    display: none;
-  }
-
-  .task-page .time-picker-input {
-    padding: 6px 10px 6px 30px;
-  }
-
-  .task-page .time-picker-icon {
-    left: 10px;
-  }
-
-  .task-page .task-dialog-dates {
-    gap: 6px;
-  }
-
-  /* Thumb-sized header buttons: the ✕ and the ⋮ menu run at desktop
-     pointer scale (28px / 24px) otherwise, well under a 40px tap target,
-     and the ✕ glyph itself reads tiny at the phone's larger base size. */
-  .task-dialog-header-actions {
-    gap: 6px;
-  }
-
-  .task-dialog-header .icon-button {
-    width: 40px;
-    height: 40px;
-    padding: 0;
-    border-radius: 99px;
-    color: var(--text);
-    transition: transform 0.1s ease, background 0.15s ease;
-  }
-
-  .task-dialog-header .task-dialog-close {
-    font-size: 20px;
-  }
-
-  .task-dialog-header .icon-button svg {
-    width: 22px;
-    height: 22px;
-  }
-
-  .task-dialog-header .icon-button:active {
-    transform: scale(0.92);
-    background: rgba(127, 127, 127, 0.18);
-  }
-
-  .settings-dialog {
-    width: 100%;
-    height: 100%;
-    border: 0;
-    border-radius: 0;
-    grid-template-columns: 120px 1fr;
-  }
-}
-
 .settings-sidebar {
   background: var(--bg);
   border-right: 1px solid var(--border);
@@ -4415,8 +4185,7 @@ input.task-check:hover {
   font-weight: 600;
 }
 
-/* Inset-grouped cards, as on the mobile Find sheet (`.find-sheet__group`):
-   each cluster of rows is a rounded surface set a shade off the pane
+/* Inset-grouped cards: each cluster of rows is a rounded surface set a shade off the pane
    background (darker in light mode, lighter in dark), rows stacked edge to
    edge with a hairline between them inset to the row's left padding. */
 .settings-group {
@@ -5249,503 +5018,6 @@ input.task-check:hover {
    (already scoped to the card) carry the selection instead. */
 .board-col-dnd [data-selected] {
   background: transparent;
-}
-
-/* ---- Mobile shell: floating glass pills ---------------------------- */
-
-:root {
-  /* Bottom pills run larger than the header pill (`--mobile-header-h`):
-     they are the primary thumb targets. */
-  --mobile-bar-h: 56px;
-  --mobile-header-h: 46px;
-  /* Scroll-end clearance a mobile scroller needs so its last row can
-     clear the pills: bar height + its bottom offset + breathing room. */
-  --mobile-bar-clearance: calc(var(--mobile-bar-h) + 28px + env(safe-area-inset-bottom));
-}
-
-/* Shared liquid-glass chrome: the bottom pills and the header's sync
-   indicator on mobile. */
-.glass {
-  border: 1px solid rgba(255, 255, 255, 0.45);
-  background: rgba(255, 255, 255, 0.55);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  box-shadow:
-    0 4px 14px rgba(0, 0, 0, 0.08),
-    0 1px 2px rgba(0, 0, 0, 0.05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.7);
-}
-
-[data-theme="dark"] .glass {
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(30, 30, 32, 0.6);
-  box-shadow:
-    0 4px 14px rgba(0, 0, 0, 0.3),
-    0 1px 2px rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
-.mobile-bar {
-  position: fixed;
-  bottom: calc(14px + env(safe-area-inset-bottom));
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  height: var(--mobile-bar-h);
-  padding: 0 6px;
-  border-radius: 99px;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.mobile-bar-left {
-  left: calc(16px + env(safe-area-inset-left));
-}
-
-.mobile-bar-right {
-  right: calc(16px + env(safe-area-inset-right));
-}
-
-/* Add pill: a solid accent fill instead of glass, so the primary
-   capture affordance stands apart from the neutral switcher pill. The
-   pill holds only the Add button, so the fill is on the pill (keeping
-   its 5px inset, so the tint reaches the rounded edge). */
-.mobile-bar-right.glass,
-[data-theme="dark"] .mobile-bar-right.glass {
-  background: #4da3ef;
-  border-color: #4da3ef;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  box-shadow:
-    0 4px 14px rgba(77, 163, 239, 0.35),
-    0 1px 2px rgba(0, 0, 0, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.25);
-}
-
-.mobile-bar-right .mobile-bar-btn {
-  color: #fff;
-}
-
-.mobile-bar-right .mobile-bar-btn:active {
-  background: rgba(0, 0, 0, 0.14);
-}
-
-/* Disabled Add (a draft is already open): fade the whole pill, not just
-   the glyph, since the fill is the affordance. */
-.mobile-bar-right:has(.mobile-bar-btn:disabled) {
-  opacity: 0.5;
-}
-
-.mobile-bar-right .mobile-bar-btn:disabled {
-  opacity: 1;
-}
-
-.mobile-bar-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  border: 0;
-  border-radius: 99px;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  transition: transform 0.1s ease, background 0.15s ease;
-}
-
-.mobile-bar-btn svg {
-  width: 22px;
-  height: 22px;
-}
-
-/* Left-pill buttons: the glyph over a small label, in a rounded box
-   wide enough for the longest label rather than the icon-only circle. */
-.mobile-bar-btn--labelled {
-  flex-direction: column;
-  gap: 2px;
-  width: auto;
-  min-width: 44px;
-  padding: 0 8px;
-  border-radius: 14px;
-}
-
-.mobile-bar-btn--labelled svg {
-  width: 20px;
-  height: 20px;
-}
-
-.mobile-bar-icon {
-  position: relative;
-  display: inline-flex;
-  line-height: 0;
-}
-
-/* Count bubble on the Inbox / Upcoming icons: a small solid pill pinned
-   to the icon's top-right corner, overlapping it slightly, with a ring in
-   the glass colour so it cuts out of the glyph instead of touching it.
-   Upcoming's bubble takes the agenda's urgency tones (overdue, due
-   today); otherwise the accent fill. */
-.mobile-bar-count {
-  position: absolute;
-  top: -5px;
-  right: -8px;
-  box-sizing: border-box;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 99px;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.75);
-  background: #4da3ef;
-  color: #fff;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 16px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  pointer-events: none;
-}
-
-[data-theme="dark"] .mobile-bar-count {
-  box-shadow: 0 0 0 2px rgba(30, 30, 32, 0.85);
-}
-
-.mobile-bar-count[data-tone="overdue"] {
-  background: var(--overdue-text);
-}
-
-.mobile-bar-count[data-tone="warning"] {
-  background: var(--due-today-text);
-}
-
-.mobile-bar-label {
-  font-size: 10px;
-  line-height: 1;
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-}
-
-.mobile-bar-btn:active {
-  transform: scale(0.92);
-  background: rgba(127, 127, 127, 0.18);
-}
-
-.mobile-bar-btn:disabled {
-  opacity: 0.4;
-}
-
-/* Fixed-view jumps (Focus / Inbox / Upcoming): the one matching the
-   current view reads as selected. */
-.mobile-bar-btn[data-active] {
-  background: rgba(127, 127, 127, 0.14);
-}
-
-/* Mobile board lanes: the per-lane Add is a primary capture affordance
-   on a phone, so give it a proper tap target and a legible glyph (the
-   card-stack icon's "+" is only a third of its viewBox, so it needs to
-   run larger than the desktop 16px to read at a glance). */
-@media (max-width: 768px) and (pointer: coarse) {
-  .board-col-header {
-    padding: 6px 6px 12px 12px;
-  }
-
-  .board-col-add-btn {
-    width: 36px;
-    height: 36px;
-    padding: 8px;
-    border-radius: 8px;
-    color: var(--text);
-  }
-
-  .board-col-add-btn svg {
-    width: 20px;
-    height: 20px;
-  }
-
-  .board-col-add-btn:active {
-    transform: scale(0.92);
-  }
-}
-
-/* Mobile header: the view's remaining buttons (list menu, display
-   options) share one glass bubble to the right of the title, the same
-   pill geometry as the bottom bars. Workspace adds `.glass` to
-   `.header-group` on mobile; the buttons inside go chromeless. */
-@media (max-width: 768px) and (pointer: coarse) {
-  .main-header-actions {
-    gap: 8px;
-  }
-
-  .main-header .header-group {
-    gap: 2px;
-    height: var(--mobile-header-h);
-    padding: 0 5px;
-    border-radius: 99px;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .main-header .header-group .icon-button {
-    width: 36px;
-    height: 36px;
-    padding: 0;
-    border: 0;
-    border-radius: 99px;
-    background: transparent;
-    color: var(--text);
-    transition: transform 0.1s ease, background 0.15s ease;
-  }
-
-  .main-header .header-group .icon-button svg {
-    width: 18px;
-    height: 18px;
-  }
-
-  .main-header .header-group .icon-button:active {
-    transform: scale(0.92);
-    background: rgba(127, 127, 127, 0.18);
-  }
-}
-
-/* Mobile Find sheet (FindSheet.tsx): the phone's list switcher. A full
-   page on the app background, fixed under the floating pills (their z
-   band is 50), which stay live as the way out: the Find pill toggles the
-   page, the fixed-view pills jump off it. A search field up top, then the
-   palette's row anatomy at thumb scale, with scroll-end clearance for the
-   pills. The row for the current view takes the nav's selected fill. */
-.find-sheet {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-  padding-top: env(safe-area-inset-top);
-  padding-right: env(safe-area-inset-right);
-  padding-left: env(safe-area-inset-left);
-  color: var(--text);
-  background: var(--bg);
-}
-
-/* Top line: the sync / account indicator at the left edge, Settings at
-   the right, no rule beneath. */
-.find-sheet__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px 0;
-}
-
-/* The indicator at the Settings icon's size: undo `.connection-indicator`'s
-   desktop-footer negative margin and give it a thumb-sized box. */
-.find-sheet__status {
-  width: 40px;
-  height: 40px;
-  margin: 0;
-  padding: 0;
-  border-radius: 8px;
-  color: var(--text);
-}
-
-.find-sheet__status svg {
-  width: 20px;
-  height: 20px;
-}
-
-/* The anonymous "Sign in" button in the same slot keeps the 40px row
-   height but sizes to its label. */
-.sign-in-button.find-sheet__status {
-  width: auto;
-  padding: 0 14px;
-  font-size: 14px;
-}
-
-/* The search field on its own line, inset to the cards' side margins,
-   staying put while the cards scroll under it. */
-.find-sheet__search {
-  padding: 4px 16px 0;
-}
-
-/* 16px floor so iOS doesn't zoom the page on focus. */
-.find-sheet__input {
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-  min-width: 0;
-  height: 40px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: rgba(127, 127, 127, 0.12);
-  color: var(--text);
-  font-size: 16px;
-  -webkit-appearance: none;
-  appearance: none;
-}
-
-.find-sheet__input:focus {
-  outline: none;
-  border-color: var(--text-faint);
-}
-
-/* Settings: an icon at the field's height, on its own line. */
-.find-sheet__settings {
-  flex-shrink: 0;
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  color: var(--text);
-}
-
-.find-sheet__settings svg {
-  width: 20px;
-  height: 20px;
-}
-
-.find-sheet__results {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  padding: 16px 16px var(--mobile-bar-clearance);
-}
-
-/* iOS inset-grouped cards: each group (the fixed views; one per
-   workspace holding its Inbox + lists; a query's results) is a rounded
-   surface lifted off the page background, rows stacked edge to edge
-   inside it with a hairline between them inset to the text's left edge.
-   Cards and captioned sections alike sit 20px apart. */
-.find-sheet__group {
-  overflow: hidden;
-  border-radius: 12px;
-  background: var(--surface);
-}
-
-.find-sheet__results > * + * {
-  margin-top: 20px;
-}
-
-/* Workspace caption over its card: the sidebar's section label at the
-   iOS grouped-table caption's size and inset, aligned to the rows' text. */
-.find-sheet__section-title {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin: 0 0 6px;
-  padding: 0 16px;
-  color: var(--text-faint);
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.find-sheet__section-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Shared marker on a workspace caption, sized to the nav heading's. */
-.find-sheet__section-shared {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.find-sheet__section-shared svg {
-  width: 13px;
-  height: 13px;
-}
-
-/* Home page link, a row in its own card under the lists: an anchor
-   rather than a button, so drop the link underline. */
-.find-sheet__website {
-  text-decoration: none;
-}
-
-/* The page and the elevated surface sit a shade apart in dark mode, so
-   the card takes a translucent lift instead. */
-[data-theme="dark"] .find-sheet__group {
-  background: rgba(255, 255, 255, 0.06);
-}
-
-/* Buttons rather than option divs — plain tap targets, no listbox
-   semantics. Reset the button chrome so `.palette__item` styling reads
-   through; taller than the desktop row to match the nav drawer's mobile
-   bump. Square corners: the card carries the radius. */
-.find-sheet__row {
-  position: relative;
-  width: 100%;
-  min-height: 44px;
-  padding: 10px 16px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  font: inherit;
-  font-size: 16px;
-  text-align: left;
-  -webkit-tap-highlight-color: transparent;
-}
-
-/* Row separator: a hairline from the text's left edge (the row inset
-   plus the 18px glyph and its 8px gap) to the card's right edge, on every
-   row but the last. */
-.find-sheet__row:not(:last-child)::after {
-  content: "";
-  position: absolute;
-  left: 42px;
-  right: 0;
-  bottom: 0;
-  height: 0.5px;
-  background: var(--border);
-}
-
-.find-sheet__row:active {
-  background: var(--palette-select-bg);
-}
-
-/* Current view: a selected-row fill, not a check, the nav's `--bg-active`
-   grey on the plain page background. */
-.find-sheet__row[aria-current="true"] {
-  background: var(--bg-active);
-}
-
-[data-theme="dark"] .find-sheet__row[aria-current="true"] {
-  background: var(--bg-active);
-  color: #fff;
-}
-
-.find-sheet__row[aria-current="true"] .palette__item-icon {
-  color: inherit;
-}
-
-.find-sheet__row .palette__item-icon {
-  width: 18px;
-  height: 18px;
-}
-
-.find-sheet__row .palette__item-icon svg {
-  width: 16px;
-  height: 16px;
-}
-
-.find-sheet__row .palette__item-icon-emoji {
-  font-size: 16px;
-}
-
-.find-sheet__row .palette__item-list {
-  font-size: 14px;
-}
-
-/* Trailing count, mirroring `.nav-item-count`: pushed to the row's end. */
-.find-sheet__count {
-  margin-left: auto;
-  flex-shrink: 0;
-  color: var(--text-faint);
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
 }
 
 /* Sharing dialog (`SharingDialog`): the confirm-dialog shell, wider, with

@@ -1,10 +1,9 @@
 // The task dialog's place control, in its own ruled band under the
 // deadline with the dates' anatomy (a pin glyph inset at the left edge,
 // an inset ✕ that removes the place). The results card carries the same
-// removal as a Remove row pinned under the list while a place is set:
-// the only route on the mobile page, which hides the ✕ (as the date and
-// time inputs' pickers do), so starting an edit with a place in hand
-// opens the card for it.
+// removal as a Remove row pinned under the list while a place is set
+// (as the date and time inputs' pickers do), so starting an edit with a
+// place in hand opens the card for it.
 //
 // Two faces. With a place set and no edit under way, the band shows the
 // label as a link to the map (`placeUrl`: the pin when the place has

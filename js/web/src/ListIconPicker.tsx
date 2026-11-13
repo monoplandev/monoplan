@@ -21,7 +21,7 @@ export function ListIconPicker(props: {
   return (
     <Popover open={open()} onOpenChange={setOpen} placement="bottom-start" gutter={6}>
       <Popover.Trigger
-        class="icon-button list-icon-trigger"
+        class="icon-button"
         tabIndex={-1}
         aria-label={m().workspace.listIcon}
       >

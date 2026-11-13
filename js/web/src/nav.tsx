@@ -106,7 +106,6 @@ function saveSectionCollapsed(docId: string, home: boolean, collapsed: boolean):
 }
 
 function ConnectionStatusPopover(props: {
-  class?: string;
   /** Every open doc: the status is "syncing" while any of them has
    *  unsynced ops, and the popover counts them. Per-doc facts (seq,
    *  epoch, fingerprint) live in each heading's Advanced dialog. */
@@ -161,7 +160,7 @@ function ConnectionStatusPopover(props: {
       <Tooltip {...guard.tooltip} openDelay={200} closeDelay={0} placement="top">
         <Tooltip.Trigger
           as={Popover.Trigger}
-          class={props.class ? `connection-indicator ${props.class}` : "connection-indicator"}
+          class="connection-indicator"
           tabIndex={-1}
           aria-label={statusLabel()}
         >
@@ -204,46 +203,12 @@ function ConnectionStatusPopover(props: {
  *  connection-status popover once authed. Lives in the sidebar footer
  *  beside the app menu (see `Workspace`), rendered exactly once, so its
  *  auto-open-on-mount auth dialog fires only once. */
-/** The first-run sign-in prompt on its own: for shells where the
- *  indicator isn't mounted at boot (mobile keeps it in the Find page),
- *  so the prompt still fires on load. Same dismissed-flag rules as
- *  `StatusSlot`'s built-in prompt. */
-export function FirstRunAuthPrompt(props: {
-  session: Session;
-  onSession: (s: Session) => void;
-}) {
-  const [authOpen, setAuthOpen] = createSignal(
-    props.session.anonymous && !loadAuthPromptDismissed() && pendingInvite() === null,
-  );
-  const onOpenChange = (open: boolean) => {
-    if (!open) markAuthPromptDismissed();
-    setAuthOpen(open);
-  };
-  return (
-    <Show when={props.session.anonymous}>
-      <AuthDialog
-        open={authOpen()}
-        onOpenChange={onOpenChange}
-        onSession={(s) => {
-          setAuthOpen(false);
-          props.onSession(s);
-        }}
-      />
-    </Show>
-  );
-}
-
 export function StatusSlot(props: {
-  /** Extra class on the indicator button (mobile's glass chrome). */
-  class?: string;
   docs: DocsLayer;
   online: boolean;
   lastSyncAt: number | null;
   session: Session;
   onSession: (s: Session) => void;
-  /** `false` when a `FirstRunAuthPrompt` elsewhere owns the first-run
-   *  prompt, so this slot only opens sign-in on tap. Default true. */
-  autoPrompt?: boolean;
 }) {
   const { m } = useAppI18n();
   // Auto-prompt anonymous users on first mount unless they've dismissed the
@@ -253,10 +218,7 @@ export function StatusSlot(props: {
   // page opened on a sharing link skips the prompt: `InviteDialog` owns
   // sign-in there, and two modals opening at once would stack.
   const [authOpen, setAuthOpen] = createSignal(
-    props.autoPrompt !== false &&
-      props.session.anonymous &&
-      !loadAuthPromptDismissed() &&
-      pendingInvite() === null,
+    props.session.anonymous && !loadAuthPromptDismissed() && pendingInvite() === null,
   );
   const onOpenChange = (open: boolean) => {
     if (!open) markAuthPromptDismissed();
@@ -273,7 +235,7 @@ export function StatusSlot(props: {
             slot is a plain "Sign in" button opening the auth dialog. */}
         <button
           type="button"
-          class={props.class ? `sign-in-button ${props.class}` : "sign-in-button"}
+          class="sign-in-button"
           tabIndex={-1}
           onClick={() => setAuthOpen(true)}
         >
@@ -287,7 +249,6 @@ export function StatusSlot(props: {
       </Show>
       <Show when={!props.session.anonymous}>
         <ConnectionStatusPopover
-          class={props.class}
           docs={props.docs}
           online={props.online}
           lastSyncAt={props.lastSyncAt}
@@ -308,8 +269,7 @@ export function Nav(props: {
    *  what drives the soft "getting big" signal past the threshold. */
   focusCount: number;
   /** The Upcoming entry's badge: Open rows owed or on today. Only the
-   *  count is shown here (the tone drives the Find sheet / mobile bar);
-   *  hidden at zero. */
+   *  count is shown here; hidden at zero. */
   upcomingBadge: AttentionBadge;
   /** Home doc settings flag; when true, render the live-item count
    *  badge beside each non-Inbox list in every section (showing "-" when
@@ -337,16 +297,6 @@ export function Nav(props: {
 }) {
   const { m } = useAppI18n();
   const [emptyBinConfirmOpen, setEmptyBinConfirmOpen] = createSignal(false);
-
-  // Match the items list's mobile bump so the drawer's tap targets feel
-  // consistent with the main view.
-  const navMobileMq = window.matchMedia(
-    "(max-width: 768px) and (pointer: coarse)",
-  );
-  const [navIsMobile, setNavIsMobile] = createSignal(navMobileMq.matches);
-  const onNavMqChange = (e: MediaQueryListEvent) => setNavIsMobile(e.matches);
-  navMobileMq.addEventListener("change", onNavMqChange);
-  onCleanup(() => navMobileMq.removeEventListener("change", onNavMqChange));
 
   // Keep the active view's nav row in view. The view can change from
   // anywhere (find palette, URL, keyboard, list creation, a click), so
@@ -481,7 +431,6 @@ export function Nav(props: {
             view={props.view}
             setView={props.setView}
             showListCounts={props.showListCounts}
-            mobile={navIsMobile()}
             onToggled={() => setSectionTick((n) => n + 1)}
             onDeleteDoc={props.onDeleteDoc}
             onLeaveDoc={props.onLeaveDoc}
@@ -567,7 +516,6 @@ function DocSection(props: {
   view: ViewKey;
   setView: (v: ViewKey) => void;
   showListCounts: boolean;
-  mobile: boolean;
   onToggled: () => void;
   onDeleteDoc: ((docId: string, name: string) => Promise<void>) | null;
   onLeaveDoc: ((docId: string) => Promise<void>) | null;
@@ -1147,7 +1095,7 @@ function DocSection(props: {
           items={dndLists()}
           setItems={setDndLists}
           getKey={(l) => l.id}
-          itemHeight={props.mobile ? 40 : 28}
+          itemHeight={28}
           multi
           arrowNavigate={false}
           clearOnClickOutside

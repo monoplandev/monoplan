@@ -26,11 +26,6 @@
 // item moves. A user list's id is unique across docs too, so `#list_`
 // carries no doc either; only another doc's reserved Inbox needs one
 // (`#inbox_<doc>`), since every doc has an `inbox` (`spec/sharing-plan.md`).
-//
-// `#menu` is the phone's menu page (`FindSheet`), a page of its own in
-// the mobile shell so Back (and the swipe gesture) leave it the way a
-// tap on a row does. Desktop has no such page: there the token is
-// ignored and the address bar rewritten to the view on screen.
 
 import type { ViewKey } from "./prefs.ts";
 
@@ -38,11 +33,7 @@ export type Route =
   | { kind: "view"; view: ViewKey }
   /** `on` names the view to open the item over instead of its home:
    *  the agenda, for `#upcoming_<id>`. Absent for a plain item link. */
-  | { kind: "item"; id: string; on?: "upcoming" }
-  | { kind: "menu" };
-
-/** The menu page's hash (mobile shell only). */
-export const MENU_HASH = "#menu";
+  | { kind: "item"; id: string; on?: "upcoming" };
 
 const ID_RE = /^[0-9a-f]{32}$/;
 const DOC_RE = /^[0-9a-f-]{32,36}$/;
@@ -66,8 +57,6 @@ export function parseHash(hash: string): Route | null {
     case "done":
     case "bin":
       return { kind: "view", view: { kind: token } };
-    case "menu":
-      return { kind: "menu" };
   }
   if (token.startsWith("item_")) {
     const id = token.slice("item_".length);
@@ -139,11 +128,9 @@ export function namesItem(hash: string, id: string): boolean {
   return r?.kind === "item" && r.id === id;
 }
 
-/** The hash the address bar should show for a given workspace state: the
- *  menu page (mobile) wins over everything, then an open item over the
- *  view behind it. */
-export function stateHash(view: ViewKey, openItemId: string | null, menu = false): string {
-  if (menu) return MENU_HASH;
+/** The hash the address bar should show for a given workspace state: an
+ *  open item wins over the view behind it. */
+export function stateHash(view: ViewKey, openItemId: string | null): string {
   return openItemId !== null ? itemHash(openItemId) : viewHash(view);
 }
 

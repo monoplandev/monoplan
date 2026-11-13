@@ -45,7 +45,6 @@ import { captureInviteFromLocation } from "./invite.ts";
 import { InviteDialog } from "./InviteDialog.tsx";
 import type { Dek } from "@monoplan/core/wasm";
 import { FindPalette } from "./FindPalette.tsx";
-import { FindSheet } from "./FindSheet.tsx";
 import type { FindResult } from "./findResults.tsx";
 import { laneLabel, useAppI18n } from "./i18n.tsx";
 import { closedLogLine, readClip, toClipItem, writeClip, type ClipItem } from "./itemClip.ts";
@@ -69,8 +68,7 @@ import {
 } from "./doneFilter.ts";
 import type { ListOption } from "./ListPicker.tsx";
 import { MovePalette } from "./MovePalette.tsx";
-import { EditableNavLabel, Nav, NavFindButton, NavMenu, FirstRunAuthPrompt, StatusSlot } from "./nav.tsx";
-import { MobileBars } from "./MobileShell.tsx";
+import { EditableNavLabel, Nav, NavFindButton, NavMenu, StatusSlot } from "./nav.tsx";
 import {
   isMacShell,
   onTitlebarMouseDown,
@@ -144,11 +142,8 @@ import {
 const DONE_LINGER_MS = 3_000;
 
 /** Fixed list-row height for the virtualizer. Must agree with the
- *  `.row` padding in styles.css: 8px + 1.3em line + 8px. Touch
- *  viewports add 12px for a comfortable thumb target. */
-function rowHeight(mobile: boolean): number {
-  return mobile ? 44 : 32;
-}
+ *  `.row` padding in styles.css: 8px + 1.3em line + 8px. */
+const ROW_HEIGHT = 32;
 
 // Module-level so the OS-preference listener is registered exactly
 // once for the lifetime of the page.
@@ -234,7 +229,7 @@ function DisplayOptionsPopover(props: { children: JSX.Element }) {
       <Tooltip {...guard.tooltip} openDelay={200} closeDelay={0} placement="bottom">
         <Tooltip.Trigger
           as={Popover.Trigger}
-          class="icon-button view-mode-trigger"
+          class="icon-button"
           tabIndex={-1}
           aria-label={m().workspace.displayOptions}
           innerHTML={mixerHzSvg}
@@ -363,7 +358,7 @@ export function Workspace(props: {
   const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
   // The item the user has entered (Enter on a row, a row's open control,
   // a Find pick, a link, a click into the side pane), or null. This is
-  // what the address bar mirrors and what the modal / mobile page show.
+  // what the address bar mirrors and what the modal shows.
   // The side pane shows `shownItemId` (below, with the selection wiring):
   // this when set, else the row the selection is on. `equals: false` so
   // re-entering the item the pane already shows (Enter on the list after
@@ -635,16 +630,6 @@ export function Workspace(props: {
   let captureHandle: CaptureHandle | null = null;
   let draftHandoff = false;
 
-  // Touch viewports get taller rows so each item's a comfortable tap
-  // target (the desktop height is too tight for a thumb). Dnd's cfg()
-  // reads itemHeight reactively via setConfig, so flipping the signal
-  // live-updates the controller.
-  const itemsMobileMq = window.matchMedia("(max-width: 768px) and (pointer: coarse)");
-  const [itemsIsMobile, setItemsIsMobile] = createSignal(itemsMobileMq.matches);
-  const onItemsMqChange = (e: MediaQueryListEvent) => setItemsIsMobile(e.matches);
-  itemsMobileMq.addEventListener("change", onItemsMqChange);
-  onCleanup(() => itemsMobileMq.removeEventListener("change", onItemsMqChange));
-
   // One selection model per Workspace instance — the Dnd component is
   // re-keyed on view change (so it remounts), but we re-use the selection
   // object so consumers always read from the same handle. Stale block
@@ -870,21 +855,6 @@ export function Workspace(props: {
   // The current view's doc's lists (the header title, the task surface's
   // move destinations for a capture here).
   const allLists = createMemo((): ListView[] => allListsOf(viewDocId()));
-
-  // Per-list open-item counts (Backlog + Live) for the mobile Find sheet,
-  // read straight off every doc's per-list projection arrays — no item
-  // scan. User list ids are unique across docs; the reserved `inbox` is
-  // Home's (the sheet's Inbox row is Home's).
-  const openCountsByList = createMemo((): Record<string, number> => {
-    const counts: Record<string, number> = {};
-    for (const d of docs.docs()) {
-      for (const [listId, ids] of Object.entries(d.app.state.listOpen)) {
-        if (listId === "inbox" && !d.home) continue;
-        counts[listId] = ids.length;
-      }
-    }
-    return counts;
-  });
 
   // The Upcoming entry's badge: what is owed or on today, with the most
   // urgent tone (`attentionBadge`). Unlike the list counts this scans the
@@ -1154,11 +1124,9 @@ export function Workspace(props: {
   // when clicked. List and Focus views only; boards capture through the
   // dialog. It stands in for the draft while none is open there; a
   // draft started mid-list (Space below a selection) leaves it in place.
-  // Touch viewports skip it: the header Add is the capture affordance
-  // there, and a tap target that reads as a row invites mis-taps.
   const canDraft = () => view().kind === "list" || view().kind === "focus";
   const showTrailer = () => {
-    if (!canDraft() || itemsIsMobile()) return false;
+    if (!canDraft()) return false;
     const d = draft();
     return d === null || d.insertIndex < items().length;
   };
@@ -2532,7 +2500,6 @@ export function Workspace(props: {
     );
   };
 
-  // Shared by both Find surfaces (desktop palette / the phone's menu page).
   const onFindOpenChange = (open: boolean) => {
     setFindOpen(open);
     if (open) return;
@@ -2618,38 +2585,9 @@ export function Workspace(props: {
     return true;
   };
 
-  // Mobile shell: at narrow viewports the sidebar (and its footer chrome)
-  // is replaced by MobileBars (MobileShell.tsx), and the Find palette by
-  // FindSheet, the phone's menu page over the same result set. Declared
-  // ahead of the router: the menu page is a route of its own there.
-  const mobileMq = window.matchMedia("(max-width: 768px) and (pointer: coarse)");
-  const [isMobile, setIsMobile] = createSignal(mobileMq.matches);
-  const onMqChange = (e: MediaQueryListEvent) => {
-    setIsMobile(e.matches);
-  };
-  mobileMq.addEventListener("change", onMqChange);
-  onCleanup(() => mobileMq.removeEventListener("change", onMqChange));
-  // The menu page is the phone's: `findOpen` on a phone is the page, on
-  // desktop the palette, which is transient and never a route. A
-  // viewport crossing closes whichever was up rather than carrying one
-  // shell's surface into the other.
-  const menuOpen = () => isMobile() && findOpen();
-  createEffect(on(isMobile, () => setFindOpen(false), { defer: true }));
-
-  // Applies a route; false when it names nothing this shell can show (the
-  // menu page on desktop), so the caller rewrites the address bar.
-  const applyRoute = (route: Route): boolean => {
-    if (route.kind === "menu") {
-      if (!isMobile()) return false;
-      batch(() => {
-        setOpenItemId(null);
-        setFindOpen(true);
-      });
-      return true;
-    }
-    // A view or item route leaves the menu page (Back from it, or a link
-    // tapped while it is up).
-    if (isMobile()) setFindOpen(false);
+  // Applies a route. One that names nothing this account has (an unknown
+  // list or doc) is ignored.
+  const applyRoute = (route: Route): void => {
     if (route.kind === "view") {
       // A list is looked up across every open doc (`spec/urls.md`): an
       // unknown one (deleted, or from another account) is ignored. The
@@ -2658,10 +2596,10 @@ export function Workspace(props: {
       let target = route.view;
       if (target.kind === "list") {
         if (target.id === "inbox") {
-          if (target.docId !== undefined && !docs.appOf(target.docId)) return true;
+          if (target.docId !== undefined && !docs.appOf(target.docId)) return;
         } else {
           const docId = docs.docIdOfList(target.id);
-          if (docId === undefined) return true;
+          if (docId === undefined) return;
           target = docs.listView(docId, target.id);
         }
       }
@@ -2680,10 +2618,9 @@ export function Workspace(props: {
         // selection. Board selections live inside Board and never saw it.
         if (!sameView) setView(target);
       });
-      return true;
+      return;
     }
     if (!openItemFromUrl(route.id, route.on)) setPendingItem({ id: route.id, on: route.on });
-    return true;
   };
 
   // Boot: a hash on the URL overrides the prefs-restored view. Applied
@@ -2710,21 +2647,13 @@ export function Workspace(props: {
   // close is the pane handing focus back (Escape, Enter): it carries on
   // showing the selection, so an Enter / Escape cycle there nets zero
   // history. The first run (boot) always replaces.
-  //
-  // The phone's menu page is an entry of its own, marked the same way:
-  // opening pushes it (over an entered item it takes that item's entry,
-  // since the item closes), closing with nothing else changing goes
-  // Back, and a pick from it (a view or an item) takes the entry over,
-  // so a menu visit never leaves a stale `#menu` behind the destination.
   const ITEM_ENTRY = { monoplanItem: true };
-  const MENU_ENTRY = { monoplanMenu: true };
-  let prevUrlState: { viewKey: string; item: string | null; menu: boolean } | undefined;
+  let prevUrlState: { viewKey: string; item: string | null } | undefined;
   createEffect(() => {
     const v = view();
     const item = openItemId();
-    const menu = menuOpen();
-    const hash = stateHash(v, item, menu);
-    const cur = { viewKey: viewKey(v), item, menu };
+    const hash = stateHash(v, item);
+    const cur = { viewKey: viewKey(v), item };
     const prev = prevUrlState;
     prevUrlState = cur;
     if (location.hash === hash) return;
@@ -2735,31 +2664,13 @@ export function Workspace(props: {
     // A context form of the open item (`#upcoming_<id>`, just applied
     // from the hash) is the same place: canonicalise the address in its
     // own entry rather than pushing the view change it carried.
-    if (!menu && item !== null && namesItem(location.hash, item)) {
+    if (item !== null && namesItem(location.hash, item)) {
       history.replaceState(history.state, "", hash);
       return;
     }
     const viewChanged = prev.viewKey !== cur.viewKey;
     const opened = prev.item === null && item !== null;
     const closed = prev.item !== null && item === null;
-    if (!prev.menu && menu) {
-      if (closed && history.state?.monoplanItem === true) {
-        history.replaceState(MENU_ENTRY, "", hash);
-      } else {
-        history.pushState(MENU_ENTRY, "", hash);
-      }
-      return;
-    }
-    if (prev.menu && !menu && history.state?.monoplanMenu === true) {
-      if (!viewChanged && !opened) {
-        // The popstate handler lands on the view beneath, already on
-        // screen, and leaves it alone.
-        history.back();
-        return;
-      }
-      history.replaceState(opened ? ITEM_ENTRY : null, "", hash);
-      return;
-    }
     if (closed && !viewChanged && history.state?.monoplanItem === true) {
       // The popstate handler sees the view we're already on and leaves
       // it (and the selection) alone.
@@ -2802,8 +2713,11 @@ export function Workspace(props: {
   const onPopState = () => {
     captureInviteFromLocation();
     const route = parseHash(location.hash);
-    if (route && applyRoute(route)) return;
-    history.replaceState(history.state, "", stateHash(view(), openItemId(), menuOpen()));
+    if (route) {
+      applyRoute(route);
+      return;
+    }
+    history.replaceState(history.state, "", stateHash(view(), openItemId()));
   };
   window.addEventListener("popstate", onPopState);
   onCleanup(() => window.removeEventListener("popstate", onPopState));
@@ -2836,11 +2750,23 @@ export function Workspace(props: {
 
   // Desktop side panel (right-hand column). Not a preference: it is there
   // whenever the viewport has room for it, and the task surface's shell
-  // follows the viewport alone (panel, floating sheet, mobile page). While
+  // follows the viewport alone (panel, floating sheet). While
   // an item is open (or a capture is in progress) the panel hosts the
   // task surface; otherwise it just invites a click. Deadlines live on
   // the Upcoming view, never here.
-  const sidePanelShown = () => !isMobile() && !isNarrow();
+  const sidePanelShown = () => !isNarrow();
+
+  // The one concession to touch: a single tap on a row opens the item
+  // (there is no double-click or Enter to reach for). Only while the
+  // side panel is away: with it showing, a tap's selection already puts
+  // the item in the panel, and entering it would raise the on-screen
+  // keyboard on every tap.
+  const touchMq = window.matchMedia("(pointer: coarse)");
+  const [isTouch, setIsTouch] = createSignal(touchMq.matches);
+  const onTouchMqChange = (e: MediaQueryListEvent) => setIsTouch(e.matches);
+  touchMq.addEventListener("change", onTouchMqChange);
+  onCleanup(() => touchMq.removeEventListener("change", onTouchMqChange));
+  const openOnTap = () => isTouch() && !sidePanelShown();
   // The panel's task host element, set by ref while the panel is mounted.
   // Gated on `sidePanelShown` so the dialog falls back to its modal shell
   // the moment the panel loses its room (the stale element is never
@@ -2964,7 +2890,7 @@ export function Workspace(props: {
   // is being captured, the topmost selected item (list view, or the
   // board's active lane). Null for a multi-row selection (the pane shows
   // its bulk actions instead), an empty one, a draft row, or a key the
-  // store no longer has. Modal / mobile shells never follow anything.
+  // store no longer has. The modal shell never follows anything.
   const followedItemId = createMemo((): string | null => {
     if (!sidePanelShown() || newItemTarget() !== null) return null;
     const sel = selectionTick();
@@ -2979,9 +2905,9 @@ export function Workspace(props: {
   // What the task surface shows: the entered item wherever it lives, else
   // (side pane only) the followed row. Entering is what focuses the
   // editor and what the URL follows; following is ambient and keeps the
-  // keys on the list. The pane losing its room (a narrow window, the
-  // mobile shell) drops the followed half on its own, so only an entered
-  // item carries over to the modal / page shell;
+  // keys on the list. The pane losing its room (a narrow window)
+  // drops the followed half on its own, so only an entered
+  // item carries over to the modal shell;
   // the pane coming back picks the selection up again.
   const shownItemId = createMemo((): string | null => {
     const entered = openItemId();
@@ -2997,7 +2923,7 @@ export function Workspace(props: {
   // the pane shows the selection instead. An emptied selection is left
   // alone: a link reveal clears then reselects on its way in, and Escape
   // handles its own case below. Only while the pane is showing; the modal
-  // and mobile page don't have a live selection under them.
+  // doesn't have a live selection under it.
   createEffect(
     on(selectionTick, (sel) => {
       if (!sel || !sidePanelShown() || sel !== actionSelection()) return;
@@ -3017,7 +2943,7 @@ export function Workspace(props: {
   // `isTrusted` skips the Row's synthetic Escapes (Enter-commit and blur
   // drive collapse through the dnd by dispatching their own), so clicking
   // out of an inline edit into the pane doesn't close it underfoot.
-  // Modal / mobile shells take Escape themselves, so nothing to do there.
+  // The modal shell takes Escape itself, so nothing to do there.
   const onEscapeKey = (e: KeyboardEvent) => {
     if (e.key !== "Escape" || !e.isTrusted) return;
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
@@ -3115,7 +3041,6 @@ export function Workspace(props: {
       <Show when={isMacShell()}>
         <div class="app-titlebar" onMouseDown={onTitlebarMouseDown} />
       </Show>
-      <Show when={!isMobile()}>
       <div
         class="nav-resizer"
         classList={{ "nav-resizer-active": navResizing() }}
@@ -3173,47 +3098,12 @@ export function Workspace(props: {
           )
         }
       />
-      </Show>
-      <Show
-        when={isMobile()}
-        fallback={
-          <FindPalette
-            docs={docs}
-            open={findOpen()}
-            onOpenChange={onFindOpenChange}
-            onSelect={onFindPick}
-          />
-        }
-      >
-        <FindSheet
-          docs={docs}
-          open={findOpen()}
-          view={view()}
-          onOpenChange={onFindOpenChange}
-          onSelect={onFindPick}
-          onOpenSettings={() => setSettingsOpen(true)}
-          status={
-            /* Mobile: the sync indicator sits in the Find page's top
-               line (there's no sidebar footer, and the pill doesn't carry
-               it). It mounts with the page, so the first-run auth prompt
-               is owned by the FirstRunAuthPrompt beside MobileBars. */
-            <StatusSlot
-              class="find-sheet__status"
-              docs={docs}
-              online={session.online()}
-              lastSyncAt={session.lastSyncAt()}
-              session={session.session()}
-              onSession={session.swapSession}
-              autoPrompt={false}
-            />
-          }
-          focusCount={docs.focusItems().length}
-          upcomingBadge={upcomingBadge()}
-          binCount={docs.binCount()}
-          openCountsByList={openCountsByList()}
-          showListCounts={home.state.settings.showListCounts}
-        />
-      </Show>
+      <FindPalette
+        docs={docs}
+        open={findOpen()}
+        onOpenChange={onFindOpenChange}
+        onSelect={onFindPick}
+      />
       <MovePalette
         open={moveIds() !== null}
         onOpenChange={(open) => {
@@ -3476,8 +3366,8 @@ export function Workspace(props: {
             </Show>
             {/* The view's icon buttons (list menu, display options, add)
                 share one group. Hidden via CSS when the view contributes
-                none; on mobile the group is a single glass bubble. */}
-            <div class={isMobile() ? "header-group glass" : "header-group"}>
+                none. */}
+            <div class="header-group">
             {/* List actions menu: the same Archive / Unarchive the nav's
                 context menu offers, kept here so restoring an archived
                 list stays discoverable from the view header too. Only
@@ -3663,7 +3553,7 @@ export function Workspace(props: {
                 <Tooltip.Trigger
                   as="button"
                   type="button"
-                  class="icon-button header-add-button"
+                  class="icon-button"
                   tabIndex={-1}
                   aria-label={m().workspace.log}
                   onClick={() =>
@@ -3731,7 +3621,7 @@ export function Workspace(props: {
               <Tooltip.Trigger
                 as="button"
                 type="button"
-                class="icon-button header-add-button"
+                class="icon-button"
                 tabIndex={-1}
                 onClick={(e) => {
                   // The dnd controller has a document-level click listener
@@ -3800,7 +3690,7 @@ export function Workspace(props: {
                   onExpandedChange={(k) =>
                     setExpandedKey(k == null ? null : String(k))
                   }
-                  itemHeight={rowHeight(itemsIsMobile())}
+                  itemHeight={ROW_HEIGHT}
                   expandable
                   clearOnBlankClick
                   fillHeight
@@ -3874,7 +3764,7 @@ export function Workspace(props: {
                         onOpen={(id) => setOpenItemId(id)}
                         onReveal={revealItemIn}
                         onMoveToList={openMovePalette}
-                        openOnTap={itemsIsMobile}
+                        openOnTap={openOnTap}
                       />
                     );
                   }}
@@ -3891,7 +3781,7 @@ export function Workspace(props: {
               onOpen={(id) => setOpenItemId(id)}
               onReveal={revealItemIn}
               onMoveToList={openMovePalette}
-              openOnTap={itemsIsMobile}
+              openOnTap={openOnTap}
               duplicateBlock={duplicateBlock}
               copyBlock={copyRows}
               onAddItem={(listId, state, done) =>
@@ -3915,7 +3805,7 @@ export function Workspace(props: {
             listLabel={listLabel}
             workspaceLabel={(docId) => (docId === docs.homeDocId ? null : docLabel(docId))}
             onOpen={(id) => setOpenItemId(id)}
-            openOnTap={itemsIsMobile}
+            openOnTap={openOnTap}
             ref={(h) => (upcomingHandle = h)}
             duplicateBlock={duplicateBlock}
             copyBlock={copyRows}
@@ -3965,67 +3855,6 @@ export function Workspace(props: {
               column sits blank rather than showing a hint. */}
           <div class="side-panel-task" ref={setPanelMount} />
         </aside>
-      </Show>
-      <Show when={isMobile()}>
-        <MobileBars
-          view={view()}
-          inboxCount={home.state.listOpen["inbox"]?.length ?? 0}
-          upcomingBadge={upcomingBadge()}
-          setView={(v) => {
-            // The pills stay live over an open item's page and over the
-            // menu page; close both so the destination view is visible.
-            // One batch: the address-bar effect then sees one transition
-            // (the menu's entry handed to the destination) rather than a
-            // close and a push.
-            batch(() => {
-              setOpenItemId(null);
-              if (findOpen()) onFindOpenChange(false);
-              navigateTo(v);
-            });
-          }}
-          onMenu={() => {
-            // The menu is a page: opening it leaves an open item's page
-            // (one page at a time), and the item's history entry becomes
-            // the menu's. Tapping its pill while on it stays put, as the
-            // view pills do; the way out is a pick, another pill, or Back.
-            if (findOpen()) return;
-            batch(() => {
-              setOpenItemId(null);
-              onFindOpenChange(true);
-            });
-          }}
-          onAdd={
-            menuOpen()
-              ? null
-              : view().kind === "upcoming"
-                ? () => {
-                    // No listbox to draft into on the calendar: capture a
-                    // new event through the dialog, as the header's Add
-                    // does on desktop.
-                    setOpenItemId(null);
-                    setNewItemTarget(newEventTarget());
-                  }
-                : (view().kind === "list" || view().kind === "focus") &&
-                    boardListId() === null
-                  ? () => {
-                      // The pills stay live over an open item's page; Add
-                      // captures into the list behind it, so close it
-                      // first.
-                      setOpenItemId(null);
-                      startDraft();
-                    }
-                  : null
-          }
-          menuOpen={menuOpen()}
-          addDisabled={draft() !== null}
-        />
-        {/* Always mounted while mobile, so the first-run auth prompt
-            still fires on load as on desktop, where the sidebar's
-            StatusSlot owns it. */}
-        <FirstRunAuthPrompt
-          session={session.session()}
-          onSession={session.swapSession}
-        />
       </Show>
     </div>
   );
