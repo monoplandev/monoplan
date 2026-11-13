@@ -3,10 +3,11 @@
 // or, while a date read out of the title waits on an answer, the
 // question in its place (`suggestion`);
 // its button hands the whole sheet over to the editor
-// (`ItemDateEditor`): quick picks and a month calendar, and once a date
-// is set a Time switch (with the time beside it), a Length menu and
-// Clear. The tick gives the sheet back to the item; the cross first
-// undoes what the editor changed. Every pick is written at once
+// (`ItemDateEditor`): a text box that reads a typed date ("fri 3pm")
+// and offers what it means, then quick picks and a month calendar, and
+// once a date is set a Time switch (with the time beside it), a Length
+// menu and Clear. The tick gives the sheet back to the item; the cross
+// first undoes what the editor changed. Every pick is written at once
 // (`item set --when / --duration`); there is no Save. Dates are
 // floating wall-clock strings, never instants.
 
@@ -83,6 +84,15 @@ struct ItemDateField: View {
 /// Picks are written as they are made, so the tick only closes; the
 /// cross puts back the date and length the editor opened with, then
 /// closes.
+///
+/// The text box at the top is where the editor starts, keyboard up: a
+/// date typed as words ("fri 3pm", "tomorrow", "14 nov") is read by
+/// `WhenPhrase` as it is typed and offered underneath as one or two
+/// readings (`WhenPhrase.readings`: the second is there when the phrase
+/// said only a day or only a time and the item's date has the other
+/// half). A tap on a reading, or Return or the tick for the first,
+/// makes it the date and returns to the item. The controls below are
+/// as they were, a scroll or a tap away.
 struct ItemDateEditor: View {
     @EnvironmentObject private var model: AppModel
     let ref: ItemRef
@@ -90,6 +100,8 @@ struct ItemDateEditor: View {
     let done: () -> Void
     /// What the item had when the editor opened, for the cross.
     @State private var original: Original
+    @State private var query = ""
+    @FocusState private var typing: Bool
 
     struct Original: Equatable {
         let when: String?
@@ -117,11 +129,104 @@ struct ItemDateEditor: View {
             editor.padding()
         }
         .scrollBounceBehavior(.basedOnSize)
-        .editorHeader(title: "Date", itemTitle: item.text, cancel: cancel, done: done)
+        .scrollDismissesKeyboard(.interactively)
+        .editorHeader(title: "Date", itemTitle: item.text, cancel: cancel, done: useTyped)
+        .onAppear { typing = true }
+    }
+
+    // MARK: Typed date
+
+    private var typed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// What the typed text can mean, likeliest first; empty when it
+    /// names no date (or nothing is typed).
+    private var readings: [String] {
+        guard let phrase = WhenPhrase.find(in: typed) else { return [] }
+        return phrase.readings(over: item.when, today: WhenText.today())
+    }
+
+    private var typedBox: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "calendar").foregroundStyle(.secondary)
+            TextField("Type a date: fri 3pm", text: $query)
+                .focused($typing)
+                .submitLabel(.done)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .onSubmit(useTyped)
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear text")
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 40)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    /// The readings of the typed text, each a row to tap; a muted line
+    /// when the text names no date.
+    @ViewBuilder
+    private var typedReadings: some View {
+        let readings = readings
+        if readings.isEmpty {
+            if !typed.isEmpty {
+                Text("No date in that yet")
+                    .foregroundStyle(.secondary)
+                    .frame(minHeight: 36)
+            }
+        } else {
+            ForEach(readings, id: \.self) { when in
+                Button {
+                    use(when)
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Image(systemName: "arrow.turn.down.right")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24)
+                        Text(ItemView.whenText(when))
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// Return and the tick: the first reading of the typed text, if it
+    /// has one, then back to the item. Text that names no date stays
+    /// up to be fixed; nothing typed just closes.
+    private func useTyped() {
+        if let first = readings.first {
+            use(first)
+        } else if typed.isEmpty {
+            done()
+        } else {
+            typing = true
+        }
+    }
+
+    /// A reading as the item's date. Going between all-day and timed
+    /// the old length no longer applies, as with the Time switch: an
+    /// hour beside a time, a single day without one.
+    private func use(_ when: String) {
+        let timed = when.count >= 16
+        var duration = DurationEdit.keep
+        if item.when != nil, timed != item.isTimed { duration = timed ? .minutes(60) : .clear }
+        model.setWhen(ref, when: when, duration: duration)
+        done()
     }
 
     private var editor: some View {
         VStack(alignment: .leading, spacing: 12) {
+            typedBox
+            typedReadings
             HStack(spacing: 8) {
                 quickPick("Today", WhenText.today())
                 quickPick("Tomorrow", WhenText.today(plus: 1))

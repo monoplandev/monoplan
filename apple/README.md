@@ -351,7 +351,12 @@ pull-down `Menu` of the workspace's lists that moves the item
 (`Request.moveItem`, i.e. `item set <id> --list <list>`; same workspace
 only, the engine has no cross-doc move). Its date field
 (`ItemDateField.swift`) hands the whole sheet to an editor
-(`ItemDateEditor`, Done returns to the item): quick picks (Today, Tomorrow), a month calendar, and once a date is set a Time switch, a
+(`ItemDateEditor`, Done returns to the item): a text box it opens on,
+keyboard up, that reads a typed date ("fri 3pm") with `WhenPhrase` and
+offers its readings underneath (2026-11-13; `WhenPhrase.readings`: one,
+or two when the phrase said only a day or only a time and the item's
+date has the other half; a tap, Return or the tick takes it and returns
+to the item), then quick picks (Today, Tomorrow), a month calendar, and once a date is set a Time switch, a
 Length menu and Clear, each pick written at once (`Request.setWhen` /
 `setDuration`, i.e. `item set --when / --duration`). A date phrase in a
 title ("dentist friday 8:30") raises a date suggestion (2026-11-13,

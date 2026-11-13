@@ -62,6 +62,34 @@ public struct WhenPhrase: Equatable {
         return nil
     }
 
+    /// The phrase is a clock time and nothing else ("3pm", "at 8:30"):
+    /// its day was picked here, not typed.
+    public var isTimeOnly: Bool {
+        when.count >= 16 && Self.matches(Self.timeOnly, text.trimmingCharacters(in: .whitespaces))
+    }
+
+    /// What the phrase can mean typed into the date editor of an item
+    /// whose date is `current`, likeliest first. Always its own value;
+    /// beside it, the half the phrase did not say taken from the item:
+    ///
+    /// - a day alone over a timed date: that day at the item's time,
+    ///   first (a new day keeps the time, as a calendar pick does);
+    /// - a time alone over a date: the item's day at that time, first
+    ///   unless that day is behind `today` (`YYYY-MM-DD`).
+    public func readings(over current: String?, today: String) -> [String] {
+        var readings = [when]
+        if let current, current.count >= 10 {
+            let day = String(current.prefix(10))
+            if when.count < 16, current.count >= 16 {
+                readings.insert(when + current.dropFirst(10).prefix(6), at: 0)
+            } else if isTimeOnly {
+                readings.insert(day + when.dropFirst(10), at: day < today ? 1 : 0)
+            }
+        }
+        var seen = Set<String>()
+        return readings.filter { seen.insert($0).inserted }
+    }
+
     // MARK: Resolution
 
     private static let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)

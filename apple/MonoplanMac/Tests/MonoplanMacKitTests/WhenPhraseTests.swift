@@ -44,6 +44,37 @@ final class WhenPhraseTests: XCTestCase {
         XCTAssertEqual(when("run tomorrow morning at 6:15"), "\(day(plus: 1))T06:15")
     }
 
+    func testReadingsFillInWhatThePhraseLeftOut() {
+        let today = day(plus: 0)
+        let tomorrow = WhenPhrase.find(in: "tomorrow", now: now)!
+        // No date yet, or an all-day one: just the phrase.
+        XCTAssertEqual(tomorrow.readings(over: nil, today: today), [day(plus: 1)])
+        XCTAssertEqual(tomorrow.readings(over: day(plus: 5), today: today), [day(plus: 1)])
+        // A day over a timed date keeps the time first.
+        XCTAssertEqual(
+            tomorrow.readings(over: "\(day(plus: 5))T15:00", today: today),
+            ["\(day(plus: 1))T15:00", day(plus: 1)])
+
+        // A time alone goes on the item's day first, unless it is past.
+        // Its own day is today, or tomorrow in the day's last minute.
+        let time = WhenPhrase.find(in: "11:59pm", now: now)!
+        let own = String(time.when.prefix(10))
+        XCTAssertTrue(time.isTimeOnly)
+        XCTAssertEqual(
+            time.readings(over: day(plus: 5), today: today),
+            ["\(day(plus: 5))T23:59", "\(own)T23:59"])
+        XCTAssertEqual(
+            time.readings(over: day(plus: -5), today: today),
+            ["\(own)T23:59", "\(day(plus: -5))T23:59"])
+        XCTAssertEqual(time.readings(over: own, today: today), ["\(own)T23:59"])
+
+        // A phrase with both halves is itself.
+        let both = WhenPhrase.find(in: "tomorrow at 5pm", now: now)!
+        XCTAssertFalse(both.isTimeOnly)
+        XCTAssertEqual(
+            both.readings(over: "\(day(plus: 5))T15:00", today: today), ["\(day(plus: 1))T17:00"])
+    }
+
     func testThePhraseIsTheWordsAsTyped() {
         let phrase = WhenPhrase.find(in: "Call mum  Tomorrow at 5pm", now: now)
         XCTAssertEqual(phrase?.text, "Tomorrow at 5pm")
