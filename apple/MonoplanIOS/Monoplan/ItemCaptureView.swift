@@ -12,13 +12,15 @@
 //
 // - Return: create and close the sheet (the quick capture).
 // - The keyboard going down any other way: create, stay on the item.
-// - The plus on Date or Place: create, and open that editor on it.
+// - The plus on Date or Place, or the list field: create, and open
+//   that editor on it.
 // - The sheet closing (drag down, the "x"): create.
 // - The app going to the background: create, stay on the item.
 //
 // An empty title creates nothing, whichever way the sheet is left.
-// The list is the one field held before the item exists: picking it
-// first costs nothing, and the item is created in it.
+// The list is the one field held before the item exists: with no title
+// yet, the list field opens the list editor (`ItemListEditor`) over the
+// capture, and the item is created in what was picked.
 
 import MonoplanMacKit
 import SwiftUI
@@ -39,6 +41,8 @@ struct ItemCaptureView: View {
     /// The editor to open on the item as it appears.
     @State private var startEditing: ItemView.Editor?
     @State private var error: String?
+    /// The list editor has the sheet (no title yet, so no item).
+    @State private var pickingList = false
     /// Whether the create has been sent. A reference, so the several
     /// ways of leaving the title that fire together (Return drops the
     /// focus and closes the sheet) see one another's claim at once.
@@ -99,8 +103,14 @@ struct ItemCaptureView: View {
         Group {
             if let promoted {
                 ItemView(ref: promoted, detent: $detent, startEditing: startEditing)
+            } else if pickingList {
+                ItemListEditor(
+                    itemTitle: nil, lists: listOptions, current: list.listId,
+                    pick: { list = $0 },
+                    done: { withAnimation(.easeOut(duration: 0.15)) { pickingList = false } })
+                    .transition(.opacity)
             } else {
-                page
+                page.transition(.opacity)
             }
         }
         .onDisappear { settle(.gone) }
@@ -168,36 +178,22 @@ struct ItemCaptureView: View {
     }
 
     /// The list the item will be created in, as the item page draws
-    /// its list field: a menu of the workspace's lists. Should the
-    /// item be created under an open menu (opening it took the
-    /// keyboard down), the pick moves the item instead.
+    /// its list field. With a title typed, a tap leaves the title like
+    /// any other: the item is created and the list editor opens on it.
+    /// With none, the editor takes the sheet to pick where the item
+    /// will land.
     private var listField: some View {
-        Menu {
-            Picker("List", selection: Binding(
-                get: { list.listId },
-                set: { id in
-                    guard let picked = model.lists(inDoc: list.docId).first(where: { $0.listId == id }) else { return }
-                    if let promoted {
-                        model.moveItem(promoted, toList: picked.listId)
-                    } else {
-                        list = picked
-                    }
-                }
-            )) {
-                ForEach(listOptions, id: \.listId) { option in
-                    Label {
-                        Text(option.name)
-                    } icon: {
-                        ListMenuIcon.image(listId: option.listId, emoji: option.icon)
-                    }
-                    .tag(option.listId)
-                }
+        Button {
+            if trimmed.isEmpty {
+                withAnimation(.easeOut(duration: 0.15)) { pickingList = true }
+            } else {
+                settle(.stay(.list))
             }
         } label: {
             HStack(spacing: 6) {
                 FieldRow(text: list.name) { ListIcon(listId: list.listId, emoji: list.icon) }
                 Spacer(minLength: 8)
-                Image(systemName: "chevron.up.chevron.down")
+                Image(systemName: "chevron.right")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -205,11 +201,12 @@ struct ItemCaptureView: View {
         }
         .buttonStyle(.plain)
         .itemFieldOutset()
+        .accessibilityHint("Chooses the list the item goes in")
     }
 
     /// The workspace's lists, with the target itself when it is not
-    /// among them yet (the index has not loaded), so the picker always
-    /// has a row to tick.
+    /// among them yet (the index has not loaded), so there is always
+    /// a row to tick.
     private var listOptions: [ListRef] {
         let lists = model.lists(inDoc: list.docId)
         return lists.contains(where: { $0.listId == list.listId }) ? lists : lists + [list]

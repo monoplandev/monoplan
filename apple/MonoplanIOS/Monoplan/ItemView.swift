@@ -9,8 +9,8 @@
 // the title hands the sheet to the title editor (`ItemTitleEditor`), the
 // star at the top right stars and unstars it, the "x" beside it closes
 // the sheet (as a drag down does),
-// the list field moves it, the date and place rows hand the sheet to their editors
-// (`ItemDateEditor`, `ItemPlaceEditor`);
+// the list field and the date and place rows hand the sheet to their
+// editors (`ItemListEditor`, `ItemDateEditor`, `ItemPlaceEditor`);
 // everything else is display only.
 // The same sheet is where a new item is captured (`ItemCaptureView`,
 // opened by the bottom bar's add button): a title field, and this page
@@ -163,6 +163,7 @@ struct ItemView: View {
 
     enum Editor {
         case title
+        case list
         case date
         case place
     }
@@ -188,6 +189,11 @@ struct ItemView: View {
                 Group {
                     switch editing {
                     case .title: ItemTitleEditor(ref: ref, item: item, done: endEditing)
+                    case .list:
+                        ItemListEditor(
+                            itemTitle: item.text, lists: listOptions(item), current: item.listId,
+                            pick: { if $0.listId != item.listId { model.moveItem(ref, toList: $0.listId) } },
+                            done: endEditing)
                     case .date: ItemDateEditor(ref: ref, item: item, done: endEditing)
                     case .place: ItemPlaceEditor(ref: ref, item: item, done: endEditing)
                     }
@@ -366,9 +372,9 @@ struct ItemView: View {
         .accessibilityValue(Self.statusLabel(item.state, event: event))
     }
 
-    /// The menu's rows: the workspace's lists, plus the item's own list
-    /// when it is not among them (archived, or the calendar's), so the
-    /// picker always has a row to tick.
+    /// The list editor's rows: the workspace's lists, plus the item's
+    /// own list when it is not among them (archived, or the calendar's),
+    /// so there is always a row to tick.
     private func listOptions(_ item: ItemDetail) -> [ListRef] {
         let lists = model.lists(inDoc: ref.docId)
         if lists.contains(where: { $0.listId == item.listId }) { return lists }
@@ -376,37 +382,22 @@ struct ItemView: View {
         return lists + [own]
     }
 
-    /// The item's list, as a pull-down menu of the workspace's lists
-    /// (the web dialog's list picker): the current one ticked, a pick
-    /// moves the item there. Lists of other workspaces are not offered:
-    /// the engine has no cross-doc move yet. A binned item stays put.
+    /// The item's list, drawn as a field: full width, a faint fill, a
+    /// full-height (44pt) tap target, outset by its own padding so its
+    /// icon and text stay in line with the plain rows under it. A tap
+    /// hands the sheet to the list editor (`ItemListEditor`), as the
+    /// date and place rows do with theirs; a system menu here covered
+    /// the item it was moving. Lists of other workspaces are not
+    /// offered: the engine has no cross-doc move yet. A binned item
+    /// stays put.
     private func listField(_ item: ItemDetail) -> some View {
-        Menu {
-            // A `Picker` in a menu is the system's single-choice menu:
-            // it draws the tick for the current list itself, which
-            // leaves each row's image slot for the list's icon.
-            Picker("List", selection: Binding(
-                get: { item.listId },
-                set: { if $0 != item.listId { model.moveItem(ref, toList: $0) } }
-            )) {
-                ForEach(listOptions(item), id: \.listId) { list in
-                    Label {
-                        Text(list.name)
-                    } icon: {
-                        ListMenuIcon.image(listId: list.listId, emoji: list.icon)
-                    }
-                    .tag(list.listId)
-                }
-            }
+        Button {
+            edit(.list)
         } label: {
-            // Drawn as a field: full width, a faint fill, the picker
-            // chevrons at its trailing edge, and a full-height (44pt)
-            // tap target. Outset by its own padding so its icon and
-            // text stay in line with the plain rows under it.
             HStack(spacing: 6) {
                 FieldRow(text: item.listLabel) { ListIcon(listId: item.listId, emoji: item.listIcon) }
                 Spacer(minLength: 8)
-                Image(systemName: "chevron.up.chevron.down")
+                Image(systemName: "chevron.right")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -415,6 +406,7 @@ struct ItemView: View {
         .buttonStyle(.plain)
         .disabled(item.binnedAt != nil)
         .itemFieldOutset()
+        .accessibilityHint("Moves the item to another list")
     }
 
     @ViewBuilder
@@ -608,24 +600,6 @@ struct CloseButton: View {
         .buttonStyle(.plain)
         .padding(.vertical, -10)
         .accessibilityLabel("Close")
-    }
-}
-
-/// A list's icon for a menu row. Menus take images only, so an emoji is
-/// drawn into one (kept in its own colours); a list without an emoji
-/// gets the same built-in glyphs as `ListIcon`.
-enum ListMenuIcon {
-    static func image(listId: String, emoji: String?) -> Image {
-        guard let emoji, !emoji.isEmpty else {
-            return Image(systemName: listId == "inbox" ? "tray" : "folder")
-        }
-        let font = UIFont.systemFont(ofSize: 17)
-        let text = emoji as NSString
-        let size = text.size(withAttributes: [.font: font])
-        let drawn = UIGraphicsImageRenderer(size: size).image { _ in
-            text.draw(at: .zero, withAttributes: [.font: font])
-        }
-        return Image(uiImage: drawn.withRenderingMode(.alwaysOriginal))
     }
 }
 
