@@ -13,9 +13,12 @@ public struct ListRow: Decodable, Equatable, Identifiable {
     public let icon: String?
     /// Unix millis the list was archived; nil while it is active.
     public let archivedAt: Int64?
+    /// How many Open items the list holds; nil from an engine that
+    /// does not count them.
+    public let open: Int?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, icon
+        case id, name, icon, open
         case archivedAt = "archived_at"
     }
 }

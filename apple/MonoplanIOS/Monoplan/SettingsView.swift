@@ -1,5 +1,6 @@
 // The Settings page, pushed from Home's gear: what a person acts on.
-// The account (who is signed in and where, sign in / sign out), sync
+// General (the device's list-counts preference, as the web's Settings
+// has it), the account (who is signed in and where, sign in / sign out), sync
 // (the status line and when it last synced), and the last error when
 // there is one. Everything diagnostic sits a level down in Debug
 // (`DebugView.swift`), pushed from the last row. Sign-in is the Mac
@@ -12,9 +13,13 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showSignIn = false
+    @AppStorage(listCountsKey) private var showListCounts = false
 
     var body: some View {
         List {
+            Section("General") {
+                Toggle("Show list counts in Home", isOn: $showListCounts)
+            }
             accountSection
             syncSection
             if let error = model.lastError {

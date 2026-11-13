@@ -2,8 +2,8 @@
 // laid out top to bottom in the same order: status, title, list, planned
 // date, deadline, place, notes, then the activity log. Read from
 // `item show --json` and refetched on every doc change while shown.
-// It comes up as a sheet over whatever list the row was in (half height,
-// draggable to full), as the dialog floats over the web's lists, rather
+// It comes up as a page sheet over whatever list the row was in (full
+// height only), as the dialog floats over the web's lists, rather
 // than as a pushed page. The sheet has a navigation bar, its buttons the
 // system's Liquid Glass: at the left the status control (the checkbox
 // ticks and reopens the item, the state label beside it opens a menu of
@@ -89,36 +89,27 @@ private enum SheetTarget: Identifiable {
 private struct ItemSheet: ViewModifier {
     @EnvironmentObject private var model: AppModel
     @State private var open: SheetTarget?
-    /// The sheet's height: half to start, full once a field expands
-    /// (`ItemView` raises it) or the user drags it up.
-    @State private var detent: PresentationDetent = .medium
 
     func body(content: Content) -> some View {
         content
-            .environment(\.openItem) {
-                detent = .medium
-                open = .item($0)
-            }
-            // A capture opens at full height: the keyboard comes up
-            // with it and would cover a half sheet. Nothing to capture
-            // into before the session has loaded.
+            .environment(\.openItem) { open = .item($0) }
+            // Nothing to capture into before the session has loaded.
             .environment(\.captureItem) { list in
                 guard let list = list ?? model.lists(inDoc: nil).first else { return }
-                detent = .large
                 open = .capture(CaptureTarget(list: list))
             }
             // One navigation stack for whatever has the sheet (the
             // page, a capture, a field editor): each puts its own
-            // buttons in the bar. Nothing is pushed on it.
+            // buttons in the bar. Nothing is pushed on it. A page
+            // sheet: full height only, no half detent.
             .sheet(item: $open) { target in
                 NavigationStack {
                     switch target {
-                    case .item(let ref): ItemView(ref: ref, detent: $detent)
-                    case .capture(let capture): ItemCaptureView(target: capture, detent: $detent)
+                    case .item(let ref): ItemView(ref: ref)
+                    case .capture(let capture): ItemCaptureView(target: capture)
                     }
                 }
                 .environmentObject(model)
-                .presentationDetents([.medium, .large], selection: $detent)
                 .presentationDragIndicator(.visible)
             }
     }
@@ -157,14 +148,12 @@ struct ItemLink<Label: View>: View {
 struct ItemView: View {
     @EnvironmentObject private var model: AppModel
     let ref: ItemRef
-    @Binding var detent: PresentationDetent
     /// An editor to open straight away: a capture that became this
     /// item on the way to its date or place.
     var startEditing: Editor? = nil
     @Environment(\.dismiss) private var dismiss
     /// The field editor that has the sheet, if one does.
     @State private var editing: Editor?
-    @State private var detentBeforeEditing: PresentationDetent = .medium
     /// The "Delete" of the more menu is waiting on its confirmation.
     @State private var confirmingDelete = false
 
@@ -175,16 +164,12 @@ struct ItemView: View {
         case place
     }
 
-    /// An editor takes the sheet over, at full height; closing it gives
-    /// the sheet back at the height it had.
+    /// An editor takes the sheet over; closing it gives the sheet back.
     private func edit(_ editor: Editor) {
-        detentBeforeEditing = detent
-        detent = .large
         withAnimation(.easeOut(duration: 0.15)) { editing = editor }
     }
 
     private func endEditing() {
-        detent = detentBeforeEditing
         withAnimation(.easeOut(duration: 0.15)) { editing = nil }
     }
 
@@ -279,12 +264,10 @@ struct ItemView: View {
     /// so (the bin masks the state; Restore is the way out), and one
     /// that has not loaded shows an inert box. At the right, the star
     /// and the more menu.
-    /// The gaps inside the status control, set to look the same on a
-    /// device: checkbox to label, and label to the menu's chevrons. The
-    /// first is the smaller number because the bar puts a few points
-    /// of its own around the menu.
+    /// The gap between the status control's checkbox and its label,
+    /// small because the bar puts a few points of its own around the
+    /// menu.
     private static let checkGap: CGFloat = 3
-    private static let chevronGap: CGFloat = 7
 
     @ToolbarContentBuilder
     private var bar: some ToolbarContent {
@@ -390,12 +373,14 @@ struct ItemView: View {
                 } else {
                     FieldRow("map", text: "Place", empty: true)
                 }
-                Spacer(minLength: 8)
-                EditBubble(adding: item.place == nil, what: "place") { edit(.place) }
-                    .disabled(item.binnedAt != nil)
+                if item.place != nil {
+                    Spacer(minLength: 8)
+                    EditBubble(what: "place") { edit(.place) }
+                        .disabled(item.binnedAt != nil)
+                }
             }
             .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-            .addsOnTap(item.place == nil && item.binnedAt == nil) { edit(.place) }
+            .addsOnTap(item.place == nil && item.binnedAt == nil, what: "place") { edit(.place) }
             if let place = item.place, let lat = place.lat, let lon = place.lon {
                 PlaceMapCard(label: place.label, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
             }
@@ -434,16 +419,12 @@ struct ItemView: View {
                 }
             }
         } label: {
-            HStack(spacing: Self.chevronGap) {
-                Text(Self.statusLabel(item.state, event: event))
-                    .font(.subheadline.weight(.medium))
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            // The bar's full height, for the tap.
-            .frame(minHeight: 36)
-            .contentShape(Rectangle())
+            // No chevrons after the label: the bar is busy enough.
+            Text(Self.statusLabel(item.state, event: event))
+                .font(.subheadline.weight(.medium))
+                // The bar's full height, for the tap.
+                .frame(minHeight: 36)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .sensoryFeedback(.selection, trigger: item.state)
@@ -525,22 +506,21 @@ struct ItemView: View {
     }
 
     /// A planned date for the item's row: today and tomorrow by name
-    /// ("Today at 14:00") with the date itself to follow, muted
-    /// ("Sat 14 Nov"); any other day as `whenText` has it, alone.
-    static func whenParts(_ when: String, now: Date = Date(), calendar: Calendar = .current) -> (text: String, muted: String?) {
-        guard let date = Agenda.start(of: String(when.prefix(10)), calendar: calendar),
-            let tomorrow = calendar.date(byAdding: .day, value: 1, to: now)
-        else { return (whenText(when), nil) }
-        let name: String
-        if calendar.isDate(date, inSameDayAs: now) {
-            name = "Today"
-        } else if calendar.isDate(date, inSameDayAs: tomorrow) {
-            name = "Tomorrow"
-        } else {
-            return (whenText(when), nil)
+    /// in the date's place ("Today 14:00"), any other day spelled out
+    /// ("Saturday 12 Sep 14:00"). No "at" before the time.
+    static func rowWhenText(_ when: String, now: Date = Date(), calendar: Calendar = .current) -> String {
+        let day = String(when.prefix(10))
+        var name = dayText(day, now: now, calendar: calendar)
+        if let date = Agenda.start(of: day, calendar: calendar) {
+            if calendar.isDate(date, inSameDayAs: now) {
+                name = "Today"
+            } else if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now),
+                calendar.isDate(date, inSameDayAs: tomorrow)
+            {
+                name = "Tomorrow"
+            }
         }
-        let text = when.count >= 16 ? "\(name) at \(when.dropFirst(11).prefix(5))" : name
-        return (text, date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))
+        return when.count >= 16 ? "\(name) \(when.dropFirst(11).prefix(5))" : name
     }
 
     /// A `YYYY-MM-DD` spelled out in the local calendar; the raw text if
@@ -732,8 +712,6 @@ private struct PlaceMapCard: View {
 /// under it when there is one. `empty` mutes a field that is unset.
 struct FieldRow<Icon: View>: View {
     let text: String
-    /// More of the same line, after the text and in its font, muted.
-    var muted: String? = nil
     var note: String? = nil
     var empty = false
     @ViewBuilder let icon: Icon
@@ -744,11 +722,7 @@ struct FieldRow<Icon: View>: View {
                 .foregroundStyle(empty ? .tertiary : .secondary)
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
-                if let muted {
-                    Text("\(text) \(Text(muted).foregroundStyle(.secondary))")
-                } else {
-                    Text(text).foregroundStyle(empty ? .tertiary : .primary)
-                }
+                Text(text).foregroundStyle(empty ? .tertiary : .primary)
                 if let note {
                     Text(note).font(.footnote).foregroundStyle(.secondary)
                 }
@@ -759,8 +733,8 @@ struct FieldRow<Icon: View>: View {
 
 extension FieldRow where Icon == Image {
     /// A field led by an SF Symbol.
-    init(_ systemImage: String, text: String, muted: String? = nil, note: String? = nil, empty: Bool = false) {
-        self.init(text: text, muted: muted, note: note, empty: empty) { Image(systemName: systemImage) }
+    init(_ systemImage: String, text: String, note: String? = nil, empty: Bool = false) {
+        self.init(text: text, note: note, empty: empty) { Image(systemName: systemImage) }
     }
 }
 

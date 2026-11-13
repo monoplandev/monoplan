@@ -7,35 +7,43 @@
 
 import SwiftUI
 
-/// The round button at the trailing edge of a field row: a plus to add
-/// a value, a pencil to change one. The row itself is display only.
+/// The round pencil at the trailing edge of a field row that has a
+/// value: the one way to change it, the row itself display only. A row
+/// with no value has no button and is the target itself (`addsOnTap`).
 struct EditBubble: View {
-    /// The field has no value yet.
-    let adding: Bool
     /// What it edits, for VoiceOver: "date", "place".
     let what: String
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: adding ? "plus" : "pencil")
+            Image(systemName: "pencil")
                 .font(.footnote.weight(.semibold))
                 .frame(width: 18, height: 18)
         }
         .buttonStyle(.bordered)
         .buttonBorderShape(.circle)
-        .accessibilityLabel(adding ? "Add \(what)" : "Change \(what)")
+        .accessibilityLabel("Change \(what)")
     }
 }
 
 extension View {
-    /// A field row with no value is all one target: a tap anywhere on
-    /// it does what its plus does. Once it has a value only the pencil
-    /// edits, so a set value is not changed by a stray tap. The plus
-    /// stays the row's one button for VoiceOver.
-    func addsOnTap(_ empty: Bool, action: @escaping () -> Void) -> some View {
-        contentShape(Rectangle())
-            .onTapGesture { if empty { action() } }
+    /// A field row with no value is all one target, with no button of
+    /// its own: a tap anywhere on it opens the editor, and VoiceOver
+    /// reads the row as the button ("Add date"). Once it has a value
+    /// only the pencil edits, so a set value is not changed by a stray
+    /// tap.
+    @ViewBuilder
+    func addsOnTap(_ empty: Bool, what: String, action: @escaping () -> Void) -> some View {
+        if empty {
+            contentShape(Rectangle())
+                .onTapGesture(perform: action)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Add \(what)")
+                .accessibilityAddTraits(.isButton)
+        } else {
+            self
+        }
     }
 
     /// An editor's navigation bar: a cross on the left, the field's

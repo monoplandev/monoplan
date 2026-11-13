@@ -19,6 +19,10 @@ import MonoplanMacKit
 import SwiftUI
 
 /// One list in one workspace: what a Home row opens.
+/// `UserDefaults` key of the list-counts preference (`SettingsView`'s
+/// toggle, read by Home).
+let listCountsKey = "listCounts"
+
 struct ListRef: Hashable {
     let docId: String
     let listId: String
@@ -115,6 +119,11 @@ struct HomeView: View {
     /// captures to.
     @State private var shownList: ListRef?
 
+    /// The device's list-counts preference (Settings), off by default:
+    /// count each list's Open items on its row. The Inbox and Starred
+    /// rows are counted either way.
+    @AppStorage(listCountsKey) private var showListCounts = false
+
     private var searchActive: Bool { searching || !query.isEmpty }
 
     /// How many of today's rows Home shows before "Show all" (which
@@ -167,7 +176,11 @@ struct HomeView: View {
                         // drawn for an empty one.
                         row(ListRef(docId: doc.docId, listId: "inbox", name: "Inbox"), count: model.inboxCount(doc.docId) ?? 0)
                         ForEach(Lists.active(model.listsByDoc[doc.docId] ?? [])) { list in
-                            row(ListRef(docId: doc.docId, listId: list.id, name: list.name, icon: list.icon))
+                            // Counted only when Settings says so
+                            // (the web's "Show list counts in nav").
+                            row(
+                                ListRef(docId: doc.docId, listId: list.id, name: list.name, icon: list.icon),
+                                count: showListCounts ? list.open ?? 0 : 0)
                         }
                     } header: {
                         // A shared workspace's title is led by the

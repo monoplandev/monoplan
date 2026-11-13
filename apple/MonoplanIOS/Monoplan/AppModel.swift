@@ -195,6 +195,7 @@ final class AppModel: ObservableObject {
                 let id = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !id.isEmpty {
                     refreshLenses()
+                    refreshListRows()
                     for list in browsedLists.values { refreshList(list) }
                     let ref = ItemRef(docId: list.docId, itemId: id, title: text)
                     // The date its title named, as a question on the
@@ -313,6 +314,7 @@ final class AppModel: ObservableObject {
             case .success(.output):
                 refreshLenses()
                 if itemDetails[ref.key] != nil { refreshItem(ref) }
+                refreshListRows()
                 for list in browsedLists.values { refreshList(list) }
             case .success(let other):
                 lastError = "could not update item: \(String(describing: other))"
@@ -353,13 +355,22 @@ final class AppModel: ObservableObject {
         let open = Set(session.docs.map(\.docId))
         listsByDoc = listsByDoc.filter { open.contains($0.key) }
         browsedLists = browsedLists.filter { open.contains($0.value.docId) }
+        refreshListRows()
         for doc in session.docs {
-            fetch(.lists(workspace: selector(doc.docId)), what: "lists", parse: Lists.parse) { [weak self] rows, _ in
-                if let rows { self?.listsByDoc[doc.docId] = rows }
-            }
             // Each Inbox's Open items, for the count on its Home row:
             // read as a browsed list, so a write of ours rereads it too.
             refreshList(ListRef(docId: doc.docId, listId: "inbox", name: "Inbox"))
+        }
+    }
+
+    /// Each open workspace's list rows alone (names, icons, open
+    /// counts). Also run after a write of ours, so the counts on
+    /// Home's rows follow it.
+    private func refreshListRows() {
+        for doc in session?.docs ?? [] {
+            fetch(.lists(workspace: selector(doc.docId)), what: "lists", parse: Lists.parse) { [weak self] rows, _ in
+                if let rows { self?.listsByDoc[doc.docId] = rows }
+            }
         }
     }
 

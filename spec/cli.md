@@ -83,7 +83,7 @@ The curated single-tier Focus lens (`spec/focus.md`), named "Starred" on every u
 Marking a starred item `done` removes it from Starred automatically; binning/deleting drops it from the view.
 
 ### Lists
-- `monoplan list ls` — active lists only by default; `--archived` shows only archived lists, `--all` shows both. `--json` output includes `archived_at` (null for active lists) and `icon` (the list's emoji, omitted when it has none).
+- `monoplan list ls` — active lists only by default; `--archived` shows only archived lists, `--all` shows both. `--json` output includes `archived_at` (null for active lists), `icon` (the list's emoji, omitted when it has none) and `open` (how many Open items the list holds: not closed, not binned).
 - `monoplan list add <name>`
 - `monoplan list rename <list> <name>`
 - `monoplan list archive <list>` — remove a list from the active workspace without touching its items, ordering, or metadata (`spec/data-model.md` "Archived lists"). Refuses for `inbox` and `events`.

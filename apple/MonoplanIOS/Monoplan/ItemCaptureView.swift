@@ -12,7 +12,7 @@
 //
 // - Return: create and close the sheet (the quick capture).
 // - The keyboard going down any other way: create, stay on the item.
-// - The plus on Date or Place, or the list field: create, and open
+// - A tap on the Date or Place row, or the list field: create, and open
 //   that editor on it.
 // - The sheet closing (drag down, the "x" in the bar): create.
 // - The app going to the background: create, stay on the item.
@@ -30,7 +30,6 @@ import SwiftUI
 struct ItemCaptureView: View {
     @EnvironmentObject private var model: AppModel
     let target: CaptureTarget
-    @Binding var detent: PresentationDetent
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var text = ""
@@ -64,9 +63,8 @@ struct ItemCaptureView: View {
         case gone
     }
 
-    init(target: CaptureTarget, detent: Binding<PresentationDetent>) {
+    init(target: CaptureTarget) {
         self.target = target
-        _detent = detent
         _list = State(initialValue: target.list)
     }
 
@@ -105,7 +103,7 @@ struct ItemCaptureView: View {
     var body: some View {
         Group {
             if let promoted {
-                ItemView(ref: promoted, detent: $detent, startEditing: startEditing)
+                ItemView(ref: promoted, startEditing: startEditing)
             } else if pickingList {
                 ItemListEditor(
                     itemTitle: nil, lists: listOptions, current: list.listId,
@@ -169,13 +167,9 @@ struct ItemCaptureView: View {
     }
 
     private func fieldRow(_ systemImage: String, _ name: String, what: String, opens editor: ItemView.Editor) -> some View {
-        HStack(spacing: 8) {
-            FieldRow(systemImage, text: name, empty: true)
-            Spacer(minLength: 8)
-            EditBubble(adding: true, what: what) { settle(.stay(editor)) }
-                .disabled(trimmed.isEmpty)
-        }
-        .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+        FieldRow(systemImage, text: name, empty: true)
+            .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+            .addsOnTap(!trimmed.isEmpty, what: what) { settle(.stay(editor)) }
     }
 
     /// The list the item will be created in, as the item page draws

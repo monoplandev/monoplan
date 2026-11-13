@@ -18,10 +18,10 @@ import MonoplanMacKit
 import SwiftUI
 
 /// The date as a row on the item: its value, or "Date" when unset,
-/// with a small round button at the trailing edge that opens the
-/// editor (a plus to add a date, a pencil to change one). With no date
-/// the whole row opens it; once one is set only the pencil does, the
-/// row itself display, so changing a date takes a deliberate tap.
+/// muted. With no date the whole row opens the editor and there is no
+/// button; once one is set a small round pencil at the trailing edge
+/// is the only way in, the row itself display, so changing a date
+/// takes a deliberate tap.
 ///
 /// A pending date suggestion (`ItemDetail.pendingSuggestion`: an open
 /// item with no date whose title named one) takes the row over, as the
@@ -29,7 +29,7 @@ import SwiftUI
 /// row in orange, "Suggested: Friday 20 Nov at 08:30", so it is never
 /// taken for a set date, with two answers at the trailing edge. The
 /// tick makes it the item's date; the cross drops it, and the plain
-/// row with its plus comes back.
+/// empty row comes back.
 struct ItemDateField: View {
     let item: ItemDetail
     let edit: () -> Void
@@ -42,19 +42,20 @@ struct ItemDateField: View {
                 suggestion(suggested)
             } else {
                 if let when = item.when {
-                    let parts = ItemView.whenParts(when)
-                    FieldRow("calendar", text: parts.text, muted: parts.muted, note: ItemView.lengthText(item))
+                    FieldRow("calendar", text: ItemView.rowWhenText(when), note: ItemView.lengthText(item))
                 } else {
                     FieldRow("calendar", text: "Date", empty: true)
                 }
-                Spacer(minLength: 8)
-                EditBubble(adding: item.when == nil, what: "date", action: edit)
-                    .disabled(item.binnedAt != nil)
+                if item.when != nil {
+                    Spacer(minLength: 8)
+                    EditBubble(what: "date", action: edit)
+                        .disabled(item.binnedAt != nil)
+                }
             }
         }
         .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
         .addsOnTap(
-            item.when == nil && item.pendingSuggestion == nil && item.binnedAt == nil, action: edit)
+            item.when == nil && item.pendingSuggestion == nil && item.binnedAt == nil, what: "date", action: edit)
     }
 
     @ViewBuilder

@@ -7,6 +7,7 @@
 //! core's destructive `delete_list` stays internal.
 
 use clap::{Parser, Subcommand};
+use std::collections::HashMap;
 use std::io::Write;
 
 use monoplan_core::{Doc, ListView};
@@ -76,7 +77,18 @@ fn show(
         .filter(|l| all || (l.archived_at.is_some() == archived_only))
         .collect();
     if json {
-        write_json(out, &lists.iter().map(list_json).collect::<Vec<_>>())?;
+        // One walk of the doc's items for every list's open count.
+        let mut open = HashMap::<String, usize>::new();
+        for item in doc.all_items() {
+            if item.is_open() {
+                *open.entry(item.list_id).or_insert(0) += 1;
+            }
+        }
+        let rows: Vec<_> = lists
+            .iter()
+            .map(|l| list_json(l, open.get(&l.id).copied().unwrap_or(0)))
+            .collect();
+        write_json(out, &rows)?;
     } else {
         for l in &lists {
             if l.archived_at.is_some() {
@@ -121,14 +133,17 @@ struct ListJson<'a> {
     icon: Option<&'a str>,
     archived_at: Option<i64>,
     created_at: i64,
+    /// How many Open items the list holds (not closed, not binned).
+    open: usize,
 }
 
-fn list_json(l: &ListView) -> ListJson<'_> {
+fn list_json(l: &ListView, open: usize) -> ListJson<'_> {
     ListJson {
         id: &l.id,
         name: &l.name,
         icon: l.icon.as_deref(),
         archived_at: l.archived_at,
         created_at: l.created_at,
+        open,
     }
 }
