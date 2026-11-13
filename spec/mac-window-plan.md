@@ -483,7 +483,7 @@ lives, and where it goes:
 | Language (es / en) | `locale` cookie + localStorage (`i18n.tsx`) | The app's own localisation: `Bundle.main.preferredLocalizations` (System Settings › Language & Region › Applications). No app setting of its own. |
 | Theme (auto / light / dark) | `theme` cookie + localStorage (`theme.ts`) | An Appearance picker (System / Light / Dark) in a new General pane, `UserDefaults`. The app sets `NSApp.appearance`; the webview's `prefers-color-scheme` follows its effective appearance, so the page stays on `auto` and no value crosses. Sheets, alerts and the traffic lights match for free. |
 | Time format (auto / 12h / 24h) | `hourcycle` cookie (`format.tsx`) | The system's: `Locale.current.hourCycle`. No app setting. |
-| Typed dates (on / off) | `typeddates` cookie (`whenToken.ts`) | A toggle in the General pane, `UserDefaults`. |
+| Typed dates (on / off) | `typeddates` cookie (`whenSuggest.ts`) | A toggle in the General pane, `UserDefaults`. |
 | Show list counts (on / off) | `listcounts` cookie (`listCounts.ts`) | A toggle in the General pane, `UserDefaults`, off by default. A device preference since 2026-11-13: it was the Home doc's synced `show_list_counts`, set through an IPC-only `DocCmd::Settings` frame, and both are gone. It rides `WindowSettings` beside typed dates. |
 | Account: email, log out, delete | — | Already hidden in the mirror (`Session.mirror`); the Account pane and the tray own sign-in / sign-out. |
 | Devices: list, rename, revoke | `/api` through the proxy | A native Devices pane (built 2026-11-04): `GET` / `PATCH` / `DELETE /api/devices` with the engine's token, straight from the app (`Devices` in `MonoplanMacKit`, tested; `APICredential` from `Engine.session` + `Engine.device_token`, fetched off the main thread). Loaded when the pane appears and after every change, never on doc events. This Mac is marked and cannot be revoked there (that is Sign Out). |
@@ -497,7 +497,7 @@ lives, and where it goes:
 `Locale.current`, re-read on `UserDefaults.didChangeNotification` and
 `NSLocale.currentLocaleDidChangeNotification`; `HostInbound.settings`;
 the General pane's toggle; `hostSettings.ts` on the page, read by
-`whenToken.ts`, `listCounts.ts`, `i18n.tsx` and `format.tsx`). One
+`whenSuggest.ts`, `listCounts.ts`, `i18n.tsx` and `format.tsx`). One
 `WindowSettings` value, built in Swift from `UserDefaults` and the
 locale and shaped like `{language, hourCycle, typedDates, listCounts}` (whatever
 the page cannot read for itself), delivered two ways:

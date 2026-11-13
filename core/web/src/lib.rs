@@ -321,6 +321,29 @@ impl Doc {
             .map_err(js_err)
     }
 
+    /// Set (`Some`) or clear (`None`) an item's pending date suggestion;
+    /// the value has the shape `setItemWhen` takes. Clearing is how a
+    /// declined suggestion is recorded.
+    #[wasm_bindgen(js_name = setItemWhenSuggested)]
+    pub fn set_item_when_suggested(
+        &self,
+        item_id: &str,
+        when: Option<String>,
+    ) -> Result<(), JsError> {
+        self.inner
+            .set_item_when_suggested(item_id, when.as_deref())
+            .map_err(js_err)
+    }
+
+    /// Accept an item's pending date suggestion: it becomes the `when`
+    /// and is cleared, in one commit. False when none was pending.
+    #[wasm_bindgen(js_name = acceptItemWhenSuggestion)]
+    pub fn accept_item_when_suggestion(&self, item_id: &str) -> Result<bool, JsError> {
+        self.inner
+            .accept_item_when_suggestion(item_id)
+            .map_err(js_err)
+    }
+
     /// Set (`Some`, whole minutes in `1..=525600`) or clear (`None`) an
     /// item's duration. Only meaningful beside a timed `when`.
     #[wasm_bindgen(js_name = setItemDuration)]
@@ -2065,6 +2088,29 @@ impl Replica {
             .map_err(js_err)
     }
 
+    /// Set (`Some`) or clear (`None`) an item's pending date suggestion;
+    /// the value has the shape `setItemWhen` takes. Clearing is how a
+    /// declined suggestion is recorded.
+    #[wasm_bindgen(js_name = setItemWhenSuggested)]
+    pub fn set_item_when_suggested(
+        &self,
+        item_id: &str,
+        when: Option<String>,
+    ) -> Result<(), JsError> {
+        self.doc()
+            .set_item_when_suggested(item_id, when.as_deref())
+            .map_err(js_err)
+    }
+
+    /// Accept an item's pending date suggestion: it becomes the `when`
+    /// and is cleared, in one commit. False when none was pending.
+    #[wasm_bindgen(js_name = acceptItemWhenSuggestion)]
+    pub fn accept_item_when_suggestion(&self, item_id: &str) -> Result<bool, JsError> {
+        self.doc()
+            .accept_item_when_suggestion(item_id)
+            .map_err(js_err)
+    }
+
     /// Set (`Some`, whole minutes in `1..=525600`) or clear (`None`) an
     /// item's duration. Only meaningful beside a timed `when`.
     #[wasm_bindgen(js_name = setItemDuration)]
@@ -2590,7 +2636,7 @@ impl From<CoreEvent> for ReplicaEvent {
 ///
 /// Variant → fields:
 /// - `fullResync` — no fields; rematerialize current state once
-/// - `itemAdded` — id, listId, text, notes, createdAt, createdBy?, state, lifecycleAt, startedAt?, doneAt?, binnedAt?, deadline?, when?, duration?, place?, openIndex?
+/// - `itemAdded` — id, listId, text, notes, createdAt, createdBy?, state, lifecycleAt, startedAt?, doneAt?, binnedAt?, deadline?, when?, whenSuggested?, duration?, place?, openIndex?
 /// - `itemRemoved` — id
 /// - `itemMoved` — id, openIndex?
 /// - `itemTextChanged` — id, text
@@ -2598,6 +2644,7 @@ impl From<CoreEvent> for ReplicaEvent {
 /// - `itemNotesDelta` — id, delta (JSON array of `{retain}` / `{insert}` / `{delete}`, UTF-16 units; only for items with a `subscribeNotes` subscription)
 /// - `itemDeadlineChanged` — id, deadline? (undefined = no deadline)
 /// - `itemWhenChanged` — id, when? (undefined = unset; `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`)
+/// - `itemWhenSuggestedChanged` — id, whenSuggested? (undefined = none pending; same shape as `when`)
 /// - `itemDurationChanged` — id, duration? (undefined = unset; whole minutes)
 /// - `itemPlaceChanged` — id, place? (undefined = unset; JSON text of `{label, lat?, lon?, address?, ref?}`)
 /// - `itemLifecycleChanged` — id, state, lifecycleAt, startedAt?, doneAt?, binnedAt?, openIndex?
@@ -2643,6 +2690,9 @@ pub struct AppEventJs {
     deadline: Option<String>,
     /// Planned date (`itemAdded` / `itemWhenChanged`); `None` means unset.
     when: Option<String>,
+    /// Pending date suggestion (`itemAdded` / `itemWhenSuggestedChanged`);
+    /// `None` means none pending.
+    when_suggested: Option<String>,
     /// Duration in whole minutes (`itemAdded` / `itemDurationChanged`);
     /// `None` means unset.
     duration: Option<u32>,
@@ -2777,6 +2827,10 @@ impl AppEventJs {
     pub fn when(&self) -> Option<String> {
         self.when.clone()
     }
+    #[wasm_bindgen(getter, js_name = whenSuggested)]
+    pub fn when_suggested(&self) -> Option<String> {
+        self.when_suggested.clone()
+    }
     #[wasm_bindgen(getter, js_name = duration)]
     pub fn duration(&self) -> Option<u32> {
         self.duration
@@ -2814,6 +2868,7 @@ impl From<CoreAppEvent> for AppEventJs {
             started_at: None,
             deadline: None,
             when: None,
+            when_suggested: None,
             duration: None,
             place: None,
             created_at: None,
@@ -2850,6 +2905,7 @@ impl From<CoreAppEvent> for AppEventJs {
                 binned_at,
                 deadline,
                 when,
+                when_suggested,
                 duration,
                 place,
                 open_index,
@@ -2868,6 +2924,7 @@ impl From<CoreAppEvent> for AppEventJs {
                 binned_at,
                 deadline,
                 when,
+                when_suggested,
                 duration,
                 place: place.as_ref().map(place_json),
                 open_index,
@@ -2912,6 +2969,12 @@ impl From<CoreAppEvent> for AppEventJs {
                 kind: "itemWhenChanged",
                 id,
                 when,
+                ..blank
+            },
+            CoreAppEvent::ItemWhenSuggestedChanged { id, when_suggested } => AppEventJs {
+                kind: "itemWhenSuggestedChanged",
+                id,
+                when_suggested,
                 ..blank
             },
             CoreAppEvent::ItemDurationChanged { id, duration } => AppEventJs {
@@ -3120,6 +3183,10 @@ fn item_to_json(it: &monoplan_core::ItemView) -> String {
     }
     if let Some(w) = &it.when {
         s.push_str(",\"when\":");
+        s.push_str(&json_string(w));
+    }
+    if let Some(w) = &it.when_suggested {
+        s.push_str(",\"whenSuggested\":");
         s.push_str(&json_string(w));
     }
     if let Some(n) = it.duration {

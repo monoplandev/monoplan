@@ -392,10 +392,14 @@ export type Messages = {
     tomorrow: string;
     /** Quick action / context-menu action that removes the planned date. */
     remove: string;
-    /** Hover text on a date phrase recognised in a title as it is typed
-     *  (`whenToken.ts`); `label` is the resolved date, time included,
-     *  with a leading ~ on an estimated time. */
-    token: (label: string) => string;
+    /** A date suggestion put as a question (`WhenSuggestion.tsx`);
+     *  `label` is the resolved date, time included. */
+    suggestion: (label: string) => string;
+    /** Accessible name / hover text of a date suggestion. */
+    suggestionGroup: string;
+    /** Answers to a date suggestion: take it as the date, or drop it. */
+    suggestionYes: string;
+    suggestionNo: string;
     /** Context-menu action that opens the item onto its date popover. */
     /** Label of the time field in the task surface's dates band. */
     time: string;
@@ -522,8 +526,8 @@ export type Messages = {
     light: string;
     dark: string;
     showListCounts: string;
-    /** Switch for recognising a date phrase typed into a title
-     *  (`whenToken.ts`); on by default. */
+    /** Switch for suggesting a date from a phrase typed into a title
+     *  (`whenSuggest.ts`); on by default. */
     typedDates: string;
     /** 12 / 24-hour clock preference; "Auto" reuses `auto`. */
     timeFormat: string;
@@ -838,7 +842,10 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       today: "Hoy",
       tomorrow: "Mañana",
       remove: "Quitar fecha",
-      token: (label) => `Fecha: ${label}`,
+      suggestion: (label) => `¿${label}?`,
+      suggestionGroup: "Fecha sugerida",
+      suggestionYes: "Sí",
+      suggestionNo: "No",
       time: "Hora",
       clearTime: "Quitar hora",
       end: "Fin",
@@ -919,7 +926,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       light: "Claro",
       dark: "Oscuro",
       showListCounts: "Mostrar contadores de listas",
-      typedDates: "Reconocer fechas al escribir",
+      typedDates: "Sugerir fechas al escribir",
       timeFormat: "Formato de hora",
       timeFormat12: "12 h",
       timeFormat24: "24 h",
@@ -1227,7 +1234,10 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       today: "Today",
       tomorrow: "Tomorrow",
       remove: "Remove date",
-      token: (label) => `Date: ${label}`,
+      suggestion: (label) => `${label}?`,
+      suggestionGroup: "Suggested date",
+      suggestionYes: "Yes",
+      suggestionNo: "No",
       time: "Time",
       clearTime: "Remove time",
       end: "End",
@@ -1308,7 +1318,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       light: "Light",
       dark: "Dark",
       showListCounts: "Show list counts",
-      typedDates: "Recognise dates as you type",
+      typedDates: "Suggest dates as you type",
       timeFormat: "Time format",
       timeFormat12: "12h",
       timeFormat24: "24h",

@@ -365,55 +365,65 @@ for the month grid). `groupByDeadline` becomes
 - i18n: a `when` message group mirroring `deadline` (label, unset, today,
   tomorrow; time-of-day formatting defers to the existing
   preference).
-- **Typed date phrases** (built 2026-11-03). A date phrase typed into a
-  title ("friday night", "tomorrow at 5pm", "14 nov") becomes a `when`.
-  One helper (`whenToken.ts`) serves the draft row and the task surface's
-  title; the grammar is `whenParse.ts` over chrono-node's casual parser,
-  English or Spanish by locale (about 14 KB gzipped per language).
-  - The text is scanned on every input. The moment a phrase parses it is
-    wrapped in place as a non-editable token that still shows the words
-    typed; the resolved date is its hover text. chrono matches whole
-    words only, so a half-typed "frida" or a suffixed "tomorrows" is
-    never a phrase. The token is a live reading of the words around it:
-    typing on after it grows it ("friday" → "friday night" → "friday
-    night at 9"), typing ahead of it can grow it too ("next friday"), and
-    words that stop parsing dissolve back into plain text. One token at
-    most; another phrase elsewhere is left alone while one stands.
-  - Backspace just after the token (Delete just before it, or either key
-    from inside it) dissolves it into its plain words and rejects that
-    phrase: the words stay in the title, the next Backspace eats a
-    character of them as usual, and the same wording is not taken again
-    while it stands, while a different or longer phrase is. A rejection
-    lasts only as long as its exact wording is in the text: edit the
-    words (a letter off, a letter back) and the phrase is eligible again.
-    Deleting the token any other way rejects the same. Rejections also
-    clear when the editor is next focused.
-  - Only a phrase that pins a day (explicit day, weekday, relative day)
-    or a clock time is taken. A bare month, "next month", and a
-    three-letter weekday on its own ("sun", "wed") are not. Of several
-    phrases the one ending last wins.
-  - A clock time gives a timed `when`; a bare 1–6 with no am/pm reads as
+- **Typed date phrases** (built 2026-11-03; reworked 2026-11-13 from an
+  inline title token to a suggestion). A date phrase typed into a title
+  ("friday night", "tomorrow at 5pm", "14 nov") raises a **date
+  suggestion**: a question, "Fri 14 Nov 08:30?", shown in orange where
+  the date would be, answered yes or no. The title is never rewritten
+  and no date is set without the yes. The rule is `whenSuggest.ts`, the
+  control `WhenSuggestion.tsx`; the grammar is `whenParse.ts` over
+  chrono-node's casual parser, English or Spanish by locale (about 14 KB
+  gzipped per language).
+  - The question is the item's `when_suggested` register
+    (`spec/data-model.md`): a resolved `when`-shaped value. The phrase is
+    resolved once, against the moment it was typed, so "friday" cannot
+    drift to a later Friday, and a client with no parser (CLI, iOS) can
+    show and answer it. It syncs like any register: capture fast, answer
+    later, on any device.
+  - It is written when a title edit brings a date phrase the title did
+    not have before (compared by wording, case and spacing folded): on
+    the item a draft row or capture creates, and on a rename as it is
+    saved. Only a *changed* phrase writes one, so nothing is kept of a
+    No: the key is deleted, and fixing a typo elsewhere in the title
+    does not ask again, while changing the phrase ("friday" → "friday
+    night", "saturday") does. A phrase edited out of the title takes its
+    unanswered suggestion with it. A title that arrives by sync or undo
+    raises nothing here: whoever typed it did.
+  - Yes moves the value into `when` (one commit, one undo step; the
+    default hour's `duration` beside a timed value, as any `when` write
+    gives). Setting a date any other way also clears the suggestion.
+  - It shows only on an open item with no `when`: on list rows and board
+    cards as an orange dashed badge in the When badge's place with a
+    tick and a cross, and in the task surface's dates band in place of
+    the date input, with Yes / No (a "Set date…" from a menu still opens
+    the field). While a title is being typed the task surface shows the
+    question live, before anything is written, and answers it straight
+    away (Yes sets the date, No just marks the wording as asked); the
+    draft row shows it as a preview with no answers, since there is no
+    item yet to hold one.
+  - chrono matches whole words only, so a half-typed "frida" or a
+    suffixed "tomorrows" is never a phrase. Only a phrase that pins a
+    day (explicit day, weekday, relative day) or a clock time is taken.
+    A bare month, "next month", and a three-letter weekday on its own
+    ("sun", "wed") are not. Of several phrases the one ending last wins.
+  - A clock time gives a timed value; a bare 1–6 with no am/pm reads as
     afternoon, as the time picker orders it. A time-of-day word gives an
-    **estimated** time (morning 09:00, afternoon 15:00, evening 18:00,
-    night / tonight 20:00; Spanish "por la mañana", "tarde", "noche"),
-    stored as a timed `when` and shown with a tilde. The word is matched
+    estimated time (morning 09:00, afternoon 15:00, evening 18:00,
+    night / tonight 20:00; Spanish "por la mañana", "tarde", "noche");
+    being a question, it is not marked as estimated. The word is matched
     in the phrase itself, since chrono implies an hour on phrases that
     said nothing about time. A phrase with neither is all-day. A phrase
     that is only a time ("at 3", "3pm") is today if that time is still
     ahead, else tomorrow. The value is built from the parsed components,
     never a `Date`, so it stays floating.
-  - The value is held in the token, not applied, while the title is being
-    typed, so a date the item already has is not overridden mid-thought.
-    Leaving the title commits it: the draft row sets `when` on the item
-    it creates (Enter, Escape, blur); the task surface, on blur, Enter,
-    close or the target changing, applies it to the When field (the
-    buffer for a capture, the item otherwise) and strips the words from
-    the editor, leaving the plain title with the date beside it. The
-    saved title is always the text without the token's words.
   - Off for a closed item and for a log-a-completion capture: a date is a
-    plan, and a done item has none to make. A standing token still
-    commits. Off everywhere under Settings › General › "Recognise dates
-    as you type", a device preference in a cookie beside the time format.
+    plan, and a done item has none to make. Off everywhere under
+    Settings › General › "Suggest dates as you type", a device preference
+    in a cookie beside the time format; a suggestion already pending
+    still shows.
+  - Not built: a keyboard answer on rows, CLI verbs to answer (the JSON
+    carries `when_suggested`; `set --when` answers it by setting a date),
+    the iOS surface.
   - The When field's date input takes a typed phrase too (2026-11-11):
     while the text names a date its popover swaps the calendar for a
     list of the first few days it could mean (`dateSuggest.ts`: the text

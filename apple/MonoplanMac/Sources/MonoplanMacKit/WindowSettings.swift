@@ -12,7 +12,7 @@ import Foundation
 
 public struct WindowSettings: Equatable {
     /// Whether the editors recognise a date typed into an item
-    /// (`whenToken.ts`); on by default, as in the browser.
+    /// (`whenSuggest.ts`); on by default, as in the browser.
     public var typedDates: Bool
     /// Whether the sidebar counts each list's open items
     /// (`listCounts.ts`); off by default, as in the browser. Inbox and

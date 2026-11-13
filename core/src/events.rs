@@ -61,6 +61,8 @@ pub enum AppEvent {
         /// Planned date (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`) or `None`.
         /// Floating wall-clock; consumers format without zone conversion.
         when: Option<String>,
+        /// Pending date suggestion (`when`-shaped) or `None`.
+        when_suggested: Option<String>,
         /// Duration in whole minutes, or `None`.
         duration: Option<u32>,
         /// Place, or `None`.
@@ -114,6 +116,13 @@ pub enum AppEvent {
     ItemWhenChanged {
         id: String,
         when: Option<String>,
+    },
+    /// Item's pending date suggestion changed: written by a client that
+    /// read a date phrase in the title, or cleared (`None`) by the
+    /// user's answer, by a `when` being set, or by the phrase going.
+    ItemWhenSuggestedChanged {
+        id: String,
+        when_suggested: Option<String>,
     },
     /// Item's duration changed. The payload is the value in whole
     /// minutes after the write — `None` when cleared (including the

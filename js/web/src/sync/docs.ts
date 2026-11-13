@@ -426,6 +426,12 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
     setItemWhen(id, when) {
       forItem(id, (app) => app.setItemWhen(id, when));
     },
+    setItemWhenSuggested(id, when) {
+      forItem(id, (app) => app.setItemWhenSuggested(id, when));
+    },
+    acceptItemWhenSuggestion(id) {
+      forItem(id, (app) => app.acceptItemWhenSuggestion(id));
+    },
     setItemDuration(id, minutes) {
       forItem(id, (app) => app.setItemDuration(id, minutes));
     },

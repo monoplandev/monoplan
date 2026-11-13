@@ -111,6 +111,10 @@ export interface ItemView {
    *  `YYYY-MM-DDTHH:MM` (timed), floating (`spec/calendar-plan.md`).
    *  Same never-`new Date()` rule as `deadline`. Absent means unset. */
   when?: string;
+  /** A date read out of the title as it was typed, waiting for a yes or
+   *  no (`spec/calendar-plan.md`, "Typed date phrases"): `when`-shaped.
+   *  Shown only while `when` is unset and the item is open. */
+  whenSuggested?: string;
   /** Optional duration in whole minutes. Only meaningful beside a timed
    *  `when`; views ignore it otherwise. Absent means unset. */
   duration?: number;
@@ -303,6 +307,8 @@ export interface DocItemActions {
   setItemNotes(id: string, notes: string): void;
   setItemDeadline(id: string, deadline: string | null): void;
   setItemWhen(id: string, when: string | null): void;
+  setItemWhenSuggested(id: string, when: string | null): void;
+  acceptItemWhenSuggestion(id: string): void;
   setItemDuration(id: string, minutes: number | null): void;
   setItemPlace(id: string, place: Place | null): void;
   setDone(id: string, done: boolean): void;
@@ -445,6 +451,12 @@ export interface DocApp extends DocItemActions {
    *  item's planned date. Floating; malformed values are rejected by the
    *  core. */
   setItemWhen(id: string, when: string | null): void;
+  /** Write (`when`-shaped) or clear (`null`) an item's pending date
+   *  suggestion. Clearing is the user's "no". */
+  setItemWhenSuggested(id: string, when: string | null): void;
+  /** The user's "yes": the pending suggestion becomes the `when`, one
+   *  undo step. No-op when none is pending. */
+  acceptItemWhenSuggestion(id: string): void;
   /** Set (whole minutes, 1..=525600) or clear (`null`) an item's duration.
    *  Clearing `when` clears it in the core as well. */
   setItemDuration(id: string, minutes: number | null): void;
@@ -865,6 +877,7 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
           lifecycleAt: Number(ev.lifecycleAt ?? ev.createdAt ?? 0),
           deadline: ev.deadline ?? undefined,
           when: ev.when ?? undefined,
+          whenSuggested: ev.whenSuggested ?? undefined,
           duration: ev.duration != null ? Number(ev.duration) : undefined,
           place: parsePlaceJson(ev.place),
           createdAt: Number(ev.createdAt ?? 0),
@@ -979,6 +992,12 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
       case "itemWhenChanged": {
         if (state.itemsById[ev.id]) {
           setState("itemsById", ev.id, "when", ev.when ?? undefined);
+        }
+        break;
+      }
+      case "itemWhenSuggestedChanged": {
+        if (state.itemsById[ev.id]) {
+          setState("itemsById", ev.id, "whenSuggested", ev.whenSuggested ?? undefined);
         }
         break;
       }
@@ -1450,6 +1469,16 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
     },
     setItemWhen(id, when) {
       mutate(() => replica.setItemWhen(id, when ?? undefined));
+    },
+    setItemWhenSuggested(id, when) {
+      // A write that changes nothing makes no commit; skipped here so it
+      // is not counted as an undo step inside a batch.
+      if ((state.itemsById[id]?.whenSuggested ?? null) === when) return;
+      mutate(() => replica.setItemWhenSuggested(id, when ?? undefined));
+    },
+    acceptItemWhenSuggestion(id) {
+      if (!state.itemsById[id]?.whenSuggested) return;
+      mutate(() => replica.acceptItemWhenSuggestion(id));
     },
     setItemDuration(id, minutes) {
       // The core rejects zero, negative, and over-a-year values; refuse

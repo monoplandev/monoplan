@@ -33,11 +33,6 @@
   --bg-badge-solid: #f3f2f7;
   --text-badge: #5e5c68;
   --text-badge-faint: #8c8a96;
-  /* Date token inline in title text (`.when-token`): the badge hue, a
-     few steps stronger, since it sits on the surface itself where the
-     badge pill all but vanishes. */
-  --bg-token: #e4e2ec;
-  --text-token: #46445a;
   --text: #1a1a1a;
   --text-muted: #999;
   --text-faint: #9e9e9f;
@@ -83,8 +78,6 @@
   --bg-badge-solid: #24232a;
   --text-badge: #aaa8b2;
   --text-badge-faint: #7a7884;
-  --bg-token: #36353f;
-  --text-token: #d0ced8;
   --text: #e5e5e5;
   --text-muted: #aaa;
   --text-faint: #636364;
@@ -3284,19 +3277,77 @@ input.task-check:hover {
   cursor: pointer;
 }
 
-/* A date phrase recognised in a title while typing (`whenToken.ts`): the
-   user's own words, set off as one non-editable unit that Backspace
-   removes whole. The badge hue, stronger, so it reads as metadata rather
-   than title text yet still shows on the bare surface, in the draft row
-   and the task surface alike. */
-.when-token {
-  padding: 0 4px;
-  border-radius: 5px;
-  background: var(--bg-token);
-  color: var(--text-token);
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
-  cursor: default;
+/* A date suggestion (`WhenSuggestion.tsx`): a date read out of the
+   title, put as a question where the date would be. Orange with a
+   dashed edge: the today hue, but never mistaken for a set date. The
+   block form sits in the task surface's dates band; the compact form is
+   a badge on rows and cards. */
+.when-suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 8px;
+  border-radius: 8px;
+  border: 1px dashed var(--due-today-text);
+  background: var(--due-today-bg);
+  color: var(--due-today-text);
+  font-size: 13px;
+  line-height: var(--lh-compact);
+  white-space: nowrap;
+}
+
+.when-suggestion[data-compact] {
+  gap: 3px;
+  padding: 1px 2px 1px 3px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.when-suggestion-answers {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 2px;
+}
+
+.when-suggestion-answer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.when-suggestion[data-compact] .when-suggestion-answer {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 4px;
+  font-size: 10px;
+}
+
+.when-suggestion-answer:hover,
+.when-suggestion-answer:focus-visible {
+  background: var(--due-today-text);
+  color: var(--due-today-bg);
+}
+
+.when-suggestion-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.when-suggestion-glyph svg {
+  width: 11px;
+  height: 11px;
 }
 
 /* Control row under the title: list picker, then the "more" menu. In the

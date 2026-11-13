@@ -51,6 +51,7 @@ import { closedLogLine, readClip, toClipItem, writeClip, type ClipItem } from ".
 import { ListIconPicker } from "./ListIconPicker.tsx";
 import { attentionBadge, groupByDay, type DayGroup } from "./dayGroups.ts";
 import { nowMs, todayStamp } from "./format.tsx";
+import { applySuggestionChange } from "./whenSuggest.ts";
 import { restoreCapturedPositions } from "./linger.ts";
 import { createPopoverTooltipGuard } from "./popoverTooltip.ts";
 import { DoneFilterMenu } from "./DoneFilterMenu.tsx";
@@ -1147,22 +1148,29 @@ export function Workspace(props: {
     text: string,
     chain: boolean,
     blur = false,
-    when: string | null = null,
   ): boolean => {
     const d = draft();
     if (!d) return false;
     const nw = newItemTarget();
     const mirrored = nw?.draft !== undefined;
     // The plain add, for a draft with no pane capture to commit through.
-    const createPlain = (t: string): string =>
-      d.focus
-        ? captureToFocus([t], d.insertIndex)[0]
-        : viewApp().addItemAt(d.listId, t, d.insertIndex);
-    // The date a phrase in the row's text resolved to (`whenToken.ts`):
-    // set on the item once it exists, whichever path made it. A Focus
-    // draft's item lives in Home.
-    const applyWhen = (id: string) => {
-      if (when) (d.focus ? home : viewApp()).setItemWhen(id, when);
+    // A date phrase in the title becomes the new item's suggestion
+    // (`whenSuggest.ts`), in the add's undo step; the pane's capture
+    // does the same for the items it makes. A Focus draft's item lives
+    // in Home.
+    const createPlain = (t: string): string => {
+      const app = d.focus ? home : viewApp();
+      return app.withActionBatch(() => {
+        const id = d.focus
+          ? captureToFocus([t], d.insertIndex)[0]
+          : viewApp().addItemAt(d.listId, t, d.insertIndex);
+        // New, open and dateless: any phrase in the title is a new one.
+        applySuggestionChange(app, id, { closed: false }, t, null, {
+          now: nowMs(),
+          locale: locale(),
+        });
+        return id;
+      });
     };
     // Re-anchor the selection on the row above the slot (or the slot
     // itself when nothing is above), so a dropped draft lands the user
@@ -1193,7 +1201,6 @@ export function Workspace(props: {
           setNewItemTarget(null);
         }
         const newId = id;
-        applyWhen(newId);
         queueMicrotask(() => selection.selectOnly(newId));
       } else {
         setNewItemTarget({ ...nw, draft: "pane" });
@@ -1219,7 +1226,6 @@ export function Workspace(props: {
     // only between the surface remounting, when the plain add stands in).
     const newId =
       (mirrored ? captureHandle?.commit(text) : null) ?? createPlain(text);
-    applyWhen(newId);
     // The target clears after the commit: the surface's settle on a
     // cleared target creates nothing, and the pane goes back to following
     // the selection, which lands on the new item below.

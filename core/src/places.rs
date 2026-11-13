@@ -301,6 +301,7 @@ mod tests {
             created_by: None,
             deadline: None,
             when: None,
+            when_suggested: None,
             duration: None,
             place,
             created_at,

@@ -115,6 +115,9 @@ pub(super) struct ItemJson<'a> {
     /// Planned date (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`), when set.
     #[serde(skip_serializing_if = "Option::is_none")]
     when: Option<&'a str>,
+    /// Pending date suggestion (`when`-shaped), when one is unanswered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    when_suggested: Option<&'a str>,
     /// Duration in whole minutes, when set.
     #[serde(skip_serializing_if = "Option::is_none")]
     duration: Option<u32>,
@@ -137,6 +140,7 @@ pub(super) fn item_json(item: &ItemView) -> ItemJson<'_> {
         binned_at: item.binned_at,
         deadline: item.deadline.as_deref(),
         when: item.when.as_deref(),
+        when_suggested: item.when_suggested.as_deref(),
         duration: item.duration,
         place: item.place.as_ref(),
     }
@@ -1184,6 +1188,7 @@ mod tests {
             lifecycle_at: 0,
             deadline: None,
             when: Some("2026-10-06".into()),
+            when_suggested: None,
             duration: None,
             place: None,
             created_at: 0,

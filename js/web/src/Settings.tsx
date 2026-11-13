@@ -29,7 +29,7 @@ import {
   timeFormatPref,
   type TimeFormatPreference,
 } from "./format.tsx";
-import { setTypedDatesPref, typedDatesPref } from "./whenToken.ts";
+import { setTypedDatesPref, typedDatesPref } from "./whenSuggest.ts";
 import { listCountsPref, setListCountsPref } from "./listCounts.ts";
 
 type Section = "general" | "account" | "devices";

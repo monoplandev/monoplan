@@ -532,6 +532,7 @@ mod tests {
             lifecycle_at: created_at,
             deadline: deadline.map(str::to_string),
             when: when.map(str::to_string),
+            when_suggested: None,
             duration: None,
             place: None,
             created_at,

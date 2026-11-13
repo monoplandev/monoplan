@@ -334,6 +334,7 @@ fn import(cfg: &Cfg) {
                 },
                 deadline: None,
                 when: None,
+                when_suggested: None,
                 duration: None,
                 place: None,
                 created_at: 1_700_000_000_000 + i as i64,

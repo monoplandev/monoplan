@@ -2,8 +2,9 @@
 // "tomorrow at 5pm", "14 nov"), found and resolved into the `when`
 // register's floating form (`spec/calendar-plan.md`). Pure: text and a
 // reference instant in, a phrase with its offsets and value out, so the
-// grammar decisions are testable without a DOM. `whenToken.ts` turns a
-// found phrase into the inline token the editors show.
+// grammar decisions are testable without a DOM. `whenSuggest.ts` turns a
+// found phrase into the date suggestion the item carries; `dateSuggest.ts`
+// reads typed date inputs with it.
 //
 // The recogniser is chrono-node's casual English / Spanish parser, picked
 // by locale. Chrono does the heavy lifting (weekdays, relative days,
@@ -23,15 +24,8 @@
 //     an assumed "in", and under the forward-date option chrono assumes
 //     it, one-letter units included, so a stray letter after "a" or a
 //     digit would land on tomorrow. "in 3 days" still counts.
-//   - A phrase the user has rejected (`exclude`, by its exact words) is
-//     passed over; a longer phrase that extends it is not.
-//   - With an `anchor` (the token already standing), only a match that
-//     starts at or before the anchor's start and reaches into it counts:
-//     the phrase as it now reads, grown ("friday" → "friday night"),
-//     shrunk ("tomorrow at 5p" is "tomorrow" until the "m" lands) or
-//     gone. Another phrase elsewhere in the text is left alone.
-//   - Otherwise, of several candidates the one ending last wins (dates
-//     trail the title), the longest when they end together.
+//   - Of several candidates the one ending last wins (dates trail the
+//     title), the longest when they end together.
 //   - An explicit hour gives a timed `when`. A time-of-day word ("night",
 //     "morning") gives an *estimated* time from the table below, not
 //     chrono's own reading (its "night" is 22:00, late for a plan); the
@@ -71,11 +65,6 @@ export interface FindWhenOptions {
   now: Date;
   /** BCP 47 tag; picks the Spanish grammar for `es*`, English otherwise. */
   locale: string;
-  /** Phrases not to take, as `phraseKey` renders them. */
-  exclude?: ReadonlySet<string>;
-  /** The range a standing token occupies: only a match that starts at
-   *  or before `start` and ends after it counts. */
-  anchor?: { start: number; end: number } | null;
 }
 
 /** Time-of-day words and the hour each estimates, per grammar. Matched
@@ -112,8 +101,8 @@ function parserFor(grammar: "en" | "es") {
 const localDate = (d: Date) =>
   `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
-/** The form a phrase is remembered in once rejected: case and
- *  whitespace folded, so retyping it the same way is the same phrase. */
+/** A phrase's wording with case and whitespace folded: what makes the
+ *  phrase in a title before an edit and after it "the same phrase". */
 export function phraseKey(text: string): string {
   return collapseWhitespace(text).toLowerCase();
 }
@@ -189,34 +178,23 @@ export function findWhenPhrase(text: string, opts: FindWhenOptions): WhenPhrase 
   if (!text.trim()) return null;
   const grammar = grammarFor(opts.locale);
   const results = parserFor(grammar).parse(text, opts.now, { forwardDate: true });
-  const anchor = opts.anchor ?? null;
   let best: WhenPhrase | null = null;
   for (const r of results) {
     const start = r.index;
     const end = start + r.text.length;
-    if (anchor && (start > anchor.start || end <= anchor.start)) continue;
     if (!anchored(r)) continue;
     if (bareDuration(r, opts.now, grammar)) continue;
-    if (opts.exclude?.has(phraseKey(r.text))) continue;
     const value = registerValue(r, opts.now, grammar);
     if (!value) continue;
     if (best) {
-      // Against an anchor the longest reading of the phrase wins; free,
-      // the one ending last, then the longest.
-      const better = anchor
-        ? r.text.length > best.text.length
-        : end > best.end || (end === best.end && r.text.length > best.text.length);
+      // The one ending last, then the longest.
+      const better =
+        end > best.end || (end === best.end && r.text.length > best.text.length);
       if (!better) continue;
     }
     best = { start, end, text: r.text, ...value, repeat: repeatOf(r) };
   }
   return best;
-}
-
-/** `text` with the phrase cut out and the seam closed: whitespace runs
- *  collapsed to one space, ends trimmed. */
-export function titleWithoutPhrase(text: string, phrase: { start: number; end: number }): string {
-  return collapseWhitespace(text.slice(0, phrase.start) + " " + text.slice(phrase.end));
 }
 
 export function collapseWhitespace(text: string): string {

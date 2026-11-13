@@ -45,7 +45,8 @@ import {
   todayStamp,
   whenTime,
 } from "./format.tsx";
-import { createWhenTokens, whenTokenTitle, type WhenTokens } from "./whenToken.ts";
+import { applySuggestionChange, raisedDate, titleDate } from "./whenSuggest.ts";
+import { WhenSuggestion } from "./WhenSuggestion.tsx";
 import { useAppI18n, statusLabel } from "./i18n.tsx";
 import {
   collapsedCaretOffset,
@@ -428,12 +429,16 @@ export function TaskDialog(props: {
   // is never value-bound, so reactive updates can't clobber a live caret.
   let titleRef: HTMLDivElement | undefined;
   let notesRef: HTMLDivElement | undefined;
-  // The date token in the title (`whenToken.ts`), made with the editor.
-  // Its date is held in the token until the title is left (blur, Enter,
-  // close, the target changing), when `commitTitleToken` applies it and
-  // strips the words: nothing is written while the user is still typing,
-  // so a date the item already has is not overridden mid-thought.
-  let titleTokens: WhenTokens | undefined;
+  // The date phrase in the title that has had its hearing
+  // (`whenSuggest.ts`, as `titleDate().key`): the one the title loaded
+  // with, or the one last answered or written to the item as a
+  // suggestion. Only a phrase that differs from it raises a new
+  // suggestion, so retyping around a declined date does not ask again.
+  // Null: the title had no date phrase.
+  const [askedKey, setAskedKey] = createSignal<string | null>(null);
+  const dateOpts = () => ({ now: nowMs(), locale: locale() });
+  const markAsked = (title: string) =>
+    setAskedKey(titleDate(title, dateOpts())?.key ?? null);
 
   // Which id the buffers currently hold. A plain var (not a signal): it's
   // written from the load effect, never read reactively.
@@ -664,8 +669,6 @@ export function TaskDialog(props: {
     if (!el) return;
     setLinkifiedText(el, value);
     ensureTrailingBreak(el);
-    // A reload drops any token's element; the helper forgets it too.
-    if (el === titleRef) titleTokens?.reset();
   };
 
   // A "\n" at the very end of a pre-wrap block doesn't get its own line
@@ -708,27 +711,31 @@ export function TaskDialog(props: {
   // their input handlers) rather than the DOM: by the time a target switch
   // reaches the load effect below, the editors may already show the next
   // target — or, across the new-item / edit forms, be different elements.
-  // Apply a date token's value to the When field (the capture buffer or
-  // the item, via `onWhenChange`) and strip its words from the editor,
-  // leaving the plain title. The `text` buffer already reads without
-  // the words, so the save that follows writes title and date apart.
-  const commitTitleToken = () => {
-    const v = titleTokens?.token();
-    if (!v) return;
-    loadEditor(titleRef, text());
-    onWhenChange(v.when);
-  };
-
+  // The title's rename, and with it the date suggestion the new title
+  // raises: a phrase not yet asked about is written to the item as its
+  // pending suggestion, one the edit removed takes its suggestion along
+  // (`applySuggestionChange`). One undo step with the rename.
   const flushTitle = (id: string | null) => {
-    commitTitleToken();
     if (!id) return;
     const it = props.app.state.itemsById[id];
     if (!it) return;
     const t = text().trim();
-    if (t && t !== it.text) {
-      syncedText = t;
-      props.app.editItemText(id, t);
-    }
+    if (!t) return;
+    props.app.withActionBatch(() => {
+      if (t !== it.text) {
+        syncedText = t;
+        props.app.editItemText(id, t);
+      }
+      applySuggestionChange(
+        props.app,
+        id,
+        { when: it.when, whenSuggested: it.whenSuggested, closed: isClosed(it) },
+        t,
+        askedKey(),
+        dateOpts(),
+      );
+    });
+    markAsked(t);
   };
   const flush = (id: string | null) => {
     if (!id) return;
@@ -795,6 +802,7 @@ export function TaskDialog(props: {
     const n = id ? subscribeNotes(id, it?.notes ?? "") : "";
     setText(t);
     syncedText = t;
+    markAsked(t);
     setNotes(n);
     setNewDeadline(null);
     setNewWhen(id ? null : (nw?.when ?? null));
@@ -827,6 +835,9 @@ export function TaskDialog(props: {
     syncedText = storeText;
     if (!clean) return;
     setText(storeText);
+    // A title that arrived (a peer's rename, an undo) is not one typed
+    // here: whoever typed it raised its suggestion.
+    markAsked(storeText);
     // The row overlay mirrors the buffer; keep it in step too.
     props.onLiveText?.(storeText);
     if (!titleRef) return;
@@ -872,9 +883,11 @@ export function TaskDialog(props: {
   const createFromBuffers = (): string | null => {
     const nw = newItemTarget();
     if (!nw) return null;
-    commitTitleToken();
     const t = text().trim();
     if (!t) return null;
+    // The date the title suggests and nobody has answered: it goes on
+    // the item as its pending suggestion, unless a date was picked.
+    const suggested = typedDate();
     const at = nw.index ?? 0;
     // A Done capture can't hold a Focus ref (auto-remove-on-Done,
     // spec/focus.md), so the pin buffer only applies to open captures.
@@ -894,6 +907,7 @@ export function TaskDialog(props: {
       if (d) props.app.setItemDeadline(id, d);
       const w = newWhen();
       if (w) props.app.setItemWhen(id, w);
+      else if (suggested && !nw.done) props.app.setItemWhenSuggested(id, suggested.when);
       const dur = newDuration();
       if (w && dur) props.app.setItemDuration(id, dur);
       const pl = newPlace();
@@ -906,6 +920,7 @@ export function TaskDialog(props: {
       return id;
     });
     createdId = id;
+    markAsked(t);
     return id;
   };
 
@@ -1031,8 +1046,6 @@ export function TaskDialog(props: {
   // editors are contenteditable, so "caret at start/end" is derived from
   // the collapsed selection offset rather than textarea selection props.
   const onTitleKeyDown = (e: KeyboardEvent) => {
-    // Backspace onto the date token removes it whole.
-    if (titleTokens?.onKeyDown(e)) return;
     // Enter commits (the title is one line); Shift+Enter is left to the
     // browser, but the title never wraps to multiple lines in use. The
     // modal shell closes on commit. The side pane stays open on
@@ -1295,6 +1308,35 @@ export function TaskDialog(props: {
     else if (whenTime(value) && newDuration() == null)
       setNewDuration(DEFAULT_DURATION_MINUTES);
   };
+  // The date suggestion (`whenSuggest.ts`) as this surface holds it. A
+  // phrase in the title as it reads right now that has not been asked
+  // about outranks the item's stored one: it is what the stored one is
+  // about to become. A done item (or a log-a-completion capture) takes
+  // no plan from its title.
+  const typedDate = () => (vDone() ? null : raisedDate(text(), askedKey(), dateOpts()));
+  const suggestedWhen = createMemo<string | null>(() => {
+    if (muted() || vWhen() !== null) return null;
+    const typed = typedDate();
+    if (typed) return typed.when;
+    const stored = item()?.whenSuggested ?? null;
+    // Stored, but its phrase has just been typed out of the title: gone
+    // as soon as the title is saved, so not shown.
+    if (stored && askedKey() !== null && !titleDate(text(), dateOpts())) return null;
+    return stored;
+  });
+  // Yes: the suggestion is the date (setting it clears the stored one).
+  const onSuggestionYes = () => {
+    const w = suggestedWhen();
+    if (!w) return;
+    onWhenChange(w);
+    markAsked(text());
+  };
+  // No: nothing is kept but the fact that this wording was asked.
+  const onSuggestionNo = () => {
+    const it = item();
+    if (it?.whenSuggested) props.app.setItemWhenSuggested(it.id, null);
+    markAsked(text());
+  };
   const onDurationChange = (minutes: number | null) => {
     const it = item();
     if (it) props.app.setItemDuration(it.id, minutes);
@@ -1463,14 +1505,6 @@ export function TaskDialog(props: {
                 // `[contenteditable="true"]` shortcut guard matches.
                 el.setAttribute("contenteditable", "true");
                 setLinkifiedText(el, text());
-                titleTokens = createWhenTokens(el, {
-                  now: nowMs,
-                  locale,
-                  title: (v) => whenTokenTitle(v, nowMs(), locale(), m().when),
-                  // A done item (or a log-a-completion capture) takes no
-                  // plan from its title.
-                  enabled: () => !vDone(),
-                });
               }}
               class="task-dialog-title"
               role="textbox"
@@ -1483,18 +1517,13 @@ export function TaskDialog(props: {
                     : m().workspace.newItemPlaceholder
               }
               onInput={() => {
-                editorText(titleRef);
-                // Take a date phrase the caret has moved past; the buffer
-                // holds the title without it.
-                titleTokens?.scan();
-                const v = titleTokens?.read().text ?? editorText(titleRef);
+                const v = editorText(titleRef);
                 setText(v);
                 // The row overlay mirrors an open item's edit live; a
                 // capture has no row yet.
                 if (!isNew()) props.onLiveText?.(v);
               }}
               onBlur={onTitleBlur}
-              onFocus={() => titleTokens?.onFocus()}
               onKeyDown={onTitleKeyDown}
               onPaste={pasteAsPlainText}
               onClick={(e) => openLinkOnClick(e, titleRef)}
@@ -1557,15 +1586,27 @@ export function TaskDialog(props: {
           {/* Date section: the planned date between the badges and the
               deadline, always present. */}
           <section class="task-dialog-section task-dialog-dates">
-            <WhenField
-              when={vWhen}
-              duration={vDuration}
-              muted={muted}
-              onChange={onWhenChange}
-              onDurationChange={onDurationChange}
-              open={props.whenOpen}
-              setOpen={props.setWhenOpen}
-            />
+            {/* An unanswered date suggestion stands in the date's place
+                until it is answered; "Set date…" from a menu still
+                reaches the field under it. */}
+            <Show
+              when={!props.whenOpen() && suggestedWhen()}
+              fallback={
+                <WhenField
+                  when={vWhen}
+                  duration={vDuration}
+                  muted={muted}
+                  onChange={onWhenChange}
+                  onDurationChange={onDurationChange}
+                  open={props.whenOpen}
+                  setOpen={props.setWhenOpen}
+                />
+              }
+            >
+              {(w) => (
+                <WhenSuggestion when={w()} onYes={onSuggestionYes} onNo={onSuggestionNo} />
+              )}
+            </Show>
           </section>
 
           {/* Deadline section under the dates, before the notes.

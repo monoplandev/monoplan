@@ -143,6 +143,13 @@ const KEY_DEADLINE: &str = "deadline";
 /// register, so date and time can never tear under concurrent edit.
 /// Validated in `set_item_when`; see `spec/calendar-plan.md`.
 const KEY_WHEN: &str = "when";
+/// Optional pending date suggestion: a `when`-shaped value a client
+/// read out of the title as it was typed, waiting for the user's yes
+/// or no. Never a plan by itself: views show it only while `when` is
+/// unset. Accepting moves it into `when`; declining deletes the key,
+/// so "no" is simply absence. See `set_item_when_suggested` and
+/// `spec/calendar-plan.md` ("Typed date phrases").
+const KEY_WHEN_SUGGESTED: &str = "when_suggested";
 /// Optional duration in whole minutes (`1..=MAX_DURATION_MINUTES`), a
 /// length rather than an end so that moving `when` on one device and
 /// setting the length on another can never produce an item that ends
@@ -550,6 +557,9 @@ pub struct ItemView {
     /// `YYYY-MM-DDTHH:MM` (timed), floating. `None` ≡ unset. Raw string,
     /// never parsed into a timestamp; sorts by plain string compare.
     pub when: Option<String>,
+    /// Pending date suggestion, `when`-shaped; `None` ≡ none pending.
+    /// Meaningful only while `when` is unset.
+    pub when_suggested: Option<String>,
     /// Optional duration in whole minutes, `1..=MAX_DURATION_MINUTES`.
     /// `None` ≡ unset. Only meaningful beside a timed `when`.
     pub duration: Option<u32>,
@@ -879,6 +889,9 @@ pub struct ExportItem {
     /// unset so older dumps stay byte-identical.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub when: Option<String>,
+    /// Pending date suggestion (`when`-shaped). Skipped when absent.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub when_suggested: Option<String>,
     /// Duration in whole minutes. Skipped when unset so older dumps stay
     /// byte-identical.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -2075,6 +2088,7 @@ impl Doc {
                 binned_at: None,
                 deadline: None,
                 when: None,
+                when_suggested: None,
                 duration: None,
                 place: None,
                 open_index,
@@ -2287,12 +2301,18 @@ impl Doc {
         let map = self.find_item(item_id)?;
         // `Some(Some(n))`: duration written; `Some(None)`: cleared.
         let mut duration_change: Option<Option<u32>> = None;
+        let mut suggestion_cleared = false;
         match &normalized {
             Some(value) => {
                 map.insert(KEY_WHEN, value.as_str())?;
                 if when_is_timed(value) && read_duration(&map).is_none() {
                     map.insert(KEY_DURATION, i64::from(DEFAULT_DURATION_MINUTES))?;
                     duration_change = Some(Some(DEFAULT_DURATION_MINUTES));
+                }
+                // A date, however it was set, answers a pending suggestion.
+                if read_string(&map, KEY_WHEN_SUGGESTED).is_some() {
+                    let _ = map.delete(KEY_WHEN_SUGGESTED);
+                    suggestion_cleared = true;
                 }
             }
             None => {
@@ -2314,7 +2334,65 @@ impl Doc {
                 duration,
             });
         }
+        if suggestion_cleared {
+            self.push_event(AppEvent::ItemWhenSuggestedChanged {
+                id: item_id.to_string(),
+                when_suggested: None,
+            });
+        }
         Ok(())
+    }
+
+    /// Set or clear an item's pending date suggestion: a `when`-shaped
+    /// value (validated as `set_item_when` validates) a client read out
+    /// of the title, held until the user answers. `None` deletes the
+    /// key, which is how a "no" is recorded: nothing is kept of a
+    /// declined suggestion, and a client only writes a new one when a
+    /// title edit brings a new phrase. One Loro commit; a write that
+    /// would change nothing makes none. Independent of `when` at the
+    /// register level: a suggestion beside a set `when` (a concurrent
+    /// write) is ignored by views.
+    pub fn set_item_when_suggested(
+        &self,
+        item_id: &str,
+        when: Option<&str>,
+    ) -> Result<(), DocError> {
+        let normalized = match when {
+            Some(raw) => Some(parse_when(raw)?),
+            None => None,
+        };
+        let map = self.find_item(item_id)?;
+        let current = read_string(&map, KEY_WHEN_SUGGESTED).filter(|s| !s.is_empty());
+        if current == normalized {
+            return Ok(());
+        }
+        match &normalized {
+            Some(value) => map.insert(KEY_WHEN_SUGGESTED, value.as_str())?,
+            None => {
+                let _ = map.delete(KEY_WHEN_SUGGESTED);
+            }
+        }
+        self.inner.commit();
+        self.push_event(AppEvent::ItemWhenSuggestedChanged {
+            id: item_id.to_string(),
+            when_suggested: normalized,
+        });
+        Ok(())
+    }
+
+    /// Accept an item's pending date suggestion: its value becomes the
+    /// `when` (with the default duration `set_item_when` writes beside a
+    /// timed value) and the suggestion is cleared, in one Loro commit, so
+    /// one undo step puts the question back. Returns whether there was a
+    /// suggestion to accept; `false` touches nothing.
+    pub fn accept_item_when_suggestion(&self, item_id: &str) -> Result<bool, DocError> {
+        let map = self.find_item(item_id)?;
+        let Some(value) = read_string(&map, KEY_WHEN_SUGGESTED).and_then(|s| parse_when(&s).ok())
+        else {
+            return Ok(false);
+        };
+        self.set_item_when(item_id, Some(&value))?;
+        Ok(true)
     }
 
     /// Set or clear an item's duration in whole minutes. `Some(n)` must
@@ -4056,6 +4134,13 @@ impl Doc {
         if let Some(value) = src.when.as_deref().and_then(|w| parse_when(w).ok()) {
             map.insert(KEY_WHEN, value.as_str())?;
         }
+        if let Some(value) = src
+            .when_suggested
+            .as_deref()
+            .and_then(|w| parse_when(w).ok())
+        {
+            map.insert(KEY_WHEN_SUGGESTED, value.as_str())?;
+        }
         // Same leniency for an out-of-range duration.
         if let Some(n) = src
             .duration
@@ -4891,6 +4976,7 @@ impl Doc {
                         KEY_NOTES,
                         KEY_DEADLINE,
                         KEY_WHEN,
+                        KEY_WHEN_SUGGESTED,
                         KEY_DURATION,
                         KEY_PLACE,
                         KEY_LIFECYCLE,
@@ -5027,6 +5113,12 @@ impl Doc {
                         when: view.when.clone(),
                     });
                 }
+                if has(KEY_WHEN_SUGGESTED) {
+                    self.push_event(AppEvent::ItemWhenSuggestedChanged {
+                        id: id.clone(),
+                        when_suggested: view.when_suggested.clone(),
+                    });
+                }
                 if has(KEY_DURATION) {
                     self.push_event(AppEvent::ItemDurationChanged {
                         id: id.clone(),
@@ -5099,6 +5191,7 @@ impl Doc {
                     binned_at: view.binned_at,
                     deadline: view.deadline,
                     when: view.when,
+                    when_suggested: view.when_suggested,
                     duration: view.duration,
                     place: view.place,
                     open_index: None,
@@ -5165,6 +5258,7 @@ impl Doc {
                             binned_at: view.binned_at,
                             deadline: view.deadline,
                             when: view.when,
+                            when_suggested: view.when_suggested,
                             duration: view.duration,
                             place: view.place,
                             open_index: Some(i),
@@ -5429,6 +5523,7 @@ impl Doc {
                 binned_at: item.binned_at,
                 deadline: item.deadline,
                 when: item.when,
+                when_suggested: item.when_suggested,
                 duration: item.duration,
                 place: item.place,
                 open_index,
@@ -5537,6 +5632,7 @@ impl Doc {
             hasher.update(i.lifecycle_at.to_be_bytes());
             hash_opt_str(&mut hasher, i.deadline.as_deref());
             hash_opt_str(&mut hasher, i.when.as_deref());
+            hash_opt_str(&mut hasher, i.when_suggested.as_deref());
             hash_opt_i64(&mut hasher, i.duration.map(i64::from));
             hash_opt_place(&mut hasher, i.place.as_ref());
             hasher.update(i.created_at.to_be_bytes());
@@ -5812,6 +5908,7 @@ fn export_item(item: ItemView) -> ExportItem {
         },
         deadline: item.deadline,
         when: item.when,
+        when_suggested: item.when_suggested,
         duration: item.duration,
         place: item.place,
         created_at: item.created_at,
@@ -6339,6 +6436,7 @@ fn item_view(map: &LoroMap) -> Option<ItemView> {
         lifecycle_at,
         deadline: read_string(map, KEY_DEADLINE).filter(|s| !s.is_empty()),
         when: read_string(map, KEY_WHEN).filter(|s| !s.is_empty()),
+        when_suggested: read_string(map, KEY_WHEN_SUGGESTED).filter(|s| !s.is_empty()),
         duration: read_duration(map),
         place: read_place(map),
         created_at: read_i64(map, KEY_CREATED_AT)?,
@@ -6609,6 +6707,7 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                     binned_at: post_it.binned_at,
                     deadline: post_it.deadline.clone(),
                     when: post_it.when.clone(),
+                    when_suggested: post_it.when_suggested.clone(),
                     duration: post_it.duration,
                     place: post_it.place.clone(),
                     open_index,
@@ -6637,6 +6736,12 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                     out.push(AppEvent::ItemWhenChanged {
                         id: post_it.id.clone(),
                         when: post_it.when.clone(),
+                    });
+                }
+                if pre_it.when_suggested != post_it.when_suggested {
+                    out.push(AppEvent::ItemWhenSuggestedChanged {
+                        id: post_it.id.clone(),
+                        when_suggested: post_it.when_suggested.clone(),
                     });
                 }
                 if pre_it.duration != post_it.duration {
@@ -10113,6 +10218,7 @@ mod tests {
             },
             deadline: None,
             when: None,
+            when_suggested: None,
             duration: None,
             place: None,
             created_at: 1,
@@ -10208,6 +10314,7 @@ mod tests {
             },
             deadline: None,
             when: None,
+            when_suggested: None,
             duration: None,
             place: None,
             created_at: 1,
@@ -11006,6 +11113,145 @@ mod tests {
     }
 
     #[test]
+    fn when_suggestion_is_set_declined_and_validated() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "dentist friday").unwrap();
+        doc.drain_events();
+        assert_eq!(doc.get_item(&id).unwrap().when_suggested, None);
+
+        doc.set_item_when_suggested(&id, Some(" 2026-11-06T08:30 "))
+            .unwrap();
+        assert_eq!(
+            doc.get_item(&id).unwrap().when_suggested.as_deref(),
+            Some("2026-11-06T08:30")
+        );
+        // A suggestion is not a plan: no `when`, no duration.
+        assert_eq!(doc.get_item(&id).unwrap().when, None);
+        assert_eq!(doc.get_item(&id).unwrap().duration, None);
+        assert_eq!(
+            doc.drain_events(),
+            vec![AppEvent::ItemWhenSuggestedChanged {
+                id: id.clone(),
+                when_suggested: Some("2026-11-06T08:30".into()),
+            }]
+        );
+
+        // The same value again changes nothing and says nothing.
+        doc.set_item_when_suggested(&id, Some("2026-11-06T08:30"))
+            .unwrap();
+        assert!(doc.drain_events().is_empty());
+
+        // Declined: the key goes, and nothing else is recorded.
+        doc.set_item_when_suggested(&id, None).unwrap();
+        assert_eq!(doc.get_item(&id).unwrap().when_suggested, None);
+        assert_eq!(
+            doc.drain_events(),
+            vec![AppEvent::ItemWhenSuggestedChanged {
+                id: id.clone(),
+                when_suggested: None,
+            }]
+        );
+
+        let err = doc
+            .set_item_when_suggested(&id, Some("friday"))
+            .unwrap_err();
+        assert!(matches!(err, DocError::Invalid(_)));
+        assert!(doc.drain_events().is_empty());
+    }
+
+    #[test]
+    fn accepting_a_when_suggestion_moves_it_into_when() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "dentist friday 8:30").unwrap();
+        assert!(!doc.accept_item_when_suggestion(&id).unwrap());
+
+        doc.set_item_when_suggested(&id, Some("2026-11-06T08:30"))
+            .unwrap();
+        doc.drain_events();
+        assert!(doc.accept_item_when_suggestion(&id).unwrap());
+        let view = doc.get_item(&id).unwrap();
+        assert_eq!(view.when.as_deref(), Some("2026-11-06T08:30"));
+        assert_eq!(view.when_suggested, None);
+        assert_eq!(view.duration, Some(DEFAULT_DURATION_MINUTES));
+        assert_eq!(
+            doc.drain_events(),
+            vec![
+                AppEvent::ItemWhenChanged {
+                    id: id.clone(),
+                    when: Some("2026-11-06T08:30".into()),
+                },
+                AppEvent::ItemDurationChanged {
+                    id: id.clone(),
+                    duration: Some(DEFAULT_DURATION_MINUTES),
+                },
+                AppEvent::ItemWhenSuggestedChanged {
+                    id: id.clone(),
+                    when_suggested: None,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn setting_a_when_answers_a_pending_suggestion() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "dentist friday").unwrap();
+        doc.set_item_when_suggested(&id, Some("2026-11-06"))
+            .unwrap();
+        doc.set_item_when(&id, Some("2026-12-01")).unwrap();
+        let view = doc.get_item(&id).unwrap();
+        assert_eq!(view.when.as_deref(), Some("2026-12-01"));
+        assert_eq!(view.when_suggested, None);
+
+        // Clearing a date leaves a suggestion written since alone.
+        doc.set_item_when(&id, None).unwrap();
+        doc.set_item_when_suggested(&id, Some("2026-11-06"))
+            .unwrap();
+        doc.set_item_when(&id, None).unwrap();
+        assert_eq!(
+            doc.get_item(&id).unwrap().when_suggested.as_deref(),
+            Some("2026-11-06")
+        );
+    }
+
+    #[test]
+    fn when_suggestion_syncs_and_survives_export_import() {
+        let dek = Dek::generate();
+        let mut a = Doc::new().unwrap();
+        let id = a.add_item(LIST_INBOX, "dentist friday").unwrap();
+        let seed = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        let mut b = Doc::empty();
+        b.apply_remote(&dek, &seed).unwrap();
+        let _ = b.drain_events();
+
+        a.set_item_when_suggested(&id, Some("2026-11-06")).unwrap();
+        let frame = a.pending_export(&dek).unwrap().unwrap();
+        b.apply_remote(&dek, &frame).unwrap();
+        assert_eq!(a.fingerprint(), b.fingerprint());
+        assert_eq!(
+            b.get_item(&id).unwrap().when_suggested.as_deref(),
+            Some("2026-11-06")
+        );
+        assert!(b.drain_events().iter().any(|e| matches!(
+            e,
+            AppEvent::ItemWhenSuggestedChanged { id: eid, when_suggested: Some(w) }
+                if eid == &id && w == "2026-11-06"
+        )));
+
+        let export = a.export_json();
+        let item = export.items.iter().find(|i| i.id == id).unwrap();
+        assert_eq!(item.when_suggested.as_deref(), Some("2026-11-06"));
+        let copy = Doc::new().unwrap();
+        copy.import_json(&export).unwrap();
+        assert!(
+            copy.all_items()
+                .iter()
+                .any(|i| i.when_suggested.as_deref() == Some("2026-11-06"))
+        );
+    }
+
+    #[test]
     fn export_import_preserves_when_and_skips_it_when_unset() {
         let src = Doc::new().unwrap();
         let a = src.add_item(LIST_INBOX, "timed").unwrap();
@@ -11161,6 +11407,7 @@ mod tests {
                 },
                 deadline: None,
                 when: None,
+                when_suggested: None,
                 duration: None,
                 place: None,
                 created_at: 1_700_000_000_000,

@@ -1,16 +1,10 @@
-// The typed-date grammar behind title tokens (`src/whenParse.ts`): which
-// phrases are taken, what register value they become, how a standing
-// token's phrase is re-read, and which phrases a rejection keeps out.
+// The typed-date grammar behind date suggestions (`src/whenParse.ts`):
+// which phrases are taken and what register value they become.
 // "Now" is Tue 2026-11-03 12:00.
 
 import { describe, expect, test } from "bun:test";
 
-import {
-  findWhenPhrase,
-  phraseKey,
-  titleWithoutPhrase,
-  type FindWhenOptions,
-} from "../src/whenParse.ts";
+import { findWhenPhrase, phraseKey, type FindWhenOptions } from "../src/whenParse.ts";
 
 const now = new Date(2026, 10, 3, 12, 0, 0);
 const find = (text: string, extra: Partial<FindWhenOptions> = {}) =>
@@ -102,41 +96,14 @@ describe("findWhenPhrase", () => {
     expect(find("friday repo")?.text).toBe("friday");
   });
 
-  test("free of an anchor, the phrase ending last wins", () => {
+  test("the phrase ending last wins", () => {
     const p = find("tomorrow or friday");
     expect(p?.text).toBe("friday");
     expect(p?.when).toBe("2026-11-06");
   });
 
-  test("against an anchor the phrase is re-read where the token stands", () => {
-    const token = { start: 0, end: 6 }; // "friday"
-    // Grown at the end, and at the front.
-    expect(find("friday night", { anchor: token })).toMatchObject({
-      start: 0,
-      end: 12,
-      when: "2026-11-06T20:00",
-    });
-    expect(find("next friday", { anchor: { start: 5, end: 11 } })).toMatchObject({
-      start: 0,
-      end: 11,
-      when: "2026-11-13",
-    });
-    // Shrunk while a time is mid-typing, then grown again.
-    expect(find("tomorrow at 5p", { anchor: { start: 0, end: 13 } })?.text).toBe("tomorrow");
-    expect(find("tomorrow at 5pm", { anchor: { start: 0, end: 8 } })?.text).toBe(
-      "tomorrow at 5pm",
-    );
-    // Gone: the words no longer parse, and a phrase elsewhere does not
-    // stand in for them.
-    expect(find("fridays or saturday", { anchor: token })).toBeNull();
-  });
-
-  test("a rejected phrase stays out; a longer one that extends it is taken", () => {
-    const exclude = new Set([phraseKey("friday")]);
-    expect(find("call mum friday", { exclude })).toBeNull();
-    expect(find("call mum  Friday", { exclude })).toBeNull();
-    expect(find("call mum friday night", { exclude })?.when).toBe("2026-11-06T20:00");
-    expect(find("call mum saturday", { exclude })?.when).toBe("2026-11-07");
+  test("a phrase's key folds case and spacing", () => {
+    expect(phraseKey("  Friday   Night ")).toBe("friday night");
   });
 
   test("spanish follows the locale", () => {
@@ -155,18 +122,5 @@ describe("findWhenPhrase", () => {
   test("blank text has no phrase", () => {
     expect(find("")).toBeNull();
     expect(find("   ")).toBeNull();
-  });
-});
-
-describe("titleWithoutPhrase", () => {
-  test("cuts the phrase out and closes the seam", () => {
-    const text = "call mum friday night about dinner";
-    const p = find(text)!;
-    expect(titleWithoutPhrase(text, p)).toBe("call mum about dinner");
-  });
-
-  test("a trailing phrase leaves a trimmed title", () => {
-    const text = "dentist tomorrow at 5pm";
-    expect(titleWithoutPhrase(text, find(text)!)).toBe("dentist");
   });
 });

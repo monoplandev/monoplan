@@ -166,6 +166,7 @@ mod tests {
             lifecycle_at: at,
             deadline: None,
             when: None,
+            when_suggested: None,
             duration: None,
             place: None,
             created_at: 0,
