@@ -116,6 +116,21 @@ struct HomeView: View {
 
     private var searchActive: Bool { searching || !query.isEmpty }
 
+    /// How many of today's rows Home shows before "Show all" (which
+    /// pushes the Calendar page), so a backlog of overdue rows cannot
+    /// push the lists off the screen.
+    private static let todayLimit = 5
+
+    /// What wants attention today, for the section under Home's menu:
+    /// the agenda's Today group (overdue deadlines and tasks whose
+    /// planned day has passed folded in, as on the Calendar page) less
+    /// what is ticked, so the section shrinks as it is cleared and is
+    /// not drawn on a clear day. Unscheduled events are not dated, so
+    /// they stay on the Calendar page.
+    private var today: [AgendaRow] {
+        (model.agenda.first(where: { $0.today })?.rows ?? []).filter { !$0.isDone }
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
             List {
@@ -128,6 +143,19 @@ struct HomeView: View {
                     }
                     NavigationLink(value: HomePage.done) {
                         Label("Done", systemImage: "checkmark.circle")
+                    }
+                }
+                if !today.isEmpty {
+                    Section("Today") {
+                        ForEach(today.prefix(Self.todayLimit), id: \.id) { row in
+                            AgendaRowView(row: row)
+                        }
+                        if today.count > Self.todayLimit {
+                            NavigationLink(value: HomePage.agenda) {
+                                Text("Show all \(today.count)")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
                 ForEach(model.session?.docs ?? [], id: \.docId) { doc in
@@ -177,8 +205,15 @@ struct HomeView: View {
                 case .settings: SettingsView()
                 }
             }
-            .refreshable { model.loadSession() }
-            .onAppear { model.loadSession() }
+            .refreshable {
+                model.loadSession()
+                model.refreshAgenda()
+            }
+            .onAppear {
+                model.loadSession()
+                model.refreshAgenda()
+            }
+            .animation(.default, value: today)
         }
         // Search covers the stack, navigation bar included, and sits
         // under the bar. A page or list result closes it and is pushed
