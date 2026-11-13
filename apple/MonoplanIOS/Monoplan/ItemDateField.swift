@@ -42,7 +42,8 @@ struct ItemDateField: View {
                 suggestion(suggested)
             } else {
                 if let when = item.when {
-                    FieldRow("calendar", text: ItemView.whenText(when), note: ItemView.lengthText(item))
+                    let parts = ItemView.whenParts(when)
+                    FieldRow("calendar", text: parts.text, muted: parts.muted, note: ItemView.lengthText(item))
                 } else {
                     FieldRow("calendar", text: "Date", empty: true)
                 }

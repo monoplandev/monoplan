@@ -477,7 +477,7 @@ struct ItemView: View {
                 FieldRow(text: item.listLabel) { ListIcon(listId: item.listId, emoji: item.listIcon) }
                 Spacer(minLength: 8)
                 SharedWorkspaceBadge(name: workspace)
-                Image(systemName: "chevron.right")
+                Image(systemName: "chevron.up.chevron.down")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -522,6 +522,25 @@ struct ItemView: View {
         let day = dayText(String(when.prefix(10)))
         guard when.count >= 16 else { return day }
         return "\(day) at \(when.dropFirst(11).prefix(5))"
+    }
+
+    /// A planned date for the item's row: today and tomorrow by name
+    /// ("Today at 14:00") with the date itself to follow, muted
+    /// ("Sat 14 Nov"); any other day as `whenText` has it, alone.
+    static func whenParts(_ when: String, now: Date = Date(), calendar: Calendar = .current) -> (text: String, muted: String?) {
+        guard let date = Agenda.start(of: String(when.prefix(10)), calendar: calendar),
+            let tomorrow = calendar.date(byAdding: .day, value: 1, to: now)
+        else { return (whenText(when), nil) }
+        let name: String
+        if calendar.isDate(date, inSameDayAs: now) {
+            name = "Today"
+        } else if calendar.isDate(date, inSameDayAs: tomorrow) {
+            name = "Tomorrow"
+        } else {
+            return (whenText(when), nil)
+        }
+        let text = when.count >= 16 ? "\(name) at \(when.dropFirst(11).prefix(5))" : name
+        return (text, date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))
     }
 
     /// A `YYYY-MM-DD` spelled out in the local calendar; the raw text if
@@ -713,6 +732,8 @@ private struct PlaceMapCard: View {
 /// under it when there is one. `empty` mutes a field that is unset.
 struct FieldRow<Icon: View>: View {
     let text: String
+    /// More of the same line, after the text and in its font, muted.
+    var muted: String? = nil
     var note: String? = nil
     var empty = false
     @ViewBuilder let icon: Icon
@@ -723,7 +744,11 @@ struct FieldRow<Icon: View>: View {
                 .foregroundStyle(empty ? .tertiary : .secondary)
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
-                Text(text).foregroundStyle(empty ? .tertiary : .primary)
+                if let muted {
+                    Text("\(text) \(Text(muted).foregroundStyle(.secondary))")
+                } else {
+                    Text(text).foregroundStyle(empty ? .tertiary : .primary)
+                }
                 if let note {
                     Text(note).font(.footnote).foregroundStyle(.secondary)
                 }
@@ -734,8 +759,8 @@ struct FieldRow<Icon: View>: View {
 
 extension FieldRow where Icon == Image {
     /// A field led by an SF Symbol.
-    init(_ systemImage: String, text: String, note: String? = nil, empty: Bool = false) {
-        self.init(text: text, note: note, empty: empty) { Image(systemName: systemImage) }
+    init(_ systemImage: String, text: String, muted: String? = nil, note: String? = nil, empty: Bool = false) {
+        self.init(text: text, muted: muted, note: note, empty: empty) { Image(systemName: systemImage) }
     }
 }
 
