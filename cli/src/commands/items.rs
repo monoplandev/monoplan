@@ -23,18 +23,35 @@ pub struct AddArgs {
     /// Target list. Defaults to `inbox`.
     #[arg(long, default_value = LIST_INBOX)]
     pub list: String,
+    /// Put the new items at the top of the list instead of the end.
+    #[arg(long)]
+    pub top: bool,
 }
 
 /// Daemon side of `add`: `texts` were already expanded from the
 /// argument (or stdin) by the client via [`collect_texts`].
-pub fn add(doc: &Doc, list: &str, texts: &[String], out: &mut dyn Write) -> anyhow::Result<()> {
+/// `top` puts them, in the order given, above the list's open items
+/// (one commit); otherwise each is appended.
+pub fn add(
+    doc: &Doc,
+    list: &str,
+    texts: &[String],
+    top: bool,
+    out: &mut dyn Write,
+) -> anyhow::Result<()> {
     if texts.is_empty() {
         anyhow::bail!("no item text provided");
     }
-    let mut ids = Vec::with_capacity(texts.len());
-    for text in texts {
-        ids.push(doc.add_item(list, text)?);
-    }
+    let ids = if top {
+        let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
+        doc.add_items_at(list, &texts, 0)?
+    } else {
+        let mut ids = Vec::with_capacity(texts.len());
+        for text in texts {
+            ids.push(doc.add_item(list, text)?);
+        }
+        ids
+    };
     for id in ids {
         writeln!(out, "{id}")?;
     }
@@ -398,10 +415,32 @@ pub fn restore(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()
     Ok(())
 }
 
+#[derive(Parser, Debug, Clone, Serialize, Deserialize)]
+pub struct DuplicateArgs {
+    pub item_id: String,
+    /// Star the copy too when the original is starred, directly below
+    /// it in Starred.
+    #[arg(long)]
+    #[serde(default)]
+    pub star: bool,
+}
+
 /// Duplicate an item beside itself (`Doc::duplicate_item`); prints the
-/// copy's id, as `add` prints a new item's.
-pub fn duplicate(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
+/// copy's id, as `add` prints a new item's. With `star`, a starred
+/// original's copy is starred in the slot under it (Home's lens, as
+/// `item set --star`); an unstarred original's copy is left unstarred.
+pub fn duplicate(
+    doc: &Doc,
+    lens: &super::focus::Lens,
+    args: DuplicateArgs,
+    out: &mut dyn Write,
+) -> anyhow::Result<()> {
     let copy = doc.duplicate_item(&args.item_id)?;
+    if args.star
+        && let Some(at) = lens.position(&args.item_id)
+    {
+        lens.star(doc, &copy, at + 1)?;
+    }
     writeln!(out, "{copy}")?;
     Ok(())
 }
@@ -832,16 +871,30 @@ mod tests {
             "list": "inbox", "texts": ["Call the bank"],
         }}))
         .unwrap();
-        let DocCmd::Add { list, texts } = cmd else {
+        let DocCmd::Add { list, texts, top } = cmd else {
             panic!("not an Add frame")
         };
+        assert!(!top, "an absent `top` appends");
         let mut out = Vec::new();
-        add(&doc, &list, &texts, &mut out).unwrap();
+        add(&doc, &list, &texts, top, &mut out).unwrap();
         let id = String::from_utf8(out).unwrap();
         let item = doc.get_item(id.trim()).unwrap();
         assert_eq!(item.text, "Call the bank");
         assert_eq!(item.list_id, LIST_INBOX);
         assert_eq!(item.state.name(), "backlog");
+
+        // The iOS capture's frame: `top` puts the item first.
+        let cmd: DocCmd = serde_json::from_value(serde_json::json!({"Add": {
+            "list": "inbox", "texts": ["Now this"], "top": true,
+        }}))
+        .unwrap();
+        let mut out = Vec::new();
+        crate::commands::run_doc(cmd, &doc, &[&doc], &Lens::home(&doc), &mut out).unwrap();
+        let first = String::from_utf8(out).unwrap();
+        assert_eq!(
+            doc.open_item_ids(LIST_INBOX),
+            vec![first.trim().to_string(), id.trim().to_string()]
+        );
     }
 
     /// `Request.setText` with a suggestion edit, and
@@ -1002,10 +1055,39 @@ mod tests {
         run_doc(cmd, &doc, &[&doc], &Lens::home(&doc), &mut out).unwrap();
         let copy = String::from_utf8(out).unwrap();
         assert_eq!(doc.get_item(copy.trim()).unwrap().text, "twice");
+        assert!(doc.focus_refs().is_empty(), "no `star`, no star");
         assert_eq!(
             doc.open_item_ids(LIST_INBOX),
             vec![id, copy.trim().to_string()]
         );
+    }
+
+    /// `Request.duplicateItem` with `star` (the iOS Starred page's
+    /// menu): the copy is starred directly under a starred original,
+    /// and not at all under an unstarred one.
+    #[test]
+    fn duplicate_star_frame_stars_the_copy_under_the_original() {
+        use crate::commands::{DocCmd, run_doc};
+        let doc = Doc::new().unwrap();
+        let a = doc.add_item(LIST_INBOX, "a").unwrap();
+        let b = doc.add_item(LIST_INBOX, "b").unwrap();
+        let plain = doc.add_item(LIST_INBOX, "plain").unwrap();
+        doc.add_to_focus(&a, usize::MAX).unwrap();
+        doc.add_to_focus(&b, usize::MAX).unwrap();
+        let run = |id: &str| {
+            let cmd: DocCmd = serde_json::from_value(
+                serde_json::json!({"Duplicate": {"item_id": id, "star": true}}),
+            )
+            .unwrap();
+            let mut out = Vec::new();
+            run_doc(cmd, &doc, &[&doc], &Lens::home(&doc), &mut out).unwrap();
+            String::from_utf8(out).unwrap().trim().to_string()
+        };
+        let copy = run(&a);
+        let starred: Vec<String> = doc.focus_entries().into_iter().map(|e| e.item_id).collect();
+        assert_eq!(starred, vec![a, copy, b]);
+        run(&plain);
+        assert_eq!(doc.focus_entries().len(), 3);
     }
 
     /// `Request.setStarred` in MonoplanMacKit: `star` at slot 1 (the

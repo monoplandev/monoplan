@@ -124,6 +124,15 @@ impl<'a> Lens<'a> {
         Ok(())
     }
 
+    /// Where `item_id` sits among Starred's entries (0-based), if it
+    /// is referenced, in either form.
+    pub fn position(&self, item_id: &str) -> Option<usize> {
+        self.home
+            .focus_entries()
+            .iter()
+            .position(|e| e.item_id == item_id)
+    }
+
     /// Unstar `item_id`, whichever doc it lives in (refs dedup by item
     /// id across both forms). The item is untouched.
     pub fn unstar(&self, item_id: &str) -> anyhow::Result<()> {

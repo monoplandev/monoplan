@@ -149,7 +149,7 @@ public enum Request {
     /// item's id on a line of its own. `workspace` as for `items`. The
     /// frame is pinned on the Rust side by
     /// `add_frame_from_the_apps_decodes_and_applies`.
-    case addItem(text: String, list: String, workspace: String? = nil)
+    case addItem(text: String, list: String, top: Bool = false, workspace: String? = nil)
     /// `monoplan item set <id> --lifecycle done|backlog`: tick an item,
     /// or reopen a closed one into Backlog (what the core's un-done
     /// writes, `spec/data-model.md` "Set lifecycle"). `workspace` as for
@@ -201,9 +201,12 @@ public enum Request {
     case setBinned(id: String, binned: Bool, workspace: String? = nil)
     /// `monoplan item duplicate <id>`: copy the item beside itself, in
     /// its own list (`Doc::duplicate_item`); the reply is the copy's
-    /// id on a line. `workspace` as for `items`. The frame is pinned on
-    /// the Rust side by `duplicate_frame_from_the_apps_decodes_and_applies`.
-    case duplicateItem(id: String, workspace: String? = nil)
+    /// id on a line. `star` (`--star`) also stars the copy of a starred
+    /// item, directly below it in Starred. `workspace` as for `items`.
+    /// The frames are pinned on the Rust side by
+    /// `duplicate_frame_from_the_apps_decodes_and_applies` and
+    /// `duplicate_star_frame_stars_the_copy_under_the_original`.
+    case duplicateItem(id: String, star: Bool = false, workspace: String? = nil)
     /// `monoplan bin rm <id>`: hard-delete a binned item. The engine
     /// refuses one that is not in the bin. `workspace` as for `items`.
     case deleteBinned(id: String, workspace: String? = nil)
@@ -266,10 +269,12 @@ public enum Request {
             return Self.doc(workspace, .map(["Show": .map([
                 "item_id": .string(id), "json": .bool(true),
             ])]))
-        case .addItem(let text, let list, let workspace):
-            return Self.doc(workspace, .map(["Add": .map([
-                "list": .string(list), "texts": .array([.string(text)]),
-            ])]))
+        case .addItem(let text, let list, let top, let workspace):
+            // `top` is absent unless set (`serde(default)`): `item add
+            // --top`, the item above the list's open ones.
+            var args: [String: MPValue] = ["list": .string(list), "texts": .array([.string(text)])]
+            if top { args["top"] = .bool(true) }
+            return Self.doc(workspace, .map(["Add": .map(args)]))
         case .setDone(let id, let done, let workspace):
             return Self.set(id, workspace, ["lifecycle": .string(done ? "Done" : "Backlog")])
         case .setLifecycle(let id, let state, let workspace):
@@ -307,8 +312,11 @@ public enum Request {
             return Self.set(id, workspace, fields)
         case .setBinned(let id, let binned, let workspace):
             return Self.doc(workspace, .map([binned ? "ItemBin" : "Restore": .map(["item_id": .string(id)])]))
-        case .duplicateItem(let id, let workspace):
-            return Self.doc(workspace, .map(["Duplicate": .map(["item_id": .string(id)])]))
+        case .duplicateItem(let id, let star, let workspace):
+            // `star` is absent unless set (`serde(default)`).
+            var args: [String: MPValue] = ["item_id": .string(id)]
+            if star { args["star"] = .bool(true) }
+            return Self.doc(workspace, .map(["Duplicate": .map(args)]))
         case .deleteBinned(let id, let workspace):
             return Self.doc(workspace, .map(["Bin": .map([
                 "sub": .map(["Rm": .map(["item_id": .string(id)])]), "json": .bool(false),

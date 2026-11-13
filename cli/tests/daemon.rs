@@ -203,6 +203,7 @@ async fn watcher_hears_sync_local_and_remote_changes() {
             cmd: DocCmd::Add {
                 list: LIST_INBOX.to_string(),
                 texts: vec!["from-the-cli".into()],
+                top: false,
             },
         },
     )
@@ -317,6 +318,7 @@ async fn embedded_host_serves_commands_and_honours_shutdown() {
             cmd: DocCmd::Add {
                 list: LIST_INBOX.to_string(),
                 texts: vec!["from the cli".into()],
+                top: false,
             },
         },
     )
@@ -403,6 +405,7 @@ async fn local_client_shares_the_loop_with_the_socket() {
         cmd: DocCmd::Add {
             list: LIST_INBOX.to_string(),
             texts: vec![text.into()],
+            top: false,
         },
     };
     assert!(matches!(
@@ -650,6 +653,7 @@ async fn mirror_converges_both_ways_through_the_host() {
         cmd: DocCmd::Add {
             list: LIST_INBOX.to_string(),
             texts: vec![text.into()],
+            top: false,
         },
     };
     write_frame(&mut cli, &add("from-the-cli")).await.unwrap();

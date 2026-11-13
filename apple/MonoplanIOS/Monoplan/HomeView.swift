@@ -251,6 +251,16 @@ struct HomeView: View {
         }
         .animation(.default, value: searchActive)
         .onChange(of: query) { model.search(query) }
+        // A capture's item is shown where it landed: its list is pushed
+        // unless that is the page already up (under the sheet, when
+        // the capture stays open as the item's page), and the list
+        // page scrolls to it.
+        .onChange(of: model.captured) {
+            guard let captured = model.captured, shownList?.key != captured.list.key else { return }
+            query = ""
+            searching = false
+            path.append(captured.list)
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             BottomBar(query: $query, searching: $searching, captureList: shownList)
         }
@@ -354,16 +364,30 @@ struct ListItemsView: View {
     @EnvironmentObject private var model: AppModel
     let list: ListRef
 
+    private func showCaptured(in items: [ItemRow], _ proxy: ScrollViewProxy) {
+        guard let captured = model.captured, captured.list.key == list.key,
+              items.contains(where: { $0.id == captured.itemId })
+        else { return }
+        withAnimation { proxy.scrollTo(captured.itemId, anchor: .top) }
+        model.showedCaptured()
+    }
+
     var body: some View {
         Group {
             if let items = model.listItems[list.key], !items.isEmpty {
-                List(items) { item in
-                    ItemLink(ItemRef(docId: list.docId, itemId: item.id, title: item.text)) {
-                        ItemRowView(item: item)
+                ScrollViewReader { proxy in
+                    List(items) { item in
+                        ItemLink(ItemRef(docId: list.docId, itemId: item.id, title: item.text)) {
+                            ItemRowView(item: item)
+                        }
                     }
+                    .listStyle(.plain)
+                    .animation(.default, value: items)
+                    // A capture into this list: bring its item into
+                    // view once the reread has it.
+                    .onChange(of: items, initial: true) { showCaptured(in: items, proxy) }
+                    .onChange(of: model.captured) { showCaptured(in: items, proxy) }
                 }
-                .listStyle(.plain)
-                .animation(.default, value: items)
             } else {
                 emptyState
             }

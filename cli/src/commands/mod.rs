@@ -177,7 +177,7 @@ enum ItemCmd {
     /// Restore an item from the bin (reveals its preserved workflow state).
     Restore(items::IdArg),
     /// Duplicate an item into the same list; prints the copy's id.
-    Duplicate(items::IdArg),
+    Duplicate(items::DuplicateArgs),
 }
 
 /// A command that runs against the doc. Parsed by the client, shipped
@@ -189,13 +189,17 @@ pub enum DocCmd {
     Add {
         list: String,
         texts: Vec<String>,
+        /// Insert at the top of the list (`item add --top`). Absent on
+        /// the wire means append.
+        #[serde(default)]
+        top: bool,
     },
     Ls(items::LsArgs),
     Show(items::ShowArgs),
     Set(Box<items::SetArgs>),
     ItemBin(items::IdArg),
     Restore(items::IdArg),
-    Duplicate(items::IdArg),
+    Duplicate(items::DuplicateArgs),
     /// The bin namespace (`bin show` / `empty` / `rm`).
     Bin(bin::BinArgs),
     Agenda(agenda::AgendaArgs),
@@ -231,13 +235,13 @@ pub fn run_doc(
     out: &mut dyn Write,
 ) -> anyhow::Result<()> {
     match cmd {
-        DocCmd::Add { list, texts } => items::add(doc, &list, &texts, out),
+        DocCmd::Add { list, texts, top } => items::add(doc, &list, &texts, top, out),
         DocCmd::Ls(a) => items::ls(doc, a, out),
         DocCmd::Show(a) => items::show(doc, lens, a, out),
         DocCmd::Set(a) => items::set(doc, open_docs, lens, *a, out),
         DocCmd::ItemBin(a) => items::bin(doc, a, out),
         DocCmd::Restore(a) => items::restore(doc, a, out),
-        DocCmd::Duplicate(a) => items::duplicate(doc, a, out),
+        DocCmd::Duplicate(a) => items::duplicate(doc, lens, a, out),
         DocCmd::Bin(a) => bin::run(doc, a, out),
         DocCmd::Agenda(a) => agenda::run(doc, a, out),
         DocCmd::Done(a) => done::run(doc, a, out),
@@ -370,6 +374,7 @@ impl Cli {
             Cmd::Item(ItemCmd::Add(a)) => DocCmd::Add {
                 texts: items::collect_texts(&a.text)?,
                 list: a.list,
+                top: a.top,
             },
             Cmd::Item(ItemCmd::Ls(a)) => DocCmd::Ls(a),
             Cmd::Item(ItemCmd::Show(a)) => DocCmd::Show(a),

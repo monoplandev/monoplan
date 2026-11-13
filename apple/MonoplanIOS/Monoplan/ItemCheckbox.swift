@@ -109,11 +109,27 @@ struct CheckboxRow<Content: View>: View {
     }
 }
 
+private struct DuplicatesStarredKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Rows under here are Starred's: duplicating one stars the copy,
+    /// directly below it. Set by `StarredView`.
+    var duplicatesStarred: Bool {
+        get { self[DuplicatesStarredKey.self] }
+        set { self[DuplicatesStarredKey.self] = newValue }
+    }
+}
+
 /// The menu a long press on an item row opens, the same on every row
 /// surface: tick or reopen, star or unstar, copy the title, duplicate,
-/// bin. Without an item (`ref` nil) there is no menu.
+/// bin. Without an item (`ref` nil) there is no menu. On the Starred
+/// page (`duplicatesStarred`) a duplicate is starred too, under the
+/// row it came from.
 struct ItemRowMenu: ViewModifier {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.duplicatesStarred) private var duplicatesStarred
     let ref: ItemRef?
     /// The workflow state name, as the engine's JSON carries it.
     let state: String
@@ -155,7 +171,7 @@ struct ItemRowMenu: ViewModifier {
             Label("Copy", systemImage: "doc.on.doc")
         }
         Button {
-            model.duplicateItem(ref)
+            model.duplicateItem(ref, star: duplicatesStarred)
         } label: {
             Label("Duplicate", systemImage: "plus.square.on.square")
         }

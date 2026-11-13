@@ -178,8 +178,21 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Capture: create an item at the end of `list`, in Backlog
-    /// (`item add <text> --list`), then reread what is on screen as
+    /// The item a capture last created and the list it landed in, until
+    /// that list's page has shown it: Home goes to the list, and the
+    /// list scrolls to the item and takes this back (`showedCaptured`).
+    @Published private(set) var captured: Captured?
+
+    struct Captured: Equatable {
+        let list: ListRef
+        let itemId: String
+    }
+
+    /// The list page has the captured item on screen.
+    func showedCaptured() { captured = nil }
+
+    /// Capture: create an item at the top of `list`, in Backlog
+    /// (`item add <text> --list --top`), then reread what is on screen as
     /// `setDone` does. `done` gets the new item, or why there is none;
     /// it may be left out by a caller that is going away (a capture
     /// sheet closing over a typed title).
@@ -187,7 +200,7 @@ final class AppModel: ObservableObject {
         text: String, to list: ListRef, whenSuggested: String? = nil,
         done: ((ItemRef?, String?) -> Void)? = nil
     ) {
-        client.send(.addItem(text: text, list: list.listId, workspace: selector(list.docId))) { [weak self] result in
+        client.send(.addItem(text: text, list: list.listId, top: true, workspace: selector(list.docId))) { [weak self] result in
             guard let self else { return }
             let failure: String
             switch result {
@@ -198,6 +211,7 @@ final class AppModel: ObservableObject {
                     refreshListRows()
                     for list in browsedLists.values { refreshList(list) }
                     let ref = ItemRef(docId: list.docId, itemId: id, title: text)
+                    captured = Captured(list: list, itemId: id)
                     // The date its title named, as a question on the
                     // new item (`WhenSuggest`).
                     if let whenSuggested { setWhenSuggested(ref, when: whenSuggested) }
@@ -265,9 +279,10 @@ final class AppModel: ObservableObject {
 
     /// Copy an item beside itself in its own list (`item duplicate`),
     /// then reread as `setDone` does. The copy's id is not needed: the
-    /// reread shows it.
-    func duplicateItem(_ ref: ItemRef) {
-        write(.duplicateItem(id: ref.itemId, workspace: selector(ref.docId)), to: ref)
+    /// reread shows it. `star` also stars the copy of a starred item,
+    /// directly below it in Starred (`--star`).
+    func duplicateItem(_ ref: ItemRef, star: Bool = false) {
+        write(.duplicateItem(id: ref.itemId, star: star, workspace: selector(ref.docId)), to: ref)
     }
 
     /// Hard-delete a binned item (`bin rm`). Its page is forgotten

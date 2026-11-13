@@ -24,6 +24,7 @@ struct StarredView: View {
                 }
                 .listStyle(.plain)
                 .animation(.default, value: model.starred)
+                .environment(\.duplicatesStarred, true)
             }
         }
         .navigationTitle("Starred")
