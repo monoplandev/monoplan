@@ -15,6 +15,7 @@ struct ItemCheckbox: View {
     @ScaledMetric(relativeTo: .body) private var side: CGFloat = 20
     private static let radius: CGFloat = 0.32
     private static let border: CGFloat = 1.25
+    private static let nudge: CGFloat = 1.5
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: side * Self.radius, style: .continuous)
@@ -31,8 +32,9 @@ struct ItemCheckbox: View {
         }
         .frame(width: side, height: side)
         // A shape has no baseline of its own: sit the box so its middle
-        // is level with the middle of the first line's capitals.
-        .alignmentGuide(.firstTextBaseline) { $0[.bottom] - side * 0.2 }
+        // is level with the middle of the first line's capitals, then a
+        // touch lower, where it looks centred on the line as a whole.
+        .alignmentGuide(.firstTextBaseline) { $0[.bottom] - side * 0.2 - Self.nudge }
         .accessibilityElement()
         .accessibilityLabel(label)
     }

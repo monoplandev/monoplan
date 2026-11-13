@@ -90,7 +90,9 @@ struct DoneView: View {
     }
 }
 
-/// One finished item: its text, with the list it lives in underneath.
+/// One finished item: the time it was ticked (the section header
+/// already says the day) leading its text on one line, with the list it
+/// lives in underneath.
 struct DoneRowView: View {
     let item: ItemRow
     let listName: String?
@@ -98,14 +100,45 @@ struct DoneRowView: View {
     var body: some View {
         CheckboxRow(state: item.state) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.text)
-                    .itemTextSlot()
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    // Sized to the widest time of day, so the text
+                    // starts at the same place on every row.
+                    Text(Self.widestTime)
+                        .hidden()
+                        .overlay(alignment: .trailing) { Text(Self.time(doneAt)) }
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                        .accessibilityElement()
+                        .accessibilityLabel(Self.time(doneAt))
+                    Text(item.text)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
                 if let listName {
                     Text(listName)
-                        .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
             }
+            // Half the row's usual gap after the checkbox: the stamp
+            // reads as part of the tick.
+            .padding(.leading, -6)
         }
     }
+
+    private var doneAt: Date {
+        Date(timeIntervalSince1970: TimeInterval(item.lifecycleAt) / 1000)
+    }
+
+    static func time(_ date: Date) -> String {
+        date.formatted(date: .omitted, time: .shortened)
+    }
+
+    /// A time with two-digit hours in either clock ("10:00 PM", "22:00"):
+    /// about as wide as a stamp gets.
+    private static let widestTime: String = {
+        let late = Calendar.current.date(bySettingHour: 22, minute: 0, second: 0, of: Date()) ?? Date()
+        return time(late)
+    }()
 }
