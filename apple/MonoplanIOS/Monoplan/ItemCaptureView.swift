@@ -106,6 +106,7 @@ struct ItemCaptureView: View {
             } else if pickingList {
                 ItemListEditor(
                     itemTitle: nil, lists: listOptions, current: list.listId,
+                    workspace: model.sharedWorkspaceName(list.docId),
                     pick: { list = $0 },
                     done: { withAnimation(.easeOut(duration: 0.15)) { pickingList = false } })
                     .transition(.opacity)
@@ -193,6 +194,7 @@ struct ItemCaptureView: View {
             HStack(spacing: 6) {
                 FieldRow(text: list.name) { ListIcon(listId: list.listId, emoji: list.icon) }
                 Spacer(minLength: 8)
+                SharedWorkspaceBadge(name: model.sharedWorkspaceName(list.docId))
                 Image(systemName: "chevron.right")
                     .font(.footnote)
                     .foregroundStyle(.secondary)

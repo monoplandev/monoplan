@@ -183,6 +183,10 @@ struct ItemView: View {
 
     private var item: ItemDetail? { model.itemDetails[ref.key] }
 
+    /// The item's workspace when it is a shared one, for the list field
+    /// and the list editor's rows.
+    private var workspace: String? { ref.docId.flatMap(model.sharedWorkspaceName) }
+
     var body: some View {
         ZStack {
             if let editing, let item {
@@ -192,6 +196,7 @@ struct ItemView: View {
                     case .list:
                         ItemListEditor(
                             itemTitle: item.text, lists: listOptions(item), current: item.listId,
+                            workspace: workspace,
                             pick: { if $0.listId != item.listId { model.moveItem(ref, toList: $0.listId) } },
                             done: endEditing)
                     case .date: ItemDateEditor(ref: ref, item: item, done: endEditing)
@@ -397,6 +402,7 @@ struct ItemView: View {
             HStack(spacing: 6) {
                 FieldRow(text: item.listLabel) { ListIcon(listId: item.listId, emoji: item.listIcon) }
                 Spacer(minLength: 8)
+                SharedWorkspaceBadge(name: workspace)
                 Image(systemName: "chevron.right")
                     .font(.footnote)
                     .foregroundStyle(.secondary)

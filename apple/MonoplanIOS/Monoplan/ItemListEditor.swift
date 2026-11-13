@@ -1,6 +1,7 @@
 // The list editor, in place of the item's page for as long as it is
 // open: a header (cross, "List" over the item's title, tick), then the
-// workspace's lists as full-width rows, the current one ticked. A tap
+// workspace's lists as full-width rows, the current one ticked, each
+// with the workspace's name when it is a shared one. A tap
 // on a row picks it and closes; the cross and the tick both close with
 // nothing changed. It takes the sheet over, as the date and place
 // editors do, rather than dropping a system menu from the list field:
@@ -17,6 +18,9 @@ struct ItemListEditor: View {
     let lists: [ListRef]
     /// The id of the list to tick.
     let current: String
+    /// The lists' workspace when it is a shared one, named on every
+    /// row; nil for Personal.
+    var workspace: String? = nil
     let pick: (ListRef) -> Void
     let done: () -> Void
 
@@ -45,6 +49,7 @@ struct ItemListEditor: View {
             HStack(spacing: 6) {
                 FieldRow(text: list.name) { ListIcon(listId: list.listId, emoji: list.icon) }
                 Spacer(minLength: 8)
+                SharedWorkspaceBadge(name: workspace)
                 if ticked {
                     Image(systemName: "checkmark")
                         .font(.body.weight(.semibold))

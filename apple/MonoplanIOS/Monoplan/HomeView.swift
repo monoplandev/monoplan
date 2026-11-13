@@ -43,6 +43,32 @@ struct ListIcon: View {
     }
 }
 
+/// What marks a list as a shared workspace's wherever it is named away
+/// from Home's sections (the item page's list field, the list editor's
+/// rows): the system's shared glyph (two people, one behind the other)
+/// and the workspace's name, muted, after the list's own name. The
+/// web's list badge has the same glyph (`usersSvg`). Draws nothing for
+/// the Personal workspace (`AppModel.sharedWorkspaceName` is nil). It
+/// is the first thing to truncate when the row is short of room.
+struct SharedWorkspaceBadge: View {
+    let name: String?
+
+    var body: some View {
+        if let name {
+            HStack(spacing: 4) {
+                Image(systemName: "person.2.fill")
+                    .accessibilityHidden(true)
+                Text(name).lineLimit(1)
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .layoutPriority(-1)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Shared workspace \(name)")
+        }
+    }
+}
+
 /// The pages Home pushes that are not one list.
 enum HomePage: Hashable {
     case starred

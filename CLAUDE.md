@@ -64,6 +64,7 @@ Root `package.json` is a Bun workspace (`js/*`) with thin script wrappers — th
 - `bun run build` / `bun run test` / `bun run fmt` / `bun run lint` — cargo equivalents
 - `bun run build:wasm` — `wasm-pack build core/`. Always use this from the workspace root; bare `cargo build --target wasm32-...` will try to build `server`/`cli` for wasm and fail.
 - `bun run typecheck` — `tsc --noEmit -p js/config`
+- iOS: do not run `apple/MonoplanIOS/build-sim.sh`. No simulator runtimes are installed (no disc space for them); the user builds and runs the app on their own device from Xcode.
 
 ## Git workflow
 
