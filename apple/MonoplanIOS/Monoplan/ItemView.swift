@@ -12,6 +12,9 @@
 // the list field moves it, the date and place rows hand the sheet to their editors
 // (`ItemDateEditor`, `ItemPlaceEditor`);
 // everything else is display only.
+// The same sheet is where a new item is captured (`ItemCaptureView`,
+// opened by the bottom bar's add button): a title field, and this page
+// from the moment the title makes it a real item.
 
 import MapKit
 import MonoplanMacKit
@@ -41,15 +44,49 @@ extension EnvironmentValues {
     }
 }
 
+private struct CaptureItemKey: EnvironmentKey {
+    static let defaultValue: (ListRef?) -> Void = { _ in }
+}
+
+extension EnvironmentValues {
+    /// Open the sheet on a new item for this list (nil: the Personal
+    /// Inbox); set by `opensItems()`.
+    var captureItem: (ListRef?) -> Void {
+        get { self[CaptureItemKey.self] }
+        set { self[CaptureItemKey.self] = newValue }
+    }
+}
+
 extension View {
     /// Item rows anywhere under this view (Home's whole navigation
-    /// stack, pushed pages included) open the item's sheet over it.
+    /// stack, pushed pages included) open the item's sheet over it,
+    /// and `captureItem` opens the same sheet on a new one.
     func opensItems() -> some View { modifier(ItemSheet()) }
+}
+
+/// One capture: the list it starts aimed at. Each has its own identity,
+/// so the sheet stays up while the capture inside it becomes an item.
+struct CaptureTarget: Identifiable {
+    let id = UUID()
+    let list: ListRef
+}
+
+/// What the sheet is up for: an item, or a capture that becomes one.
+private enum SheetTarget: Identifiable {
+    case item(ItemRef)
+    case capture(CaptureTarget)
+
+    var id: String {
+        switch self {
+        case .item(let ref): return ref.key
+        case .capture(let target): return target.id.uuidString
+        }
+    }
 }
 
 private struct ItemSheet: ViewModifier {
     @EnvironmentObject private var model: AppModel
-    @State private var open: ItemRef?
+    @State private var open: SheetTarget?
     /// The sheet's height: half to start, full once a field expands
     /// (`ItemView` raises it) or the user drags it up.
     @State private var detent: PresentationDetent = .medium
@@ -58,13 +95,26 @@ private struct ItemSheet: ViewModifier {
         content
             .environment(\.openItem) {
                 detent = .medium
-                open = $0
+                open = .item($0)
             }
-            .sheet(item: $open) { ref in
-                ItemView(ref: ref, detent: $detent)
-                    .environmentObject(model)
-                    .presentationDetents([.medium, .large], selection: $detent)
-                    .presentationDragIndicator(.visible)
+            // A capture opens at full height: the keyboard comes up
+            // with it and would cover a half sheet. Nothing to capture
+            // into before the session has loaded.
+            .environment(\.captureItem) { list in
+                guard let list = list ?? model.lists(inDoc: nil).first else { return }
+                detent = .large
+                open = .capture(CaptureTarget(list: list))
+            }
+            .sheet(item: $open) { target in
+                Group {
+                    switch target {
+                    case .item(let ref): ItemView(ref: ref, detent: $detent)
+                    case .capture(let capture): ItemCaptureView(target: capture, detent: $detent)
+                    }
+                }
+                .environmentObject(model)
+                .presentationDetents([.medium, .large], selection: $detent)
+                .presentationDragIndicator(.visible)
             }
     }
 }
@@ -103,12 +153,15 @@ struct ItemView: View {
     @EnvironmentObject private var model: AppModel
     let ref: ItemRef
     @Binding var detent: PresentationDetent
+    /// An editor to open straight away: a capture that became this
+    /// item on the way to its date or place.
+    var startEditing: Editor? = nil
     @Environment(\.dismiss) private var dismiss
     /// The field editor that has the sheet, if one does.
     @State private var editing: Editor?
     @State private var detentBeforeEditing: PresentationDetent = .medium
 
-    private enum Editor {
+    enum Editor {
         case title
         case date
         case place
@@ -144,7 +197,10 @@ struct ItemView: View {
                 page.transition(.opacity)
             }
         }
-        .onAppear { model.refreshItem(ref) }
+        .onAppear {
+            model.refreshItem(ref)
+            if let startEditing, editing == nil { edit(startEditing) }
+        }
         .onChange(of: model.changeCount) { model.refreshItem(ref) }
     }
 
@@ -535,7 +591,7 @@ private struct StarButton: View {
 
 /// The round "x" in the top right corner of an item's sheet: closes it,
 /// for anyone who does not find the drag down.
-private struct CloseButton: View {
+struct CloseButton: View {
     let action: () -> Void
 
     var body: some View {
@@ -558,7 +614,7 @@ private struct CloseButton: View {
 /// A list's icon for a menu row. Menus take images only, so an emoji is
 /// drawn into one (kept in its own colours); a list without an emoji
 /// gets the same built-in glyphs as `ListIcon`.
-private enum ListMenuIcon {
+enum ListMenuIcon {
     static func image(listId: String, emoji: String?) -> Image {
         guard let emoji, !emoji.isEmpty else {
             return Image(systemName: listId == "inbox" ? "tray" : "folder")

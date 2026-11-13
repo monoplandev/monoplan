@@ -134,6 +134,12 @@ public enum Request {
     /// `monoplan item show <id> --json`: one item with its notes and
     /// list name (`ItemDetail.parse`). `workspace` as for `items`.
     case item(id: String, workspace: String? = nil)
+    /// `monoplan item add <text> --list <list>`: capture one item at
+    /// the end of a list, in Backlog. The reply's stdout is the new
+    /// item's id on a line of its own. `workspace` as for `items`. The
+    /// frame is pinned on the Rust side by
+    /// `add_frame_from_the_apps_decodes_and_applies`.
+    case addItem(text: String, list: String, workspace: String? = nil)
     /// `monoplan item set <id> --lifecycle done|backlog`: tick an item,
     /// or reopen a closed one into Backlog (what the core's un-done
     /// writes, `spec/data-model.md` "Set lifecycle"). `workspace` as for
@@ -231,6 +237,10 @@ public enum Request {
         case .item(let id, let workspace):
             return Self.doc(workspace, .map(["Show": .map([
                 "item_id": .string(id), "json": .bool(true),
+            ])]))
+        case .addItem(let text, let list, let workspace):
+            return Self.doc(workspace, .map(["Add": .map([
+                "list": .string(list), "texts": .array([.string(text)]),
             ])]))
         case .setDone(let id, let done, let workspace):
             return Self.set(id, workspace, ["lifecycle": .string(done ? "Done" : "Backlog")])

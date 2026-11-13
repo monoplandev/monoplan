@@ -801,6 +801,29 @@ mod tests {
         assert_eq!(err.to_string(), "item not found: nope");
     }
 
+    /// The frame the native clients hand-encode to capture an item
+    /// (`Request.addItem` in MonoplanMacKit): one text, and the reply
+    /// is the new id on a line, which the apps open the item by.
+    #[test]
+    fn add_frame_from_the_apps_decodes_and_applies() {
+        use crate::commands::DocCmd;
+        let doc = Doc::new().unwrap();
+        let cmd: DocCmd = serde_json::from_value(serde_json::json!({"Add": {
+            "list": "inbox", "texts": ["Call the bank"],
+        }}))
+        .unwrap();
+        let DocCmd::Add { list, texts } = cmd else {
+            panic!("not an Add frame")
+        };
+        let mut out = Vec::new();
+        add(&doc, &list, &texts, &mut out).unwrap();
+        let id = String::from_utf8(out).unwrap();
+        let item = doc.get_item(id.trim()).unwrap();
+        assert_eq!(item.text, "Call the bank");
+        assert_eq!(item.list_id, LIST_INBOX);
+        assert_eq!(item.state.name(), "backlog");
+    }
+
     /// The frame the native clients hand-encode to tick and reopen an
     /// item (`Request.setDone` in MonoplanMacKit): unset fields as nil,
     /// the state by its variant name.

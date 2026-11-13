@@ -61,6 +61,12 @@ final class DaemonClientTests: XCTestCase {
             ])])])])
         )
         XCTAssertEqual(
+            Request.addItem(text: "Call the bank", list: "inbox", workspace: "d1").value,
+            .map(["Doc": .map(["workspace": .string("d1"), "cmd": .map(["Add": .map([
+                "list": .string("inbox"), "texts": .array([.string("Call the bank")]),
+            ])])])])
+        )
+        XCTAssertEqual(
             Request.setText(id: "i1", text: "Call the bank").value,
             .map(["Doc": .map(["cmd": .map(["Set": .map([
                 "item_id": .string("i1"), "text": .string("Call the bank"),

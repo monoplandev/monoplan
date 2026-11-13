@@ -6,7 +6,8 @@
 // when it has none); a list opens its Open items.
 // The gear at the top right opens Settings (account and sync, with
 // Debug a level under it). A floating bar (`BottomBar`: search, and an
-// add button inert so far) sits under every page; while its field has
+// add button that captures a new item into the list being shown, else
+// the Personal Inbox) sits under every page; while its field has
 // focus or text, `SearchView` covers the stack. Every page is pushed
 // from here, and item rows on any of them tick and open the item's sheet.
 // Archived lists and the reserved `events` list (calendar-only,
@@ -70,6 +71,9 @@ struct HomeView: View {
     /// has focus.
     @State private var query = ""
     @FocusState private var searching: Bool
+    /// The list page on screen, if one is: where the add button
+    /// captures to.
+    @State private var shownList: ListRef?
 
     private var searchActive: Bool { searching || !query.isEmpty }
 
@@ -108,7 +112,11 @@ struct HomeView: View {
                     }
                 }
             }
-            .navigationDestination(for: ListRef.self) { ListItemsView(list: $0) }
+            .navigationDestination(for: ListRef.self) { list in
+                ListItemsView(list: list)
+                    .onAppear { shownList = list }
+                    .onDisappear { if shownList == list { shownList = nil } }
+            }
             .navigationDestination(for: HomePage.self) { page in
                 switch page {
                 case .starred: StarredView()
@@ -139,7 +147,7 @@ struct HomeView: View {
         .animation(.default, value: searchActive)
         .onChange(of: query) { model.search(query) }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            BottomBar(query: $query, searching: $searching)
+            BottomBar(query: $query, searching: $searching, captureList: shownList)
         }
         // The inset on the stack does not reach the scroll views inside
         // it, so every page's content gets the bar's height as a bottom

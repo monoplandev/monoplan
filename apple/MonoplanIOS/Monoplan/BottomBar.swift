@@ -5,13 +5,18 @@
 // Home owns the query and the field's focus, and draws the results
 // (`SearchView`) while either is set; for as long, the add button is a
 // cross that cancels the search: clears the text and drops the
-// keyboard. Add itself is inert until capture lands.
+// keyboard. Otherwise add opens the item sheet on a new item
+// (`ItemCaptureView`) for the list being shown, the Personal Inbox
+// when no list is.
 
 import SwiftUI
 
 struct BottomBar: View {
     @Binding var query: String
     @FocusState.Binding var searching: Bool
+    /// The list a capture starts aimed at; nil is the Personal Inbox.
+    var captureList: ListRef?
+    @Environment(\.captureItem) private var capture
 
     /// Search is up: the field has focus, or holds a query whose
     /// results are being read with the keyboard down.
@@ -45,8 +50,9 @@ struct BottomBar: View {
                 if active {
                     query = ""
                     searching = false
+                } else {
+                    capture(captureList)
                 }
-                // Otherwise capture: not built yet.
             } label: {
                 Image(systemName: active ? "xmark" : "square.and.pencil")
                     .font(.title3.weight(.semibold))

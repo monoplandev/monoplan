@@ -175,6 +175,35 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Capture: create an item at the end of `list`, in Backlog
+    /// (`item add <text> --list`), then reread what is on screen as
+    /// `setDone` does. `done` gets the new item, or why there is none;
+    /// it may be left out by a caller that is going away (a capture
+    /// sheet closing over a typed title).
+    func addItem(text: String, to list: ListRef, done: ((ItemRef?, String?) -> Void)? = nil) {
+        client.send(.addItem(text: text, list: list.listId, workspace: selector(list.docId))) { [weak self] result in
+            guard let self else { return }
+            let failure: String
+            switch result {
+            case .success(.output(let stdout, _)):
+                let id = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !id.isEmpty {
+                    refreshLenses()
+                    for list in browsedLists.values { refreshList(list) }
+                    done?(ItemRef(docId: list.docId, itemId: id, title: text), nil)
+                    return
+                }
+                failure = "could not add item: no id came back"
+            case .success(let other):
+                failure = "could not add item: \(String(describing: other))"
+            case .failure(let error):
+                failure = "could not add item: \(engineErrorMessage(error))"
+            }
+            lastError = failure
+            done?(nil, failure)
+        }
+    }
+
     /// Tick an item, or reopen a closed one (`item set --lifecycle`).
     /// Nothing is assumed about the result: once the engine has applied
     /// it, everything on screen is read again at once rather than after
