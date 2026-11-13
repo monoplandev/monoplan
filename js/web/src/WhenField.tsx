@@ -5,8 +5,9 @@
 // calendar picker (`CalendarPicker`; Remove). The input is typed into as
 // well (`dateTyping.tsx`): once what is typed names a date
 // (`dateSuggest.ts`, over the title tokens' parser) the popover's body
-// turns from the calendar into a listbox of the first few days it could
-// mean. Typed times offer clock-time choices; date-only rows keep any
+// shows a listbox above the calendar of the first few dates it could
+// mean. Today / Tomorrow are the defaults when no date is set, and the
+// highlighted suggestion previews its day in the calendar. Typed times offer clock-time choices; date-only rows keep any
 // existing time part, as a calendar pick does. Enter on
 // emptied text removes the date.
 // The time row (`WhenTimeRow`: start picker, ✕, end picker) sits below
@@ -88,7 +89,7 @@ export function WhenField(props: {
   };
 
   // The typed side of the start input (`dateTyping.tsx`): its list stands
-  // in for the calendar while the text names a date.
+  // above the calendar while the text names a date.
   const typing = createDateTyping({
     open: props.open,
     setOpen: props.setOpen,
@@ -97,6 +98,7 @@ export function WhenField(props: {
     reference: () => new Date(nowMs()),
     locale,
     includeTime: true,
+    defaults: () => props.when() ? [] : [todayStamp(nowMs()), addDaysToStamp(todayStamp(nowMs()), 1)],
     onPick: (value) => {
       const t = whenTime(value);
       if (!t) {
@@ -324,47 +326,25 @@ export function WhenField(props: {
                 inputRef?.focus();
               }}
             >
-              <Show
-                when={typing.listShown()}
-                fallback={
-                  <>
-                    <div class="when-popover-quick">
-                      <button
-                        type="button"
-                        class="when-popover-quick-action"
-                        onClick={() => pickDay(todayStamp(nowMs()))}
-                      >
-                        {m().when.today}
-                      </button>
-                      <button
-                        type="button"
-                        class="when-popover-quick-action"
-                        onClick={() =>
-                          pickDay(addDaysToStamp(todayStamp(nowMs()), 1))
-                        }
-                      >
-                        {m().when.tomorrow}
-                      </button>
-                    </div>
-                    <CalendarPicker
-                      kind="when"
-                      setOpen={props.setOpen}
-                      value={props.when}
-                      onPick={props.onChange}
-                      onRemove={() => props.onChange(null)}
-                    />
-                  </>
-                }
-              >
+              <Show when={typing.listShown()}>
                 <DateSuggestList
                   typing={typing}
                   format={(value) => {
+                    if (!typing.query()?.trim()) return todayOrTomorrow(value) ?? formatDay(value);
                     const day = formatDay(whenDay(value));
                     return whenTime(value) ? `${day} ${formatWhenTime(value, locale())}` : day;
                   }}
-                  hint={todayOrTomorrow}
+                  hint={(value) => typing.query()?.trim() ? todayOrTomorrow(value) : formatDay(value)}
                 />
               </Show>
+              <CalendarPicker
+                kind="when"
+                setOpen={props.setOpen}
+                value={props.when}
+                preview={typing.preview}
+                onPick={props.onChange}
+                onRemove={() => props.onChange(null)}
+              />
             </Popover.Content>
           </Popover.Portal>
         </Popover>
@@ -420,23 +400,20 @@ export function WhenField(props: {
                   endInputRef?.focus();
                 }}
               >
-                <Show
-                  when={endTyping.listShown()}
-                  fallback={
-                    <CalendarPicker
-                      setOpen={setEndOpen}
-                      value={endDay}
-                      onPick={pickEndDay}
-                      disabled={endDayDisabled}
-                    />
-                  }
-                >
+                <Show when={endTyping.listShown()}>
                   <DateSuggestList
                     typing={endTyping}
                     format={formatDay}
                     hint={todayOrTomorrow}
                   />
                 </Show>
+                <CalendarPicker
+                  setOpen={setEndOpen}
+                  value={endDay}
+                  preview={endTyping.preview}
+                  onPick={pickEndDay}
+                  disabled={endDayDisabled}
+                />
               </Popover.Content>
             </Popover.Portal>
           </Popover>

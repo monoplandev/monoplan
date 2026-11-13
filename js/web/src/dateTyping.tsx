@@ -2,8 +2,7 @@
 // (`WhenField.tsx`'s start and end dates). `createDateTyping` holds what
 // has been typed, the days it could mean (`dateSuggest.ts`) and the
 // cursor among them, and hands back the input's props; `DateSuggestList`
-// is the listbox the host shows in the popover in place of its calendar
-// while `listShown()`.
+// is the listbox the host shows above its calendar while `listShown()`.
 //
 // A click selects the input's text so typing replaces it, and typing
 // opens the popover. Arrow keys move the cursor, Enter or a click takes
@@ -27,6 +26,8 @@ export interface DateTypingOptions {
   reference: () => Date;
   locale: () => string;
   includeTime?: boolean;
+  /** Choices before any phrase is typed. */
+  defaults?: () => string[];
   /** Days the field can take; the rest are left out of the list. */
   allowed?: (day: string) => boolean;
   /** Write the picked date or datetime; the popover is closed after. */
@@ -47,17 +48,22 @@ export function createDateTyping(opts: DateTypingOptions) {
   const [cursor, setCursor] = createSignal(0);
   const suggestions = createMemo(() => {
     const q = query();
-    if (q === null) return [];
-    const days = dateSuggestions(q, { now: opts.reference(), locale: opts.locale(), includeTime: opts.includeTime });
+    const days = q === null || !q.trim()
+      ? (opts.defaults?.() ?? [])
+      : dateSuggestions(q, { now: opts.reference(), locale: opts.locale(), includeTime: opts.includeTime });
     const allowed = opts.allowed;
     return allowed ? days.filter(allowed) : days;
   });
   const listShown = () => opts.open() && suggestions().length > 0;
+  const preview = () => listShown() ? (suggestions()[cursor()] ?? null) : null;
 
   // However the popover closed (a pick, Escape, a click away), the typed
   // text goes with it.
   createEffect(() => {
-    if (!opts.open()) setQuery(null);
+    if (!opts.open()) {
+      setQuery(null);
+      setCursor(0);
+    }
   });
 
   const pick = (day: string) => {
@@ -149,8 +155,8 @@ export function createDateTyping(opts: DateTypingOptions) {
   return {
     query,
     cursor,
-    setCursor,
     suggestions,
+    preview,
     listShown,
     listboxId,
     optionId,
@@ -185,9 +191,6 @@ export function DateSuggestList(props: {
             aria-selected={i() === t().cursor()}
             class="palette__item"
             classList={{ "palette__item--selected": i() === t().cursor() }}
-            onMouseMove={() => {
-              if (t().cursor() !== i()) t().setCursor(i());
-            }}
             onClick={() => t().pick(day)}
           >
             <span class="palette__item-name">

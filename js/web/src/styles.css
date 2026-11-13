@@ -3893,47 +3893,20 @@ input.task-check:hover {
   overflow-y: auto;
 }
 
-/* The date input's typed suggestions, standing in for the calendar in
+/* The date input's suggestions above the calendar in
    the same popover: a short column of days in the time picker's row
    style, wide enough that the card does not collapse around it. */
 .date-suggest {
   min-width: 13em;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-row);
 }
 
 .date-suggest .palette__item {
   padding: 4px 10px;
   font-size: 14px;
   font-variant-numeric: tabular-nums;
-}
-
-/* Today / Tomorrow quick actions heading the when popover, ruled off from
-   the month grid below. Same quiet button as the picker's footer. */
-.when-popover-quick {
-  display: flex;
-  gap: 4px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border-row);
-}
-
-.when-popover-quick-action {
-  flex: 1;
-  font: inherit;
-  font-size: 12px;
-  color: var(--text);
-  background: var(--bg-badge);
-  border: none;
-  border-radius: 4px;
-  padding: 4px 8px;
-  cursor: pointer;
-}
-
-.when-popover-quick-action:hover {
-  background: var(--bg-hover);
-}
-
-.when-popover-quick-action:focus-visible {
-  outline: 2px solid var(--link);
-  outline-offset: 1px;
 }
 
 /* Pin-to-Focus toggle in the header actions, before the item menu: an
@@ -4141,6 +4114,13 @@ input.task-check:hover {
 .calendar-cell-trigger[data-selected] {
   background: var(--link);
   color: #fff;
+}
+
+/* A soft selection previews a suggestion without changing the saved date. */
+.calendar-cell-trigger[data-preview] {
+  box-shadow: inset 0 0 0 2px var(--link);
+  background: color-mix(in srgb, var(--link) 14%, var(--bg));
+  color: var(--link);
 }
 
 .calendar-cell-trigger[data-disabled] {

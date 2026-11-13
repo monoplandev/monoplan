@@ -441,8 +441,8 @@ for the month grid). `groupByDeadline` becomes
     12:00 is a time" as the fallback. Not built on iOS: the live
     question while the title is still being typed.
   - The When field's date input takes a typed phrase too (2026-11-11):
-    while the text names a date its popover swaps the calendar for a
-    list of the first few days it could mean (`dateSuggest.ts`: the text
+    the popover keeps the calendar below a
+    list of the first few days the text could mean (`dateSuggest.ts`: the text
     as typed, a trailing partial word completed to "today" / "tomorrow" /
     a weekday / a month, a bare day number in each coming month, a lone
     repeating phrase as its next three occurrences). The start input keeps typed times: an ambiguous clock time such as
@@ -450,6 +450,11 @@ for the month grid). `groupByDeadline` becomes
     24-hour times have one reading per day. Choosing a timed suggestion
     sets both date and time; date-only choices keep any existing time.
     The end-date input continues to write the day only.
+    With no start date or typed phrase, Today and Tomorrow are the default
+    suggestions. Typing or arrowing through suggestions previews the day
+    with an outline in the calendar, bringing its month into view; only
+    clicking or pressing Enter commits the suggestion. Pointer hover does
+    not change the preview or month, so reaching for the calendar keeps it stable.
     The end-date input does the same, reading phrases from the start
     day once that is ahead of today and leaving out days the span
     cannot end on. Enter on its emptied text drops the end date: the

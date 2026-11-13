@@ -7,7 +7,7 @@
 // dates band (`WhenTimeRow`), not here.
 
 import Calendar from "@corvu/calendar";
-import { createMemo, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import {
   localDateStamp,
   nowMs,
@@ -28,6 +28,8 @@ export interface CalendarPickerProps {
   /** Currently-set register value to preselect / open the calendar on, or
    *  null. */
   value: () => string | null;
+  /** A suggestion under the cursor, shown without committing it. */
+  preview?: () => string | null;
   /** Fired with the picked register value (never null — removal is the
    *  button below); the host closes after. In `when` mode the pick keeps
    *  the stored time part. */
@@ -55,6 +57,17 @@ export function CalendarPicker(props: CalendarPickerProps) {
     return s ? parseLocalDateParts(whenDay(s)) : null;
   });
 
+  const previewDay = createMemo(() => {
+    const stamp = props.preview?.();
+    return stamp ? whenDay(stamp) : null;
+  });
+  const [month, setMonth] = createSignal(value() ?? new Date(nowMs()));
+  createEffect(() => {
+    const stamp = previewDay();
+    const day = stamp ? parseLocalDateParts(stamp) : null;
+    if (day) setMonth(day);
+  });
+
   // The stored time part a `when` pick carries over to the new day.
   const time = () => whenTime(props.value() ?? "");
 
@@ -80,7 +93,8 @@ export function CalendarPicker(props: CalendarPickerProps) {
       <Calendar
         mode="single"
         value={value()}
-        initialMonth={value() ?? undefined}
+        month={month()}
+        onMonthChange={setMonth}
         // Adjacent months' spill-over days are real dates; corvu's
         // default renders them but makes them inert, which reads as
         // broken. Keep them pickable, just dimmed (see data-outside).
@@ -146,6 +160,7 @@ export function CalendarPicker(props: CalendarPickerProps) {
                             <Calendar.CellTrigger
                               day={day}
                               class="calendar-cell-trigger"
+                              data-preview={localDateStamp(day) === previewDay() ? "" : undefined}
                               data-outside={
                                 day.getMonth() !== cal.month.getMonth()
                                   ? ""
