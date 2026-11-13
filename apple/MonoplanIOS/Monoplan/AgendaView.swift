@@ -100,9 +100,16 @@ struct AgendaRowView: View {
                             .accessibilityLabel("At \(place.label)")
                         }
                         if let name = row.docName {
-                            Text(name)
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
+                            // The shared glyph, then the workspace's
+                            // name, as `SharedWorkspaceBadge` has them.
+                            HStack(spacing: 4) {
+                                SharedIcon()
+                                Text(name).lineLimit(1)
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Shared workspace \(name)")
                         }
                     }
                     Spacer(minLength: 8)
