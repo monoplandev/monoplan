@@ -176,6 +176,8 @@ enum ItemCmd {
     Bin(items::IdArg),
     /// Restore an item from the bin (reveals its preserved workflow state).
     Restore(items::IdArg),
+    /// Duplicate an item into the same list; prints the copy's id.
+    Duplicate(items::IdArg),
 }
 
 /// A command that runs against the doc. Parsed by the client, shipped
@@ -193,6 +195,7 @@ pub enum DocCmd {
     Set(Box<items::SetArgs>),
     ItemBin(items::IdArg),
     Restore(items::IdArg),
+    Duplicate(items::IdArg),
     /// The bin namespace (`bin show` / `empty` / `rm`).
     Bin(bin::BinArgs),
     Agenda(agenda::AgendaArgs),
@@ -234,6 +237,7 @@ pub fn run_doc(
         DocCmd::Set(a) => items::set(doc, open_docs, lens, *a, out),
         DocCmd::ItemBin(a) => items::bin(doc, a, out),
         DocCmd::Restore(a) => items::restore(doc, a, out),
+        DocCmd::Duplicate(a) => items::duplicate(doc, a, out),
         DocCmd::Bin(a) => bin::run(doc, a, out),
         DocCmd::Agenda(a) => agenda::run(doc, a, out),
         DocCmd::Done(a) => done::run(doc, a, out),
@@ -372,6 +376,7 @@ impl Cli {
             Cmd::Item(ItemCmd::Set(a)) => DocCmd::Set(a),
             Cmd::Item(ItemCmd::Bin(a)) => DocCmd::ItemBin(a),
             Cmd::Item(ItemCmd::Restore(a)) => DocCmd::Restore(a),
+            Cmd::Item(ItemCmd::Duplicate(a)) => DocCmd::Duplicate(a),
             Cmd::Bin(a) => DocCmd::Bin(a),
             Cmd::Agenda(a) => DocCmd::Agenda(a),
             Cmd::Done(a) => DocCmd::Done(a),

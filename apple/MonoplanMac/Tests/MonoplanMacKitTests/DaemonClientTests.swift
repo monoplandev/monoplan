@@ -65,6 +65,10 @@ final class DaemonClientTests: XCTestCase {
             .map(["Doc": .map(["workspace": .string("d1"), "cmd": .map(["ItemBin": .map(["item_id": .string("i1")])])])])
         )
         XCTAssertEqual(
+            Request.duplicateItem(id: "i1", workspace: "d1").value,
+            .map(["Doc": .map(["workspace": .string("d1"), "cmd": .map(["Duplicate": .map(["item_id": .string("i1")])])])])
+        )
+        XCTAssertEqual(
             Request.setBinned(id: "i1", binned: false).value,
             .map(["Doc": .map(["cmd": .map(["Restore": .map(["item_id": .string("i1")])])])])
         )

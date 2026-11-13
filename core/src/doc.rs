@@ -1974,6 +1974,62 @@ impl Doc {
         Ok(ids.into_iter().next().expect("one text yields one id"))
     }
 
+    /// Duplicate an item: a new item in the same list with the same
+    /// text, notes, deadline, `when`, duration and place. Returns the
+    /// copy's id. The copy of an open item keeps its workflow state and
+    /// sits directly after the original; the copy of a closed one is a
+    /// fresh Backlog item at the end of the list. Not copied: the id,
+    /// the creation and reflection stamps (the copy is created now, by
+    /// this author), a pending `when` suggestion, and any Starred
+    /// reference. A binned item is refused.
+    ///
+    /// Composed from the typed setters, so it is one commit per field
+    /// the original has set, not one in all: a failure part-way leaves
+    /// a partial copy, and workspace undo takes it back a field at a
+    /// time.
+    pub fn duplicate_item(&self, item_id: &str) -> Result<String, DocError> {
+        let item = self
+            .get_item(item_id)
+            .ok_or_else(|| DocError::ItemNotFound(item_id.to_string()))?;
+        if item.is_binned() {
+            return Err(DocError::Invalid("can't duplicate a binned item".into()));
+        }
+        let (state, index) = if item.state.is_open() {
+            let after = self
+                .open_item_ids(&item.list_id)
+                .iter()
+                .position(|id| id == item_id)
+                .map_or(usize::MAX, |i| i + 1);
+            (item.state, after)
+        } else {
+            (WorkflowState::Backlog, usize::MAX)
+        };
+        let copy = self.add_item_in_state_at(&item.list_id, &item.text, state, index)?;
+        if let Some(deadline) = &item.deadline {
+            self.set_item_deadline(&copy, Some(deadline))?;
+        }
+        if let Some(when) = &item.when {
+            // Before the duration: a timed `when` defaults one, which
+            // the original's then replaces.
+            self.set_item_when(&copy, Some(when))?;
+        }
+        if item.duration.is_some() {
+            self.set_item_duration(&copy, item.duration)?;
+        }
+        if let Some(place) = &item.place {
+            self.set_item_place(&copy, Some(place))?;
+        }
+        if !item.notes.is_empty() {
+            self.apply_notes_delta(
+                &copy,
+                &[NotesDeltaOp::Insert {
+                    insert: item.notes.clone(),
+                }],
+            )?;
+        }
+        Ok(copy)
+    }
+
     fn add_items_at_impl(
         &self,
         list_id: &str,
@@ -11282,6 +11338,66 @@ mod tests {
             dst2.iter_items()
                 .all(|i| i.when.is_none() || i.text == "all day")
         );
+    }
+
+    #[test]
+    fn duplicate_copies_the_fields_and_sits_after_the_original() {
+        let doc = Doc::new().unwrap();
+        let a = doc.add_item(LIST_INBOX, "a").unwrap();
+        let b = doc.add_item(LIST_INBOX, "b").unwrap();
+        doc.set_item_lifecycle(&a, ItemLifecycle::Todo).unwrap();
+        doc.set_item_deadline(&a, Some("2026-12-01")).unwrap();
+        doc.set_item_when(&a, Some("2026-11-20T09:30")).unwrap();
+        doc.set_item_duration(&a, Some(45)).unwrap();
+        doc.set_item_place(&a, Some(&place("Cafe", Some((-33.8, 151.2)))))
+            .unwrap();
+        doc.set_item_when_suggested(&b, Some("2026-11-21")).unwrap();
+        doc.apply_notes_delta(
+            &a,
+            &[NotesDeltaOp::Insert {
+                insert: "bring the form".into(),
+            }],
+        )
+        .unwrap();
+        doc.add_to_focus(&a, 0).unwrap();
+
+        let copy = doc.duplicate_item(&a).unwrap();
+        assert_eq!(
+            doc.open_item_ids(LIST_INBOX),
+            vec![a.clone(), copy.clone(), b.clone()]
+        );
+        let (from, to) = (doc.get_item(&a).unwrap(), doc.get_item(&copy).unwrap());
+        assert_eq!(to.text, "a");
+        assert_eq!(to.state, WorkflowState::Todo);
+        assert_eq!(to.notes, "bring the form");
+        assert_eq!(to.deadline, from.deadline);
+        assert_eq!(to.when, from.when);
+        assert_eq!(to.duration, Some(45));
+        assert_eq!(to.place, from.place);
+        // The star is the original's alone.
+        assert_eq!(doc.focus_refs().len(), 1);
+
+        // A pending suggestion is not copied.
+        let plain = doc.duplicate_item(&b).unwrap();
+        assert_eq!(doc.get_item(&plain).unwrap().when_suggested, None);
+    }
+
+    #[test]
+    fn duplicate_of_a_closed_item_is_open_and_a_binned_one_is_refused() {
+        let doc = Doc::new().unwrap();
+        let a = doc.add_item(LIST_INBOX, "a").unwrap();
+        let b = doc.add_item(LIST_INBOX, "b").unwrap();
+        doc.set_item_done(&a, true).unwrap();
+        let copy = doc.duplicate_item(&a).unwrap();
+        assert_eq!(doc.get_item(&copy).unwrap().state, WorkflowState::Backlog);
+        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![b.clone(), copy]);
+
+        doc.set_item_binned(&b, true).unwrap();
+        assert!(matches!(doc.duplicate_item(&b), Err(DocError::Invalid(_))));
+        assert!(matches!(
+            doc.duplicate_item("nope"),
+            Err(DocError::ItemNotFound(_))
+        ));
     }
 
     #[test]

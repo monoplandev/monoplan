@@ -96,6 +96,7 @@ struct SearchView: View {
                     }
                     ForEach(hits) { hit in
                         Button { open(hit) } label: { SearchHitRow(hit: hit) }
+                            .modifier(ItemRowMenu(ref: menuItem(hit), state: hit.state ?? "backlog"))
                     }
                 } header: {
                     // The count is of the rows shown: pages and hits.
@@ -117,6 +118,13 @@ struct SearchView: View {
             .listStyle(.insetGrouped)
             .scrollDismissesKeyboard(.interactively)
         }
+    }
+
+    /// The item a hit's long-press menu acts on: none for a list, and
+    /// none for a binned item, which the menu's actions do not fit.
+    private func menuItem(_ hit: SearchHit) -> ItemRef? {
+        guard hit.kind == .item, hit.state != "binned" else { return nil }
+        return ItemRef(docId: hit.docId, itemId: hit.itemId, title: hit.title)
     }
 
     private func open(_ hit: SearchHit) {

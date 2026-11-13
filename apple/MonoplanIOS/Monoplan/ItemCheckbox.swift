@@ -101,10 +101,69 @@ struct CheckboxRow<Content: View>: View {
                 .accessibilityAddTraits(.isButton)
         }
         .padding(.vertical, 2)
+        .modifier(ItemRowMenu(ref: ref, state: state))
         // A list starts its separator at the row's first text by
         // default, which leaves the checkbox hanging outside the line;
         // start it at the row's leading edge so it spans the checkbox.
         .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
+    }
+}
+
+/// The menu a long press on an item row opens, the same on every row
+/// surface: tick or reopen, star or unstar, copy the title, duplicate,
+/// bin. Without an item (`ref` nil) there is no menu.
+struct ItemRowMenu: ViewModifier {
+    @EnvironmentObject private var model: AppModel
+    let ref: ItemRef?
+    /// The workflow state name, as the engine's JSON carries it.
+    let state: String
+
+    private var closed: Bool { state == "done" || state == "cancelled" }
+
+    func body(content: Content) -> some View {
+        if let ref {
+            content.contextMenu { items(ref) }
+        } else {
+            content
+        }
+    }
+
+    @ViewBuilder
+    private func items(_ ref: ItemRef) -> some View {
+        Button {
+            model.setDone(ref, done: !closed)
+        } label: {
+            if closed {
+                Label(state == "cancelled" ? "Reopen" : "Mark not done", systemImage: "arrow.uturn.backward")
+            } else {
+                Label("Mark done", systemImage: "checkmark")
+            }
+        }
+        // Starred holds Open items only (`spec/focus.md`), so a closed
+        // row has nothing to star.
+        if !closed {
+            let starred = model.starred.contains { $0.id == ref.itemId }
+            Button {
+                model.setStarred(ref, starred: !starred)
+            } label: {
+                Label(starred ? "Unstar" : "Star", systemImage: starred ? "star.slash" : "star")
+            }
+        }
+        Button {
+            UIPasteboard.general.string = ref.title
+        } label: {
+            Label("Copy", systemImage: "doc.on.doc")
+        }
+        Button {
+            model.duplicateItem(ref)
+        } label: {
+            Label("Duplicate", systemImage: "plus.square.on.square")
+        }
+        Button(role: .destructive) {
+            model.setBinned(ref, binned: true)
+        } label: {
+            Label("Move to Bin", systemImage: "trash")
+        }
     }
 }
 

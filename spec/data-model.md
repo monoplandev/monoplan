@@ -485,6 +485,7 @@ Doc-level synced settings that are not owned by any specific `ListMeta`.
 All mutations go through Loro APIs internally; the core exposes typed helpers:
 
 - `add_item(list_id, text) -> ItemId`
+- `duplicate_item(item_id) -> ItemId` — a new item in the same list carrying the original's text, notes, deadline, `when`, duration and place. An open original's copy keeps its workflow state and sits directly after it; a closed one's is a Backlog item appended to the list. Not copied: stamps, `when_suggested`, Starred references. Rejects a binned item with `Invalid`. Composed from the setters below: one commit per copied field.
 - `move_item(item_id, target_list_id, target_index)` — in-list reorder when
   `target_list_id` equals the current list (order `mov`, placement kept);
   cross-list move otherwise (fresh placement, atomic location write,

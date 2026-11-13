@@ -263,6 +263,13 @@ final class AppModel: ObservableObject {
         write(.setBinned(id: ref.itemId, binned: binned, workspace: selector(ref.docId)), to: ref)
     }
 
+    /// Copy an item beside itself in its own list (`item duplicate`),
+    /// then reread as `setDone` does. The copy's id is not needed: the
+    /// reread shows it.
+    func duplicateItem(_ ref: ItemRef) {
+        write(.duplicateItem(id: ref.itemId, workspace: selector(ref.docId)), to: ref)
+    }
+
     /// Hard-delete a binned item (`bin rm`). Its page is forgotten
     /// first, so nothing rereads an item that is no longer there.
     func deleteBinned(_ ref: ItemRef) {

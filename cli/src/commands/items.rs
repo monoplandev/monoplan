@@ -398,6 +398,14 @@ pub fn restore(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()
     Ok(())
 }
 
+/// Duplicate an item beside itself (`Doc::duplicate_item`); prints the
+/// copy's id, as `add` prints a new item's.
+pub fn duplicate(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
+    let copy = doc.duplicate_item(&args.item_id)?;
+    writeln!(out, "{copy}")?;
+    Ok(())
+}
+
 // ---------- set ----------
 
 /// Where `--star` puts the item: a 1-based slot (the top when none is
@@ -979,6 +987,25 @@ mod tests {
         run(serde_json::json!({"ItemBin": {"item_id": id}}));
         run(serde_json::json!({"Bin": {"sub": {"Rm": {"item_id": id}}, "json": false}}));
         assert!(doc.get_item(&id).is_none());
+    }
+
+    /// `Request.duplicateItem` in MonoplanMacKit: the reply is the
+    /// copy's id on a line.
+    #[test]
+    fn duplicate_frame_from_the_apps_decodes_and_applies() {
+        use crate::commands::{DocCmd, run_doc};
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "twice").unwrap();
+        let cmd: DocCmd =
+            serde_json::from_value(serde_json::json!({"Duplicate": {"item_id": id}})).unwrap();
+        let mut out = Vec::new();
+        run_doc(cmd, &doc, &[&doc], &Lens::home(&doc), &mut out).unwrap();
+        let copy = String::from_utf8(out).unwrap();
+        assert_eq!(doc.get_item(copy.trim()).unwrap().text, "twice");
+        assert_eq!(
+            doc.open_item_ids(LIST_INBOX),
+            vec![id, copy.trim().to_string()]
+        );
     }
 
     /// `Request.setStarred` in MonoplanMacKit: `star` at slot 1 (the

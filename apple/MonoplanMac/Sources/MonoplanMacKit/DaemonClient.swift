@@ -199,6 +199,11 @@ public enum Request {
     /// clear the bin mask; the workflow state under it is kept.
     /// `workspace` as for `items`.
     case setBinned(id: String, binned: Bool, workspace: String? = nil)
+    /// `monoplan item duplicate <id>`: copy the item beside itself, in
+    /// its own list (`Doc::duplicate_item`); the reply is the copy's
+    /// id on a line. `workspace` as for `items`. The frame is pinned on
+    /// the Rust side by `duplicate_frame_from_the_apps_decodes_and_applies`.
+    case duplicateItem(id: String, workspace: String? = nil)
     /// `monoplan bin rm <id>`: hard-delete a binned item. The engine
     /// refuses one that is not in the bin. `workspace` as for `items`.
     case deleteBinned(id: String, workspace: String? = nil)
@@ -302,6 +307,8 @@ public enum Request {
             return Self.set(id, workspace, fields)
         case .setBinned(let id, let binned, let workspace):
             return Self.doc(workspace, .map([binned ? "ItemBin" : "Restore": .map(["item_id": .string(id)])]))
+        case .duplicateItem(let id, let workspace):
+            return Self.doc(workspace, .map(["Duplicate": .map(["item_id": .string(id)])]))
         case .deleteBinned(let id, let workspace):
             return Self.doc(workspace, .map(["Bin": .map([
                 "sub": .map(["Rm": .map(["item_id": .string(id)])]), "json": .bool(false),
