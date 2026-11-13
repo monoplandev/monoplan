@@ -382,20 +382,21 @@ one fetch per doc, refetched with the session on every `Changed`;
 emoji (`ListIcon`: the `icon` the list JSON carries, a folder without
 one) on its Home row, in its page's title and on the item sheet. A list pushes its Open
 items (`Request.items(list:workspace:)`), refetched on `Changed` while
-shown; read-only. A gear at the top right of the index opens Debug (the settings
-button, until there are settings), pushed onto the same stack. **Done** (`DoneView.swift`) is the
+shown; read-only. A gear at the top right of the index opens Settings, pushed onto the same stack. **Done** (`DoneView.swift`) is the
 Personal workspace's Done items across every list, newest first, in a
 section per day ticked (`Request.done(limit:)`, i.e. `done -n N --json`,
 grouped by `Done.days`), each row with its list name. It is a window,
 not the history: 50 rows to start, doubled each time the end of the
 list scrolls into sight (`AppModel.loadMoreDone`), and a `Changed`
-refetches only the window reached; read-only. **Debug**
-(`DebugView.swift`) is the original surface: the `SyncStatus` the engine
-publishes (online, pending, local-only, last synced, offline reason),
-`Changed` events counted as they arrive, the engine's build id and pid,
-the profile path, and the `Engine.session` record (email, account,
-device, server, open docs), with the sign-in / sign-out buttons until
-a settings surface takes them. Sign-in is the Mac sheet's form without
+refetches only the window reached; read-only. **Settings**
+(`SettingsView.swift`, 2026-11-13) holds what a person acts on: the
+account (email, server, sign in / sign out), sync (the status line,
+last synced) and the last error. **Debug**
+(`DebugView.swift`, the original surface) is pushed from its last row
+and keeps the rest: the raw `SyncStatus` flags (online, pending,
+local-only, offline reason), `Changed` events counted as they arrive,
+Sync now and Reconnect, the engine's build id and pid, the profile path, and the
+`Engine.session` ids (account, device, open docs). Sign-in is the Mac sheet's form without
 account creation or recovery; the local-only workspace a first launch
 runs is replaced by the account's, as on the Mac.
 

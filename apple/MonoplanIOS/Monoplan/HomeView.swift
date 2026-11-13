@@ -4,8 +4,8 @@
 // `Engine.session` orders them), each with its Inbox and then its
 // active lists in the doc's order, each led by its emoji (a folder
 // when it has none); a list opens its Open items.
-// The gear at the top right opens Debug, which stands in for settings
-// until there are any. A floating bar (`BottomBar`: search and add,
+// The gear at the top right opens Settings (account and sync, with
+// Debug a level under it). A floating bar (`BottomBar`: search and add,
 // both inert so far) sits under every page. Every page is pushed from
 // here, and item rows on any of them tick and open the item's sheet.
 // Archived lists and the reserved `events` list (calendar-only,
@@ -48,7 +48,7 @@ struct HomeView: View {
         case starred
         case agenda
         case done
-        case debug
+        case settings
     }
 
     var body: some View {
@@ -81,7 +81,7 @@ struct HomeView: View {
             .navigationTitle("Home")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink(value: Page.debug) {
+                    NavigationLink(value: Page.settings) {
                         Label("Settings", systemImage: "gearshape")
                     }
                 }
@@ -92,7 +92,7 @@ struct HomeView: View {
                 case .starred: StarredView()
                 case .agenda: AgendaView()
                 case .done: DoneView()
-                case .debug: DebugView()
+                case .settings: SettingsView()
                 }
             }
             .refreshable { model.loadSession() }
