@@ -173,13 +173,18 @@ extension View {
     /// rows are still to load, nothing while `count` is nil (not
     /// loaded). Goes with `navigationTitle`, which still names the
     /// page for the back button. `icon` goes before the title: the
-    /// page's icon from the Home menu, in the menu's tint.
+    /// page's icon from the Home menu, in the menu's tint. `workspace`
+    /// goes between the icon and the title for a list of a shared
+    /// workspace, as the web's header has it ("Household > Groceries"):
+    /// the workspace's name, muted so the list's leads, then a chevron.
+    /// It is the first thing to truncate when the bar is short of room.
     func countedTitle(_ title: String, count: Int?, more: Bool = false) -> some View {
         countedTitle(title, count: count, more: more) { EmptyView() }
     }
 
     func countedTitle<Icon: View>(
-        _ title: String, count: Int?, more: Bool = false, @ViewBuilder icon: () -> Icon
+        _ title: String, count: Int?, more: Bool = false, workspace: String? = nil,
+        @ViewBuilder icon: () -> Icon
     ) -> some View {
         let icon = icon()
         return navigationBarTitleDisplayMode(.inline)
@@ -191,6 +196,18 @@ extension View {
                             .foregroundStyle(.tint)
                             .accessibilityHidden(true)
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            if let workspace {
+                                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                    Text(workspace)
+                                        .font(.headline)
+                                        .lineLimit(1)
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.semibold))
+                                        .accessibilityHidden(true)
+                                }
+                                .foregroundStyle(.secondary)
+                                .layoutPriority(-1)
+                            }
                             Text(title)
                                 .font(.headline)
                                 .lineLimit(1)
@@ -232,8 +249,12 @@ struct ListItemsView: View {
         .navigationTitle(title)
         // The list's icon as Home's menu shows it (emoji, the Inbox's
         // tray, else a folder), its name, and how many Open items it
-        // has, once they have loaded.
-        .countedTitle(list.name, count: model.listItems[list.key]?.count) {
+        // has, once they have loaded; a shared workspace's list has the
+        // workspace's name before its own.
+        .countedTitle(
+            list.name, count: model.listItems[list.key]?.count,
+            workspace: model.sharedWorkspaceName(list.docId)
+        ) {
             ListIcon(listId: list.listId, emoji: list.icon)
         }
         .refreshable { model.refreshList(list) }

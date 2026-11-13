@@ -292,6 +292,16 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// A shared workspace's name: nil for the Personal workspace (and
+    /// for a doc that is not open), as the web's `isSharedDoc` has any
+    /// doc but Home shared.
+    func sharedWorkspaceName(_ docId: String) -> String? {
+        guard let session, docId != session.primaryDocId,
+              let doc = session.docs.first(where: { $0.docId == docId })
+        else { return nil }
+        return doc.name ?? "Shared"
+    }
+
     /// The `-w` selector for a doc: nil for the Personal workspace, the
     /// frame every other read already sends.
     private func selector(_ docId: String?) -> String? {
