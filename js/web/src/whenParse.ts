@@ -65,6 +65,8 @@ export interface FindWhenOptions {
   now: Date;
   /** BCP 47 tag; picks the Spanish grammar for `es*`, English otherwise. */
   locale: string;
+  /** Read the other half of an ambiguous 12-hour clock time. */
+  alternateTime?: boolean;
 }
 
 /** Time-of-day words and the hour each estimates, per grammar. Matched
@@ -144,6 +146,7 @@ function registerValue(
   r: ParsedResult,
   now: Date,
   grammar: "en" | "es",
+  alternateTime = false,
 ): { when: string; estimated: boolean } | null {
   const s = r.start;
   const year = s.get("year");
@@ -156,6 +159,9 @@ function registerValue(
     let hour = s.get("hour") ?? 0;
     const minute = s.get("minute") ?? 0;
     if (!s.isCertain("meridiem") && hour >= 1 && hour <= 6) hour += 12;
+    if (alternateTime && !s.isCertain("meridiem") && (s.get("hour") ?? 0) >= 1 && (s.get("hour") ?? 0) <= 12) {
+      hour = (hour + 12) % 24;
+    }
     if (!s.isCertain("day") && !s.isCertain("weekday")) {
       // Time only: chrono picked the day for its own reading of the
       // hour; pick it again for the adjusted one.
@@ -184,7 +190,7 @@ export function findWhenPhrase(text: string, opts: FindWhenOptions): WhenPhrase 
     const end = start + r.text.length;
     if (!anchored(r)) continue;
     if (bareDuration(r, opts.now, grammar)) continue;
-    const value = registerValue(r, opts.now, grammar);
+    const value = registerValue(r, opts.now, grammar, opts.alternateTime);
     if (!value) continue;
     if (best) {
       // The one ending last, then the longest.

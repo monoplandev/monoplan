@@ -19,8 +19,8 @@
 //     years' 14th of November. With several readings each gives its first
 //     day only.
 //
-// Only the day of a reading is kept: the field writes the date, and the
-// time has its own row.
+// Start-date suggestions can keep clock times and offer both readings of
+// an ambiguous hour. End-date suggestions keep only the day.
 
 import { collapseWhitespace, findWhenPhrase, type WhenPhrase } from "./whenParse.ts";
 
@@ -100,11 +100,11 @@ function candidates(text: string, now: Date, v: Vocabulary): string[] {
   return out;
 }
 
-/** The days `query` could mean as `YYYY-MM-DD`, best reading first; empty
+/** The dates (optionally with times) `query` could mean, best reading first; empty
  *  when it names none. */
 export function dateSuggestions(
   query: string,
-  opts: { now: Date; locale: string },
+  opts: { now: Date; locale: string; includeTime?: boolean },
 ): string[] {
   const text = collapseWhitespace(query);
   if (!text) return [];
@@ -112,24 +112,26 @@ export function dateSuggestions(
   const phrases: WhenPhrase[] = [];
   const seen = new Set<string>();
   for (const c of candidates(text, opts.now, VOCABULARY[grammar])) {
-    const p = findWhenPhrase(c, opts);
-    if (!p) continue;
-    const day = p.when.slice(0, 10);
-    if (seen.has(day)) continue;
-    seen.add(day);
-    phrases.push(p);
-    if (phrases.length === LIMIT) break;
+    for (const alternateTime of opts.includeTime ? [false, true] : [false]) {
+      const p = findWhenPhrase(c, { ...opts, alternateTime });
+      if (!p) continue;
+      const value = opts.includeTime ? p.when : p.when.slice(0, 10);
+      if (seen.has(value)) continue;
+      seen.add(value);
+      phrases.push({ ...p, when: value });
+    }
+    if (phrases.length >= LIMIT) break;
   }
-  const days = phrases.map((p) => p.when.slice(0, 10));
+  const days = phrases.map((p) => p.when);
   const only = phrases.length === 1 ? phrases[0] : null;
   if (only?.repeat) {
     for (let i = 1; i < REPEATS; i++) {
       const next = shift(
-        days[0],
+        days[0].slice(0, 10),
         only.repeat === "week" ? { days: 7 * i } : { years: i },
       );
-      if (next) days.push(next);
+      if (next) days.push(next + days[0].slice(10));
     }
   }
-  return days;
+  return days.slice(0, LIMIT);
 }

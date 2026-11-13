@@ -445,8 +445,11 @@ for the month grid). `groupByDeadline` becomes
     list of the first few days it could mean (`dateSuggest.ts`: the text
     as typed, a trailing partial word completed to "today" / "tomorrow" /
     a weekday / a month, a bare day number in each coming month, a lone
-    repeating phrase as its next three occurrences). It writes the day
-    only; a typed time is dropped, the time row owns that.
+    repeating phrase as its next three occurrences). The start input keeps typed times: an ambiguous clock time such as
+    "Fri 9:30" offers both 09:30 and 21:30, while explicit AM/PM or
+    24-hour times have one reading per day. Choosing a timed suggestion
+    sets both date and time; date-only choices keep any existing time.
+    The end-date input continues to write the day only.
     The end-date input does the same, reading phrases from the start
     day once that is ahead of today and leaving out days the span
     cannot end on. Enter on its emptied text drops the end date: the

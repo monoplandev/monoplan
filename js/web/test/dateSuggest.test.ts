@@ -73,3 +73,44 @@ describe("dateSuggestions", () => {
     expect(suggest("ma", "es-ES")).toEqual(["2026-11-12", "2026-11-17"]);
   });
 });
+
+const suggestTime = (q: string, locale = "en-AU") =>
+  dateSuggestions(q, { now, locale, includeTime: true });
+
+describe("start-date suggestions with times", () => {
+  test("an ambiguous weekday time offers both AM and PM", () => {
+    expect(suggestTime("Fri 9:30")).toEqual([
+      "2026-11-13T09:30", "2026-11-13T21:30",
+    ]);
+    expect(suggestTime("tomorrow at 3")).toEqual([
+      "2026-11-12T15:00", "2026-11-12T03:00",
+    ]);
+    expect(suggestTime("Fri 12:30")).toEqual([
+      "2026-11-13T12:30", "2026-11-13T00:30",
+    ]);
+    expect(suggestTime("viernes 9:30", "es-ES")).toEqual(suggestTime("Fri 9:30"));
+  });
+
+  test("explicit times keep their reading on subsequent weekdays", () => {
+    for (const q of ["Fri 9:30pm", "Fri 21:30"]) {
+      expect(suggestTime(q)).toEqual([
+        "2026-11-13T21:30", "2026-11-20T21:30", "2026-11-27T21:30",
+      ]);
+    }
+    expect(suggestTime("tomorrow 9:30am")).toEqual(["2026-11-12T09:30"]);
+    expect(suggestTime("tomorrow 00:30")).toEqual(["2026-11-12T00:30"]);
+    expect(suggestTime("tomorrow night")).toEqual(["2026-11-12T20:00"]);
+  });
+
+  test("each time-only reading chooses its own upcoming day", () => {
+    expect(suggestTime("9:30")).toEqual([
+      "2026-11-12T09:30", "2026-11-11T21:30",
+    ]);
+  });
+
+  test("date-only suggestions retain the existing choices", () => {
+    for (const q of ["fri", "tomorrow", "14", "14 nov", "t"]) {
+      expect(suggestTime(q)).toEqual(suggest(q));
+    }
+  });
+});

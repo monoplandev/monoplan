@@ -6,7 +6,8 @@
 // well (`dateTyping.tsx`): once what is typed names a date
 // (`dateSuggest.ts`, over the title tokens' parser) the popover's body
 // turns from the calendar into a listbox of the first few days it could
-// mean. A row keeps any time part, as a calendar pick does, and Enter on
+// mean. Typed times offer clock-time choices; date-only rows keep any
+// existing time part, as a calendar pick does. Enter on
 // emptied text removes the date.
 // The time row (`WhenTimeRow`: start picker, ✕, end picker) sits below
 // the input and shows only once a date is set: without one the section
@@ -47,6 +48,7 @@ import {
   durationBetween,
   durationForTimedStart,
   endTimeOf,
+  formatWhenTime,
   isValidEndDayOffset,
   MAX_ALL_DAY_OFFSET,
   nowMs,
@@ -94,12 +96,27 @@ export function WhenField(props: {
     content: () => contentRef,
     reference: () => new Date(nowMs()),
     locale,
-    onPick: pickDay,
+    includeTime: true,
+    onPick: (value) => {
+      const t = whenTime(value);
+      if (!t) {
+        pickDay(value);
+        return;
+      }
+      const wasAllDay = !whenTime(props.when() ?? "");
+      const d = props.duration();
+      props.onChange(value);
+      if (wasAllDay) {
+        const reshaped = durationForTimedStart(d);
+        if (reshaped !== d) props.onDurationChange(reshaped);
+      }
+    },
     onClear: () => {
       if (props.when()) props.onChange(null);
     },
   });
-  const todayOrTomorrow = (day: string) => {
+  const todayOrTomorrow = (value: string) => {
+    const day = whenDay(value);
     const today = todayStamp(nowMs());
     if (day === today) return m().when.today;
     return day === addDaysToStamp(today, 1) ? m().when.tomorrow : null;
@@ -341,7 +358,10 @@ export function WhenField(props: {
               >
                 <DateSuggestList
                   typing={typing}
-                  format={formatDay}
+                  format={(value) => {
+                    const day = formatDay(whenDay(value));
+                    return whenTime(value) ? `${day} ${formatWhenTime(value, locale())}` : day;
+                  }}
                   hint={todayOrTomorrow}
                 />
               </Show>

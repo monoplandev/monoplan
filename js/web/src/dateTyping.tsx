@@ -26,9 +26,10 @@ export interface DateTypingOptions {
    *  from here). */
   reference: () => Date;
   locale: () => string;
+  includeTime?: boolean;
   /** Days the field can take; the rest are left out of the list. */
   allowed?: (day: string) => boolean;
-  /** Write the picked `YYYY-MM-DD`; the popover is closed after. */
+  /** Write the picked date or datetime; the popover is closed after. */
   onPick: (day: string) => void;
   /** Enter on emptied text. */
   onClear?: () => void;
@@ -47,7 +48,7 @@ export function createDateTyping(opts: DateTypingOptions) {
   const suggestions = createMemo(() => {
     const q = query();
     if (q === null) return [];
-    const days = dateSuggestions(q, { now: opts.reference(), locale: opts.locale() });
+    const days = dateSuggestions(q, { now: opts.reference(), locale: opts.locale(), includeTime: opts.includeTime });
     const allowed = opts.allowed;
     return allowed ? days.filter(allowed) : days;
   });
