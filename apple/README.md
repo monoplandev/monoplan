@@ -316,8 +316,14 @@ icon in `Assets.car` for iOS 26 and flat `icon60x60` / `icon76x76`
 PNGs for iOS 17 and 18. There is no `Assets.xcassets`; one is only
 needed once the app wants named colours or images of its own.
 
-Four tabs in a system `TabView` (`ContentView.swift`; the floating
-glass pill on iOS 26, the flat bar before). Item rows outside the
+One navigation stack rooted at Browse, no tab bar (2026-11-13; the
+four-tab `TabView` and `ContentView.swift` went with it): the app opens
+on the index and every other page is pushed from it. A floating bar
+(`BottomBar.swift`: a search field with an add button to its right,
+glass on iOS 26, material before) is the stack's bottom inset, so it
+shows on every page. While the field has focus the add button is a
+cross that clears the text and drops the keyboard; search and add do
+nothing else yet. Item rows outside the
 Agenda lead with a checkbox (`ItemCheckbox.swift`: empty while open,
 ticked when Done, crossed when Cancelled). Tapping it ticks an open item
 or reopens a closed one into Backlog (`AppModel.setDone` →
@@ -326,7 +332,7 @@ hand-encoded frame is pinned by a test in `cli/src/commands/items.rs`),
 after which every loaded read is fetched again at once: no optimistic
 state. The first write from the iOS app. Every such row opens the
 item as a sheet over its list (`ItemView.swift`, 2026-11-13; half
-height, draggable to full; `opensItems()` on each tab's stack presents
+height, draggable to full; `opensItems()` on Browse's stack presents
 it): the web task dialog's
 content in its order (status, title, list, planned date and length,
 deadline when set, place, notes, activity log), read through
@@ -352,12 +358,10 @@ only. A place
 with coordinates also shows a small non-interactive MapKit map with a
 pin (`PlaceMapCard`); tapping it opens the spot in Apple Maps under the
 place's label. Tiles come from Apple, so this is a second non-E2EE
-lookup beside Photon (`spec/place-plan.md`). **Inbox** (`InboxView.swift`)
-is the capture list's Open items in list order, read through the Kit's
-`Request.items` (`item ls --list inbox --json`, decoded by
-`Items.parse`) and refetched on every `Changed` event, coalesced over
-250 ms as the Mac tray's agenda is; read-only so far, capture and
-lifecycle moves are next. **Starred** (`StarredView.swift`) is the
+lookup beside Photon (`spec/place-plan.md`). There is no Inbox page of its own: Personal's Inbox is the first row of
+its workspace section in Browse, a list page like any other. The lens
+reads are refetched on every `Changed` event, coalesced over 250 ms as
+the Mac tray's agenda is. **Starred** (`StarredView.swift`) is the
 Focus lens as the daemon resolves it (`Request.focus(all: true)`, i.e.
 `starred --all --json`, `spec/cli.md` §Focus: Home's curated order with
 its cross-workspace entries resolved), each row with its list name and,
@@ -370,7 +374,7 @@ group as a section: Today, Unscheduled events, then each non-empty
 day, with the row's time, its workspace under the text when it is not
 Personal's, and the duration or overdue / due-today tone; read-only
 markup, nothing tappable yet. **Browse** (`BrowseView.swift`,
-2026-11-13) is the index: a section per open workspace (`Engine.session`'s
+2026-11-13) is the root and the index: first a section with Starred, Agenda and Done, then a section per open workspace (`Engine.session`'s
 docs, Personal first), each with its Inbox and then its active lists
 (`Request.lists(workspace:)`, i.e. `list ls --json --all -w <doc id>`,
 one fetch per doc, refetched with the session on every `Changed`;
@@ -378,10 +382,8 @@ one fetch per doc, refetched with the session on every `Changed`;
 emoji (`ListIcon`: the `icon` the list JSON carries, a folder without
 one) on its Browse row, in its page's title and on the item sheet. A list pushes its Open
 items (`Request.items(list:workspace:)`), refetched on `Changed` while
-shown; read-only. Under the workspaces sit the two pages that lost their
-tabs, pushed onto Browse's navigation stack. The tab keeps
-its place across tab switches, and tapping it again pops to the index
-(the system's behaviour, nothing of ours). **Done** (`DoneView.swift`) is the
+shown; read-only. A gear at the top right of the index opens Debug (the settings
+button, until there are settings), pushed onto the same stack. **Done** (`DoneView.swift`) is the
 Personal workspace's Done items across every list, newest first, in a
 section per day ticked (`Request.done(limit:)`, i.e. `done -n N --json`,
 grouped by `Done.days`), each row with its list name. It is a window,

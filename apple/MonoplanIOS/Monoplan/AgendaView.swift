@@ -1,4 +1,5 @@
-// The Agenda tab: the daemon's agenda projection (`agenda --json`,
+// The Agenda page, pushed from Browse (which owns the navigation stack
+// and the item sheet): the daemon's agenda projection (`agenda --json`,
 // spec/cli.md, with a horizon far enough out to be the whole future,
 // `AppModel.agendaDays`) as sections: Today first (overdue deadlines
 // and tasks whose planned day has passed folded in), Unscheduled
@@ -12,31 +13,28 @@ struct AgendaView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if model.agenda.allSatisfy({ $0.rows.isEmpty }) {
-                    emptyState
-                } else {
-                    List {
-                        ForEach(model.agenda, id: \.day) { day in
-                            if !day.rows.isEmpty {
-                                Section(Self.title(for: day)) {
-                                    ForEach(day.rows, id: \.id) { row in
-                                        AgendaRowView(row: row)
-                                    }
+        Group {
+            if model.agenda.allSatisfy({ $0.rows.isEmpty }) {
+                emptyState
+            } else {
+                List {
+                    ForEach(model.agenda, id: \.day) { day in
+                        if !day.rows.isEmpty {
+                            Section(Self.title(for: day)) {
+                                ForEach(day.rows, id: \.id) { row in
+                                    AgendaRowView(row: row)
                                 }
                             }
                         }
                     }
-                    .listStyle(.insetGrouped)
-                    .animation(.default, value: model.agenda)
                 }
+                .listStyle(.insetGrouped)
+                .animation(.default, value: model.agenda)
             }
-            .navigationTitle("Agenda")
-            .refreshable { model.refreshAgenda() }
-            .onAppear { model.refreshAgenda() }
         }
-        .opensItems()
+        .navigationTitle("Agenda")
+        .refreshable { model.refreshAgenda() }
+        .onAppear { model.refreshAgenda() }
     }
 
     private var emptyState: some View {

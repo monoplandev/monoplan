@@ -1,4 +1,5 @@
-// The Starred tab: the Focus lens (spec/focus.md; "Starred" is the UI
+// The Starred page, pushed from Browse (which owns the navigation stack
+// and the item sheet): the Focus lens (spec/focus.md; "Starred" is the UI
 // name) as the daemon resolves it with `starred --all`: Home's curated
 // order, entries from other workspaces included, each row naming its
 // list and, when not Personal's, its workspace. The order is the
@@ -12,25 +13,22 @@ struct StarredView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if model.starred.isEmpty {
-                    emptyState
-                } else {
-                    List(model.starred, id: \.id) { row in
-                        ItemLink(ItemRef(docId: row.docId, itemId: row.id, title: row.text)) {
-                            StarredRowView(row: row)
-                        }
+        Group {
+            if model.starred.isEmpty {
+                emptyState
+            } else {
+                List(model.starred, id: \.id) { row in
+                    ItemLink(ItemRef(docId: row.docId, itemId: row.id, title: row.text)) {
+                        StarredRowView(row: row)
                     }
-                    .listStyle(.plain)
-                    .animation(.default, value: model.starred)
                 }
+                .listStyle(.plain)
+                .animation(.default, value: model.starred)
             }
-            .navigationTitle("Starred")
-            .refreshable { model.refreshStarred() }
-            .onAppear { model.refreshStarred() }
         }
-        .opensItems()
+        .navigationTitle("Starred")
+        .refreshable { model.refreshStarred() }
+        .onAppear { model.refreshStarred() }
     }
 
     private var emptyState: some View {

@@ -41,7 +41,7 @@ extension EnvironmentValues {
 }
 
 extension View {
-    /// Item rows anywhere under this view (a tab's whole navigation
+    /// Item rows anywhere under this view (Browse's whole navigation
     /// stack, pushed pages included) open the item's sheet over it.
     func opensItems() -> some View { modifier(ItemSheet()) }
 }

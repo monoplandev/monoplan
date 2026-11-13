@@ -1,11 +1,14 @@
-// The Browse tab: the index. A section per open workspace (Personal
-// first, as `Engine.session` orders them), each with its Inbox and then
-// its active lists in the doc's order, each led by its emoji (a folder
+// Browse: the root page and the app's one navigation stack; there is
+// no tab bar. First the pages that are not one list: Starred, Agenda
+// and Done. Then a section per open workspace (Personal first, as
+// `Engine.session` orders them), each with its Inbox and then its
+// active lists in the doc's order, each led by its emoji (a folder
 // when it has none); a list opens its Open items.
-// Underneath, the pages that are not worth a tab: Done and Debug.
-// The tab keeps its place across tab switches; tapping it again pops to
-// the index (the system's behaviour). Item rows tick and open as in the
-// lenses. Archived lists and the reserved `events` list (calendar-only,
+// The gear at the top right opens Debug, which stands in for settings
+// until there are any. A floating bar (`BottomBar`: search and add,
+// both inert so far) sits under every page. Every page is pushed from
+// here, and item rows on any of them tick and open the item's sheet.
+// Archived lists and the reserved `events` list (calendar-only,
 // spec/events-plan.md) are left out.
 
 import MonoplanCore
@@ -42,6 +45,8 @@ struct BrowseView: View {
     @EnvironmentObject private var model: AppModel
 
     private enum Page: Hashable {
+        case starred
+        case agenda
         case done
         case debug
     }
@@ -49,6 +54,17 @@ struct BrowseView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    NavigationLink(value: Page.starred) {
+                        Label("Starred", systemImage: "star")
+                    }
+                    NavigationLink(value: Page.agenda) {
+                        Label("Agenda", systemImage: "calendar")
+                    }
+                    NavigationLink(value: Page.done) {
+                        Label("Done", systemImage: "checkmark.circle")
+                    }
+                }
                 ForEach(model.session?.docs ?? [], id: \.docId) { doc in
                     Section(doc.name ?? "Personal") {
                         row(ListRef(docId: doc.docId, listId: "inbox", name: "Inbox"))
@@ -60,20 +76,21 @@ struct BrowseView: View {
                 if model.session == nil, case .connecting(let why) = model.clientState {
                     Section { Text(why).foregroundStyle(.secondary) }
                 }
-                Section {
-                    NavigationLink(value: Page.done) {
-                        Label("Done", systemImage: "checkmark.circle")
-                    }
-                    NavigationLink(value: Page.debug) {
-                        Label("Debug", systemImage: "ladybug")
-                    }
-                }
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Browse")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink(value: Page.debug) {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                }
+            }
             .navigationDestination(for: ListRef.self) { ListItemsView(list: $0) }
             .navigationDestination(for: Page.self) { page in
                 switch page {
+                case .starred: StarredView()
+                case .agenda: AgendaView()
                 case .done: DoneView()
                 case .debug: DebugView()
                 }
@@ -81,6 +98,7 @@ struct BrowseView: View {
             .refreshable { model.loadSession() }
             .onAppear { model.loadSession() }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) { BottomBar() }
         .opensItems()
     }
 
@@ -95,8 +113,8 @@ struct BrowseView: View {
     }
 }
 
-/// One list's Open items, in list order: the Inbox tab's page for any
-/// list in any workspace. Refetched on every doc change while shown.
+/// One list's Open items, in list order, for any list in any workspace
+/// (an Inbox included). Refetched on every doc change while shown.
 struct ListItemsView: View {
     @EnvironmentObject private var model: AppModel
     let list: ListRef
@@ -141,7 +159,7 @@ struct ListItemsView: View {
             } else {
                 ContentUnavailableView(
                     "Nothing open",
-                    systemImage: "folder",
+                    systemImage: list.listId == "inbox" ? "tray" : "folder",
                     description: Text("Open items in \(list.name) show here.")
                 )
             }

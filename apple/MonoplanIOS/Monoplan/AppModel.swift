@@ -26,12 +26,8 @@ final class AppModel: ObservableObject {
     /// time: the cheapest proof that remote ops are arriving.
     @Published private(set) var changeCount = 0
     @Published private(set) var lastChangeAt: Date?
-    /// The Inbox's Open items, in list order, refetched on `Changed`.
-    @Published private(set) var inbox: [ItemRow] = []
-    /// Why the last Inbox fetch failed, until one succeeds.
-    @Published private(set) var inboxError: String?
     /// The agenda's day groups (`agenda --days <agendaDays> --json`),
-    /// refetched on `Changed` beside the Inbox.
+    /// refetched on `Changed`.
     @Published private(set) var agenda: [AgendaDay] = []
     @Published private(set) var agendaError: String?
     /// The Starred lens (`starred --all --json`): Home's curated order
@@ -101,8 +97,7 @@ final class AppModel: ObservableObject {
         hasAccount = location.hasAccount
         if case .connected = state {
             loadSession()
-            refreshInbox()
-            refreshAgenda()
+                refreshAgenda()
             refreshStarred()
             refreshDone()
         } else {
@@ -133,7 +128,6 @@ final class AppModel: ObservableObject {
     }
 
     private func refreshLenses() {
-        refreshInbox()
         refreshAgenda()
         refreshStarred()
         refreshDone()
@@ -303,14 +297,6 @@ final class AppModel: ObservableObject {
         fetch(.focus(all: true), what: "starred", parse: Focus.parse) { [weak self] rows, error in
             if let rows { self?.starred = rows }
             self?.starredError = error
-        }
-    }
-
-    /// `item ls --list inbox --json` through the engine.
-    func refreshInbox() {
-        fetch(.items(list: "inbox"), what: "inbox", parse: Items.parse) { [weak self] rows, error in
-            if let rows { self?.inbox = rows }
-            self?.inboxError = error
         }
     }
 
