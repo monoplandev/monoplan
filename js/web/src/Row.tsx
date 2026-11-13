@@ -19,7 +19,6 @@ import { laneLabel, useAppI18n } from "./i18n.tsx";
 import { pasteAsPlainText } from "./plainTextPaste.ts";
 import { openLinkOnClick, setLinkifiedText } from "./linkify.ts";
 import { applySuggestionChange, titleDate } from "./whenSuggest.ts";
-import { WhenSuggestion } from "./WhenSuggestion.tsx";
 import type { ViewKey } from "./prefs.ts";
 import {
   isBinned,
@@ -179,10 +178,8 @@ export function Row(props: {
           ((canPinToFocus() && focused()) ||
             (isOpen(props.item()) &&
               (Boolean(props.item().when) ||
-                Boolean(props.item().whenSuggested) ||
                 Boolean(props.item().deadline) ||
-                Boolean(props.item().place))))) ||
-        (props.expanded() && Boolean(typedDate()))));
+                Boolean(props.item().place)))))));
   // Whether this row's context menu is up, so the "…" button that opened
   // it (or a right-click) stays visible under the menu instead of fading
   // with the hover (`.row[data-menu-open]`).
@@ -196,31 +193,6 @@ export function Row(props: {
   // Set around the blur handler's synthetic Escape so the collapse effect
   // can tell a pointer-driven settle from Escape / Enter.
   let blurSettle = false;
-  // The date the text being typed would suggest (`whenSuggest.ts`),
-  // shown as a preview of the question the item will carry once it
-  // exists. Nothing is written from here while typing.
-  const [typedDate, setTypedDate] = createSignal<string | null>(null);
-  const readTypedDate = () =>
-    setTypedDate(
-      isClosed(props.item())
-        ? null
-        : (titleDate(textRef.textContent ?? "", { now: nowMs(), locale: locale() })?.when ??
-            null),
-    );
-  // An open item's unanswered suggestion; a set date outranks it.
-  const pendingDate = () => {
-    const it = props.item();
-    return isOpen(it) && !it.when ? it.whenSuggested : undefined;
-  };
-  const suggestionBadge = (when: string) => (
-    <WhenSuggestion
-      when={when}
-      compact
-      onYes={() => props.app.acceptItemWhenSuggestion(props.item().id)}
-      onNo={() => props.app.setItemWhenSuggested(props.item().id, null)}
-    />
-  );
-
   // Order matters: this effect must run *before* the model-mirror effect
   // below. On collapse, both fire in the same tick — if the mirror runs
   // first, it overwrites the user's edit with the stale model text and
@@ -238,7 +210,6 @@ export function Row(props: {
           // while the row is editable. The collapse path & mirror effect
           // restore plain text, so anchors only exist in expanded rows.
           setLinkifiedText(textRef, props.item().text);
-          readTypedDate();
           queueMicrotask(() => {
             // No focus-time reveal: the dnd controller scrolls the row
             // into view on expansion (see `applyExpanded`), and Safari's
@@ -264,7 +235,6 @@ export function Row(props: {
           const chain = chainOnSettle;
           chainOnSettle = false;
           const next = (textRef.textContent ?? "").trim();
-          setTypedDate(null);
           // Draft path: the row is a transient pseudo-item that has no
           // replica-side record yet. Hand the trimmed text back to the
           // workspace, which decides commit (addItemAt) vs drop. Skip the
@@ -439,7 +409,6 @@ export function Row(props: {
               if (textRef.textContent === "" && textRef.firstChild) {
                 textRef.replaceChildren();
               }
-              readTypedDate();
               if (isDraftId(props.item().id)) {
                 props.onDraftInput?.(textRef.textContent ?? "");
               }
@@ -553,8 +522,7 @@ export function Row(props: {
           when={
             props.deadlineInFooter &&
             !props.expanded() &&
-            ((isOpen(props.item()) &&
-              (props.item().when || props.item().whenSuggested || props.item().deadline)) ||
+            ((isOpen(props.item()) && (props.item().when || props.item().deadline)) ||
               (canPinToFocus() && focused()) ||
               rowStamp())
           }
@@ -571,7 +539,6 @@ export function Row(props: {
             <Show when={isOpen(props.item()) && props.item().when}>
               {(w) => <WhenBadge when={w()} />}
             </Show>
-            <Show when={pendingDate()}>{(w) => suggestionBadge(w())}</Show>
             <Show when={isOpen(props.item()) && props.item().deadline}>
               {(d) => <DeadlineBadge deadline={d()} />}
             </Show>
@@ -616,14 +583,6 @@ export function Row(props: {
               }
             >
               {(w) => <WhenBadge when={w()} />}
-            </Show>
-            <Show when={!props.deadlineInFooter && !props.expanded() && pendingDate()}>
-              {(w) => suggestionBadge(w())}
-            </Show>
-            {/* While a title is being typed: what it will ask, no answers
-                yet (the item does not exist to take one). */}
-            <Show when={!props.deadlineInFooter && props.expanded() && typedDate()}>
-              {(w) => <WhenSuggestion when={w()} compact />}
             </Show>
             <Show
               when={

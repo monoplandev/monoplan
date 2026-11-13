@@ -19,7 +19,8 @@
 //     title leaves the answer standing.
 //   - A phrase edited out of the title takes its unanswered suggestion
 //     with it.
-//   - It shows only on an open item with no `when`. Setting a date any
+//   - It shows only in the task surface, on an open item with no
+//     `when`; lists and boards carry no trace of it. Setting a date any
 //     other way clears it (the core does that).
 //
 // This module is the rule, pure but for the device preference; the

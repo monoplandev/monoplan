@@ -392,15 +392,15 @@ for the month grid). `groupByDeadline` becomes
   - Yes moves the value into `when` (one commit, one undo step; the
     default hour's `duration` beside a timed value, as any `when` write
     gives). Setting a date any other way also clears the suggestion.
-  - It shows only on an open item with no `when`: on list rows and board
-    cards as an orange dashed badge in the When badge's place with a
-    tick and a cross, and in the task surface's dates band in place of
-    the date input, with Yes / No (a "Set date…" from a menu still opens
-    the field). While a title is being typed the task surface shows the
-    question live, before anything is written, and answers it straight
-    away (Yes sets the date, No just marks the wording as asked); the
-    draft row shows it as a preview with no answers, since there is no
-    item yet to hold one.
+  - It shows only in the task surface, on an open item with no `when`:
+    in the dates band in place of the date input, with Yes / No (a "Set
+    date…" from a menu still opens the field). While a title is being
+    typed there the question shows live, before anything is written,
+    and is answered straight away (Yes sets the date, No just marks the
+    wording as asked). Lists and boards show nothing of it (an in-row
+    badge was built and dropped the same day, 2026-11-13: a question
+    does not belong in a list): an item captured from a draft row still
+    gets its suggestion, seen when the item is opened.
   - chrono matches whole words only, so a half-typed "frida" or a
     suffixed "tomorrows" is never a phrase. Only a phrase that pins a
     day (explicit day, weekday, relative day) or a clock time is taken.
@@ -421,7 +421,7 @@ for the month grid). `groupByDeadline` becomes
     Settings › General › "Suggest dates as you type", a device preference
     in a cookie beside the time format; a suggestion already pending
     still shows.
-  - Not built: a keyboard answer on rows, CLI verbs to answer (the JSON
+  - Not built: CLI verbs to answer (the JSON
     carries `when_suggested`; `set --when` answers it by setting a date),
     the iOS surface.
   - The When field's date input takes a typed phrase too (2026-11-11):

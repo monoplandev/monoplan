@@ -3279,9 +3279,8 @@ input.task-check:hover {
 
 /* A date suggestion (`WhenSuggestion.tsx`): a date read out of the
    title, put as a question where the date would be. Orange with a
-   dashed edge: the today hue, but never mistaken for a set date. The
-   block form sits in the task surface's dates band; the compact form is
-   a badge on rows and cards. */
+   dashed edge: the today hue, but never mistaken for a set date. Sits
+   in the task surface's dates band. */
 .when-suggestion {
   display: inline-flex;
   align-items: center;
@@ -3294,13 +3293,6 @@ input.task-check:hover {
   font-size: 13px;
   line-height: var(--lh-compact);
   white-space: nowrap;
-}
-
-.when-suggestion[data-compact] {
-  gap: 3px;
-  padding: 1px 2px 1px 3px;
-  border-radius: 6px;
-  font-size: 12px;
 }
 
 .when-suggestion-answers {
@@ -3324,30 +3316,10 @@ input.task-check:hover {
   cursor: pointer;
 }
 
-.when-suggestion[data-compact] .when-suggestion-answer {
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border-radius: 4px;
-  font-size: 10px;
-}
-
 .when-suggestion-answer:hover,
 .when-suggestion-answer:focus-visible {
   background: var(--due-today-text);
   color: var(--due-today-bg);
-}
-
-.when-suggestion-glyph {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-}
-
-.when-suggestion-glyph svg {
-  width: 11px;
-  height: 11px;
 }
 
 /* Control row under the title: list picker, then the "more" menu. In the

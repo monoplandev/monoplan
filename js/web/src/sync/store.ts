@@ -113,7 +113,8 @@ export interface ItemView {
   when?: string;
   /** A date read out of the title as it was typed, waiting for a yes or
    *  no (`spec/calendar-plan.md`, "Typed date phrases"): `when`-shaped.
-   *  Shown only while `when` is unset and the item is open. */
+   *  Shown only in the task surface, while `when` is unset and the
+   *  item is open. */
   whenSuggested?: string;
   /** Optional duration in whole minutes. Only meaningful beside a timed
    *  `when`; views ignore it otherwise. Absent means unset. */
