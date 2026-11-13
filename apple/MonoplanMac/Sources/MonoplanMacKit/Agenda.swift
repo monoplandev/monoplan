@@ -23,6 +23,8 @@ public struct AgendaRow: Decodable, Equatable {
     /// Minutes.
     public let duration: Int?
     public let deadline: String?
+    /// The item's place, when it has one.
+    public let place: PlaceInfo?
     public let placedBy: String?
     public let tone: String
     /// `--all` only: the row's workspace. `docName` is nil for Home

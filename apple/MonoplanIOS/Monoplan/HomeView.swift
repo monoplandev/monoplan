@@ -43,11 +43,25 @@ struct ListIcon: View {
     }
 }
 
+/// The web's shared glyph (`js/web/src/icons/users.svg`, in the asset
+/// catalog as `Users`: two people, one behind the other), sized to sit
+/// beside footnote text: a little over its cap height, and growing
+/// with it under Dynamic Type. Takes the foreground style around it.
+struct SharedIcon: View {
+    @ScaledMetric(relativeTo: .footnote) private var side: CGFloat = 15
+
+    var body: some View {
+        Image("Users")
+            .resizable()
+            .scaledToFit()
+            .frame(width: side, height: side)
+            .accessibilityHidden(true)
+    }
+}
+
 /// What marks a list as a shared workspace's wherever it is named away
 /// from Home's sections (the item page's list field, the list editor's
-/// rows): the system's shared glyph (two people, one behind the other)
-/// and the workspace's name, muted, after the list's own name. The
-/// web's list badge has the same glyph (`usersSvg`). Draws nothing for
+/// rows): the shared glyph and the workspace's name, muted, after the list's own name. Draws nothing for
 /// the Personal workspace (`AppModel.sharedWorkspaceName` is nil). It
 /// is the first thing to truncate when the row is short of room.
 struct SharedWorkspaceBadge: View {
@@ -56,8 +70,7 @@ struct SharedWorkspaceBadge: View {
     var body: some View {
         if let name {
             HStack(spacing: 4) {
-                Image(systemName: "person.2.fill")
-                    .accessibilityHidden(true)
+                SharedIcon()
                 Text(name).lineLimit(1)
             }
             .font(.footnote)
@@ -118,10 +131,23 @@ struct HomeView: View {
                     }
                 }
                 ForEach(model.session?.docs ?? [], id: \.docId) { doc in
-                    Section(doc.name ?? "Personal") {
+                    Section {
                         row(ListRef(docId: doc.docId, listId: "inbox", name: "Inbox"))
                         ForEach(Lists.active(model.listsByDoc[doc.docId] ?? [])) { list in
                             row(ListRef(docId: doc.docId, listId: list.id, name: list.name, icon: list.icon))
+                        }
+                    } header: {
+                        // A shared workspace's title is led by the
+                        // shared glyph, as its lists' badges are.
+                        if let shared = model.sharedWorkspaceName(doc.docId) {
+                            HStack(spacing: 4) {
+                                SharedIcon()
+                                Text(shared)
+                            }
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("\(shared), shared workspace")
+                        } else {
+                            Text(doc.name ?? "Personal")
                         }
                     }
                 }

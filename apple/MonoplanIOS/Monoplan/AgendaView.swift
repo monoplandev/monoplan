@@ -57,9 +57,13 @@ struct AgendaView: View {
         }
     }
 
-    /// "Today", "Unscheduled", or the day spelled out ("Friday 7 Nov").
+    /// "Today 13 Nov" (the date in the weekday's place), "Unscheduled",
+    /// or the day spelled out ("Friday 7 Nov").
     static func title(for day: AgendaDay) -> String {
-        if day.today { return "Today" }
+        if day.today {
+            let date = day.day.flatMap { Agenda.start(of: $0) } ?? Date()
+            return "Today \(date.formatted(.dateTime.day().month(.abbreviated)))"
+        }
         guard let text = day.day else { return "Unscheduled" }
         guard let date = Agenda.start(of: text) else { return text }
         return date.formatted(.dateTime.weekday(.wide).day().month(.abbreviated))
@@ -67,8 +71,8 @@ struct AgendaView: View {
 }
 
 /// One agenda row, laid out as the other lenses' rows are: the
-/// checkbox, the text with the workspace under it when the row is not
-/// Personal's, and on the right the time when timed with a note under
+/// checkbox, the text with its place under it when it has one and then
+/// the workspace when the row is not Personal's, and on the right the time when timed with a note under
 /// it for the tone (overdue in red, due today in orange) or the
 /// duration. The checkbox ticks; the rest of the row opens the sheet.
 struct AgendaRowView: View {
@@ -83,6 +87,18 @@ struct AgendaRowView: View {
                             .lineLimit(2)
                             .strikethrough(row.isDone)
                             .foregroundStyle(row.isDone ? .secondary : .primary)
+                        if let place = row.place {
+                            // The item page's place glyph, then the label.
+                            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                Image(systemName: "map")
+                                    .accessibilityHidden(true)
+                                Text(place.label).lineLimit(1)
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("At \(place.label)")
+                        }
                         if let name = row.docName {
                             Text(name)
                                 .font(.caption)
