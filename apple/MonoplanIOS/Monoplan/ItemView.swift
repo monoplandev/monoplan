@@ -7,7 +7,8 @@
 // than as a pushed page. The checkbox ticks and reopens the item, the
 // state label beside it opens a menu of the workflow states, a tap on
 // the title hands the sheet to the title editor (`ItemTitleEditor`), the
-// star at the top right stars and unstars it,
+// star at the top right stars and unstars it, the "x" beside it closes
+// the sheet (as a drag down does),
 // the list field moves it, the date and place rows hand the sheet to their editors
 // (`ItemDateEditor`, `ItemPlaceEditor`);
 // everything else is display only.
@@ -102,6 +103,7 @@ struct ItemView: View {
     @EnvironmentObject private var model: AppModel
     let ref: ItemRef
     @Binding var detent: PresentationDetent
+    @Environment(\.dismiss) private var dismiss
     /// The field editor that has the sheet, if one does.
     @State private var editing: Editor?
     @State private var detentBeforeEditing: PresentationDetent = .medium
@@ -215,10 +217,15 @@ struct ItemView: View {
                 }
             }
             Spacer(minLength: 8)
-            // Only an Open item can be starred (spec/focus.md): a
-            // closed or binned one has no star to show or set.
-            if let item, item.binnedAt == nil, item.closedAt == nil {
-                StarButton(starred: item.starred) { model.setStarred(ref, starred: !item.starred) }
+            // The star, then the close button in the corner, as the
+            // actions sit beside the "x" on a Maps place card.
+            HStack(spacing: 0) {
+                // Only an Open item can be starred (spec/focus.md): a
+                // closed or binned one has no star to show or set.
+                if let item, item.binnedAt == nil, item.closedAt == nil {
+                    StarButton(starred: item.starred) { model.setStarred(ref, starred: !item.starred) }
+                }
+                CloseButton { dismiss() }
             }
         }
     }
@@ -491,7 +498,7 @@ struct ItemTitleEditor: View {
     }
 }
 
-/// The star at the top right of an item's page: gold and filled when
+/// The star beside the close button at the top right of an item's page: gold and filled when
 /// the item is starred, an outline when it is not; a tap flips it.
 private struct StarButton: View {
     let starred: Bool
@@ -513,6 +520,28 @@ private struct StarButton: View {
         .padding(.vertical, -10)
         .sensoryFeedback(.selection, trigger: starred)
         .accessibilityLabel(starred ? "Unstar" : "Star")
+    }
+}
+
+/// The round "x" in the top right corner of an item's sheet: closes it,
+/// for anyone who does not find the drag down.
+private struct CloseButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.footnote.weight(.bold))
+                .foregroundStyle(.secondary)
+                .frame(width: 30, height: 30)
+                .background(.quaternary.opacity(0.5), in: Circle())
+                // A full 44pt target, the circle against the edge.
+                .frame(width: 44, height: 44, alignment: .trailing)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, -10)
+        .accessibilityLabel("Close")
     }
 }
 
