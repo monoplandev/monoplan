@@ -355,9 +355,15 @@ only, the engine has no cross-doc move). Its date field
 keyboard up, that reads a typed date ("fri 3pm") with `WhenPhrase` and
 offers its readings underneath (2026-11-13; `WhenPhrase.readings`: one,
 or two when the phrase said only a day or only a time and the item's
-date has the other half; a tap, Return or the tick takes it and returns
-to the item), then quick picks (Today, Tomorrow), a month calendar, and once a date is set a Time switch, a
-Length menu and Clear, each pick written at once (`Request.setWhen` /
+date has the other half; while a date is set the box shows it, the
+keyboard down, and focusing it selects the text to type over; a tap or
+Return takes an offer and leaves the editor up, so "fri" can be followed by "3pm"; only the tick
+and the cross close it; with nothing typed and no date set the offers are Today and
+Tomorrow, which typing replaces unless the text is the start of one),
+then a month calendar, and once a date is set its start and end time
+side by side (the web's time row: the end is start + `duration`, an end
+at or before the start is the next day) with Clear time under them, or
+on an all-day date Add time and a Length in days, then Clear date, each pick written at once (`Request.setWhen` /
 `setDuration`, i.e. `item set --when / --duration`). A date phrase in a
 title ("dentist friday 8:30") raises a date suggestion (2026-11-13,
 `spec/calendar-plan.md` "Typed date phrases"): the date row turns

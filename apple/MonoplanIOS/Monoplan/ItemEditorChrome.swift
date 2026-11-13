@@ -29,6 +29,15 @@ struct EditBubble: View {
 }
 
 extension View {
+    /// A field row with no value is all one target: a tap anywhere on
+    /// it does what its plus does. Once it has a value only the pencil
+    /// edits, so a set value is not changed by a stray tap. The plus
+    /// stays the row's one button for VoiceOver.
+    func addsOnTap(_ empty: Bool, action: @escaping () -> Void) -> some View {
+        contentShape(Rectangle())
+            .onTapGesture { if empty { action() } }
+    }
+
     /// An editor's navigation bar: a cross on the left, the field's
     /// name over the item's title (nil where the editor shows the
     /// title itself), a tick on the right, off while there is nothing

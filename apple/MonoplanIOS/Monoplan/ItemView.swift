@@ -381,8 +381,9 @@ struct ItemView: View {
                 FieldRow("timer", text: "Due \(Self.dayText(deadline))")
             }
             Divider()
-            // As the date: a display row with the round button that
-            // opens the editor; the map card stays under it.
+            // As the date: a row with the round button that opens the
+            // editor (the whole row does while there is no place); the
+            // map card stays under it.
             HStack(spacing: 8) {
                 if let place = item.place {
                     FieldRow("map", text: place.label, note: place.address)
@@ -394,6 +395,7 @@ struct ItemView: View {
                     .disabled(item.binnedAt != nil)
             }
             .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+            .addsOnTap(item.place == nil && item.binnedAt == nil) { edit(.place) }
             if let place = item.place, let lat = place.lat, let lon = place.lon {
                 PlaceMapCard(label: place.label, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
             }

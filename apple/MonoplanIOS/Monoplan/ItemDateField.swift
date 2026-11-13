@@ -4,10 +4,12 @@
 // question in its place (`suggestion`);
 // its button hands the whole sheet over to the editor
 // (`ItemDateEditor`): a text box that reads a typed date ("fri 3pm")
-// and offers what it means, then quick picks and a month calendar, and
-// once a date is set a Time switch (with the time beside it), a Length
-// menu and Clear. The tick gives the sheet back to the item; the cross
-// first undoes what the editor changed. Every pick is written at once
+// and offers what it means (Today and Tomorrow until something is
+// typed), then a month calendar, and once a date is set its start and
+// end time side by side with Clear time under them (an all-day date
+// has Add time and a Length in days instead), and Clear date. The tick
+// gives the sheet back to the item; the cross first undoes what the
+// editor changed. Every pick is written at once
 // (`item set --when / --duration`); there is no Save. Dates are
 // floating wall-clock strings, never instants.
 
@@ -16,8 +18,9 @@ import SwiftUI
 
 /// The date as a row on the item: its value, or "Date" when unset,
 /// with a small round button at the trailing edge that opens the
-/// editor (a plus to add a date, a pencil to change one). Only the
-/// button is tappable; the row itself is display.
+/// editor (a plus to add a date, a pencil to change one). With no date
+/// the whole row opens it; once one is set only the pencil does, the
+/// row itself display, so changing a date takes a deliberate tap.
 ///
 /// A pending date suggestion (`ItemDetail.pendingSuggestion`: an open
 /// item with no date whose title named one) takes the row over, as the
@@ -48,6 +51,8 @@ struct ItemDateField: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+        .addsOnTap(
+            item.when == nil && item.pendingSuggestion == nil && item.binnedAt == nil, action: edit)
     }
 
     @ViewBuilder
@@ -90,8 +95,20 @@ struct ItemDateField: View {
 /// `WhenPhrase` as it is typed and offered underneath as one or two
 /// readings (`WhenPhrase.readings`: the second is there when the phrase
 /// said only a day or only a time and the item's date has the other
-/// half). A tap on a reading, or Return or the tick for the first,
-/// makes it the date and returns to the item. The controls below are
+/// half). Before anything is typed the offers are Today and Tomorrow
+/// (none once the item has a date);
+/// typing replaces them, except one the text is the start of ("tom"
+/// keeps Tomorrow). A tap on an offer, or Return for the first once
+/// something is typed, makes it the date and leaves the editor up
+/// with the keyboard, so a day can be followed by a time
+/// ("fri", then "3pm": a time alone goes on the item's day). Only the
+/// tick (which first takes what is typed) and the cross close it.
+///
+/// While a date is set and nothing is being typed the box says the
+/// date ("Friday 20 Nov at 15:00"), and the editor opens with the
+/// keyboard down. Focusing the box selects that text, so typing
+/// replaces it; the offers read only what was typed, never the date
+/// shown. The controls below are
 /// as they were, a scroll or a tap away.
 struct ItemDateEditor: View {
     @EnvironmentObject private var model: AppModel
@@ -101,6 +118,7 @@ struct ItemDateEditor: View {
     /// What the item had when the editor opened, for the cross.
     @State private var original: Original
     @State private var query = ""
+    @State private var selection: TextSelection?
     @FocusState private var typing: Bool
 
     struct Original: Equatable {
@@ -130,30 +148,89 @@ struct ItemDateEditor: View {
         }
         .scrollBounceBehavior(.basedOnSize)
         .scrollDismissesKeyboard(.interactively)
-        .editorHeader(title: "Date", itemTitle: item.text, cancel: cancel, done: useTyped)
-        .onAppear { typing = true }
+        .editorHeader(title: "Date", itemTitle: item.text, cancel: cancel, done: finish)
+        .onAppear {
+            // No date: start typing. A date: show it, keyboard down.
+            query = shown
+            typing = item.when == nil
+        }
+        .onChange(of: item.when) {
+            // Whatever set it (an offer, the calendar, a time, Clear),
+            // the box says the date again, ready to be typed over.
+            query = shown
+            if typing { selectAll() }
+        }
+        .onChange(of: typing) {
+            if typing {
+                selectAll()
+            } else if query.isEmpty {
+                query = shown
+            }
+        }
     }
 
     // MARK: Typed date
 
-    private var typed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// What the box says while nothing is being typed: the item's
+    /// date, or nothing.
+    private var shown: String { item.when.map(ItemView.whenText) ?? "" }
 
-    /// What the typed text can mean, likeliest first; empty when it
-    /// names no date (or nothing is typed).
-    private var readings: [String] {
-        guard let phrase = WhenPhrase.find(in: typed) else { return [] }
-        return phrase.readings(over: item.when, today: WhenText.today())
+    /// What has been typed: the box's text, unless that is still the
+    /// date it shows.
+    private var typed: String {
+        query == shown ? "" : query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Select the box's text, so the next key replaces it. A turn
+    /// later: the selection set while focus is still arriving is
+    /// dropped for the caret the tap places.
+    private func selectAll() {
+        DispatchQueue.main.async {
+            selection = query.isEmpty ? nil : TextSelection(range: query.startIndex..<query.endIndex)
+        }
+    }
+
+
+    /// One offer under the text box: a date, and for the standing ones
+    /// their name ("Today").
+    struct Offer: Equatable {
+        let when: String
+        var name: String?
+    }
+
+    /// The offers, likeliest first. The standing two (Today, Tomorrow:
+    /// both with nothing typed on an item with no date, none on one
+    /// with a date, then only those the text is the start of), each keeping the item's time of day as a calendar
+    /// pick does; then what the text reads as, less any date already
+    /// offered.
+    private var offers: [Offer] {
+        Self.offers(typed: typed, current: item.when, today: WhenText.today(), tomorrow: WhenText.today(plus: 1))
+    }
+
+    static func offers(typed: String, current: String?, today: String, tomorrow: String) -> [Offer] {
+        let time = current.map { $0.count >= 16 ? String($0.dropFirst(10).prefix(6)) : "" } ?? ""
+        let word = typed.lowercased()
+        var offers = [("Today", today), ("Tomorrow", tomorrow)]
+            .filter { word.isEmpty ? current == nil : $0.0.lowercased().hasPrefix(word) }
+            .map { Offer(when: $0.1 + time, name: $0.0) }
+        if let phrase = WhenPhrase.find(in: typed) {
+            for when in phrase.readings(over: current, today: today)
+            where !offers.contains(where: { $0.when == when }) {
+                offers.append(Offer(when: when))
+            }
+        }
+        return offers
     }
 
     private var typedBox: some View {
         HStack(spacing: 8) {
             Image(systemName: "calendar").foregroundStyle(.secondary)
-            TextField("Type a date: fri 3pm", text: $query)
+            TextField("Type a date: fri 3pm", text: $query, selection: $selection)
                 .focused($typing)
                 .submitLabel(.done)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
-                .onSubmit(useTyped)
+                .onSubmit(submit)
             if !query.isEmpty {
                 Button {
                     query = ""
@@ -169,88 +246,118 @@ struct ItemDateEditor: View {
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
-    /// The readings of the typed text, each a row to tap; a muted line
-    /// when the text names no date.
+    /// The offers, each a row to tap; a muted line when the text names
+    /// no date.
     @ViewBuilder
-    private var typedReadings: some View {
-        let readings = readings
-        if readings.isEmpty {
+    private var offerRows: some View {
+        let offers = offers
+        if offers.isEmpty {
             if !typed.isEmpty {
                 Text("No date in that yet")
                     .foregroundStyle(.secondary)
                     .frame(minHeight: 36)
             }
         } else {
-            ForEach(readings, id: \.self) { when in
+            ForEach(offers, id: \.when) { offer in
                 Button {
-                    use(when)
+                    use(offer.when)
                 } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Image(systemName: "arrow.turn.down.right")
                             .foregroundStyle(.secondary)
                             .frame(width: 24)
-                        Text(ItemView.whenText(when))
+                        if let name = offer.name {
+                            Text(name)
+                            Spacer(minLength: 8)
+                            Text(ItemView.whenText(offer.when)).foregroundStyle(.secondary)
+                        } else {
+                            Text(ItemView.whenText(offer.when))
+                        }
                     }
                     .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                Divider()
             }
         }
     }
 
-    /// Return and the tick: the first reading of the typed text, if it
-    /// has one, then back to the item. Text that names no date stays
-    /// up to be fixed; nothing typed just closes.
-    private func useTyped() {
-        if let first = readings.first {
-            use(first)
-        } else if typed.isEmpty {
+    /// Return: the first offer for the typed text, and the editor
+    /// stays for more. Text that names no date stays up to be fixed;
+    /// with nothing typed Return closes, as the tick does.
+    private func submit() {
+        if typed.isEmpty {
+            done()
+        } else {
+            if let first = offers.first { use(first.when) }
+            typing = true
+        }
+    }
+
+    /// The tick: what is typed, if it names a date, then back to the
+    /// item. Text that names none stays up to be fixed.
+    private func finish() {
+        if typed.isEmpty {
+            done()
+        } else if let first = offers.first {
+            use(first.when)
             done()
         } else {
             typing = true
         }
     }
 
-    /// A reading as the item's date. Going between all-day and timed
-    /// the old length no longer applies, as with the Time switch: an
-    /// hour beside a time, a single day without one.
+    /// An offer as the item's date; the box then says it, selected,
+    /// for the next thing to type. Going between all-day and timed the old length
+    /// no longer applies: an hour beside a time, a single day without
+    /// one.
     private func use(_ when: String) {
         let timed = when.count >= 16
         var duration = DurationEdit.keep
         if item.when != nil, timed != item.isTimed { duration = timed ? .minutes(60) : .clear }
         model.setWhen(ref, when: when, duration: duration)
-        done()
+        // Now, not only when the write comes back: the same date
+        // picked again changes nothing to hear of.
+        query = ItemView.whenText(when)
+        if typing { selectAll() }
     }
 
     private var editor: some View {
         VStack(alignment: .leading, spacing: 12) {
             typedBox
-            typedReadings
-            HStack(spacing: 8) {
-                quickPick("Today", WhenText.today())
-                quickPick("Tomorrow", WhenText.today(plus: 1))
-            }
+            offerRows
             DatePicker("Date", selection: day, displayedComponents: .date)
                 .datePickerStyle(.graphical)
             if let when = item.when {
                 Divider()
-                HStack {
-                    Text("Time")
-                    Spacer()
-                    if item.isTimed {
-                        DatePicker("Time", selection: time(on: when), displayedComponents: .hourAndMinute)
-                            .labelsHidden()
+                if item.isTimed {
+                    // Start and end, as the web's time row: the end is
+                    // start + the stored length.
+                    HStack(spacing: 12) {
+                        timeBox("clock", "Start", time(on: when))
+                        timeBox("arrow.right", "End", end(of: when), note: Self.endDayNote(when, item.duration))
                     }
-                    Toggle("Time", isOn: timed(when)).labelsHidden()
+                    .frame(minHeight: 36)
+                    Button("Clear time") {
+                        // Back to all-day, a single one.
+                        model.setWhen(ref, when: String(when.prefix(10)), duration: .clear)
+                    }
+                    .frame(minHeight: 36)
+                } else {
+                    HStack {
+                        Button("Add time", systemImage: "clock") {
+                            // 09:00 for an hour (any all-day span no
+                            // longer applies).
+                            model.setWhen(ref, when: "\(when.prefix(10))T09:00", duration: .minutes(60))
+                        }
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                        Spacer()
+                        lengthMenu
+                    }
+                    .frame(minHeight: 36)
                 }
-                .frame(minHeight: 36)
-                HStack {
-                    Text("Length")
-                    Spacer()
-                    lengthMenu
-                }
-                .frame(minHeight: 36)
                 Divider()
                 Button("Clear date", role: .destructive) {
                     // The engine clears the duration with it.
@@ -259,13 +366,6 @@ struct ItemDateEditor: View {
                 .frame(minHeight: 36)
             }
         }
-    }
-
-    private func quickPick(_ title: String, _ dayText: String) -> some View {
-        Button(title) { setDay(dayText) }
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.capsule)
-            .controlSize(.regular)
     }
 
     /// A new day keeps the time of day when there is one.
@@ -278,8 +378,8 @@ struct ItemDateEditor: View {
     }
 
     /// The calendar's selection. With no date yet it rests on today,
-    /// which is why Today is also a quick pick: tapping the day the
-    /// picker already shows selected is not a change it reports.
+    /// which is why Today is also a standing offer: tapping the day
+    /// the picker already shows selected is not a change it reports.
     private var day: Binding<Date> {
         Binding(
             get: { item.when.flatMap(WhenText.date) ?? Date() },
@@ -294,19 +394,62 @@ struct ItemDateEditor: View {
         )
     }
 
-    /// Time on: 09:00 for an hour (any all-day span no longer applies).
-    /// Time off: the bare day, a single one.
-    private func timed(_ when: String) -> Binding<Bool> {
+    /// One of the two times: its glyph, then the system's time control.
+    /// Each takes half the row.
+    private func timeBox(_ systemImage: String, _ name: String, _ selection: Binding<Date>, note: String? = nil)
+        -> some View
+    {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage).foregroundStyle(.secondary)
+            DatePicker(name, selection: selection, displayedComponents: .hourAndMinute)
+                .labelsHidden()
+            if let note {
+                Text(note).font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The end: start + the stored length (the start itself when there
+    /// is none). Picking one writes the length up to it.
+    private func end(of when: String) -> Binding<Date> {
         Binding(
-            get: { item.isTimed },
-            set: { on in
-                if on {
-                    model.setWhen(ref, when: "\(when.prefix(10))T09:00", duration: .minutes(60))
-                } else {
-                    model.setWhen(ref, when: String(when.prefix(10)), duration: .clear)
-                }
+            get: {
+                let start = WhenText.date(when) ?? Date()
+                return WhenText.calendar.date(byAdding: .minute, value: max(0, item.duration ?? 0), to: start) ?? start
+            },
+            set: {
+                let c = WhenText.calendar.dateComponents([.hour, .minute], from: $0)
+                let end = (c.hour ?? 0) * 60 + (c.minute ?? 0)
+                model.setDuration(ref, minutes: Self.length(from: when, toClock: end, was: item.duration))
             }
         )
+    }
+
+    /// Minutes of the day a timed `when` starts at.
+    static func startClock(_ when: String) -> Int {
+        let parts = when.dropFirst(11).prefix(5).split(separator: ":").compactMap { Int($0) }
+        return parts.count == 2 ? parts[0] * 60 + parts[1] : 0
+    }
+
+    /// Days past the start day the end lands on.
+    static func endDayOffset(_ when: String, _ duration: Int?) -> Int {
+        (startClock(when) + max(0, duration ?? 0)) / 1440
+    }
+
+    /// "+1d" beside an end that is not on the start day.
+    static func endDayNote(_ when: String, _ duration: Int?) -> String? {
+        let days = endDayOffset(when, duration)
+        return days > 0 ? "+\(days)d" : nil
+    }
+
+    /// The length an end time picked on the clock gives, the web's
+    /// rule (spec/calendar-plan.md "UI shows an end time, stores a
+    /// length"): the end stays on the day it was already on; an end at
+    /// or before the start means the next day.
+    static func length(from when: String, toClock end: Int, was duration: Int?) -> Int {
+        let length = endDayOffset(when, duration) * 1440 + end - startClock(when)
+        return length > 0 ? length : length + 1440
     }
 
     // MARK: Length
