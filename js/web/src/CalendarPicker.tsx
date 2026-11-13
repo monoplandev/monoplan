@@ -10,7 +10,9 @@ import Calendar from "@corvu/calendar";
 import { createMemo, For, Show } from "solid-js";
 import {
   localDateStamp,
+  nowMs,
   parseLocalDateParts,
+  todayStamp,
   whenDay,
   whenFromParts,
   whenTime,
@@ -43,6 +45,7 @@ export interface CalendarPickerProps {
 export function CalendarPicker(props: CalendarPickerProps) {
   const { m, locale } = useAppI18n();
   const isWhen = () => props.kind === "when";
+  const today = createMemo(() => todayStamp(nowMs()));
 
   // Register stamp ⇄ Date on the boundary — the register stores a floating
   // local date; corvu works in `Date`s. Never `new Date(stamp)` (that's UTC
@@ -130,7 +133,13 @@ export function CalendarPicker(props: CalendarPickerProps) {
               <tbody>
                 <For each={cal.weeks}>
                   {(week) => (
-                    <tr>
+                    <tr
+                      data-current-week={
+                        week.some((day) => localDateStamp(day) === today())
+                          ? ""
+                          : undefined
+                      }
+                    >
                       <For each={week}>
                         {(day) => (
                           <Calendar.Cell class="calendar-cell">

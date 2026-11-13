@@ -4103,6 +4103,11 @@ input.task-check:hover {
   text-align: center;
 }
 
+/* A continuous band, including the gaps and adjacent-month days. */
+.calendar-table tr[data-current-week] {
+  background: var(--bg-hover);
+}
+
 .calendar-cell-trigger {
   display: inline-flex;
   align-items: center;
