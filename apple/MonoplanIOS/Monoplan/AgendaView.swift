@@ -80,6 +80,7 @@ struct AgendaRowView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(row.text)
+                            .lineLimit(2)
                             .strikethrough(row.isDone)
                             .foregroundStyle(row.isDone ? .secondary : .primary)
                         if let name = row.docName {
