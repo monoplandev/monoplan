@@ -360,7 +360,10 @@ keyboard down, and focusing it selects the text to type over; a tap or
 Return takes an offer and leaves the editor up, so "fri" can be followed by "3pm"; only the tick
 and the cross close it; with nothing typed and no date set the offers are Today and
 Tomorrow, which typing replaces unless the text is the start of one),
-then a month calendar, and once a date is set its start and end time
+then a month calendar (`MultiDatePicker` read as a range picker: a tap
+sets the day, the next tap on a later day ends the span there, up to
+seven days, the one after starts over; trial, 2026-11-13), and once a
+date is set its start and end time
 side by side (the web's time row: the end is start + `duration`, an end
 at or before the start is the next day) with Clear time under them, or
 on an all-day date Add time and a Length in days, then Clear date, each pick written at once (`Request.setWhen` /

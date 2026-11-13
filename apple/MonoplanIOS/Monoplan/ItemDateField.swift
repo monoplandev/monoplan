@@ -5,7 +5,8 @@
 // its button hands the whole sheet over to the editor
 // (`ItemDateEditor`): a text box that reads a typed date ("fri 3pm")
 // and offers what it means (Today and Tomorrow until something is
-// typed), then a month calendar, and once a date is set its start and
+// typed), then a month calendar that shows a multi-day date as a run
+// of days and picks one in two taps, and once a date is set its start and
 // end time side by side with Clear time under them (an all-day date
 // has Add time and a Length in days instead), and Clear date. The tick
 // gives the sheet back to the item; the cross first undoes what the
@@ -119,6 +120,9 @@ struct ItemDateEditor: View {
     @State private var original: Original
     @State private var query = ""
     @State private var selection: TextSelection?
+    /// The last tap on the calendar set a start day: the next one, on
+    /// a later day, ends the span there.
+    @State private var awaitingEnd = false
     @FocusState private var typing: Bool
 
     struct Original: Equatable {
@@ -232,13 +236,11 @@ struct ItemDateEditor: View {
                 .textInputAutocapitalization(.never)
                 .onSubmit(submit)
             if !query.isEmpty {
-                Button {
-                    query = ""
-                } label: {
+                Button(action: clearDate) {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Clear text")
+                .accessibilityLabel("Clear date")
             }
         }
         .padding(.horizontal, 12)
@@ -323,12 +325,20 @@ struct ItemDateEditor: View {
         if typing { selectAll() }
     }
 
+    private func clearDate() {
+        query = ""
+        selection = nil
+        awaitingEnd = false
+        // The engine clears the duration with it.
+        model.setWhen(ref, when: nil)
+    }
+
     private var editor: some View {
         VStack(alignment: .leading, spacing: 12) {
             typedBox
             offerRows
-            DatePicker("Date", selection: day, displayedComponents: .date)
-                .datePickerStyle(.graphical)
+            MultiDatePicker("Date", selection: days)
+                .environment(\.calendar, WhenText.calendar)
             if let when = item.when {
                 Divider()
                 if item.isTimed {
@@ -359,32 +369,109 @@ struct ItemDateEditor: View {
                     .frame(minHeight: 36)
                 }
                 Divider()
-                Button("Clear date", role: .destructive) {
-                    // The engine clears the duration with it.
-                    model.setWhen(ref, when: nil)
-                }
+                Button("Clear date", role: .destructive, action: clearDate)
                 .frame(minHeight: 36)
             }
         }
     }
 
-    /// A new day keeps the time of day when there is one.
-    private func setDay(_ dayText: String) {
-        if let when = item.when, item.isTimed {
-            model.setWhen(ref, when: dayText + when.dropFirst(10).prefix(6))
+    // MARK: Calendar
+
+    /// The calendar's selection: every day the item's span covers, so
+    /// a multi-day date shows as a run of days. The picker
+    /// (`MultiDatePicker`) only toggles single days, so each change it
+    /// reports is read as a tap on the one day that differs (`tap`)
+    /// and the selection it proposed is never kept: what shows is
+    /// always the span as stored.
+    private var days: Binding<Set<DateComponents>> {
+        Binding(
+            get: { Set(Self.spanDays(item).map(Self.components)) },
+            set: { proposed in
+                let now = Set(Self.spanDays(item))
+                let changed = Set(proposed.compactMap(Self.dayText)).symmetricDifference(now)
+                if changed.count == 1, let day = changed.first { tap(day) }
+            }
+        )
+    }
+
+    /// A tap on a day of the calendar, as a range picker reads it: the
+    /// first sets the day (the span back to a single one, the time of
+    /// day kept), the next on a later day ends the span there, the one
+    /// after starts over. A span is at most `maxDays`, as the Length
+    /// menu's; a tap past that is a new start. A tap on the only day
+    /// selected changes nothing: Clear date is what removes a date.
+    private func tap(_ day: String) {
+        guard let when = item.when else {
+            model.setWhen(ref, when: day)
+            awaitingEnd = true
+            return
+        }
+        let start = String(when.prefix(10))
+        let single = Self.spanDays(item).count == 1
+        let ahead = Self.daysBetween(start, day)
+        if awaitingEnd, single, ahead > 0, ahead < Self.maxDays {
+            if item.isTimed {
+                // The end keeps its time of day, on the new last day.
+                let startClock = Self.startClock(when)
+                let endClock = (startClock + max(0, item.duration ?? 0)) % 1440
+                model.setDuration(ref, minutes: ahead * 1440 + endClock - startClock)
+            } else {
+                model.setDuration(ref, minutes: (ahead + 1) * 1440)
+            }
+            awaitingEnd = false
+        } else if day == start, single {
+            awaitingEnd = true
         } else {
-            model.setWhen(ref, when: dayText)
+            if item.isTimed {
+                // Whole days come off the length; the end's time stays.
+                let length = max(0, item.duration ?? 0)
+                model.setWhen(
+                    ref, when: day + when.dropFirst(10).prefix(6),
+                    duration: length >= 1440 ? .minutes(length % 1440 == 0 ? 60 : length % 1440) : .keep)
+            } else {
+                model.setWhen(ref, when: day, duration: .clear)
+            }
+            awaitingEnd = true
         }
     }
 
-    /// The calendar's selection. With no date yet it rests on today,
-    /// which is why Today is also a standing offer: tapping the day
-    /// the picker already shows selected is not a change it reports.
-    private var day: Binding<Date> {
-        Binding(
-            get: { item.when.flatMap(WhenText.date) ?? Date() },
-            set: { setDay(WhenText.day($0)) }
-        )
+    static let maxDays = 7
+
+    /// The days (`YYYY-MM-DD`) the item's date covers, in order: whole
+    /// days beside an all-day date, and beside a timed one every day
+    /// up to the one its end falls on (an end at midnight belongs to
+    /// the day before).
+    static func spanDays(_ item: ItemDetail) -> [String] {
+        guard let when = item.when, let first = WhenText.date(String(when.prefix(10))) else { return [] }
+        let count: Int
+        if item.isTimed {
+            let length = max(0, item.duration ?? 0)
+            count = length > 0 ? (startClock(when) + length - 1) / 1440 + 1 : 1
+        } else {
+            count = currentLength(item) / 1440
+        }
+        let calendar = WhenText.calendar
+        return (0..<count).compactMap {
+            calendar.date(byAdding: .day, value: $0, to: first).map(WhenText.day)
+        }
+    }
+
+    /// Whole days from one `YYYY-MM-DD` to another; 0 if either is not
+    /// a day.
+    static func daysBetween(_ from: String, _ to: String) -> Int {
+        guard let a = WhenText.date(from), let b = WhenText.date(to) else { return 0 }
+        return WhenText.calendar.dateComponents([.day], from: a, to: b).day ?? 0
+    }
+
+    /// A day as the picker holds one.
+    static func components(_ day: String) -> DateComponents {
+        guard let date = WhenText.date(day) else { return DateComponents() }
+        return WhenText.calendar.dateComponents([.calendar, .era, .year, .month, .day], from: date)
+    }
+
+    static func dayText(_ day: DateComponents) -> String? {
+        guard let year = day.year, let month = day.month, let date = day.day else { return nil }
+        return String(format: "%04d-%02d-%02d", year, month, date)
     }
 
     private func time(on when: String) -> Binding<Date> {
