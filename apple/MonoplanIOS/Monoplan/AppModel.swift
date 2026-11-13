@@ -239,6 +239,19 @@ final class AppModel: ObservableObject {
         write(.setStarred(id: ref.itemId, starred: starred, workspace: selector(ref.docId)), to: ref)
     }
 
+    /// Move an item to the bin, or restore it from there
+    /// (`item bin` / `item restore`), then reread as `setDone` does.
+    func setBinned(_ ref: ItemRef, binned: Bool) {
+        write(.setBinned(id: ref.itemId, binned: binned, workspace: selector(ref.docId)), to: ref)
+    }
+
+    /// Hard-delete a binned item (`bin rm`). Its page is forgotten
+    /// first, so nothing rereads an item that is no longer there.
+    func deleteBinned(_ ref: ItemRef) {
+        itemDetails[ref.key] = nil
+        write(.deleteBinned(id: ref.itemId, workspace: selector(ref.docId)), to: ref)
+    }
+
     /// Set or clear (nil) an item's planned date, with what to do to
     /// its duration in the same call (`item set --when [--duration]`).
     func setWhen(_ ref: ItemRef, when: String?, duration: DurationEdit = .keep) {

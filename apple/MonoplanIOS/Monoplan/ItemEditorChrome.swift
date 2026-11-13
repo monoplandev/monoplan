@@ -52,20 +52,21 @@ extension View {
     }
 }
 
-/// The "x" at the top right of the item sheet's pages: closes the
-/// sheet, for anyone who does not find the drag down.
+/// The "x" at the top left of the item sheet's pages, where an editor
+/// has its cross: closes the sheet, for anyone who does not find the
+/// drag down. Declared first, so it is the item in the corner.
 struct SheetCloseItem: ToolbarContent {
     let action: () -> Void
 
     var body: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
+        ToolbarItem(placement: .topBarLeading) {
             Button(role: .close, action: action)
         }
     }
 }
 
-/// A checkbox that does nothing and a word beside it, at the top left
-/// of the sheet where an item's status control goes: "New item" on a
+/// A checkbox that does nothing and a word beside it, after the close
+/// button, where an item's status control goes: "New item" on a
 /// capture, "Binned" on a binned item. No glass behind it: it is not a
 /// button.
 struct SheetStatusLabel: ToolbarContent {

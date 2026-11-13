@@ -158,8 +158,9 @@ struct ItemCaptureView: View {
         .navigationBarTitleDisplayMode(.inline)
         // Where the item's status control and its buttons will be.
         .toolbar {
-            SheetStatusLabel(state: "backlog", text: "New item")
             SheetCloseItem { dismiss() }
+            ToolbarSpacer(.fixed, placement: .topBarLeading)
+            SheetStatusLabel(state: "backlog", text: "New item")
         }
         .onAppear { focused = true }
     }

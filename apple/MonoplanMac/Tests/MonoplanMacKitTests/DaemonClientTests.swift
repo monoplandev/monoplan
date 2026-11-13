@@ -61,6 +61,20 @@ final class DaemonClientTests: XCTestCase {
             ])])])])
         )
         XCTAssertEqual(
+            Request.setBinned(id: "i1", binned: true, workspace: "d1").value,
+            .map(["Doc": .map(["workspace": .string("d1"), "cmd": .map(["ItemBin": .map(["item_id": .string("i1")])])])])
+        )
+        XCTAssertEqual(
+            Request.setBinned(id: "i1", binned: false).value,
+            .map(["Doc": .map(["cmd": .map(["Restore": .map(["item_id": .string("i1")])])])])
+        )
+        XCTAssertEqual(
+            Request.deleteBinned(id: "i1").value,
+            .map(["Doc": .map(["cmd": .map(["Bin": .map([
+                "sub": .map(["Rm": .map(["item_id": .string("i1")])]), "json": .bool(false),
+            ])])])])
+        )
+        XCTAssertEqual(
             Request.addItem(text: "Call the bank", list: "inbox", workspace: "d1").value,
             .map(["Doc": .map(["workspace": .string("d1"), "cmd": .map(["Add": .map([
                 "list": .string("inbox"), "texts": .array([.string("Call the bank")]),

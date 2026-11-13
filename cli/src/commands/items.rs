@@ -913,6 +913,26 @@ mod tests {
         assert_eq!(frame(Some("-"), None), (None, None));
     }
 
+    /// `Request.setBinned` and `Request.deleteBinned` in MonoplanMacKit:
+    /// bin, restore, then bin again and hard-delete from the bin.
+    #[test]
+    fn bin_frames_from_the_apps_decode_and_apply() {
+        use crate::commands::{DocCmd, run_doc};
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "bin me").unwrap();
+        let run = |frame: serde_json::Value| {
+            let cmd: DocCmd = serde_json::from_value(frame).unwrap();
+            run_doc(cmd, &doc, &[&doc], &Lens::home(&doc), &mut Vec::new()).unwrap();
+        };
+        run(serde_json::json!({"ItemBin": {"item_id": id}}));
+        assert!(doc.get_item(&id).unwrap().binned_at.is_some());
+        run(serde_json::json!({"Restore": {"item_id": id}}));
+        assert!(doc.get_item(&id).unwrap().binned_at.is_none());
+        run(serde_json::json!({"ItemBin": {"item_id": id}}));
+        run(serde_json::json!({"Bin": {"sub": {"Rm": {"item_id": id}}, "json": false}}));
+        assert!(doc.get_item(&id).is_none());
+    }
+
     /// `Request.setStarred` in MonoplanMacKit: `star` at slot 1 (the
     /// top of Starred), or `unstar` true. In a workspace other than Home the ref
     /// is Home's (`focus::Lens`), and `item show` reports it.

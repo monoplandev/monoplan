@@ -177,6 +177,13 @@ public enum Request {
     /// takes a known place of that label whole (the engine's rule)
     /// unless `exact`, which writes just the label.
     case setPlace(id: String, place: PlaceInfo?, exact: Bool = false, workspace: String? = nil)
+    /// `monoplan item bin <id>` / `monoplan item restore <id>`: set or
+    /// clear the bin mask; the workflow state under it is kept.
+    /// `workspace` as for `items`.
+    case setBinned(id: String, binned: Bool, workspace: String? = nil)
+    /// `monoplan bin rm <id>`: hard-delete a binned item. The engine
+    /// refuses one that is not in the bin. `workspace` as for `items`.
+    case deleteBinned(id: String, workspace: String? = nil)
     /// `monoplan places [query] -n <limit> --json`: the account's known
     /// places, most recently used first (`KnownPlace.parse`). Spans
     /// every open doc, so it takes no workspace.
@@ -267,6 +274,12 @@ public enum Request {
             if let lat = place.lat, let lon = place.lon { fields["coords"] = .string("\(lat),\(lon)") }
             if let address = place.address, !address.isEmpty { fields["address"] = .string(address) }
             return Self.set(id, workspace, fields)
+        case .setBinned(let id, let binned, let workspace):
+            return Self.doc(workspace, .map([binned ? "ItemBin" : "Restore": .map(["item_id": .string(id)])]))
+        case .deleteBinned(let id, let workspace):
+            return Self.doc(workspace, .map(["Bin": .map([
+                "sub": .map(["Rm": .map(["item_id": .string(id)])]), "json": .bool(false),
+            ])]))
         case .places(let query, let limit):
             return Self.doc(nil, .map(["Places": .map([
                 "query": query.isEmpty ? .nil : .string(query),

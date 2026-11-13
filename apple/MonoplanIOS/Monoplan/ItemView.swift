@@ -7,8 +7,9 @@
 // than as a pushed page. The sheet has a navigation bar, its buttons the
 // system's Liquid Glass: at the left the status control (the checkbox
 // ticks and reopens the item, the state label beside it opens a menu of
-// the workflow states), at the right the star, which stars and unstars
-// it, and the "x", which closes the sheet (as a drag down does). A tap
+// the workflow states) after the "x", which closes the sheet (as a drag
+// down does); at the right the star, which stars and unstars it, and
+// the more menu. A tap
 // on the title hands the sheet to the title editor (`ItemTitleEditor`),
 // the list field and the date and place rows hand the sheet to their
 // editors (`ItemListEditor`, `ItemDateEditor`, `ItemPlaceEditor`);
@@ -164,6 +165,8 @@ struct ItemView: View {
     /// The field editor that has the sheet, if one does.
     @State private var editing: Editor?
     @State private var detentBeforeEditing: PresentationDetent = .medium
+    /// The "Delete" of the more menu is waiting on its confirmation.
+    @State private var confirmingDelete = false
 
     enum Editor {
         case title
@@ -255,21 +258,41 @@ struct ItemView: View {
         .scrollBounceBehavior(.basedOnSize)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { bar }
+        // A hard delete cannot be taken back (no undo here, and the
+        // bin was the second chance), so it asks first.
+        .confirmationDialog("Delete this item for good?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                model.deleteBinned(ref)
+                dismiss()
+            }
+        } message: {
+            Text("It is removed from every device and cannot be restored.")
+        }
     }
 
-    /// The page's navigation bar. At the left, the checkbox and the
-    /// workflow state beside it as one glass control with two halves:
+    /// The page's navigation bar. At the left, the close button in the
+    /// corner on its own glass (where the editors have their cross),
+    /// then the checkbox and the workflow state beside it as one glass
+    /// control with two halves:
     /// the checkbox ticks and reopens, the label opens a menu of the
     /// states (the web dialog's status badge). A binned item just says
     /// so (the bin masks the state; Restore is the way out), and one
-    /// that has not loaded shows an inert box. At the right, the star,
-    /// then the close button in the corner on its own glass, as the
-    /// actions sit beside the "x" on a Maps place card.
+    /// that has not loaded shows an inert box. At the right, the star
+    /// and the more menu.
+    /// The gaps inside the status control, set to look the same on a
+    /// device: checkbox to label, and label to the menu's chevrons. The
+    /// first is the smaller number because the bar puts a few points
+    /// of its own around the menu.
+    private static let checkGap: CGFloat = 3
+    private static let chevronGap: CGFloat = 7
+
     @ToolbarContentBuilder
     private var bar: some ToolbarContent {
+        SheetCloseItem { dismiss() }
+        ToolbarSpacer(.fixed, placement: .topBarLeading)
         if let item, item.binnedAt == nil {
             ToolbarItem(placement: .topBarLeading) {
-                HStack(spacing: 8) {
+                HStack(spacing: Self.checkGap) {
                     ItemCheckButton(ref: ref, state: item.state)
                     stateMenu(item)
                 }
@@ -281,13 +304,60 @@ struct ItemView: View {
         }
         // Only an Open item can be starred (spec/focus.md): a closed
         // or binned one has no star to show or set.
+        // With a star, the two are one item laid out here: as two
+        // items the bar spaces them itself, further apart than wanted.
         if let item, item.binnedAt == nil, item.closedAt == nil {
             ToolbarItem(placement: .topBarTrailing) {
-                StarButton(starred: item.starred) { model.setStarred(ref, starred: !item.starred) }
+                HStack(spacing: 0) {
+                    StarButton(starred: item.starred, width: Self.pairedButtonWidth) {
+                        model.setStarred(ref, starred: !item.starred)
+                    }
+                    moreMenu(item, width: Self.pairedButtonWidth)
+                }
+                .fixedSize()
             }
-            ToolbarSpacer(.fixed, placement: .topBarTrailing)
+        } else if let item {
+            ToolbarItem(placement: .topBarTrailing) { moreMenu(item) }
         }
-        SheetCloseItem { dismiss() }
+    }
+
+    /// The width each of the star and the more menu takes when they
+    /// share the glass: the distance between their centres, and the
+    /// width of each one's tap target.
+    private static let pairedButtonWidth: CGFloat = 34
+
+    /// The "…" menu: what is done to the item as a whole. An item goes
+    /// to the bin and the sheet closes on it, as it leaves the list
+    /// underneath. A binned one (reached from search) can be restored,
+    /// which keeps the sheet up on the item as it was, or deleted for
+    /// good after a confirmation.
+    /// `width` is set when it shares the glass with the star: the
+    /// label is then that wide, all of it the tap target.
+    private func moreMenu(_ item: ItemDetail, width: CGFloat? = nil) -> some View {
+        Menu {
+            if item.binnedAt == nil {
+                Button("Move to Bin", systemImage: "trash", role: .destructive) {
+                    model.setBinned(ref, binned: true)
+                    dismiss()
+                }
+            } else {
+                Button("Restore", systemImage: "arrow.uturn.backward") {
+                    model.setBinned(ref, binned: false)
+                }
+                Button("Delete", systemImage: "trash", role: .destructive) {
+                    confirmingDelete = true
+                }
+            }
+        } label: {
+            if let width {
+                Image(systemName: "ellipsis")
+                    .frame(width: width, height: 36)
+                    .contentShape(Rectangle())
+                    .accessibilityLabel("More")
+            } else {
+                Label("More", systemImage: "ellipsis")
+            }
+        }
     }
 
     /// List, planned date, deadline (only when set, as on the web) and
@@ -352,7 +422,7 @@ struct ItemView: View {
                 }
             }
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: Self.chevronGap) {
                 Text(Self.statusLabel(item.state, event: event))
                     .font(.subheadline.weight(.medium))
                 Image(systemName: "chevron.up.chevron.down")
@@ -542,13 +612,15 @@ struct ItemTitleEditor: View {
     }
 }
 
-/// The star beside the close button at the top right of an item's page:
+/// The star at the top right of an item's page, beside the more menu:
 /// the web dialog's glyph (`.task-dialog-pin-toggle`,
 /// `js/web/src/icons/star-filled.svg`, in the asset catalog as
 /// `StarFill` and, stroked, `StarStroke`) on the bar's glass, a thin
 /// outline that fills yellow when the item is starred; a tap flips it.
 private struct StarButton: View {
     let starred: Bool
+    /// The width of the button, all of it the tap target.
+    let width: CGFloat
     let action: () -> Void
 
     /// The web's `#ffe785`.
@@ -565,6 +637,8 @@ private struct StarButton: View {
                     .foregroundStyle(Color.primary.opacity(0.7))
             }
             .frame(width: 22, height: 22)
+            .frame(width: width, height: 36)
+            .contentShape(Rectangle())
         }
         .sensoryFeedback(.selection, trigger: starred)
         .accessibilityLabel(starred ? "Unstar" : "Star")
