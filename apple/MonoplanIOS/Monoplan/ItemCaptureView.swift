@@ -18,6 +18,8 @@
 // - The app going to the background: create, stay on the item.
 //
 // An empty title creates nothing, whichever way the sheet is left.
+// A date phrase in the title ("dentist friday 8:30") is written on the
+// new item as its date suggestion (`WhenPhrase`), answered on its page.
 // The list is the one field held before the item exists: with no title
 // yet, the list field opens the list editor (`ItemListEditor`) over the
 // capture, and the item is created in what was picked.
@@ -79,11 +81,12 @@ struct ItemCaptureView: View {
         guard !title.isEmpty else { return }
         draft.sent = true
         error = nil
+        let suggested = WhenPhrase.find(in: title)?.when
         if case .gone = after {
-            model.addItem(text: title, to: list)
+            model.addItem(text: title, to: list, whenSuggested: suggested)
             return
         }
-        model.addItem(text: title, to: list) { ref, failure in
+        model.addItem(text: title, to: list, whenSuggested: suggested) { ref, failure in
             guard let ref else {
                 draft.sent = false
                 error = failure

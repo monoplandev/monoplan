@@ -42,13 +42,9 @@ struct DoneView: View {
             }
         }
         .navigationTitle("Done")
-        // Done loads a window at a time: the count is of what has
-        // loaded, with a "+" while there is more.
-        .countedTitle(
-            "Done",
-            count: model.doneError == nil ? model.doneDays.reduce(0) { $0 + $1.rows.count } : nil,
-            more: model.doneHasMore
-        ) {
+        // Done loads a window at a time, so the count is asked for on
+        // its own (`done --count`): every Done item, loaded or not.
+        .countedTitle("Done", count: model.doneError == nil ? model.doneTotal : nil) {
             Image(systemName: "checkmark.circle")
         }
         .refreshable { model.refreshDone() }

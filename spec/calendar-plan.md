@@ -421,9 +421,25 @@ for the month grid). `groupByDeadline` becomes
     plan, and a done item has none to make. There is no setting to
     turn it off (the "Recognise dates as you type" switch went
     2026-11-13): a suggestion changes nothing until it is answered.
-  - Not built: CLI verbs to answer (the JSON
-    carries `when_suggested`; `set --when` answers it by setting a date),
-    the iOS surface.
+  - CLI (2026-11-13): `item set --when-suggested <when | ->` raises or
+    dismisses one (`spec/cli.md`); the JSON carries `when_suggested`,
+    and `set --when` answers yes by setting a date. The CLI reads no
+    phrases out of titles.
+  - iOS (2026-11-13): the same question on the item sheet, in the date
+    row's place, orange with a tick and a cross (`ItemDateField.swift`).
+    It is raised when a capture creates the item and when the title
+    editor saves a title with a new phrase (`WhenSuggest.edit`, the
+    `whenSuggest.ts` rule). The grammar is not chrono's: the recogniser
+    is Foundation's `NSDataDetector` (`WhenPhrase.swift` in
+    MonoplanMacKit; no chrono port worth having, and no JavaScript in
+    the native apps), with our all-day / timed split, time-of-day hours,
+    time-only roll-forward and no past days on top. So the two clients
+    can disagree at the edges: the detector has no bare hour ("at 3")
+    and no "in an hour", and takes a meal word as a time ("lunch
+    saturday" is Saturday 12:00). All-day versus timed rests on the
+    detector's undocumented `timeIsSignificant`, with "anything but
+    12:00 is a time" as the fallback. Not built on iOS: the live
+    question while the title is still being typed.
   - The When field's date input takes a typed phrase too (2026-11-11):
     while the text names a date its popover swaps the calendar for a
     list of the first few days it could mean (`dateSuggest.ts`: the text

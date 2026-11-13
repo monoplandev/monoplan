@@ -362,11 +362,21 @@ struct ItemView: View {
 
     /// List, planned date, deadline (only when set, as on the web) and
     /// place. The date and place rows are always there, muted when
-    /// empty: they are where setting one will happen.
+    /// empty: they are where setting one will happen. A pending date
+    /// suggestion stands in the date row's place until it is answered.
     private func fields(_ item: ItemDetail) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             listField(item)
-            ItemDateField(item: item) { edit(.date) }
+            ItemDateField(
+                item: item,
+                edit: { edit(.date) },
+                answer: { suggested, yes in
+                    if yes {
+                        model.setWhen(ref, when: suggested)
+                    } else {
+                        model.setWhenSuggested(ref, when: nil)
+                    }
+                })
             if let deadline = item.deadline {
                 FieldRow("timer", text: "Due \(Self.dayText(deadline))")
             }
@@ -556,7 +566,9 @@ struct ItemView: View {
 /// open: the title as a text field with the keyboard up, and the notes
 /// under it, display only for now. Nothing is written until the tick
 /// (or Return: a title is one line, as on the web); the cross drops
-/// what was typed. An empty title cannot be kept.
+/// what was typed. An empty title cannot be kept. A date phrase the new
+/// title brings is written with it as the item's date suggestion, and
+/// one it loses takes its suggestion along (`WhenSuggest.edit`).
 struct ItemTitleEditor: View {
     @EnvironmentObject private var model: AppModel
     let ref: ItemRef
@@ -576,7 +588,12 @@ struct ItemTitleEditor: View {
 
     private func commit() {
         guard !trimmed.isEmpty else { return }
-        if trimmed != item.text { model.setText(ref, text: trimmed) }
+        if trimmed != item.text {
+            let suggestion = WhenSuggest.edit(
+                title: trimmed, was: item.text, when: item.when, pending: item.whenSuggested,
+                closed: item.closedAt != nil)
+            model.setText(ref, text: trimmed, suggestion: suggestion)
+        }
         done()
     }
 

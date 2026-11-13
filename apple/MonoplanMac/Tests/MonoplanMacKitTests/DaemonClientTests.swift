@@ -109,6 +109,14 @@ final class DaemonClientTests: XCTestCase {
         let unstarred = setArgs(.setStarred(id: "i1", starred: false))
         XCTAssertEqual(unstarred?["star"], .nil)
         XCTAssertEqual(unstarred?["unstar"], .bool(true))
+        // A plain retitle carries no `when_suggested` key at all.
+        XCTAssertNil(setArgs(.setText(id: "i1", text: "x"))?["when_suggested"])
+        let raised = setArgs(.setText(id: "i1", text: "dentist friday", suggestion: .set("2026-11-20")))
+        XCTAssertEqual(raised?["text"], .string("dentist friday"))
+        XCTAssertEqual(raised?["when_suggested"], .string("2026-11-20"))
+        XCTAssertEqual(setArgs(.setText(id: "i1", text: "dentist", suggestion: .clear))?["when_suggested"], .string("-"))
+        XCTAssertEqual(setArgs(.setWhenSuggested(id: "i1", when: "2026-11-20T08:30"))?["when_suggested"], .string("2026-11-20T08:30"))
+        XCTAssertEqual(setArgs(.setWhenSuggested(id: "i1", when: nil))?["when_suggested"], .string("-"))
         let timed = setArgs(.setWhen(id: "i1", when: "2026-09-12T14:00", duration: .minutes(90)))
         XCTAssertEqual(timed?["when"], .string("2026-09-12T14:00"))
         XCTAssertEqual(timed?["duration"], .string("90"))
@@ -143,6 +151,12 @@ final class DaemonClientTests: XCTestCase {
             Request.done(limit: 50).value,
             .map(["Doc": .map(["cmd": .map(["Done": .map([
                 "limit": .int(50), "since": .nil, "json": .bool(true),
+            ])])])])
+        )
+        XCTAssertEqual(
+            Request.doneCount.value,
+            .map(["Doc": .map(["cmd": .map(["Done": .map([
+                "limit": .nil, "since": .nil, "json": .bool(false), "count": .bool(true),
             ])])])])
         )
         XCTAssertEqual(

@@ -353,7 +353,16 @@ only, the engine has no cross-doc move). Its date field
 (`ItemDateField.swift`) hands the whole sheet to an editor
 (`ItemDateEditor`, Done returns to the item): quick picks (Today, Tomorrow), a month calendar, and once a date is set a Time switch, a
 Length menu and Clear, each pick written at once (`Request.setWhen` /
-`setDuration`, i.e. `item set --when / --duration`). Its place row
+`setDuration`, i.e. `item set --when / --duration`). A date phrase in a
+title ("dentist friday 8:30") raises a date suggestion (2026-11-13,
+`spec/calendar-plan.md` "Typed date phrases"): the date row turns
+orange, "Suggested: Friday 20 Nov at 08:30", with a tick that makes it
+the date (`Request.setWhen`) and a cross that drops it
+(`Request.setWhenSuggested`, i.e. `item set --when-suggested`). It is
+written when a capture creates the item and when the title editor
+saves a title with a new phrase; the phrase is read by `WhenPhrase`
+(MonoplanMacKit, over `NSDataDetector`) and the rule is
+`WhenSuggest.edit`. Its place row
 does the same (`ItemPlaceEditor.swift`): one text box, then the typed
 text as a bare label, the account's known places that match
 (`Request.places`, i.e. `places --json`, `spec/cli.md` §Items; nothing
@@ -396,7 +405,9 @@ section per day ticked (`Request.done(limit:)`, i.e. `done -n N --json`,
 grouped by `Done.days`), each row with its list name. It is a window,
 not the history: 50 rows to start, doubled each time the end of the
 list scrolls into sight (`AppModel.loadMoreDone`), and a `Changed`
-refetches only the window reached; read-only. **Settings**
+refetches only the window reached; read-only. The title's count is
+the whole history's, read on its own (`Request.doneCount`, i.e.
+`done --count`). **Settings**
 (`SettingsView.swift`, 2026-11-13) holds what a person acts on: the
 account (email, server, sign in / sign out), sync (the status line,
 last synced) and the last error. **Debug**

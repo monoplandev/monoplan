@@ -14,6 +14,14 @@ public struct DoneDay: Equatable, Identifiable {
 }
 
 public enum Done {
+    /// The bare number `monoplan done --count` prints.
+    public static func parseCount(_ stdout: String) throws -> Int {
+        guard let n = Int(stdout.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            throw CocoaError(.formatting)
+        }
+        return n
+    }
+
     /// Consecutive rows sharing a local day become one group; the input
     /// order (newest first) is kept, so the days come out newest first.
     public static func days(from rows: [ItemRow], calendar: Calendar = .current) -> [DoneDay] {

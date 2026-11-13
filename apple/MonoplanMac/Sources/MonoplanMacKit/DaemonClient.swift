@@ -111,6 +111,16 @@ public enum DurationEdit: Equatable {
     case minutes(Int)
 }
 
+/// What a write does to the item's pending date suggestion
+/// (`when_suggested`, `WhenSuggest`).
+public enum SuggestionEdit: Equatable {
+    case keep
+    /// Drop it: the user's "no", or its phrase left the title.
+    case clear
+    /// Raise one: a `when`-shaped value read out of the title.
+    case set(String)
+}
+
 public enum Request {
     case hello(buildId: String)
     case watch
@@ -151,9 +161,17 @@ public enum Request {
     /// reads carry (`backlog`, `todo`, `in_progress`, `review`, `done`,
     /// `cancelled`); the same frame as `setDone`.
     case setLifecycle(id: String, state: String, workspace: String? = nil)
-    /// `monoplan item set <id> --text <text>`: retitle the item.
+    /// `monoplan item set <id> --text <text> [--when-suggested <when|->]`:
+    /// retitle the item, and in the same frame raise or drop the date
+    /// suggestion the new title brings (`WhenSuggest.edit`).
     /// `workspace` as for `items`.
-    case setText(id: String, text: String, workspace: String? = nil)
+    case setText(id: String, text: String, suggestion: SuggestionEdit = .keep, workspace: String? = nil)
+    /// `monoplan item set <id> --when-suggested <when|->`: raise a date
+    /// suggestion on the item, or dismiss the pending one (nil). The
+    /// yes is `setWhen` with the suggested value: any date set clears
+    /// the suggestion. The frame is pinned on the Rust side by
+    /// `when_suggested_frame_from_the_apps_decodes_and_applies`.
+    case setWhenSuggested(id: String, when: String?, workspace: String? = nil)
     /// `monoplan item set <id> --list <list>`: move the item to another
     /// list of the same workspace (appended). `workspace` as for `items`.
     case moveItem(id: String, list: String, workspace: String? = nil)
@@ -197,6 +215,9 @@ public enum Request {
     /// Done (`Items.parse`; `Done.days` groups them). A full window
     /// (`limit` rows back) means there may be more.
     case done(limit: Int)
+    /// `monoplan done --count`: how many Done items the Personal
+    /// workspace holds in all, as a bare number (`Done.parseCount`).
+    case doneCount
     /// `monoplan list ls --json --all`: id → name, archived included so
     /// every list id an item can carry resolves. `workspace` as for
     /// `items`.
@@ -248,8 +269,18 @@ public enum Request {
             return Self.set(id, workspace, ["lifecycle": .string(done ? "Done" : "Backlog")])
         case .setLifecycle(let id, let state, let workspace):
             return Self.set(id, workspace, ["lifecycle": .string(Self.lifecycleVariant(state))])
-        case .setText(let id, let text, let workspace):
-            return Self.set(id, workspace, ["text": .string(text)])
+        case .setText(let id, let text, let suggestion, let workspace):
+            // `when_suggested` is absent unless it is being written
+            // (`serde(default)`), so a plain retitle's frame is unchanged.
+            var fields: [String: MPValue] = ["text": .string(text)]
+            switch suggestion {
+            case .keep: break
+            case .clear: fields["when_suggested"] = .string("-")
+            case .set(let when): fields["when_suggested"] = .string(when)
+            }
+            return Self.set(id, workspace, fields)
+        case .setWhenSuggested(let id, let when, let workspace):
+            return Self.set(id, workspace, ["when_suggested": .string(when ?? "-")])
         case .moveItem(let id, let list, let workspace):
             return Self.set(id, workspace, ["list": .string(list)])
         case .setStarred(let id, let starred, let workspace):
@@ -289,6 +320,10 @@ public enum Request {
         case .done(let limit):
             return .map(["Doc": .map(["cmd": .map(["Done": .map([
                 "limit": .int(Int64(limit)), "since": .nil, "json": .bool(true),
+            ])])])])
+        case .doneCount:
+            return .map(["Doc": .map(["cmd": .map(["Done": .map([
+                "limit": .nil, "since": .nil, "json": .bool(false), "count": .bool(true),
             ])])])])
         case .lists(let workspace):
             return Self.doc(workspace, .map(["Lists": .map(["cmd": .map(["Ls": .map([

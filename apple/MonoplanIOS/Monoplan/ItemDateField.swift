@@ -1,5 +1,7 @@
 // The item sheet's planned date (`when` and `duration`,
-// spec/calendar-plan.md). On the item it is one row (`ItemDateField`);
+// spec/calendar-plan.md). On the item it is one row (`ItemDateField`),
+// or, while a date read out of the title waits on an answer, the
+// question in its place (`suggestion`);
 // its button hands the whole sheet over to the editor
 // (`ItemDateEditor`): quick picks and a month calendar, and once a date
 // is set a Time switch (with the time beside it), a Length menu and
@@ -15,22 +17,64 @@ import SwiftUI
 /// with a small round button at the trailing edge that opens the
 /// editor (a plus to add a date, a pencil to change one). Only the
 /// button is tappable; the row itself is display.
+///
+/// A pending date suggestion (`ItemDetail.pendingSuggestion`: an open
+/// item with no date whose title named one) takes the row over, as the
+/// web's `WhenSuggestion.tsx` takes the date input's place: the same
+/// row in orange, "Suggested: Friday 20 Nov at 08:30", so it is never
+/// taken for a set date, with two answers at the trailing edge. The
+/// tick makes it the item's date; the cross drops it, and the plain
+/// row with its plus comes back.
 struct ItemDateField: View {
     let item: ItemDetail
     let edit: () -> Void
+    /// The answer to the pending suggestion: its value, and yes or no.
+    let answer: (String, Bool) -> Void
 
     var body: some View {
         HStack(spacing: 8) {
-            if let when = item.when {
-                FieldRow("calendar", text: ItemView.whenText(when), note: ItemView.lengthText(item))
+            if let suggested = item.pendingSuggestion {
+                suggestion(suggested)
             } else {
-                FieldRow("calendar", text: "Date", empty: true)
+                if let when = item.when {
+                    FieldRow("calendar", text: ItemView.whenText(when), note: ItemView.lengthText(item))
+                } else {
+                    FieldRow("calendar", text: "Date", empty: true)
+                }
+                Spacer(minLength: 8)
+                EditBubble(adding: item.when == nil, what: "date", action: edit)
+                    .disabled(item.binnedAt != nil)
             }
-            Spacer(minLength: 8)
-            EditBubble(adding: item.when == nil, what: "date", action: edit)
-                .disabled(item.binnedAt != nil)
         }
         .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func suggestion(_ suggested: String) -> some View {
+        let label = "Suggested: \(ItemView.whenText(suggested))"
+        // `FieldRow`'s anatomy, in orange.
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Image(systemName: "calendar").frame(width: 24)
+            Text(label)
+        }
+        .foregroundStyle(.orange)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        Spacer(minLength: 8)
+        answerBubble("checkmark", "Use suggested date") { answer(suggested, true) }
+        answerBubble("xmark", "Dismiss suggestion") { answer(suggested, false) }
+    }
+
+    /// One answer, drawn as the row's edit button is (`EditBubble`).
+    private func answerBubble(_ systemImage: String, _ name: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.footnote.weight(.semibold))
+                .frame(width: 18, height: 18)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.circle)
+        .accessibilityLabel(name)
     }
 }
 

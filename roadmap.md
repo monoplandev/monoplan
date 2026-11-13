@@ -118,3 +118,4 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - location & time badges within lists are ugly and maybe over the top.
 - Cal adapter / Event RSVPs?
 - signing out while offline and failing a server token revocation never re-attempts
+- normalise nlp date suggestions acros platforms

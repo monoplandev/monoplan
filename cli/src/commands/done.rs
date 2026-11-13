@@ -35,6 +35,11 @@ pub struct DoneArgs {
     /// Machine-parseable output.
     #[arg(long)]
     pub json: bool,
+    /// Print how many items match instead of listing them. `-n` does
+    /// not cap it, and a bare call counts the whole history.
+    #[arg(long)]
+    #[serde(default)]
+    pub count: bool,
 }
 
 /// Resolve `--since` to a day: `YYYY-MM-DD` as written, `<N>d` /
@@ -99,6 +104,11 @@ pub fn run(doc: &Doc, args: DoneArgs, out: &mut dyn Write) -> anyhow::Result<()>
         .or_else(|| since.is_none().then_some(DEFAULT_LIMIT));
 
     let items = doc.all_items();
+    if args.count {
+        // The number alone, which is also its JSON.
+        writeln!(out, "{}", select_done(&items, since, None).len())?;
+        return Ok(());
+    }
     let done = select_done(&items, since, limit);
     if args.json {
         return write_json(out, &done.iter().map(|i| item_json(i)).collect::<Vec<_>>());

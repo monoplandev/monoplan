@@ -33,6 +33,21 @@ final class ItemDetailTests: XCTestCase {
         XCTAssertNil(item.place)
         XCTAssertFalse(item.isTimed)
         XCTAssertNil(item.closedAt)
+        XCTAssertNil(item.pendingSuggestion)
+    }
+
+    func testASuggestionIsPendingOnlyOnAnOpenUndatedItem() throws {
+        func item(_ extra: String, state: String = "backlog", binned: String = "null") throws -> ItemDetail {
+            try ItemDetail.parse("""
+            {"id":"i3","text":"dentist friday","list_id":"inbox","state":"\(state)","lifecycle_at":10,
+             "created_at":10,"started_at":null,"done_at":null,"binned_at":\(binned),
+             "when_suggested":"2026-11-20"\(extra),"notes":"","starred":false}
+            """)
+        }
+        XCTAssertEqual(try item("").pendingSuggestion, "2026-11-20")
+        XCTAssertNil(try item(#","when":"2026-11-21""#).pendingSuggestion)
+        XCTAssertNil(try item("", state: "done").pendingSuggestion)
+        XCTAssertNil(try item("", binned: "99").pendingSuggestion)
     }
 
     func testParsesKnownPlaces() throws {

@@ -440,6 +440,10 @@ pub struct SetArgs {
     /// Planned date, `YYYY-MM-DD` (all-day) or `YYYY-MM-DDTHH:MM` (timed, floating); `-` clears it and the duration.
     #[arg(long, group = "field", value_name = "DATE|-")]
     pub when: Option<String>,
+    /// Pending date suggestion, same shape as --when: a date read out of the title, held until answered; `-` dismisses it. `--when` with the same value accepts it.
+    #[arg(long, group = "field", value_name = "DATE|-")]
+    #[serde(default)]
+    pub when_suggested: Option<String>,
     /// Duration: minutes, or `1h30m` / `2h` / `45m` / `3d` / `1d2h`; `-` clears.
     #[arg(long, group = "field", value_name = "LEN|-")]
     pub duration: Option<String>,
@@ -500,6 +504,9 @@ pub fn set(
     }
     if let Some(when) = &args.when {
         doc.set_item_when(id, clear_or(when))?;
+    }
+    if let Some(suggested) = &args.when_suggested {
+        doc.set_item_when_suggested(id, clear_or(suggested))?;
     }
     if let Some(duration) = duration {
         doc.set_item_duration(id, duration)?;
@@ -651,6 +658,7 @@ mod tests {
             list: None,
             lifecycle: None,
             when: None,
+            when_suggested: None,
             duration: None,
             deadline: None,
             place: None,
@@ -826,6 +834,42 @@ mod tests {
         assert_eq!(item.text, "Call the bank");
         assert_eq!(item.list_id, LIST_INBOX);
         assert_eq!(item.state.name(), "backlog");
+    }
+
+    /// `Request.setText` with a suggestion edit, and
+    /// `Request.setWhenSuggested`: the title and the date suggestion it
+    /// raised in one frame, then the two answers (a dismissal clears
+    /// the register; a `when` of the same value is the yes, and clears
+    /// it too).
+    #[test]
+    fn when_suggested_frame_from_the_apps_decodes_and_applies() {
+        use crate::commands::DocCmd;
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "dentist").unwrap();
+        let send = |text: Option<&str>, when: Option<&str>, suggested: Option<&str>| {
+            let cmd: DocCmd = serde_json::from_value(serde_json::json!({"Set": {
+                "item_id": id, "text": text, "list": null, "lifecycle": null,
+                "when": when, "when_suggested": suggested, "duration": null,
+                "deadline": null, "place": null, "coords": null, "address": null,
+                "new_place": false, "star": null, "unstar": false,
+            }}))
+            .unwrap();
+            let DocCmd::Set(args) = cmd else {
+                panic!("not a Set frame")
+            };
+            set(&doc, &[&doc], &Lens::home(&doc), *args, &mut Vec::new()).unwrap();
+            doc.get_item(&id).unwrap()
+        };
+        let item = send(Some("dentist friday 8:30"), None, Some("2026-11-20T08:30"));
+        assert_eq!(item.text, "dentist friday 8:30");
+        assert_eq!(item.when_suggested.as_deref(), Some("2026-11-20T08:30"));
+        assert_eq!(item.when, None);
+        let item = send(None, None, Some("-"));
+        assert_eq!(item.when_suggested, None);
+        send(None, None, Some("2026-11-20T08:30"));
+        let item = send(None, Some("2026-11-20T08:30"), None);
+        assert_eq!(item.when.as_deref(), Some("2026-11-20T08:30"));
+        assert_eq!(item.when_suggested, None);
     }
 
     /// The frame the native clients hand-encode to tick and reopen an

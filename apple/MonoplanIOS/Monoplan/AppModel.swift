@@ -45,6 +45,9 @@ final class AppModel: ObservableObject {
     /// back: a full window means there may be more.
     @Published private(set) var doneLoadedLimit = 0
     private var doneCount = 0
+    /// How many Done items there are in all (`done --count`), loaded or
+    /// not; nil until first read.
+    @Published private(set) var doneTotal: Int?
     private var doneLimit = AppModel.donePage
     static let donePage = 50
     /// List id → display name, for the rows of lenses that span lists.
@@ -180,7 +183,10 @@ final class AppModel: ObservableObject {
     /// `setDone` does. `done` gets the new item, or why there is none;
     /// it may be left out by a caller that is going away (a capture
     /// sheet closing over a typed title).
-    func addItem(text: String, to list: ListRef, done: ((ItemRef?, String?) -> Void)? = nil) {
+    func addItem(
+        text: String, to list: ListRef, whenSuggested: String? = nil,
+        done: ((ItemRef?, String?) -> Void)? = nil
+    ) {
         client.send(.addItem(text: text, list: list.listId, workspace: selector(list.docId))) { [weak self] result in
             guard let self else { return }
             let failure: String
@@ -190,7 +196,11 @@ final class AppModel: ObservableObject {
                 if !id.isEmpty {
                     refreshLenses()
                     for list in browsedLists.values { refreshList(list) }
-                    done?(ItemRef(docId: list.docId, itemId: id, title: text), nil)
+                    let ref = ItemRef(docId: list.docId, itemId: id, title: text)
+                    // The date its title named, as a question on the
+                    // new item (`WhenSuggest`).
+                    if let whenSuggested { setWhenSuggested(ref, when: whenSuggested) }
+                    done?(ref, nil)
                     return
                 }
                 failure = "could not add item: no id came back"
@@ -222,8 +232,15 @@ final class AppModel: ObservableObject {
 
     /// Retitle an item (`item set --text`), then reread as `setDone`
     /// does.
-    func setText(_ ref: ItemRef, text: String) {
-        write(.setText(id: ref.itemId, text: text, workspace: selector(ref.docId)), to: ref)
+    func setText(_ ref: ItemRef, text: String, suggestion: SuggestionEdit = .keep) {
+        write(.setText(id: ref.itemId, text: text, suggestion: suggestion, workspace: selector(ref.docId)), to: ref)
+    }
+
+    /// Raise a date suggestion on an item, or dismiss the pending one
+    /// (nil: the user's "no"). The "yes" is `setWhen` with the
+    /// suggested value: any date set clears the suggestion.
+    func setWhenSuggested(_ ref: ItemRef, when: String?) {
+        write(.setWhenSuggested(id: ref.itemId, when: when, workspace: selector(ref.docId)), to: ref)
     }
 
     /// Move an item to another list of its own workspace
@@ -377,6 +394,9 @@ final class AppModel: ObservableObject {
                 doneLoadedLimit = limit
             }
             doneError = error
+        }
+        fetch(.doneCount, what: "done count", parse: Done.parseCount) { [weak self] total, _ in
+            if let total { self?.doneTotal = total }
         }
         fetch(.lists(), what: "lists", parse: Lists.parse) { [weak self] rows, _ in
             if let rows { self?.listNames = Lists.names(from: rows) }

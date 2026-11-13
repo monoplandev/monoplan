@@ -64,6 +64,10 @@ public struct ItemDetail: Decodable, Equatable {
     public let deadline: String?
     /// `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, when set.
     public let when: String?
+    /// A pending date suggestion (`when`-shaped): a date read out of
+    /// the title as it was typed, waiting on the user's yes or no
+    /// (spec/calendar-plan.md "Typed date phrases").
+    public let whenSuggested: String?
     /// Whole minutes, when set.
     public let duration: Int?
     public let place: PlaceInfo?
@@ -72,6 +76,13 @@ public struct ItemDetail: Decodable, Equatable {
     public let starred: Bool
 
     public var isTimed: Bool { (when?.count ?? 0) >= 16 }
+
+    /// The suggestion to ask about: only on an open item with no date
+    /// (a date is a plan; a closed or binned item has none to make, and
+    /// a suggestion left beside a set `when` is ignored).
+    public var pendingSuggestion: String? {
+        when == nil && binnedAt == nil && closedAt == nil ? whenSuggested : nil
+    }
 
     /// The list's display name: the doc's, else the reserved label.
     public var listLabel: String {

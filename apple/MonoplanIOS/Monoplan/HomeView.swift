@@ -279,21 +279,20 @@ private extension View {
 
 extension View {
     /// The small navigation title drawn by hand, for a count beside it
-    /// in a regular weight: "-" for none, a "+" after it when `more`
-    /// rows are still to load, nothing while `count` is nil (not
-    /// loaded). Goes with `navigationTitle`, which still names the
+    /// in a regular weight: "-" for none, nothing while `count` is
+    /// nil (not loaded). Goes with `navigationTitle`, which still names the
     /// page for the back button. `icon` goes before the title: the
     /// page's icon from the Home menu, in the menu's tint. `workspace`
     /// goes between the icon and the title for a list of a shared
     /// workspace, as the web's header has it ("Household > Groceries"):
     /// the workspace's name, muted so the list's leads, then a chevron.
     /// It is the first thing to truncate when the bar is short of room.
-    func countedTitle(_ title: String, count: Int?, more: Bool = false) -> some View {
-        countedTitle(title, count: count, more: more) { EmptyView() }
+    func countedTitle(_ title: String, count: Int?) -> some View {
+        countedTitle(title, count: count) { EmptyView() }
     }
 
     func countedTitle<Icon: View>(
-        _ title: String, count: Int?, more: Bool = false, workspace: String? = nil,
+        _ title: String, count: Int?, workspace: String? = nil,
         @ViewBuilder icon: () -> Icon
     ) -> some View {
         let icon = icon()
@@ -322,7 +321,7 @@ extension View {
                                 .font(.headline)
                                 .lineLimit(1)
                             if let count {
-                                Text(count == 0 ? "-" : "\(count)\(more ? "+" : "")")
+                                Text(count == 0 ? "-" : "\(count)")
                                     .font(.body.monospacedDigit())
                                     .foregroundStyle(.secondary)
                                     .layoutPriority(1)
