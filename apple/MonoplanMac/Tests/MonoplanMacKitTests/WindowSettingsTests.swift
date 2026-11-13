@@ -23,6 +23,17 @@ final class WindowSettingsTests: XCTestCase {
         XCTAssertNil(d.object(forKey: "hourCycle"))
     }
 
+    func testListCountsDefaultsOffAndRoundTrips() {
+        let d = defaults()
+        XCTAssertEqual(WindowSettings.load(from: d, locale: us, localizations: ["en"]).listCounts, false)
+        var s = WindowSettings.load(from: d, locale: us, localizations: ["en"])
+        s.listCounts = true
+        s.save(to: d)
+        let back = WindowSettings.load(from: d, locale: us, localizations: ["en"])
+        XCTAssertEqual(back.listCounts, true)
+        XCTAssertEqual(back.typedDates, true)
+    }
+
     func testLanguageIsTheAppsOwnSpanishOrEnglish() {
         XCTAssertEqual(WindowSettings.language(of: ["es"]), "es")
         XCTAssertEqual(WindowSettings.language(of: ["es-419", "en"]), "es")
@@ -41,9 +52,9 @@ final class WindowSettingsTests: XCTestCase {
 
     func testScripts() {
         let s = WindowSettings(typedDates: false, language: "es", hourCycle: "24h")
-        XCTAssertEqual(s.userScript, "window.__monoplanSettings = {\"hourCycle\":\"24h\",\"language\":\"es\",\"typedDates\":false};")
+        XCTAssertEqual(s.userScript, "window.__monoplanSettings = {\"hourCycle\":\"24h\",\"language\":\"es\",\"listCounts\":false,\"typedDates\":false};")
         XCTAssertEqual(
             HostInbound.settings(s).script,
-            "window.__monoplanHost.settings({\"hourCycle\":\"24h\",\"language\":\"es\",\"typedDates\":false})")
+            "window.__monoplanHost.settings({\"hourCycle\":\"24h\",\"language\":\"es\",\"listCounts\":false,\"typedDates\":false})")
     }
 }

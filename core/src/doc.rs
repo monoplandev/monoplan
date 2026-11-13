@@ -321,12 +321,6 @@ const KEY_BINNED_AT: &str = "binned_at";
 /// unarchiving deletes the key. Metadata-only — archiving never touches
 /// items, order containers, lifecycle, or Focus.
 const KEY_ARCHIVED_AT: &str = "archived_at";
-/// Global "show counts on non-Inbox lists" flag. Lives on the doc-level
-/// settings map; Inbox's own count is always visible (when non-zero) and
-/// is not gated by this. Absent ≡ false — written only when toggled on
-/// (and removed when toggled back off) so docs that have never enabled
-/// it carry no key.
-const KEY_SHOW_LIST_COUNTS: &str = "show_list_counts";
 /// The reserved `inbox` (Inbox) list's saved default view. Inbox has no
 /// ListMeta row, so its `KEY_VIEW` equivalent lives on the doc-level
 /// settings map — same encoding, same absent ≡ no-default semantics.
@@ -757,11 +751,6 @@ pub struct ListView {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingsView {
-    /// When true, clients render each non-Inbox list's open-item count
-    /// (Backlog + Live) in the nav (subject to the count > 0 gate).
-    /// Inbox's count is always shown regardless. Single global flag;
-    /// on by default (the opt-out is what gets persisted).
-    pub show_list_counts: bool,
     /// The reserved `inbox` (Inbox) list's saved default view. Inbox has
     /// no ListMeta row, so its default lives here rather than on
     /// [`ListView::default_view`]. `None` ≡ no saved default.
@@ -814,7 +803,6 @@ pub struct ImportSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportSettings {
-    pub show_list_counts: bool,
     /// Inbox's saved default view in its encoded form (`"list"`,
     /// `"board"`, `"board:<lanes>"` — see [`DefaultView`]). Skipped when
     /// unset so pre-default-view dumps stay byte-identical.
@@ -3202,29 +3190,6 @@ impl Doc {
             .commit_with(CommitOptions::new().origin(VIEW_ORIGIN));
     }
 
-    /// Toggle the global "show counts on non-Inbox lists" setting. Inbox
-    /// is unaffected — its count is always visible (subject to count >
-    /// 0) and is not gated by this flag. No-op when the value is
-    /// unchanged, so flicking the menu twice doesn't emit phantom
-    /// events. Never an undo step (`VIEW_ORIGIN`).
-    pub fn set_show_list_counts(&self, show: bool) -> Result<(), DocError> {
-        let settings = self.settings_map();
-        let current = read_bool(&settings, KEY_SHOW_LIST_COUNTS).unwrap_or(true);
-        if current == show {
-            return Ok(());
-        }
-        if show {
-            // Drop the key entirely on the on path so the default state
-            // leaves no trace — on-disk state matches a never-toggled doc.
-            settings.delete(KEY_SHOW_LIST_COUNTS)?;
-        } else {
-            settings.insert(KEY_SHOW_LIST_COUNTS, false)?;
-        }
-        self.commit_view();
-        self.push_event(settings_changed(&settings_view(&settings)));
-        Ok(())
-    }
-
     /// Name (`Some`, trimmed, non-empty) or un-name (`None` / blank) the
     /// doc. One commit; a no-op when unchanged. The name is doc content
     /// (it rides the settings map, encrypted like everything else), so
@@ -3804,7 +3769,6 @@ impl Doc {
         JsonExport {
             version: 1,
             settings: ExportSettings {
-                show_list_counts: s.show_list_counts,
                 inbox_view: s.inbox_view.map(|v| v.encode()),
             },
             lists,
@@ -5538,7 +5502,6 @@ impl Doc {
         let mut hasher = Sha256::new();
         let settings = self.get_settings();
         hasher.update(b"S");
-        hasher.update([settings.show_list_counts as u8]);
         hash_str(&mut hasher, settings.doc_name.as_deref().unwrap_or(""));
         hasher.update((settings.calendar_hidden_docs.len() as u32).to_be_bytes());
         for d in &settings.calendar_hidden_docs {
@@ -6219,18 +6182,8 @@ fn read_i64(map: &LoroMap, key: &str) -> Option<i64> {
     value.into_i64().ok()
 }
 
-fn read_bool(map: &LoroMap, key: &str) -> Option<bool> {
-    let v = map.get(key)?;
-    let value = v.as_value()?.clone();
-    value.into_bool().ok()
-}
-
 fn settings_view(map: &LoroMap) -> SettingsView {
     SettingsView {
-        // Defaults on: a never-toggled doc shows counts. The key is only
-        // persisted on the opt-out path (stored `false`); absence means
-        // the default.
-        show_list_counts: read_bool(map, KEY_SHOW_LIST_COUNTS).unwrap_or(true),
         // Inbox has no ListMeta row, so its saved default view lives
         // here; same encoding and same absent ≡ no-default reading as a
         // user list's `view` key.
@@ -6808,7 +6761,6 @@ fn diff_settings(pre: &SettingsView, post: &SettingsView, out: &mut Vec<AppEvent
 /// one place the event's payload is assembled from a [`SettingsView`].
 fn settings_changed(s: &SettingsView) -> AppEvent {
     AppEvent::SettingsChanged {
-        show_list_counts: s.show_list_counts,
         inbox_view: s.inbox_view,
         doc_name: s.doc_name.clone(),
         calendar_hidden_docs: s.calendar_hidden_docs.clone(),
@@ -7147,7 +7099,6 @@ mod tests {
         };
         doc.set_default_view(&list, Some(board)).unwrap();
         doc.set_default_view(LIST_INBOX, Some(board)).unwrap();
-        doc.set_show_list_counts(false).unwrap();
         doc.set_calendar_doc_hidden("other-doc", true).unwrap();
 
         // Undo reverses the rename, the last edit, and leaves every
@@ -7158,7 +7109,6 @@ mod tests {
         assert_eq!(meta.default_view, Some(board));
         let settings = doc.get_settings();
         assert_eq!(settings.inbox_view, Some(board));
-        assert!(!settings.show_list_counts);
         assert_eq!(settings.calendar_hidden_docs, vec!["other-doc".to_string()]);
 
         // And they did not clear the redo stack either.
@@ -7332,10 +7282,7 @@ mod tests {
     fn import_drops_unknown_default_view() {
         let export = JsonExport {
             version: 1,
-            settings: ExportSettings {
-                show_list_counts: false,
-                inbox_view: None,
-            },
+            settings: ExportSettings { inbox_view: None },
             lists: vec![ExportList {
                 id: "src-list".to_string(),
                 name: "Work".to_string(),
@@ -8050,53 +7997,6 @@ mod tests {
     }
 
     #[test]
-    fn new_doc_has_show_list_counts_on() {
-        let doc = Doc::new().unwrap();
-        assert!(doc.get_settings().show_list_counts);
-    }
-
-    #[test]
-    fn show_list_counts_round_trips() {
-        let doc = Doc::new().unwrap();
-        // Default is on; the opt-out (`false`) is what gets persisted.
-        doc.set_show_list_counts(false).unwrap();
-        assert!(!doc.get_settings().show_list_counts);
-        let bytes = doc.save().unwrap();
-        let restored = Doc::load(&bytes).unwrap();
-        assert!(!restored.get_settings().show_list_counts);
-        // Toggling back on drops the key — verify the round-trip to the
-        // default.
-        doc.set_show_list_counts(true).unwrap();
-        assert!(doc.get_settings().show_list_counts);
-    }
-
-    #[test]
-    fn show_list_counts_idempotent() {
-        let doc = Doc::new().unwrap();
-        let _ = doc.drain_events();
-        // On is the default, so setting it on is a no-op.
-        doc.set_show_list_counts(true).unwrap();
-        assert!(
-            doc.drain_events().is_empty(),
-            "no-op toggle must not emit events"
-        );
-        doc.set_show_list_counts(false).unwrap();
-        let evs = doc.drain_events();
-        assert!(matches!(
-            evs.as_slice(),
-            [AppEvent::SettingsChanged {
-                show_list_counts: false,
-                ..
-            }]
-        ));
-        doc.set_show_list_counts(false).unwrap();
-        assert!(
-            doc.drain_events().is_empty(),
-            "second toggle to same value must not re-emit"
-        );
-    }
-
-    #[test]
     fn save_load_round_trip_preserves_state() {
         let doc = Doc::new().unwrap();
         let id = doc.add_item(LIST_INBOX, "persisted").unwrap();
@@ -8315,12 +8215,10 @@ mod tests {
     fn json_export_includes_builtin_and_user_lists() {
         let doc = Doc::new().unwrap();
         let errands = doc.add_list("Errands").unwrap();
-        doc.set_show_list_counts(true).unwrap();
 
         let export = doc.export_json();
 
         assert_eq!(export.version, 1);
-        assert!(export.settings.show_list_counts);
         assert_eq!(
             export.lists[0],
             ExportList {
@@ -9959,16 +9857,13 @@ mod tests {
         let other = doc.add_list("Other").unwrap();
         let a = doc.add_item(LIST_INBOX, "a").unwrap();
         let b = doc.add_item(&other, "b").unwrap();
-        doc.set_show_list_counts(true).unwrap();
+        doc.set_doc_name(Some("Household")).unwrap();
         let _ = doc.drain_events();
 
         let snap = doc.snapshot_events();
         assert!(snap.iter().any(|e| matches!(
             e,
-            AppEvent::SettingsChanged {
-                show_list_counts: true,
-                ..
-            }
+            AppEvent::SettingsChanged { doc_name: Some(name), .. } if name == "Household"
         )));
         // ListAdded events come first, then ItemAdded events.
         let lists: Vec<&str> = snap
@@ -11245,10 +11140,7 @@ mod tests {
         // list. Should land in main, not silently dropped.
         let export = JsonExport {
             version: 1,
-            settings: ExportSettings {
-                show_list_counts: false,
-                inbox_view: None,
-            },
+            settings: ExportSettings { inbox_view: None },
             lists: vec![ExportList {
                 id: LIST_INBOX.to_string(),
                 name: INBOX_NAME.to_string(),
@@ -11308,10 +11200,7 @@ mod tests {
     fn import_json_rejects_unknown_version() {
         let export = JsonExport {
             version: 99,
-            settings: ExportSettings {
-                show_list_counts: false,
-                inbox_view: None,
-            },
+            settings: ExportSettings { inbox_view: None },
             lists: vec![],
             items: vec![],
             focus: vec![],
@@ -11351,19 +11240,19 @@ mod tests {
         let a = Doc::new().unwrap();
         let mut b = Doc::new().unwrap();
 
-        // Counts default on, so the meaningful peer toggle is opting out.
-        a.set_show_list_counts(false).unwrap();
+        a.set_calendar_doc_hidden("other-doc", true).unwrap();
         let blob = a.pending_export(&dek).unwrap().unwrap();
 
         b.apply_remote(&dek, &blob).unwrap();
 
-        assert!(!b.get_settings().show_list_counts);
+        assert_eq!(
+            b.get_settings().calendar_hidden_docs,
+            vec!["other-doc".to_string()]
+        );
         assert!(matches!(
             b.drain_events().as_slice(),
-            [AppEvent::SettingsChanged {
-                show_list_counts: false,
-                ..
-            }]
+            [AppEvent::SettingsChanged { calendar_hidden_docs, .. }]
+                if calendar_hidden_docs == &["other-doc".to_string()]
         ));
     }
 

@@ -276,11 +276,6 @@ export interface FocusEntry {
 }
 
 export interface SettingsView {
-  /** When true, the nav renders the live-item count beside each
-   *  non-Inbox list (subject to the count > 0 gate). Inbox's count is
-   *  always shown regardless. Single global flag; default false. Synced
-   *  via the doc-level settings map. */
-  showListCounts: boolean;
   /** The reserved `inbox` list's saved default view in encoded form, or
    *  `null` when none is saved. Inbox has no ListMeta row, so its
    *  default lives in the doc-level settings map rather than on
@@ -530,7 +525,6 @@ export interface DocApp extends DocItemActions {
   /** Toggle the global "show counts on non-Queue lists" setting.
    *  Queue's own count is always visible (subject to count > 0) and is
    *  not gated by this flag. */
-  setShowListCounts(show: boolean): void;
   /** Name the doc (`""` un-names it). Doc content: every member sees it. */
   setDocName(name: string): void;
   /** Hide / show a doc on the merged calendar. Personal: Home doc only. */
@@ -682,7 +676,6 @@ function materializeReplicaSnapshot(replica: Replica, home: boolean): HomeState 
     listsOrder: payload.lists.map((list) => list.id),
     listsById,
     settings: {
-      showListCounts: payload.settings.showListCounts ?? true,
       inboxView: payload.settings.inboxView ?? null,
       docName: payload.settings.docName ?? null,
       calendarHiddenDocs: payload.settings.calendarHiddenDocs ?? [],
@@ -731,7 +724,6 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
     listsOrder: [],
     listsById: {},
     settings: {
-      showListCounts: true,
       inboxView: null,
       docName: null,
       calendarHiddenDocs: [],
@@ -1110,7 +1102,6 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
         // wire format always sends the full known shape, so a single
         // setState keeps the store in lockstep with the doc.
         setState("settings", {
-          showListCounts: ev.showListCounts ?? true,
           inboxView: ev.inboxView ?? null,
           docName: ev.docName ?? null,
           calendarHiddenDocs: ev.calendarHiddenDocs ?? [],
@@ -1275,7 +1266,7 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
     return result;
   };
 
-  // A display-setting write (saved default view, list counts, calendar
+  // A display-setting write (saved default view, calendar
   // hidden docs). The core commits these under its
   // undo-excluded `view` origin, so no step is counted and no entry
   // recorded: undo after a view change reverses the last edit instead.
@@ -1546,9 +1537,6 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
     },
     setListArchived(id, archived) {
       mutate(() => replica.setListArchived(id, archived));
-    },
-    setShowListCounts(show) {
-      mutateView(() => replica.setShowListCounts(show));
     },
     addToFocus(id, index) {
       // Default to the top: newly-focused items are "what am I working on

@@ -14,6 +14,10 @@ public struct WindowSettings: Equatable {
     /// Whether the editors recognise a date typed into an item
     /// (`whenToken.ts`); on by default, as in the browser.
     public var typedDates: Bool
+    /// Whether the sidebar counts each list's open items
+    /// (`listCounts.ts`); off by default, as in the browser. Inbox and
+    /// Starred are counted either way.
+    public var listCounts: Bool
     /// The page's language (`i18n.tsx`): the app's own, "es" when the
     /// app runs in Spanish, "en" otherwise (System Settings › Language
     /// & Region › Applications; no setting of the app's own).
@@ -23,11 +27,13 @@ public struct WindowSettings: Equatable {
     public var hourCycle: String
 
     public static let typedDatesKey = "typedDates"
+    public static let listCountsKey = "listCounts"
     /// The global the user script sets.
     public static let global = "window.__monoplanSettings"
 
-    public init(typedDates: Bool, language: String, hourCycle: String) {
+    public init(typedDates: Bool, listCounts: Bool = false, language: String, hourCycle: String) {
         self.typedDates = typedDates
+        self.listCounts = listCounts
         self.language = language
         self.hourCycle = hourCycle
     }
@@ -41,6 +47,7 @@ public struct WindowSettings: Equatable {
     ) -> WindowSettings {
         WindowSettings(
             typedDates: defaults.object(forKey: typedDatesKey) as? Bool ?? true,
+            listCounts: defaults.object(forKey: listCountsKey) as? Bool ?? false,
             language: language(of: localizations),
             hourCycle: hourCycle(of: locale))
     }
@@ -61,12 +68,15 @@ public struct WindowSettings: Equatable {
     /// are the system's and never written.
     public func save(to defaults: UserDefaults = .standard) {
         defaults.set(typedDates, forKey: Self.typedDatesKey)
+        defaults.set(listCounts, forKey: Self.listCountsKey)
     }
 
     /// The object literal, keys sorted so equal settings give equal
     /// text. `HostSettings` on the JS side.
     public var json: String {
-        let object: [String: Any] = ["typedDates": typedDates, "language": language, "hourCycle": hourCycle]
+        let object: [String: Any] = [
+            "typedDates": typedDates, "listCounts": listCounts, "language": language, "hourCycle": hourCycle,
+        ]
         let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
         return String(decoding: data, as: UTF8.self)
     }

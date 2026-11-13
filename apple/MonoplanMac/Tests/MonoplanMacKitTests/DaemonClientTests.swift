@@ -174,16 +174,6 @@ final class DaemonClientTests: XCTestCase {
                 "days": .int(14), "today": .nil, "json": .bool(true), "all": .bool(true),
             ])])])])
         )
-        // The shapes cli/src/commands/settings.rs `wire_shape` pins.
-        XCTAssertEqual(
-            Request.settings.value,
-            .map(["Doc": .map(["cmd": .map(["Settings": .map([:])])])])
-        )
-        XCTAssertEqual(
-            Request.setShowListCounts(false).value,
-            .map(["Doc": .map(["cmd": .map(["Settings": .map(["show_list_counts": .bool(false)])])])])
-        )
-        XCTAssertEqual(try WorkspaceSettings.parse("{\n  \"show_list_counts\": false\n}\n"), WorkspaceSettings(showListCounts: false))
         // The shape cli/src/ipc.rs `wire_shape_is_named_maps_and_bare_unit_variants` pins.
         XCTAssertEqual(
             Request.createWorkspace(name: "Work").value,

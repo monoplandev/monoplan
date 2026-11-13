@@ -271,7 +271,7 @@ export function Nav(props: {
   /** The Upcoming entry's badge: Open rows owed or on today. Only the
    *  count is shown here; hidden at zero. */
   upcomingBadge: AttentionBadge;
-  /** Home doc settings flag; when true, render the live-item count
+  /** The device's list-counts preference (`listCounts.ts`); when true, render the live-item count
    *  badge beside each non-Inbox list in every section (showing "-" when
    *  the list is empty). Inbox badges are always shown regardless. */
   showListCounts: boolean;

@@ -30,6 +30,7 @@ import {
   type TimeFormatPreference,
 } from "./format.tsx";
 import { setTypedDatesPref, typedDatesPref } from "./whenToken.ts";
+import { listCountsPref, setListCountsPref } from "./listCounts.ts";
 
 type Section = "general" | "account" | "devices";
 
@@ -99,8 +100,6 @@ export function Settings(props: {
   onOpenChange: (b: boolean) => void;
   themePref: ThemePreference;
   onThemeChange: (pref: ThemePreference) => void;
-  showListCounts: boolean;
-  onShowListCountsChange: (show: boolean) => void;
   session: Session;
   logout: () => void;
   /** The server has deleted the account (`DELETE /api/account`); the
@@ -390,8 +389,8 @@ export function Settings(props: {
                     <Switch
                       class="settings-switch"
                       aria-label={m().settings.showListCounts}
-                      checked={props.showListCounts}
-                      onChange={(checked) => props.onShowListCountsChange(checked)}
+                      checked={listCountsPref()}
+                      onChange={(checked) => setListCountsPref(checked)}
                     >
                       <Switch.Input class="settings-switch-input" />
                       <Switch.Control class="settings-switch-control">

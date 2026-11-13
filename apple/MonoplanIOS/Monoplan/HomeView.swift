@@ -1,7 +1,8 @@
 // Home: the root page and the app's one navigation stack; there is
 // no tab bar. First the pages that are not one list: Starred, Agenda
-// and Done. Then a section per open workspace (Personal first, as
-// `Engine.session` orders them), each with its Inbox and then its
+// and Done (Starred with its count). Then a section per open workspace (Personal first, as
+// `Engine.session` orders them), each with its Inbox (and how many
+// Open items it holds) and then its
 // active lists in the doc's order, each led by its emoji (a folder
 // when it has none); a list opens its Open items.
 // The gear at the top right opens Settings (account and sync, with
@@ -136,7 +137,9 @@ struct HomeView: View {
             List {
                 Section {
                     NavigationLink(value: HomePage.starred) {
+                        // How many are starred; nothing is drawn for none.
                         Label { Text("Starred") } icon: { StarIcon() }
+                            .counted(model.starred.count)
                     }
                     NavigationLink(value: HomePage.agenda) {
                         Label("Calendar", systemImage: "calendar")
@@ -160,7 +163,9 @@ struct HomeView: View {
                 }
                 ForEach(model.session?.docs ?? [], id: \.docId) { doc in
                     Section {
-                        row(ListRef(docId: doc.docId, listId: "inbox", name: "Inbox"))
+                        // The Inbox's Open items, counted; nothing is
+                        // drawn for an empty one.
+                        row(ListRef(docId: doc.docId, listId: "inbox", name: "Inbox"), count: model.inboxCount(doc.docId) ?? 0)
                         ForEach(Lists.active(model.listsByDoc[doc.docId] ?? [])) { list in
                             row(ListRef(docId: doc.docId, listId: list.id, name: list.name, icon: list.icon))
                         }
@@ -243,12 +248,30 @@ struct HomeView: View {
         .opensItems()
     }
 
-    private func row(_ ref: ListRef) -> some View {
+    private func row(_ ref: ListRef, count: Int = 0) -> some View {
         NavigationLink(value: ref) {
             Label {
                 Text(ref.name)
             } icon: {
                 ListIcon(listId: ref.listId, emoji: ref.icon)
+            }
+            .counted(count)
+        }
+    }
+}
+
+private extension View {
+    /// A Home row's label with a count at its trailing edge, inside the
+    /// link so it sits before the chevron (`badge` draws after it).
+    /// Nothing is drawn for zero.
+    func counted(_ count: Int) -> some View {
+        HStack {
+            self
+            if count > 0 {
+                Spacer()
+                Text("\(count)")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
             }
         }
     }

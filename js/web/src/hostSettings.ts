@@ -3,7 +3,7 @@
 // side). The app owns these; the page reads them and never persists
 // its own. Two deliveries: a document-start user script sets
 // `window.__monoplanSettings` before any module runs, so the
-// readers (`whenToken.ts`, `format.tsx`, `i18n.tsx`) see the app's
+// readers (`whenToken.ts`, `listCounts.ts`, `format.tsx`, `i18n.tsx`) see the app's
 // values on first paint; and
 // `window.__monoplanHost.settings(...)` (`mirrorHost.ts`) pushes a
 // change live, which `applyHostSettings` fans out to the readers.
@@ -13,6 +13,8 @@
 export interface HostSettings {
   /** `whenToken.ts`: recognise a date typed into an item. */
   typedDates?: boolean;
+  /** `listCounts.ts`: count each list's open items in the sidebar. */
+  listCounts?: boolean;
   /** `i18n.tsx`: the app's own language. */
   language?: "es" | "en";
   /** `format.tsx`: the system's hour cycle. */

@@ -223,11 +223,6 @@ pub enum AppEvent {
     /// current known value for each surfaced field so consumers can
     /// mirror a small settings object with a single write.
     SettingsChanged {
-        /// When true, clients render each non-Inbox list's open-item
-        /// count (all Open states) in the nav (subject to the count > 0
-        /// gate). Inbox always shows its count regardless. Single global flag —
-        /// there is no per-list override.
-        show_list_counts: bool,
         /// The reserved `inbox` list's saved default view (`spec/board.md`),
         /// or `None` when none is saved. Inbox has no ListMeta row, so its
         /// default travels on the settings event rather than

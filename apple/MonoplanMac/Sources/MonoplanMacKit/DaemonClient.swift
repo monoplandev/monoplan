@@ -203,11 +203,6 @@ public enum Request {
     case lists(workspace: String? = nil)
     /// Who is logged in, from the daemon's account row.
     case account
-    /// The Home doc's account-wide UI settings (`WorkspaceSettings`;
-    /// `DocCmd::Settings`, an IPC-only frame with no CLI verb).
-    case settings
-    /// Set `show_list_counts`; the reply is the settings after.
-    case setShowListCounts(Bool)
     /// Create a workspace the account owns, by name, and open it on the
     /// engine (`Request::CreateWorkspace`; the reply is `workspaceCreated`).
     case createWorkspace(name: String)
@@ -301,10 +296,6 @@ public enum Request {
             ])])])]))
         case .account:
             return .string("Account")
-        case .settings:
-            return .map(["Doc": .map(["cmd": .map(["Settings": .map([:])])])])
-        case .setShowListCounts(let on):
-            return .map(["Doc": .map(["cmd": .map(["Settings": .map(["show_list_counts": .bool(on)])])])])
         case .createWorkspace(let name):
             return .map(["CreateWorkspace": .map(["name": .string(name)])])
         case .deleteWorkspace(let docId):

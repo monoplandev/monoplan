@@ -301,7 +301,7 @@ for the month grid). `groupByDeadline` becomes
   (overdue tone), a deadline today, or a `when`
   on today, a span covering today included. Its tone is the most urgent counted (overdue red, deadline-today
   warning, otherwise the ordinary faint count); hidden at zero and not gated
-  by `showListCounts`. Future days and done rows do not count, and neither
+  by the list-counts preference. Future days and done rows do not count, and neither
   does an event's past `when`: it has gone by (`attentionBadge` in
   `dayGroups.ts`).
 - Not a `Dnd` listbox (day sections, rows of two heights, nothing

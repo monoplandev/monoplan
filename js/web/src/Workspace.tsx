@@ -69,6 +69,7 @@ import {
 import type { ListOption } from "./ListPicker.tsx";
 import { MovePalette } from "./MovePalette.tsx";
 import { EditableNavLabel, Nav, NavFindButton, NavMenu, StatusSlot } from "./nav.tsx";
+import { listCountsPref } from "./listCounts.ts";
 import {
   isMacShell,
   onTitlebarMouseDown,
@@ -3060,7 +3061,7 @@ export function Workspace(props: {
         binCount={docs.binCount()}
         focusCount={docs.focusItems().length}
         upcomingBadge={upcomingBadge()}
-        showListCounts={home.state.settings.showListCounts}
+        showListCounts={listCountsPref()}
         view={view()}
         setView={navigateTo}
         onDeleteDoc={canDeleteDocs() ? props.deleteDoc : null}
@@ -3142,8 +3143,6 @@ export function Workspace(props: {
           setThemePref(pref);
           theme.set(pref);
         }}
-        showListCounts={home.state.settings.showListCounts}
-        onShowListCountsChange={(show) => home.setShowListCounts(show)}
         session={session.session()}
         logout={() => setLogoutConfirmOpen(true)}
         onAccountDeleted={() =>

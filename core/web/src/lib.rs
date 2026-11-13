@@ -448,11 +448,6 @@ impl Doc {
         self.inner.delete_list(list_id).map_err(js_err)
     }
 
-    #[wasm_bindgen(js_name = setShowListCounts)]
-    pub fn set_show_list_counts(&self, show: bool) -> Result<(), JsError> {
-        self.inner.set_show_list_counts(show).map_err(js_err)
-    }
-
     /// Name the doc (`""` un-names it). Doc content: every member sees
     /// it. See `spec/sharing-plan.md`.
     #[wasm_bindgen(js_name = setDocName)]
@@ -2197,11 +2192,6 @@ impl Replica {
         self.doc().delete_list(list_id).map_err(js_err)
     }
 
-    #[wasm_bindgen(js_name = setShowListCounts)]
-    pub fn set_show_list_counts(&self, show: bool) -> Result<(), JsError> {
-        self.doc().set_show_list_counts(show).map_err(js_err)
-    }
-
     /// See [`Doc::set_doc_name`].
     #[wasm_bindgen(js_name = setDocName)]
     pub fn set_doc_name(&self, name: &str) -> Result<(), JsError> {
@@ -2619,8 +2609,7 @@ impl From<CoreEvent> for ReplicaEvent {
 /// - `listIconChanged` — id, icon? (undefined = icon removed)
 /// - `listDefaultViewChanged` — id, defaultView? (undefined = cleared)
 /// - `listArchivedChanged` — id, archivedAt? (undefined = unarchived)
-/// - `settingsChanged` — showListCounts, inboxView?, docName?,
-///   calendarHiddenDocs
+/// - `settingsChanged` — inboxView?, docName?, calendarHiddenDocs
 /// - `focusChanged` — no fields; re-derive the Focus projection
 #[wasm_bindgen]
 pub struct AppEventJs {
@@ -2670,7 +2659,6 @@ pub struct AppEventJs {
     /// `Some(ts)` when the list is archived, `None` when active or on
     /// events that don't carry archive state.
     archived_at: Option<i64>,
-    show_list_counts: Option<bool>,
     /// Settings (`settingsChanged`): Inbox's saved default view in
     /// encoded form, or `None` when none is saved.
     inbox_view: Option<String>,
@@ -2753,10 +2741,6 @@ impl AppEventJs {
     pub fn open_index(&self) -> Option<usize> {
         self.open_index
     }
-    #[wasm_bindgen(getter, js_name = showListCounts)]
-    pub fn show_list_counts(&self) -> Option<bool> {
-        self.show_list_counts
-    }
     #[wasm_bindgen(getter, js_name = defaultView)]
     pub fn default_view(&self) -> Option<String> {
         self.default_view.clone()
@@ -2837,7 +2821,6 @@ impl From<CoreAppEvent> for AppEventJs {
             done_at: None,
             binned_at: None,
             archived_at: None,
-            show_list_counts: None,
             inbox_view: None,
             doc_name: None,
             calendar_hidden_docs: None,
@@ -3024,13 +3007,11 @@ impl From<CoreAppEvent> for AppEventJs {
                 ..blank
             },
             CoreAppEvent::SettingsChanged {
-                show_list_counts,
                 inbox_view,
                 doc_name,
                 calendar_hidden_docs,
             } => AppEventJs {
                 kind: "settingsChanged",
-                show_list_counts: Some(show_list_counts),
                 inbox_view: inbox_view.map(|v| v.encode()),
                 doc_name,
                 calendar_hidden_docs: Some(calendar_hidden_docs),
@@ -3077,7 +3058,14 @@ fn list_to_json(l: &monoplan_core::ListView) -> String {
 }
 
 fn settings_to_json(s: &monoplan_core::SettingsView) -> String {
-    let mut out = format!("{{\"showListCounts\":{}", s.show_list_counts);
+    let mut out = String::from("{\"calendarHiddenDocs\":[");
+    for (i, d) in s.calendar_hidden_docs.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(&json_string(d));
+    }
+    out.push(']');
     if let Some(v) = &s.inbox_view {
         out.push_str(",\"inboxView\":");
         out.push_str(&json_string(&v.encode()));
@@ -3086,14 +3074,6 @@ fn settings_to_json(s: &monoplan_core::SettingsView) -> String {
         out.push_str(",\"docName\":");
         out.push_str(&json_string(n));
     }
-    out.push_str(",\"calendarHiddenDocs\":[");
-    for (i, d) in s.calendar_hidden_docs.iter().enumerate() {
-        if i > 0 {
-            out.push(',');
-        }
-        out.push_str(&json_string(d));
-    }
-    out.push(']');
     out.push('}');
     out
 }

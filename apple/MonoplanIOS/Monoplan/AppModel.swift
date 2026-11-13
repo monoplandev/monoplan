@@ -107,7 +107,7 @@ final class AppModel: ObservableObject {
         hasAccount = location.hasAccount
         if case .connected = state {
             loadSession()
-                refreshAgenda()
+            refreshAgenda()
             refreshStarred()
             refreshDone()
         } else {
@@ -335,11 +335,20 @@ final class AppModel: ObservableObject {
         guard let session else { return }
         let open = Set(session.docs.map(\.docId))
         listsByDoc = listsByDoc.filter { open.contains($0.key) }
+        browsedLists = browsedLists.filter { open.contains($0.value.docId) }
         for doc in session.docs {
             fetch(.lists(workspace: selector(doc.docId)), what: "lists", parse: Lists.parse) { [weak self] rows, _ in
                 if let rows { self?.listsByDoc[doc.docId] = rows }
             }
+            // Each Inbox's Open items, for the count on its Home row:
+            // read as a browsed list, so a write of ours rereads it too.
+            refreshList(ListRef(docId: doc.docId, listId: "inbox", name: "Inbox"))
         }
+    }
+
+    /// How many Open items a workspace's Inbox holds; nil until read.
+    func inboxCount(_ docId: String) -> Int? {
+        listItems["\(docId)/inbox"]?.count
     }
 
     /// `item ls --list <list> -w <doc> --json`: one browsed list's Open

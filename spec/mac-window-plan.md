@@ -484,7 +484,7 @@ lives, and where it goes:
 | Theme (auto / light / dark) | `theme` cookie + localStorage (`theme.ts`) | An Appearance picker (System / Light / Dark) in a new General pane, `UserDefaults`. The app sets `NSApp.appearance`; the webview's `prefers-color-scheme` follows its effective appearance, so the page stays on `auto` and no value crosses. Sheets, alerts and the traffic lights match for free. |
 | Time format (auto / 12h / 24h) | `hourcycle` cookie (`format.tsx`) | The system's: `Locale.current.hourCycle`. No app setting. |
 | Typed dates (on / off) | `typeddates` cookie (`whenToken.ts`) | A toggle in the General pane, `UserDefaults`. |
-| Show list counts | **The doc** (`settings.show_list_counts`, synced to every device, `spec/data-model.md`) | Not a device preference, but it sits in the General pane anyway, because that is where a user looks for it (decided 2026-11-04). The pane reads and sets it through the engine, as the tray reads the agenda: `DocCmd::Settings {show_list_counts?}`, an IPC-only frame with no CLI verb (the flag is read from the Home doc alone and gates every workspace, so a `-w`-taking verb would misstate it; `Request.settings` / `.setShowListCounts`, `WorkspaceSettings`), sent without a workspace and so on Home. The page learns of a change through the mirror like any doc change; the pane re-fetches on every `Changed` event, so a toggle from the page or another device shows there. Nothing crosses `WindowSettings`. |
+| Show list counts (on / off) | `listcounts` cookie (`listCounts.ts`) | A toggle in the General pane, `UserDefaults`, off by default. A device preference since 2026-11-13: it was the Home doc's synced `show_list_counts`, set through an IPC-only `DocCmd::Settings` frame, and both are gone. It rides `WindowSettings` beside typed dates. |
 | Account: email, log out, delete | — | Already hidden in the mirror (`Session.mirror`); the Account pane and the tray own sign-in / sign-out. |
 | Devices: list, rename, revoke | `/api` through the proxy | A native Devices pane (built 2026-11-04): `GET` / `PATCH` / `DELETE /api/devices` with the engine's token, straight from the app (`Devices` in `MonoplanMacKit`, tested; `APICredential` from `Engine.session` + `Engine.device_token`, fetched off the main thread). Loaded when the pane appears and after every change, never on doc events. This Mac is marked and cannot be revoked there (that is Sign Out). |
 | Advanced: per-workspace sync facts | replica state | Gone from the dialog in both clients (decided 2026-11-04): `monoplan.sync()` in the devtools console (`consoleApi.ts`, installed by `Workspace`) tables the same facts, status, seq, epoch, fingerprint, counts, doc id, and reads better for comparing two devices. The CLI's `workspace status --json` has the seq and pending state; the fingerprint joins it only when a cross-device comparison needs it. |
@@ -497,9 +497,9 @@ lives, and where it goes:
 `Locale.current`, re-read on `UserDefaults.didChangeNotification` and
 `NSLocale.currentLocaleDidChangeNotification`; `HostInbound.settings`;
 the General pane's toggle; `hostSettings.ts` on the page, read by
-`whenToken.ts`, `i18n.tsx` and `format.tsx`). One
+`whenToken.ts`, `listCounts.ts`, `i18n.tsx` and `format.tsx`). One
 `WindowSettings` value, built in Swift from `UserDefaults` and the
-locale and shaped like `{language, hourCycle, typedDates}` (whatever
+locale and shaped like `{language, hourCycle, typedDates, listCounts}` (whatever
 the page cannot read for itself), delivered two ways:
 
 1. **At document start**, as a `WKUserScript` (`.atDocumentStart`,
@@ -586,7 +586,8 @@ alone; the dialog's controls are left alone until the section goes
 wholesale), then the transport with typed dates as its first
 passenger, then language and time format from system values (both
 built 2026-11-04, above), then show list counts in the General pane
-through the engine (built 2026-11-04, the table above), then the
+(built 2026-11-04 through the engine; a device preference on the
+transport since 2026-11-13, the table above), then the
 Devices pane, the console facts and the dialog's removal from the
 window (all built 2026-11-04, above). Done.
 

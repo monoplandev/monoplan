@@ -436,7 +436,7 @@ projection.
 permanent-deletion work); it is not exposed as a user-facing action in any
 client UI.
 
-Whether the nav shows an open-item count (all Open states) beside each list is governed by a single doc-level flag — see `WorkspaceSettings.show_list_counts`. There is no per-list override; Inbox's count is always shown regardless.
+Whether the nav shows an open-item count (all Open states) beside each list is a **device preference**, not doc state (web: the `listcounts` cookie, `listCounts.ts`; macOS: `UserDefaults`, `spec/mac-window-plan.md` "Settings"; off by default; iOS shows no per-list counts). It was the synced `WorkspaceSettings.show_list_counts` until 2026-11-13; a doc may still carry that key and nothing reads it. There is no per-list override; Inbox's count is always shown regardless.
 
 ## Built-in lists
 
@@ -475,7 +475,6 @@ Doc-level synced settings that are not owned by any specific `ListMeta`.
 
 | Field | Type | Notes |
 |---|---|---|
-| `show_list_counts` | bool? | when true, clients render each non-Inbox list's open-item count (all Open states) in the nav (subject to a `count > 0` gate). Inbox's count is always shown regardless. Absent ≡ **true**; the mutation deletes the key on the on path, so a never-toggled doc and one toggled back on are byte-identical and only the opt-out is persisted. |
 | `inbox_view` | string? | the reserved `inbox` list's **saved default view**. Inbox has no `ListMeta` row, so its `view` register lives here — same encoding, same absent ≡ no-default reading. See `spec/board.md`. |
 | `doc_name` | string? | the doc's user-facing name (`spec/sharing-plan.md`), trimmed. Doc content — every member sees it, the server never does. Absent ≡ unnamed (clients fall back to a built-in label); the Home doc is never named, clients label it "Personal". |
 | `calendar_hidden_docs` | list of string? | doc ids hidden from the merged calendar lens. A **personal** cross-doc preference: only ever read on the account's Home doc (which syncs across its devices and is never shared). Deduped; absent / empty ≡ every doc shown; the key is deleted once empty. Unknown ids are harmless. |
@@ -514,7 +513,6 @@ All mutations go through Loro APIs internally; the core exposes typed helpers:
   (`false`) a user list; refuses for `inbox` and `events`. Metadata-only: performs **no**
   item, order, lifecycle, or Focus mutations. No-op (no commit, no event) when
   the list is already in the requested state. See "Archived lists" above.
-- `set_show_list_counts(show)` — toggles the doc-level "show counts on non-Inbox lists" flag. Inbox's count is always visible (subject to count > 0) and is not gated by this.
 - `set_doc_name(name)` — `Some(name)` (trimmed, non-empty) names the doc, `None` / blank un-names it (key deleted). One commit; a no-op when unchanged. Emits `SettingsChanged`.
 - `set_calendar_doc_hidden(doc_id, hidden)` — the personal cross-doc preference (Home doc only; the core does not enforce which doc). One commit, a no-op when already in the requested state, and emits `SettingsChanged`. It rejects a blank id with `Invalid` and does not validate the id otherwise (the core holds no doc registry).
 - `set_default_view(list_id, view)` — saves (`Some`) or clears (`None`) a list's default view as one encoded register; accepts the reserved `inbox`, whose value lands in `settings.inbox_view` and reports via `SettingsChanged` rather than `ListDefaultViewChanged`; refuses the reserved `events` (`Invalid`: it has no list or board view). One commit; a no-op when unchanged. See `spec/board.md`.

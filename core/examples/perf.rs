@@ -312,10 +312,7 @@ fn commit(cfg: &Cfg) {
 fn import(cfg: &Cfg) {
     let export = JsonExport {
         version: 1,
-        settings: ExportSettings {
-            show_list_counts: false,
-            inbox_view: None,
-        },
+        settings: ExportSettings { inbox_view: None },
         lists: vec![ExportList {
             id: LIST_INBOX.to_string(),
             name: "Inbox".to_string(),

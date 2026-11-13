@@ -25,7 +25,6 @@ pub mod login;
 pub mod logout;
 mod password;
 mod recover;
-pub mod settings;
 mod share;
 pub mod signup;
 pub mod status;
@@ -204,13 +203,6 @@ pub enum DocCmd {
     Places(items::PlacesArgs),
     /// Search (`find.rs`). The daemon serves it over every open doc.
     Find(find::FindArgs),
-    /// The Home doc's account-wide UI settings (`settings.rs`): read,
-    /// or set what is `Some` first. IPC-only, for the macOS app's
-    /// Settings window; no CLI verb maps here.
-    Settings {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        show_list_counts: Option<bool>,
-    },
     ExportJson,
     /// `Doc::reconcile_with`: explicit maintenance sweep, never
     /// scheduled. `sweep_closed_before` is resolved in the client so the
@@ -249,7 +241,6 @@ pub fn run_doc(
         DocCmd::Lists(a) => lists::run(doc, a, out),
         DocCmd::Places(a) => items::places(open_docs, a, out),
         DocCmd::Find(a) => find::run(doc, a, out),
-        DocCmd::Settings { show_list_counts } => settings::run(doc, show_list_counts, out),
         DocCmd::ExportJson => {
             out.write_all(export::render(doc)?.as_bytes())?;
             Ok(())
