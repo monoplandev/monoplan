@@ -498,23 +498,33 @@ struct ItemTitleEditor: View {
     }
 }
 
-/// The star beside the close button at the top right of an item's page: gold and filled when
-/// the item is starred, an outline when it is not; a tap flips it.
+/// The star beside the close button at the top right of an item's page,
+/// drawn as the web dialog draws it (`.task-dialog-pin-toggle`): the
+/// web's own glyph (`js/web/src/icons/star-filled.svg`, in the asset
+/// catalog as `StarFill` and, stroked, `StarStroke`), a thin outline
+/// that fills yellow when the item is starred; a tap flips it.
 private struct StarButton: View {
     let starred: Bool
     let action: () -> Void
 
-    static let gold = Color(red: 1.0, green: 0.76, blue: 0.03)
+    /// The web's `#ffe785`.
+    static let fill = Color(red: 1.0, green: 0.906, blue: 0.522)
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: starred ? "star.fill" : "star")
-                .font(.title3)
-                .foregroundStyle(starred ? AnyShapeStyle(Self.gold) : AnyShapeStyle(.secondary))
-                // A full 44pt target around the glyph, without pushing
-                // the status row taller or the star in from the edge.
-                .frame(width: 44, height: 44, alignment: .trailing)
-                .contentShape(Rectangle())
+            ZStack {
+                Image("StarFill")
+                    .resizable()
+                    .foregroundStyle(starred ? Self.fill : .clear)
+                Image("StarStroke")
+                    .resizable()
+                    .foregroundStyle(Color.primary.opacity(0.7))
+            }
+            .frame(width: 24, height: 24)
+            // A full 44pt target around the glyph, without pushing
+            // the status row taller.
+            .frame(width: 44, height: 44, alignment: .trailing)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .padding(.vertical, -10)

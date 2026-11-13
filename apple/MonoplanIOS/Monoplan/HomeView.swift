@@ -50,6 +50,19 @@ enum HomePage: Hashable {
     case settings
 }
 
+/// The web's star (`js/web/src/icons/star.svg`, in the asset catalog as
+/// `Star`), sized to sit where a symbol would as a label's icon.
+struct StarIcon: View {
+    var size: CGFloat = 22
+
+    var body: some View {
+        Image("Star")
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
+    }
+}
+
 struct HomeView: View {
     @EnvironmentObject private var model: AppModel
     @State private var path = NavigationPath()
@@ -65,10 +78,10 @@ struct HomeView: View {
             List {
                 Section {
                     NavigationLink(value: HomePage.starred) {
-                        Label("Starred", systemImage: "star")
+                        Label { Text("Starred") } icon: { StarIcon() }
                     }
                     NavigationLink(value: HomePage.agenda) {
-                        Label("Agenda", systemImage: "calendar")
+                        Label("Calendar", systemImage: "calendar")
                     }
                     NavigationLink(value: HomePage.done) {
                         Label("Done", systemImage: "checkmark.circle")
@@ -146,6 +159,48 @@ struct HomeView: View {
     }
 }
 
+extension View {
+    /// The small navigation title drawn by hand, for a count beside it
+    /// in a regular weight: "-" for none, a "+" after it when `more`
+    /// rows are still to load, nothing while `count` is nil (not
+    /// loaded). Goes with `navigationTitle`, which still names the
+    /// page for the back button. `icon` goes before the title: the
+    /// page's icon from the Home menu, in the menu's tint.
+    func countedTitle(_ title: String, count: Int?, more: Bool = false) -> some View {
+        countedTitle(title, count: count, more: more) { EmptyView() }
+    }
+
+    func countedTitle<Icon: View>(
+        _ title: String, count: Int?, more: Bool = false, @ViewBuilder icon: () -> Icon
+    ) -> some View {
+        let icon = icon()
+        return navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 6) {
+                        icon
+                            .font(.headline)
+                            .foregroundStyle(.tint)
+                            .accessibilityHidden(true)
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(title)
+                                .font(.headline)
+                                .lineLimit(1)
+                            if let count {
+                                Text(count == 0 ? "-" : "\(count)\(more ? "+" : "")")
+                                    .font(.body.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                    .layoutPriority(1)
+                            }
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.isHeader)
+                }
+            }
+    }
+}
+
 /// One list's Open items, in list order, for any list in any workspace
 /// (an Inbox included). Refetched on every doc change while shown.
 struct ListItemsView: View {
@@ -167,13 +222,19 @@ struct ListItemsView: View {
             }
         }
         .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
+        // The list's icon as Home's menu shows it (emoji, the Inbox's
+        // tray, else a folder), its name, and how many Open items it
+        // has, once they have loaded.
+        .countedTitle(list.name, count: model.listItems[list.key]?.count) {
+            ListIcon(listId: list.listId, emoji: list.icon)
+        }
         .refreshable { model.refreshList(list) }
         .onAppear { model.refreshList(list) }
         .onChange(of: model.changeCount) { model.refreshList(list) }
     }
 
-    /// The header: the list's emoji, when it has one, before its name.
+    /// The page's name for the back button: the list's emoji, when it
+    /// has one, before its name.
     private var title: String {
         guard let icon = list.icon, !icon.isEmpty else { return list.name }
         return "\(icon) \(list.name)"

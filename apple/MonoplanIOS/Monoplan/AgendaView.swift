@@ -32,7 +32,7 @@ struct AgendaView: View {
                 .animation(.default, value: model.agenda)
             }
         }
-        .navigationTitle("Agenda")
+        .navigationTitle("Calendar")
         .refreshable { model.refreshAgenda() }
         .onAppear { model.refreshAgenda() }
     }
@@ -41,12 +41,12 @@ struct AgendaView: View {
         ScrollView {
             if let error = model.agendaError {
                 ContentUnavailableView(
-                    "Agenda unavailable",
+                    "Calendar unavailable",
                     systemImage: "exclamationmark.triangle",
                     description: Text(error)
                 )
             } else if model.sync == nil, case .connecting(let why) = model.clientState {
-                ContentUnavailableView("Agenda", systemImage: "calendar", description: Text(why))
+                ContentUnavailableView("Calendar", systemImage: "calendar", description: Text(why))
             } else {
                 ContentUnavailableView(
                     "Nothing scheduled",

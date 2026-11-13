@@ -27,6 +27,9 @@ struct StarredView: View {
             }
         }
         .navigationTitle("Starred")
+        .countedTitle("Starred", count: model.starredError == nil ? model.starred.count : nil) {
+            StarIcon(size: 19)
+        }
         .refreshable { model.refreshStarred() }
         .onAppear { model.refreshStarred() }
     }

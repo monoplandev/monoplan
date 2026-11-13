@@ -29,15 +29,16 @@ struct SearchView: View {
     /// its label is matched here, with the index's own name rule.
     private struct BuiltIn: Identifiable {
         let title: String
-        let systemImage: String
+        /// The page's symbol; nil is Starred, which has the web's star.
+        let systemImage: String?
         let pick: SearchPick
         var id: String { title }
     }
 
     private var builtIns: [BuiltIn] {
         var all = [
-            BuiltIn(title: "Starred", systemImage: "star", pick: .page(.starred)),
-            BuiltIn(title: "Agenda", systemImage: "calendar", pick: .page(.agenda)),
+            BuiltIn(title: "Starred", systemImage: nil, pick: .page(.starred)),
+            BuiltIn(title: "Calendar", systemImage: "calendar", pick: .page(.agenda)),
             BuiltIn(title: "Done", systemImage: "checkmark.circle", pick: .page(.done)),
         ]
         if let home = model.session?.primaryDocId {
@@ -77,15 +78,38 @@ struct SearchView: View {
             }
         } else {
             List {
-                ForEach(pages) { page in
-                    Button { pick(page.pick) } label: {
-                        Label(page.title, systemImage: page.systemImage)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
+                Section {
+                    ForEach(pages) { page in
+                        Button { pick(page.pick) } label: {
+                            Label {
+                                Text(page.title)
+                            } icon: {
+                                if let symbol = page.systemImage {
+                                    Image(systemName: symbol)
+                                } else {
+                                    StarIcon()
+                                }
+                            }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
                     }
-                }
-                ForEach(hits) { hit in
-                    Button { open(hit) } label: { SearchHitRow(hit: hit) }
+                    ForEach(hits) { hit in
+                        Button { open(hit) } label: { SearchHitRow(hit: hit) }
+                    }
+                } header: {
+                    // The count is of the rows shown: pages and hits.
+                    let count = pages.count + hits.count
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Search results")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Spacer(minLength: 8)
+                        Text(count == 1 ? "1 result" : "\(count) results")
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    .textCase(nil)
                 }
             }
             // Plain, so a row reads as a row rather than a tinted link.
