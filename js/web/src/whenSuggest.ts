@@ -1,6 +1,6 @@
 // Date suggestions read out of a title. A date phrase typed into a title
 // ("dentist friday 8:30") never changes the title and never sets a date
-// by itself: it raises a question, "Fri 14 Nov 08:30?", shown in orange
+// by itself: it raises a question, "Suggested: Fri 14 Nov 08:30", shown in orange
 // where the date would be, which the user answers yes or no
 // (`WhenSuggestion.tsx`). Decided 2026-11-13, replacing the inline token
 // that cut the words out of the title (`spec/calendar-plan.md`, "Typed

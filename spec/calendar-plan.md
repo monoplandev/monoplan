@@ -368,8 +368,8 @@ for the month grid). `groupByDeadline` becomes
 - **Typed date phrases** (built 2026-11-03; reworked 2026-11-13 from an
   inline title token to a suggestion). A date phrase typed into a title
   ("friday night", "tomorrow at 5pm", "14 nov") raises a **date
-  suggestion**: a question, "Fri 14 Nov 08:30?", shown in orange where
-  the date would be, answered yes or no. The title is never rewritten
+  suggestion**: "Suggested: Fri 14 Nov 08:30", shown in orange where
+  the date would be, answered with a tick or a ✕. The title is never rewritten
   and no date is set without the yes. The rule is `whenSuggest.ts`, the
   control `WhenSuggestion.tsx`; the grammar is `whenParse.ts` over
   chrono-node's casual parser, English or Spanish by locale (about 14 KB
@@ -393,7 +393,7 @@ for the month grid). `groupByDeadline` becomes
     default hour's `duration` beside a timed value, as any `when` write
     gives). Setting a date any other way also clears the suggestion.
   - It shows only in the task surface, on an open item with no `when`:
-    in the dates band in place of the date input, with Yes / No (a "Set
+    in the dates band in place of the date input, shaped like it, with a tick and a ✕ at the right edge (a "Set
     date…" from a menu still opens the field). While a title is being
     typed there the question shows live, before anything is written,
     and is answered straight away (Yes sets the date, No just marks the

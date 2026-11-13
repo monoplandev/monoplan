@@ -3277,49 +3277,53 @@ input.task-check:hover {
   cursor: pointer;
 }
 
-/* A date suggestion (`WhenSuggestion.tsx`): a date read out of the
-   title, put as a question where the date would be. Orange with a
-   dashed edge: the today hue, but never mistaken for a set date. Sits
-   in the task surface's dates band. */
+/* A date suggestion (`WhenSuggestion.tsx`), in the date's place in the
+   task surface. Built on the date field's own parts
+   (`.task-dialog-when-anchor`, `.task-dialog-when-icon`) and the input's
+   box (`.task-dialog-when-input`: 32px, same padding and radius,
+   inherited font), so it sits exactly where the date would. Orange, no
+   border: the today hue marks it as not yet a date. */
 .when-suggestion {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 4px 3px 8px;
-  border-radius: 8px;
-  border: 1px dashed var(--due-today-text);
+  height: 32px;
+  box-sizing: border-box;
+  padding: 2px 48px 2px 26px;
+  border-radius: 4px;
   background: var(--due-today-bg);
   color: var(--due-today-text);
-  font-size: 13px;
-  line-height: var(--lh-compact);
+}
+
+.when-suggestion .task-dialog-when-icon {
+  color: inherit;
+}
+
+.when-suggestion-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Tick then ✕, inset at the right edge where the date input's ✕ sits,
+   at its size. */
 .when-suggestion-answers {
+  position: absolute;
+  right: 3px;
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin-left: 2px;
 }
 
 .when-suggestion-answer {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  border-radius: 4px;
   color: inherit;
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
 }
 
-.when-suggestion-answer:hover,
-.when-suggestion-answer:focus-visible {
-  background: var(--due-today-text);
-  color: var(--due-today-bg);
+.when-suggestion-answer svg {
+  width: 12px;
+  height: 12px;
 }
 
 /* Control row under the title: list picker, then the "more" menu. In the

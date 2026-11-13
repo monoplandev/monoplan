@@ -392,12 +392,11 @@ export type Messages = {
     tomorrow: string;
     /** Quick action / context-menu action that removes the planned date. */
     remove: string;
-    /** A date suggestion put as a question (`WhenSuggestion.tsx`);
-     *  `label` is the resolved date, time included. */
+    /** A date suggestion as it reads (`WhenSuggestion.tsx`); `label` is
+     *  the resolved date, time included. */
     suggestion: (label: string) => string;
-    /** Accessible name / hover text of a date suggestion. */
-    suggestionGroup: string;
-    /** Answers to a date suggestion: take it as the date, or drop it. */
+    /** Names of the two answers to a date suggestion (a tick and a ✕):
+     *  take it as the date, or drop it. */
     suggestionYes: string;
     suggestionNo: string;
     /** Context-menu action that opens the item onto its date popover. */
@@ -842,10 +841,9 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       today: "Hoy",
       tomorrow: "Mañana",
       remove: "Quitar fecha",
-      suggestion: (label) => `¿${label}?`,
-      suggestionGroup: "Fecha sugerida",
-      suggestionYes: "Sí",
-      suggestionNo: "No",
+      suggestion: (label) => `Sugerida: ${label}`,
+      suggestionYes: "Usar la fecha sugerida",
+      suggestionNo: "Descartar la sugerencia",
       time: "Hora",
       clearTime: "Quitar hora",
       end: "Fin",
@@ -1234,10 +1232,9 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       today: "Today",
       tomorrow: "Tomorrow",
       remove: "Remove date",
-      suggestion: (label) => `${label}?`,
-      suggestionGroup: "Suggested date",
-      suggestionYes: "Yes",
-      suggestionNo: "No",
+      suggestion: (label) => `Suggested: ${label}`,
+      suggestionYes: "Use suggested date",
+      suggestionNo: "Dismiss suggestion",
       time: "Time",
       clearTime: "Remove time",
       end: "End",
