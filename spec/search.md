@@ -2,7 +2,7 @@
 
 Current search is a **local, client-side, plaintext index** over the already-decrypted account doc. Its first consumer is the web command palette (`cmd/ctrl+f`). The server does not participate.
 
-**Status (2026-10-08): the engine lives in core** (`core/src/search.rs`, `Doc::search`). Every client gets the same tokenizer and ranking; the web client is a thin query bridge over wasm (`searchJson`, `tokenize`, `matchesName`). The JS implementation this spec was first written against has been removed.
+**Status (2026-10-08): the engine lives in core** (`core/src/search.rs`, `Doc::search`). Every client gets the same tokenizer and ranking; the web client is a thin query bridge over wasm (`searchJson`, `tokenize`, `matchesName`). The JS implementation this spec was first written against has been removed. The native clients reach it through the CLI's `find` verb (`spec/cli.md` §Items, 2026-11-13), which is `Doc::search` over every open doc with the web Find's merge policy; the iOS search field is its first consumer and matches its built-in pages' labels with `matches_name` over the FFI. iOS shows no default menu: an empty query is a blank page.
 
 ## Goals
 
@@ -308,7 +308,9 @@ Where feasible, drive the index through the ordinary `Doc` mutation API rather t
 ## Open questions
 
 - Whether item `notes` should appear in the palette result preview, or only participate in matching.
-- Whether CLI should expose `monoplan find <query>` or defer search to the web UI first. The engine is now in core, so the verb is a thin wrapper when wanted.
+
+Resolved (2026-11-13): the CLI exposes `monoplan find <query>`; it is
+the native clients' read.
 
 Resolved: built-in view labels are matched at the palette layer by their
 rendered (localized) names rather than indexed by the engine — see

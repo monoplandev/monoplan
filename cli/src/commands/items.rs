@@ -728,7 +728,9 @@ mod tests {
             serde_json::json!({"Places": {"query": "gy", "limit": 8, "json": true}}),
         )
         .unwrap();
-        assert!(matches!(cmd, DocCmd::Places(a) if a.query.as_deref() == Some("gy") && a.limit == 8));
+        assert!(
+            matches!(cmd, DocCmd::Places(a) if a.query.as_deref() == Some("gy") && a.limit == 8)
+        );
     }
 
     #[test]

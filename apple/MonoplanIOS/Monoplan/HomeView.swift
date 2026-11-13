@@ -5,9 +5,10 @@
 // active lists in the doc's order, each led by its emoji (a folder
 // when it has none); a list opens its Open items.
 // The gear at the top right opens Settings (account and sync, with
-// Debug a level under it). A floating bar (`BottomBar`: search and add,
-// both inert so far) sits under every page. Every page is pushed from
-// here, and item rows on any of them tick and open the item's sheet.
+// Debug a level under it). A floating bar (`BottomBar`: search, and an
+// add button inert so far) sits under every page; while its field has
+// focus or text, `SearchView` covers the stack. Every page is pushed
+// from here, and item rows on any of them tick and open the item's sheet.
 // Archived lists and the reserved `events` list (calendar-only,
 // spec/events-plan.md) are left out.
 
@@ -41,27 +42,35 @@ struct ListIcon: View {
     }
 }
 
+/// The pages Home pushes that are not one list.
+enum HomePage: Hashable {
+    case starred
+    case agenda
+    case done
+    case settings
+}
+
 struct HomeView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var path = NavigationPath()
+    /// The bottom bar's search: what is typed, and whether the field
+    /// has focus.
+    @State private var query = ""
+    @FocusState private var searching: Bool
 
-    private enum Page: Hashable {
-        case starred
-        case agenda
-        case done
-        case settings
-    }
+    private var searchActive: Bool { searching || !query.isEmpty }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 Section {
-                    NavigationLink(value: Page.starred) {
+                    NavigationLink(value: HomePage.starred) {
                         Label("Starred", systemImage: "star")
                     }
-                    NavigationLink(value: Page.agenda) {
+                    NavigationLink(value: HomePage.agenda) {
                         Label("Agenda", systemImage: "calendar")
                     }
-                    NavigationLink(value: Page.done) {
+                    NavigationLink(value: HomePage.done) {
                         Label("Done", systemImage: "checkmark.circle")
                     }
                 }
@@ -81,13 +90,13 @@ struct HomeView: View {
             .navigationTitle("Home")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink(value: Page.settings) {
+                    NavigationLink(value: HomePage.settings) {
                         Label("Settings", systemImage: "gearshape")
                     }
                 }
             }
             .navigationDestination(for: ListRef.self) { ListItemsView(list: $0) }
-            .navigationDestination(for: Page.self) { page in
+            .navigationDestination(for: HomePage.self) { page in
                 switch page {
                 case .starred: StarredView()
                 case .agenda: AgendaView()
@@ -98,7 +107,27 @@ struct HomeView: View {
             .refreshable { model.loadSession() }
             .onAppear { model.loadSession() }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) { BottomBar() }
+        // Search covers the stack, navigation bar included, and sits
+        // under the bar. A page or list result closes it and is pushed
+        // onto whatever page search was started from.
+        .overlay {
+            if searchActive {
+                SearchView(query: query) { pick in
+                    query = ""
+                    searching = false
+                    switch pick {
+                    case .page(let page): path.append(page)
+                    case .list(let list): path.append(list)
+                    }
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.default, value: searchActive)
+        .onChange(of: query) { model.search(query) }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            BottomBar(query: $query, searching: $searching)
+        }
         // The inset on the stack does not reach the scroll views inside
         // it, so every page's content gets the bar's height as a bottom
         // margin: the last row scrolls clear of the bar.

@@ -114,6 +114,12 @@ final class DaemonClientTests: XCTestCase {
             ])])])])
         )
         XCTAssertEqual(
+            Request.find(query: "buy gro", limit: 50).value,
+            .map(["Doc": .map(["cmd": .map(["Find": .map([
+                "query": .string("buy gro"), "limit": .int(50), "json": .bool(true),
+            ])])])])
+        )
+        XCTAssertEqual(
             Request.done(limit: 50).value,
             .map(["Doc": .map(["cmd": .map(["Done": .map([
                 "limit": .int(50), "since": .nil, "json": .bool(true),

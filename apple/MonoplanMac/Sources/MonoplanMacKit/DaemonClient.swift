@@ -175,6 +175,10 @@ public enum Request {
     /// places, most recently used first (`KnownPlace.parse`). Spans
     /// every open doc, so it takes no workspace.
     case places(query: String, limit: Int)
+    /// `monoplan find <query> -n <limit> --json`: the search index of
+    /// every open doc, merged and ranked (`Find.parse`). Spans every
+    /// open doc, so it takes no workspace.
+    case find(query: String, limit: Int)
     /// `monoplan done -n <limit> --json`: the Personal workspace's Done
     /// items across every list, newest first by the moment they entered
     /// Done (`Items.parse`; `Done.days` groups them). A full window
@@ -257,6 +261,10 @@ public enum Request {
             return Self.doc(nil, .map(["Places": .map([
                 "query": query.isEmpty ? .nil : .string(query),
                 "limit": .int(Int64(limit)), "json": .bool(true),
+            ])]))
+        case .find(let query, let limit):
+            return Self.doc(nil, .map(["Find": .map([
+                "query": .string(query), "limit": .int(Int64(limit)), "json": .bool(true),
             ])]))
         case .setDuration(let id, let minutes, let workspace):
             return Self.set(id, workspace, ["duration": .string(minutes.map(String.init) ?? "-")])

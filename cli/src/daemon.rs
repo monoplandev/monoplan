@@ -1370,6 +1370,35 @@ impl Host {
                     }
                 }
             }
+            // `find`: the search index of every open doc, merged
+            // (`commands/find.rs`). Read-only, like the two above.
+            Request::Doc {
+                workspace,
+                cmd: crate::commands::DocCmd::Find(args),
+            } => {
+                if workspace.is_some() {
+                    Reply::Err {
+                        message: "find searches every workspace; it takes no -w".into(),
+                    }
+                } else {
+                    let docs: Vec<(crate::workspace::Candidate, &monoplan_core::Doc)> = self
+                        .engine
+                        .candidates()
+                        .into_iter()
+                        .filter_map(|c| self.engine.doc_for(c.doc_id).map(|d| (c, d)))
+                        .collect();
+                    let mut buf = Vec::new();
+                    match crate::commands::find::run_all(&docs, args, &mut buf) {
+                        Ok(()) => Reply::Output {
+                            stdout: String::from_utf8_lossy(&buf).into_owned(),
+                            sync: self.sync_status(),
+                        },
+                        Err(e) => Reply::Err {
+                            message: format!("{e:#}"),
+                        },
+                    }
+                }
+            }
             Request::Doc { workspace, cmd } => {
                 let doc_id = match self.engine.resolve(workspace.as_deref()) {
                     Ok(id) => id,

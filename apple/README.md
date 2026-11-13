@@ -34,7 +34,7 @@ so the FFI grows typed reads as that UI does. The offline
 ## Layering
 
 ```
-monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's daemon: Engine (start, request, watch, subscribe, import, session, device_token, shutdown), login, logout
+monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's daemon: Engine (start, request, watch, subscribe, import, session, device_token, shutdown), login, logout, matches_name
    → MonoplanCoreFFI.xcframework        static libs (macOS/iOS/iOS-sim) + C headers
       → MonoplanCore (SwiftPM)          generated Swift bindings + a thin facade
          → MonoplanMac, MonoplanIOS      consume MonoplanCore (and MonoplanMac's Kit product) as local packages
@@ -321,9 +321,17 @@ four-tab `TabView` and `ContentView.swift` went with it): the app opens
 on the index and every other page is pushed from it. A floating bar
 (`BottomBar.swift`: a search field with an add button to its right,
 glass on iOS 26, material before) is the stack's bottom inset, so it
-shows on every page. While the field has focus the add button is a
-cross that clears the text and drops the keyboard; search and add do
-nothing else yet. Item rows outside the
+shows on every page. Search (2026-11-13, `SearchView.swift`) works as
+the web's Find does (`spec/search.md`): while the field has focus or
+text, a page covers the stack, blank until something is typed (no
+default menu here), then the built-in pages whose names match
+(`matches_name` over the FFI), lists, and items, ranked across every
+open workspace (`AppModel.search` → `Request.find`, i.e. `find <query>
+--json`, on each keystroke and again on `Changed`). A page or list
+result closes search and is pushed; an item result opens its sheet over
+the results. For as long as search is up the add button is a cross that
+clears the text and drops the keyboard; add itself does nothing yet.
+Item rows outside the
 Agenda lead with a checkbox (`ItemCheckbox.swift`: empty while open,
 ticked when Done, crossed when Cancelled). Tapping it ticks an open item
 or reopens a closed one into Backlog (`AppModel.setDone` →

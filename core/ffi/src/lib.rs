@@ -244,6 +244,16 @@ pub fn login(
     })
 }
 
+/// Whether `name` matches `query` the way the search index matches a
+/// list's name (`spec/search.md`): every query token prefixes some
+/// token of `name`, accents and case folded; an empty query matches
+/// everything. For the labels a client owns (its built-in views), which
+/// the index never sees.
+#[uniffi::export]
+pub fn matches_name(name: String, query: String) -> bool {
+    monoplan_core::matches_name(&name, &query)
+}
+
 /// Sign out: stop whatever holds the profile, hold it, revoke this
 /// device on the server, wipe it. What `monoplan auth logout` does, for
 /// the app's Settings. The revoke is best-effort (an unreachable server

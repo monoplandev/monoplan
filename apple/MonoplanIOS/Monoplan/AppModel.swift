@@ -62,6 +62,16 @@ final class AppModel: ObservableObject {
     /// fetched when its page appears and on each `Changed` while shown.
     @Published private(set) var itemDetails: [String: ItemDetail] = [:]
     @Published private(set) var itemErrors: [String: String] = [:]
+    /// Search results (`find <query> --json`: every open workspace,
+    /// ranked), and the query they answer. The hits of the query before
+    /// stay until the next reply, so `searchedQuery` says whether they
+    /// are for what is typed now.
+    @Published private(set) var searchHits: [SearchHit] = []
+    @Published private(set) var searchedQuery = ""
+    @Published private(set) var searchError: String?
+    /// What is being searched for, trimmed; empty while search is idle.
+    private var searchQuery = ""
+    static let searchLimit = 50
     private var refreshQueued = false
     @Published var lastError: String?
     @Published var signingIn = false
@@ -131,6 +141,38 @@ final class AppModel: ObservableObject {
         refreshAgenda()
         refreshStarred()
         refreshDone()
+        refreshSearch()
+    }
+
+    /// Search for what the bar's field holds, on every keystroke: the
+    /// index is in process and a query is well under a frame. An empty
+    /// query clears the results; it is not a request.
+    func search(_ query: String) {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query != searchQuery else { return }
+        searchQuery = query
+        if query.isEmpty {
+            searchHits = []
+            searchedQuery = ""
+            searchError = nil
+        } else {
+            refreshSearch()
+        }
+    }
+
+    /// Run the current query again: it changed, or the docs did under
+    /// it. A reply for a query no longer typed is dropped.
+    private func refreshSearch() {
+        let query = searchQuery
+        guard !query.isEmpty else { return }
+        fetch(.find(query: query, limit: Self.searchLimit), what: "search results", parse: Find.parse) { [weak self] hits, error in
+            guard let self, query == searchQuery else { return }
+            if let hits {
+                searchHits = hits
+                searchedQuery = query
+            }
+            searchError = error
+        }
     }
 
     /// Tick an item, or reopen a closed one (`item set --lifecycle`).

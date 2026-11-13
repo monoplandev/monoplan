@@ -620,7 +620,10 @@ mod tests {
         assert_eq!(
             by_day,
             vec![
-                (TODAY, vec!["past-when", "overdue", "both-late", "due-today"]),
+                (
+                    TODAY,
+                    vec!["past-when", "overdue", "both-late", "due-today"]
+                ),
                 ("2026-09-11", vec!["dl-first"]),
                 ("2026-09-12", vec!["both"]),
             ]
@@ -714,11 +717,8 @@ mod tests {
                 ]
             )]
         );
-        let rows: Vec<(PlacedBy, Tone)> = days[0]
-            .rows
-            .iter()
-            .map(|r| (r.placed_by, r.tone))
-            .collect();
+        let rows: Vec<(PlacedBy, Tone)> =
+            days[0].rows.iter().map(|r| (r.placed_by, r.tone)).collect();
         assert_eq!(
             rows,
             vec![

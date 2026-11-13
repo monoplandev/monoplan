@@ -2,16 +2,20 @@
 // its right, an add button. Placed as the bottom safe-area inset of
 // Home's navigation stack, so it stays put across pushed pages and
 // lists scroll under it. Liquid Glass on iOS 26, material before.
-// While the field has focus the add button becomes a cross that
-// cancels the search: clears the text and drops the keyboard. Nothing
-// else works yet: the field takes text and add is inert until search
-// and capture land.
+// Home owns the query and the field's focus, and draws the results
+// (`SearchView`) while either is set; for as long, the add button is a
+// cross that cancels the search: clears the text and drops the
+// keyboard. Add itself is inert until capture lands.
 
 import SwiftUI
 
 struct BottomBar: View {
-    @State private var query = ""
-    @FocusState private var searching: Bool
+    @Binding var query: String
+    @FocusState.Binding var searching: Bool
+
+    /// Search is up: the field has focus, or holds a query whose
+    /// results are being read with the keyboard down.
+    private var active: Bool { searching || !query.isEmpty }
 
     private static let height: CGFloat = 48
     private static let bottomPadding: CGFloat = 8
@@ -38,13 +42,13 @@ struct BottomBar: View {
             // One button in one glass circle, so the glyph swaps in
             // place rather than one control replacing another.
             Button {
-                if searching {
+                if active {
                     query = ""
                     searching = false
                 }
                 // Otherwise capture: not built yet.
             } label: {
-                Image(systemName: searching ? "xmark" : "square.and.pencil")
+                Image(systemName: active ? "xmark" : "square.and.pencil")
                     .font(.title3.weight(.semibold))
                     .contentTransition(.symbolEffect(.replace))
                     .frame(width: Self.height, height: Self.height)
@@ -52,8 +56,8 @@ struct BottomBar: View {
             }
             .buttonStyle(.plain)
             .glass(in: Circle())
-            .accessibilityLabel(searching ? "Cancel search" : "Add")
-            .animation(.default, value: searching)
+            .accessibilityLabel(active ? "Cancel search" : "Add")
+            .animation(.default, value: active)
         }
         .padding(.horizontal, 16)
         .padding(.bottom, Self.bottomPadding)

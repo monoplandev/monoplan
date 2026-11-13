@@ -17,6 +17,7 @@ pub mod db;
 mod delete_account;
 pub mod done;
 pub mod export;
+pub mod find;
 pub mod focus;
 pub mod items;
 pub mod lists;
@@ -81,6 +82,8 @@ enum Cmd {
     Bin(bin::BinArgs),
     /// Known places: the ones already on items, most recently used first.
     Places(items::PlacesArgs),
+    /// Search items and lists in every workspace: all words must match, the last as a prefix.
+    Find(find::FindArgs),
     /// Manage account and login.
     #[command(subcommand)]
     Auth(AuthCmd),
@@ -199,6 +202,8 @@ pub enum DocCmd {
     Lists(lists::ListsArgs),
     /// The account's known places, across every open doc.
     Places(items::PlacesArgs),
+    /// Search (`find.rs`). The daemon serves it over every open doc.
+    Find(find::FindArgs),
     /// The Home doc's account-wide UI settings (`settings.rs`): read,
     /// or set what is `Some` first. IPC-only, for the macOS app's
     /// Settings window; no CLI verb maps here.
@@ -243,6 +248,7 @@ pub fn run_doc(
         DocCmd::Focus(a) => focus::run(doc, a, out),
         DocCmd::Lists(a) => lists::run(doc, a, out),
         DocCmd::Places(a) => items::places(open_docs, a, out),
+        DocCmd::Find(a) => find::run(doc, a, out),
         DocCmd::Settings { show_list_counts } => settings::run(doc, show_list_counts, out),
         DocCmd::ExportJson => {
             out.write_all(export::render(doc)?.as_bytes())?;
@@ -381,6 +387,7 @@ impl Cli {
             Cmd::Starred(a) => DocCmd::Focus(a),
             Cmd::List(a) => DocCmd::Lists(a),
             Cmd::Places(a) => DocCmd::Places(a),
+            Cmd::Find(a) => DocCmd::Find(a),
         };
         // A fresh install gets a local-only workspace here; no account
         // needed to capture (`crate::bootstrap`).

@@ -1,0 +1,151 @@
+// Search, drawn over Home's navigation stack while the bottom bar's
+// field has focus or text. It works as the web's Find does
+// (spec/search.md; `find --json` through the engine): the built-in
+// pages whose names match, then lists, then items, ranked across every
+// open workspace, every word matching and the last one as a prefix.
+// Unlike the web there is no default menu: with nothing typed the page
+// is blank. A page or list result closes search and pushes it; an item
+// result opens the item's sheet over the results, which stay.
+
+import MonoplanCore
+import MonoplanMacKit
+import SwiftUI
+
+/// What a result that is not an item opens.
+enum SearchPick {
+    case page(HomePage)
+    case list(ListRef)
+}
+
+struct SearchView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.openItem) private var openItem
+    let query: String
+    let pick: (SearchPick) -> Void
+
+    private var trimmed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// A built-in page: not a doc entity, so the index never has it and
+    /// its label is matched here, with the index's own name rule.
+    private struct BuiltIn: Identifiable {
+        let title: String
+        let systemImage: String
+        let pick: SearchPick
+        var id: String { title }
+    }
+
+    private var builtIns: [BuiltIn] {
+        var all = [
+            BuiltIn(title: "Starred", systemImage: "star", pick: .page(.starred)),
+            BuiltIn(title: "Agenda", systemImage: "calendar", pick: .page(.agenda)),
+            BuiltIn(title: "Done", systemImage: "checkmark.circle", pick: .page(.done)),
+        ]
+        if let home = model.session?.primaryDocId {
+            all.append(BuiltIn(
+                title: "Inbox", systemImage: "tray",
+                pick: .list(ListRef(docId: home, listId: "inbox", name: "Inbox"))
+            ))
+        }
+        return all.filter { matchesName(name: $0.title, query: trimmed) }
+    }
+
+    var body: some View {
+        ZStack {
+            Color(.systemGroupedBackground).ignoresSafeArea()
+            if !trimmed.isEmpty {
+                results
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var results: some View {
+        let pages = builtIns
+        // The hits of the query before this one stay up until this
+        // one's arrive, so typing does not flicker; "no results" is
+        // only said once the engine has answered for what is typed.
+        let hits = model.searchHits
+        if pages.isEmpty && hits.isEmpty {
+            if let error = model.searchError {
+                ContentUnavailableView(
+                    "Search unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(error)
+                )
+            } else if model.searchedQuery == trimmed {
+                ContentUnavailableView.search(text: trimmed)
+            }
+        } else {
+            List {
+                ForEach(pages) { page in
+                    Button { pick(page.pick) } label: {
+                        Label(page.title, systemImage: page.systemImage)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                }
+                ForEach(hits) { hit in
+                    Button { open(hit) } label: { SearchHitRow(hit: hit) }
+                }
+            }
+            // Plain, so a row reads as a row rather than a tinted link.
+            .buttonStyle(.plain)
+            .listStyle(.insetGrouped)
+            .scrollDismissesKeyboard(.interactively)
+        }
+    }
+
+    private func open(_ hit: SearchHit) {
+        switch hit.kind {
+        case .item:
+            openItem(ItemRef(docId: hit.docId, itemId: hit.itemId, title: hit.title))
+        case .list:
+            guard let docId = hit.docId ?? model.session?.primaryDocId else { return }
+            pick(.list(ListRef(docId: docId, listId: hit.itemId, name: hit.title, icon: hit.icon)))
+        }
+    }
+}
+
+/// One result: a list under its icon, or an item under a checkbox that
+/// mirrors its state (display only, as in the web's palette; the sheet
+/// ticks). Underneath, where the result lives: the item's list, the
+/// workspace when it is not Personal, and "Archived" for an archived
+/// list or an item in one. A binned item is struck through.
+private struct SearchHitRow: View {
+    let hit: SearchHit
+
+    private var binned: Bool { hit.state == "binned" }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Group {
+                switch hit.kind {
+                case .item: ItemCheckbox(state: hit.state ?? "backlog")
+                case .list: ListIcon(listId: hit.itemId, emoji: hit.icon)
+                }
+            }
+            .frame(minWidth: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(hit.title)
+                    .strikethrough(binned)
+                    .foregroundStyle(binned ? .secondary : .primary)
+                    .lineLimit(2)
+                if !note.isEmpty {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private var note: String {
+        var parts = [hit.listName, hit.docName].compactMap { $0 }
+        if binned { parts.append("Bin") }
+        if hit.archived { parts.append("Archived") }
+        return parts.joined(separator: " · ")
+    }
+}

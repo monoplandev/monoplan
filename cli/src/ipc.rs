@@ -446,6 +446,17 @@ mod tests {
             }),
             serde_json::json!({"Doc": {"workspace": "Work", "cmd": {"Focus": {"cmd": null, "json": true}}}})
         );
+        assert_eq!(
+            shape(&Request::Doc {
+                workspace: None,
+                cmd: DocCmd::Find(crate::commands::find::FindArgs {
+                    query: "buy gro".into(),
+                    limit: 50,
+                    json: true,
+                })
+            }),
+            serde_json::json!({"Doc": {"cmd": {"Find": {"query": "buy gro", "limit": 50, "json": true}}}})
+        );
         // A client that omits `workspace` (the macOS app) means Home.
         let home: Request = rmp_serde::from_slice(
             &rmp_serde::to_vec_named(&serde_json::json!({"Doc": {"cmd": {"Lists": {"cmd": {"Ls": {"json": true, "archived": false, "all": true}}}}}})).unwrap(),
