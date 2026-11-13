@@ -369,8 +369,8 @@ for the month grid). `groupByDeadline` becomes
   inline title token to a suggestion). A date phrase typed into a title
   ("friday night", "tomorrow at 5pm", "14 nov") raises a **date
   suggestion**: "Suggested: Fri 14 Nov 08:30", shown in orange where
-  the date would be, answered with a tick or a ✕. The title is never rewritten
-  and no date is set without the yes. The rule is `whenSuggest.ts`, the
+  the date would be, answered with a tick or a ✕. The title is never
+  rewritten and no date is set without the yes. The rule is `whenSuggest.ts`, the
   control `WhenSuggestion.tsx`; the grammar is `whenParse.ts` over
   chrono-node's casual parser, English or Spanish by locale (about 14 KB
   gzipped per language).
@@ -393,8 +393,9 @@ for the month grid). `groupByDeadline` becomes
     default hour's `duration` beside a timed value, as any `when` write
     gives). Setting a date any other way also clears the suggestion.
   - It shows only in the task surface, on an open item with no `when`:
-    in the dates band in place of the date input, shaped like it, with a tick and a ✕ at the right edge (a "Set
-    date…" from a menu still opens the field). While a title is being
+    in the dates band in place of the date input, shaped like it, with
+    a tick and a ✕ at the right edge (a "Set date…" from a menu still
+    opens the field). While a title is being
     typed there the question shows live, before anything is written,
     and is answered straight away (Yes sets the date, No just marks the
     wording as asked). Lists and boards show nothing of it (an in-row
@@ -417,10 +418,9 @@ for the month grid). `groupByDeadline` becomes
     ahead, else tomorrow. The value is built from the parsed components,
     never a `Date`, so it stays floating.
   - Off for a closed item and for a log-a-completion capture: a date is a
-    plan, and a done item has none to make. Off everywhere under
-    Settings › General › "Suggest dates as you type", a device preference
-    in a cookie beside the time format; a suggestion already pending
-    still shows.
+    plan, and a done item has none to make. There is no setting to
+    turn it off (the "Recognise dates as you type" switch went
+    2026-11-13): a suggestion changes nothing until it is answered.
   - Not built: CLI verbs to answer (the JSON
     carries `when_suggested`; `set --when` answers it by setting a date),
     the iOS surface.

@@ -29,7 +29,6 @@ import {
   timeFormatPref,
   type TimeFormatPreference,
 } from "./format.tsx";
-import { setTypedDatesPref, typedDatesPref } from "./whenSuggest.ts";
 import { listCountsPref, setListCountsPref } from "./listCounts.ts";
 
 type Section = "general" | "account" | "devices";
@@ -391,20 +390,6 @@ export function Settings(props: {
                       aria-label={m().settings.showListCounts}
                       checked={listCountsPref()}
                       onChange={(checked) => setListCountsPref(checked)}
-                    >
-                      <Switch.Input class="settings-switch-input" />
-                      <Switch.Control class="settings-switch-control">
-                        <Switch.Thumb class="settings-switch-thumb" />
-                      </Switch.Control>
-                    </Switch>
-                  </div>
-                  <div class="settings-row">
-                    <div class="settings-row-label">{m().settings.typedDates}</div>
-                    <Switch
-                      class="settings-switch"
-                      aria-label={m().settings.typedDates}
-                      checked={typedDatesPref()}
-                      onChange={(checked) => setTypedDatesPref(checked)}
                     >
                       <Switch.Input class="settings-switch-input" />
                       <Switch.Control class="settings-switch-control">

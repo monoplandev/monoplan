@@ -525,9 +525,6 @@ export type Messages = {
     light: string;
     dark: string;
     showListCounts: string;
-    /** Switch for suggesting a date from a phrase typed into a title
-     *  (`whenSuggest.ts`); on by default. */
-    typedDates: string;
     /** 12 / 24-hour clock preference; "Auto" reuses `auto`. */
     timeFormat: string;
     timeFormat12: string;
@@ -924,7 +921,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       light: "Claro",
       dark: "Oscuro",
       showListCounts: "Mostrar contadores de listas",
-      typedDates: "Sugerir fechas al escribir",
       timeFormat: "Formato de hora",
       timeFormat12: "12 h",
       timeFormat24: "24 h",
@@ -1315,7 +1311,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       light: "Light",
       dark: "Dark",
       showListCounts: "Show list counts",
-      typedDates: "Suggest dates as you type",
       timeFormat: "Time format",
       timeFormat12: "12h",
       timeFormat24: "24h",

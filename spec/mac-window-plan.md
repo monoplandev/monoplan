@@ -483,8 +483,7 @@ lives, and where it goes:
 | Language (es / en) | `locale` cookie + localStorage (`i18n.tsx`) | The app's own localisation: `Bundle.main.preferredLocalizations` (System Settings › Language & Region › Applications). No app setting of its own. |
 | Theme (auto / light / dark) | `theme` cookie + localStorage (`theme.ts`) | An Appearance picker (System / Light / Dark) in a new General pane, `UserDefaults`. The app sets `NSApp.appearance`; the webview's `prefers-color-scheme` follows its effective appearance, so the page stays on `auto` and no value crosses. Sheets, alerts and the traffic lights match for free. |
 | Time format (auto / 12h / 24h) | `hourcycle` cookie (`format.tsx`) | The system's: `Locale.current.hourCycle`. No app setting. |
-| Typed dates (on / off) | `typeddates` cookie (`whenSuggest.ts`) | A toggle in the General pane, `UserDefaults`. |
-| Show list counts (on / off) | `listcounts` cookie (`listCounts.ts`) | A toggle in the General pane, `UserDefaults`, off by default. A device preference since 2026-11-13: it was the Home doc's synced `show_list_counts`, set through an IPC-only `DocCmd::Settings` frame, and both are gone. It rides `WindowSettings` beside typed dates. |
+| Show list counts (on / off) | `listcounts` cookie (`listCounts.ts`) | A toggle in the General pane, `UserDefaults`, off by default. A device preference since 2026-11-13: it was the Home doc's synced `show_list_counts`, set through an IPC-only `DocCmd::Settings` frame, and both are gone. It rides `WindowSettings` (the typed-dates toggle that first did was removed 2026-11-13, once a typed date became a suggestion to answer rather than something done to the title). |
 | Account: email, log out, delete | — | Already hidden in the mirror (`Session.mirror`); the Account pane and the tray own sign-in / sign-out. |
 | Devices: list, rename, revoke | `/api` through the proxy | A native Devices pane (built 2026-11-04): `GET` / `PATCH` / `DELETE /api/devices` with the engine's token, straight from the app (`Devices` in `MonoplanMacKit`, tested; `APICredential` from `Engine.session` + `Engine.device_token`, fetched off the main thread). Loaded when the pane appears and after every change, never on doc events. This Mac is marked and cannot be revoked there (that is Sign Out). |
 | Advanced: per-workspace sync facts | replica state | Gone from the dialog in both clients (decided 2026-11-04): `monoplan.sync()` in the devtools console (`consoleApi.ts`, installed by `Workspace`) tables the same facts, status, seq, epoch, fingerprint, counts, doc id, and reads better for comparing two devices. The CLI's `workspace status --json` has the seq and pending state; the fingerprint joins it only when a cross-device comparison needs it. |
@@ -492,14 +491,14 @@ lives, and where it goes:
 | Open window at launch | — | Native only (built 2026-11-04): a toggle in the General pane, `UserDefaults`, on by default (`LaunchPreference`). The tray opens the window on the first client state once the engine has settled, connected or not (not signed in, failed to start), never while it is still starting, so the page does not boot against no engine and flash its error before the reload. Off leaves a launch tray-only. |
 
 **Transport** (built 2026-11-04: `WindowSettings` in
-`MonoplanMacKit`, the `typedDates` default, the app's language from
+`MonoplanMacKit`, the app's language from
 `Bundle.main.preferredLocalizations`, the hour cycle from
 `Locale.current`, re-read on `UserDefaults.didChangeNotification` and
 `NSLocale.currentLocaleDidChangeNotification`; `HostInbound.settings`;
 the General pane's toggle; `hostSettings.ts` on the page, read by
-`whenSuggest.ts`, `listCounts.ts`, `i18n.tsx` and `format.tsx`). One
+`listCounts.ts`, `i18n.tsx` and `format.tsx`). One
 `WindowSettings` value, built in Swift from `UserDefaults` and the
-locale and shaped like `{language, hourCycle, typedDates, listCounts}` (whatever
+locale and shaped like `{language, hourCycle, listCounts}` (whatever
 the page cannot read for itself), delivered two ways:
 
 1. **At document start**, as a `WKUserScript` (`.atDocumentStart`,

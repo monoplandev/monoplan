@@ -3,7 +3,7 @@
 // side). The app owns these; the page reads them and never persists
 // its own. Two deliveries: a document-start user script sets
 // `window.__monoplanSettings` before any module runs, so the
-// readers (`whenSuggest.ts`, `listCounts.ts`, `format.tsx`, `i18n.tsx`) see the app's
+// readers (`listCounts.ts`, `format.tsx`, `i18n.tsx`) see the app's
 // values on first paint; and
 // `window.__monoplanHost.settings(...)` (`mirrorHost.ts`) pushes a
 // change live, which `applyHostSettings` fans out to the readers.
@@ -11,8 +11,6 @@
 // readers fall back to their cookies.
 
 export interface HostSettings {
-  /** `whenSuggest.ts`: suggest a date from a phrase typed into a title. */
-  typedDates?: boolean;
   /** `listCounts.ts`: count each list's open items in the sidebar. */
   listCounts?: boolean;
   /** `i18n.tsx`: the app's own language. */

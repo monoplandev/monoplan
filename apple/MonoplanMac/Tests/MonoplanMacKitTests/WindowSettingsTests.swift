@@ -11,18 +11,6 @@ final class WindowSettingsTests: XCTestCase {
 
     private let us = Locale(identifier: "en_US")
 
-    func testTypedDatesDefaultsOnAndRoundTrips() {
-        let d = defaults()
-        XCTAssertEqual(WindowSettings.load(from: d, locale: us, localizations: ["en"]).typedDates, true)
-        var s = WindowSettings.load(from: d, locale: us, localizations: ["en"])
-        s.typedDates = false
-        s.save(to: d)
-        XCTAssertEqual(WindowSettings.load(from: d, locale: us, localizations: ["en"]).typedDates, false)
-        // The system values are not persisted.
-        XCTAssertNil(d.object(forKey: "language"))
-        XCTAssertNil(d.object(forKey: "hourCycle"))
-    }
-
     func testListCountsDefaultsOffAndRoundTrips() {
         let d = defaults()
         XCTAssertEqual(WindowSettings.load(from: d, locale: us, localizations: ["en"]).listCounts, false)
@@ -31,7 +19,9 @@ final class WindowSettingsTests: XCTestCase {
         s.save(to: d)
         let back = WindowSettings.load(from: d, locale: us, localizations: ["en"])
         XCTAssertEqual(back.listCounts, true)
-        XCTAssertEqual(back.typedDates, true)
+        // The system values are not persisted.
+        XCTAssertNil(d.object(forKey: "language"))
+        XCTAssertNil(d.object(forKey: "hourCycle"))
     }
 
     func testLanguageIsTheAppsOwnSpanishOrEnglish() {
@@ -51,10 +41,10 @@ final class WindowSettingsTests: XCTestCase {
     }
 
     func testScripts() {
-        let s = WindowSettings(typedDates: false, language: "es", hourCycle: "24h")
-        XCTAssertEqual(s.userScript, "window.__monoplanSettings = {\"hourCycle\":\"24h\",\"language\":\"es\",\"listCounts\":false,\"typedDates\":false};")
+        let s = WindowSettings(language: "es", hourCycle: "24h")
+        XCTAssertEqual(s.userScript, "window.__monoplanSettings = {\"hourCycle\":\"24h\",\"language\":\"es\",\"listCounts\":false};")
         XCTAssertEqual(
             HostInbound.settings(s).script,
-            "window.__monoplanHost.settings({\"hourCycle\":\"24h\",\"language\":\"es\",\"listCounts\":false,\"typedDates\":false})")
+            "window.__monoplanHost.settings({\"hourCycle\":\"24h\",\"language\":\"es\",\"listCounts\":false})")
     }
 }

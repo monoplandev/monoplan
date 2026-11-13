@@ -17,24 +17,24 @@ describe("hostSettings", () => {
   test("absent outside the app", async () => {
     const m = await fresh(undefined);
     expect(m.hasHostSettings()).toBe(false);
-    expect(m.hostSetting("typedDates")).toBeUndefined();
+    expect(m.hostSetting("listCounts")).toBeUndefined();
   });
 
   test("reads the document-start global", async () => {
-    const m = await fresh({ typedDates: false });
+    const m = await fresh({ listCounts: false });
     expect(m.hasHostSettings()).toBe(true);
-    expect(m.hostSetting("typedDates")).toBe(false);
+    expect(m.hostSetting("listCounts")).toBe(false);
   });
 
   test("a live push merges and notifies", async () => {
-    const m = await fresh({ typedDates: false });
+    const m = await fresh({ listCounts: false });
     const seen: unknown[] = [];
     const off = m.onHostSettings((s: unknown) => seen.push(s));
-    m.applyHostSettings({ typedDates: true });
-    expect(m.hostSetting("typedDates")).toBe(true);
-    expect(seen).toEqual([{ typedDates: true }]);
+    m.applyHostSettings({ listCounts: true });
+    expect(m.hostSetting("listCounts")).toBe(true);
+    expect(seen).toEqual([{ listCounts: true }]);
     off();
-    m.applyHostSettings({ typedDates: false });
+    m.applyHostSettings({ listCounts: false });
     expect(seen.length).toBe(1);
   });
 

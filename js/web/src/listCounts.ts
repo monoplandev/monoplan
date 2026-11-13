@@ -1,6 +1,6 @@
 // Whether the sidebar counts each list's open items: a device
-// preference like typed dates (`whenSuggest.ts`), so it lives in a cookie
-// beside it, off by default. Inbox, Starred and the bin are counted
+// preference like the time format (`format.tsx`), so it lives in a
+// cookie beside it, off by default. Inbox, Starred and the bin are counted
 // either way. In the macOS app's window the app owns it
 // (`hostSettings.ts`): read from there, followed live, never written.
 import { createSignal } from "solid-js";
