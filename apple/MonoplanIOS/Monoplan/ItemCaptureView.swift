@@ -14,7 +14,7 @@
 // - The keyboard going down any other way: create, stay on the item.
 // - The plus on Date or Place, or the list field: create, and open
 //   that editor on it.
-// - The sheet closing (drag down, the "x"): create.
+// - The sheet closing (drag down, the "x" in the bar): create.
 // - The app going to the background: create, stay on the item.
 //
 // An empty title creates nothing, whichever way the sheet is left.
@@ -123,14 +123,6 @@ struct ItemCaptureView: View {
     private var page: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                HStack(spacing: 10) {
-                    ItemCheckbox(state: "backlog")
-                    Text("New item")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 8)
-                    CloseButton { dismiss() }
-                }
                 // Wraps like the title it becomes. A wrapping field
                 // takes Return as a line break, so Return is caught as
                 // it lands: it creates the item and closes the sheet.
@@ -161,10 +153,14 @@ struct ItemCaptureView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
-            // Clear of the sheet's drag indicator.
-            .padding(.top, 12)
         }
         .scrollBounceBehavior(.basedOnSize)
+        .navigationBarTitleDisplayMode(.inline)
+        // Where the item's status control and its buttons will be.
+        .toolbar {
+            SheetStatusLabel(state: "backlog", text: "New item")
+            SheetCloseItem { dismiss() }
+        }
         .onAppear { focused = true }
     }
 

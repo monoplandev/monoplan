@@ -4,11 +4,12 @@
 // `item show --json` and refetched on every doc change while shown.
 // It comes up as a sheet over whatever list the row was in (half height,
 // draggable to full), as the dialog floats over the web's lists, rather
-// than as a pushed page. The checkbox ticks and reopens the item, the
-// state label beside it opens a menu of the workflow states, a tap on
-// the title hands the sheet to the title editor (`ItemTitleEditor`), the
-// star at the top right stars and unstars it, the "x" beside it closes
-// the sheet (as a drag down does),
+// than as a pushed page. The sheet has a navigation bar, its buttons the
+// system's Liquid Glass: at the left the status control (the checkbox
+// ticks and reopens the item, the state label beside it opens a menu of
+// the workflow states), at the right the star, which stars and unstars
+// it, and the "x", which closes the sheet (as a drag down does). A tap
+// on the title hands the sheet to the title editor (`ItemTitleEditor`),
 // the list field and the date and place rows hand the sheet to their
 // editors (`ItemListEditor`, `ItemDateEditor`, `ItemPlaceEditor`);
 // everything else is display only.
@@ -105,8 +106,11 @@ private struct ItemSheet: ViewModifier {
                 detent = .large
                 open = .capture(CaptureTarget(list: list))
             }
+            // One navigation stack for whatever has the sheet (the
+            // page, a capture, a field editor): each puts its own
+            // buttons in the bar. Nothing is pushed on it.
             .sheet(item: $open) { target in
-                Group {
+                NavigationStack {
                     switch target {
                     case .item(let ref): ItemView(ref: ref, detent: $detent)
                     case .capture(let capture): ItemCaptureView(target: capture, detent: $detent)
@@ -218,7 +222,6 @@ struct ItemView: View {
     private var page: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                status
                 Text(item?.text ?? ref.title)
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(item?.closedAt == nil ? .primary : .secondary)
@@ -244,56 +247,47 @@ struct ItemView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
-            // Clear of the sheet's drag indicator.
-            .padding(.top, 12)
         }
         // No pull-to-refresh: the page refetches on every doc change by
         // itself, and in a sheet a pull at the top has to mean "drag the
         // sheet down". Content that fits does not scroll at all, so the
         // same drag works from anywhere on it.
         .scrollBounceBehavior(.basedOnSize)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { bar }
     }
 
-    /// The checkbox and the workflow state beside it, drawn as one
-    /// status control with two halves: the checkbox ticks and reopens,
-    /// the label opens a menu of the states (the web dialog's status
-    /// badge). A binned item just says so (the bin masks the state;
-    /// Restore is the way out), and one that has not loaded shows an
-    /// inert box.
-    private var status: some View {
-        HStack(spacing: 10) {
-            if let item, item.binnedAt == nil {
-                HStack(spacing: 0) {
+    /// The page's navigation bar. At the left, the checkbox and the
+    /// workflow state beside it as one glass control with two halves:
+    /// the checkbox ticks and reopens, the label opens a menu of the
+    /// states (the web dialog's status badge). A binned item just says
+    /// so (the bin masks the state; Restore is the way out), and one
+    /// that has not loaded shows an inert box. At the right, the star,
+    /// then the close button in the corner on its own glass, as the
+    /// actions sit beside the "x" on a Maps place card.
+    @ToolbarContentBuilder
+    private var bar: some ToolbarContent {
+        if let item, item.binnedAt == nil {
+            ToolbarItem(placement: .topBarLeading) {
+                HStack(spacing: 8) {
                     ItemCheckButton(ref: ref, state: item.state)
-                        .padding(.leading, 8)
-                        .padding(.trailing, 8)
                     stateMenu(item)
                 }
-                .frame(minHeight: 36)
-                .background(.quaternary.opacity(0.5), in: Capsule())
-                // The capsule's own inset, taken back so the checkbox
-                // stays in line with the title under it.
-                .padding(.leading, -8)
-            } else {
-                ItemCheckbox(state: item?.state ?? "backlog")
-                if item != nil {
-                    Text("Binned")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
+                .padding(.horizontal, 6)
+                .fixedSize()
             }
-            Spacer(minLength: 8)
-            // The star, then the close button in the corner, as the
-            // actions sit beside the "x" on a Maps place card.
-            HStack(spacing: 0) {
-                // Only an Open item can be starred (spec/focus.md): a
-                // closed or binned one has no star to show or set.
-                if let item, item.binnedAt == nil, item.closedAt == nil {
-                    StarButton(starred: item.starred) { model.setStarred(ref, starred: !item.starred) }
-                }
-                CloseButton { dismiss() }
-            }
+        } else {
+            SheetStatusLabel(state: item?.state ?? "backlog", text: item == nil ? "" : "Binned")
         }
+        // Only an Open item can be starred (spec/focus.md): a closed
+        // or binned one has no star to show or set.
+        if let item, item.binnedAt == nil, item.closedAt == nil {
+            ToolbarItem(placement: .topBarTrailing) {
+                StarButton(starred: item.starred) { model.setStarred(ref, starred: !item.starred) }
+            }
+            ToolbarSpacer(.fixed, placement: .topBarTrailing)
+        }
+        SheetCloseItem { dismiss() }
     }
 
     /// List, planned date, deadline (only when set, as on the web) and
@@ -363,10 +357,9 @@ struct ItemView: View {
                     .font(.subheadline.weight(.medium))
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-            .foregroundStyle(.secondary)
-            .padding(.trailing, 12)
-            // The capsule's full height, and out to its trailing edge.
+            // The bar's full height, for the tap.
             .frame(minHeight: 36)
             .contentShape(Rectangle())
         }
@@ -518,44 +511,42 @@ struct ItemTitleEditor: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            EditorHeader(title: "Title", canFinish: !trimmed.isEmpty, cancel: done, done: commit)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    // Wraps like the title it replaces. A wrapping
-                    // field takes Return as a line break, so Return is
-                    // caught as it lands and commits instead.
-                    TextField("Title", text: $text, axis: .vertical)
-                        .font(.title2.weight(.semibold))
-                        .focused($focused)
-                        .submitLabel(.done)
-                        .onChange(of: text) {
-                            guard text.contains(where: \.isNewline) else { return }
-                            text = text.split(whereSeparator: \.isNewline).joined(separator: " ")
-                            commit()
-                        }
-                    Divider()
-                    if item.notes.isEmpty {
-                        Text("Notes").foregroundStyle(.tertiary)
-                    } else {
-                        Text(item.notes).textSelection(.enabled)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                // Wraps like the title it replaces. A wrapping field
+                // takes Return as a line break, so Return is caught as
+                // it lands and commits instead.
+                TextField("Title", text: $text, axis: .vertical)
+                    .font(.title2.weight(.semibold))
+                    .focused($focused)
+                    .submitLabel(.done)
+                    .onChange(of: text) {
+                        guard text.contains(where: \.isNewline) else { return }
+                        text = text.split(whereSeparator: \.isNewline).joined(separator: " ")
+                        commit()
                     }
+                Divider()
+                if item.notes.isEmpty {
+                    Text("Notes").foregroundStyle(.tertiary)
+                } else {
+                    Text(item.notes).textSelection(.enabled)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
             }
-            .scrollBounceBehavior(.basedOnSize)
-            .scrollDismissesKeyboard(.interactively)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
         }
+        .scrollBounceBehavior(.basedOnSize)
+        .scrollDismissesKeyboard(.interactively)
+        .editorHeader(title: "Title", canFinish: !trimmed.isEmpty, cancel: done, done: commit)
         .onAppear { focused = true }
     }
 }
 
-/// The star beside the close button at the top right of an item's page,
-/// drawn as the web dialog draws it (`.task-dialog-pin-toggle`): the
-/// web's own glyph (`js/web/src/icons/star-filled.svg`, in the asset
-/// catalog as `StarFill` and, stroked, `StarStroke`), a thin outline
-/// that fills yellow when the item is starred; a tap flips it.
+/// The star beside the close button at the top right of an item's page:
+/// the web dialog's glyph (`.task-dialog-pin-toggle`,
+/// `js/web/src/icons/star-filled.svg`, in the asset catalog as
+/// `StarFill` and, stroked, `StarStroke`) on the bar's glass, a thin
+/// outline that fills yellow when the item is starred; a tap flips it.
 private struct StarButton: View {
     let starred: Bool
     let action: () -> Void
@@ -573,38 +564,10 @@ private struct StarButton: View {
                     .resizable()
                     .foregroundStyle(Color.primary.opacity(0.7))
             }
-            .frame(width: 24, height: 24)
-            // A full 44pt target around the glyph, without pushing
-            // the status row taller.
-            .frame(width: 44, height: 44, alignment: .trailing)
-            .contentShape(Rectangle())
+            .frame(width: 22, height: 22)
         }
-        .buttonStyle(.plain)
-        .padding(.vertical, -10)
         .sensoryFeedback(.selection, trigger: starred)
         .accessibilityLabel(starred ? "Unstar" : "Star")
-    }
-}
-
-/// The round "x" in the top right corner of an item's sheet: closes it,
-/// for anyone who does not find the drag down.
-struct CloseButton: View {
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "xmark")
-                .font(.footnote.weight(.bold))
-                .foregroundStyle(.secondary)
-                .frame(width: 30, height: 30)
-                .background(.quaternary.opacity(0.5), in: Circle())
-                // A full 44pt target, the circle against the edge.
-                .frame(width: 44, height: 44, alignment: .trailing)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .padding(.vertical, -10)
-        .accessibilityLabel("Close")
     }
 }
 

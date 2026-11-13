@@ -69,13 +69,11 @@ struct ItemDateEditor: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            EditorHeader(title: "Date", itemTitle: item.text, cancel: cancel, done: done)
-            ScrollView {
-                editor.padding()
-            }
-            .scrollBounceBehavior(.basedOnSize)
+        ScrollView {
+            editor.padding()
         }
+        .scrollBounceBehavior(.basedOnSize)
+        .editorHeader(title: "Date", itemTitle: item.text, cancel: cancel, done: done)
     }
 
     private var editor: some View {

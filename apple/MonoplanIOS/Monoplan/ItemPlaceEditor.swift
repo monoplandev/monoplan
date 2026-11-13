@@ -26,7 +26,6 @@ struct ItemPlaceEditor: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            EditorHeader(title: "Place", itemTitle: item.text, cancel: done, done: useTyped)
             searchBox
             List {
                 if typed.isEmpty, let place = item.place {
@@ -77,6 +76,7 @@ struct ItemPlaceEditor: View {
             .buttonStyle(.plain)
             .scrollDismissesKeyboard(.interactively)
         }
+        .editorHeader(title: "Place", itemTitle: item.text, cancel: done, done: useTyped)
         .onAppear {
             focused = true
             loadKnown()

@@ -25,19 +25,17 @@ struct ItemListEditor: View {
     let done: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            EditorHeader(title: "List", itemTitle: itemTitle, cancel: done, done: done)
-            ScrollView {
-                VStack(spacing: 0) {
-                    ForEach(lists, id: \.listId) { list in
-                        row(list)
-                        Divider()
-                    }
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(lists, id: \.listId) { list in
+                    row(list)
+                    Divider()
                 }
-                .padding(.horizontal)
             }
-            .scrollBounceBehavior(.basedOnSize)
+            .padding(.horizontal)
         }
+        .scrollBounceBehavior(.basedOnSize)
+        .editorHeader(title: "List", itemTitle: itemTitle, cancel: done, done: done)
     }
 
     private func row(_ list: ListRef) -> some View {

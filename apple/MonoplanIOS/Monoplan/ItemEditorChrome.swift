@@ -1,6 +1,9 @@
-// What the item sheet's field editors share: the small round button a
-// field row ends with, and the header of an editor that has taken the
-// sheet over (cross, title over the item's name, tick).
+// What the item sheet's views share: the small round button a field
+// row ends with, the navigation bar of an editor that has taken the
+// sheet over (cross, title over the item's name, tick), and the bar's
+// close button and plain status label. The sheet's content sits in one
+// `NavigationStack` (`ItemSheet`), so all of these are toolbar items
+// and the system draws them as Liquid Glass.
 
 import SwiftUI
 
@@ -25,50 +28,60 @@ struct EditBubble: View {
     }
 }
 
-/// An editor's header: a cross on the left, the field's name over the
-/// item's title, a tick on the right.
-struct EditorHeader: View {
-    let title: String
-    /// Nil where the editor shows the item's title itself.
-    var itemTitle: String? = nil
-    /// The tick is off while there is nothing valid to keep.
-    var canFinish = true
-    let cancel: () -> Void
-    let done: () -> Void
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                button("xmark", label: "Cancel", action: cancel)
-                VStack(spacing: 2) {
-                    Text(title).font(.headline)
-                    if let itemTitle {
-                        Text(itemTitle)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
+extension View {
+    /// An editor's navigation bar: a cross on the left, the field's
+    /// name over the item's title (nil where the editor shows the
+    /// title itself), a tick on the right, off while there is nothing
+    /// valid to keep.
+    func editorHeader(
+        title: String, itemTitle: String? = nil, canFinish: Bool = true,
+        cancel: @escaping () -> Void, done: @escaping () -> Void
+    ) -> some View {
+        navigationTitle(title)
+            .navigationSubtitle(itemTitle ?? "")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", systemImage: "xmark", role: .cancel, action: cancel)
                 }
-                .frame(maxWidth: .infinity)
-                button("checkmark", label: "Done", action: done)
-                    .tint(.accentColor)
-                    .disabled(!canFinish)
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done", systemImage: "checkmark", role: .confirm, action: done)
+                        .disabled(!canFinish)
+                }
             }
-            .padding(.horizontal)
-            .padding(.top, 20)
-            .padding(.bottom, 12)
-            Divider()
+    }
+}
+
+/// The "x" at the top right of the item sheet's pages: closes the
+/// sheet, for anyone who does not find the drag down.
+struct SheetCloseItem: ToolbarContent {
+    let action: () -> Void
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button(role: .close, action: action)
         }
     }
+}
 
-    private func button(_ systemImage: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.body.weight(.semibold))
-                .frame(width: 22, height: 22)
+/// A checkbox that does nothing and a word beside it, at the top left
+/// of the sheet where an item's status control goes: "New item" on a
+/// capture, "Binned" on a binned item. No glass behind it: it is not a
+/// button.
+struct SheetStatusLabel: ToolbarContent {
+    let state: String
+    let text: String
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            HStack(spacing: 10) {
+                ItemCheckbox(state: state)
+                Text(text)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            .fixedSize()
         }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.circle)
-        .accessibilityLabel(label)
+        .sharedBackgroundVisibility(.hidden)
     }
 }
