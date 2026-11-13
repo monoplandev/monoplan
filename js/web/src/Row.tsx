@@ -1,7 +1,5 @@
 import { createEffect, createMemo, createSignal, on, Show } from "solid-js";
 import { ContextMenu } from "@kobalte/core/context-menu";
-import checkSvg from "./icons/check.svg?raw";
-import crossSvg from "./icons/cross.svg?raw";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import plusSvg from "./icons/plus.svg?raw";
 import starFilledSvg from "./icons/star-filled.svg?raw";
@@ -573,12 +571,6 @@ export function Row(props: {
             <Show when={rowStamp()}>
               {(ts) => (
                 <span class="badge row-timestamp" title={stampTitle(ts())}>
-                  <Show when={props.viewKind === "done"}>
-                    <span
-                      class="row-timestamp-icon"
-                      innerHTML={isCancelled(props.item()) ? crossSvg : checkSvg}
-                    />
-                  </Show>
                   {props.viewKind === "done"
                     ? formatDoneStamp(ts(), nowMs(), locale())
                     : formatRelative(ts(), nowMs(), locale())}

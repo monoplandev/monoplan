@@ -1583,17 +1583,6 @@ input.task-check:hover {
   line-height: var(--lh-compact);
 }
 
-.row-timestamp-icon {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.row-timestamp-icon svg {
-  width: 12px;
-  height: 12px;
-}
-
 /* Origin-list badge on the Done and Bin views (spec/board.md — both are
    global, cross-list views). Plain text, no pill background, so it reads as a
    quiet origin label rather than a tag. */
