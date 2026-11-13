@@ -78,7 +78,7 @@ struct BrowseView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("Browse")
+            .navigationTitle("Home")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink(value: Page.debug) {
