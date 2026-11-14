@@ -31,9 +31,36 @@ enum PaneColor {
     static let list = dynamic(dark: 0x12, light: .textBackgroundColor)
     static let panel = dynamic(dark: 0x18, light: .windowBackgroundColor)
 
-    /// The line between two panes: near-black in dark, `system` (the
-    /// split view's own) in light.
-    static func divider(_ system: NSColor) -> NSColor { dynamic(dark: 0x08, light: system) }
+    /// The line between two panes: near-black in dark; in light,
+    /// `system` (the split view's own, black at 10%) at half its alpha.
+    static func divider(_ system: NSColor) -> NSColor {
+        NSColor(name: nil) { appearance in
+            guard appearance.bestMatch(from: [.aqua, .darkAqua]) != .darkAqua else { return grey(0x08) }
+            var resolved = system
+            appearance.performAsCurrentDrawingAppearance {
+                resolved = system.usingColorSpace(.sRGB) ?? system
+            }
+            return resolved.withAlphaComponent(resolved.alphaComponent * 0.5)
+        }
+    }
+
+    /// A selected row's gray, `system` (the row's own) brightened by
+    /// half: in light halfway to white (#dcdcdc to #eeeeee), in dark
+    /// half as bright again (#464646 to #696969).
+    static func rowSelection(_ system: NSColor) -> NSColor {
+        NSColor(name: nil) { appearance in
+            var resolved = system
+            appearance.performAsCurrentDrawingAppearance {
+                resolved = system.usingColorSpace(.sRGB) ?? system
+            }
+            guard appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua else {
+                return resolved.blended(withFraction: 0.5, of: .white) ?? resolved
+            }
+            return NSColor(
+                srgbRed: min(resolved.redComponent * 1.5, 1), green: min(resolved.greenComponent * 1.5, 1),
+                blue: min(resolved.blueComponent * 1.5, 1), alpha: resolved.alphaComponent)
+        }
+    }
 
     /// The hairline between two item rows, just visible: the web's
     /// `--row-divider` (`js/web/src/styles.css`).

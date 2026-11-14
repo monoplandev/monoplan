@@ -10,6 +10,10 @@
 // visual effect view the setter configures. Text and icons follow, as
 // they take their colour from the same flag.
 //
+// The gray itself is the row class's own `secondarySelectedControlColor`
+// (#dcdcdc in light, #464646 in dark), patched to come back brightened
+// by half (`PaneColor.rowSelection`).
+//
 // Probed on macOS 26 (2026-11-14). If SwiftUI renames the class this
 // does nothing and the selection is the accent colour again.
 
@@ -24,6 +28,7 @@ enum GraySelection {
         let pairs = [
             (#selector(getter: NSTableRowView.isEmphasized), #selector(getter: NSTableRowView.monoplan_isEmphasized)),
             (#selector(setter: NSTableRowView.isEmphasized), #selector(setter: NSTableRowView.monoplan_isEmphasized)),
+            (NSSelectorFromString("secondarySelectedControlColor"), #selector(NSTableRowView.monoplan_secondarySelectedControlColor)),
         ]
         for (original, replacement) in pairs {
             guard let inherited = class_getInstanceMethod(rowClass, original),
@@ -45,5 +50,11 @@ private extension NSTableRowView {
     @objc var monoplan_isEmphasized: Bool {
         get { false }
         set { self.monoplan_isEmphasized = false }
+    }
+
+    /// Exchanged with the row class's `secondarySelectedControlColor`,
+    /// so the call below is the original.
+    @objc func monoplan_secondarySelectedControlColor() -> NSColor {
+        PaneColor.rowSelection(monoplan_secondarySelectedControlColor())
     }
 }

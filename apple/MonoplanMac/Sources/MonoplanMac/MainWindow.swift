@@ -688,6 +688,13 @@ struct MainWindowView: View {
     /// hosts each apart).
     enum Pane { case sidebar, list }
     let pane: Pane
+    /// Whether the sidebar has drawn once. A sidebar `List` whose
+    /// selection is already set on its first render draws that row's
+    /// label bold, and the bold stays when the selection moves on
+    /// (macOS 26, probed 2026-11-15); selecting after the first render
+    /// leaves every label regular. So the selection reads as none
+    /// until then.
+    @State private var sidebarDrawn = false
 
     var body: some View {
         switch pane {
@@ -707,7 +714,10 @@ struct MainWindowView: View {
     /// one in another group moves both at once.
     private var sidebar: some View {
         List(selection: Binding<NavTarget?>(
-            get: { model.lens.map(NavTarget.lens) ?? .list(workspace: model.workspace, list: model.list) },
+            get: {
+                guard sidebarDrawn else { return nil }
+                return model.lens.map(NavTarget.lens) ?? .list(workspace: model.workspace, list: model.list)
+            },
             set: {
                 switch $0 {
                 case .lens(let lens): model.select(lens: lens)
@@ -726,8 +736,8 @@ struct MainWindowView: View {
                 }
                 .navRow()
                 .tag(NavTarget.lens(.starred))
-                Label("Calendar", systemImage: "calendar").navRow().tag(NavTarget.lens(.agenda))
-                Label("Done", systemImage: "checkmark.circle").navRow().tag(NavTarget.lens(.done))
+                Label { Text("Calendar") } icon: { NavIcon(image: NavArt.calendar) }.navRow().tag(NavTarget.lens(.agenda))
+                Label { Text("Done") } icon: { NavIcon(image: NavArt.done) }.navRow().tag(NavTarget.lens(.done))
             }
             ForEach(model.sections) { section in
                 Section(isExpanded: Binding(
@@ -735,7 +745,7 @@ struct MainWindowView: View {
                     set: { model.setCollapsed(section.id, !$0) }
                 )) {
                     HStack {
-                        Label("Inbox", systemImage: "tray")
+                        Label { Text("Inbox") } icon: { NavIcon(image: NavArt.inbox) }
                         Spacer()
                         count(section.inboxOpen)
                     }
@@ -771,6 +781,7 @@ struct MainWindowView: View {
             }
         }
         .listStyle(.sidebar)
+        .onAppear { DispatchQueue.main.async { sidebarDrawn = true } }
         // Rows of 28 pt, between the system's small (24) and medium
         // (32), which has no such step: the small size, with each row
         // (`navRow`) at the medium's type and 4 pt taller.
@@ -828,7 +839,7 @@ struct MainWindowView: View {
                 // down and builds it again (a few ms each). The tag
                 // keeps selection on the item.
                 ForEach(Array(model.items.enumerated()), id: \.offset) { _, item in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    HStack(alignment: .center, spacing: 8) {
                         ItemCheckButton(state: item.state) { _ in model.tick(item) }
                         Text(verbatim: item.text)
                             .lineLimit(1)
@@ -880,7 +891,7 @@ struct MainWindowView: View {
 
     private func agendaRow(_ row: AgendaEntry) -> some View {
         let done = row.state == .done
-        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+        return HStack(alignment: .center, spacing: 8) {
             ItemCheckButton(state: row.state) { model.setDone(workspace: row.docId, id: row.id, done: $0) }
             if TodayMenu.isTimed(row), let when = row.when {
                 Text(verbatim: String(when.dropFirst(11).prefix(5)))
@@ -913,7 +924,7 @@ struct MainWindowView: View {
         List(selection: selection { id in model.starred.first { $0.id == id }?.docId }) {
             ForEach(model.starred, id: \.id) { row in
                 let done = row.state == .done
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(alignment: .center, spacing: 8) {
                     ItemCheckButton(state: row.state) { model.setDone(workspace: row.docId, id: row.id, done: $0) }
                     Text(verbatim: row.text)
                         .lineLimit(1)
@@ -942,7 +953,7 @@ struct MainWindowView: View {
     private var done: some View {
         List(selection: selection { id in model.done.first { $0.item.id == id }?.workspace }) {
             ForEach(model.done) { row in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(alignment: .center, spacing: 8) {
                     ItemCheckButton(state: row.item.state) {
                         model.setDone(workspace: row.workspace, id: row.item.id, done: $0)
                     }

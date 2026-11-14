@@ -415,11 +415,27 @@ private struct PanelTitle: View {
     }
 
     var body: some View {
-        // Wraps like the heading it replaces.
+        // Wraps like the heading it replaces. Unfocused, a vertical
+        // field sizes itself for every line but can draw one short
+        // (macOS 26, probed 2026-11-15), so the title is drawn by a
+        // `Text` under it and the field's own text is clear until it
+        // has the focus. The field stays opaque and on top: at opacity
+        // 0 it takes no clicks. The two wrap and sit identically.
+        ZStack(alignment: .topLeading) {
+            Text(verbatim: draft)
+                .foregroundStyle(ink)
+                .opacity(focused ? 0 : 1)
+            field
+        }
+        .font(.title2.weight(.semibold))
+    }
+
+    private var ink: Color { closed ? .secondary : .primary }
+
+    private var field: some View {
         TextField("Title", text: $draft, axis: .vertical)
             .textFieldStyle(.plain)
-            .font(.title2.weight(.semibold))
-            .foregroundStyle(closed ? .secondary : .primary)
+            .foregroundStyle(focused ? ink : .clear)
             .focused($focused)
             .onSubmit { focused = false }
             .onChange(of: draft) {
