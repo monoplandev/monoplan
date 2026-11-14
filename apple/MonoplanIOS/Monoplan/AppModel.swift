@@ -430,6 +430,33 @@ final class AppModel: ObservableObject {
             }
     }
 
+    /// Create a list at the end of a workspace's lists (`list add
+    /// <name>`), then reread Home's list rows. `done` gets the new
+    /// list, or why there is none.
+    func addList(name: String, inDoc docId: String, done: @escaping (ListRef?, String?) -> Void) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        client.send(.addList(name: name, workspace: selector(docId))) { [weak self] result in
+            guard let self else { return }
+            let failure: String
+            switch result {
+            case .success(.output(let stdout, _)):
+                let id = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !id.isEmpty {
+                    refreshListRows()
+                    done(ListRef(docId: docId, listId: id, name: name), nil)
+                    return
+                }
+                failure = "could not add list: no id came back"
+            case .success(let other):
+                failure = "could not add list: \(String(describing: other))"
+            case .failure(let error):
+                failure = "could not add list: \(engineErrorMessage(error))"
+            }
+            lastError = failure
+            done(nil, failure)
+        }
+    }
+
     private func write(_ request: Request, to ref: ItemRef) {
         client.send(request) { [weak self] result in
             guard let self else { return }

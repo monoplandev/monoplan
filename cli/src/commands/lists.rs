@@ -147,3 +147,27 @@ fn list_json(l: &ListView, open: usize) -> ListJson<'_> {
         open,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::focus::Lens;
+    use monoplan_core::Doc;
+
+    /// `Request.addList` in MonoplanMacKit: the reply is the new list's
+    /// id on a line.
+    #[test]
+    fn add_list_frame_from_the_apps_decodes_and_applies() {
+        use crate::commands::{DocCmd, run_doc};
+        let doc = Doc::new().unwrap();
+        let cmd: DocCmd = serde_json::from_value(
+            serde_json::json!({"Lists": {"cmd": {"Add": {"name": "Errands"}}}}),
+        )
+        .unwrap();
+        let mut out = Vec::new();
+        run_doc(cmd, &doc, &[&doc], &Lens::home(&doc), &mut out).unwrap();
+        let id = String::from_utf8(out).unwrap();
+        let lists = doc.all_lists();
+        let list = lists.iter().find(|l| l.id == id.trim()).unwrap();
+        assert_eq!(list.name, "Errands");
+    }
+}

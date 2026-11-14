@@ -6,7 +6,10 @@
 // active lists in the doc's order, each led by its emoji (a folder
 // when it has none); a list opens its Open items.
 // The gear at the top right opens Settings (account and sync, with
-// Debug a level under it); while the profile has no account, a Sign In
+// Debug a level under it), and the folder beside it makes a new list:
+// a popover under it takes the name (and, with more than one workspace
+// open, which one: Personal unless changed) and the new list's page
+// is pushed. While the profile has no account, a Sign In
 // button sits at the top left and opens the sign-in sheet.
 // A floating bar (`BottomBar`: search, and an
 // add button that captures a new item into the list being shown, else
@@ -147,6 +150,10 @@ struct HomeView: View {
     @State private var showSignIn = false
     /// The Map page is up: its sheet stands where the bottom bar does.
     @State private var mapShown = false
+    /// The new-list popover is up.
+    @State private var showNewList = false
+    /// Why the last new list was not made; shown in an alert.
+    @State private var newListError: String?
 
     /// The device's list-counts preference (Settings), off by default:
     /// count each list's Open items on its row. The Inbox and Starred
@@ -251,6 +258,23 @@ struct HomeView: View {
                             .disabled(model.busy != nil)
                     }
                 }
+                if let session = model.session, !session.docs.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { showNewList = true } label: {
+                            Label("New List", systemImage: "folder.badge.plus")
+                        }
+                        // A popover on the phone too, not the sheet a
+                        // compact width would make of it.
+                        .popover(isPresented: $showNewList) {
+                            NewListPopover { name, docId in
+                                showNewList = false
+                                createList(name: name, in: docId)
+                            }
+                            .environmentObject(model)
+                            .presentationCompactAdaptation(.popover)
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink(value: HomePage.settings) {
                         Label("Settings", systemImage: "gearshape")
@@ -288,6 +312,14 @@ struct HomeView: View {
         .sheet(isPresented: $showSignIn) {
             SignInView()
                 .environmentObject(model)
+        }
+        .alert(
+            "Could not create list",
+            isPresented: Binding(get: { newListError != nil }, set: { if !$0 { newListError = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(newListError ?? "")
         }
         // Search covers the stack, navigation bar included, and sits
         // under the bar. A page or list result closes it and is pushed
@@ -329,6 +361,17 @@ struct HomeView: View {
         .opensItems()
     }
 
+    /// Make the list and push its page; a failure is said in an alert.
+    private func createList(name: String, in docId: String) {
+        model.addList(name: name, inDoc: docId) { list, error in
+            if let list {
+                path.append(list)
+            } else {
+                newListError = error
+            }
+        }
+    }
+
     private func row(_ ref: ListRef, count: Int = 0) -> some View {
         NavigationLink(value: ref) {
             Label {
@@ -338,6 +381,86 @@ struct HomeView: View {
             }
             .counted(count)
         }
+    }
+}
+
+/// The new-list popover: the name, focused as it opens, under it a
+/// row for the workspace the list goes in (Personal unless changed; not
+/// drawn while only one is open; a shared one led by the shared glyph),
+/// and Create at the bottom. Return creates too. `create`
+/// gets the trimmed name and the workspace's doc id.
+private struct NewListPopover: View {
+    @EnvironmentObject private var model: AppModel
+    let create: (String, String) -> Void
+
+    @State private var name = ""
+    /// The workspace picked; nil until one is, which reads as Personal.
+    @State private var picked: String?
+    @FocusState private var focused: Bool
+
+    private var docs: [(id: String, name: String, shared: Bool)] {
+        (model.session?.docs ?? []).map {
+            let shared = model.sharedWorkspaceName($0.docId)
+            return ($0.docId, shared ?? $0.name ?? "Personal", shared != nil)
+        }
+    }
+
+    private var docId: String? {
+        picked ?? model.session?.primaryDocId ?? docs.first?.id
+    }
+
+    private var trimmed: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            TextField("New list", text: $name)
+                .font(.title3)
+                .focused($focused)
+                .submitLabel(.done)
+                .onSubmit(submit)
+            Divider()
+            if docs.count > 1, let current = docs.first(where: { $0.id == docId }) {
+                Menu {
+                    Picker("Workspace", selection: Binding(get: { docId ?? "" }, set: { picked = $0 })) {
+                        ForEach(docs, id: \.id) { doc in
+                            if doc.shared {
+                                Label(doc.name, image: "Users").tag(doc.id)
+                            } else {
+                                Text(doc.name).tag(doc.id)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        if current.shared { SharedIcon() }
+                        Text(current.name).lineLimit(1)
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .tint(.primary)
+                .accessibilityLabel("Workspace, \(current.name)")
+                Divider()
+            }
+            Button(action: submit) {
+                Text("Create").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(trimmed.isEmpty)
+        }
+        .padding(16)
+        .frame(width: 300)
+        .onAppear { focused = true }
+    }
+
+    private func submit() {
+        guard !trimmed.isEmpty, let docId else { return }
+        create(trimmed, docId)
     }
 }
 

@@ -205,6 +205,12 @@ final class EngineClientTests: XCTestCase {
             ])])])])])])
         )
         XCTAssertEqual(
+            Request.addList(name: "Errands", workspace: "d1").value,
+            .map(["Doc": .map(["workspace": .string("d1"), "cmd": .map(["Lists": .map(["cmd": .map(["Add": .map([
+                "name": .string("Errands"),
+            ])])])])])])
+        )
+        XCTAssertEqual(
             Request.items(list: "work", workspace: "d1").value,
             .map(["Doc": .map(["workspace": .string("d1"), "cmd": .map(["Ls": .map([
                 "list": .string("work"), "done": .bool(false), "json": .bool(true),

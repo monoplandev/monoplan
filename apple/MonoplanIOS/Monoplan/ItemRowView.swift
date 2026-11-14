@@ -4,7 +4,7 @@
 import MonoplanMacKit
 import SwiftUI
 
-/// One item: its text, with the workflow state and any dates underneath
+/// One item: its text, with the workflow state underneath
 /// when there is something beyond the default to say.
 struct ItemRowView: View {
     let item: ItemRow
@@ -28,8 +28,6 @@ struct ItemRowView: View {
         if item.state != "backlog" && item.state != "todo" {
             out.append(Self.stateLabel(item.state))
         }
-        if let when = item.when { out.append("@\(when)") }
-        if let deadline = item.deadline { out.append("due \(deadline)") }
         return out
     }
 

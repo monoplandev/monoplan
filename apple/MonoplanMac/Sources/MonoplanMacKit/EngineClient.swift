@@ -243,6 +243,12 @@ public enum Request {
     /// every list id an item can carry resolves. `workspace` as for
     /// `items`.
     case lists(workspace: String? = nil)
+    /// `monoplan list add <name>`: a new list at the end of the
+    /// workspace's lists; the reply is its id on a line. The engine
+    /// trims the name and refuses an empty one. `workspace` as for
+    /// `items`. The frame is pinned on the Rust side by
+    /// `add_list_frame_from_the_apps_decodes_and_applies`.
+    case addList(name: String, workspace: String? = nil)
     /// Who is logged in, from the engine's account row.
     case account
     /// Create a workspace the account owns, by name, and open it on the
@@ -364,6 +370,10 @@ public enum Request {
         case .lists(let workspace):
             return Self.doc(workspace, .map(["Lists": .map(["cmd": .map(["Ls": .map([
                 "json": .bool(true), "archived": .bool(false), "all": .bool(true),
+            ])])])]))
+        case .addList(let name, let workspace):
+            return Self.doc(workspace, .map(["Lists": .map(["cmd": .map(["Add": .map([
+                "name": .string(name),
             ])])])]))
         case .account:
             return .string("Account")
