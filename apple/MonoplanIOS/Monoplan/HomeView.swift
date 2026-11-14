@@ -6,7 +6,9 @@
 // active lists in the doc's order, each led by its emoji (a folder
 // when it has none); a list opens its Open items.
 // The gear at the top right opens Settings (account and sync, with
-// Debug a level under it). A floating bar (`BottomBar`: search, and an
+// Debug a level under it); while the profile has no account, a Sign In
+// button sits at the top left and opens the sign-in sheet.
+// A floating bar (`BottomBar`: search, and an
 // add button that captures a new item into the list being shown, else
 // the Personal Inbox) sits under every page; while its field has
 // focus or text, `SearchView` covers the stack. Every page is pushed
@@ -118,6 +120,7 @@ struct HomeView: View {
     /// The list page on screen, if one is: where the add button
     /// captures to.
     @State private var shownList: ListRef?
+    @State private var showSignIn = false
 
     /// The device's list-counts preference (Settings), off by default:
     /// count each list's Open items on its row. The Inbox and Starred
@@ -204,6 +207,14 @@ struct HomeView: View {
             .listStyle(.insetGrouped)
             .navigationTitle("Home")
             .toolbar {
+                // Signed out (no account, a local-only workspace
+                // included): sign in from here, as from Settings.
+                if !model.hasAccount {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Sign In") { showSignIn = true }
+                            .disabled(model.busy != nil)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink(value: HomePage.settings) {
                         Label("Settings", systemImage: "gearshape")
@@ -232,6 +243,10 @@ struct HomeView: View {
                 model.refreshAgenda()
             }
             .animation(.default, value: today)
+        }
+        .sheet(isPresented: $showSignIn) {
+            SignInView()
+                .environmentObject(model)
         }
         // Search covers the stack, navigation bar included, and sits
         // under the bar. A page or list result closes it and is pushed

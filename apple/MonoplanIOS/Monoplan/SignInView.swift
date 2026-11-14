@@ -1,6 +1,9 @@
 // The sign-in sheet: the macOS Settings sheet's form, sign-in only.
 // Account creation and recovery stay on the Mac, the web client and
-// the CLI for now.
+// the CLI for now. The server is a choice of two: monoplan.app (the
+// default) or a self-hosted server, whose URL field shows only when it
+// is picked. The device is named by the system (`UIDevice.current.name`,
+// "iPhone" without the user-assigned-name entitlement), not asked for.
 
 import SwiftUI
 import UIKit
@@ -10,13 +13,16 @@ struct SignInView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var email = ""
     @State private var password = ""
-    @State private var server = SignInView.defaultServer
-    @State private var deviceName = UIDevice.current.name
+    @State private var selfHosted = false
+    /// The self-hosted server's URL; read only while `selfHosted`.
+    @State private var server = ""
 
     static let defaultServer = "https://alpha.monoplan.app"
 
+    private var serverText: String { server.trimmingCharacters(in: .whitespacesAndNewlines) }
+
     private var canSubmit: Bool {
-        !model.signingIn && !email.isEmpty && !password.isEmpty && !server.isEmpty && !deviceName.isEmpty
+        !model.signingIn && !email.isEmpty && !password.isEmpty && (!selfHosted || !serverText.isEmpty)
     }
 
     var body: some View {
@@ -32,13 +38,18 @@ struct SignInView: View {
                         .textContentType(.password)
                         .onSubmit { if canSubmit { submit() } }
                 }
-                Section("Advanced") {
-                    TextField("Server", text: $server)
-                        .textContentType(.URL)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    TextField("Device name", text: $deviceName)
+                Section {
+                    Picker("Signing in with", selection: $selfHosted) {
+                        Text("monoplan.app").tag(false)
+                        Text("Self-hosted server").tag(true)
+                    }
+                    if selfHosted {
+                        TextField("Server URL", text: $server)
+                            .textContentType(.URL)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
                 }
                 if let error = model.signInError {
                     Section {
@@ -75,8 +86,9 @@ struct SignInView: View {
 
     private func submit() {
         let creds = SignInCredentials(
-            server: Self.normalise(server), email: email.trimmingCharacters(in: .whitespaces),
-            password: password, deviceName: deviceName.trimmingCharacters(in: .whitespaces))
+            server: selfHosted ? Self.normalise(server) : Self.defaultServer,
+            email: email.trimmingCharacters(in: .whitespaces),
+            password: password, deviceName: UIDevice.current.name)
         model.signIn(creds) { ok in
             if ok { dismiss() }
         }
