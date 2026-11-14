@@ -1031,6 +1031,16 @@
         }
       }
     },
+    "Show list counts in sidebar": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar contadores de listas en la barra lateral"
+          }
+        }
+      }
+    },
     "Sign In": {
       "localizations": {
         "es": {

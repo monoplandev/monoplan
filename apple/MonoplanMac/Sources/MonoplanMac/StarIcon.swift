@@ -50,10 +50,13 @@ enum StarArt {
         guard let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil, pixelsWide: Int(size.width) * scale, pixelsHigh: Int(size.height) * scale,
             bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
-            let context = NSGraphicsContext(bitmapImageRep: rep)
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
         else { return out }
+        // Before the context is made: it takes its points-to-pixels
+        // scale from the rep's size then, and a later change leaves it
+        // drawing 1:1 into the bottom-left corner.
         rep.size = size
+        guard let context = NSGraphicsContext(bitmapImageRep: rep) else { return out }
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
         let rect = NSRect(origin: .zero, size: size)

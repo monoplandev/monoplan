@@ -134,6 +134,9 @@ struct NavSection: Identifiable {
     let workspace: WorkspaceInfo
     /// Every list of the workspace, archived ones included.
     let lists: [ListInfo]
+    /// How many Open items its Inbox holds. The Inbox has no
+    /// `ListMeta` row, so `lists` does not count it.
+    let inboxOpen: Int
 
     var id: String { workspace.docId }
 
@@ -154,6 +157,14 @@ struct NavSection: Identifiable {
 /// The views over every workspace, on top of the sidebar.
 enum Lens: Hashable {
     case starred, agenda, done
+}
+
+/// What the list pane shows: a lens, or a list in a workspace.
+struct Surface: Equatable {
+    var lens: Lens?
+    /// The workspace's doc id; nil is Home.
+    var workspace: String?
+    var list: String
 }
 
 /// A Done row: the item, tagged with the workspace it was read from.
@@ -194,12 +205,18 @@ final class MainWindowModel: ObservableObject {
     @Published private(set) var workspace: String?
     /// The selected list's id.
     @Published private(set) var list = MainWindowModel.inbox
+    /// What the rows below were read for. The selection above
+    /// (`lens`, `workspace`, `list`) moves at the click, for the
+    /// sidebar; this follows once the new rows are read, so the pane
+    /// keeps the old surface until then rather than blanking.
+    @Published private(set) var shown = Surface(lens: nil, workspace: nil, list: MainWindowModel.inbox)
     @Published private(set) var items: [Item] = []
     /// The lens shown in place of a list, if any. The list selection
     /// under it is kept, though nothing shows it.
     @Published private(set) var lens: Lens?
-    /// Each lens's rows, read only while it is the one shown.
+    /// Starred's rows, always read: the sidebar counts them.
     @Published private(set) var starred: [StarredItem] = []
+    /// The other lenses' rows, each read only while it is the one shown.
     @Published private(set) var agenda: [AgendaGroup] = []
     @Published private(set) var done: [DoneRow] = []
     /// The selected row's item, if one is: its panel is open.
@@ -225,6 +242,8 @@ final class MainWindowModel: ObservableObject {
     private static let collapsedKey = "MonoplanNavCollapsed"
     static let inbox = "inbox"
     static let events = "events"
+    /// `MONOPLAN_TIMING=1` logs each reload's timings to stderr.
+    static let timing = ProcessInfo.processInfo.environment["MONOPLAN_TIMING"] != nil
     /// Far enough out to be the whole future, as on iOS.
     static let agendaDays: UInt32 = 36_500
     /// How many Done rows the lens shows, newest first.
@@ -238,6 +257,7 @@ final class MainWindowModel: ObservableObject {
 
     /// The selected list's name, for the items' heading.
     var listTitle: String {
+        let lens = shown.lens, workspace = shown.workspace, list = shown.list
         switch lens {
         case .starred: return String(localized: "Starred")
         case .agenda: return String(localized: "Calendar")
@@ -277,8 +297,6 @@ final class MainWindowModel: ObservableObject {
             return
         }
         self.lens = lens
-        items = []
-        clearLenses()
         clearItem()
         generation += 1
         reload()
@@ -321,12 +339,9 @@ final class MainWindowModel: ObservableObject {
             return
         }
         lens = nil
-        clearLenses()
         clearItem()
         self.workspace = workspace
         self.list = list
-        // The old list's rows are not this one's.
-        items = []
         generation += 1
         reload()
     }
@@ -353,6 +368,7 @@ final class MainWindowModel: ObservableObject {
 
     private struct Snapshot {
         var sections: [NavSection]
+        var lens: Lens?
         var workspace: String?
         var list: String
         var items: [Item]
@@ -370,7 +386,11 @@ final class MainWindowModel: ObservableObject {
         guard visible, let calls = engine.calls else { return }
         let workspace = workspace, list = list, generation = generation, lens = lens
         let picked = selected
+        let asked = Date()
+        var began = asked, ended = asked
         calls.run({ engine -> Snapshot in
+            began = Date()
+            defer { ended = Date() }
             let workspaces = try engine.workspaces()
             // A workspace that has gone (deleted, left, another
             // account's) falls back to Home, and a list that has gone
@@ -381,19 +401,22 @@ final class MainWindowModel: ObservableObject {
             let selected = found.map { $0.home ? nil : $0.docId } ?? nil
             let gone = workspace != nil && found == nil
             let sections = try workspaces.map { workspace in
-                NavSection(
+                let target = workspace.home ? nil : workspace.docId
+                return NavSection(
                     workspace: workspace,
-                    lists: try engine.lists(workspace: workspace.home ? nil : workspace.docId, filter: .all))
+                    lists: try engine.lists(workspace: target, filter: .all),
+                    inboxOpen: try engine.items(workspace: target, list: Self.inbox, includeDone: false).count)
             }
             let lists = sections.first { $0.target == selected }?.lists ?? []
             let known = list == Self.inbox || lists.contains { $0.id == list }
             let shown = !gone && known ? list : Self.inbox
             var snapshot = Snapshot(
-                sections: sections, workspace: selected,
+                sections: sections, lens: lens, workspace: selected,
                 list: shown, items: [])
+            snapshot.starred = try engine.starred()
             switch lens {
             case .starred:
-                snapshot.starred = try engine.starred()
+                break
             case .agenda:
                 snapshot.agenda = try engine.agenda(days: Self.agendaDays)
             case .done:
@@ -418,11 +441,32 @@ final class MainWindowModel: ObservableObject {
             return snapshot
         }) { [weak self] result in
             guard let self, generation == self.generation else { return }
+            if Self.timing, case .success(let snapshot) = result {
+                let landed = Date()
+                var rows: Int = snapshot.items.count + snapshot.done.count
+                for group in snapshot.agenda { rows += group.rows.count }
+                if snapshot.lens == .starred { rows += snapshot.starred.count }
+                let workspaces: Int = snapshot.sections.count
+                // Two turns of the main queue, so SwiftUI's update for
+                // the rows set below has run in between.
+                DispatchQueue.main.async {
+                    DispatchQueue.main.async {
+                        let ms = { (a: Date, b: Date) -> String in
+                            String(format: "%.1f", b.timeIntervalSince(a) * 1000)
+                        }
+                        var line = "reload: queued " + ms(asked, began) + " ms, read " + ms(began, ended)
+                        line += " ms, to main " + ms(ended, landed) + " ms, render " + ms(landed, Date())
+                        line += " ms, \(rows) rows, \(workspaces) workspaces\n"
+                        FileHandle.standardError.write(Data(line.utf8))
+                    }
+                }
+            }
             switch result {
             case .success(let snapshot):
                 self.sections = snapshot.sections
                 self.workspace = snapshot.workspace
                 self.list = snapshot.list
+                self.shown = Surface(lens: snapshot.lens, workspace: snapshot.workspace, list: snapshot.list)
                 self.items = snapshot.items
                 self.starred = snapshot.starred
                 self.agenda = snapshot.agenda
@@ -469,7 +513,7 @@ final class MainWindowModel: ObservableObject {
     }
 
     func tick(_ item: Item) {
-        let workspace = workspace
+        let workspace = shown.workspace
         write { try $0.setDone(workspace: workspace, id: item.id, done: true) }
     }
 
@@ -490,7 +534,8 @@ final class MainWindowModel: ObservableObject {
     func add(_ text: String) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        let workspace = workspace, list = list
+        guard shown.lens == nil else { return }
+        let workspace = shown.workspace, list = shown.list
         write { _ = try $0.addItem(workspace: workspace, list: list, text: text, top: false) }
     }
 
@@ -509,9 +554,17 @@ final class MainWindowModel: ObservableObject {
     }
 }
 
+/// `UserDefaults` key of the list-counts preference (the General
+/// pane's toggle), the same key as iOS.
+let listCountsKey = "listCounts"
+
 struct MainWindowView: View {
     @ObservedObject var model: MainWindowModel
     @State private var draft = ""
+    /// The device's list-counts preference (Settings), off by default:
+    /// whether a list's row carries its Open count, as the web's "Show
+    /// list counts in nav".
+    @AppStorage(listCountsKey) private var showListCounts = false
     /// Which of the window's panes this is (`MainSplitViewController`
     /// hosts each apart).
     enum Pane { case sidebar, list }
@@ -541,7 +594,14 @@ struct MainWindowView: View {
             }
         )) {
             Section {
-                Label { Text("Starred") } icon: { StarOutline() }.tag(NavTarget.lens(.starred))
+                // Starred and the Inbox are counted whatever the
+                // preference says, as on iOS.
+                HStack {
+                    Label { Text("Starred") } icon: { StarOutline() }
+                    Spacer()
+                    count(model.starred.count)
+                }
+                .tag(NavTarget.lens(.starred))
                 Label("Calendar", systemImage: "calendar").tag(NavTarget.lens(.agenda))
                 Label("Done", systemImage: "checkmark").tag(NavTarget.lens(.done))
             }
@@ -550,15 +610,18 @@ struct MainWindowView: View {
                     get: { !model.collapsed.contains(section.id) },
                     set: { model.setCollapsed(section.id, !$0) }
                 )) {
-                    Text("Inbox").tag(NavTarget.list(workspace: section.target, list: MainWindowModel.inbox))
+                    HStack {
+                        Text("Inbox")
+                        Spacer()
+                        count(section.inboxOpen)
+                    }
+                    .tag(NavTarget.list(workspace: section.target, list: MainWindowModel.inbox))
                     ForEach(section.userLists) { list in
                         HStack {
                             Text(verbatim: [list.icon, list.name].compactMap { $0 }.joined(separator: " "))
                                 .lineLimit(1)
                             Spacer()
-                            if list.open > 0 {
-                                Text(verbatim: "\(list.open)").foregroundStyle(.secondary).monospacedDigit()
-                            }
+                            if showListCounts { count(Int(list.open)) }
                         }
                         .tag(NavTarget.list(workspace: section.target, list: list.id))
                     }
@@ -574,6 +637,14 @@ struct MainWindowView: View {
         .listStyle(.sidebar)
     }
 
+    /// A sidebar row's count; nothing is drawn for none.
+    @ViewBuilder
+    private func count(_ count: Int) -> some View {
+        if count > 0 {
+            Text(verbatim: "\(count)").foregroundStyle(.secondary).monospacedDigit()
+        }
+    }
+
     private var items: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let error = model.error {
@@ -583,7 +654,7 @@ struct MainWindowView: View {
                     .padding(.horizontal, 12)
                     .padding(.bottom, 6)
             }
-            switch model.lens {
+            switch model.shown.lens {
             case .starred: starred
             case .agenda: agenda
             case .done: done
@@ -603,8 +674,13 @@ struct MainWindowView: View {
 
     private var list: some View {
         VStack(spacing: 0) {
-            List(selection: selection { _ in model.workspace }) {
-                ForEach(model.items) { item in
+            List(selection: selection { _ in model.shown.workspace }) {
+                // Rows are identified by position, not by item: going
+                // from one list to another then rewrites the rows on
+                // screen in place, where item identity tears every one
+                // down and builds it again (a few ms each). The tag
+                // keeps selection on the item.
+                ForEach(Array(model.items.enumerated()), id: \.offset) { _, item in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Button {
                             model.tick(item)
@@ -614,9 +690,11 @@ struct MainWindowView: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel(Text("Mark as done"))
                         Text(verbatim: item.text)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                         Spacer()
                         if let when = item.when ?? item.deadline {
-                            Text(verbatim: when).foregroundStyle(.secondary).monospacedDigit()
+                            Text(verbatim: when).foregroundStyle(.secondary).monospacedDigit().fixedSize()
                         }
                     }
                     .tag(item.id)
@@ -676,16 +754,19 @@ struct MainWindowView: View {
                 Text(verbatim: String(when.dropFirst(11).prefix(5)))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+                    .fixedSize()
             }
             Text(verbatim: row.text)
+                .lineLimit(1)
+                .truncationMode(.tail)
                 .foregroundStyle(done ? .secondary : .primary)
             if let name = row.docName {
                 Text(verbatim: name).font(.footnote).foregroundStyle(.tertiary).lineLimit(1)
             }
             Spacer()
             switch row.tone {
-            case .overdue: Text("overdue").font(.footnote).foregroundStyle(.red)
-            case .warning: Text("due today").font(.footnote).foregroundStyle(.orange)
+            case .overdue: Text("overdue").font(.footnote).foregroundStyle(.red).fixedSize()
+            case .warning: Text("due today").font(.footnote).foregroundStyle(.orange).fixedSize()
             case .neutral: EmptyView()
             }
         }
@@ -707,6 +788,8 @@ struct MainWindowView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text("Mark as done"))
                     Text(verbatim: row.text)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                         .foregroundStyle(done ? .secondary : .primary)
                     Spacer()
                     Text(verbatim: [row.listName, row.docName].compactMap { $0 }.joined(separator: " · "))
@@ -744,6 +827,8 @@ struct MainWindowView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text("Mark as not done"))
                     Text(verbatim: row.item.text)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                         .foregroundStyle(.secondary)
                     if let name = row.workspaceName {
                         Text(verbatim: name).font(.footnote).foregroundStyle(.tertiary).lineLimit(1)
@@ -753,6 +838,7 @@ struct MainWindowView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
+                        .fixedSize()
                 }
                 .tag(row.item.id)
             }

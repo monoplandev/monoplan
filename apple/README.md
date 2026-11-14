@@ -129,7 +129,9 @@ status, star) over the panel; the window's title is the name of what is
 listed. A sidebar shaped as the web nav
 is (the lenses Starred, Calendar and Done on top, then one group per open workspace, Personal
 first; each a heading that folds its group, the fold kept in
-`UserDefaults`, over Inbox and the active lists with their open counts,
+`UserDefaults`, over Inbox and the active lists; Starred and each Inbox always carry
+their open count, the lists theirs when the
+General pane's "Show list counts in sidebar" is on (off by default),
 `Engine.lists` once per workspace), the Calendar (`Engine.agenda` over
 every workspace: Today, Unscheduled, then each non-empty day, rows
 with a tick; a tray row for an event opens it), Starred

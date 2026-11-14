@@ -449,6 +449,8 @@ final class SettingsModel: ObservableObject {
 /// (`LaunchPreference`).
 struct GeneralPane: View {
     @ObservedObject var model: SettingsModel
+    /// Read by the window's sidebar (`MainWindowView`).
+    @AppStorage(listCountsKey) private var showListCounts = false
 
     var body: some View {
         Form {
@@ -461,6 +463,7 @@ struct GeneralPane: View {
                 Text("Dark").tag(AppearancePreference.dark)
             }
             .pickerStyle(.segmented)
+            Toggle("Show list counts in sidebar", isOn: $showListCounts)
             Toggle("Open window at launch", isOn: Binding(
                 get: { model.openWindowAtLaunch },
                 set: { model.setOpenWindowAtLaunch($0) }
