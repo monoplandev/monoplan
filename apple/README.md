@@ -121,8 +121,12 @@ which links MonoplanCore and so needs `build:apple` run first.
 `Sources/MonoplanMac/MainWindow.swift`, per
 [`spec/swift-bindings-plan.md`](../spec/swift-bindings-plan.md) "The
 macOS window": native SwiftUI over the typed calls, and for now
-deliberately a debug screen. A session line (email, server, sync
-status, or why the engine is not running), a sidebar shaped as the web nav
+deliberately a debug screen. The chrome is AppKit
+(`Sources/MonoplanMac/MainSplit.swift`): a split view controller of
+sidebar, list and the item's panel as inspector under one unified
+toolbar, whose tracking separators keep the panel's controls (close,
+status, star) over the panel; the window's title is the name of what is
+listed. A sidebar shaped as the web nav
 is (the lenses Starred, Calendar and Done on top, then one group per open workspace, Personal
 first; each a heading that folds its group, the fold kept in
 `UserDefaults`, over Inbox and the active lists with their open counts,

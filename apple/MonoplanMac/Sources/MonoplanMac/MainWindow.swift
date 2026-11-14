@@ -1,7 +1,7 @@
 // The window: native SwiftUI over the engine's typed calls
 // (spec/swift-bindings-plan.md "The macOS window"), replacing the
-// webview. Deliberately a debug screen for now: a session line (who,
-// which server, sync), a sidebar laid out as the web nav is (the lenses
+// webview. Deliberately a debug screen for now: a sidebar laid out as
+// the web nav is (the lenses
 // Starred, Calendar and Done on top, then one group per open workspace,
 // Personal first, each a collapsible heading over its Inbox and lists),
 // and either the open items of the selected list with a tick and a
@@ -12,6 +12,11 @@
 // read only but for its tick and star. No board, no drag and drop, no
 // item editor; those come from sharing views with iOS.
 //
+// The chrome is the system's (`MainSplit.swift`): a split view of
+// sidebar, list and the panel as inspector in a unified toolbar window.
+// The bar shows the name of what is listed and, over the panel, the
+// item's controls.
+//
 // It holds no doc and no state of its own beyond the selections: every
 // read is a typed call, made again whenever the engine says a doc
 // changed and after each of its own writes. Nothing is optimistic.
@@ -20,6 +25,7 @@
 // menu); closed, it goes back to a bare status item.
 
 import AppKit
+import Combine
 import SwiftUI
 import MonoplanCore
 import MonoplanMacKit
@@ -28,21 +34,43 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private let model: MainWindowModel
     private let onVisibility: (Bool) -> Void
     private var newWorkspacePrompt: NewWorkspacePrompt?
+    private var modelSync: AnyCancellable?
+    private let split: MainSplitViewController
 
     init(engine: EngineController, onVisibility: @escaping (Bool) -> Void) {
         model = MainWindowModel(engine: engine)
         self.onVisibility = onVisibility
-        let window = NSWindow(contentViewController: NSHostingController(rootView: MainWindowView(model: model)))
+        // A toolbar window, as Finder or Notes: the tall unified bar
+        // with the large traffic lights. The content view takes the
+        // whole frame so the sidebar runs to the top edge under them.
+        // The panes and the toolbar are `MainSplitViewController`'s.
+        split = MainSplitViewController(model: model)
+        let window = NSWindow(contentViewController: split)
         window.title = "Monoplan"
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        window.toolbar = split.toolbar
+        window.toolbarStyle = .unified
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 520, height: 360)
-        window.setContentSize(NSSize(width: 760, height: 520))
+        window.setContentSize(NSSize(width: 860, height: 560))
         window.center()
         // After the default frame, so a saved one wins.
         window.setFrameAutosaveName("MonoplanWindow")
         super.init(window: window)
         window.delegate = self
+        split.restoreDividers()
+        // The bar's title is the window's, drawn over the list: the
+        // name of what is shown. It and the panel's toolbar items
+        // follow the model. `objectWillChange` is before the change,
+        // hence the hop.
+        modelSync = model.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                guard let self, let window = self.window else { return }
+                let title = self.model.listTitle
+                if window.title != title { window.title = title }
+                self.split.sync()
+            }
     }
 
     @available(*, unavailable)
@@ -157,7 +185,6 @@ enum NavTarget: Hashable {
 /// engine's call queue and come back here.
 final class MainWindowModel: ObservableObject {
     @Published private(set) var state: EngineState
-    @Published private(set) var account: AccountInfo?
     /// The sidebar: every open workspace with its lists, Home first.
     @Published private(set) var sections: [NavSection] = []
     /// The doc ids of the workspaces whose group is folded. Local to
@@ -207,16 +234,6 @@ final class MainWindowModel: ObservableObject {
         self.engine = engine
         state = engine.state
         collapsed = Set(UserDefaults.standard.stringArray(forKey: Self.collapsedKey) ?? [])
-    }
-
-    /// The first line of the window: who is signed in and where, then
-    /// what the engine is doing.
-    var sessionLine: String {
-        let who = account.map { "\($0.email) · \($0.serverUrl)" } ?? String(localized: "Local workspace (no account)")
-        switch state {
-        case .connecting(let reason): return "\(who) · " + String(localized: "Not running · \(reason)")
-        case .connected(let sync): return "\(who) · \(sync.line())"
-        }
     }
 
     /// The selected list's name, for the items' heading.
@@ -327,7 +344,6 @@ final class MainWindowModel: ObservableObject {
     }
 
     private func clear() {
-        account = nil
         sections = []
         items = []
         clearLenses()
@@ -336,7 +352,6 @@ final class MainWindowModel: ObservableObject {
     }
 
     private struct Snapshot {
-        var account: AccountInfo?
         var sections: [NavSection]
         var workspace: String?
         var list: String
@@ -374,7 +389,7 @@ final class MainWindowModel: ObservableObject {
             let known = list == Self.inbox || lists.contains { $0.id == list }
             let shown = !gone && known ? list : Self.inbox
             var snapshot = Snapshot(
-                account: try engine.account(), sections: sections, workspace: selected,
+                sections: sections, workspace: selected,
                 list: shown, items: [])
             switch lens {
             case .starred:
@@ -405,7 +420,6 @@ final class MainWindowModel: ObservableObject {
             guard let self, generation == self.generation else { return }
             switch result {
             case .success(let snapshot):
-                self.account = snapshot.account
                 self.sections = snapshot.sections
                 self.workspace = snapshot.workspace
                 self.list = snapshot.list
@@ -498,36 +512,15 @@ final class MainWindowModel: ObservableObject {
 struct MainWindowView: View {
     @ObservedObject var model: MainWindowModel
     @State private var draft = ""
+    /// Which of the window's panes this is (`MainSplitViewController`
+    /// hosts each apart).
+    enum Pane { case sidebar, list }
+    let pane: Pane
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(verbatim: model.sessionLine)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            Divider()
-            HSplitView {
-                sidebar
-                    .frame(minWidth: 160, idealWidth: 200, maxWidth: 320)
-                items
-                    .frame(minWidth: 260, maxWidth: .infinity, maxHeight: .infinity)
-                if let selected = model.selected {
-                    ItemPanel(
-                        item: model.detail,
-                        workspaceName: model.sharedWorkspaceName(selected.workspace),
-                        setDone: { model.setDone(workspace: selected.workspace, id: selected.id, done: $0) },
-                        setStarred: { model.setStarred(workspace: selected.workspace, id: selected.id, starred: $0) },
-                        close: model.closeItem)
-                        .frame(minWidth: 240, idealWidth: 300, maxWidth: 440)
-                }
-            }
+        switch pane {
+        case .sidebar: sidebar
+        case .list: items.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -548,7 +541,7 @@ struct MainWindowView: View {
             }
         )) {
             Section {
-                Label("Starred", systemImage: "star").tag(NavTarget.lens(.starred))
+                Label { Text("Starred") } icon: { StarOutline() }.tag(NavTarget.lens(.starred))
                 Label("Calendar", systemImage: "calendar").tag(NavTarget.lens(.agenda))
                 Label("Done", systemImage: "checkmark").tag(NavTarget.lens(.done))
             }
@@ -583,10 +576,6 @@ struct MainWindowView: View {
 
     private var items: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(verbatim: model.listTitle)
-                .font(.headline)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
             if let error = model.error {
                 Text(verbatim: error)
                     .font(.footnote)
@@ -727,7 +716,7 @@ struct MainWindowView: View {
                     Button {
                         model.unstar(row)
                     } label: {
-                        Image(systemName: "star.fill")
+                        StarGlyph(starred: true)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text("Remove star"))

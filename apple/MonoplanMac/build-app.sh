@@ -93,7 +93,15 @@ APP="$PKG/.build/Monoplan.app"
 CONTENTS="$APP/Contents"
 rm -rf "$APP"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
-cp "$BIN" "$CONTENTS/MacOS/MonoplanMac"
+# SwiftPM stamps the binary as built against the deployment target's
+# SDK (14.0), not the one it was compiled with. AppKit reads that stamp
+# to pick the window chrome: under 26 it draws the old title bar,
+# sidebar and traffic lights while laying the toolbar out for the new
+# ones, so the bar sits a few points off its panes and nothing is glass.
+# Restamp with the real SDK; the minimum system stays 14.0. Before
+# signing, which this invalidates.
+xcrun vtool -set-build-version macos 14.0 "$(xcrun --show-sdk-version)" -replace \
+  -output "$CONTENTS/MacOS/MonoplanMac" "$BIN"
 cp "$CLI" "$CONTENTS/MacOS/monoplan"
 
 # SwiftPM cannot put the catalog in Bundle.main, so compile it here:

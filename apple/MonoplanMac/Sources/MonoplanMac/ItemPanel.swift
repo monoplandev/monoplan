@@ -7,6 +7,9 @@
 //
 // Read only but for the two writes the window already had: the
 // checkbox ticks and reopens the item, the star stars and unstars it.
+// Both are toolbar items with the close button, over the panel in the
+// window's bar and on the system's glass, as the iOS page's navigation
+// bar (`MainSplit.swift`).
 // No field editors, no state menu, no bin: those come with the views
 // shared with iOS.
 
@@ -20,14 +23,9 @@ struct ItemPanel: View {
     let item: ItemInfo?
     /// The item's workspace when it is a shared one.
     let workspaceName: String?
-    let setDone: (Bool) -> Void
-    let setStarred: (Bool) -> Void
-    let close: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
+        Group {
             if let item {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
@@ -45,56 +43,10 @@ struct ItemPanel: View {
                     .padding(16)
                 }
             } else {
-                Spacer()
+                Color.clear
             }
         }
         .frame(maxHeight: .infinity)
-    }
-
-    /// The status at the left (the checkbox and the workflow state; a
-    /// binned item just says so, the bin masking its state), the star
-    /// and the close button at the right. Only an Open item can be
-    /// starred (spec/focus.md).
-    private var header: some View {
-        HStack(spacing: 8) {
-            if let item {
-                if item.item.binnedAt != nil {
-                    Text("Binned").foregroundStyle(.secondary)
-                } else {
-                    let closed = item.item.state.isClosed
-                    Button {
-                        setDone(!closed)
-                    } label: {
-                        Image(systemName: closed ? "checkmark.circle.fill" : "circle")
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(closed ? Text("Mark as not done") : Text("Mark as done"))
-                    Text(verbatim: Self.statusLabel(item))
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            if let item, item.item.binnedAt == nil, item.closedAt == nil {
-                Button {
-                    setStarred(!item.starred)
-                } label: {
-                    Image(systemName: item.starred ? "star.fill" : "star")
-                        .foregroundStyle(item.starred ? Color.yellow : Color.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(item.starred ? Text("Remove star") : Text("Star"))
-            }
-            Button(action: close) {
-                Image(systemName: "xmark")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .keyboardShortcut(.cancelAction)
-            .accessibilityLabel(Text("Close"))
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
     }
 
     /// List, planned date, deadline (only when set) and place. The date
