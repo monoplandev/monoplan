@@ -139,6 +139,34 @@ final class EngineController {
             }
         }
     }
+
+    /// Create an account (`monoplan auth signup`, `MonoplanCore.signup`),
+    /// off the main thread. Our engine is stopped first, as for
+    /// `signIn`; its shutdown persists the local-only workspace, which
+    /// signup then adopts as the account's Home doc (same id, same key;
+    /// `spec/auth.md` §Device pairing), so nothing captured before is
+    /// lost. The engine the client's poke starts afterwards pushes that
+    /// history on its first connect; after a failure it starts on the
+    /// untouched local-only workspace again.
+    func signUp(_ creds: SignInCredentials, completion: @escaping (Result<SignupOutcome, Error>) -> Void) {
+        accountWork = "signing in"
+        let dir = location.dir.path
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.engine?.shutdown()
+            let result = Result {
+                try MonoplanCore.signup(
+                    profileDir: dir, server: creds.server, email: creds.email,
+                    password: creds.password, deviceName: creds.deviceName)
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.engine = nil
+                self.accountWork = nil
+                self.client.engineGone()
+                completion(result.mapError(EngineFailure.init))
+            }
+        }
+    }
 }
 
 struct SignInCredentials {

@@ -259,8 +259,8 @@ request and reply for the tray).
 xcodegen on this machine; `Monoplan.xcodeproj` uses a synchronized
 folder, so new files under `Monoplan/` need no project edit) with one
 SwiftUI target. It is the first native client and exists to drive the
-architecture, not to be used yet: sign in, sign out, run a sync, and
-show what the engine reports.
+architecture, not to be used yet: sign in, create an account, sign
+out, run a sync, and show what the engine reports.
 
 The app runs the profile's engine, as the Mac app does: `EngineController`
 runs `Engine` from MonoplanCore in process and `EngineClient` (the Kit,
@@ -278,7 +278,10 @@ missing socket also means `login` cannot stop the app's engine itself,
 as it does on the Mac (`client::claim` sends `Shutdown` over the
 socket and would wait out its deadline here), so `EngineController`
 shuts its engine down before calling `login`, as both apps already do
-before `logout`; a rejected password costs an engine restart.
+before `logout`; a rejected password costs an engine restart. `signup`
+(2026-11-14) goes the same way: the shutdown persists the local-only
+workspace, signup adopts it, and the sheet shows the recovery code
+once.
 
 ```sh
 bun run ios          # build for the simulator, install, launch

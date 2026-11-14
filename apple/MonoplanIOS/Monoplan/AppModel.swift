@@ -568,6 +568,28 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Create an account. The completion gets the recovery code, for
+    /// the sheet to show once; it is kept nowhere else. Nil on failure
+    /// (`signInError` says why).
+    func signUp(_ creds: SignInCredentials, completion: @escaping (String?) -> Void) {
+        signingIn = true
+        signInError = nil
+        busy = "Creating account"
+        engineController.signUp(creds) { [weak self] result in
+            guard let self else { return }
+            signingIn = false
+            busy = nil
+            hasAccount = location.hasAccount
+            switch result {
+            case .success(let outcome):
+                completion(outcome.recoveryCode)
+            case .failure(let error):
+                signInError = error.localizedDescription
+                completion(nil)
+            }
+        }
+    }
+
     func signOut() {
         busy = "Signing out"
         engineController.signOut { [weak self] error in

@@ -13,6 +13,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showSignIn = false
+    @State private var confirmSignOut = false
     @AppStorage(listCountsKey) private var showListCounts = false
 
     var body: some View {
@@ -49,8 +50,14 @@ struct SettingsView: View {
             if let session = model.session, !session.localOnly {
                 LabeledContent("Email", value: session.email)
                 LabeledContent("Server", value: session.serverUrl)
-                Button("Sign Out", role: .destructive) { model.signOut() }
+                Button("Sign Out", role: .destructive) { confirmSignOut = true }
                     .disabled(model.busy != nil)
+                    .confirmationDialog("Sign out of Monoplan?", isPresented: $confirmSignOut, titleVisibility: .visible) {
+                        Button("Sign Out", role: .destructive) { model.signOut() }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("This removes the account's data from this iPhone. It stays on the server and your other devices.")
+                    }
             } else {
                 if model.session?.localOnly == true {
                     Text("This device is running a local-only workspace. Signing in replaces it with the account's.")
