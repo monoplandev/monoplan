@@ -255,13 +255,13 @@ async fn connect(profile: &Profile, spawn: Spawn) -> anyhow::Result<UnixStream> 
 /// Start `monoplan daemon --detach` from this executable and wait for
 /// its ready line. The child's stdout is the readiness pipe (one line:
 /// `ready`, `already-running`, or `error: …`); its stderr goes to
-/// `daemon.log` in the profile dir.
+/// `engine.log` in the profile dir.
 fn spawn_daemon(profile: &Profile) -> anyhow::Result<()> {
     let exe = std::env::current_exe()?;
     let log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(profile.dir.join("daemon.log"))?;
+        .open(profile.dir.join(daemon::LOG_FILE))?;
     let mut cmd = Command::new(exe);
     cmd.arg("daemon")
         .arg("start")
@@ -314,7 +314,7 @@ fn spawn_daemon(profile: &Profile) -> anyhow::Result<()> {
             Ok(())
         }
         "already-running" => Ok(()),
-        "" => anyhow::bail!("daemon exited before signalling readiness; see daemon.log"),
+        "" => anyhow::bail!("daemon exited before signalling readiness; see engine.log"),
         other => anyhow::bail!(
             "daemon failed to start: {}",
             other.trim_start_matches("error: ")

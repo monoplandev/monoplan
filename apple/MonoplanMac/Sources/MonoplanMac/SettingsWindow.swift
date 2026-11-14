@@ -4,7 +4,7 @@
 // preferences the app owns for its window, spec/mac-window-plan.md
 // "Settings"), Account (what a user looks at), Devices (the account's
 // devices over the server API) and Advanced (the engine process, the
-// command line, the profile on disk). Panes are SwiftUI
+// command line, the profile on disk and its size). Panes are SwiftUI
 // views hosted in an AppKit tab view controller, so adding one is a
 // view, a label and an SF Symbol.
 //
@@ -854,6 +854,51 @@ struct RenameDeviceSheet: View {
 /// where the profile lives. Nothing here needs touching day to day.
 struct AdvancedPane: View {
     @ObservedObject var model: SettingsModel
+    @State private var localFiles: [(name: String, bytes: Int64)]?
+
+    /// The profile's size on disc. The row is always present (a dash
+    /// until measured) so the pane keeps its height; the file-by-file
+    /// split is the row's tooltip.
+    private var localDataLine: String {
+        guard let files = localFiles else { return "—" }
+        return Self.format(bytes: files.reduce(0) { $0 + $1.bytes })
+    }
+
+    private var localDataBreakdown: String {
+        (localFiles ?? []).filter { $0.bytes > 0 }
+            .map { "\($0.name)  \(Self.format(bytes: $0.bytes))" }
+            .joined(separator: "\n")
+    }
+
+    private func measureLocalData() async {
+        let dir = URL(fileURLWithPath: model.profilePath, isDirectory: true)
+        localFiles = await Task.detached { Self.fileSizes(dir) }.value
+    }
+
+    /// Bytes allocated to every regular file under `dir`, largest
+    /// first: the whole profile, not the sqlite file alone, since the
+    /// WAL sidecar can hold a real share of it between checkpoints.
+    /// Same measure as the iOS Debug page.
+    private nonisolated static func fileSizes(_ dir: URL) -> [(name: String, bytes: Int64)] {
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .totalFileAllocatedSizeKey, .fileSizeKey]
+        guard let files = FileManager.default.enumerator(
+            at: dir, includingPropertiesForKeys: Array(keys)
+        ) else { return [] }
+        var sizes: [(name: String, bytes: Int64)] = []
+        let root = dir.standardizedFileURL.path + "/"
+        for case let url as URL in files {
+            guard let values = try? url.resourceValues(forKeys: keys),
+                  values.isRegularFile == true else { continue }
+            let path = url.standardizedFileURL.path
+            let name = path.hasPrefix(root) ? String(path.dropFirst(root.count)) : path
+            sizes.append((name, Int64(values.totalFileAllocatedSize ?? values.fileSize ?? 0)))
+        }
+        return sizes.sorted { $0.bytes > $1.bytes }
+    }
+
+    private static func format(bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
 
     var body: some View {
         Form {
@@ -882,8 +927,13 @@ struct AdvancedPane: View {
                     Button("Reveal") { model.revealProfile() }
                 }
             }
+            LabeledContent("Local data", value: localDataLine)
+                .help(localDataBreakdown)
         }
         .formStyle(.grouped)
         .frame(width: 460)
+        // Re-measured each time the pane comes up, and when the
+        // profile moves (sign in / out).
+        .task(id: model.profilePath) { await measureLocalData() }
     }
 }

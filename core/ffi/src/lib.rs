@@ -56,13 +56,14 @@ pub enum EngineError {
     Failed { message: String },
 }
 
-/// Where the embedded engine's `tracing` output goes: `daemon.log` in
+/// Where the embedded engine's `tracing` output goes: `engine.log` in
 /// the profile dir, the file the headless daemon's stderr is appended
 /// to, so there is one place to look on a Mac. A GUI process has no
 /// terminal, and the engine's connect failures (`warn`) would otherwise
 /// vanish. `RUST_LOG` overrides the level. Set once per process; the
 /// file is reopened per write, so it survives a sign-out purge and
-/// comes back with the next profile.
+/// comes back with the next profile. Its size is capped at each engine
+/// start (`daemon::start_with`).
 fn init_log(profile_dir: &std::path::Path) {
     use tracing_subscriber::{EnvFilter, fmt::writer::MakeWriter};
 
@@ -86,7 +87,7 @@ fn init_log(profile_dir: &std::path::Path) {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .with_ansi(false)
-        .with_writer(Append(profile_dir.join("daemon.log")))
+        .with_writer(Append(profile_dir.join(monoplan_cli::daemon::LOG_FILE)))
         .try_init();
 }
 

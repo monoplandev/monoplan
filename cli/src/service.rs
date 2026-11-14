@@ -5,7 +5,7 @@
 //! (`~/.config/systemd/user/monoplan.service`). Both run a plain
 //! `monoplan daemon start` from *this* executable's resolved path, pinned to
 //! the profile active at install time via `MONOPLAN_DATA_DIR`, with
-//! stderr appended to the profile's `daemon.log`.
+//! stderr appended to the profile's `engine.log`.
 //!
 //! Restart policy is "on failure only": `daemon stop` is a clean exit
 //! and stays stopped until the next login (or another `install`, which
@@ -198,9 +198,9 @@ pub fn launchd_plist(exe: &Path, profile_dir: &Path) -> String {
   <key>ProcessType</key>
   <string>Background</string>
   <key>StandardOutPath</key>
-  <string>{dir}/daemon.log</string>
+  <string>{dir}/engine.log</string>
   <key>StandardErrorPath</key>
-  <string>{dir}/daemon.log</string>
+  <string>{dir}/engine.log</string>
 </dict>
 </plist>
 "#
@@ -219,7 +219,7 @@ pub fn systemd_unit(exe: &Path, profile_dir: &Path) -> String {
          [Service]\n\
          ExecStart=\"{exe}\" daemon start\n\
          Environment=MONOPLAN_DATA_DIR={dir}\n\
-         StandardError=append:{dir}/daemon.log\n\
+         StandardError=append:{dir}/engine.log\n\
          Restart=on-failure\n\
          \n\
          [Install]\n\
@@ -251,7 +251,7 @@ mod tests {
         assert!(plist.contains("<key>SuccessfulExit</key>\n    <false/>"));
         assert!(
             plist.contains(
-                "<string>/Users/d/Library/Application Support/monoplan/daemon.log</string>"
+                "<string>/Users/d/Library/Application Support/monoplan/engine.log</string>"
             )
         );
     }

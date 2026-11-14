@@ -181,7 +181,7 @@ stays as the barrier `login` / `recover` and the tests use.
 ### Auto-spawn
 
 The client spawns `current_exe() daemon --detach` as a child with stdin
-nulled, stdout piped and stderr sent to `daemon.log`. The child's stdout
+nulled, stdout piped and stderr sent to `engine.log`. The child's stdout
 *is* the readiness pipe: it `setsid`s (done by the parent's `pre_exec`),
 takes `daemon.lock`, binds the socket, opens the doc, then prints one
 line (`ready`, `already-running`, or `error: …`) and never uses stdout

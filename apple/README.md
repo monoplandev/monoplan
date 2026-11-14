@@ -160,8 +160,8 @@ MONOPLAN_DATA_DIR=local/cli bun run mac               # a different profile, sam
 MONOPLAN_MAC_DEBUG=1 bun run mac                      # log state and rows to stderr
 ```
 
-The in-app engine logs to `daemon.log` in the profile dir (`~/Library/
-Application Support/monoplan/daemon.log` by default; `RUST_LOG`
+The in-app engine logs to `engine.log` in the profile dir (`~/Library/
+Application Support/monoplan/engine.log` by default; `RUST_LOG`
 overrides the `info` level): connect failures and drops land there
 once per distinct reason, and the same reason shows on the Settings
 Sync row and in `monoplan daemon status` ("offline; never synced

@@ -75,6 +75,13 @@ const PERSIST_INTERVAL: Duration = Duration::from_secs(1);
 const WATCH_BUFFER: usize = 64;
 
 const LOCK_FILE: &str = "daemon.lock";
+/// The engine's log in the profile dir: the embedded host's `tracing`
+/// output and a headless daemon's stderr, both appended.
+pub const LOG_FILE: &str = "engine.log";
+/// Past this size at engine start the log is cut back to its tail.
+const LOG_CAP: u64 = 1024 * 1024;
+/// How much of the tail a cut keeps.
+const LOG_KEEP: u64 = 256 * 1024;
 
 #[derive(Parser, Debug)]
 #[command(subcommand_required = true, arg_required_else_help = true)]
@@ -222,6 +229,7 @@ pub async fn start_with(profile: Profile, serve_socket: bool) -> anyhow::Result<
     let Some(lock) = try_acquire(&profile.dir)? else {
         return Ok(None);
     };
+    trim_log(&profile.dir.join(LOG_FILE), LOG_CAP, LOG_KEEP);
     let listener = if serve_socket {
         Some(bind(&profile.dir)?)
     } else {
@@ -233,6 +241,35 @@ pub async fn start_with(profile: Profile, serve_socket: bool) -> anyhow::Result<
         listener,
         engine,
     }))
+}
+
+/// Cut the log at `path` back to its last `keep` bytes (from the next
+/// line start) once it has grown past `cap`. Called once per engine
+/// start, under the profile lock, so one process trims at a time and a
+/// long-lived engine can overshoot until its next start. The file is
+/// rewritten in place, never replaced: a headless daemon's stderr is an
+/// append-mode descriptor on this same inode and carries on writing at
+/// the new end. Best effort: a log that cannot be trimmed is left as
+/// it is.
+fn trim_log(path: &Path, cap: u64, keep: u64) {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    let trim = || -> std::io::Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .append(true)
+            .open(path)?;
+        let len = file.metadata()?.len();
+        if len <= cap {
+            return Ok(());
+        }
+        file.seek(SeekFrom::Start(len.saturating_sub(keep)))?;
+        let mut tail = Vec::new();
+        file.read_to_end(&mut tail)?;
+        let start = tail.iter().position(|&b| b == b'\n').map_or(0, |i| i + 1);
+        file.set_len(0)?;
+        file.write_all(&tail[start..])
+    };
+    let _ = trim();
 }
 
 /// Serve until `shutdown` fires or a client asks (`Request::Shutdown`).
@@ -1880,5 +1917,41 @@ impl Host {
             let _ = self.watchers.send(WatchEvent::Changed);
         }
         self.fan_out();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn trim_log_keeps_the_tail_from_a_line_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(LOG_FILE);
+        let lines: String = (0..100).map(|i| format!("line {i:03}\n")).collect();
+        std::fs::write(&path, &lines).unwrap();
+
+        // Under the cap: untouched.
+        trim_log(&path, 10_000, 95);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), lines);
+
+        // Over it: the last 95 bytes land mid-line, so the cut starts
+        // at the next whole line. A writer that had the file open in
+        // append mode beforehand (a daemon's stderr) carries on at the
+        // new end.
+        let mut stderr = OpenOptions::new().append(true).open(&path).unwrap();
+        trim_log(&path, 500, 95);
+        stderr.write_all(b"after\n").unwrap();
+        let expected: String = (90..100)
+            .map(|i| format!("line {i:03}\n"))
+            .chain(["after\n".to_string()])
+            .collect();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), expected);
+
+        // No file: nothing made.
+        std::fs::remove_file(&path).unwrap();
+        trim_log(&path, 500, 95);
+        assert!(!path.exists());
     }
 }

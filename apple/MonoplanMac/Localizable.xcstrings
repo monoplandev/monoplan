@@ -481,6 +481,16 @@
         }
       }
     },
+    "Local data": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Datos locales"
+          }
+        }
+      }
+    },
     "Local workspace (no account)": {
       "localizations": {
         "es": {
