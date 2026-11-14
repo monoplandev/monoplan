@@ -1,10 +1,8 @@
-// Whether launching the app opens the window (spec/mac-window-plan.md
-// "Settings"). On by default: the app is a tray process, but a user who
-// double-clicks it, or has it open at login, is nearly always after
-// the window; off makes a launch tray-only, as the first pass was. The
-// tray opens the window once the engine has settled rather than at once,
-// so the page does not boot against no engine and flash its error
-// before the reload. Pure data here, applied in the app target.
+// Whether launching the app opens the window. On by default: the app
+// is a tray process, but a user who double-clicks it, or has it open
+// at login, is nearly always after the window; off makes a launch
+// tray-only, as the first pass was. Pure data here, applied in the app
+// target.
 
 import Foundation
 

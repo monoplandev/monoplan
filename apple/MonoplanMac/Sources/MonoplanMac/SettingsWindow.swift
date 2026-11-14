@@ -1,8 +1,7 @@
 // The Settings window: the standard macOS preferences layout, a
 // toolbar of icon-over-label panes (a sidebar is for System
 // Settings-scale catalogues). Four panes: General (the device
-// preferences the app owns for its window, spec/mac-window-plan.md
-// "Settings"), Account (what a user looks at), Devices (the account's
+// preferences the app owns), Account (what a user looks at), Devices (the account's
 // devices over the server API) and Advanced (the engine process, the
 // command line, the profile on disk and its size). Panes are SwiftUI
 // views hosted in an AppKit tab view controller, so adding one is a
@@ -32,14 +31,14 @@ final class SettingsWindowController: NSWindowController {
     private let model: SettingsModel
 
     init(
-        location: ProfileLocation, client: EngineClient,
+        location: ProfileLocation, engine: EngineController,
         signIn: @escaping (SignInCredentials, @escaping (Error?) -> Void) -> Void,
         signUp: @escaping (SignInCredentials, @escaping (Result<SignupOutcome, Error>) -> Void) -> Void,
         signOut: @escaping (@escaping (Error?) -> Void) -> Void,
         credential: @escaping () -> APICredential?
     ) {
         model = SettingsModel(
-            location: location, client: client, signIn: signIn, signUp: signUp, signOut: signOut,
+            location: location, engine: engine, signIn: signIn, signUp: signUp, signOut: signOut,
             credential: credential)
         // The toolbar tab style: AppKit builds the toolbar from the tab
         // items (one icon + label each) and, with the `.preference`
@@ -80,9 +79,9 @@ final class SettingsWindowController: NSWindowController {
     /// The Account pane's position among the tabs, for `showSignIn`.
     private static let accountPaneIndex = 1
 
-    /// The tray forwards engine state and sync events here; the window
-    /// does not hook the client itself, so the tray's own callbacks
-    /// stay intact.
+    /// The tray forwards engine state and change events here; the
+    /// window does not hook the engine controller itself, so the tray's
+    /// own callbacks stay intact.
     func refresh() {
         model.refresh()
     }
@@ -94,31 +93,22 @@ final class SettingsWindowController: NSWindowController {
         window?.makeKeyAndOrderFront(nil)
     }
 
-    /// Open on the Account pane (the window's account button).
+    /// Open on the Account pane.
     func showAccount() {
         (contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = Self.accountPaneIndex
         show()
     }
 
     /// Open on the Account pane with the sign-in sheet up (the tray's
-    /// and the window's "Sign In…"); the sheet itself offers creating
-    /// an account too.
+    /// "Sign In…"); the sheet itself offers creating an account too.
     func showSignIn(mode: SignInSheet.Mode = .signIn) {
         showAccount()
         model.signInMode = mode
         model.showSignIn = true
     }
-
-    /// The Account pane's confirm-then-sign-out, for the window's
-    /// account button; the pane shows the outcome if it is open.
-    func signOut() {
-        model.signOut()
-    }
 }
 
-/// What both panes show. Everything here is read from the profile
-/// files or the engine's hello; nothing is editable yet, since sign-in /
-/// sign-out rewrite the profile and stay with the CLI for now.
+/// What the panes show: read from the profile files and the engine.
 final class SettingsModel: ObservableObject {
     @Published var serverURL: String = "—"
     @Published var signedIn = false
@@ -126,11 +116,10 @@ final class SettingsModel: ObservableObject {
     @Published var email: String?
     @Published var profilePath: String
     @Published var engineLine: String = String(localized: "Not running")
-    /// The package version. From the engine's hello once it answers
-    /// (`version:mtime`, the mtime being the CLI's staleness check,
-    /// not something to show); the bundle's own version until then.
-    /// Either way the bundle's commit follows it when the build script
-    /// recorded one.
+    /// The package version. The engine's own once it runs (`buildId`
+    /// is `version:mtime`, the mtime being the CLI's staleness check,
+    /// not something to show); the bundle's until then. Either way the
+    /// bundle's commit follows it when the build script recorded one.
     @Published var buildLine: String = SettingsModel.withCommit(SettingsModel.bundleVersion)
     @Published var syncLine: String = "—"
     /// Settings › General. Saved and applied app-wide on change.
@@ -138,9 +127,6 @@ final class SettingsModel: ObservableObject {
     /// Settings › General, read by the tray at the next launch
     /// (`LaunchPreference`).
     @Published var openWindowAtLaunch: Bool = LaunchPreference.openWindow()
-    /// Settings › General, delivered to the window's page
-    /// (`WindowSettings`): whether the sidebar counts each list.
-    @Published var listCounts: Bool = WindowSettings.load().listCounts
     @Published var openAtLogin = false
     @Published var loginError: String?
     @Published var signingOut = false
@@ -171,7 +157,7 @@ final class SettingsModel: ObservableObject {
     let cli: CommandLineLink? = bundledBinary().map { CommandLineLink(target: $0) }
 
     private let location: ProfileLocation
-    private let client: EngineClient
+    private let engine: EngineController
     private let signInAction: (SignInCredentials, @escaping (Error?) -> Void) -> Void
     private let signUpAction: (SignInCredentials, @escaping (Result<SignupOutcome, Error>) -> Void) -> Void
     private let signOutAction: (@escaping (Error?) -> Void) -> Void
@@ -184,14 +170,14 @@ final class SettingsModel: ObservableObject {
     }()
 
     init(
-        location: ProfileLocation, client: EngineClient,
+        location: ProfileLocation, engine: EngineController,
         signIn: @escaping (SignInCredentials, @escaping (Error?) -> Void) -> Void,
         signUp: @escaping (SignInCredentials, @escaping (Result<SignupOutcome, Error>) -> Void) -> Void,
         signOut: @escaping (@escaping (Error?) -> Void) -> Void,
         credential: @escaping () -> APICredential?
     ) {
         self.location = location
-        self.client = client
+        self.engine = engine
         self.signInAction = signIn
         self.signUpAction = signUp
         self.signOutAction = signOut
@@ -279,7 +265,7 @@ final class SettingsModel: ObservableObject {
             devices = nil
             devicesError = nil
         }
-        switch client.state {
+        switch engine.state {
         case .connecting(let reason):
             engineLine = String(localized: "Not running · \(reason)")
             syncLine = "—"
@@ -287,13 +273,11 @@ final class SettingsModel: ObservableObject {
         case .connected(let sync):
             if signedIn, devicesVisible, devices == nil, devicesError == nil, !devicesBusy { loadDevices() }
             engineLine = String(localized: "Running")
-            if let d = client.engine {
-                buildLine = Self.withCommit(String(d.buildId.split(separator: ":", maxSplits: 1).first ?? ""))
-            }
+            buildLine = Self.withCommit(String(MonoplanCore.buildId().split(separator: ":", maxSplits: 1).first ?? ""))
             syncLine = sync.line()
-            client.send(.account) { [weak self] result in
-                if case .success(.account(_, let email, _)) = result {
-                    self?.email = email
+            engine.calls?.run({ try $0.account() }) { [weak self] result in
+                if case .success(let account) = result {
+                    self?.email = account?.email
                 }
             }
         }
@@ -330,13 +314,6 @@ final class SettingsModel: ObservableObject {
     func setAppearance(_ pref: AppearancePreference) {
         appearance = pref
         pref.activate()
-    }
-
-    func setListCounts(_ on: Bool) {
-        listCounts = on
-        var s = WindowSettings.load()
-        s.listCounts = on
-        s.save()
     }
 
     func setOpenWindowAtLaunch(_ on: Bool) {
@@ -411,7 +388,7 @@ final class SettingsModel: ObservableObject {
     }
 
     /// One API call: the credential off the main thread (the engine's
-    /// `session()` blocks briefly), the request, the reply on main.
+    /// `account()` blocks briefly), the request, the reply on main.
     private func request(_ build: @escaping (APICredential) -> URLRequest?,
                          completion: @escaping (Result<Data, Error>) -> Void) {
         devicesBusy = true
@@ -467,12 +444,9 @@ final class SettingsModel: ObservableObject {
     }
 }
 
-/// The device preferences the app owns for its window
-/// (spec/mac-window-plan.md "Settings"). Appearance drives
-/// `NSApp.appearance`, which the webview follows through
-/// `prefers-color-scheme`; the page itself holds no theme in the app.
-/// The rest reach the page as `WindowSettings`, except the launch
-/// toggle, which is the tray's (`LaunchPreference`).
+/// The device preferences the app owns. Appearance drives
+/// `NSApp.appearance`; the launch toggle is the tray's
+/// (`LaunchPreference`).
 struct GeneralPane: View {
     @ObservedObject var model: SettingsModel
 
@@ -490,10 +464,6 @@ struct GeneralPane: View {
             Toggle("Open window at launch", isOn: Binding(
                 get: { model.openWindowAtLaunch },
                 set: { model.setOpenWindowAtLaunch($0) }
-            ))
-            Toggle("Show list counts", isOn: Binding(
-                get: { model.listCounts },
-                set: { model.setListCounts($0) }
             ))
         }
         .formStyle(.grouped)

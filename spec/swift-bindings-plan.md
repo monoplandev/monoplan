@@ -1,4 +1,4 @@
-# Typed Swift bindings (plan; phases 1 to 3 built 2026-11-14)
+# Typed Swift bindings (plan; phases 1 to 4 built 2026-11-14)
 
 Decided 2026-11-14. Supersedes the client half of
 [`mac-window-plan.md`](mac-window-plan.md): the webview window is
@@ -175,9 +175,12 @@ needed for this.
   `MirrorFraming.swift` and the JSON model files; the generated
   records replace the models, with extensions for the derived bits
   (`SyncStatus.level`, `offlineNotice`). It keeps presentation helpers
-  (`WhenPhrase`, `AgendaSnapshot`, install / launch preferences). It
-  then depends on `MonoplanCore`, so its tests need `build:apple` run
-  first; accepted.
+  (`WhenPhrase`, `AgendaSnapshot`, install / launch preferences).
+  Amended in phase 4: the Kit does **not** come to depend on
+  `MonoplanCore`. The iOS widget links the Kit and must not link the
+  engine, so code over the generated records lives in each app target
+  instead (the Mac's `TrayMenu.swift`, iOS's `TypedRows.swift`), and
+  the Kit keeps what is Foundation-only.
 - The engine-lifecycle rules in the two `EngineController`s do not
   change.
 
@@ -278,23 +281,68 @@ views with iOS later, which is its own piece of work.
    - Not on the FFI: moving an item between workspaces (core + web
      only so far) and `export` / `reconcile`; no native screen uses
      them.
-4. **macOS.** Tray onto the bindings. Delete `WebWindow.swift`, the
-   scheme handler, `PageZoom`, `WindowSettings` and the web bundle step
-   in `build-app.sh`; add the debug window.
+4. **macOS.** Built 2026-11-14. Tray onto the bindings; `WebWindow.swift`,
+   `FFITransport.swift`, the Kit's `MirrorFraming` (the page's message
+   framing and the scheme routes), `PageZoom`, `WindowSettings` and the
+   web bundle step in `build-app.sh` deleted; the debug window added.
+   The Mac app sends no msgpack and decodes no JSON from the engine.
+   What settled:
+   - `EngineController` is the iOS one's shape: it starts the engine,
+     follows it with `Engine.observe`, restarts on `stopped`, backs off
+     on a failed start (ten seconds at most, which is also how "busy"
+     is waited out now), reports `EngineState` (`onState`) and doc
+     changes (`onChanged`) and hands out one `EngineCalls` per engine.
+     The one difference kept: a sign-in or signup does not stop the
+     engine first, since on the Mac the Rust side's claim stops it over
+     the socket only once the server has accepted the credentials, so a
+     wrong password costs nothing.
+   - Tray: one read per refresh, `agenda(days: 0)` and `starred()` in
+     one turn of the call queue. Both span workspaces now (the old
+     requests were Home's alone), and `StarredItem.list_name` replaces
+     the separate `list ls` read. The menu's rows are rendered in the
+     app target (`TrayMenu.swift`: `TodayMenu`, `StarredMenu`,
+     `MenuLine`, and `SyncState.line` / `offlineNotice`), tested by a
+     second test target, `MonoplanMacTests`, which links `MonoplanCore`.
+   - Window (`MainWindow.swift`): the session line, a workspace picker
+     when there is more than one, Inbox / Calendar / the active lists
+     with their open counts, the selected list's open items with a
+     tick (`set_done`) and an add field (`add_item`). One snapshot read
+     on `changed`, on a new engine and after each write; a read in
+     flight when the selection moves is dropped. A tray row opens the
+     window on the item's list in its workspace: there is no item page
+     to open it on yet. Monoplan › New Workspace… stays
+     (`create_workspace`, then the window shows it); delete workspace
+     has no Mac surface until the window grows one.
+   - Gone with the page: View › Reload and the zoom items, the doc's
+     undo / redo (Edit › Undo is a text field's own now), Settings ›
+     General "Show list counts", the hand-off before close / quit /
+     sign-out, `MONOPLAN_MIRROR_URL`. "Open window at launch" no longer
+     waits for the engine: the window shows its state.
+   - Settings: the account's email from `account()`, the Build row from
+     `build_id()`, and the Devices pane's credential from `account()`
+     (server, device id) plus `device_token()`. So `device_token` is
+     **not** removed in phase 5; `session` is.
+   - Left for phase 5 in the Kit: `EngineClient.swift`, `MessagePack.swift`
+     and the JSON models (`Bin`, `Done`, `Find`, `Focus`, `ItemDetail`,
+     `Items`, `Lists`, `Placed`) with their tests. Nothing in either
+     app uses them; `Agenda.swift` stays for the widget.
 5. **Cleanup.** Remove `Engine.request`, the frame `watch`,
-   `subscribe`, `import`, `session` (and `EngineSession` / `EngineDoc`),
-   `device_token`; `HostCmd::{Subscribe, Import, Unsubscribe}`
+   `subscribe`, `import`, `session` (and `EngineSession` / `EngineDoc`);
+   `HostCmd::{Subscribe, Import, Unsubscribe}`
    and the mirror fan-out in the loop (`HostCmd::Session` stays: it is
    what `account` and `workspaces` read); `Doc::import_mirror_update`;
    `Replica.mirror`, `Doc.loadWithPeer`, `MirrorBridge`, `mirror.html`,
    `createMirrorRuntime`, `MirrorApp`, `Session.mirror` in js; the
-   Swift codec and client (`ProfileLocation` moves out of
-   `EngineClient.swift` first: both apps keep it); the "frame from the
+   Swift codec, client and JSON models (`ProfileLocation` and
+   `SuggestionEdit` move out of `EngineClient.swift` first: both apps
+   keep the one, `WhenSuggest` returns the other; `PlaceInfo` stays
+   for the widget's `AgendaRow`); the "frame from the
    apps" tests in `commands/*`; the wire-shape test's Swift-facing comment.
    Mirror peer slots stop being leased. Update `apple/README.md`,
    `daemon-plan.md` and mark `mac-window-plan.md` superseded.
 
-Phases 1 to 3 touch no macOS code and phase 4 no iOS code. The socket,
+Phases 1 to 3 touch no macOS code and phase 4 no iOS code (the Kit
+lost only files iOS never used). The socket,
 `ipc.rs` and the CLI's own request path are untouched throughout.
 
 ## Open

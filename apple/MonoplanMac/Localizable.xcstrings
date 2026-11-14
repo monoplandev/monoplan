@@ -81,22 +81,12 @@
         }
       }
     },
-    "Account…": {
+    "Add an item": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cuenta…"
-          }
-        }
-      }
-    },
-    "Actual Size": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tamaño real"
+            "value": "Añadir un elemento"
           }
         }
       }
@@ -127,6 +117,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Versión"
+          }
+        }
+      }
+    },
+    "Calendar": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendario"
           }
         }
       }
@@ -201,16 +201,6 @@
         }
       }
     },
-    "Could not delete the workspace": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No se pudo eliminar el espacio"
-          }
-        }
-      }
-    },
     "Could not load devices: %@": {
       "localizations": {
         "es": {
@@ -281,26 +271,6 @@
         }
       }
     },
-    "Delete": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Eliminar"
-          }
-        }
-      }
-    },
-    "Delete “%@”?": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "¿Eliminar «%@»?"
-          }
-        }
-      }
-    },
     "Device name": {
       "localizations": {
         "es": {
@@ -347,16 +317,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Usar pantalla completa"
-          }
-        }
-      }
-    },
-    "Find": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Buscar"
           }
         }
       }
@@ -411,6 +371,16 @@
         }
       }
     },
+    "Inbox": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bandeja de entrada"
+          }
+        }
+      }
+    },
     "Install": {
       "localizations": {
         "es": {
@@ -437,16 +407,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Se cerrará su sesión y tendrá que iniciarla de nuevo para acceder a tu cuenta."
-          }
-        }
-      }
-    },
-    "Its lists and items are removed from every device, and anyone it is shared with loses access. This cannot be undone.": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sus listas y elementos se eliminarán de todos los dispositivos y quienes lo compartan perderán el acceso. Esta acción no se puede deshacer."
           }
         }
       }
@@ -507,6 +467,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Espacio de trabajo local · sin sincronizar"
+          }
+        }
+      }
+    },
+    "Mark as done": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Marcar como hecho"
           }
         }
       }
@@ -601,6 +571,16 @@
         }
       }
     },
+    "Nothing here": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nada aquí"
+          }
+        }
+      }
+    },
     "Nothing starred": {
       "localizations": {
         "es": {
@@ -617,16 +597,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nada para hoy"
-          }
-        }
-      }
-    },
-    "OK": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Aceptar"
           }
         }
       }
@@ -711,6 +681,16 @@
         }
       }
     },
+    "Personal": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Personal"
+          }
+        }
+      }
+    },
     "Profile": {
       "localizations": {
         "es": {
@@ -737,16 +717,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Rehacer"
-          }
-        }
-      }
-    },
-    "Reload": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Recargar"
           }
         }
       }
@@ -867,16 +837,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Mostrar todo"
-          }
-        }
-      }
-    },
-    "Show list counts": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Mostrar contadores de listas"
           }
         }
       }
@@ -1081,16 +1041,6 @@
         }
       }
     },
-    "Type “%@” to confirm": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Escribe «%@» para confirmar"
-          }
-        }
-      }
-    },
     "Undo": {
       "localizations": {
         "es": {
@@ -1127,6 +1077,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ventana"
+          }
+        }
+      }
+    },
+    "Workspace": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Espacio de trabajo"
           }
         }
       }
@@ -1171,42 +1131,12 @@
         }
       }
     },
-    "Zoom In": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Acercar"
-          }
-        }
-      }
-    },
-    "Zoom Out": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Alejar"
-          }
-        }
-      }
-    },
     "cancelled": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
             "value": "cancelado"
-          }
-        }
-      }
-    },
-    "could not read agenda: %@": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "no se pudo leer la agenda: %@"
           }
         }
       }
@@ -1387,16 +1317,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "el motor se ha detenido"
-          }
-        }
-      }
-    },
-    "unexpected reply: %@": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "respuesta inesperada: %@"
           }
         }
       }

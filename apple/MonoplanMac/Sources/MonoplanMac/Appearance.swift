@@ -1,7 +1,5 @@
 // `AppearancePreference` applied: the whole app's appearance, so the
-// tray menu, the Settings window, sheets, the traffic lights and the
-// window's webview (whose `prefers-color-scheme` follows its effective
-// appearance) all agree. Set at launch from the saved preference and
+// tray menu, the windows and their sheets all agree. Set at launch from the saved preference and
 // again from the General pane.
 
 import AppKit

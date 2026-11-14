@@ -1,16 +1,15 @@
 // The menubar app's entry point. Top-level code rather than `@main` so the
 // activation policy is set before the run loop starts: `.accessory` gives a
 // status item with no Dock icon or menu bar of its own, which is what a
-// tray-only process should be. Opening the window (`WebWindow.swift`)
+// tray-only process should be. Opening the window (`MainWindow.swift`)
 // switches to `.regular`, with a Dock icon and the main menu, and
 // closing it switches back.
 //
-// The tray holds no doc. It watches its own in-process engine (a watch
-// over the FFI, never the socket) and re-fetches `agenda --days 0
-// --json` when the engine says something changed, once a minute (the
-// relative times move), and when the menu opens. "Open Monoplan" and
-// the item rows open the window, which mirrors the engine's docs
-// (spec/mac-window-plan.md).
+// The tray holds no doc. It follows its own in-process engine through
+// the typed calls (spec/swift-bindings-plan.md; never the socket) and
+// reads the agenda and Starred again when the engine says something
+// changed, once a minute (the relative times move), and when the menu
+// opens. "Open Monoplan" and the item rows open the window.
 
 import AppKit
 import MonoplanCore
@@ -24,43 +23,18 @@ let debug = ProcessInfo.processInfo.environment["MONOPLAN_MAC_DEBUG"] == "1"
 final class TrayController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
-    private let client: EngineClient
     private let location: ProfileLocation
     private let engineController: EngineController
     private var settingsWindow: SettingsWindowController?
-    /// The window: one per process, made on first open, mirrors the
-    /// controller's running engine.
-    private lazy var webWindow = WebWindowController(
-        engineProvider: { [weak self] in self?.engineController.runningEngine },
-        engineState: { [weak self] in self?.engineState() ?? .pending(String(localized: "starting")) },
-        onVisibility: { visible in NSApp.setActivationPolicy(visible ? .regular : .accessory) },
-        // The title bar's account button: the Settings window's Account
-        // pane and its sign-in / sign-out flows.
-        account: AccountActions(
-            hasAccount: { [weak self] in self?.location.hasAccount ?? false },
-            openAccount: { [weak self] in self?.settings().showAccount() },
-            signIn: { [weak self] in self?.settings().showSignIn() },
-            signOut: { [weak self] in self?.settings().signOut() }),
-        // The page's Delete workspace, after the window's native
-        // confirm: the engine deletes on the server and forgets its copy.
-        deleteWorkspace: { [weak self] docId, done in
-            guard let self else { return done(.failure(ClientError.notConnected)) }
-            self.client.send(.deleteWorkspace(docId: docId)) { result in
-                switch result {
-                case .success(.workspaceDeleted): done(.success(()))
-                case .success(let other):
-                    done(.failure(ClientError.protocolError("unexpected reply: \(String(describing: other))")))
-                case .failure(let error): done(.failure(error))
-                }
-            }
-        })
-    /// Whether the last client state was connected, to tell an engine
-    /// coming (back) up from a status refresh.
+    /// The window: one per process, made on first open.
+    private lazy var mainWindow = MainWindowController(
+        engine: engineController,
+        onVisibility: { visible in NSApp.setActivationPolicy(visible ? .regular : .accessory) })
+    /// Whether the last engine state was running, to tell an engine
+    /// coming (back) up from a sync report.
     private var hadEngine = false
     private var lines: [MenuLine] = []
     private var starred: [MenuLine] = []
-    private var starredRows: [FocusRow] = []
-    private var listNames: [String: String] = Lists.names(from: [])
     private var fetchError: String?
     private var refreshQueued = false
     private var minuteTimer: Timer?
@@ -71,17 +45,11 @@ final class TrayController: NSObject, NSMenuDelegate {
     private var pathMonitor: NWPathMonitor?
     private var lastPath: NWPath?
     private var reconnectQueued = false
-    /// Settings › General "Open window at launch": the window opens on
-    /// the first client state after the engine has settled, running or
-    /// not (not signed in, failed to start), so the page never boots
-    /// against an engine that is still starting. Cleared once used.
-    private var openWindowAtLaunch = LaunchPreference.openWindow()
 
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         location = ProfileLocation.resolve()
-        client = EngineClient()
-        engineController = EngineController(location: location, client: client)
+        engineController = EngineController(location: location)
         super.init()
 
         if let button = statusItem.button {
@@ -92,42 +60,30 @@ final class TrayController: NSObject, NSMenuDelegate {
         statusItem.menu = menu
         rebuildMenu()
 
-        client.onState = { [weak self] state in
+        engineController.onState = { [weak self] state in
             guard let self else { return }
-            if self.openWindowAtLaunch, !self.engineController.isStarting {
-                self.openWindowAtLaunch = false
-                self.webWindow.show()
-            }
-            if case .connected(let sync) = state {
-                self.refresh()
-                self.webWindow.pushSync(sync)
-                // An engine after none: the window's page booted against
-                // the old one (or showed its signed-out / waiting
-                // screen); reload it.
-                if !self.hadEngine { self.webWindow.engineAvailable() }
+            if case .connected = state {
+                // An engine after none: its rows. A sync report alone
+                // only moves the offline notice.
+                if self.hadEngine { self.rebuildMenu() } else { self.refresh() }
                 self.hadEngine = true
             } else {
-                // No engine: the page's docs are stale after a sign out
-                // (or a terminal command taking the profile), so reload
-                // it onto the pre-boot screen; after that, keep that
-                // screen told as the reason moves (signing out → not
-                // signed in, signing in → starting).
-                if self.hadEngine { self.webWindow.engineLost() } else { self.webWindow.pushEngineState(self.engineState()) }
                 self.hadEngine = false
                 self.rebuildMenu()
             }
+            self.mainWindow.engineStateChanged(state)
             self.settingsWindow?.refresh()
         }
-        client.onEvent = { [weak self] event in
-            switch event {
-            case .changed: self?.scheduleRefresh()
-            case .sync(let sync):
-                self?.rebuildMenu()
-                self?.webWindow.pushSync(sync)
-            }
+        engineController.onChanged = { [weak self] in
+            self?.scheduleRefresh()
+            self?.mainWindow.docChanged()
             self?.settingsWindow?.refresh()
         }
-        client.start()
+        engineController.start()
+
+        // Settings › General "Open window at launch". The window shows
+        // the engine's state itself, so it need not wait for the start.
+        if LaunchPreference.openWindow() { mainWindow.show() }
 
         minuteTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             self?.refresh()
@@ -142,16 +98,6 @@ final class TrayController: NSObject, NSMenuDelegate {
         pathMonitor = monitor
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
-    }
-
-    /// The engine as the window's page should see it (`EngineState`):
-    /// running, or waiting with the tray's reason. There is always a
-    /// profile to run (a local-only workspace is seeded when there is
-    /// none), so the page never has to offer sign-in to get going.
-    private func engineState() -> EngineState {
-        if engineController.runningEngine != nil { return .running }
-        if case .connecting(let reason) = client.state { return .pending(reason) }
-        return .pending(String(localized: "starting"))
     }
 
     // MARK: Network
@@ -171,15 +117,14 @@ final class TrayController: NSObject, NSMenuDelegate {
     }
 
     /// Coalesce the burst a wake produces (several path updates and the
-    /// wake itself) into one reconnect. Nothing to do without an engine;
-    /// the request fails quietly then.
+    /// wake itself) into one reconnect. Nothing to do without an engine.
     private func scheduleReconnect() {
         if reconnectQueued { return }
         reconnectQueued = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
             guard let self else { return }
             self.reconnectQueued = false
-            self.client.send(.reconnect) { _ in }
+            self.engineController.calls?.run({ try $0.reconnect() }) { _ in }
         }
     }
 
@@ -196,48 +141,25 @@ final class TrayController: NSObject, NSMenuDelegate {
     }
 
     private func refresh() {
-        client.send(.agenda(days: 0)) { [weak self] result in
+        guard let calls = engineController.calls else { return }
+        calls.run({ engine in
+            // Today is the headline; a failed Starred read just leaves
+            // the section empty rather than replacing it.
+            (try engine.agenda(days: 0), (try? engine.starred()) ?? [])
+        }) { [weak self] result in
             guard let self else { return }
             switch result {
-            case .success(.output(let stdout, _)):
-                do {
-                    self.lines = TodayMenu.lines(from: try Agenda.parse(stdout), now: Date())
-                    self.fetchError = nil
-                } catch {
-                    self.fetchError = String(localized: "could not read agenda: \(error.localizedDescription)")
-                }
-            case .success(let other):
-                self.fetchError = String(localized: "unexpected reply: \(String(describing: other))")
+            case .success((let groups, let starred)):
+                self.lines = TodayMenu.lines(from: groups, now: Date())
+                self.starred = StarredMenu.lines(from: starred)
+                self.fetchError = nil
+            case .failure(EngineError.Stopped):
+                // An engine that has just stopped: the state line says
+                // so and the next engine's refresh fills the rows.
+                break
             case .failure(let error):
-                // No engine, or one that has just stopped: the state line
-                // says so and the next engine's refresh fills the rows.
-                if case ClientError.notConnected = error { break }
-                if case ClientError.engineStopped = error { break }
-                if case EngineError.Stopped = error { break }
                 self.fetchError = engineErrorMessage(error)
             }
-            self.rebuildMenu()
-        }
-        client.send(.lists()) { [weak self] result in
-            guard let self else { return }
-            if case .success(.output(let stdout, _)) = result,
-               let rows = try? Lists.parse(stdout) {
-                self.listNames = Lists.names(from: rows)
-                self.starred = StarredMenu.lines(from: self.starredRows, listNames: self.listNames)
-                self.rebuildMenu()
-            }
-        }
-        client.send(.focus()) { [weak self] result in
-            guard let self else { return }
-            if case .success(.output(let stdout, _)) = result,
-               let rows = try? Focus.parse(stdout) {
-                self.starredRows = rows
-            } else {
-                // Today is the headline; a failed Starred fetch just
-                // leaves the section empty rather than replacing it.
-                self.starredRows = []
-            }
-            self.starred = StarredMenu.lines(from: self.starredRows, listNames: self.listNames)
             self.rebuildMenu()
         }
     }
@@ -252,7 +174,7 @@ final class TrayController: NSObject, NSMenuDelegate {
     private func rebuildMenu() {
         if debug {
             NSLog("MonoplanMac: state=%@ lines=%@ starred=%@ error=%@",
-                  String(describing: client.state),
+                  String(describing: engineController.state),
                   lines.map { "\($0.title)\($0.note.map { " [\($0)]" } ?? "")" }.joined(separator: " | "),
                   starred.map { "\($0.title)\($0.note.map { " [\($0)]" } ?? "")" }.joined(separator: " | "),
                   fetchError ?? "-")
@@ -263,7 +185,7 @@ final class TrayController: NSObject, NSMenuDelegate {
         header.isEnabled = false
         menu.addItem(header)
 
-        switch client.state {
+        switch engineController.state {
         case .connecting(let reason):
             addDisabled(String(localized: "Not running · \(reason)"))
         case .connected:
@@ -273,20 +195,18 @@ final class TrayController: NSObject, NSMenuDelegate {
             } else if lines.isEmpty {
                 addDisabled(String(localized: "Nothing today"))
             } else {
-                // Today rows jump to the item on the calendar, whatever
-                // list it lives in: `#upcoming_<id>` (spec/urls.md).
-                for line in lines { menu.addItem(rowItem(line, fragment: "upcoming_\(line.id)", noteTab: noteTab)) }
+                for line in lines { menu.addItem(rowItem(line, noteTab: noteTab)) }
             }
             menu.addItem(.separator())
             addDisabled(String(localized: "Starred"))
             if starred.isEmpty {
                 addDisabled(String(localized: "Nothing starred"))
             } else {
-                for line in starred { menu.addItem(rowItem(line, fragment: "item_\(line.id)", noteTab: noteTab)) }
+                for line in starred { menu.addItem(rowItem(line, noteTab: noteTab)) }
             }
         }
 
-        if case .connected(let sync) = client.state, let notice = sync.offlineNotice() {
+        if case .connected(let sync) = engineController.state, let notice = sync.offlineNotice() {
             menu.addItem(.separator())
             addDisabled(notice)
         }
@@ -346,11 +266,11 @@ final class TrayController: NSObject, NSMenuDelegate {
         return ceil((titles.max() ?? 0) + noteGap + (notes.max() ?? 0))
     }
 
-    /// `fragment` is the `spec/urls.md` token the row opens the window on.
-    private func rowItem(_ line: MenuLine, fragment: String, noteTab: CGFloat) -> NSMenuItem {
+    /// A click opens the window on the item's list (`openItem`).
+    private func rowItem(_ line: MenuLine, noteTab: CGFloat) -> NSMenuItem {
         let item = NSMenuItem(title: "", action: #selector(openItem(_:)), keyEquivalent: "")
         item.target = self
-        item.representedObject = fragment
+        item.representedObject = RowTarget(listId: line.listId, docId: line.docId)
         var titleAttributes: [NSAttributedString.Key: Any] = [.font: Self.titleFont]
         if line.done { titleAttributes[.foregroundColor] = NSColor.secondaryLabelColor }
         let title = NSMutableAttributedString(string: Self.displayTitle(line), attributes: titleAttributes)
@@ -427,64 +347,28 @@ final class TrayController: NSObject, NSMenuDelegate {
 
     // MARK: Actions
 
-    /// The window over the engine's docs; also the Dock icon's reopen.
+    /// The window; also the Dock icon's reopen.
     @objc func openWindow() {
-        webWindow.show()
+        mainWindow.show()
     }
 
-    /// The View menu's Reload.
-    @objc func reloadWindow(_ sender: Any?) {
-        webWindow.reload(sender)
-    }
-
-    @objc func undoInWindow(_ sender: Any?) {
-        webWindow.undo(sender)
-    }
-
-    @objc func redoInWindow(_ sender: Any?) {
-        webWindow.redo(sender)
-    }
-
-    @objc func zoomInWindow(_ sender: Any?) { webWindow.zoomIn(sender) }
-    @objc func zoomOutWindow(_ sender: Any?) { webWindow.zoomOut(sender) }
-    @objc func actualSizeInWindow(_ sender: Any?) { webWindow.actualSize(sender) }
-
-    /// Monoplan › New Workspace…: the name is asked for natively on the
-    /// window (the page's own dialog is hidden there, `Session.mirror`),
-    /// the engine creates and opens the doc (`Request.createWorkspace`),
-    /// and the page is told to show it. Needs a running engine with an
-    /// account (one workspace per accountless install, `spec/auth.md`),
-    /// which `validateMenuItem` checks.
+    /// Monoplan › New Workspace…: the name is asked for on the window
+    /// and the engine creates and opens the doc (`Engine.createWorkspace`).
+    /// Needs a running engine with an account (one workspace per
+    /// accountless install, `spec/auth.md`), which `validateMenuItem`
+    /// checks.
     @objc func newWorkspace(_ sender: Any?) {
-        webWindow.show()
-        webWindow.promptNewWorkspace { [weak self] name, done in
-            guard let self else { return }
-            self.client.send(.createWorkspace(name: name)) { result in
-                switch result {
-                case .success(.workspaceCreated(let docId, _, _)):
-                    done(.success(docId))
-                case .success(let other):
-                    done(.failure(ClientError.protocolError("unexpected reply: \(String(describing: other))")))
-                case .failure(let error):
-                    done(.failure(error))
-                }
-            }
-        }
+        mainWindow.show()
+        mainWindow.promptNewWorkspace()
     }
 
-    /// Edit › Undo / Redo follow the page's `undoState`, the zoom items
-    /// the ends of the ladder, New Workspace… an engine that is serving a
-    /// signed-in profile; every other item of ours is always available.
+    /// New Workspace… needs an engine that is serving a signed-in
+    /// profile; every other item of ours is always available.
     @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
         case #selector(newWorkspace(_:)):
-            guard location.hasAccount, case .connected = client.state else { return false }
+            guard location.hasAccount, case .connected = engineController.state else { return false }
             return true
-        case #selector(undoInWindow(_:)): return webWindow.canUndo
-        case #selector(redoInWindow(_:)): return webWindow.canRedo
-        case #selector(zoomInWindow(_:)): return webWindow.canZoomIn
-        case #selector(zoomOutWindow(_:)): return webWindow.canZoomOut
-        case #selector(actualSizeInWindow(_:)): return webWindow.canResetZoom
         default: return true
         }
     }
@@ -502,39 +386,28 @@ final class TrayController: NSObject, NSMenuDelegate {
     private func settings() -> SettingsWindowController {
         if let settingsWindow { return settingsWindow }
         let w = SettingsWindowController(
-            location: location, client: client,
+            location: location, engine: engineController,
             signIn: { [weak self] creds, done in self?.engineController.signIn(creds, completion: done) },
-            // The window hands its last edits to the engine first, as it
-            // does before a close or quit: the engine is about to stop,
-            // and its doc is what signup adopts or sign-out wipes.
-            signUp: { [weak self] creds, done in
-                guard let self else { return }
-                self.webWindow.handOff { self.engineController.signUp(creds, completion: done) }
-            },
-            signOut: { [weak self] done in
-                guard let self else { return }
-                self.webWindow.handOff { self.engineController.signOut(completion: done) }
-            },
-            // The Devices pane's server access: the engine's session and
-            // token. `session()` blocks briefly; the pane asks off the
-            // main thread.
+            signUp: { [weak self] creds, done in self?.engineController.signUp(creds, completion: done) },
+            signOut: { [weak self] done in self?.engineController.signOut(completion: done) },
+            // The Devices pane's server access: who the engine is signed
+            // in as and its device token. `account()` blocks briefly;
+            // the pane asks off the main thread.
             credential: { [weak self] in
                 guard let engine = self?.engineController.runningEngine, let token = engine.deviceToken(),
-                      let session = try? engine.session()
+                      let account = try? engine.account()
                 else { return nil }
-                return APICredential(serverURL: session.serverUrl, token: token, deviceId: session.deviceId)
+                return APICredential(serverURL: account.serverUrl, token: token, deviceId: account.deviceId)
             })
         settingsWindow = w
         return w
     }
 
-    /// A row of the menu: the window on the row's fragment. Today rows
-    /// carry `upcoming_<id>` (the item over the calendar, whatever its
-    /// list), Starred rows `item_<id>` (the item in its home view),
-    /// both per spec/urls.md.
+    /// A row of the menu: the window on the item's list, in its
+    /// workspace. The window has no item page yet.
     @objc private func openItem(_ sender: NSMenuItem) {
-        guard let fragment = sender.representedObject as? String else { return }
-        webWindow.show(fragment: fragment)
+        guard let target = sender.representedObject as? RowTarget else { return }
+        mainWindow.show(list: target.listId, workspace: target.docId)
     }
 
     /// Quitting ends the engine too (`applicationShouldTerminate`), which
@@ -544,15 +417,21 @@ final class TrayController: NSObject, NSMenuDelegate {
         NSApp.terminate(nil)
     }
 
-    /// Before the process goes: the window hands its last edits to the
-    /// engine, then the engine persists, folds and releases the profile.
-    func shutdown(completion: @escaping () -> Void) {
-        webWindow.handOff { [self] in
-            webWindow.tearDown()
-            client.stop()
-            engineController.stop()
-            completion()
-        }
+    /// Before the process goes: the engine persists, folds and releases
+    /// the profile. Blocks.
+    func shutdown() {
+        engineController.stop()
+    }
+}
+
+/// What a menu row opens: `NSMenuItem.representedObject` wants an object.
+private final class RowTarget: NSObject {
+    let listId: String
+    let docId: String?
+
+    init(listId: String, docId: String?) {
+        self.listId = listId
+        self.docId = docId
     }
 }
 
@@ -565,12 +444,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = MainMenu.build(
             newWorkspace: #selector(TrayController.newWorkspace(_:)),
             settings: #selector(TrayController.openSettings),
-            reload: #selector(TrayController.reloadWindow(_:)),
-            undo: #selector(TrayController.undoInWindow(_:)),
-            redo: #selector(TrayController.redoInWindow(_:)),
-            zoomIn: #selector(TrayController.zoomInWindow(_:)),
-            zoomOut: #selector(TrayController.zoomOutWindow(_:)),
-            actualSize: #selector(TrayController.actualSizeInWindow(_:)),
             target: tray)
     }
 
@@ -581,9 +454,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let tray else { return .terminateNow }
-        tray.shutdown { NSApp.reply(toApplicationShouldTerminate: true) }
-        return .terminateLater
+        tray?.shutdown()
+        return .terminateNow
     }
 }
 

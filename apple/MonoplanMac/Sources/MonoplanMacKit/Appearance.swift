@@ -1,9 +1,6 @@
-// The Appearance preference (spec/mac-window-plan.md "Settings"): the
-// first of the device preferences the app owns for its window. Pure
-// data here, the `NSAppearance` it maps to in the app target. The
-// window's page needs nothing from it: the app sets `NSApp.appearance`
-// and the webview's `prefers-color-scheme` follows its effective
-// appearance, so the page stays on "auto".
+// The Appearance preference: the first of the device preferences the
+// app owns. Pure data here, the `NSAppearance` it maps to in the app
+// target.
 
 import Foundation
 

@@ -25,24 +25,3 @@ public enum Focus {
         return try decoder.decode([FocusRow].self, from: Data(json.utf8))
     }
 }
-
-public enum StarredMenu {
-    /// How many starred rows the tray shows: the top of the list is the
-    /// point of curating it.
-    public static let limit = 3
-
-    /// `listNames` is id → name; the item's list is shown as the muted
-    /// note, or nothing when the id is unknown (a list the fetch missed
-    /// is not worth showing a uuid for).
-    public static func lines(from rows: [FocusRow], listNames: [String: String] = [:], limit: Int = limit) -> [MenuLine] {
-        rows.prefix(limit).map { row in
-            MenuLine(
-                id: row.id,
-                title: TodayMenu.clipped(row.text),
-                note: listNames[row.listId].map(TodayMenu.clipped),
-                done: false,
-                overdue: false
-            )
-        }
-    }
-}

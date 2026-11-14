@@ -29,30 +29,6 @@ final class AgendaTests: XCTestCase {
         XCTAssertNil(days[1].day)
     }
 
-    func testOnlyTodayBecomesLinesWithTimesAndNotes() throws {
-        let lines = TodayMenu.lines(from: try Agenda.parse(sample), now: date(9, 5))
-        XCTAssertEqual(lines.map(\.title), [
-            "Overdue report", "09:00  Standup", "14:30  Dentist", "Groceries", "Pay rent",
-        ])
-        XCTAssertEqual(lines.map(\.note), ["overdue", "now", "in 5h 25m", nil, "due today"])
-        XCTAssertEqual(lines.map(\.done), [false, false, false, true, false])
-    }
-
-    func testTimedNotesFollowTheClock() throws {
-        let days = try Agenda.parse(sample)
-        XCTAssertEqual(TodayMenu.lines(from: days, now: date(8, 59))[1].note, "in 1m")
-        XCTAssertEqual(TodayMenu.lines(from: days, now: date(9, 20))[1].note, "started 20m ago")
-        XCTAssertEqual(TodayMenu.lines(from: days, now: date(15, 0))[2].note, "now")
-    }
-
-    func testSpanFormatting() {
-        XCTAssertEqual(TodayMenu.span(30), "<1m")
-        XCTAssertEqual(TodayMenu.span(3 * 60), "3m")
-        XCTAssertEqual(TodayMenu.span(2 * 3600 + 15 * 60), "2h 15m")
-        XCTAssertEqual(TodayMenu.span(3 * 3600), "3h")
-        XCTAssertEqual(TodayMenu.span(28 * 3600), "1d 4h")
-    }
-
     func testWhenParsingIgnoresReservedZoneSuffix() {
         XCTAssertEqual(Agenda.start(of: "2026-10-26T14:00[Europe/London]"), date(14, 0))
         XCTAssertEqual(Agenda.start(of: "2026-10-26"), date(0, 0))
@@ -61,22 +37,6 @@ final class AgendaTests: XCTestCase {
 }
 
 extension AgendaTests {
-    func testLongTitlesAreClippedToThirtyTwoWithEllipsis() {
-        let exact = String(repeating: "a", count: 32)
-        XCTAssertEqual(TodayMenu.clipped(exact), exact)
-        let long = String(repeating: "b", count: 33)
-        let clipped = TodayMenu.clipped(long)
-        XCTAssertEqual(clipped.count, 32)
-        XCTAssertTrue(clipped.hasSuffix("…"))
-        XCTAssertEqual(clipped, String(repeating: "b", count: 31) + "…")
-        // The time prefix is outside the cap.
-        let row = """
-        [{"day":"2026-10-26","today":true,"rows":[{"id":"x","text":"\(long)","list_id":"events","state":"backlog","when":"2026-10-26T09:00","tone":"neutral"}]}]
-        """
-        let line = TodayMenu.lines(from: try! Agenda.parse(row), now: date(8, 0))[0]
-        XCTAssertEqual(line.title, "09:00  " + clipped)
-    }
-
     func testMergedRowsCarryTheirWorkspace() throws {
         let json = """
         [{"day":"2026-09-09","today":true,"rows":[
