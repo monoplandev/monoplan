@@ -254,9 +254,22 @@ final class MainWindowModel: ObservableObject {
     @Published private(set) var done: [DoneRow] = []
     /// The selected row's item, if one is: its panel is open.
     @Published private(set) var selected: ItemSelection?
-    /// That item's page, once read. An item that cannot be read (hard
-    /// deleted, its workspace gone) closes the panel.
+    /// The panel's item page. On a new selection the old page stays
+    /// until the new one is read, so the panel and its toolbar items
+    /// swap in one go rather than blanking (as `shown` does for the
+    /// rows). An item that cannot be read (hard deleted, its workspace
+    /// gone) closes the panel.
     @Published private(set) var detail: ItemInfo?
+    /// The selection `detail` was read for: `selected` once it lands.
+    @Published private(set) var detailOf: ItemSelection?
+
+    /// The panel's item when it is the selected one, for the panel's
+    /// and toolbar's writes: nil in the moment between a click and the
+    /// new item's read, when the panel still shows the old item.
+    var current: (selection: ItemSelection, item: ItemInfo)? {
+        guard let selected, let detail, detailOf == selected else { return nil }
+        return (selected, detail)
+    }
     /// The last failed read or write, until the next one succeeds.
     @Published private(set) var error: String?
 
@@ -341,9 +354,32 @@ final class MainWindowModel: ObservableObject {
     func selectItem(workspace: String?, id: String?) {
         guard let id else { return clearItem() }
         guard id != selected?.id else { return }
-        selected = ItemSelection(workspace: workspace, id: id)
-        detail = nil
-        reload()
+        let picked = ItemSelection(workspace: workspace, id: id)
+        selected = picked
+        readDetail(picked)
+    }
+
+    /// Read just the selected item's page: a click on another row
+    /// changes nothing else, so the full `reload` is not needed.
+    private func readDetail(_ picked: ItemSelection) {
+        guard visible, let calls = engine.calls else { return }
+        calls.run({ engine -> ItemInfo? in
+            try? engine.item(workspace: picked.workspace, id: picked.id)
+        }) { [weak self] result in
+            // A newer selection, or the panel shut, since the read
+            // went out: its own read (or none) decides.
+            guard let self, self.selected == picked else { return }
+            switch result {
+            case .success(let info?): self.setDetail(info, of: picked)
+            case .success(nil): self.clearItem()
+            case .failure: break
+            }
+        }
+    }
+
+    private func setDetail(_ info: ItemInfo, of selection: ItemSelection) {
+        detail = info
+        detailOf = selection
     }
 
     func closeItem() {
@@ -353,6 +389,7 @@ final class MainWindowModel: ObservableObject {
     private func clearItem() {
         selected = nil
         detail = nil
+        detailOf = nil
     }
 
     /// A shared workspace's name, for the panel; nil for Home, which
@@ -506,11 +543,14 @@ final class MainWindowModel: ObservableObject {
                 self.starred = snapshot.starred
                 self.agenda = snapshot.agenda
                 self.done = snapshot.done
-                // An item selected since the read went out keeps its
-                // (empty) panel until its own read lands.
-                if snapshot.selected == self.selected {
-                    self.detail = snapshot.detail
-                    if snapshot.detail == nil { self.selected = nil }
+                // An item selected since the read went out keeps the
+                // old page until its own read lands.
+                if let picked = snapshot.selected, picked == self.selected {
+                    if let detail = snapshot.detail {
+                        self.setDetail(detail, of: picked)
+                    } else {
+                        self.clearItem()
+                    }
                 }
                 self.error = nil
                 if self.reveal {

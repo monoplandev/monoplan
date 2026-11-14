@@ -338,7 +338,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate, N
 
     /// The status control's halves: the checkbox, then the label.
     @objc private func statusClicked(_ sender: NSSegmentedControl) {
-        guard let selected = model.selected, let item = model.detail, item.item.binnedAt == nil else { return }
+        guard let (selected, item) = model.current, item.item.binnedAt == nil else { return }
         if sender.selectedSegment == 0 {
             model.setDone(workspace: selected.workspace, id: selected.id, done: !item.item.state.isClosed)
         } else {
@@ -372,7 +372,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate, N
 
     @objc private func pickState(_ sender: NSMenuItem) {
         guard let state = sender.representedObject as? ItemState, sender.state != .on,
-            let selected = model.selected
+            let selected = model.current?.selection
         else { return }
         model.setState(workspace: selected.workspace, id: selected.id, state: state)
     }
@@ -392,17 +392,17 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate, N
     }
 
     @objc private func duplicateItem(_ sender: Any?) {
-        guard let selected = model.selected else { return }
+        guard let selected = model.current?.selection else { return }
         model.duplicate(workspace: selected.workspace, id: selected.id)
     }
 
     @objc private func binItem(_ sender: Any?) {
-        guard let selected = model.selected else { return }
+        guard let selected = model.current?.selection else { return }
         model.bin(workspace: selected.workspace, id: selected.id)
     }
 
     @objc private func toggleStar(_ sender: Any?) {
-        guard let selected = model.selected, let item = model.detail else { return }
+        guard let (selected, item) = model.current else { return }
         model.setStarred(workspace: selected.workspace, id: selected.id, starred: !item.starred)
     }
 
@@ -427,12 +427,15 @@ struct ItemPanelPane: View {
 
     var body: some View {
         Group {
-            if let selected = model.selected {
+            // The page shown, which on a new selection is the old one
+            // until the new one is read: its fields, and its writes,
+            // are for the item it shows, in that item's workspace.
+            if model.selected != nil, let shown = model.detailOf {
                 ItemPanel(
-                    item: model.detail, workspaceName: model.sharedWorkspaceName(selected.workspace),
-                    lists: model.moveLists(workspace: selected.workspace),
-                    retitle: { model.setText(workspace: selected.workspace, item: $0, text: $1) },
-                    move: { model.moveItem(workspace: selected.workspace, id: $0.item.id, list: $1) })
+                    item: model.detail, workspaceName: model.sharedWorkspaceName(shown.workspace),
+                    lists: model.moveLists(workspace: shown.workspace),
+                    retitle: { model.setText(workspace: shown.workspace, item: $0, text: $1) },
+                    move: { model.moveItem(workspace: shown.workspace, id: $0.item.id, list: $1) })
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
