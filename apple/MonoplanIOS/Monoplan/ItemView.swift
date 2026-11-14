@@ -110,7 +110,6 @@ private struct ItemSheet: ViewModifier {
                     }
                 }
                 .environmentObject(model)
-                .presentationDragIndicator(.visible)
             }
     }
 }
