@@ -34,6 +34,7 @@ pub mod done;
 pub mod find;
 pub mod items;
 pub mod lists;
+pub mod moves;
 pub mod places;
 pub mod starred;
 

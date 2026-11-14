@@ -37,6 +37,7 @@ use monoplan_cli::api::{
     find::FindHit,
     items::{Item, ItemInfo, ItemState, Place},
     lists::{ListFilter, ListInfo},
+    moves::ItemRef,
     places::{LocatedItem, PlaceSuggestion},
     starred::StarredItem,
 };
@@ -911,6 +912,81 @@ impl Engine {
         Ok(self.client.call_blocking(workspace, move |cx| {
             api::lists::set_list_archived(cx, &list, archived)
         })?)
+    }
+
+    // ----- drag and drop (spec/mac-dnd-plan.md) -----
+    //
+    // One method per gesture, so a drop of many rows is one action and
+    // one Undo. A reorder names its slot by `before`, the row the block
+    // lands directly above (nil: the end).
+
+    /// Reorder within the rows' own list: `ids` become one block, in
+    /// list order, directly above `before`.
+    pub fn reorder_items(
+        &self,
+        workspace: Option<String>,
+        ids: Vec<String>,
+        before: Option<String>,
+    ) -> Result<(), EngineError> {
+        Ok(self.client.call_blocking(workspace, move |cx| {
+            api::moves::reorder_items(cx, &ids, before.as_deref())
+        })?)
+    }
+
+    /// Land `ids`, in the order given, as one block from the 0-based
+    /// open `index` of `list` (a drop onto a sidebar list passes 0).
+    /// Binned rows are restored; Done rows stay Done.
+    pub fn move_items(
+        &self,
+        workspace: Option<String>,
+        ids: Vec<String>,
+        list: String,
+        index: u32,
+    ) -> Result<(), EngineError> {
+        Ok(self.client.call_blocking(workspace, move |cx| {
+            api::moves::move_items(cx, &ids, &list, index as usize)
+        })?)
+    }
+
+    /// Reorder Starred: `ids` become one block directly above
+    /// `before`, a starred id. Hidden entries keep their place.
+    pub fn reorder_starred(
+        &self,
+        ids: Vec<String>,
+        before: Option<String>,
+    ) -> Result<(), EngineError> {
+        Ok(self.client.call_blocking(None, move |cx| {
+            api::moves::reorder_starred(cx, &ids, before.as_deref())
+        })?)
+    }
+
+    /// Reorder the workspace's lists: `ids` become one block directly
+    /// above `before`.
+    pub fn move_lists(
+        &self,
+        workspace: Option<String>,
+        ids: Vec<String>,
+        before: Option<String>,
+    ) -> Result<(), EngineError> {
+        Ok(self.client.call_blocking(workspace, move |cx| {
+            api::moves::move_lists(cx, &ids, before.as_deref())
+        })?)
+    }
+
+    /// Bin or restore rows from any workspace; rows already so are
+    /// skipped.
+    pub fn set_binned_many(&self, items: Vec<ItemRef>, binned: bool) -> Result<(), EngineError> {
+        Ok(self.client.call_blocking(None, move |cx| {
+            api::moves::set_binned_many(cx, &items, binned)
+        })?)
+    }
+
+    /// Star rows from any workspace, on top of Starred in the order
+    /// given; already starred or not Open are skipped.
+    pub fn star_items(&self, items: Vec<ItemRef>) -> Result<(), EngineError> {
+        Ok(self
+            .client
+            .call_blocking(None, move |cx| api::moves::star_items(cx, &items))?)
     }
 
     // The reads below span every open workspace: they take none, and
