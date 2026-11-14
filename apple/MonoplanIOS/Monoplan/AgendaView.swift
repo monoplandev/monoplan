@@ -1,11 +1,12 @@
 // The Agenda page, pushed from Home (which owns the navigation stack
-// and the item sheet): the engine's agenda projection (`agenda --json`,
+// and the item sheet): the engine's agenda projection (`Engine.agenda`,
 // spec/cli.md, with a horizon far enough out to be the whole future,
 // `AppModel.agendaDays`) as sections: Today first (overdue deadlines
 // and tasks whose planned day has passed folded in), Unscheduled
 // events, then each non-empty day. A row opens the item's sheet
 // (`ItemView`) and its checkbox ticks it, as in the other lenses.
 
+import MonoplanCore
 import MonoplanMacKit
 import SwiftUI
 
@@ -21,7 +22,7 @@ struct AgendaView: View {
                     ForEach(model.agenda, id: \.day) { day in
                         if !day.rows.isEmpty {
                             Section(Self.title(for: day)) {
-                                ForEach(day.rows, id: \.id) { row in
+                                ForEach(day.rows, id: \.key) { row in
                                     AgendaRowView(row: row)
                                 }
                             }
@@ -45,7 +46,7 @@ struct AgendaView: View {
                     systemImage: "exclamationmark.triangle",
                     description: Text(error)
                 )
-            } else if model.sync == nil, case .connecting(let why) = model.clientState {
+            } else if model.sync == nil, case .connecting(let why) = model.engineState {
                 ContentUnavailableView("Calendar", systemImage: "calendar", description: Text(why))
             } else {
                 ContentUnavailableView(
@@ -59,7 +60,7 @@ struct AgendaView: View {
 
     /// "Today 13 Nov" (the date in the weekday's place), "Unscheduled",
     /// or the day spelled out ("Friday 7 Nov").
-    static func title(for day: AgendaDay) -> String {
+    static func title(for day: AgendaGroup) -> String {
         if day.today {
             let date = day.day.flatMap { Agenda.start(of: $0) } ?? Date()
             return "Today \(date.formatted(.dateTime.day().month(.abbreviated)))"
@@ -76,7 +77,7 @@ struct AgendaView: View {
 /// it for the tone (overdue in red, due today in orange) or the
 /// duration. The checkbox ticks; the rest of the row opens the sheet.
 struct AgendaRowView: View {
-    let row: AgendaRow
+    let row: AgendaEntry
 
     var body: some View {
         ItemLink(ItemRef(docId: row.docId, itemId: row.id, title: row.text)) {
@@ -130,14 +131,14 @@ struct AgendaRowView: View {
 
     private var note: (text: String, color: Color)? {
         switch row.tone {
-        case "overdue": return ("overdue", .red)
-        case "warning": return ("due today", .orange)
-        default: break
+        case .overdue: return ("overdue", .red)
+        case .warning: return ("due today", .orange)
+        case .neutral: break
         }
         if let minutes = row.duration, minutes > 0 {
-            return (Self.span(minutes), .secondary)
+            return (Self.span(Int(minutes)), .secondary)
         }
-        if row.placedBy == "deadline", let deadline = row.deadline, !row.isTimed {
+        if row.placedBy == .deadline, let deadline = row.deadline, !row.isTimed {
             return ("due \(deadline)", .secondary)
         }
         return nil

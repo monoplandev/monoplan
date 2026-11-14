@@ -3,12 +3,12 @@
 // (spec/data-model.md "Lifecycle"). `ItemCheckbox` is the drawing,
 // `ItemCheckButton` the control that ticks and reopens.
 
+import MonoplanCore
 import SwiftUI
 import UIKit
 
 struct ItemCheckbox: View {
-    /// The workflow state name, as the engine's JSON carries it.
-    let state: String
+    let state: ItemState
 
     /// Drawn rather than an SF Symbol, whose corner radius and stroke
     /// are not ours to set. Sized with the text (Dynamic Type).
@@ -20,12 +20,12 @@ struct ItemCheckbox: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: side * Self.radius, style: .continuous)
         ZStack {
-            if state == "done" {
+            if state == .done {
                 shape.fill(.tint)
                 mark("checkmark").foregroundStyle(.white)
             } else {
                 shape.strokeBorder(.tertiary, lineWidth: Self.border)
-                if state == "cancelled" {
+                if state == .cancelled {
                     mark("xmark").foregroundStyle(.tertiary)
                 }
             }
@@ -46,8 +46,8 @@ struct ItemCheckbox: View {
 
     private var label: String {
         switch state {
-        case "done": return "Done"
-        case "cancelled": return "Cancelled"
+        case .done: return "Done"
+        case .cancelled: return "Cancelled"
         default: return "Not done"
         }
     }
@@ -58,9 +58,9 @@ struct ItemCheckbox: View {
 struct ItemCheckButton: View {
     @EnvironmentObject private var model: AppModel
     let ref: ItemRef
-    let state: String
+    let state: ItemState
 
-    private var closed: Bool { state == "done" || state == "cancelled" }
+    private var closed: Bool { state.isClosed }
 
     var body: some View {
         Button {
@@ -73,7 +73,7 @@ struct ItemCheckButton: View {
                 .padding(-10)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(state == "cancelled" ? "Reopen" : closed ? "Mark not done" : "Mark done")
+        .accessibilityLabel(state == .cancelled ? "Reopen" : closed ? "Mark not done" : "Mark done")
     }
 }
 
@@ -84,7 +84,7 @@ struct ItemCheckButton: View {
 struct CheckboxRow<Content: View>: View {
     @Environment(\.itemRef) private var ref
     @Environment(\.openItem) private var openItem
-    let state: String
+    let state: ItemState
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -128,13 +128,12 @@ struct ItemRowMenu: ViewModifier {
     @EnvironmentObject private var model: AppModel
     @Environment(\.duplicatesStarred) private var duplicatesStarred
     let ref: ItemRef?
-    /// The workflow state name, as the engine's JSON carries it.
-    let state: String
+    let state: ItemState
 
     /// "Move to Bin" is waiting on its confirmation.
     @State private var confirmingBin = false
 
-    private var closed: Bool { state == "done" || state == "cancelled" }
+    private var closed: Bool { state.isClosed }
 
     func body(content: Content) -> some View {
         if let ref {
@@ -156,7 +155,7 @@ struct ItemRowMenu: ViewModifier {
             model.setDone(ref, done: !closed)
         } label: {
             if closed {
-                Label(state == "cancelled" ? "Reopen" : "Mark not done", systemImage: "arrow.uturn.backward")
+                Label(state == .cancelled ? "Reopen" : "Mark not done", systemImage: "arrow.uturn.backward")
             } else {
                 Label("Mark done", systemImage: "checkmark")
             }

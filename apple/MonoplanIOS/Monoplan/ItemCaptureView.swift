@@ -24,6 +24,7 @@
 // yet, the list field opens the list editor (`ItemListEditor`) over the
 // capture, and the item is created in what was picked.
 
+import MonoplanCore
 import MonoplanMacKit
 import SwiftUI
 
@@ -161,7 +162,7 @@ struct ItemCaptureView: View {
         .toolbar {
             SheetCloseItem { dismiss() }
             ToolbarSpacer(.fixed, placement: .topBarLeading)
-            SheetStatusLabel(state: "backlog", text: "New item")
+            SheetStatusLabel(state: .backlog, text: "New item")
         }
         .onAppear { focused = true }
     }

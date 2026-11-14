@@ -7,7 +7,6 @@
 // sync status are in Settings (`SettingsView.swift`).
 
 import MonoplanCore
-import MonoplanMacKit
 import SwiftUI
 
 struct DebugView: View {
@@ -76,7 +75,7 @@ struct DebugView: View {
                     .disabled(sync.localOnly)
                 Button("Reconnect") { model.reconnect() }
                     .disabled(sync.localOnly)
-            } else if case .connecting(let why) = model.clientState {
+            } else if case .connecting(let why) = model.engineState {
                 LabeledContent("Status", value: why)
             }
         }
@@ -84,10 +83,11 @@ struct DebugView: View {
 
     private var engineSection: some View {
         Section("Engine") {
-            if let info = model.engineInfo {
+            // The engine is this process: its build id is the app's.
+            if model.sync != nil {
                 LabeledContent("Serving", value: "yes")
-                LabeledContent("Build", value: info.buildId)
-                LabeledContent("PID", value: "\(info.pid)")
+                LabeledContent("Build", value: MonoplanCore.buildId())
+                LabeledContent("PID", value: "\(ProcessInfo.processInfo.processIdentifier)")
             } else {
                 LabeledContent("Serving", value: "no")
             }

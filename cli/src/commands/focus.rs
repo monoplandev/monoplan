@@ -25,11 +25,12 @@ use std::collections::HashMap;
 use std::io::Write;
 
 use clap::{Parser, Subcommand};
-use monoplan_core::{Doc, DocId, ItemView, LIST_EVENTS, LIST_INBOX, Place};
+use monoplan_core::{Doc, DocId, ItemView};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::items::write_json;
+use crate::api::{self, Ctx, lists::ListNames, starred::StarredItem};
 use crate::workspace::{Candidate, HOME_LABEL};
 
 #[derive(Parser, Debug, Clone, Serialize, Deserialize)]
@@ -149,30 +150,44 @@ impl<'a> Lens<'a> {
     }
 }
 
-pub fn run(doc: &Doc, args: FocusArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+/// `starred`, and with `--all` the full lens (`api::starred`); `mv`
+/// and the hidden `add` / `rm` write the command's own doc.
+pub fn run(cx: &Ctx, args: FocusArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+    let doc = cx.doc;
     match args.cmd {
-        None => show(doc, args.json, out),
+        None if args.all => show(&api::starred::starred_everywhere(cx)?, args.json, out),
+        None => show(&api::starred::starred(cx)?, args.json, out),
+        Some(_) if args.all => anyhow::bail!("starred --all only lists; mv takes -w instead"),
         Some(FocusCmd::Add { item_id, pos }) => add(doc, &item_id, pos, out),
         Some(FocusCmd::Rm { item_id }) => rm(doc, &item_id, out),
         Some(FocusCmd::Mv {
             item_id,
             pos,
             after,
-        }) => mv(doc, &item_id, pos, after.as_deref(), out),
+        }) => {
+            api::starred::move_starred(cx, &item_id, pos, after.as_deref())?;
+            writeln!(out, "{item_id}")?;
+            Ok(())
+        }
     }
 }
 
-fn show(doc: &Doc, json: bool, out: &mut dyn Write) -> anyhow::Result<()> {
-    let items = doc.focus_view();
+/// The numbered listing; rows of the full lens end in their
+/// workspace.
+fn show(rows: &[StarredItem], json: bool, out: &mut dyn Write) -> anyhow::Result<()> {
     if json {
-        let rows: Vec<FocusItemJson> = items
-            .iter()
-            .enumerate()
-            .map(|(i, item)| item_json(i + 1, item, None, None))
-            .collect();
-        write_json(out, &rows)?;
-    } else {
-        print_items(out, &items)?;
+        return write_json(out, &rows);
+    }
+    for r in rows {
+        // The position matches the `--star` / `starred mv` argument
+        // space. Starred is Open-only, so the box carries the workflow
+        // state mark.
+        let mark = super::items::state_mark(r.state.into());
+        write!(out, "{:>3}  {}  [{mark}] {}", r.pos, r.id, r.text)?;
+        if r.doc_id.is_some() {
+            write!(out, "  [{}]", r.doc_name.as_deref().unwrap_or(HOME_LABEL))?;
+        }
+        writeln!(out)?;
     }
     Ok(())
 }
@@ -201,7 +216,7 @@ pub fn resolve_all<'a>(
         .get(&primary)
         .map(|(c, d)| (c, *d))
         .ok_or_else(|| anyhow::anyhow!("the Home workspace is not open"))?;
-    let mut list_names: HashMap<DocId, HashMap<String, String>> = HashMap::new();
+    let mut list_names: HashMap<DocId, ListNames> = HashMap::new();
     let mut rows = Vec::new();
     for entry in home.focus_entries() {
         let (tag, doc) = match &entry.doc_id {
@@ -217,19 +232,10 @@ pub fn resolve_all<'a>(
         if !item.is_open() {
             continue;
         }
-        // The reserved lists have no `ListMeta` row (`all_lists` skips
-        // them), so they are named here as the clients label them.
-        let names = list_names.entry(tag.doc_id).or_insert_with(|| {
-            doc.all_lists()
-                .into_iter()
-                .map(|l| (l.id, l.name))
-                .collect()
-        });
-        let list_name = match item.list_id.as_str() {
-            LIST_INBOX => Some("Inbox".to_string()),
-            LIST_EVENTS => Some("Events".to_string()),
-            other => names.get(other).cloned(),
-        };
+        let list_name = list_names
+            .entry(tag.doc_id)
+            .or_insert_with(|| ListNames::of(doc))
+            .get(&item.list_id);
         rows.push(StarredRow {
             doc: tag,
             item,
@@ -237,38 +243,6 @@ pub fn resolve_all<'a>(
         });
     }
     Ok(rows)
-}
-
-/// `starred --all`: [`resolve_all`], printed like [`show`] with a
-/// workspace tag on every row.
-pub fn show_all(
-    docs: &[(Candidate, &Doc)],
-    primary: DocId,
-    json: bool,
-    out: &mut dyn Write,
-) -> anyhow::Result<()> {
-    let rows = resolve_all(docs, primary)?;
-    if json {
-        let rows: Vec<FocusItemJson> = rows
-            .iter()
-            .enumerate()
-            .map(|(i, r)| item_json(i + 1, &r.item, Some(r.doc), r.list_name.as_deref()))
-            .collect();
-        write_json(out, &rows)?;
-    } else {
-        for (i, r) in rows.iter().enumerate() {
-            let mark = super::items::state_mark(r.item.state);
-            writeln!(
-                out,
-                "{:>3}  {}  [{mark}] {}  [{}]",
-                i + 1,
-                r.item.id,
-                r.item.text,
-                r.doc.name.as_deref().unwrap_or(HOME_LABEL)
-            )?;
-        }
-    }
-    Ok(())
 }
 
 fn add(doc: &Doc, item_id: &str, pos: Option<usize>, out: &mut dyn Write) -> anyhow::Result<()> {
@@ -286,93 +260,10 @@ fn rm(doc: &Doc, item_id: &str, out: &mut dyn Write) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A position counts every live entry, the ones a client cannot show
-/// included (a ref into a workspace that is not open, or to an item
-/// that has closed there), so a client that shows the resolved lens
-/// (`starred --all`) names a neighbour with `after` instead: the item
-/// lands directly under it, whatever hidden entries sit around them.
-fn mv(
-    doc: &Doc,
-    item_id: &str,
-    pos: Option<usize>,
-    after: Option<&str>,
-    out: &mut dyn Write,
-) -> anyhow::Result<()> {
-    let index = match after {
-        Some(anchor) => {
-            let entries = doc.focus_entries();
-            let at = |id: &str| entries.iter().position(|e| e.item_id == id);
-            let Some(anchor_at) = at(anchor) else {
-                anyhow::bail!("not starred: {anchor}");
-            };
-            match at(item_id) {
-                // The slot the item ends up in: taking it out from
-                // above the anchor moves the anchor up one.
-                Some(from) if from < anchor_at => anchor_at,
-                _ => anchor_at + 1,
-            }
-        }
-        None => one_based_to_index(pos.unwrap_or(1)),
-    };
-    doc.move_in_focus(item_id, index)?;
-    writeln!(out, "{item_id}")?;
-    Ok(())
-}
-
 /// Map a user-facing 1-based position to the 0-based visible index. A `0`
 /// (or the absurd) clamps to the first slot; the doc layer clamps the top.
 pub fn one_based_to_index(pos: usize) -> usize {
     pos.saturating_sub(1)
-}
-
-fn print_items(out: &mut dyn Write, items: &[ItemView]) -> anyhow::Result<()> {
-    for (i, item) in items.iter().enumerate() {
-        // 1-based position matches the `--star` / `starred mv` argument
-        // space. Starred is Open-only, so the box carries the workflow
-        // state mark.
-        let mark = super::items::state_mark(item.state);
-        writeln!(out, "{:>3}  {}  [{mark}] {}", i + 1, item.id, item.text)?;
-    }
-    Ok(())
-}
-
-#[derive(Serialize)]
-struct FocusItemJson<'a> {
-    pos: usize,
-    id: &'a str,
-    text: &'a str,
-    list_id: &'a str,
-    /// Workflow register state name (`spec/data-model.md` "Lifecycle").
-    state: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    place: Option<&'a Place>,
-    /// `--all` only: the row's workspace (`doc_name` absent for Home and
-    /// an unnamed doc) and its list's name there.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    doc_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    doc_name: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    list_name: Option<&'a str>,
-}
-
-fn item_json<'a>(
-    pos: usize,
-    item: &'a ItemView,
-    doc: Option<&'a Candidate>,
-    list_name: Option<&'a str>,
-) -> FocusItemJson<'a> {
-    FocusItemJson {
-        pos,
-        id: &item.id,
-        text: &item.text,
-        list_id: &item.list_id,
-        state: item.state.name(),
-        place: item.place.as_ref(),
-        doc_id: doc.map(|c| c.doc_id.0.to_string()),
-        doc_name: doc.and_then(|c| c.name.as_deref()),
-        list_name,
-    }
 }
 
 #[cfg(test)]
@@ -410,13 +301,18 @@ mod tests {
         };
         assert_eq!(order(), ["a", "hidden", "b", "c"]);
         let run = |mv: serde_json::Value| {
-            let cmd: DocCmd =
-                serde_json::from_value(serde_json::json!({"Focus": {"cmd": {"Mv": mv}, "json": false}}))
-                    .unwrap();
+            let cmd: DocCmd = serde_json::from_value(
+                serde_json::json!({"Focus": {"cmd": {"Mv": mv}, "json": false}}),
+            )
+            .unwrap();
             let DocCmd::Focus(args) = cmd else {
                 panic!("not a Focus frame")
             };
-            run(&home, args, &mut Vec::new())
+            run(
+                &Ctx::bare(&home, &[&home], &Lens::home(&home)),
+                args,
+                &mut Vec::new(),
+            )
         };
         // Down: a under b.
         run(serde_json::json!({"item_id": ids[0], "pos": null, "after": ids[1]})).unwrap();

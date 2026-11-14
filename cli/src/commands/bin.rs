@@ -1,13 +1,14 @@
 //! Bin namespace: `bin show` / `bin empty` / `bin rm <id>`. Binning an
-//! item is `item bin <id>` ([`super::items::bin`]).
+//! item is `item bin <id>` ([`super::items::bin`]). The behaviour is
+//! `api::bin`; this is the arguments and the rendering.
 
 use clap::{Parser, Subcommand};
 use std::io::Write;
 
-use monoplan_core::Doc;
 use serde::{Deserialize, Serialize};
 
 use super::items::{IdArg, write_json};
+use crate::api::{self, Ctx};
 
 #[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 pub struct BinArgs {
@@ -27,51 +28,23 @@ pub enum BinSub {
     Rm(IdArg),
 }
 
-pub fn run(doc: &Doc, args: BinArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+pub fn run(cx: &Ctx, args: BinArgs, out: &mut dyn Write) -> anyhow::Result<()> {
     match args.sub {
-        BinSub::Show => show(doc, args.json, out),
-        BinSub::Empty => empty(doc, out),
-        BinSub::Rm(id) => rm(doc, &id.item_id, out),
-    }
-}
-
-fn show(doc: &Doc, json: bool, out: &mut dyn Write) -> anyhow::Result<()> {
-    let items = doc.binned_items();
-    if json {
-        let v: Vec<BinnedJson> = items
-            .iter()
-            .map(|i| BinnedJson {
-                id: &i.id,
-                text: &i.text,
-                list_id: &i.list_id,
-                binned_at: i.binned_at.unwrap_or_default(),
-            })
-            .collect();
-        write_json(out, &v)?;
-    } else {
-        for i in &items {
-            writeln!(out, "{}  {}", i.id, i.text)?;
+        BinSub::Show => {
+            let rows = api::bin::binned(cx)?;
+            if args.json {
+                write_json(out, &rows)?;
+            } else {
+                for row in &rows {
+                    writeln!(out, "{}  {}", row.id, row.text)?;
+                }
+            }
+        }
+        BinSub::Empty => writeln!(out, "removed {}", api::bin::empty_bin(cx)?)?,
+        BinSub::Rm(id) => {
+            api::bin::delete_binned(cx, &id.item_id)?;
+            writeln!(out, "{}", id.item_id)?;
         }
     }
     Ok(())
-}
-
-fn empty(doc: &Doc, out: &mut dyn Write) -> anyhow::Result<()> {
-    let removed = doc.empty_bin()?;
-    writeln!(out, "removed {removed}")?;
-    Ok(())
-}
-
-fn rm(doc: &Doc, item_id: &str, out: &mut dyn Write) -> anyhow::Result<()> {
-    doc.delete_binned(item_id)?;
-    writeln!(out, "{item_id}")?;
-    Ok(())
-}
-
-#[derive(Serialize)]
-struct BinnedJson<'a> {
-    id: &'a str,
-    text: &'a str,
-    list_id: &'a str,
-    binned_at: i64,
 }

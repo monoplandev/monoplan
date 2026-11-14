@@ -8,17 +8,17 @@
 // takes the typed text, if any, as the label.
 
 import MapKit
-import MonoplanMacKit
+import MonoplanCore
 import SwiftUI
 
 struct ItemPlaceEditor: View {
     @EnvironmentObject private var model: AppModel
     let ref: ItemRef
-    let item: ItemDetail
+    let item: ItemInfo
     let done: () -> Void
 
     @State private var query = ""
-    @State private var known: [KnownPlace] = []
+    @State private var known: [PlaceSuggestion] = []
     @StateObject private var search = PlaceSearch()
     @FocusState private var focused: Bool
 
@@ -52,7 +52,7 @@ struct ItemPlaceEditor: View {
                                 model.setPlace(ref, place: row.place, exact: true)
                                 done()
                             } label: {
-                                PlaceRow(title: row.label, subtitle: row.address, systemImage: "clock")
+                                PlaceRow(title: row.place.label, subtitle: row.place.address, systemImage: "clock")
                             }
                         }
                     }
@@ -116,7 +116,7 @@ struct ItemPlaceEditor: View {
     /// `item set --place <label>` does); otherwise it is a bare label.
     /// Nothing typed: just close.
     private func useTyped() {
-        if !typed.isEmpty { model.setPlace(ref, place: PlaceInfo(label: typed)) }
+        if !typed.isEmpty { model.setPlace(ref, place: Place(label: typed)) }
         done()
     }
 
@@ -190,17 +190,17 @@ final class PlaceSearch: NSObject, ObservableObject, MKLocalSearchCompleterDeleg
     /// A suggestion as a place: its name, where it is, and its address.
     /// If the follow-up search fails the suggestion's own text is kept,
     /// without coordinates.
-    func resolve(_ result: MKLocalSearchCompletion, completion: @escaping (PlaceInfo) -> Void) {
+    func resolve(_ result: MKLocalSearchCompletion, completion: @escaping (Place) -> Void) {
         let address = result.subtitle.isEmpty ? nil : result.subtitle
         MKLocalSearch(request: MKLocalSearch.Request(completion: result)).start { response, _ in
-            let place: PlaceInfo
+            let place: Place
             if let item = response?.mapItems.first {
                 let at = item.placemark.coordinate
-                place = PlaceInfo(
+                place = Place(
                     label: item.name ?? result.title, lat: at.latitude, lon: at.longitude,
                     address: address ?? item.placemark.title)
             } else {
-                place = PlaceInfo(label: result.title, address: address)
+                place = Place(label: result.title, address: address)
             }
             DispatchQueue.main.async { completion(place) }
         }

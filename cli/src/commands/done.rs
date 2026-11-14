@@ -14,10 +14,11 @@ use std::io::Write;
 
 use chrono::{DateTime, Datelike, Days, Local, NaiveDate, TimeZone};
 use clap::Parser;
-use monoplan_core::{Doc, ItemView, LIST_EVENTS, LIST_INBOX};
+use monoplan_core::{ItemView, LIST_EVENTS, LIST_INBOX};
 use serde::{Deserialize, Serialize};
 
-use super::items::{date_tags, item_json, row_box, write_json};
+use super::items::{date_tags, row_box, write_json};
+use crate::api::{self, Ctx};
 
 /// Rows shown when neither `-n` nor `--since` bounds the list.
 const DEFAULT_LIMIT: usize = 20;
@@ -92,7 +93,8 @@ pub fn select_done(items: &[ItemView], since: Option<i64>, limit: Option<usize>)
     done
 }
 
-pub fn run(doc: &Doc, args: DoneArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+pub fn run(cx: &Ctx, args: DoneArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+    let doc = cx.doc;
     let since = match &args.since {
         Some(s) => Some(day_start_millis(since_day(s, Local::now().date_naive())?)),
         None => None,
@@ -103,16 +105,16 @@ pub fn run(doc: &Doc, args: DoneArgs, out: &mut dyn Write) -> anyhow::Result<()>
         .limit
         .or_else(|| since.is_none().then_some(DEFAULT_LIMIT));
 
-    let items = doc.all_items();
     if args.count {
         // The number alone, which is also its JSON.
-        writeln!(out, "{}", select_done(&items, since, None).len())?;
+        writeln!(out, "{}", api::done::done_count(cx, since)?)?;
         return Ok(());
     }
-    let done = select_done(&items, since, limit);
     if args.json {
-        return write_json(out, &done.iter().map(|i| item_json(i)).collect::<Vec<_>>());
+        return write_json(out, &api::done::done(cx, since, limit)?);
     }
+    let items = doc.all_items();
+    let done = select_done(&items, since, limit);
     if done.is_empty() {
         writeln!(out, "Nothing done.")?;
         return Ok(());

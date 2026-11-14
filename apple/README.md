@@ -34,7 +34,7 @@ so the FFI grows typed reads as that UI does. The offline
 ## Layering
 
 ```
-monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's daemon: Engine (start, request, watch, subscribe, import, session, device_token, shutdown; typed: lists, items, add_item, set_done, observe), login, logout, matches_name
+monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's daemon: Engine (start, request, watch, subscribe, import, session, device_token, shutdown; typed: one method per `monoplan_cli::api` function, plus sync, reconnect, account, workspaces, create_workspace, delete_workspace, observe), login, logout, matches_name, build_id
    → MonoplanCoreFFI.xcframework        static libs (macOS/iOS/iOS-sim) + C headers
       → MonoplanCore (SwiftPM)          generated Swift bindings + a thin facade
          → MonoplanMac, MonoplanIOS      consume MonoplanCore (and MonoplanMac's Kit product) as local packages
@@ -69,7 +69,8 @@ gitignored:
 - `apple/MonoplanCore/Sources/MonoplanCore/Generated/` — the uniffi Swift bindings,
   one file per Rust crate that defines exported types: `monoplan_ffi.swift`
   (`Engine` and its methods) and `monoplan_cli.swift` (the records the typed
-  calls return: `Item`, `ListInfo`, ...).
+  calls return: `Item`, `ItemInfo`, `ListInfo`, `AgendaGroup`, `StarredItem`,
+  `FindHit`, `BinEntry`, `LocatedItem`, `PlaceSuggestion`, ...).
 
 The typed calls are replacing `Engine.request` verb by verb
 ([`spec/swift-bindings-plan.md`](../spec/swift-bindings-plan.md), phase 1
@@ -77,10 +78,10 @@ built 2026-11-14). From Swift: `EngineCalls(engine)` and
 `try await calls.run { try $0.items(workspace: nil, list: "inbox", includeDone: false) }`
 (or `calls.run({ ... }) { result in ... }`, the result on the main queue,
 for a caller that is not async);
-`engine.observe(onChanged:onSync:)` for the change and sync events. The iOS
-app's Home index, list pages, capture and tick use them (phase 2,
-2026-11-14: `AppModel.call` / `read`); the rest of iOS and all of macOS
-are still on `Engine.request`.
+`engine.observe(onChanged:onSync:onStopped:)` for the change and sync
+events. The iOS app uses nothing else (phase 3, 2026-11-14:
+`AppModel.call` / `read`, and an `EngineController` that follows the
+engine through `observe`); macOS is still on `Engine.request`.
 
 Run it before `swift build` / `swift test` on a fresh checkout — the package
 won't compile without those outputs present.
@@ -277,15 +278,20 @@ architecture, not to be used yet: sign in, create an account, sign
 out, run a sync, and show what the engine reports.
 
 The app runs the profile's engine, as the Mac app does: `EngineController`
-runs `Engine` from MonoplanCore in process and `EngineClient` (the Kit,
-consumed as the `MonoplanMacKit` product of `../MonoplanMac`) talks to
-it through `FFITransport`, hello then watch. Two things differ from
+runs `Engine` from MonoplanCore in process, follows it with
+`Engine.observe` (sync state, `Changed`, its end) and hands `AppModel`
+its `EngineCalls`. There is no client object or wire format between
+the app and its engine (spec/swift-bindings-plan.md, phase 3): every
+read and write is a typed method returning generated records. The Kit
+(the `MonoplanMacKit` product of `../MonoplanMac`) is still linked for
+what is not wire: `ProfileLocation`, `WhenPhrase` / `WhenSuggest`,
+`Agenda.start(of:)` and the widget's `AgendaSnapshot`. Two things differ from
 the Mac. The engine serves **no socket**: nothing on iOS would dial one,
 and the container paths are longer than `sun_path` allows, so
 `monoplan-ffi` passes `serve_socket = false` (`daemon::start_with`)
 under `target_os = "ios"` and skips the headless-daemon takeover. And
 the process is suspended rather than quit: on return to the
-foreground the app sends `Reconnect`, since the WebSocket is dead by
+foreground the app calls `Engine.reconnect`, since the WebSocket is dead by
 then (`spec/daemon-plan.md` "Mobile hosts"); there is no clean
 shutdown, the engine's persist tick and the WAL cover a kill. The
 missing socket also means `login` cannot stop the app's engine itself,
@@ -423,8 +429,8 @@ group as a section: Today, Unscheduled events, then each non-empty
 day, with the row's time, its workspace under the text when it is not
 Personal's, and the duration or overdue / due-today tone; read-only
 markup, nothing tappable yet. **Home** (`HomeView.swift`,
-2026-11-13) is the root and the index: first a section with Starred, Agenda, Map, Done and Bin, then a section per open workspace (`Engine.session`'s
-docs, Personal first), each with its Inbox and then its active lists
+2026-11-13) is the root and the index: first a section with Starred, Agenda, Map, Done and Bin, then a section per open workspace (`Engine.workspaces`,
+Personal first), each with its Inbox and then its active lists
 (the typed `Engine.lists(workspace:filter: .all)`,
 one read per doc, refetched with the session on every `Changed`;
 `userLists` in `TypedRows.swift` drops archived and reserved rows). A list shows its
@@ -432,11 +438,10 @@ emoji (`ListIcon`: the `icon` the list JSON carries, a folder without
 one) on its Home row, in its page's title and on the item sheet. A list pushes its Open
 items (the typed `Engine.items`), refetched on `Changed` while
 shown; a long press and drag reorders a row (2026-11-14: `onMove`,
-`Request.reorderItem`, i.e. `item set <id> --pos <pos>`; the rows are
+`Engine.reorderItem`; the rows are
 reordered locally first, then reread). A gear at the top right of the index opens Settings, pushed onto the same stack. **Map**
 (`PlacesMapView.swift`, 2026-11-14) is the Open items that carry a
-place with coordinates (`Request.placedItems`, i.e. `places --items
---json`, every open workspace), one marker per spot, under a sheet
+place with coordinates (`Engine.placedItems`, every open workspace), one marker per spot, under a sheet
 that stays up with the page (strip, half, full; the map stays live up
 to half): the items nearest first, from the phone's location
 (`LocationSource`, when-in-use, used on the device only) or else the
@@ -444,39 +449,37 @@ middle of the map, with a search field; a marker narrows the list to
 its spot, and a row pushes the item's page inside the sheet. Home's
 bottom bar is hidden while it is up. **Done** (`DoneView.swift`) is the
 Personal workspace's Done items across every list, newest first, in a
-section per day ticked (`Request.done(limit:)`, i.e. `done -n N --json`,
-grouped by `Done.days`), each row with its list name. It is a window,
+section per day ticked (`Engine.done(workspace:limit:)`,
+grouped by `DoneDay.days`), each row with its list name. It is a window,
 not the history: 50 rows to start, doubled each time the end of the
 list scrolls into sight (`AppModel.loadMoreDone`), and a `Changed`
 refetches only the window reached; read-only. The title's count is
-the whole history's, read on its own (`Request.doneCount`, i.e.
-`done --count`). **Bin** (`BinView.swift`, 2026-11-14) is every open
-workspace's binned items, newest binned first (`Request.bin(workspace:)`,
-i.e. `bin show --json`, one fetch per doc, merged in `AppModel.refreshBin`;
-fetched with the other lenses, and Home shows its Bin row only while
+the whole history's, read on its own (`Engine.doneCount`). **Bin** (`BinView.swift`, 2026-11-14) is every open
+workspace's binned items, newest binned first (`Engine.binned`, one
+read merged in Rust; read with the other lenses, and Home shows its Bin row only while
 something is binned; search reaches the page either way),
 each row with its list, its workspace when not Personal's, and how long
 ago it was binned. A row opens the item's sheet (Restore, Delete); a
-swipe or a long press restores (`Request.setBinned`) or deletes
-(`Request.deleteBinned`) from the list, and "Empty" deletes the lot
-(`Request.emptyBin`, i.e. `bin empty`, per workspace with something
-binned). Both deletes ask first. **Settings**
+swipe or a long press restores (`Engine.setBinned`) or deletes
+(`Engine.deleteBinned`) from the list, and "Empty" deletes the lot
+(`Engine.emptyBin`, per workspace with something binned). Both deletes ask first. **Settings**
 (`SettingsView.swift`, 2026-11-13) holds what a person acts on: the
 account (email, server, sign in / sign out), sync (the status line,
 last synced) and the last error. **Debug**
 (`DebugView.swift`, the original surface) is pushed from its last row
-and keeps the rest: the raw `SyncStatus` flags (online, pending,
+and keeps the rest: the raw `SyncState` flags (online, pending,
 local-only, offline reason), `Changed` events counted as they arrive,
 Sync now and Reconnect, the engine's build id and pid, the profile path, and the
-`Engine.session` ids (account, device, open docs). Sign-in is the Mac sheet's form without
+session's ids (`Engine.account`, `Engine.workspaces`: account, device, open docs). Sign-in is the Mac sheet's form without
 account creation or recovery; the local-only workspace a first launch
 runs is replaced by the account's, as on the Mac.
 
-Not shared yet: `EngineController` and `FFITransport` are copies of the
-Mac app's. The obvious next step is a third target beside the Kit,
-depending on MonoplanCore, that both apps consume; the Kit's name
-(`MonoplanMacKit`) should go with it. After that, the native reads
-the UI needs (lists, items, a board) belong on the FFI as typed
-calls, and the cross-doc layer the web client keeps in
-`js/web/src/sync/docs.ts` belongs in Rust above `Doc`, since a native
-UI cannot reuse it.
+Not shared yet: the iOS `EngineController` is its own, where the Mac
+app's still drives the Kit's `EngineClient`. When macOS moves onto the
+typed calls (spec/swift-bindings-plan.md, phase 4) the two can become a
+third target beside the Kit, depending on MonoplanCore, that both apps
+consume; the Kit's name (`MonoplanMacKit`) should go with it. The
+reads the UI needs are on the FFI as typed calls, the ones that span
+workspaces merged in Rust (`monoplan_cli::api`); what remains of the
+cross-doc layer the web client keeps in `js/web/src/sync/docs.ts`
+(moving an item between workspaces) is not on the FFI yet.

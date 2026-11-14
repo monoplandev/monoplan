@@ -6,7 +6,7 @@
 // position; no number is shown, and a long press and drag changes it. A row's checkbox ticks the item
 // (which drops it from Starred); the row opens its sheet.
 
-import MonoplanMacKit
+import MonoplanCore
 import SwiftUI
 
 struct StarredView: View {
@@ -48,7 +48,7 @@ struct StarredView: View {
                     systemImage: "exclamationmark.triangle",
                     description: Text(error)
                 )
-            } else if model.sync == nil, case .connecting(let why) = model.clientState {
+            } else if model.sync == nil, case .connecting(let why) = model.engineState {
                 ContentUnavailableView("Starred", systemImage: "star", description: Text(why))
             } else {
                 ContentUnavailableView(
@@ -64,7 +64,7 @@ struct StarredView: View {
 /// One starred row: the text, and underneath the list it lives in with
 /// the workspace after it when that is not Personal.
 struct StarredRowView: View {
-    let row: FocusRow
+    let row: StarredItem
 
     var body: some View {
         CheckboxRow(state: row.state) {

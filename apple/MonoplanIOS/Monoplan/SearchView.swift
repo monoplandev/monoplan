@@ -1,6 +1,6 @@
 // Search, drawn over Home's navigation stack while the bottom bar's
 // field has focus or text. It works as the web's Find does
-// (spec/search.md; `find --json` through the engine): the built-in
+// (spec/search.md; `Engine.find`): the built-in
 // pages whose names match, then lists, then items, ranked across every
 // open workspace, every word matching and the last one as a prefix.
 // Unlike the web there is no default menu: with nothing typed the page
@@ -8,7 +8,7 @@
 // result opens the item's sheet over the results, which stay.
 
 import MonoplanCore
-import MonoplanMacKit
+import MonoplanCore
 import SwiftUI
 
 /// What a result that is not an item opens.
@@ -96,9 +96,9 @@ struct SearchView: View {
                                 .contentShape(Rectangle())
                         }
                     }
-                    ForEach(hits) { hit in
+                    ForEach(hits, id: \.key) { hit in
                         Button { open(hit) } label: { SearchHitRow(hit: hit) }
-                            .modifier(ItemRowMenu(ref: menuItem(hit), state: hit.state ?? "backlog"))
+                            .modifier(ItemRowMenu(ref: menuItem(hit), state: hit.state?.itemState ?? .backlog))
                     }
                 } header: {
                     // The count is of the rows shown: pages and hits.
@@ -124,18 +124,18 @@ struct SearchView: View {
 
     /// The item a hit's long-press menu acts on: none for a list, and
     /// none for a binned item, which the menu's actions do not fit.
-    private func menuItem(_ hit: SearchHit) -> ItemRef? {
-        guard hit.kind == .item, hit.state != "binned" else { return nil }
-        return ItemRef(docId: hit.docId, itemId: hit.itemId, title: hit.title)
+    private func menuItem(_ hit: FindHit) -> ItemRef? {
+        guard hit.kind == .item, !hit.isBinned else { return nil }
+        return ItemRef(docId: hit.docId, itemId: hit.id, title: hit.title)
     }
 
-    private func open(_ hit: SearchHit) {
+    private func open(_ hit: FindHit) {
         switch hit.kind {
         case .item:
-            openItem(ItemRef(docId: hit.docId, itemId: hit.itemId, title: hit.title))
+            openItem(ItemRef(docId: hit.docId, itemId: hit.id, title: hit.title))
         case .list:
             guard let docId = hit.docId ?? model.session?.primaryDocId else { return }
-            pick(.list(ListRef(docId: docId, listId: hit.itemId, name: hit.title, icon: hit.icon)))
+            pick(.list(ListRef(docId: docId, listId: hit.id, name: hit.title, icon: hit.icon)))
         }
     }
 }
@@ -146,16 +146,16 @@ struct SearchView: View {
 /// workspace when it is not Personal, and "Archived" for an archived
 /// list or an item in one. A binned item is struck through.
 private struct SearchHitRow: View {
-    let hit: SearchHit
+    let hit: FindHit
 
-    private var binned: Bool { hit.state == "binned" }
+    private var binned: Bool { hit.isBinned }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Group {
                 switch hit.kind {
-                case .item: ItemCheckbox(state: hit.state ?? "backlog")
-                case .list: ListIcon(listId: hit.itemId, emoji: hit.icon)
+                case .item: ItemCheckbox(state: hit.state?.itemState ?? .backlog)
+                case .list: ListIcon(listId: hit.id, emoji: hit.icon)
                 }
             }
             .frame(minWidth: 24)

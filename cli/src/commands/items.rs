@@ -8,14 +8,14 @@
 use std::io::{BufRead, IsTerminal, Write};
 
 use clap::{ArgGroup, Parser, ValueEnum};
-use monoplan_core::{
-    Doc, ItemLifecycle, ItemView, LIST_EVENTS, LIST_INBOX, Place, PlaceSuggestion, WorkflowState,
-    fold_label, place_matches, place_suggestions,
-};
+use monoplan_core::{ItemView, LIST_INBOX, Place, PlaceSuggestion, WorkflowState, fold_label};
 use serde::{Deserialize, Serialize};
 
-use crate::api::{self, Ctx, items::Item};
-use crate::workspace::{Candidate, HOME_LABEL};
+use crate::api::{
+    self, Ctx,
+    items::{Item, ItemState},
+};
+use crate::workspace::HOME_LABEL;
 
 // ---------- add ----------
 
@@ -200,46 +200,13 @@ pub struct ShowArgs {
     pub json: bool,
 }
 
-/// The `ls --json` row plus what only a single item's page needs: its
-/// notes (plain text) and its list's name and emoji. `list_name` is
-/// absent for the reserved lists, which have no `ListMeta` row; clients
-/// label those. `list_icon` is absent when the list has none. `starred`
-/// is whether the item shows in Starred (`focus::Lens::has`).
-#[derive(Serialize)]
-struct ItemDetailJson<'a> {
-    #[serde(flatten)]
-    item: Item,
-    notes: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    list_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    list_icon: Option<String>,
-    starred: bool,
-}
-
 /// One item, whatever its state (open, closed or binned): the `ls` row,
-/// then its notes under a blank line when it has any.
-pub fn show(
-    doc: &Doc,
-    lens: &super::focus::Lens,
-    args: ShowArgs,
-    out: &mut dyn Write,
-) -> anyhow::Result<()> {
-    let Some(item) = doc.get_item(&args.item_id) else {
-        anyhow::bail!("item not found: {}", args.item_id);
-    };
+/// then its notes under a blank line when it has any. `--json` is
+/// `api::items::ItemInfo`.
+pub fn show(cx: &Ctx, args: ShowArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+    let item = api::items::item_view(cx, &args.item_id)?;
     if args.json {
-        let list = doc.get_list_meta(&item.list_id);
-        write_json(
-            out,
-            &ItemDetailJson {
-                item: item_json(&item),
-                notes: &item.notes,
-                list_icon: list.as_ref().and_then(|l| l.icon.clone()),
-                list_name: list.map(|l| l.name),
-                starred: lens.has(&item),
-            },
-        )?;
+        write_json(out, &api::items::item_info(cx, &item))?;
     } else {
         print_items(out, std::slice::from_ref(&item))?;
         if !item.notes.is_empty() {
@@ -268,35 +235,17 @@ pub struct PlacesArgs {
     pub items: bool,
 }
 
-#[derive(Serialize)]
-struct KnownPlaceJson<'a> {
-    #[serde(flatten)]
-    place: &'a Place,
-    /// Items (not binned) carrying this place.
-    count: usize,
-    /// Unix millis of the newest use.
-    last_used: i64,
-}
-
-/// The account's known places (`spec/place-plan.md` "Reuse"): the
-/// places already on items of every open doc, deduped, most recently
-/// used first. What a place field offers before any geocoder is asked.
-pub fn places(open_docs: &[&Doc], args: PlacesArgs, out: &mut dyn Write) -> anyhow::Result<()> {
-    let rows = place_suggestions(
-        open_docs.iter().copied(),
-        args.query.as_deref().unwrap_or(""),
-        args.limit,
-    );
+/// `places`: the account's known places (`api::places::places`), or
+/// with `--items` the Open items that carry one
+/// (`api::places::placed_items`), over every open doc.
+pub fn places(cx: &Ctx, args: PlacesArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+    let query = args.query.as_deref().unwrap_or("");
+    if args.items {
+        return placed_items(cx, query, &args, out);
+    }
+    let rows = api::places::places(cx, query, args.limit)?;
     if args.json {
-        let json: Vec<KnownPlaceJson> = rows
-            .iter()
-            .map(|r| KnownPlaceJson {
-                place: &r.place,
-                count: r.count,
-                last_used: r.last_used,
-            })
-            .collect();
-        write_json(out, &json)?;
+        write_json(out, &rows)?;
     } else {
         for r in &rows {
             match &r.place.address {
@@ -308,83 +257,27 @@ pub fn places(open_docs: &[&Doc], args: PlacesArgs, out: &mut dyn Write) -> anyh
     Ok(())
 }
 
-/// A `places --items` row: the `item ls --json` row plus where it is.
-#[derive(Serialize)]
-struct PlacedItemJson<'a> {
-    #[serde(flatten)]
-    item: Item,
-    /// Absent for the reserved lists' ids no client labels.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    list_name: Option<String>,
-    /// The row's workspace, when the caller tagged its docs (the
-    /// daemon does). `doc_name` is absent for Home and an unnamed doc.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    doc_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    doc_name: Option<&'a str>,
-}
-
-/// `places --items`: the Open items (not closed, not binned) that carry
-/// a place, over `docs`, each doc's in its own item order; `query`
-/// keeps those whose place matches, as for the places themselves, and
-/// `limit` caps the rows. A place without coordinates counts: what can
-/// be pinned is the reader's question. What the iOS map reads.
-pub fn placed_items(
-    docs: &[(Option<&Candidate>, &Doc)],
+fn placed_items(
+    cx: &Ctx,
+    query: &str,
     args: &PlacesArgs,
     out: &mut dyn Write,
 ) -> anyhow::Result<()> {
-    let query = args.query.as_deref().unwrap_or("");
-    let mut rows: Vec<(Option<&Candidate>, ItemView, Option<String>)> = Vec::new();
-    for (tag, doc) in docs {
-        let names: std::collections::HashMap<String, String> = doc
-            .all_lists()
-            .into_iter()
-            .map(|l| (l.id, l.name))
-            .collect();
-        for item in doc.all_items() {
-            let placed = item.place.as_ref().is_some_and(|p| place_matches(p, query));
-            if !item.is_open() || !placed {
-                continue;
-            }
-            // The reserved lists have no `ListMeta` row, so they are
-            // named here as the clients label them.
-            let list_name = match item.list_id.as_str() {
-                LIST_INBOX => Some("Inbox".to_string()),
-                LIST_EVENTS => Some("Events".to_string()),
-                other => names.get(other).cloned(),
-            };
-            rows.push((*tag, item, list_name));
-        }
-    }
-    if args.limit > 0 {
-        rows.truncate(args.limit);
-    }
     if args.json {
-        let json: Vec<PlacedItemJson> = rows
-            .iter()
-            .map(|(tag, item, list_name)| PlacedItemJson {
-                item: item_json(item),
-                list_name: list_name.clone(),
-                doc_id: tag.map(|c| c.doc_id.0.to_string()),
-                doc_name: tag.and_then(|c| c.name.as_deref()),
-            })
-            .collect();
-        write_json(out, &json)?;
-    } else {
-        for (tag, item, _) in &rows {
-            let doc = tag
-                .map(|c| format!("  [{}]", c.name.as_deref().unwrap_or(HOME_LABEL)))
-                .unwrap_or_default();
-            writeln!(
-                out,
-                "{}  {} {}{}{doc}",
-                item.id,
-                row_box(item),
-                item.text,
-                date_tags(item)
-            )?;
-        }
+        return write_json(out, &api::places::placed_items(cx, query, args.limit)?);
+    }
+    for (tag, item, _) in &api::places::placed_item_views(cx, query, args.limit) {
+        let doc = tag
+            .map(|c| format!("  [{}]", c.name.as_deref().unwrap_or(HOME_LABEL)))
+            .unwrap_or_default();
+        writeln!(
+            out,
+            "{}  {} {}{}{doc}",
+            item.id,
+            row_box(item),
+            item.text,
+            date_tags(item)
+        )?;
     }
     Ok(())
 }
@@ -413,30 +306,23 @@ pub enum LifecycleState {
     Cancelled,
 }
 
-impl From<LifecycleState> for ItemLifecycle {
+impl From<LifecycleState> for ItemState {
     fn from(s: LifecycleState) -> Self {
         match s {
-            LifecycleState::Backlog => ItemLifecycle::Backlog,
-            LifecycleState::Todo => ItemLifecycle::Todo,
-            LifecycleState::InProgress => ItemLifecycle::InProgress,
-            LifecycleState::Review => ItemLifecycle::Review,
-            LifecycleState::Done => ItemLifecycle::Done,
-            LifecycleState::Cancelled => ItemLifecycle::Cancelled,
+            LifecycleState::Backlog => ItemState::Backlog,
+            LifecycleState::Todo => ItemState::Todo,
+            LifecycleState::InProgress => ItemState::InProgress,
+            LifecycleState::Review => ItemState::Review,
+            LifecycleState::Done => ItemState::Done,
+            LifecycleState::Cancelled => ItemState::Cancelled,
         }
     }
 }
 
-pub fn bin(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
-    doc.set_item_binned(&args.item_id, true)?;
-    writeln!(out, "{}", args.item_id)?;
-    Ok(())
-}
-
-/// Restore from the bin: clear the mask only, revealing the preserved
-/// workflow state — a done-then-binned item pops back into the Done
-/// view, an open one back into its list at its former position.
-pub fn restore(doc: &Doc, args: IdArg, out: &mut dyn Write) -> anyhow::Result<()> {
-    doc.set_item_binned(&args.item_id, false)?;
+/// `item bin` / `item restore` (`api::items::set_binned`); prints the
+/// item's id.
+pub fn set_binned(cx: &Ctx, args: IdArg, binned: bool, out: &mut dyn Write) -> anyhow::Result<()> {
+    api::items::set_binned(cx, &args.item_id, binned)?;
     writeln!(out, "{}", args.item_id)?;
     Ok(())
 }
@@ -451,22 +337,10 @@ pub struct DuplicateArgs {
     pub star: bool,
 }
 
-/// Duplicate an item beside itself (`Doc::duplicate_item`); prints the
-/// copy's id, as `add` prints a new item's. With `star`, a starred
-/// original's copy is starred in the slot under it (Home's lens, as
-/// `item set --star`); an unstarred original's copy is left unstarred.
-pub fn duplicate(
-    doc: &Doc,
-    lens: &super::focus::Lens,
-    args: DuplicateArgs,
-    out: &mut dyn Write,
-) -> anyhow::Result<()> {
-    let copy = doc.duplicate_item(&args.item_id)?;
-    if args.star
-        && let Some(at) = lens.position(&args.item_id)
-    {
-        lens.star(doc, &copy, at + 1)?;
-    }
+/// Duplicate an item beside itself (`api::items::duplicate`); prints
+/// the copy's id, as `add` prints a new item's.
+pub fn duplicate(cx: &Ctx, args: DuplicateArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+    let copy = api::items::duplicate(cx, &args.item_id, args.star)?;
     writeln!(out, "{copy}")?;
     Ok(())
 }
@@ -547,17 +421,12 @@ pub struct SetArgs {
     pub unstar: bool,
 }
 
-/// `open_docs` is every open doc, `doc` included: known places are
+/// Each flag is one `api::items` setter. Known places are
 /// account-scoped (`spec/place-plan.md` "Reuse"), so `--place gym` in
-/// one workspace finds the Gym geocoded in another. `lens` is where
-/// `--star` / `--unstar` write: Starred is Home's, whatever `doc` is.
-pub fn set(
-    doc: &Doc,
-    open_docs: &[&Doc],
-    lens: &super::focus::Lens,
-    args: SetArgs,
-    out: &mut dyn Write,
-) -> anyhow::Result<()> {
+/// one workspace finds the Gym geocoded in another; `--star` /
+/// `--unstar` write Home's lens, whatever workspace the item is in.
+pub fn set(cx: &Ctx, args: SetArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+    use api::items as write;
     let id = args.item_id.as_str();
     // Parse first, so a typo in one flag writes nothing.
     let duration = match args.duration.as_deref().map(clear_or) {
@@ -568,82 +437,48 @@ pub fn set(
     let coords = args.coords.as_deref().map(parse_coords).transpose()?;
 
     if let Some(text) = &args.text {
-        doc.edit_item_text(id, text)?;
+        write::set_text(cx, id, text)?;
     }
     if args.list.is_some() || args.pos.is_some() {
         // `--pos` alone reorders within the item's own list.
-        let list = match &args.list {
-            Some(list) => list.clone(),
-            None => {
-                doc.get_item(id)
-                    .ok_or_else(|| anyhow::anyhow!("item not found: {id}"))?
-                    .list_id
-            }
-        };
-        // No position appends (target_index = current length);
-        // `move_item` clamps to the existing range anyway. The index
-        // is the slot the item ends up in: `move_item` counts it over
-        // the projection without the moving item.
-        let target_idx = match args.pos {
-            Some(pos) => super::focus::one_based_to_index(pos),
-            None => doc.items_in_list(&list, true).len(),
-        };
-        doc.move_item(id, &list, target_idx)?;
+        write::move_item(cx, id, args.list.as_deref(), args.pos)?;
     }
     if let Some(state) = args.lifecycle {
-        doc.set_item_lifecycle(id, state.into())?;
+        write::set_state(cx, id, state.into())?;
     }
     if let Some(when) = &args.when {
-        doc.set_item_when(id, clear_or(when))?;
+        write::set_when(cx, id, clear_or(when))?;
     }
     if let Some(suggested) = &args.when_suggested {
-        doc.set_item_when_suggested(id, clear_or(suggested))?;
+        write::set_when_suggested(cx, id, clear_or(suggested))?;
     }
     if let Some(duration) = duration {
-        doc.set_item_duration(id, duration)?;
+        write::set_duration(cx, id, duration)?;
     }
     if let Some(deadline) = &args.deadline {
-        doc.set_item_deadline(id, clear_or(deadline))?;
+        write::set_deadline(cx, id, clear_or(deadline))?;
     }
     if let Some(label) = &args.place {
-        let value = match clear_or(label) {
-            None => None,
-            // A bare label that matches a place already on some item
-            // of any open workspace
-            // (case-insensitively, `spec/place-plan.md` "Reuse") takes
-            // that place whole, coordinates and address included, so
-            // `--place gym` finds the Gym the web client geocoded;
-            // --coords / --address / --new-place write exactly what was
-            // given. Validation lives in the core.
-            Some(label) => {
-                let known = if coords.is_none() && args.address.is_none() && !args.new_place {
-                    known_place(
-                        &place_suggestions(open_docs.iter().copied(), label, 0),
-                        label,
-                    )
-                } else {
-                    None
-                };
-                Some(known.unwrap_or_else(|| Place {
-                    label: label.to_string(),
-                    lat: coords.map(|c| c.0),
-                    lon: coords.map(|c| c.1),
-                    address: args.address.clone(),
-                    reference: None,
-                }))
-            }
-        };
-        doc.set_item_place(id, value.as_ref())?;
+        // --coords / --address / --new-place write exactly what was
+        // given; a bare label may take a known place whole.
+        let place = clear_or(label).map(|label| api::items::Place {
+            label: label.to_string(),
+            lat: coords.map(|c| c.0),
+            lon: coords.map(|c| c.1),
+            address: args.address.clone(),
+            reference: None,
+        });
+        write::set_place(cx, id, place, args.new_place)?;
     }
     if let Some(pos) = args.star {
         let index = match pos {
             StarPos::Append => usize::MAX,
             StarPos::At(p) => super::focus::one_based_to_index(p),
         };
-        lens.star(doc, id, index)?;
+        write::star(cx, id, index)?;
     }
     if args.unstar {
-        lens.unstar(id)?;
+        write::unstar(cx, id)?;
     }
     writeln!(out, "{id}")?;
     Ok(())
@@ -741,6 +576,7 @@ pub fn known_place(suggestions: &[PlaceSuggestion], label: &str) -> Option<Place
 mod tests {
     use super::super::focus::Lens;
     use super::*;
+    use monoplan_core::{Doc, ItemLifecycle};
 
     fn set_args(item_id: &str) -> SetArgs {
         SetArgs {
@@ -794,7 +630,7 @@ mod tests {
         let run = |query: Option<&str>| {
             let mut out = Vec::new();
             places(
-                &[&home, &work],
+                &Ctx::bare(&home, &[&home, &work], &Lens::home(&home)),
                 PlacesArgs {
                     query: query.map(str::to_string),
                     limit: 0,
@@ -888,11 +724,20 @@ mod tests {
             doc_id: DocId(uuid::Uuid::from_u128(2)),
             name: Some("Work".into()),
         };
+        let tagged = [(home_tag.clone(), &home), (work_tag.clone(), &work)];
+        let lens = Lens::home(&home);
+        let cx = Ctx {
+            doc: &home,
+            open_docs: &[&home, &work],
+            lens: &lens,
+            workspaces: &tagged,
+            home: Some(home_tag.doc_id),
+        };
         let run = |query: Option<&str>| {
             let mut out = Vec::new();
-            placed_items(
-                &[(Some(&home_tag), &home), (Some(&work_tag), &work)],
-                &PlacesArgs {
+            places(
+                &cx,
+                PlacesArgs {
                     query: query.map(str::to_string),
                     limit: 0,
                     json: true,
@@ -939,7 +784,12 @@ mod tests {
             item_id: id.clone(),
             json,
         };
-        show(&doc, &Lens::home(&doc), args(true), &mut out).unwrap();
+        show(
+            &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)),
+            args(true),
+            &mut out,
+        )
+        .unwrap();
         let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(v["id"], id.as_str());
         assert_eq!(v["text"], "draft");
@@ -948,13 +798,23 @@ mod tests {
         assert!(v.get("list_icon").is_none());
         doc.set_list_icon(&list, "🧰").unwrap();
         let mut out = Vec::new();
-        show(&doc, &Lens::home(&doc), args(true), &mut out).unwrap();
+        show(
+            &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)),
+            args(true),
+            &mut out,
+        )
+        .unwrap();
         let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(v["list_icon"], "🧰");
         assert_eq!(v["when"], "2026-09-12");
 
         let mut out = Vec::new();
-        show(&doc, &Lens::home(&doc), args(false), &mut out).unwrap();
+        show(
+            &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)),
+            args(false),
+            &mut out,
+        )
+        .unwrap();
         let text = String::from_utf8(out).unwrap();
         assert!(text.ends_with("\n\nline one\nline two\n"), "{text:?}");
 
@@ -962,8 +822,7 @@ mod tests {
         let inbox = doc.add_item(LIST_INBOX, "loose").unwrap();
         let mut out = Vec::new();
         show(
-            &doc,
-            &Lens::home(&doc),
+            &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)),
             ShowArgs {
                 item_id: inbox,
                 json: true,
@@ -976,8 +835,7 @@ mod tests {
         assert_eq!(v["notes"], "");
 
         let err = show(
-            &doc,
-            &Lens::home(&doc),
+            &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)),
             ShowArgs {
                 item_id: "nope".into(),
                 json: true,
@@ -1005,11 +863,8 @@ mod tests {
         assert!(!top, "an absent `top` appends");
         let mut out = Vec::new();
         let lens = crate::commands::focus::Lens::home(&doc);
-        let cx = Ctx {
-            doc: &doc,
-            open_docs: &[&doc],
-            lens: &lens,
-        };
+        let docs = [&doc];
+        let cx = Ctx::bare(&doc, &docs, &lens);
         add(&cx, &list, &texts, top, &mut out).unwrap();
         let id = String::from_utf8(out).unwrap();
         let item = doc.get_item(id.trim()).unwrap();
@@ -1023,7 +878,8 @@ mod tests {
         }}))
         .unwrap();
         let mut out = Vec::new();
-        crate::commands::run_doc(cmd, &doc, &[&doc], &Lens::home(&doc), &mut out).unwrap();
+        crate::commands::run_doc(cmd, &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)), &mut out)
+            .unwrap();
         let first = String::from_utf8(out).unwrap();
         assert_eq!(
             doc.open_item_ids(LIST_INBOX),
@@ -1052,7 +908,12 @@ mod tests {
             let DocCmd::Set(args) = cmd else {
                 panic!("not a Set frame")
             };
-            set(&doc, &[&doc], &Lens::home(&doc), *args, &mut Vec::new()).unwrap();
+            set(
+                &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)),
+                *args,
+                &mut Vec::new(),
+            )
+            .unwrap();
             doc.get_item(&id).unwrap()
         };
         let item = send(Some("dentist friday 8:30"), None, Some("2026-11-20T08:30"));
@@ -1086,7 +947,12 @@ mod tests {
             let DocCmd::Set(args) = cmd else {
                 panic!("not a Set frame")
             };
-            set(&doc, &[&doc], &Lens::home(&doc), *args, &mut Vec::new()).unwrap();
+            set(
+                &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)),
+                *args,
+                &mut Vec::new(),
+            )
+            .unwrap();
             assert_eq!(doc.get_item(&id).unwrap().is_done(), done);
         }
         // `Request.setLifecycle`: every variant name the apps send.
@@ -1107,7 +973,12 @@ mod tests {
             let DocCmd::Set(args) = cmd else {
                 panic!("not a Set frame")
             };
-            set(&doc, &[&doc], &Lens::home(&doc), *args, &mut Vec::new()).unwrap();
+            set(
+                &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)),
+                *args,
+                &mut Vec::new(),
+            )
+            .unwrap();
             assert_eq!(doc.get_item(&id).unwrap().state.name(), want);
         }
         // `Request.moveItem`: the same frame with `list` set instead.
@@ -1122,7 +993,12 @@ mod tests {
         let DocCmd::Set(args) = cmd else {
             panic!("not a Set frame")
         };
-        set(&doc, &[&doc], &Lens::home(&doc), *args, &mut Vec::new()).unwrap();
+        set(
+            &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)),
+            *args,
+            &mut Vec::new(),
+        )
+        .unwrap();
         assert_eq!(doc.get_item(&id).unwrap().list_id, list);
         // `Request.setWhen` / `setDuration`: strings as the flags take
         // them, `-` to clear.
@@ -1137,7 +1013,12 @@ mod tests {
             let DocCmd::Set(args) = cmd else {
                 panic!("not a Set frame")
             };
-            set(&doc, &[&doc], &Lens::home(&doc), *args, &mut Vec::new()).unwrap();
+            set(
+                &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)),
+                *args,
+                &mut Vec::new(),
+            )
+            .unwrap();
             let item = doc.get_item(&id).unwrap();
             (item.when, item.duration)
         };
@@ -1188,7 +1069,11 @@ mod tests {
             let DocCmd::Set(args) = cmd else {
                 panic!("not a Set frame")
             };
-            set(&doc, &[&doc], &Lens::home(&doc), *args, &mut Vec::new())
+            set(
+                &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)),
+                *args,
+                &mut Vec::new(),
+            )
         };
         // Down: a to the third slot.
         frame(&ids[0], None, 3).unwrap();
@@ -1216,7 +1101,12 @@ mod tests {
         let id = doc.add_item(LIST_INBOX, "bin me").unwrap();
         let run = |frame: serde_json::Value| {
             let cmd: DocCmd = serde_json::from_value(frame).unwrap();
-            run_doc(cmd, &doc, &[&doc], &Lens::home(&doc), &mut Vec::new()).unwrap();
+            run_doc(
+                cmd,
+                &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)),
+                &mut Vec::new(),
+            )
+            .unwrap();
         };
         run(serde_json::json!({"ItemBin": {"item_id": id}}));
         assert!(doc.get_item(&id).unwrap().binned_at.is_some());
@@ -1229,16 +1119,17 @@ mod tests {
         let read = |frame: serde_json::Value| {
             let cmd: DocCmd = serde_json::from_value(frame).unwrap();
             let mut out = Vec::new();
-            run_doc(cmd, &doc, &[&doc], &Lens::home(&doc), &mut out).unwrap();
+            run_doc(cmd, &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)), &mut out).unwrap();
             String::from_utf8(out).unwrap()
         };
         let a = doc.add_item(LIST_INBOX, "a").unwrap();
         let b = doc.add_item(LIST_INBOX, "b").unwrap();
         run(serde_json::json!({"ItemBin": {"item_id": a}}));
         run(serde_json::json!({"ItemBin": {"item_id": b}}));
-        let shown: serde_json::Value =
-            serde_json::from_str(&read(serde_json::json!({"Bin": {"sub": "Show", "json": true}})))
-                .unwrap();
+        let shown: serde_json::Value = serde_json::from_str(&read(
+            serde_json::json!({"Bin": {"sub": "Show", "json": true}}),
+        ))
+        .unwrap();
         let rows = shown.as_array().unwrap();
         assert_eq!(rows.len(), 2);
         for row in rows {
@@ -1263,7 +1154,7 @@ mod tests {
         let cmd: DocCmd =
             serde_json::from_value(serde_json::json!({"Duplicate": {"item_id": id}})).unwrap();
         let mut out = Vec::new();
-        run_doc(cmd, &doc, &[&doc], &Lens::home(&doc), &mut out).unwrap();
+        run_doc(cmd, &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)), &mut out).unwrap();
         let copy = String::from_utf8(out).unwrap();
         assert_eq!(doc.get_item(copy.trim()).unwrap().text, "twice");
         assert!(doc.focus_refs().is_empty(), "no `star`, no star");
@@ -1291,7 +1182,7 @@ mod tests {
             )
             .unwrap();
             let mut out = Vec::new();
-            run_doc(cmd, &doc, &[&doc], &Lens::home(&doc), &mut out).unwrap();
+            run_doc(cmd, &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)), &mut out).unwrap();
             String::from_utf8(out).unwrap().trim().to_string()
         };
         let copy = run(&a);
@@ -1321,7 +1212,7 @@ mod tests {
                 item_id: id.clone(),
                 json: true,
             };
-            show(&work, lens, args, &mut out).unwrap();
+            show(&Ctx::bare(&work, &[&home, &work], lens), args, &mut out).unwrap();
             let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
             v["starred"].as_bool().unwrap()
         };
@@ -1338,7 +1229,12 @@ mod tests {
             let DocCmd::Set(args) = cmd else {
                 panic!("not a Set frame")
             };
-            set(&work, &[&home, &work], &lens, *args, &mut Vec::new()).unwrap();
+            set(
+                &Ctx::bare(&work, &[&home, &work], &lens),
+                *args,
+                &mut Vec::new(),
+            )
+            .unwrap();
             assert_eq!(starred(&lens), want);
             let order: Vec<String> = home
                 .focus_entries()
@@ -1360,9 +1256,7 @@ mod tests {
         let id = doc.add_item(LIST_INBOX, "draft").unwrap();
         let mut out = Vec::new();
         set(
-            &doc,
-            &[&doc],
-            &Lens::home(&doc),
+            &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)),
             SetArgs {
                 text: Some("final".into()),
                 lifecycle: Some(LifecycleState::InProgress),
@@ -1392,9 +1286,7 @@ mod tests {
         // Clearing with `-`, and --unstar, through the same path.
         let mut out = Vec::new();
         set(
-            &doc,
-            &[&doc],
-            &Lens::home(&doc),
+            &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)),
             SetArgs {
                 when: Some("-".into()),
                 deadline: Some("-".into()),
@@ -1419,9 +1311,7 @@ mod tests {
         let id = doc.add_item(LIST_INBOX, "draft").unwrap();
         let mut out = Vec::new();
         let err = set(
-            &doc,
-            &[&doc],
-            &Lens::home(&doc),
+            &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)),
             SetArgs {
                 text: Some("changed".into()),
                 duration: Some("soon".into()),
@@ -1472,9 +1362,7 @@ mod tests {
         let id = home.add_item(LIST_INBOX, "drop off keys").unwrap();
         let mut out = Vec::new();
         set(
-            &home,
-            &[&home, &work],
-            &Lens::home(&home),
+            &Ctx::bare(&home, &[&home, &work], &Lens::home(&home)),
             SetArgs {
                 place: Some("office".into()),
                 ..set_args(&id)

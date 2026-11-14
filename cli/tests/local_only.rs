@@ -349,3 +349,108 @@ async fn typed_calls_run_on_the_loop_and_agree_with_the_cli() {
     .unwrap();
     assert_eq!(stopped.unwrap_err(), ApiError::Stopped);
 }
+
+/// The typed reads that span workspaces get their workspaces from the
+/// loop (`Host::with_ctx`): rows come back tagged with the doc they
+/// are from, where the same functions over bare docs tag nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn typed_reads_that_span_workspaces_tag_their_rows() {
+    use monoplan_cli::api::{self, agenda::AgendaQuery, items::Place};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("profile");
+    bootstrap::open_or_init_at(dir.clone()).await.unwrap();
+    let handle = daemon::spawn_with(reopen_profile(&dir), true)
+        .await
+        .unwrap();
+    let home = handle.client.session().await.unwrap().primary_doc_id;
+    let home = home.0.to_string();
+
+    let c = handle.client.clone();
+    let (id, starred, agenda, placed, hits, binned) = tokio::task::spawn_blocking(move || {
+        let id = c
+            .call_blocking(None, |cx| {
+                let id = api::items::add_items(cx, LIST_INBOX, &["lift".into()], true)?.remove(0);
+                api::items::set_when(cx, &id, Some("2030-01-04"))?;
+                api::items::set_place(
+                    cx,
+                    &id,
+                    Some(Place {
+                        label: "Gym".into(),
+                        lat: Some(1.5),
+                        lon: Some(2.5),
+                        address: None,
+                        reference: None,
+                    }),
+                    false,
+                )?;
+                api::items::star(cx, &id, 0)?;
+                Ok(id)
+            })
+            .unwrap();
+        let starred = c
+            .call_blocking(None, api::starred::starred_everywhere)
+            .unwrap();
+        let agenda = c
+            .call_blocking(None, |cx| {
+                api::agenda::agenda(
+                    cx,
+                    &AgendaQuery {
+                        days: 36_500,
+                        today: Some("2026-11-14"),
+                        everywhere: true,
+                    },
+                )
+            })
+            .unwrap();
+        let placed = c
+            .call_blocking(None, |cx| api::places::placed_items(cx, "", 0))
+            .unwrap();
+        let hits = c
+            .call_blocking(None, |cx| api::find::find(cx, "lif", 10))
+            .unwrap();
+        let binned = c
+            .call_blocking(None, {
+                let id = id.clone();
+                move |cx| {
+                    api::items::set_binned(cx, &id, true)?;
+                    api::bin::binned_everywhere(cx)
+                }
+            })
+            .unwrap();
+        (id, starred, agenda, placed, hits, binned)
+    })
+    .await
+    .unwrap();
+
+    let tag = Some(home);
+    assert_eq!(starred.len(), 1);
+    assert_eq!(
+        (starred[0].id.as_str(), &starred[0].doc_id),
+        (id.as_str(), &tag)
+    );
+    assert_eq!(starred[0].list_name.as_deref(), Some("Inbox"));
+    let day = agenda
+        .iter()
+        .find(|g| g.day.as_deref() == Some("2030-01-04"))
+        .unwrap();
+    assert_eq!(
+        (day.rows[0].id.as_str(), &day.rows[0].doc_id),
+        (id.as_str(), &tag)
+    );
+    assert!(agenda[0].today);
+    assert_eq!(placed.len(), 1);
+    assert_eq!(
+        (placed[0].item.id.as_str(), &placed[0].doc_id),
+        (id.as_str(), &tag)
+    );
+    assert_eq!(hits[0].id, id);
+    assert_eq!(hits[0].doc_id, tag);
+    assert_eq!(binned.len(), 1);
+    assert_eq!(
+        (binned[0].id.as_str(), &binned[0].doc_id),
+        (id.as_str(), &tag)
+    );
+
+    handle.shutdown().await.unwrap();
+}

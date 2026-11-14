@@ -10,7 +10,6 @@
 use clap::{Parser, Subcommand};
 use std::io::Write;
 
-use monoplan_core::{Doc, ListView};
 use serde::{Deserialize, Serialize};
 
 use super::items::write_json;
@@ -54,42 +53,51 @@ pub enum ListsCmd {
 }
 
 pub fn run(cx: &Ctx, args: ListsArgs, out: &mut dyn Write) -> anyhow::Result<()> {
-    let doc = cx.doc;
-    match args.cmd {
+    // Every edit prints the list's id, as `add` prints the new one's.
+    let id = match args.cmd {
         ListsCmd::Ls {
             json,
             archived,
             all,
-        } => show(doc, cx, json, archived, all, out),
-        ListsCmd::Add { name } => add(doc, &name, out),
-        ListsCmd::Rename { list, name } => rename(doc, &list, &name, out),
-        ListsCmd::Icon { list, icon } => set_icon(doc, &list, icon.as_deref(), out),
-        ListsCmd::Archive { list } => set_archived(doc, &list, true, out),
-        ListsCmd::Unarchive { list } => set_archived(doc, &list, false, out),
-    }
+        } => return show(cx, json, archived, all, out),
+        ListsCmd::Add { name } => api::lists::add_list(cx, &name)?,
+        ListsCmd::Rename { list, name } => {
+            api::lists::rename_list(cx, &list, &name)?;
+            list
+        }
+        ListsCmd::Icon { list, icon } => {
+            api::lists::set_list_icon(cx, &list, icon.as_deref())?;
+            list
+        }
+        ListsCmd::Archive { list } => {
+            api::lists::set_list_archived(cx, &list, true)?;
+            list
+        }
+        ListsCmd::Unarchive { list } => {
+            api::lists::set_list_archived(cx, &list, false)?;
+            list
+        }
+    };
+    writeln!(out, "{id}")?;
+    Ok(())
 }
 
 fn show(
-    doc: &Doc,
     cx: &Ctx,
     json: bool,
     archived_only: bool,
     all: bool,
     out: &mut dyn Write,
 ) -> anyhow::Result<()> {
+    let filter = match (all, archived_only) {
+        (true, _) => ListFilter::All,
+        (false, true) => ListFilter::Archived,
+        (false, false) => ListFilter::Active,
+    };
+    let lists = api::lists::lists(cx, filter)?;
     if json {
-        let filter = match (all, archived_only) {
-            (true, _) => ListFilter::All,
-            (false, true) => ListFilter::Archived,
-            (false, false) => ListFilter::Active,
-        };
-        return write_json(out, &api::lists::lists(cx, filter)?);
+        return write_json(out, &lists);
     }
-    let lists: Vec<ListView> = doc
-        .all_lists()
-        .into_iter()
-        .filter(|l| all || (l.archived_at.is_some() == archived_only))
-        .collect();
     for l in &lists {
         if l.archived_at.is_some() {
             writeln!(out, "{}  {}  (archived)", l.id, l.name)?;
@@ -100,43 +108,10 @@ fn show(
     Ok(())
 }
 
-fn add(doc: &Doc, name: &str, out: &mut dyn Write) -> anyhow::Result<()> {
-    let id = doc.add_list(name)?;
-    writeln!(out, "{id}")?;
-    Ok(())
-}
-
-fn rename(doc: &Doc, list_id: &str, name: &str, out: &mut dyn Write) -> anyhow::Result<()> {
-    doc.rename_list(list_id, name)?;
-    writeln!(out, "{list_id}")?;
-    Ok(())
-}
-
-fn set_icon(
-    doc: &Doc,
-    list_id: &str,
-    icon: Option<&str>,
-    out: &mut dyn Write,
-) -> anyhow::Result<()> {
-    doc.set_list_icon(list_id, icon.unwrap_or(""))?;
-    writeln!(out, "{list_id}")?;
-    Ok(())
-}
-
-fn set_archived(
-    doc: &Doc,
-    list_id: &str,
-    archived: bool,
-    out: &mut dyn Write,
-) -> anyhow::Result<()> {
-    doc.set_list_archived(list_id, archived)?;
-    writeln!(out, "{list_id}")?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::focus::Lens;
+    use crate::api::Ctx;
     use monoplan_core::Doc;
 
     /// `Request.addList` in MonoplanMacKit: the reply is the new list's
@@ -150,7 +125,7 @@ mod tests {
         )
         .unwrap();
         let mut out = Vec::new();
-        run_doc(cmd, &doc, &[&doc], &Lens::home(&doc), &mut out).unwrap();
+        run_doc(cmd, &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)), &mut out).unwrap();
         let id = String::from_utf8(out).unwrap();
         let lists = doc.all_lists();
         let list = lists.iter().find(|l| l.id == id.trim()).unwrap();
@@ -165,8 +140,14 @@ mod tests {
         let doc = Doc::new().unwrap();
         let id = doc.add_list("Errands").unwrap();
         let run = |cmd: serde_json::Value| {
-            let cmd: DocCmd = serde_json::from_value(serde_json::json!({"Lists": {"cmd": cmd}})).unwrap();
-            run_doc(cmd, &doc, &[&doc], &Lens::home(&doc), &mut Vec::new()).unwrap();
+            let cmd: DocCmd =
+                serde_json::from_value(serde_json::json!({"Lists": {"cmd": cmd}})).unwrap();
+            run_doc(
+                cmd,
+                &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)),
+                &mut Vec::new(),
+            )
+            .unwrap();
         };
         let list = || doc.all_lists().into_iter().find(|l| l.id == id).unwrap();
         run(serde_json::json!({"Rename": {"list": id, "name": "Chores"}}));

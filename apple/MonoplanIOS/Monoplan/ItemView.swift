@@ -1,7 +1,7 @@
 // An item's page: the web client's task dialog (js/web/src/TaskDialog.tsx)
 // laid out top to bottom in the same order: status, title, list, planned
 // date, deadline, place, notes, then the activity log. Read from
-// `item show --json` and refetched on every doc change while shown.
+// `Engine.item` and reread on every doc change while shown.
 // It comes up as a page sheet over whatever list the row was in (full
 // height only), as the dialog floats over the web's lists, rather
 // than as a pushed page. The sheet has a navigation bar, its buttons the
@@ -19,6 +19,7 @@
 // from the moment the title makes it a real item.
 
 import MapKit
+import MonoplanCore
 import MonoplanMacKit
 import SwiftUI
 
@@ -174,7 +175,7 @@ struct ItemView: View {
         withAnimation(.easeOut(duration: 0.15)) { editing = nil }
     }
 
-    private var item: ItemDetail? { model.itemDetails[ref.key] }
+    private var item: ItemInfo? { model.itemDetails[ref.key] }
 
     /// The item's workspace when it is a shared one, for the list field
     /// and the list editor's rows.
@@ -292,7 +293,7 @@ struct ItemView: View {
                 .fixedSize()
             }
         } else {
-            SheetStatusLabel(state: item?.state ?? "backlog", text: item == nil ? "" : "Binned")
+            SheetStatusLabel(state: item?.state ?? .backlog, text: item == nil ? "" : "Binned")
         }
         // Only an Open item can be starred (spec/focus.md): a closed
         // or binned one has no star to show or set.
@@ -325,7 +326,7 @@ struct ItemView: View {
     /// good after a confirmation.
     /// `width` is set when it shares the glass with the star: the
     /// label is then that wide, all of it the tap target.
-    private func moreMenu(_ item: ItemDetail, width: CGFloat? = nil) -> some View {
+    private func moreMenu(_ item: ItemInfo, width: CGFloat? = nil) -> some View {
         Menu {
             if item.binnedAt == nil {
                 Button("Move to Bin", systemImage: "trash", role: .destructive) {
@@ -355,7 +356,7 @@ struct ItemView: View {
     /// place. The date and place rows are always there, muted when
     /// empty: they are where setting one will happen. A pending date
     /// suggestion stands in the date row's place until it is answered.
-    private func fields(_ item: ItemDetail) -> some View {
+    private func fields(_ item: ItemInfo) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             listField(item)
             ItemDateField(
@@ -400,13 +401,11 @@ struct ItemView: View {
     /// lanes, so its four open states are one choice, "Event", standing
     /// in as `backlog` (what reopening writes), beside the two closed
     /// ones (spec/events-plan.md).
-    private static let taskStates = ["backlog", "todo", "in_progress", "review", "done", "cancelled"]
-    private static let eventStates = ["backlog", "done", "cancelled"]
+    private static let taskStates: [ItemState] = [.backlog, .todo, .inProgress, .review, .done, .cancelled]
+    private static let eventStates: [ItemState] = [.backlog, .done, .cancelled]
 
-    private static func isClosed(_ state: String) -> Bool { state == "done" || state == "cancelled" }
-
-    private static func statusLabel(_ state: String, event: Bool) -> String {
-        event && !isClosed(state) ? "Event" : ItemRowView.stateLabel(state)
+    private static func statusLabel(_ state: ItemState, event: Bool) -> String {
+        event && !state.isClosed ? "Event" : state.label
     }
 
     /// The state label as a pull-down menu: the current state ticked, a
@@ -414,13 +413,13 @@ struct ItemView: View {
     /// single open choice is ticked whatever open state the item holds
     /// underneath, and picking it changes nothing, so a state the item
     /// brought in from a list is kept.
-    private func stateMenu(_ item: ItemDetail) -> some View {
+    private func stateMenu(_ item: ItemInfo) -> some View {
         let event = item.listId == "events"
-        let picked = event && !Self.isClosed(item.state) ? "backlog" : item.state
+        let picked: ItemState = event && !item.state.isClosed ? .backlog : item.state
         return Menu {
             Picker("Status", selection: Binding(
                 get: { picked },
-                set: { if $0 != picked { model.setLifecycle(ref, state: $0) } }
+                set: { if $0 != picked { model.setState(ref, state: $0) } }
             )) {
                 ForEach(event ? Self.eventStates : Self.taskStates, id: \.self) { state in
                     Text(Self.statusLabel(state, event: event)).tag(state)
@@ -443,7 +442,7 @@ struct ItemView: View {
     /// The list editor's rows: the workspace's lists, plus the item's
     /// own list when it is not among them (archived, or the calendar's),
     /// so there is always a row to tick.
-    private func listOptions(_ item: ItemDetail) -> [ListRef] {
+    private func listOptions(_ item: ItemInfo) -> [ListRef] {
         let lists = model.lists(inDoc: ref.docId)
         if lists.contains(where: { $0.listId == item.listId }) { return lists }
         let own = ListRef(docId: ref.docId ?? "", listId: item.listId, name: item.listLabel, icon: item.listIcon)
@@ -458,7 +457,7 @@ struct ItemView: View {
     /// the item it was moving. Lists of other workspaces are not
     /// offered: the engine has no cross-doc move yet. A binned item
     /// stays put.
-    private func listField(_ item: ItemDetail) -> some View {
+    private func listField(_ item: ItemInfo) -> some View {
         Button {
             edit(.list)
         } label: {
@@ -479,7 +478,7 @@ struct ItemView: View {
     }
 
     @ViewBuilder
-    private func notes(_ item: ItemDetail) -> some View {
+    private func notes(_ item: ItemInfo) -> some View {
         if item.notes.isEmpty {
             Text("Notes").foregroundStyle(.tertiary)
         } else {
@@ -489,11 +488,11 @@ struct ItemView: View {
 
     /// The item's timeline as plain sentences: created, and once closed,
     /// when and how long it took.
-    private func activity(_ item: ItemDetail) -> some View {
+    private func activity(_ item: ItemInfo) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Created \(Self.stamp(item.createdAt))")
             if let closedAt = item.closedAt {
-                Text("\(item.state == "done" ? "Completed" : "Cancelled") \(Self.stamp(closedAt))")
+                Text("\(item.state == .done ? "Completed" : "Cancelled") \(Self.stamp(closedAt))")
                 if let took = Self.elapsed(from: item.createdAt, to: closedAt) {
                     Text("Took \(took)")
                 }
@@ -544,7 +543,7 @@ struct ItemView: View {
     /// How long it runs: the duration beside a timed date ("1h 30m"),
     /// whole days beside an all-day one once it spans more than one
     /// (spec/calendar-plan.md).
-    static func lengthText(_ item: ItemDetail) -> String? {
+    static func lengthText(_ item: ItemInfo) -> String? {
         guard let minutes = item.duration, minutes > 0 else { return nil }
         if item.isTimed { return AgendaRowView.span(minutes) }
         let days = (minutes + 1439) / 1440
@@ -581,12 +580,12 @@ struct ItemView: View {
 struct ItemTitleEditor: View {
     @EnvironmentObject private var model: AppModel
     let ref: ItemRef
-    let item: ItemDetail
+    let item: ItemInfo
     let done: () -> Void
     @State private var text: String
     @FocusState private var focused: Bool
 
-    init(ref: ItemRef, item: ItemDetail, done: @escaping () -> Void) {
+    init(ref: ItemRef, item: ItemInfo, done: @escaping () -> Void) {
         self.ref = ref
         self.item = item
         self.done = done
@@ -601,7 +600,7 @@ struct ItemTitleEditor: View {
             let suggestion = WhenSuggest.edit(
                 title: trimmed, was: item.text, when: item.when, pending: item.whenSuggested,
                 closed: item.closedAt != nil)
-            model.setText(ref, text: trimmed, suggestion: suggestion)
+            model.setText(ref, text: trimmed, suggestion: SuggestionChange(suggestion))
         }
         done()
     }

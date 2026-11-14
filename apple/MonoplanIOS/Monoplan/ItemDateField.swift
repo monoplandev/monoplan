@@ -14,6 +14,7 @@
 // (`item set --when / --duration`); there is no Save. Dates are
 // floating wall-clock strings, never instants.
 
+import MonoplanCore
 import MonoplanMacKit
 import SwiftUI
 
@@ -23,7 +24,7 @@ import SwiftUI
 /// is the only way in, the row itself display, so changing a date
 /// takes a deliberate tap.
 ///
-/// A pending date suggestion (`ItemDetail.pendingSuggestion`: an open
+/// A pending date suggestion (`ItemInfo.pendingSuggestion`: an open
 /// item with no date whose title named one) takes the row over, as the
 /// web's `WhenSuggestion.tsx` takes the date input's place: the same
 /// row in orange, "Suggested: Friday 20 Nov at 08:30", so it is never
@@ -31,7 +32,7 @@ import SwiftUI
 /// tick makes it the item's date; the cross drops it, and the plain
 /// empty row comes back.
 struct ItemDateField: View {
-    let item: ItemDetail
+    let item: ItemInfo
     let edit: () -> Void
     /// The answer to the pending suggestion: its value, and yes or no.
     let answer: (String, Bool) -> Void
@@ -116,7 +117,7 @@ struct ItemDateField: View {
 struct ItemDateEditor: View {
     @EnvironmentObject private var model: AppModel
     let ref: ItemRef
-    let item: ItemDetail
+    let item: ItemInfo
     let done: () -> Void
     /// What the item had when the editor opened, for the cross.
     @State private var original: Original
@@ -132,7 +133,7 @@ struct ItemDateEditor: View {
         let duration: Int?
     }
 
-    init(ref: ItemRef, item: ItemDetail, done: @escaping () -> Void) {
+    init(ref: ItemRef, item: ItemInfo, done: @escaping () -> Void) {
         self.ref = ref
         self.item = item
         self.done = done
@@ -143,7 +144,7 @@ struct ItemDateEditor: View {
         if Original(when: item.when, duration: item.duration) != original {
             model.setWhen(
                 ref, when: original.when,
-                duration: original.duration.map(DurationEdit.minutes) ?? .clear)
+                duration: original.duration.map { .minutes(minutes: UInt32(clamping: $0)) } ?? .clear)
         }
         done()
     }
@@ -318,8 +319,8 @@ struct ItemDateEditor: View {
     /// one.
     private func use(_ when: String) {
         let timed = when.count >= 16
-        var duration = DurationEdit.keep
-        if item.when != nil, timed != item.isTimed { duration = timed ? .minutes(60) : .clear }
+        var duration = DurationChange.keep
+        if item.when != nil, timed != item.isTimed { duration = timed ? .minutes(minutes: 60) : .clear }
         model.setWhen(ref, when: when, duration: duration)
         // Now, not only when the write comes back: the same date
         // picked again changes nothing to hear of.
@@ -361,7 +362,7 @@ struct ItemDateEditor: View {
                         Button("Add time", systemImage: "clock") {
                             // 09:00 for an hour (any all-day span no
                             // longer applies).
-                            model.setWhen(ref, when: "\(when.prefix(10))T09:00", duration: .minutes(60))
+                            model.setWhen(ref, when: "\(when.prefix(10))T09:00", duration: .minutes(minutes: 60))
                         }
                         .buttonStyle(.bordered)
                         .buttonBorderShape(.capsule)
@@ -429,7 +430,7 @@ struct ItemDateEditor: View {
                 let length = max(0, item.duration ?? 0)
                 model.setWhen(
                     ref, when: day + when.dropFirst(10).prefix(6),
-                    duration: length >= 1440 ? .minutes(length % 1440 == 0 ? 60 : length % 1440) : .keep)
+                    duration: length >= 1440 ? .minutes(minutes: UInt32(length % 1440 == 0 ? 60 : length % 1440)) : .keep)
             } else {
                 model.setWhen(ref, when: day, duration: .clear)
             }
@@ -443,7 +444,7 @@ struct ItemDateEditor: View {
     /// days beside an all-day date, and beside a timed one every day
     /// up to the one its end falls on (an end at midnight belongs to
     /// the day before).
-    static func spanDays(_ item: ItemDetail) -> [String] {
+    static func spanDays(_ item: ItemInfo) -> [String] {
         guard let when = item.when, let first = WhenText.date(String(when.prefix(10))) else { return [] }
         let count: Int
         if item.isTimed {
@@ -566,7 +567,7 @@ struct ItemDateEditor: View {
 
     /// The menu's value: minutes when timed (0 is none), else the span
     /// rounded up to whole days in minutes (at least one day).
-    static func currentLength(_ item: ItemDetail) -> Int {
+    static func currentLength(_ item: ItemInfo) -> Int {
         let minutes = max(0, item.duration ?? 0)
         if item.isTimed { return minutes }
         return max(1, (minutes + 1439) / 1440) * 1440

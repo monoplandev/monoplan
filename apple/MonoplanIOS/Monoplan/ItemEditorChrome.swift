@@ -5,6 +5,7 @@
 // `NavigationStack` (`ItemSheet`), so all of these are toolbar items
 // and the system draws them as Liquid Glass.
 
+import MonoplanCore
 import SwiftUI
 
 /// The round pencil at the trailing edge of a field row that has a
@@ -87,7 +88,7 @@ struct SheetCloseItem: ToolbarContent {
 /// capture, "Binned" on a binned item. No glass behind it: it is not a
 /// button.
 struct SheetStatusLabel: ToolbarContent {
-    let state: String
+    let state: ItemState
     let text: String
 
     var body: some ToolbarContent {

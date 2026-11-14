@@ -20,7 +20,7 @@
 
 import CoreLocation
 import MapKit
-import MonoplanMacKit
+import MonoplanCore
 import SwiftUI
 
 /// Where the phone is, while the Map page is up. Asks for when-in-use
@@ -70,15 +70,17 @@ final class LocationSource: NSObject, ObservableObject, CLLocationManagerDelegat
 
 /// An item that can be pinned: its place has coordinates.
 private struct Pinned: Equatable {
-    let item: PlacedItem
+    let item: LocatedItem
+    let place: Place
     let coordinate: CLLocationCoordinate2D
     /// The spot's identity: items at the same coordinates share a
     /// marker (five decimals is about a metre).
     let spot: String
 
-    init?(_ item: PlacedItem) {
-        guard let lat = item.place.lat, let lon = item.place.lon else { return nil }
+    init?(_ item: LocatedItem) {
+        guard let place = item.item.place, let lat = place.lat, let lon = place.lon else { return nil }
         self.item = item
+        self.place = place
         coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
         spot = String(format: "%.5f,%.5f", lat, lon)
     }
@@ -130,7 +132,7 @@ struct PlacesMapView: View {
         }
         return order.compactMap { id in
             guard let pins = bySpot[id], let first = pins.first else { return nil }
-            return Spot(id: id, label: first.item.place.label, coordinate: first.coordinate, count: pins.count)
+            return Spot(id: id, label: first.place.label, coordinate: first.coordinate, count: pins.count)
         }
     }
 
@@ -141,7 +143,7 @@ struct PlacesMapView: View {
         let shown = pinned.filter { pin in
             if let spot, pin.spot != spot { return false }
             if trimmed.isEmpty { return true }
-            let place = pin.item.place
+            let place = pin.place
             return [pin.item.text, place.label, place.address ?? ""]
                 .contains { $0.localizedStandardContains(trimmed) }
         }
@@ -346,7 +348,7 @@ private struct PlacedRowView: View {
     }
 
     private var note: String {
-        var parts = [pin.item.place.label]
+        var parts = [pin.place.label]
         if let from {
             let metres = Measurement(value: pin.metres(from: from), unit: UnitLength.meters)
             parts.append(metres.formatted(.measurement(width: .abbreviated, usage: .road)))

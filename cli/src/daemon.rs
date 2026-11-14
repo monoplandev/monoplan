@@ -1249,7 +1249,8 @@ impl Host {
     }
 
     /// The context a command or call on `doc_id` runs with: that doc,
-    /// every open doc, and Starred as seen from it. Starred is Home's
+    /// every open doc (and each one's workspace tag, for the reads
+    /// that span them), and Starred as seen from it. Starred is Home's
     /// alone; a command on another workspace stars through a foreign
     /// ref there.
     fn with_ctx<T>(&self, doc_id: DocId, f: impl FnOnce(&Ctx<'_>) -> T) -> T {
@@ -1257,12 +1258,14 @@ impl Host {
             .engine
             .doc_for(doc_id)
             .expect("resolved against open docs");
-        let open_docs: Vec<&monoplan_core::Doc> = self
+        // Home first (`Engine::doc_ids`).
+        let workspaces: Vec<(crate::workspace::Candidate, &monoplan_core::Doc)> = self
             .engine
-            .doc_ids()
+            .candidates()
             .into_iter()
-            .filter_map(|id| self.engine.doc_for(id))
+            .filter_map(|c| self.engine.doc_for(c.doc_id).map(|d| (c, d)))
             .collect();
+        let open_docs: Vec<&monoplan_core::Doc> = workspaces.iter().map(|(_, d)| *d).collect();
         let lens = if doc_id == self.engine.primary_doc_id() {
             crate::commands::focus::Lens::home(doc)
         } else {
@@ -1272,6 +1275,8 @@ impl Host {
             doc,
             open_docs: &open_docs,
             lens: &lens,
+            workspaces: &workspaces,
+            home: Some(self.engine.primary_doc_id()),
         })
     }
 
@@ -1436,138 +1441,18 @@ impl Host {
                 embedded: self.embedded,
                 sync: self.sync_status(),
             },
-            // `agenda --all` reads every open doc at once: the one
-            // merged read the host serves (`spec/cli.md` §Agenda), so
-            // native clients get the cross-doc lens from Rust rather
-            // than merging per-doc replies themselves. Read-only:
-            // nothing to persist or push after it.
-            Request::Doc {
-                workspace,
-                cmd: crate::commands::DocCmd::Agenda(args),
-            } if args.all => {
-                if workspace.is_some() {
-                    Reply::Err {
-                        message: "agenda --all reads every workspace; it takes no -w".into(),
-                    }
-                } else {
-                    let docs: Vec<(crate::workspace::Candidate, &monoplan_core::Doc)> = self
-                        .engine
-                        .candidates()
-                        .into_iter()
-                        .filter_map(|c| self.engine.doc_for(c.doc_id).map(|d| (c, d)))
-                        .collect();
-                    let hidden = self
-                        .engine
-                        .doc_for(self.engine.primary_doc_id())
-                        .map(|d| d.get_settings().calendar_hidden_docs)
-                        .unwrap_or_default();
-                    let mut buf = Vec::new();
-                    match crate::commands::agenda::run_all(&docs, &hidden, args, &mut buf) {
-                        Ok(()) => Reply::Output {
-                            stdout: String::from_utf8_lossy(&buf).into_owned(),
-                            sync: self.sync_status(),
-                        },
-                        Err(e) => Reply::Err {
-                            message: format!("{e:#}"),
-                        },
-                    }
-                }
-            }
-            // `starred --all`: Home's lens with its cross-workspace
-            // entries resolved against the open docs (the host's half
-            // of `spec/focus.md` "Foreign refs"). Read-only, like the
-            // merged agenda above.
-            Request::Doc {
-                workspace,
-                cmd: crate::commands::DocCmd::Focus(args),
-            } if args.all => {
-                if workspace.is_some() {
-                    Reply::Err {
-                        message: "starred --all reads every workspace; it takes no -w".into(),
-                    }
-                } else if args.cmd.is_some() {
-                    Reply::Err {
-                        message: "starred --all only lists; mv takes -w instead".into(),
-                    }
-                } else {
-                    let docs: Vec<(crate::workspace::Candidate, &monoplan_core::Doc)> = self
-                        .engine
-                        .candidates()
-                        .into_iter()
-                        .filter_map(|c| self.engine.doc_for(c.doc_id).map(|d| (c, d)))
-                        .collect();
-                    let mut buf = Vec::new();
-                    match crate::commands::focus::show_all(
-                        &docs,
-                        self.engine.primary_doc_id(),
-                        args.json,
-                        &mut buf,
-                    ) {
-                        Ok(()) => Reply::Output {
-                            stdout: String::from_utf8_lossy(&buf).into_owned(),
-                            sync: self.sync_status(),
-                        },
-                        Err(e) => Reply::Err {
-                            message: format!("{e:#}"),
-                        },
-                    }
-                }
-            }
-            // `find`: the search index of every open doc, merged
-            // (`commands/find.rs`). Read-only, like the two above.
-            Request::Doc {
-                workspace,
-                cmd: crate::commands::DocCmd::Find(args),
-            } => {
-                if workspace.is_some() {
-                    Reply::Err {
-                        message: "find searches every workspace; it takes no -w".into(),
-                    }
-                } else {
-                    let docs: Vec<(crate::workspace::Candidate, &monoplan_core::Doc)> = self
-                        .engine
-                        .candidates()
-                        .into_iter()
-                        .filter_map(|c| self.engine.doc_for(c.doc_id).map(|d| (c, d)))
-                        .collect();
-                    let mut buf = Vec::new();
-                    match crate::commands::find::run_all(&docs, args, &mut buf) {
-                        Ok(()) => Reply::Output {
-                            stdout: String::from_utf8_lossy(&buf).into_owned(),
-                            sync: self.sync_status(),
-                        },
-                        Err(e) => Reply::Err {
-                            message: format!("{e:#}"),
-                        },
-                    }
-                }
-            }
-            // `places --items`: the Open items carrying a place, over
-            // every open doc, tagged by workspace (`commands/items.rs`).
-            // Account-scoped as `places` is, so `-w` does not narrow
-            // it. Read-only, like the three above.
-            Request::Doc {
-                workspace: _,
-                cmd: crate::commands::DocCmd::Places(args),
-            } if args.items => {
-                let candidates = self.engine.candidates();
-                let docs: Vec<(Option<&crate::workspace::Candidate>, &monoplan_core::Doc)> =
-                    candidates
-                        .iter()
-                        .filter_map(|c| self.engine.doc_for(c.doc_id).map(|d| (Some(c), d)))
-                        .collect();
-                let mut buf = Vec::new();
-                match crate::commands::items::placed_items(&docs, &args, &mut buf) {
-                    Ok(()) => Reply::Output {
-                        stdout: String::from_utf8_lossy(&buf).into_owned(),
-                        sync: self.sync_status(),
-                    },
-                    Err(e) => Reply::Err {
-                        message: format!("{e:#}"),
-                    },
-                }
-            }
+            // The reads that span every open doc (`agenda --all`,
+            // `starred --all`, `find`) run from Home like any other
+            // command; they have no workspace to be told.
             Request::Doc { workspace, cmd } => {
+                if workspace.is_some()
+                    && let Some(message) = cmd.spans_workspaces()
+                {
+                    let _ = reply.send(Reply::Err {
+                        message: message.into(),
+                    });
+                    return Ok(false);
+                }
                 let doc_id = match self.engine.resolve(workspace.as_deref()) {
                     Ok(id) => id,
                     Err(e) => {
@@ -1578,9 +1463,7 @@ impl Host {
                     }
                 };
                 let mut buf = Vec::new();
-                let result = self.with_ctx(doc_id, |cx| {
-                    run_doc(cmd, cx.doc, cx.open_docs, cx.lens, &mut buf)
-                });
+                let result = self.with_ctx(doc_id, |cx| run_doc(cmd, cx, &mut buf));
                 self.after_doc_work().await?;
                 match result {
                     Ok(()) => Reply::Output {

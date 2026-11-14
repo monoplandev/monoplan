@@ -1,4 +1,4 @@
-# Typed Swift bindings (plan; phases 1 and 2 built 2026-11-14)
+# Typed Swift bindings (plan; phases 1 to 3 built 2026-11-14)
 
 Decided 2026-11-14. Supersedes the client half of
 [`mac-window-plan.md`](mac-window-plan.md): the webview window is
@@ -80,6 +80,8 @@ pub struct Ctx<'a> {
     pub doc: &'a Doc,            // the resolved workspace
     pub open_docs: &'a [&'a Doc],
     pub lens: &'a focus::Lens<'a>,
+    pub workspaces: &'a [(Candidate, &'a Doc)], // open docs with their tags, Home first
+    pub home: Option<DocId>,
 }
 
 pub fn items(cx: &Ctx, list: &str, include_done: bool) -> anyhow::Result<Vec<Item>>;
@@ -136,9 +138,14 @@ same tail: `persist_replica_state`, `flush_replicas`, `pump`,
 `notify_if_changed`. That tail is factored out of the `Request::Doc`
 arm so both paths share it. In process nothing is serialised.
 
-The cross-doc reads the loop special-cases today (`agenda --all`,
-Starred, `find`, `places --items`) become api functions over
-`open_docs`; the loop's special arms then call those.
+The cross-doc reads the loop used to special-case (`agenda --all`,
+`starred --all`, `find`, `places --items`) are api functions over
+`Ctx::workspaces` (built 2026-11-14), so the special arms are gone:
+`run_doc` takes the `Ctx` and serves them like any command, and the
+`Request::Doc` arm only refuses a `-w` on the ones that have no
+workspace to act in (`DocCmd::spans_workspaces`). Over bare docs
+(`Ctx::bare`, tests) the same functions cover `open_docs` and tag
+nothing.
 
 ### `monoplan-ffi`
 
@@ -223,19 +230,67 @@ views with iOS later, which is its own piece of work.
      wire name from the pages on the old models; the list page's
      reorder, rename, emoji and archive and the Done page's list names
      are still `Request`s.
-3. **The rest of the verbs**, area by area, Rust and iOS together:
-   item detail and setters, agenda, starred, bin, done, find, places,
-   list management, account, workspaces. iOS ends with no
-   `MonoplanMacKit` wire types in use.
+3. **The rest of the verbs.** Built 2026-11-14, Rust and iOS
+   together: item detail and setters, agenda, starred, bin, done, find,
+   places, list management, account, workspaces. iOS has no
+   `MonoplanMacKit` wire type, no `EngineClient` and no transport left.
+   What settled:
+   - `api::{agenda, bin, done, find, places, starred}` beside `items`
+     and `lists`; every `commands/*` function is args → `api::` →
+     render, and the borrowed `*Json<'a>` structs are gone. The pure
+     rules with their tests stayed where they were
+     (`commands::agenda::build_agenda_from`, `commands::done::select_done`,
+     `commands::focus::{Lens, resolve_all}`); the api calls them.
+   - Names, chosen clear of the Kit's models while both are linked:
+     `AgendaGroup` / `AgendaEntry` (`AgendaTone`, `AgendaPlacedBy`),
+     `StarredItem`, `ItemInfo` (the item's page: an `Item` plus notes,
+     list name and emoji, starred), `LocatedItem` (an `Item` plus list
+     name and workspace), `BinEntry`, `FindHit` (`FindKind`,
+     `HitState`: the six states and `Binned`), `PlaceSuggestion`. On
+     the FFI: `DurationChange`, `SuggestionChange` (the keep / clear /
+     set enums), `AccountInfo`, `WorkspaceInfo`. Rows that nest an
+     `Item` flatten it in JSON (`serde(flatten)`), so `--json` is
+     unchanged.
+   - Reads that span workspaces take no `workspace` and tag rows with
+     `doc_id` / `doc_name`: `agenda`, `starred`, `binned`, `find`,
+     `places`, `placed_items`. `binned` is new as a merged read (the
+     app used to ask each doc and merge); `bin show --json` is still
+     one workspace's.
+   - `sync`, `reconnect`, `create_workspace`, `delete_workspace` wrap
+     the loop's existing requests (`request_blocking`) and type the
+     reply; `account` and `workspaces` read `HostCmd::Session`. No new
+     loop code for any of them.
+   - `agenda_json`: the same rows serialised in Rust, for the widget's
+     snapshot file. The widget still decodes it with the Kit's
+     `AgendaDay`; the app no longer parses it.
+   - iOS: `EngineController` owns the lifecycle the client's provider
+     loop used to drive (start, `Engine.observe`, restart on `stopped`,
+     backoff on a failed start) and reports `EngineState`; `AppModel`
+     keeps `call` / `read` only. Views take `ItemState`, not its name.
+     Derived bits live in `TypedRows.swift` (`SyncState.level` /
+     `line`, `ItemInfo`'s forwarding and `closedAt`, `DoneDay.days`,
+     row keys).
+   - Still from the Kit on iOS, none of it wire: `ProfileLocation`,
+     `WhenPhrase` / `WhenSuggest`, `Agenda.start(of:)`,
+     `AgendaSnapshot`. `WhenSuggest.edit` returns the Kit's
+     `SuggestionEdit`, bridged by `SuggestionChange.init(_:)` until the
+     Kit depends on `MonoplanCore` (phase 4).
+   - Not on the FFI: moving an item between workspaces (core + web
+     only so far) and `export` / `reconcile`; no native screen uses
+     them.
 4. **macOS.** Tray onto the bindings. Delete `WebWindow.swift`, the
    scheme handler, `PageZoom`, `WindowSettings` and the web bundle step
    in `build-app.sh`; add the debug window.
 5. **Cleanup.** Remove `Engine.request`, the frame `watch`,
-   `subscribe`, `import`, `session`, `device_token`; `HostCmd::{Subscribe, Import, Unsubscribe, Session}`
-   and the mirror fan-out in the loop; `Doc::import_mirror_update`;
+   `subscribe`, `import`, `session` (and `EngineSession` / `EngineDoc`),
+   `device_token`; `HostCmd::{Subscribe, Import, Unsubscribe}`
+   and the mirror fan-out in the loop (`HostCmd::Session` stays: it is
+   what `account` and `workspaces` read); `Doc::import_mirror_update`;
    `Replica.mirror`, `Doc.loadWithPeer`, `MirrorBridge`, `mirror.html`,
    `createMirrorRuntime`, `MirrorApp`, `Session.mirror` in js; the
-   Swift codec and client; the wire-shape test's Swift-facing comment.
+   Swift codec and client (`ProfileLocation` moves out of
+   `EngineClient.swift` first: both apps keep it); the "frame from the
+   apps" tests in `commands/*`; the wire-shape test's Swift-facing comment.
    Mirror peer slots stop being leased. Update `apple/README.md`,
    `daemon-plan.md` and mark `mac-window-plan.md` superseded.
 

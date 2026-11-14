@@ -2,7 +2,6 @@ use std::io::Write;
 
 use clap::{Parser, Subcommand};
 use dialoguer::{Confirm, Password};
-use monoplan_core::Doc;
 use serde::{Deserialize, Serialize};
 
 use crate::client::{self, Spawn};
@@ -219,48 +218,47 @@ pub enum DocCmd {
     },
 }
 
-/// Execute a doc command. Pure over `doc` + `out`: no I/O of its own,
-/// so the daemon can run it inline on its loop and the one-shot test
-/// path can run it against any `Doc`. `open_docs` is every doc the
-/// install has open (`doc` among them), for the reads that are
-/// account-scoped though the command writes one doc: the known places
-/// `item set --place` resolves a label against. `lens` is Starred as
-/// seen from `doc`: Home's, so starring an item of another workspace
-/// writes Home.
-pub fn run_doc(
-    cmd: DocCmd,
-    doc: &Doc,
-    open_docs: &[&Doc],
-    lens: &focus::Lens,
-    out: &mut dyn Write,
-) -> anyhow::Result<()> {
-    let cx = crate::api::Ctx {
-        doc,
-        open_docs,
-        lens,
-    };
-    match cmd {
-        DocCmd::Add { list, texts, top } => items::add(&cx, &list, &texts, top, out),
-        DocCmd::Ls(a) => items::ls(&cx, a, out),
-        DocCmd::Show(a) => items::show(doc, lens, a, out),
-        DocCmd::Set(a) => items::set(doc, open_docs, lens, *a, out),
-        DocCmd::ItemBin(a) => items::bin(doc, a, out),
-        DocCmd::Restore(a) => items::restore(doc, a, out),
-        DocCmd::Duplicate(a) => items::duplicate(doc, lens, a, out),
-        DocCmd::Bin(a) => bin::run(doc, a, out),
-        DocCmd::Agenda(a) => agenda::run(doc, a, out),
-        DocCmd::Done(a) => done::run(doc, a, out),
-        DocCmd::Focus(a) => focus::run(doc, a, out),
-        DocCmd::Lists(a) => lists::run(&cx, a, out),
-        // The daemon serves `--items` itself, tagged by workspace;
-        // here (no tags to give) the rows are the open docs' untagged.
-        DocCmd::Places(a) if a.items => {
-            let docs: Vec<(Option<&crate::workspace::Candidate>, &Doc)> =
-                open_docs.iter().map(|d| (None, *d)).collect();
-            items::placed_items(&docs, &a, out)
+impl DocCmd {
+    /// Why this command takes no `-w`, when it reads every workspace
+    /// at once and so has none to act in.
+    pub fn spans_workspaces(&self) -> Option<&'static str> {
+        match self {
+            DocCmd::Agenda(a) if a.all => {
+                Some("agenda --all reads every workspace; it takes no -w")
+            }
+            DocCmd::Focus(a) if a.all => {
+                Some("starred --all reads every workspace; it takes no -w")
+            }
+            DocCmd::Find(_) => Some("find searches every workspace; it takes no -w"),
+            _ => None,
         }
-        DocCmd::Places(a) => items::places(open_docs, a, out),
-        DocCmd::Find(a) => find::run(doc, a, out),
+    }
+}
+
+/// Execute a doc command: arguments in, one or more `crate::api` calls,
+/// the result rendered to `out`. No I/O of its own, so the daemon runs
+/// it inline on its loop and a test can run it against any `Doc`
+/// (`Ctx::bare`). The context is the doc the command acts in, every
+/// doc the install has open (for the reads that are account-scoped or
+/// span workspaces), and Starred as seen from that doc: Home's, so
+/// starring an item of another workspace writes Home.
+pub fn run_doc(cmd: DocCmd, cx: &crate::api::Ctx, out: &mut dyn Write) -> anyhow::Result<()> {
+    let doc = cx.doc;
+    match cmd {
+        DocCmd::Add { list, texts, top } => items::add(cx, &list, &texts, top, out),
+        DocCmd::Ls(a) => items::ls(cx, a, out),
+        DocCmd::Show(a) => items::show(cx, a, out),
+        DocCmd::Set(a) => items::set(cx, *a, out),
+        DocCmd::ItemBin(a) => items::set_binned(cx, a, true, out),
+        DocCmd::Restore(a) => items::set_binned(cx, a, false, out),
+        DocCmd::Duplicate(a) => items::duplicate(cx, a, out),
+        DocCmd::Bin(a) => bin::run(cx, a, out),
+        DocCmd::Agenda(a) => agenda::run(cx, a, out),
+        DocCmd::Done(a) => done::run(cx, a, out),
+        DocCmd::Focus(a) => focus::run(cx, a, out),
+        DocCmd::Lists(a) => lists::run(cx, a, out),
+        DocCmd::Places(a) => items::places(cx, a, out),
+        DocCmd::Find(a) => find::run(cx, a, out),
         DocCmd::ExportJson => {
             out.write_all(export::render(doc)?.as_bytes())?;
             Ok(())

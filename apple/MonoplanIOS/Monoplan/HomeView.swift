@@ -1,7 +1,7 @@
 // Home: the root page and the app's one navigation stack; there is
 // no tab bar. First the pages that are not one list: Starred, Agenda,
 // Map, Done and Bin (Starred with its count). Then a section per open workspace (Personal first, as
-// `Engine.session` orders them), each with its Inbox (and how many
+// `Engine.workspaces` orders them), each with its Inbox (and how many
 // Open items it holds) and then its
 // active lists in the doc's order, each led by its emoji (a folder
 // when it has none); a list opens its Open items.
@@ -28,7 +28,6 @@
 // spec/events-plan.md) are left out.
 
 import MonoplanCore
-import MonoplanMacKit
 import SwiftUI
 
 /// One list in one workspace: what a Home row opens.
@@ -197,7 +196,7 @@ struct HomeView: View {
     /// what is ticked, so the section shrinks as it is cleared and is
     /// not drawn on a clear day. Unscheduled events are not dated, so
     /// they stay on the Calendar page.
-    private var today: [AgendaRow] {
+    private var today: [AgendaEntry] {
         (model.agenda.first(where: { $0.today })?.rows ?? []).filter { !$0.isDone }
     }
 
@@ -229,7 +228,7 @@ struct HomeView: View {
                 }
                 if !today.isEmpty {
                     Section("Today") {
-                        ForEach(today.prefix(Self.todayLimit), id: \.id) { row in
+                        ForEach(today.prefix(Self.todayLimit), id: \.key) { row in
                             AgendaRowView(row: row)
                         }
                         if today.count > Self.todayLimit {
@@ -283,7 +282,7 @@ struct HomeView: View {
                         }
                     }
                 }
-                if model.session == nil, case .connecting(let why) = model.clientState {
+                if model.session == nil, case .connecting(let why) = model.engineState {
                     Section { Text(why).foregroundStyle(.secondary) }
                 }
             }

@@ -7,7 +7,6 @@
 // sheet's form without account creation or recovery.
 
 import MonoplanCore
-import MonoplanMacKit
 import SwiftUI
 
 struct SettingsView: View {
@@ -76,7 +75,7 @@ struct SettingsView: View {
                 if !sync.localOnly {
                     LabeledContent("Last synced", value: Self.format(millis: sync.lastSyncedAt))
                 }
-            } else if case .connecting(let why) = model.clientState {
+            } else if case .connecting(let why) = model.engineState {
                 LabeledContent("Status", value: why)
             }
         }

@@ -1,12 +1,12 @@
 // The Bin page, pushed from Home (which owns the navigation stack and
 // the item sheet): every open workspace's binned items, newest binned
-// first (`bin show --json` per doc, spec/cli.md §Bin), each row naming
+// first (`Engine.binned`, spec/cli.md §Bin), each row naming
 // the list it would go back to and, when not Personal's, its
 // workspace. A row opens the item's sheet, where it can be restored or
 // deleted; a swipe or a long press does either from the list. "Empty"
 // deletes the lot. Both deletes are for good, so both ask first.
 
-import MonoplanMacKit
+import MonoplanCore
 import SwiftUI
 
 struct BinView: View {
@@ -14,7 +14,7 @@ struct BinView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openItem) private var openItem
     /// The row whose "Delete" is waiting on its confirmation.
-    @State private var deleting: BinnedItem?
+    @State private var deleting: BinEntry?
     @State private var confirmingEmpty = false
 
     var body: some View {
@@ -22,11 +22,11 @@ struct BinView: View {
             if model.binned.isEmpty {
                 emptyState
             } else {
-                List(model.binned) { item in
+                List(model.binned, id: \.key) { item in
                     Button { openItem(item.ref) } label: {
                         BinnedRowView(
                             item: item,
-                            listName: model.listName(item.row.listId, inDoc: item.docId),
+                            listName: model.listName(item.listId, inDoc: item.docId),
                             workspace: model.sharedWorkspaceName(item.docId))
                     }
                     .swipeActions(edge: .leading) {
@@ -87,13 +87,13 @@ struct BinView: View {
         return count == 1 ? "Delete 1 item for good?" : "Delete all \(count) items for good?"
     }
 
-    private func restoreButton(_ item: BinnedItem) -> some View {
+    private func restoreButton(_ item: BinEntry) -> some View {
         Button("Restore", systemImage: "arrow.uturn.backward") {
             model.setBinned(item.ref, binned: false)
         }
     }
 
-    private func deleteButton(_ item: BinnedItem) -> some View {
+    private func deleteButton(_ item: BinEntry) -> some View {
         Button("Delete", systemImage: "trash", role: .destructive) { deleting = item }
     }
 
@@ -105,7 +105,7 @@ struct BinView: View {
                     systemImage: "exclamationmark.triangle",
                     description: Text(error)
                 )
-            } else if model.sync == nil, case .connecting(let why) = model.clientState {
+            } else if model.sync == nil, case .connecting(let why) = model.engineState {
                 ContentUnavailableView("Bin", systemImage: "trash", description: Text(why))
             } else if !model.binLoaded {
                 ProgressView().padding(.top, 80)
@@ -123,13 +123,13 @@ struct BinView: View {
 /// One binned item: its text, and underneath the list it lives in, the
 /// workspace when that is not Personal, and how long ago it was binned.
 struct BinnedRowView: View {
-    let item: BinnedItem
+    let item: BinEntry
     let listName: String?
     let workspace: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(item.row.text)
+            Text(item.text)
                 .itemTextSlot()
             Text(note)
                 .font(.caption)
@@ -142,7 +142,7 @@ struct BinnedRowView: View {
     }
 
     private var note: String {
-        let binnedAt = Date(timeIntervalSince1970: TimeInterval(item.row.binnedAt) / 1000)
+        let binnedAt = Date(timeIntervalSince1970: TimeInterval(item.binnedAt) / 1000)
         // A stamp a moment ahead of this clock (another device's) reads
         // as now, not as "in 2 seconds".
         let ago = min(binnedAt, Date()).formatted(.relative(presentation: .named))

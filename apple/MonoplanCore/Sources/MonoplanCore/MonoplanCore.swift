@@ -49,8 +49,18 @@ public final class EngineCalls: @unchecked Sendable {
 }
 
 // The rows carry their own id, so SwiftUI can list them as they are.
+// Only the ones whose id is unique among the rows a read returns: the
+// rows of a read that spans workspaces (`AgendaEntry`, `FindHit`, ...)
+// are told apart by their workspace too.
 extension Item: Identifiable {}
 extension ListInfo: Identifiable {}
+
+extension Place {
+    /// A place by its label, with whatever else is known of it.
+    public init(label: String, lat: Double? = nil, lon: Double? = nil, address: String? = nil) {
+        self.init(label: label, lat: lat, lon: lon, address: address, reference: nil)
+    }
+}
 
 extension Engine {
     /// `observe` with closures. Each is called on `queue` (the main

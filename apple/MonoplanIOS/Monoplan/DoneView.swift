@@ -1,11 +1,11 @@
 // The Done page, pushed from Home (which owns the navigation stack):
 // what got finished in the Personal workspace, newest first, a section
-// per day ticked (`done --json`, spec/cli.md §Items).
+// per day ticked (`Engine.done`, spec/cli.md §Items).
 // A window that grows on scroll rather than the whole history: the
 // trailing spinner row asks for more as it comes into sight. A row's
 // checkbox reopens the item; the row opens its sheet.
 
-import MonoplanMacKit
+import MonoplanCore
 import SwiftUI
 
 struct DoneView: View {
@@ -64,7 +64,7 @@ struct DoneView: View {
                     systemImage: "exclamationmark.triangle",
                     description: Text(error)
                 )
-            } else if model.sync == nil, case .connecting(let why) = model.clientState {
+            } else if model.sync == nil, case .connecting(let why) = model.engineState {
                 ContentUnavailableView("Done", systemImage: "checkmark.circle", description: Text(why))
             } else {
                 ContentUnavailableView(
@@ -95,7 +95,7 @@ struct DoneView: View {
 /// already says the day) leading its text on one line, with the list it
 /// lives in underneath.
 struct DoneRowView: View {
-    let item: ItemRow
+    let item: Item
     let listName: String?
 
     var body: some View {
