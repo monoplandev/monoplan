@@ -1570,6 +1570,16 @@
           }
         }
       }
+    },
+    "Moves the item to another list": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mueve el elemento a otra lista"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

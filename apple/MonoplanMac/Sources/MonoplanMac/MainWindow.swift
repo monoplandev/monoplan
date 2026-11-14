@@ -244,7 +244,11 @@ final class MainWindowModel: ObservableObject {
     /// under it is kept, though nothing shows it.
     @Published private(set) var lens: Lens?
     /// Starred's rows, always read: the sidebar counts them.
-    @Published private(set) var starred: [StarredItem] = []
+    @Published private(set) var starred: [StarredItem] = [] {
+        didSet { starredIds = Set(starred.map(\.id)) }
+    }
+    /// Their ids, for the star on a starred item's row elsewhere.
+    private(set) var starredIds: Set<String> = []
     /// The other lenses' rows, each read only while it is the one shown.
     @Published private(set) var agenda: [AgendaGroup] = []
     @Published private(set) var done: [DoneRow] = []
@@ -569,13 +573,27 @@ final class MainWindowModel: ObservableObject {
         write { try $0.setText(workspace: workspace, id: id, text: text, suggestion: suggestion) }
     }
 
-    func setStarred(workspace: String?, id: String, starred: Bool) {
-        write { try $0.setStarred(workspace: workspace, id: id, starred: starred) }
+    /// The lists an item of `workspace` can be moved to: its Inbox,
+    /// then its active lists in the doc's order.
+    func moveLists(workspace: String?) -> [PanelList] {
+        let lists = sections.first { $0.target == workspace }?.userLists ?? []
+        return [PanelList(id: Self.inbox, name: String(localized: "Inbox"), icon: nil)]
+            + lists.map { PanelList(id: $0.id, name: $0.name, icon: $0.icon) }
     }
 
-    /// Take a row out of Starred.
-    func unstar(_ row: StarredItem) {
-        write { try $0.setStarred(workspace: row.docId, id: row.id, starred: false) }
+    /// Move an item to another list of its own workspace
+    /// (`Engine.moveItem`).
+    func moveItem(workspace: String?, id: String, list: String) {
+        write { try $0.moveItem(workspace: workspace, id: id, list: list) }
+    }
+
+    /// Move an item to any workflow state (`Engine.setState`).
+    func setState(workspace: String?, id: String, state: ItemState) {
+        write { try $0.setState(workspace: workspace, id: id, state: state) }
+    }
+
+    func setStarred(workspace: String?, id: String, starred: Bool) {
+        write { try $0.setStarred(workspace: workspace, id: id, starred: starred) }
     }
 
     func add(_ text: String) {
@@ -705,6 +723,13 @@ struct MainWindowView: View {
         .environment(\.sidebarRowSize, .small)
     }
 
+    /// A starred item's mark on its row, in every list but Starred
+    /// itself. Not a control: the item's panel stars and unstars.
+    private var starMark: some View {
+        StarGlyph(starred: true, size: 13)
+            .accessibilityLabel(Text("Starred"))
+    }
+
     /// A sidebar row's count; nothing is drawn for none.
     @ViewBuilder
     private func count(_ count: Int) -> some View {
@@ -755,6 +780,7 @@ struct MainWindowView: View {
                             .lineLimit(1)
                             .truncationMode(.tail)
                         Spacer()
+                        if model.starredIds.contains(item.id) { starMark }
                         if let when = item.when ?? item.deadline {
                             Text(verbatim: when).foregroundStyle(.secondary).monospacedDigit().fixedSize()
                         }
@@ -823,6 +849,7 @@ struct MainWindowView: View {
                 Text(verbatim: name).font(.footnote).foregroundStyle(.tertiary).lineLimit(1)
             }
             Spacer()
+            if model.starredIds.contains(row.id) { starMark }
             switch row.tone {
             case .overdue: Text("overdue").font(.footnote).foregroundStyle(.red).fixedSize()
             case .warning: Text("due today").font(.footnote).foregroundStyle(.orange).fixedSize()
@@ -832,8 +859,9 @@ struct MainWindowView: View {
     }
 
     /// Starred: Home's curated order over every workspace. A row has
-    /// its tick, its text, where it lives (the list, and the workspace
-    /// when it is not Personal's) and a star that takes it out.
+    /// its tick, its text and where it lives (the list, and the
+    /// workspace when it is not Personal's). No star on a row: every
+    /// one here has it. The item's panel takes it off.
     private var starred: some View {
         List(selection: selection { id in model.starred.first { $0.id == id }?.docId }) {
             ForEach(model.starred, id: \.id) { row in
@@ -849,13 +877,6 @@ struct MainWindowView: View {
                         .font(.footnote)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
-                    Button {
-                        model.unstar(row)
-                    } label: {
-                        StarGlyph(starred: true)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(Text("Remove star"))
                 }
                 .itemRow()
                 .tag(row.id)

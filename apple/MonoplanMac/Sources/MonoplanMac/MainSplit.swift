@@ -187,22 +187,28 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate, N
         guard let item = model.detail else { return }
         switch toolbarItem.itemIdentifier {
         case .itemStatus:
-            guard let button = toolbarItem.view as? NSButton else { return }
+            guard let control = toolbarItem.view as? NSSegmentedControl else { return }
             // A binned item just says so: the bin masks its state.
             if item.item.binnedAt != nil {
-                button.title = String(localized: "Binned")
-                button.image = nil
-                button.isEnabled = false
-                button.toolTip = nil
+                control.segmentCount = 1
+                control.setImage(nil, forSegment: 0)
+                control.setLabel(String(localized: "Binned"), forSegment: 0)
+                control.setToolTip(nil, forSegment: 0)
+                control.isEnabled = false
             } else {
                 let closed = item.item.state.isClosed
                 let hint = closed ? String(localized: "Mark as not done") : String(localized: "Mark as done")
-                button.title = ItemPanel.statusLabel(item)
-                button.image = ItemCheckArt.image(item.item.state, accessibilityDescription: hint)
-                button.isEnabled = true
-                button.toolTip = hint
+                control.segmentCount = 2
+                control.setLabel("", forSegment: 0)
+                control.setImage(
+                    ItemCheckArt.image(item.item.state, accessibilityDescription: hint), forSegment: 0)
+                control.setToolTip(hint, forSegment: 0)
+                control.setLabel(ItemPanel.statusLabel(item), forSegment: 1)
+                control.setToolTip(String(localized: "Status"), forSegment: 1)
+                control.isEnabled = true
             }
-            button.sizeToFit()
+            for segment in 0..<control.segmentCount { control.setWidth(0, forSegment: segment) }
+            control.sizeToFit()
         case .itemStar:
             let hint = item.starred ? String(localized: "Remove star") : String(localized: "Star")
             toolbarItem.image = StarArt.toolbarImage(starred: item.starred)
@@ -272,12 +278,14 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate, N
             item.target = self
             item.action = #selector(newItem(_:))
         case .itemStatus:
-            // The checkbox and the workflow state as one control: a
-            // click ticks and reopens.
-            let button = NSButton(title: "", target: self, action: #selector(toggleDone(_:)))
-            button.bezelStyle = .toolbar
-            button.imagePosition = .imageLeading
-            item.view = button
+            // The checkbox and the workflow state as one control with
+            // two halves, as the iOS item page's: the checkbox ticks
+            // and reopens, the label opens a menu of the states.
+            let control = NSSegmentedControl()
+            control.trackingMode = .momentary
+            control.target = self
+            control.action = #selector(statusClicked(_:))
+            item.view = control
         case .itemStar:
             item.isBordered = true
             item.target = self
@@ -313,9 +321,45 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate, N
 
     @objc private func newItem(_ sender: Any?) {}
 
-    @objc private func toggleDone(_ sender: Any?) {
+    /// The status control's halves: the checkbox, then the label.
+    @objc private func statusClicked(_ sender: NSSegmentedControl) {
         guard let selected = model.selected, let item = model.detail, item.item.binnedAt == nil else { return }
-        model.setDone(workspace: selected.workspace, id: selected.id, done: !item.item.state.isClosed)
+        if sender.selectedSegment == 0 {
+            model.setDone(workspace: selected.workspace, id: selected.id, done: !item.item.state.isClosed)
+        } else {
+            popStateMenu(item, under: sender)
+        }
+    }
+
+    /// The states as a menu under the status label, the current one
+    /// ticked; a pick moves the item there in one write. On an Open
+    /// event the single open choice is ticked whatever open state the
+    /// item holds underneath, and picking it changes nothing, so a
+    /// state the item brought in from a list is kept.
+    private func popStateMenu(_ item: ItemInfo, under control: NSSegmentedControl) {
+        let event = item.item.listId == MainWindowModel.events
+        let picked: ItemState = event && !item.item.state.isClosed ? .backlog : item.item.state
+        let menu = NSMenu()
+        for state in event ? ItemPanel.eventStates : ItemPanel.taskStates {
+            let row = NSMenuItem(
+                title: ItemPanel.statusLabel(state, event: event), action: #selector(pickState(_:)),
+                keyEquivalent: "")
+            row.target = self
+            row.representedObject = state
+            row.state = state == picked ? .on : .off
+            menu.addItem(row)
+        }
+        // Under the label's half, its left edge on the half's.
+        let x = control.width(forSegment: 0) > 0 ? control.width(forSegment: 0) : control.bounds.width / 3
+        let y = control.isFlipped ? control.bounds.maxY + 6 : control.bounds.minY - 6
+        menu.popUp(positioning: nil, at: NSPoint(x: x, y: y), in: control)
+    }
+
+    @objc private func pickState(_ sender: NSMenuItem) {
+        guard let state = sender.representedObject as? ItemState, sender.state != .on,
+            let selected = model.selected
+        else { return }
+        model.setState(workspace: selected.workspace, id: selected.id, state: state)
     }
 
     @objc private func toggleStar(_ sender: Any?) {
@@ -345,9 +389,11 @@ struct ItemPanelPane: View {
     var body: some View {
         Group {
             if let selected = model.selected {
-                ItemPanel(item: model.detail, workspaceName: model.sharedWorkspaceName(selected.workspace)) {
-                    model.setText(workspace: selected.workspace, item: $0, text: $1)
-                }
+                ItemPanel(
+                    item: model.detail, workspaceName: model.sharedWorkspaceName(selected.workspace),
+                    lists: model.moveLists(workspace: selected.workspace),
+                    retitle: { model.setText(workspace: selected.workspace, item: $0, text: $1) },
+                    move: { model.moveItem(workspace: selected.workspace, id: $0.item.id, list: $1) })
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

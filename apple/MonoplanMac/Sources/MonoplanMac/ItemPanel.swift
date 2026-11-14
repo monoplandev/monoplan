@@ -23,9 +23,14 @@ struct ItemPanel: View {
     let item: ItemInfo?
     /// The item's workspace when it is a shared one.
     let workspaceName: String?
+    /// The lists the item can be moved to: its workspace's, Inbox
+    /// first.
+    let lists: [PanelList]
     /// The title was edited: the new one, trimmed, not empty and not
     /// the old one.
     let retitle: (ItemInfo, String) -> Void
+    /// Another list was picked for the item: its id.
+    let move: (ItemInfo, String) -> Void
 
     var body: some View {
         Group {
@@ -63,13 +68,7 @@ struct ItemPanel: View {
     /// and place rows are always there, muted when empty.
     private func fields(_ item: ItemInfo) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            PanelField(text: item.listLabel, note: workspaceName) {
-                if let emoji = item.listIcon {
-                    Text(verbatim: emoji)
-                } else {
-                    Image(systemName: Self.listSymbol(item.item.listId))
-                }
-            }
+            listField(item)
             if let when = item.item.when {
                 PanelField(text: Self.whenText(when), note: Self.lengthText(item)) {
                     Image(systemName: "calendar")
@@ -100,6 +99,62 @@ struct ItemPanel: View {
         }
     }
 
+    /// The item's list, drawn as a field as on the iOS page
+    /// (`ItemView.listField`): full width, a faint fill, outset by its
+    /// own padding so its icon and text stay in line with the plain
+    /// rows under it. A click opens a menu of the workspace's lists
+    /// with the current one ticked, and a pick moves the item. Lists
+    /// of other workspaces are not offered. A binned item stays put.
+    ///
+    /// A plain button that pops an `NSMenu`, not a SwiftUI `Menu`: a
+    /// `Menu`'s label is the system's to draw, and it does not keep a
+    /// box of our own.
+    private func listField(_ item: ItemInfo) -> some View {
+        Button {
+            ListMenu.pop(listOptions(item), current: item.item.listId) { move(item, $0) }
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Group {
+                    if let emoji = item.listIcon {
+                        Text(verbatim: emoji)
+                    } else {
+                        Image(systemName: Self.listSymbol(item.item.listId))
+                    }
+                }
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: item.listLabel)
+                    if let workspaceName {
+                        Text(verbatim: workspaceName).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, Self.fieldInset)
+            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(item.item.binnedAt != nil)
+        .padding(.horizontal, -Self.fieldInset)
+        .accessibilityHint(Text("Moves the item to another list"))
+    }
+
+    private static let fieldInset: CGFloat = 8
+
+    /// The menu's rows: the workspace's lists, plus the item's own
+    /// when it is not among them (archived, or the calendar's), so
+    /// there is always a row to tick.
+    private func listOptions(_ item: ItemInfo) -> [PanelList] {
+        if lists.contains(where: { $0.id == item.item.listId }) { return lists }
+        return lists + [PanelList(id: item.item.listId, name: item.listLabel, icon: item.listIcon)]
+    }
+
     /// The item's timeline as plain sentences: created, and once closed,
     /// when and how long it took.
     private func activity(_ item: ItemInfo) -> some View {
@@ -126,8 +181,11 @@ struct ItemPanel: View {
     /// `events` list) has no lanes, so its open states all read
     /// "Event" (spec/events-plan.md).
     static func statusLabel(_ item: ItemInfo) -> String {
-        let state = item.item.state
-        if item.item.listId == MainWindowModel.events, !state.isClosed { return String(localized: "Event") }
+        statusLabel(item.item.state, event: item.item.listId == MainWindowModel.events)
+    }
+
+    static func statusLabel(_ state: ItemState, event: Bool) -> String {
+        if event, !state.isClosed { return String(localized: "Event") }
         switch state {
         case .backlog: return String(localized: "Backlog")
         case .todo: return String(localized: "To do")
@@ -137,6 +195,14 @@ struct ItemPanel: View {
         case .cancelled: return String(localized: "Cancelled")
         }
     }
+
+    /// The states a status menu offers, as on iOS. A task gets all
+    /// six, in ladder order. An event has no lanes, so its four open
+    /// states are one choice, "Event", standing in as `backlog` (what
+    /// reopening writes), beside the two closed ones
+    /// (spec/events-plan.md).
+    static let taskStates: [ItemState] = [.backlog, .todo, .inProgress, .review, .done, .cancelled]
+    static let eventStates: [ItemState] = [.backlog, .done, .cancelled]
 
     static func listSymbol(_ listId: String) -> String {
         switch listId {
@@ -220,6 +286,47 @@ extension ItemInfo {
         default: return nil
         }
     }
+}
+
+/// The list field's menu: the lists, the current one ticked.
+private final class ListMenu: NSObject {
+    private let pick: (String) -> Void
+
+    private init(pick: @escaping (String) -> Void) {
+        self.pick = pick
+    }
+
+    /// Open it at the pointer; `pick` gets the id of a list other
+    /// than the current one. Returns once the menu has shut.
+    static func pop(_ lists: [PanelList], current: String, pick: @escaping (String) -> Void) {
+        let handler = ListMenu(pick: pick)
+        let menu = NSMenu()
+        for list in lists {
+            let title = [list.icon, list.name].compactMap { $0 }.joined(separator: " ")
+            let item = NSMenuItem(title: title, action: #selector(picked(_:)), keyEquivalent: "")
+            item.target = handler
+            item.representedObject = list.id
+            item.state = list.id == current ? .on : .off
+            menu.addItem(item)
+        }
+        let ticked = menu.items.first { $0.state == .on }
+        // The ticked row lands under the pointer, as a pop-up button's.
+        menu.popUp(positioning: ticked, at: NSEvent.mouseLocation, in: nil)
+        // `handler` is the items' (weak) target: kept until here.
+        withExtendedLifetime(handler) {}
+    }
+
+    @objc private func picked(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String, sender.state != .on else { return }
+        pick(id)
+    }
+}
+
+/// A list the panel's item can be moved to.
+struct PanelList: Identifiable {
+    let id: String
+    let name: String
+    let icon: String?
 }
 
 /// One field of the panel: its icon, its value, and a secondary line
