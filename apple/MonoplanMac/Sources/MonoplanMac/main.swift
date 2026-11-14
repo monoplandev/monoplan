@@ -26,6 +26,8 @@ final class TrayController: NSObject, NSMenuDelegate {
     private let location: ProfileLocation
     private let engineController: EngineController
     private var settingsWindow: SettingsWindowController?
+    /// Edit › Undo / Redo: the editing text's, else the engine's.
+    private(set) lazy var editUndo = EditUndo(engine: engineController)
     /// The window: one per process, made on first open.
     private lazy var mainWindow = MainWindowController(
         engine: engineController,
@@ -451,7 +453,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = MainMenu.build(
             newWorkspace: #selector(TrayController.newWorkspace(_:)),
             settings: #selector(TrayController.openSettings),
-            target: tray)
+            target: tray,
+            undo: tray.editUndo)
     }
 
     /// The Dock icon (while the window is open) or a second launch.

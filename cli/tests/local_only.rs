@@ -344,6 +344,53 @@ async fn typed_calls_run_on_the_loop_and_agree_with_the_cli() {
     assert_eq!(stopped.unwrap_err(), ApiError::Stopped);
 }
 
+/// The loop's undo (`monoplan_cli::undo`, the Mac's Edit › Undo): a
+/// typed call that commits more than once is one action, undo and redo
+/// step whole actions, and the status the menu validates against
+/// follows without a round trip.
+#[tokio::test(flavor = "multi_thread")]
+async fn loop_undo_steps_whole_calls() {
+    use monoplan_cli::api;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("profile");
+    bootstrap::open_or_init_at(dir.clone()).await.unwrap();
+    let handle = daemon::spawn(reopen_profile(&dir)).await.unwrap();
+    let c = handle.client.clone();
+
+    tokio::task::spawn_blocking(move || {
+        let inbox = |c: &daemon::LocalClient| {
+            c.call_blocking(None, |cx| api::items::items(cx, LIST_INBOX, false))
+                .unwrap()
+                .len()
+        };
+        let start = inbox(&c);
+        assert_eq!(c.undo_state(), (false, false));
+        assert!(!c.undo_blocking(false).unwrap());
+
+        // Two commits, one call.
+        c.call_blocking(None, |cx| {
+            api::items::add_items(cx, LIST_INBOX, &["a".into(), "b".into()], false)?;
+            api::items::add_items(cx, LIST_INBOX, &["c".into()], false)
+        })
+        .unwrap();
+        assert_eq!(inbox(&c), start + 3);
+        // A read is not an action.
+        assert_eq!(c.undo_state(), (true, false));
+
+        assert!(c.undo_blocking(false).unwrap());
+        assert_eq!(inbox(&c), start);
+        assert_eq!(c.undo_state(), (false, true));
+
+        assert!(c.undo_blocking(true).unwrap());
+        assert_eq!(inbox(&c), start + 3);
+        assert_eq!(c.undo_state(), (true, false));
+    })
+    .await
+    .unwrap();
+    handle.shutdown().await.unwrap();
+}
+
 /// The typed reads that span workspaces get their workspaces from the
 /// loop (`Host::with_ctx`): rows come back tagged with the doc they
 /// are from, where the same functions over bare docs tag nothing.

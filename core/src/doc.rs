@@ -5448,6 +5448,20 @@ impl Doc {
         self.undo.lock().map(|um| um.can_redo()).unwrap_or(false)
     }
 
+    /// Steps on the undo stack: one per eligible local commit, never
+    /// capped. A host that groups several commits into one user action
+    /// (the CLI's engine loop) diffs this around the action; a drop
+    /// below what it last saw means the stack was rearmed (a hard
+    /// delete, a same-peer import) and its record of it is void.
+    pub fn undo_count(&self) -> usize {
+        self.undo.lock().map(|um| um.undo_count()).unwrap_or(0)
+    }
+
+    /// Steps on the redo stack; see [`undo_count`](Self::undo_count).
+    pub fn redo_count(&self) -> usize {
+        self.undo.lock().map(|um| um.redo_count()).unwrap_or(0)
+    }
+
     fn apply_undo_op<F>(&self, op: F) -> Result<bool, DocError>
     where
         F: FnOnce(&mut UndoManager) -> loro::LoroResult<bool>,

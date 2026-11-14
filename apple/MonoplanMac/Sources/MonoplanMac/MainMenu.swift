@@ -2,7 +2,8 @@
 // then; as a bare status item it has no menu bar). Standard items wired
 // to the responder chain: the Edit menu is what makes ⌘Z, ⌘X, ⌘C, ⌘V
 // and ⌘A reach a text field at all, since AppKit routes key equivalents
-// through the menu.
+// through the menu. Undo and Redo are the exception, with their own
+// target that picks the text's undo or the doc's (`EditUndo.swift`).
 //
 // New Workspace… is the one doc-level command here: the app asks for
 // the name and the engine does the work. It sits in the app menu, where
@@ -11,7 +12,7 @@
 import AppKit
 
 enum MainMenu {
-    static func build(newWorkspace: Selector, settings: Selector, target: AnyObject) -> NSMenu {
+    static func build(newWorkspace: Selector, settings: Selector, target: AnyObject, undo: EditUndo) -> NSMenu {
         let main = NSMenu()
 
         let app = NSMenu()
@@ -35,11 +36,13 @@ enum MainMenu {
         main.addItem(submenu(app, title: "Monoplan"))
 
         let edit = NSMenu(title: String(localized: "Edit"))
-        // The focused text field's own undo, through the responder
-        // chain; the doc has no undo in this window yet.
-        edit.addItem(withTitle: String(localized: "Undo"), action: Selector(("undo:")), keyEquivalent: "z")
-        let redoItem = edit.addItem(withTitle: String(localized: "Redo"), action: Selector(("redo:")), keyEquivalent: "z")
+        // The editing text's undo while a field has focus, the doc's
+        // otherwise (`EditUndo.swift`).
+        let undoItem = edit.addItem(withTitle: String(localized: "Undo"), action: #selector(EditUndo.undo(_:)), keyEquivalent: "z")
+        undoItem.target = undo
+        let redoItem = edit.addItem(withTitle: String(localized: "Redo"), action: #selector(EditUndo.redo(_:)), keyEquivalent: "z")
         redoItem.keyEquivalentModifierMask = [.command, .shift]
+        redoItem.target = undo
         edit.addItem(.separator())
         edit.addItem(withTitle: String(localized: "Cut"), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         edit.addItem(withTitle: String(localized: "Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")

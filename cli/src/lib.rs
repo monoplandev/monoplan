@@ -16,4 +16,5 @@ pub mod peer;
 pub mod service;
 pub mod storage;
 pub mod sync;
+pub mod undo;
 pub mod workspace;

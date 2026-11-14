@@ -155,6 +155,11 @@ pub struct DaemonStatus {
     /// Contiguous-prefix server seq the replica has applied in memory.
     pub last_contiguous_seq: u64,
     pub connects: u32,
+    /// Whether the loop's undo history (`crate::undo`) has an action
+    /// to take back, or one to do again: what an app's Edit menu
+    /// validates against without a round trip.
+    pub can_undo: bool,
+    pub can_redo: bool,
 }
 
 impl DaemonStatus {
@@ -451,6 +456,25 @@ impl LocalClient {
         rx.blocking_recv().map_err(|_| ApiError::Stopped)?
     }
 
+    /// Undo (or with `redo`, redo) the newest action across every open
+    /// doc, for a thread that is not on the runtime. `Ok(false)` when
+    /// there was nothing to take back. What it changed is durable when
+    /// this returns, and `Changed` goes to the watchers.
+    pub fn undo_blocking(&self, redo: bool) -> Result<bool, ApiError> {
+        let (tx, rx) = oneshot::channel();
+        self.requests
+            .send(HostCmd::Undo { redo, reply: tx })
+            .map_err(|_| ApiError::Stopped)?;
+        rx.blocking_recv().map_err(|_| ApiError::Stopped)?
+    }
+
+    /// Whether there is an action to undo, and one to redo, as of the
+    /// loop's last command. Never blocks.
+    pub fn undo_state(&self) -> (bool, bool) {
+        let s = self.status.borrow();
+        (s.can_undo, s.can_redo)
+    }
+
     /// The profile as an app shows it: identity, server, and the open
     /// docs, Home first. A local-only workspace answers with empty
     /// identity fields and `local_only` set.
@@ -695,6 +719,12 @@ pub(crate) enum HostCmd {
         workspace: Option<String>,
         run: CallFn,
     },
+    /// Take back the newest action in any open doc (`redo`: do the
+    /// newest undone one again). Answers whether there was one.
+    Undo {
+        redo: bool,
+        reply: oneshot::Sender<Result<bool, ApiError>>,
+    },
 }
 
 /// The body of a [`HostCmd::Call`], run once on the loop.
@@ -878,6 +908,9 @@ struct Host {
     offline_reason: Option<String>,
     /// No account: never connect, never report offline.
     local_only: bool,
+    /// One undo history over every open doc (`crate::undo`): each call
+    /// or doc command is one entry.
+    history: crate::undo::History,
 }
 
 impl Host {
@@ -907,6 +940,7 @@ impl Host {
             pending_syncs: Vec::new(),
             offline_reason: None,
             local_only,
+            history: crate::undo::History::default(),
         }
     }
 
@@ -982,6 +1016,19 @@ impl Host {
                 self.on_call(workspace, run).await?;
                 Ok(false)
             }
+            HostCmd::Undo { redo, reply } => {
+                let result = {
+                    let docs = open_docs(&self.engine);
+                    if redo {
+                        self.history.redo(&docs)
+                    } else {
+                        self.history.undo(&docs)
+                    }
+                };
+                self.after_doc_work().await?;
+                let _ = reply.send(result.map_err(ApiError::from));
+                Ok(false)
+            }
         }
     }
 
@@ -998,7 +1045,9 @@ impl Host {
                 return Ok(());
             }
         };
+        let before = self.history.before(&open_docs(&self.engine));
         let answer = self.with_ctx(doc_id, |cx| run(Ok(cx)));
+        self.history.record(before, &open_docs(&self.engine));
         self.after_doc_work().await?;
         answer();
         Ok(())
@@ -1043,6 +1092,7 @@ impl Host {
         self.engine.flush_replicas();
         self.pump().await;
         self.notify_if_changed();
+        self.publish();
         Ok(())
     }
 
@@ -1112,7 +1162,9 @@ impl Host {
                     }
                 };
                 let mut buf = Vec::new();
+                let before = self.history.before(&open_docs(&self.engine));
                 let result = self.with_ctx(doc_id, |cx| run_doc(cmd, cx, &mut buf));
+                self.history.record(before, &open_docs(&self.engine));
                 self.after_doc_work().await?;
                 match result {
                     Ok(()) => Reply::Output {
@@ -1524,6 +1576,8 @@ impl Host {
             pending: self.has_pending_work(),
             last_contiguous_seq: self.engine.home_replica().last_contiguous_seq(),
             connects: self.status.borrow().connects,
+            can_undo: self.history.can_undo(),
+            can_redo: self.history.can_redo(),
         };
         let prev_sync = self.status.borrow().sync();
         let now_sync = next.sync();
@@ -1548,6 +1602,16 @@ impl Host {
             let _ = self.watchers.send(WatchEvent::Changed);
         }
     }
+}
+
+/// Every open doc with its id, Home first: what the undo history is
+/// checked and stepped against.
+fn open_docs(engine: &Engine) -> Vec<(DocId, &monoplan_core::Doc)> {
+    engine
+        .doc_ids()
+        .into_iter()
+        .filter_map(|id| engine.doc_for(id).map(|d| (id, d)))
+        .collect()
 }
 
 #[cfg(test)]

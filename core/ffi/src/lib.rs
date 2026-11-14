@@ -1026,6 +1026,35 @@ impl Engine {
         Ok(self.client.call_blocking(workspace, api::bin::empty_bin)?)
     }
 
+    // ----- undo / redo (`monoplan_cli::undo`) -----
+    //
+    // One history over every open workspace, kept by the loop: each
+    // typed call above that wrote is one action, and Undo takes back
+    // the newest wherever it was made. Text a field is editing has its
+    // own undo in the app; these are the doc's.
+
+    /// Take back the newest action. False when there was none.
+    pub fn undo(&self) -> Result<bool, EngineError> {
+        Ok(self.client.undo_blocking(false)?)
+    }
+
+    /// Do again the newest undone action. False when there was none.
+    pub fn redo(&self) -> Result<bool, EngineError> {
+        Ok(self.client.undo_blocking(true)?)
+    }
+
+    /// Whether there is an action to undo, as of the loop's last
+    /// command. Never blocks: for validating a menu item on the main
+    /// thread.
+    pub fn can_undo(&self) -> bool {
+        self.client.undo_state().0
+    }
+
+    /// As [`can_undo`](Self::can_undo), for redo.
+    pub fn can_redo(&self) -> bool {
+        self.client.undo_state().1
+    }
+
     // ----- the engine itself -----
 
     /// Push now and report whether the server answers. Waits out a
