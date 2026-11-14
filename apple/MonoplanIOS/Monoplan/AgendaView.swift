@@ -84,7 +84,7 @@ struct AgendaRowView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(row.text)
-                            .lineLimit(2)
+                            .itemTextSlot()
                             .foregroundStyle(row.isDone ? .secondary : .primary)
                         if let place = row.place {
                             // The item page's place glyph, then the label.

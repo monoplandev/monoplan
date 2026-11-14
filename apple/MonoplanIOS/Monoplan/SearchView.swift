@@ -163,7 +163,7 @@ private struct SearchHitRow: View {
                 Text(hit.title)
                     .strikethrough(binned)
                     .foregroundStyle(binned ? .secondary : .primary)
-                    .lineLimit(2)
+                    .itemTextSlot()
                 if !note.isEmpty {
                     Text(note)
                         .font(.caption)

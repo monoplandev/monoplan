@@ -253,7 +253,7 @@ struct PlacesMapView: View {
             ForEach(rows, id: \.item.key) { pin in
                 Button { open(pin) } label: { PlacedRowView(pin: pin, from: location.location) }
                     .buttonStyle(.plain)
-                    .listRowSeparator(.hidden)
+                    .itemListRow()
             }
             if rows.isEmpty {
                 emptyState.listRowSeparator(.hidden)
@@ -333,7 +333,7 @@ private struct PlacedRowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(pin.item.text)
-                .lineLimit(2)
+                .itemTextSlot()
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 PinIcon(size: 11)
                 Text(note).lineLimit(1)

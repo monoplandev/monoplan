@@ -41,7 +41,7 @@ struct BinView: View {
                         deleteButton(item)
                     }
                     // No dividers between item rows, as `CheckboxRow` has it.
-                    .listRowSeparator(.hidden)
+                    .itemListRow()
                 }
                 // Plain, so a row reads as a row rather than a tinted link.
                 .buttonStyle(.plain)
@@ -130,8 +130,7 @@ struct BinnedRowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(item.row.text)
-                .lineLimit(2)
-                .truncationMode(.tail)
+                .itemTextSlot()
             Text(note)
                 .font(.caption)
                 .foregroundStyle(.secondary)

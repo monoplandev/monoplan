@@ -100,10 +100,9 @@ struct CheckboxRow<Content: View>: View {
                 .onTapGesture { if let ref { openItem(ref) } }
                 .accessibilityAddTraits(.isButton)
         }
-        .padding(.vertical, 2)
         .modifier(ItemRowMenu(ref: ref, state: state))
         // No dividers between item rows, on any page that lists them.
-        .listRowSeparator(.hidden)
+        .itemListRow()
     }
 }
 
@@ -191,11 +190,19 @@ struct ItemRowMenu: ViewModifier {
 }
 
 extension View {
-    /// An item's text in a row: a slot of exactly two lines, kept even
-    /// when the text needs one so rows share a height, with anything
-    /// past the second line cut off by an ellipsis.
+    /// An item's text in a row: one line, with anything past it cut
+    /// off by an ellipsis, so rows stay compact and share a height.
     func itemTextSlot() -> some View {
-        lineLimit(2, reservesSpace: true)
+        lineLimit(1)
             .truncationMode(.tail)
+    }
+
+    /// An item row's place in its list: no divider, and less room
+    /// above and below than a list gives by default. The system still
+    /// holds a row to its minimum height (44 pt), so a row of one line
+    /// is that tall whatever is asked here.
+    func itemListRow() -> some View {
+        listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
     }
 }
