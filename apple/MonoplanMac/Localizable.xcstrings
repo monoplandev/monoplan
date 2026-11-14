@@ -1600,6 +1600,126 @@
           }
         }
       }
+    },
+    "Bin": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Papelera"
+          }
+        }
+      }
+    },
+    "Restore": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restaurar"
+          }
+        }
+      }
+    },
+    "Delete…": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eliminar…"
+          }
+        }
+      }
+    },
+    "Delete": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eliminar"
+          }
+        }
+      }
+    },
+    "Empty Bin…": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vaciar papelera…"
+          }
+        }
+      }
+    },
+    "Empty Bin": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vaciar papelera"
+          }
+        }
+      }
+    },
+    "Items in the Bin can be restored until they are deleted.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Los elementos de la papelera se pueden restaurar hasta que se eliminen."
+          }
+        }
+      }
+    },
+    "Delete this item for good?": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Eliminar este elemento para siempre?"
+          }
+        }
+      }
+    },
+    "It is removed from every device and cannot be restored.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se elimina de todos los dispositivos y no se puede restaurar."
+          }
+        }
+      }
+    },
+    "Delete 1 item for good?": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Eliminar 1 elemento para siempre?"
+          }
+        }
+      }
+    },
+    "Delete all %lld items for good?": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Eliminar los %lld elementos para siempre?"
+          }
+        }
+      }
+    },
+    "They are removed from every device and cannot be restored.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se eliminan de todos los dispositivos y no se pueden restaurar."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

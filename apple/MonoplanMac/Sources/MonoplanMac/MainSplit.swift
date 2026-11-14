@@ -164,18 +164,17 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     /// The panel's part of the bar: nothing with the panel shut; else
     /// its separator, the status once the item is read, and the star
     /// and the "…" menu at the far edge. No close button: Escape, or
-    /// its edge dragged shut. Only an Open item can be starred
-    /// (spec/focus.md); a binned item has neither.
+    /// its edge dragged shut. Only an Open, unbinned item can be
+    /// starred (spec/focus.md); a binned item's "…" menu restores or
+    /// deletes it.
     private func panelItems() -> [NSToolbarItem.Identifier] {
         guard model.selected != nil else { return [] }
         var items: [NSToolbarItem.Identifier] = [.panelSeparator]
         guard let item = model.detail else { return items }
         items.append(.itemStatus)
-        if item.item.binnedAt == nil {
-            items.append(.flexibleSpace)
-            if item.closedAt == nil { items.append(.itemStar) }
-            items.append(.itemMore)
-        }
+        items.append(.flexibleSpace)
+        if item.item.binnedAt == nil, item.closedAt == nil { items.append(.itemStar) }
+        items.append(.itemMore)
         return items
     }
 
@@ -210,6 +209,13 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             toolbarItem.image = StarArt.toolbarImage(starred: item.starred)
             toolbarItem.label = hint
             toolbarItem.toolTip = hint
+        case .itemMore:
+            // The menu follows the item in and out of the Bin.
+            let binned = item.item.binnedAt != nil
+            if let menuItem = toolbarItem as? NSMenuToolbarItem,
+               (menuItem.menu.items.first?.action == #selector(restoreItem(_:))) != binned {
+                menuItem.menu = itemMenu(binned: binned)
+            }
         default:
             break
         }
@@ -239,7 +245,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             item.label = label
             item.toolTip = label
             item.showsIndicator = false
-            item.menu = itemMenu()
+            item.menu = itemMenu(binned: model.detail?.item.binnedAt != nil)
             return item
         }
         let item = NSToolbarItem(itemIdentifier: identifier)
@@ -341,10 +347,20 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     }
 
     /// The "…" menu: the rows' right-click menu (`itemMenu` in
-    /// `MainWindow.swift`), for the panel's item.
-    private func itemMenu() -> NSMenu {
+    /// `MainWindow.swift`), for the panel's item; a binned item's is
+    /// the Bin's rows' (`binnedMenu`).
+    private func itemMenu(binned: Bool) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
+        if binned {
+            let restore = NSMenuItem(
+                title: String(localized: "Restore"), action: #selector(restoreItem(_:)), keyEquivalent: "")
+            let delete = NSMenuItem(
+                title: String(localized: "Delete…"), action: #selector(deleteItem(_:)), keyEquivalent: "")
+            for row in [restore, delete] { row.target = self }
+            menu.items = [restore, .separator(), delete]
+            return menu
+        }
         let duplicate = NSMenuItem(
             title: String(localized: "Duplicate"), action: #selector(duplicateItem(_:)), keyEquivalent: "")
         let bin = NSMenuItem(
@@ -362,6 +378,18 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     @objc private func binItem(_ sender: Any?) {
         guard let selected = model.current?.selection else { return }
         model.bin(workspace: selected.workspace, id: selected.id)
+    }
+
+    @objc private func restoreItem(_ sender: Any?) {
+        guard let selected = model.current?.selection else { return }
+        model.restore(workspace: selected.workspace, id: selected.id)
+    }
+
+    @objc private func deleteItem(_ sender: Any?) {
+        guard let selected = model.current?.selection else { return }
+        BinConfirm.delete(on: view.window) { [model] in
+            model.deleteBinned(workspace: selected.workspace, id: selected.id)
+        }
     }
 
     @objc private func toggleStar(_ sender: Any?) {

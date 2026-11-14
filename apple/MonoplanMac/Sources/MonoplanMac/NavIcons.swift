@@ -1,5 +1,6 @@
-// The sidebar's glyphs for Inbox, Calendar and Done: the web nav's
-// (`js/web/src/icons/archive.svg`, `calendar.svg`, `check.svg`). As with
+// The sidebar's glyphs for Inbox, Calendar, Done and Bin: the web nav's
+// (`js/web/src/icons/archive.svg`, `calendar.svg`, `check.svg`,
+// `trash.svg`). As with
 // the star (`StarIcon.swift`), this target has no asset catalog, so the
 // SVGs are here as source and AppKit rasterises them as templates,
 // coloured by the foreground style.
@@ -16,6 +17,9 @@ enum NavArt {
         """#)
     static let done = template(#"""
         <svg width="15" height="15" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3.5 8.5l3 3 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        """#)
+    static let bin = template(#"""
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect width="256" height="256" fill="none"/><line x1="216" y1="56" x2="40" y2="56" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="104" y1="104" x2="104" y2="168" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><line x1="152" y1="104" x2="152" y2="168" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><path d="M200,56V208a8,8,0,0,1-8,8H64a8,8,0,0,1-8-8V56" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/><path d="M168,56V40a16,16,0,0,0-16-16H104A16,16,0,0,0,88,40V56" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/></svg>
         """#)
 
     private static func template(_ svg: String) -> NSImage {

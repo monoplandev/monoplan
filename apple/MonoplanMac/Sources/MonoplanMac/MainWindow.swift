@@ -6,8 +6,9 @@
 // Personal first, each a collapsible heading over its Inbox and lists),
 // and either the open items of the selected list with a tick and a
 // field to add one, or a lens over every workspace: Starred in its
-// curated order, the Calendar (the engine's agenda, by day), or Done,
-// newest first. A row of any of them can be selected, which opens the
+// curated order, the Calendar (the engine's agenda, by day), Done,
+// newest first, or the Bin, newest binned first (its sidebar row only
+// while something is binned, as on the web and iOS). A row of any of them can be selected, which opens the
 // item's panel at the right (`ItemPanel.swift`): the iOS item page,
 // read only but for its tick and star. No board, no drag and drop, no
 // item editor; those come from sharing views with iOS.
@@ -176,7 +177,7 @@ struct NavSection: Identifiable {
 
 /// The views over every workspace, on top of the sidebar.
 enum Lens: Hashable {
-    case starred, agenda, done
+    case starred, agenda, done, bin
 }
 
 /// What the list pane shows: a lens, or a list in a workspace.
@@ -243,6 +244,9 @@ final class MainWindowModel: ObservableObject {
     /// The other lenses' rows, each read only while it is the one shown.
     @Published private(set) var agenda: [AgendaGroup] = []
     @Published private(set) var done: [DoneRow] = []
+    /// The Bin's rows, every workspace's, newest binned first. Always
+    /// read: the sidebar shows the Bin only while it has any.
+    @Published private(set) var binned: [BinEntry] = []
     /// The selected row's item, if one is: its panel is open.
     @Published private(set) var selected: ItemSelection?
     /// The panel's item page. On a new selection the old page stays
@@ -299,6 +303,7 @@ final class MainWindowModel: ObservableObject {
         case .starred: return String(localized: "Starred")
         case .agenda: return String(localized: "Calendar")
         case .done: return String(localized: "Done")
+        case .bin: return String(localized: "Bin")
         case nil: break
         }
         switch list {
@@ -312,12 +317,14 @@ final class MainWindowModel: ObservableObject {
     }
 
     /// The window's title: the list's name with its Open count, as the
-    /// sidebar row has it. Starred counts its rows; the Calendar and
-    /// Done have no count (Done's rows are capped). None for zero.
+    /// sidebar row has it. Starred and the Bin count their rows; the
+    /// Calendar and Done have no count (Done's rows are capped). None
+    /// for zero.
     var windowTitle: String {
         let count: Int
         switch shown.lens {
         case .starred: count = starred.count
+        case .bin: count = binned.count
         case .agenda, .done: count = 0
         case nil: count = items.count
         }
@@ -432,6 +439,7 @@ final class MainWindowModel: ObservableObject {
         starred = []
         agenda = []
         done = []
+        binned = []
     }
 
     private func clear() {
@@ -451,6 +459,7 @@ final class MainWindowModel: ObservableObject {
         var starred: [StarredItem] = []
         var agenda: [AgendaGroup] = []
         var done: [DoneRow] = []
+        var binned: [BinEntry] = []
         /// The selection the read was made for, and its item.
         var selected: ItemSelection?
         var detail: ItemInfo?
@@ -490,8 +499,9 @@ final class MainWindowModel: ObservableObject {
                 sections: sections, lens: lens, workspace: selected,
                 list: shown, items: [])
             snapshot.starred = try engine.starred()
+            snapshot.binned = try engine.binned()
             switch lens {
-            case .starred:
+            case .starred, .bin:
                 break
             case .agenda:
                 snapshot.agenda = try engine.agenda(days: Self.agendaDays)
@@ -522,6 +532,7 @@ final class MainWindowModel: ObservableObject {
                 var rows: Int = snapshot.items.count + snapshot.done.count
                 for group in snapshot.agenda { rows += group.rows.count }
                 if snapshot.lens == .starred { rows += snapshot.starred.count }
+                if snapshot.lens == .bin { rows += snapshot.binned.count }
                 let workspaces: Int = snapshot.sections.count
                 // Two turns of the main queue, so SwiftUI's update for
                 // the rows set below has run in between.
@@ -547,6 +558,7 @@ final class MainWindowModel: ObservableObject {
                 self.starred = snapshot.starred
                 self.agenda = snapshot.agenda
                 self.done = snapshot.done
+                self.binned = snapshot.binned
                 // An item selected since the read went out keeps the
                 // old page until its own read lands.
                 if let picked = snapshot.selected, picked == self.selected {
@@ -557,6 +569,12 @@ final class MainWindowModel: ObservableObject {
                     }
                 }
                 self.error = nil
+                // The Bin emptied while shown: its sidebar row goes, so
+                // the list under it comes back.
+                if snapshot.lens == .bin, snapshot.binned.isEmpty, self.lens == .bin {
+                    self.select(workspace: snapshot.workspace, list: snapshot.list)
+                    return
+                }
                 if self.reveal {
                     self.reveal = false
                     if let shown = snapshot.sections.first(where: { $0.target == snapshot.workspace }),
@@ -655,6 +673,38 @@ final class MainWindowModel: ObservableObject {
         write { try $0.setBinned(workspace: workspace, id: id, binned: true) }
     }
 
+    /// Take an item out of the Bin, back to its list and state.
+    func restore(workspace: String?, id: String) {
+        write { try $0.setBinned(workspace: workspace, id: id, binned: false) }
+    }
+
+    /// Hard-delete a binned item (`Engine.deleteBinned`); its panel
+    /// shuts first. The caller has asked (`BinConfirm`).
+    func deleteBinned(workspace: String?, id: String) {
+        if selected?.id == id { clearItem() }
+        write { try $0.deleteBinned(workspace: workspace, id: id) }
+    }
+
+    /// Hard-delete everything in the Bin, a workspace at a time
+    /// (`Engine.emptyBin`): only those with something binned. The
+    /// caller has asked (`BinConfirm`).
+    func emptyBin() {
+        if let selected, binned.contains(where: { $0.id == selected.id }) { clearItem() }
+        for docId in Set(binned.map(\.docId)) {
+            write { _ = try $0.emptyBin(workspace: docId) }
+        }
+    }
+
+    /// The name of the list a binned item would go back to, for its
+    /// row; nil when that list is not known.
+    func binnedListName(_ entry: BinEntry) -> String? {
+        if entry.listId == Self.inbox { return String(localized: "Inbox") }
+        if entry.listId == Self.events { return String(localized: "Calendar") }
+        let section = sections.first { $0.workspace.docId == entry.docId }
+        guard let list = section?.lists.first(where: { $0.id == entry.listId }) else { return nil }
+        return [list.icon, list.name].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
     func add(_ text: String) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -739,6 +789,16 @@ struct MainWindowView: View {
                 })
                 row(.lens(.agenda), Label { Text("Calendar") } icon: { NavIcon(image: NavArt.calendar) })
                 row(.lens(.done), Label { Text("Done") } icon: { NavIcon(image: NavArt.done) })
+                // Only while something is binned, as the web's and iOS's
+                // nav; counted, as the web's.
+                if !model.binned.isEmpty {
+                    row(.lens(.bin), HStack {
+                        Label { Text("Bin") } icon: { NavIcon(image: NavArt.bin) }
+                        Spacer()
+                        count(model.binned.count)
+                    }
+                    .contextMenu { emptyBinButton })
+                }
             }
             ForEach(model.sections) { section in
                 Section(isExpanded: Binding(
@@ -812,6 +872,7 @@ struct MainWindowView: View {
             case .starred: starred
             case .agenda: agenda
             case .done: done
+            case .bin: bin
             case nil: list
             }
         }
@@ -976,6 +1037,63 @@ struct MainWindowView: View {
         .scrollContentBackground(.hidden)
     }
 
+    /// Empty Bin…, asked first: the sidebar row's menu and the Bin's bar.
+    private var emptyBinButton: some View {
+        Button("Empty Bin…") {
+            BinConfirm.empty(count: model.binned.count, on: NSApp.keyWindow) { model.emptyBin() }
+        }
+        .disabled(model.binned.isEmpty)
+    }
+
+    /// The Bin: every workspace's binned items, newest binned first. A
+    /// row has its text, the list it would go back to (and the
+    /// workspace when not Personal's), and when it was binned; its menu
+    /// restores or deletes it. A bar over the rows empties the lot, as
+    /// Finder's Trash has it. Both deletes are for good, so both ask.
+    private var bin: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text("Items in the Bin can be restored until they are deleted.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                Spacer()
+                emptyBinButton
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            Divider()
+            List(selection: selection { id in model.binned.first { $0.id == id }?.docId }) {
+                ForEach(model.binned, id: \.binKey) { row in
+                    HStack(alignment: .center, spacing: 8) {
+                        Text(verbatim: row.text)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        let place = [model.binnedListName(row), model.sharedWorkspaceName(row.docId)]
+                            .compactMap { $0 }.joined(separator: " · ")
+                        if !place.isEmpty {
+                            Text(verbatim: place).font(.footnote).foregroundStyle(.tertiary).lineLimit(1)
+                        }
+                        Spacer()
+                        Text(verbatim: Self.stamp(row.binnedAt))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                            .fixedSize()
+                    }
+                    .itemRow()
+                    .binnedMenu(model, workspace: row.docId, id: row.id)
+                    .tag(row.id)
+                }
+                if model.binned.isEmpty {
+                    Text("Nothing here").foregroundStyle(.secondary)
+                }
+            }
+            .listStyle(.inset)
+            .scrollContentBackground(.hidden)
+        }
+    }
+
     /// A Done row's moment (unix ms), as a short date and time.
     static func stamp(_ millis: Int64) -> String {
         Date(timeIntervalSince1970: TimeInterval(millis) / 1000)
@@ -1018,6 +1136,61 @@ private extension View {
             Button("Duplicate") { model.duplicate(workspace: workspace, id: id) }
             Divider()
             Button("Move to Bin") { model.bin(workspace: workspace, id: id) }
+        }
+    }
+
+    /// A binned row's right-click menu: the same actions as the
+    /// panel's "…" button for a binned item.
+    func binnedMenu(_ model: MainWindowModel, workspace: String?, id: String) -> some View {
+        contextMenu {
+            Button("Restore") { model.restore(workspace: workspace, id: id) }
+            Divider()
+            Button("Delete…") {
+                BinConfirm.delete(on: NSApp.keyWindow) { model.deleteBinned(workspace: workspace, id: id) }
+            }
+        }
+    }
+}
+
+extension BinEntry {
+    /// The row's identity across workspaces.
+    var binKey: String { "\(docId ?? "")/\(id)" }
+}
+
+/// The Bin's two deletes are for good: each asks first, as a sheet on
+/// the window (a bare alert without one).
+enum BinConfirm {
+    static func delete(on window: NSWindow?, then confirmed: @escaping () -> Void) {
+        ask(
+            String(localized: "Delete this item for good?"),
+            String(localized: "It is removed from every device and cannot be restored."),
+            button: String(localized: "Delete"), on: window, then: confirmed)
+    }
+
+    static func empty(count: Int, on window: NSWindow?, then confirmed: @escaping () -> Void) {
+        guard count > 0 else { return }
+        ask(
+            count == 1
+                ? String(localized: "Delete 1 item for good?")
+                : String(localized: "Delete all \(count) items for good?"),
+            String(localized: "They are removed from every device and cannot be restored."),
+            button: String(localized: "Empty Bin"), on: window, then: confirmed)
+    }
+
+    private static func ask(
+        _ message: String, _ info: String, button: String, on window: NSWindow?,
+        then confirmed: @escaping () -> Void
+    ) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = message
+        alert.informativeText = info
+        alert.addButton(withTitle: button).hasDestructiveAction = true
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        if let window {
+            alert.beginSheetModal(for: window) { if $0 == .alertFirstButtonReturn { confirmed() } }
+        } else if alert.runModal() == .alertFirstButtonReturn {
+            confirmed()
         }
     }
 }
