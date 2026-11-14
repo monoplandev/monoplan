@@ -157,8 +157,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
                 let closed = item.item.state.isClosed
                 let hint = closed ? String(localized: "Mark as not done") : String(localized: "Mark as done")
                 button.title = ItemPanel.statusLabel(item)
-                button.image = NSImage(
-                    systemSymbolName: closed ? "checkmark.circle.fill" : "circle", accessibilityDescription: hint)
+                button.image = ItemCheckArt.image(item.item.state, accessibilityDescription: hint)
                 button.isEnabled = true
                 button.toolTip = hint
             }

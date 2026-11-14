@@ -601,9 +601,10 @@ struct MainWindowView: View {
                     Spacer()
                     count(model.starred.count)
                 }
+                .navRow()
                 .tag(NavTarget.lens(.starred))
-                Label("Calendar", systemImage: "calendar").tag(NavTarget.lens(.agenda))
-                Label("Done", systemImage: "checkmark").tag(NavTarget.lens(.done))
+                Label("Calendar", systemImage: "calendar").navRow().tag(NavTarget.lens(.agenda))
+                Label("Done", systemImage: "checkmark.circle").navRow().tag(NavTarget.lens(.done))
             }
             ForEach(model.sections) { section in
                 Section(isExpanded: Binding(
@@ -611,18 +612,30 @@ struct MainWindowView: View {
                     set: { model.setCollapsed(section.id, !$0) }
                 )) {
                     HStack {
-                        Text("Inbox")
+                        Label("Inbox", systemImage: "tray")
                         Spacer()
                         count(section.inboxOpen)
                     }
+                    .navRow()
                     .tag(NavTarget.list(workspace: section.target, list: MainWindowModel.inbox))
                     ForEach(section.userLists) { list in
                         HStack {
-                            Text(verbatim: [list.icon, list.name].compactMap { $0 }.joined(separator: " "))
-                                .lineLimit(1)
+                            // The list's emoji as its icon, a folder
+                            // without one, as on iOS: the names line
+                            // up under Inbox's.
+                            Label {
+                                Text(verbatim: list.name).lineLimit(1)
+                            } icon: {
+                                if let icon = list.icon, !icon.isEmpty {
+                                    Text(verbatim: icon)
+                                } else {
+                                    Image(systemName: "folder")
+                                }
+                            }
                             Spacer()
                             if showListCounts { count(Int(list.open)) }
                         }
+                        .navRow()
                         .tag(NavTarget.list(workspace: section.target, list: list.id))
                     }
                 } header: {
@@ -635,6 +648,10 @@ struct MainWindowView: View {
             }
         }
         .listStyle(.sidebar)
+        // Rows of 28 pt, between the system's small (24) and medium
+        // (32), which has no such step: the small size, with each row
+        // (`navRow`) at the medium's type and 4 pt taller.
+        .environment(\.sidebarRowSize, .small)
     }
 
     /// A sidebar row's count; nothing is drawn for none.
@@ -682,13 +699,7 @@ struct MainWindowView: View {
                 // keeps selection on the item.
                 ForEach(Array(model.items.enumerated()), id: \.offset) { _, item in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Button {
-                            model.tick(item)
-                        } label: {
-                            Image(systemName: "circle")
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(Text("Mark as done"))
+                        ItemCheckButton(state: item.state) { _ in model.tick(item) }
                         Text(verbatim: item.text)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -697,6 +708,7 @@ struct MainWindowView: View {
                             Text(verbatim: when).foregroundStyle(.secondary).monospacedDigit().fixedSize()
                         }
                     }
+                    .itemRow()
                     .tag(item.id)
                 }
                 if model.items.isEmpty {
@@ -727,7 +739,7 @@ struct MainWindowView: View {
             ForEach(model.agenda, id: \.day) { group in
                 Section {
                     ForEach(group.rows, id: \.id) { row in
-                        agendaRow(row).tag(row.id)
+                        agendaRow(row).itemRow().tag(row.id)
                     }
                     if group.rows.isEmpty {
                         Text("Nothing today").foregroundStyle(.secondary)
@@ -743,13 +755,7 @@ struct MainWindowView: View {
     private func agendaRow(_ row: AgendaEntry) -> some View {
         let done = row.state == .done
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Button {
-                model.setDone(workspace: row.docId, id: row.id, done: !done)
-            } label: {
-                Image(systemName: done ? "checkmark.circle.fill" : "circle")
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("Mark as done"))
+            ItemCheckButton(state: row.state) { model.setDone(workspace: row.docId, id: row.id, done: $0) }
             if TodayMenu.isTimed(row), let when = row.when {
                 Text(verbatim: String(when.dropFirst(11).prefix(5)))
                     .foregroundStyle(.secondary)
@@ -780,13 +786,7 @@ struct MainWindowView: View {
             ForEach(model.starred, id: \.id) { row in
                 let done = row.state == .done
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Button {
-                        model.setDone(workspace: row.docId, id: row.id, done: !done)
-                    } label: {
-                        Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(Text("Mark as done"))
+                    ItemCheckButton(state: row.state) { model.setDone(workspace: row.docId, id: row.id, done: $0) }
                     Text(verbatim: row.text)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -804,6 +804,7 @@ struct MainWindowView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text("Remove star"))
                 }
+                .itemRow()
                 .tag(row.id)
             }
             if model.starred.isEmpty {
@@ -819,13 +820,9 @@ struct MainWindowView: View {
         List(selection: selection { id in model.done.first { $0.item.id == id }?.workspace }) {
             ForEach(model.done) { row in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Button {
-                        model.setDone(workspace: row.workspace, id: row.item.id, done: false)
-                    } label: {
-                        Image(systemName: "checkmark.circle.fill")
+                    ItemCheckButton(state: row.item.state) {
+                        model.setDone(workspace: row.workspace, id: row.item.id, done: $0)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(Text("Mark as not done"))
                     Text(verbatim: row.item.text)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -840,6 +837,7 @@ struct MainWindowView: View {
                         .monospacedDigit()
                         .fixedSize()
                 }
+                .itemRow()
                 .tag(row.item.id)
             }
             if model.done.isEmpty {
@@ -865,6 +863,20 @@ struct MainWindowView: View {
         guard let text = group.day else { return String(localized: "Unscheduled") }
         guard let date = Agenda.start(of: text) else { return text }
         return date.formatted(.dateTime.weekday(.wide).day().month(.abbreviated))
+    }
+}
+
+private extension View {
+    /// A sidebar row's size: see the sidebar's `sidebarRowSize`.
+    func navRow() -> some View {
+        font(.body).imageScale(.medium).frame(minHeight: 20)
+    }
+
+    /// An item row's size, fixed: 32 pt, the web's row height
+    /// (`ROW_HEIGHT` in `js/web/src/Workspace.tsx`). The list adds 4 pt
+    /// above and below the content.
+    func itemRow() -> some View {
+        frame(height: 24)
     }
 }
 

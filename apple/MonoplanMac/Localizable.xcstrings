@@ -901,6 +901,16 @@
         }
       }
     },
+    "Reopen": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reabrir"
+          }
+        }
+      }
+    },
     "Rename device": {
       "localizations": {
         "es": {
