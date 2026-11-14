@@ -5,7 +5,7 @@
 //! requests arriving on a Unix socket, a persist tick, a liveness ping,
 //! and shutdown signals.
 //!
-//! - **Ownership.** The daemon holds `daemon.lock` (a kernel flock,
+//! - **Ownership.** The daemon holds `engine.lock` (a kernel flock,
 //!   released on any exit path) for its lifetime. `Engine::open`
 //!   refuses while it is held, so a one-shot command can never write
 //!   WAL rows the resident doc would not see.
@@ -74,7 +74,7 @@ const PERSIST_INTERVAL: Duration = Duration::from_secs(1);
 /// to cover a burst between two of its reads.
 const WATCH_BUFFER: usize = 64;
 
-const LOCK_FILE: &str = "daemon.lock";
+const LOCK_FILE: &str = "engine.lock";
 /// The engine's log in the profile dir: the embedded host's `tracing`
 /// output and a headless daemon's stderr, both appended.
 pub const LOG_FILE: &str = "engine.log";
@@ -644,7 +644,7 @@ async fn status() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Listen on the profile's socket. Holding `daemon.lock` means any
+/// Listen on the profile's socket. Holding `engine.lock` means any
 /// existing socket file is stale (its owner is gone), so unlink first.
 fn bind(profile_dir: &Path) -> anyhow::Result<UnixListener> {
     let path = ipc::socket_path(profile_dir);

@@ -1,5 +1,5 @@
 // A minimal MessagePack codec: exactly the subset `rmp_serde::to_vec_named`
-// produces for the daemon's `Request` / `Reply` types (cli/src/ipc.rs),
+// produces for the engine's `Request` / `Reply` types (cli/src/ipc.rs),
 // and nothing more. Hand-written rather than a dependency because the
 // surface is small, the wire shape is pinned by a Rust test
 // (`wire_shape_is_named_maps_and_bare_unit_variants`), and a tray should

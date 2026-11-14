@@ -32,7 +32,7 @@ final class MessagePackTests: XCTestCase {
         XCTAssertEqual(try MessagePack.decode(bytes), value)
     }
 
-    func testDecodesWhatTheDaemonSends() throws {
+    func testDecodesWhatTheEngineSends() throws {
         // {"Event": {"Sync": {"online": false, "last_synced_at": 7}}}
         var bytes: [UInt8] = [0x81, 0xa5] + Array("Event".utf8)
         bytes += [0x81, 0xa4] + Array("Sync".utf8)

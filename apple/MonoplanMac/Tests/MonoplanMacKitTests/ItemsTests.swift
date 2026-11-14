@@ -12,7 +12,7 @@ final class ItemsTests: XCTestCase {
       "deadline":"2026-11-20","when":"2026-11-19T09:30","duration":45,"place":{"label":"Clinic"}}]
     """
 
-    func testParsesTheDaemonsShape() throws {
+    func testParsesTheEnginesShape() throws {
         let rows = try Items.parse(sample)
         XCTAssertEqual(rows.map(\.id), ["a", "b"])
         XCTAssertEqual(rows[0].state, "backlog")

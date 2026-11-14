@@ -1,11 +1,11 @@
 import XCTest
 @testable import MonoplanMacKit
 
-final class DaemonClientTests: XCTestCase {
+final class EngineClientTests: XCTestCase {
     func testSocketPathMatchesTheCli() {
         // Same vector as `long_profile_paths_fall_back_to_temp` in cli/src/ipc.rs.
         XCTAssertEqual(ProfileLocation.fnv1a(Array("/tmp/p".utf8)), 0x6cc1_2add_f274_5004)
-        XCTAssertEqual(ProfileLocation(dir: URL(fileURLWithPath: "/tmp/p")).socketPath(), "/tmp/p/daemon.sock")
+        XCTAssertEqual(ProfileLocation(dir: URL(fileURLWithPath: "/tmp/p")).socketPath(), "/tmp/p/engine.sock")
         let long = ProfileLocation(dir: URL(fileURLWithPath: "/" + String(repeating: "x", count: 150)))
         XCTAssertEqual(
             long.socketPath(tempDir: "/var/tmp/"),
@@ -287,7 +287,7 @@ final class DaemonClientTests: XCTestCase {
             } else if !replies.isEmpty {
                 completion(.success(MessagePack.encode(replies.removeFirst())))
             } else {
-                completion(.failure(ClientError.daemon("no canned reply")))
+                completion(.failure(ClientError.engine("no canned reply")))
             }
         }
 
@@ -310,8 +310,8 @@ final class DaemonClientTests: XCTestCase {
     func testClientHandshakesWatchesAndRequestsOverATransport() {
         let queue = DispatchQueue(label: "test.client")
         let transport = FakeTransport()
-        let client = DaemonClient(queue: queue)
-        var states: [DaemonClient.State] = []
+        let client = EngineClient(queue: queue)
+        var states: [EngineClient.State] = []
         var events: [WatchEvent] = []
         client.onState = { states.append($0) }
         client.onEvent = { events.append($0) }
@@ -320,7 +320,7 @@ final class DaemonClientTests: XCTestCase {
         queue.sync { client.start() }
         settle(queue)
         // Hello, then the watch's first frame put us online.
-        XCTAssertEqual(client.daemon, DaemonClient.DaemonInfo(buildId: "b:1", pid: 7))
+        XCTAssertEqual(client.engine, EngineClient.EngineInfo(buildId: "b:1", pid: 7))
         XCTAssertEqual(client.state, .connected(SyncStatus(online: true, lastSyncedAt: 5)))
         XCTAssertEqual(transport.requests.count, 1)
 
@@ -337,7 +337,7 @@ final class DaemonClientTests: XCTestCase {
         transport.replies = [.map(["Err": .map(["message": .string("nope")])])]
         queue.sync { client.send(.lists()) { got = $0 } }
         settle(queue)
-        guard case .failure(let e) = got, case ClientError.daemon("nope") = e else {
+        guard case .failure(let e) = got, case ClientError.engine("nope") = e else {
             return XCTFail("\(String(describing: got))")
         }
 
@@ -355,7 +355,7 @@ final class DaemonClientTests: XCTestCase {
         transport.onStopped?()
         settle(queue)
         XCTAssertTrue(transport.closed)
-        XCTAssertNil(client.daemon)
+        XCTAssertNil(client.engine)
         XCTAssertEqual(asked, 1)
         XCTAssertEqual(client.state, .connecting("starting again"))
         queue.sync { client.send(.account) { got = $0 } }

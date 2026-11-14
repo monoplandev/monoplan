@@ -25,7 +25,7 @@ import MonoplanMacKit
 
 final class EngineController {
     private let location: ProfileLocation
-    private let client: DaemonClient
+    private let client: EngineClient
     private var engine: MonoplanCore.Engine?
     private var starting = false
     /// The last failed start, shown once and then retried.
@@ -34,7 +34,7 @@ final class EngineController {
     /// a reason not to start an engine meanwhile.
     private var accountWork: String?
 
-    init(location: ProfileLocation, client: DaemonClient) {
+    init(location: ProfileLocation, client: EngineClient) {
         self.location = location
         self.client = client
         client.engineProvider = { [weak self] in

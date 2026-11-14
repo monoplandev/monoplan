@@ -32,7 +32,7 @@ final class SettingsWindowController: NSWindowController {
     private let model: SettingsModel
 
     init(
-        location: ProfileLocation, client: DaemonClient,
+        location: ProfileLocation, client: EngineClient,
         signIn: @escaping (SignInCredentials, @escaping (Error?) -> Void) -> Void,
         signUp: @escaping (SignInCredentials, @escaping (Result<SignupOutcome, Error>) -> Void) -> Void,
         signOut: @escaping (@escaping (Error?) -> Void) -> Void,
@@ -171,7 +171,7 @@ final class SettingsModel: ObservableObject {
     let cli: CommandLineLink? = bundledBinary().map { CommandLineLink(target: $0) }
 
     private let location: ProfileLocation
-    private let client: DaemonClient
+    private let client: EngineClient
     private let signInAction: (SignInCredentials, @escaping (Error?) -> Void) -> Void
     private let signUpAction: (SignInCredentials, @escaping (Result<SignupOutcome, Error>) -> Void) -> Void
     private let signOutAction: (@escaping (Error?) -> Void) -> Void
@@ -184,7 +184,7 @@ final class SettingsModel: ObservableObject {
     }()
 
     init(
-        location: ProfileLocation, client: DaemonClient,
+        location: ProfileLocation, client: EngineClient,
         signIn: @escaping (SignInCredentials, @escaping (Error?) -> Void) -> Void,
         signUp: @escaping (SignInCredentials, @escaping (Result<SignupOutcome, Error>) -> Void) -> Void,
         signOut: @escaping (@escaping (Error?) -> Void) -> Void,
@@ -287,7 +287,7 @@ final class SettingsModel: ObservableObject {
         case .connected(let sync):
             if signedIn, devicesVisible, devices == nil, devicesError == nil, !devicesBusy { loadDevices() }
             engineLine = String(localized: "Running")
-            if let d = client.daemon {
+            if let d = client.engine {
                 buildLine = Self.withCommit(String(d.buildId.split(separator: ":", maxSplits: 1).first ?? ""))
             }
             syncLine = sync.line()

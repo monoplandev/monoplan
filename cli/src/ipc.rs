@@ -20,7 +20,7 @@ use crate::commands::DocCmd;
 /// budget.
 pub const MAX_FRAME: u32 = 64 * 1024 * 1024;
 
-const SOCKET_FILE: &str = "daemon.sock";
+const SOCKET_FILE: &str = "engine.sock";
 /// `sun_path` is 104 bytes on macOS (108 on Linux) including the NUL;
 /// stay under the smaller one with margin for the fallback decision.
 const MAX_SOCKET_PATH: usize = 100;
@@ -546,7 +546,7 @@ mod tests {
     #[test]
     fn long_profile_paths_fall_back_to_temp() {
         let short = Path::new("/tmp/p");
-        assert_eq!(socket_path(short), Path::new("/tmp/p/daemon.sock"));
+        assert_eq!(socket_path(short), Path::new("/tmp/p/engine.sock"));
         let long = PathBuf::from(format!("/{}", "x".repeat(150)));
         let p = socket_path(&long);
         assert!(p.starts_with(std::env::temp_dir()));

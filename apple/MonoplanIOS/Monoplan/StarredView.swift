@@ -1,6 +1,6 @@
 // The Starred page, pushed from Home (which owns the navigation stack
 // and the item sheet): the Focus lens (spec/focus.md; "Starred" is the UI
-// name) as the daemon resolves it with `starred --all`: Home's curated
+// name) as the engine resolves it with `starred --all`: Home's curated
 // order, entries from other workspaces included, each row naming its
 // list and, when not Personal's, its workspace. The order is the
 // position; no number is shown. A row's checkbox ticks the item

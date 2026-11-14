@@ -156,7 +156,7 @@ Built 2026-11-03 (phase 2). `cli/src/daemon.rs`, `core/ffi/src/lib.rs`,
   on the loop that is calling it).
 - **Tray** (built, phase 1). `Engine.request(bytes) -> bytes` and
   `Engine.watch(sink)`, the socket's msgpack payloads over a function
-  call. The tray's `DaemonClient` keeps its codec and swaps its
+  call. The tray's `EngineClient` keeps its codec and swaps its
   transport; the connect, backoff and build-id dance left the app.
   Liveness comes from the sink's `stopped()` instead of a dropped
   socket. Typed uniffi request and reply enums can replace the bytes
@@ -664,14 +664,14 @@ window (all built 2026-11-04, above). Done.
    twin of a socket connection; `monoplan-ffi` exposes it as
    `Engine.request` (msgpack payload in, payload out, blocking) and
    `Engine.watch` (an `EngineSink` callback: `Watching`, then `Event`s,
-   `stopped` when the loop ends). `DaemonClient` speaks the same
+   `stopped` when the loop ends). `EngineClient` speaks the same
    payloads over an `EngineTransport` protocol; the app's is
    `FFITransport`, tests use an in-memory one. The client no longer
    connects, backs off or hellos a socket: it asks `EngineController`
    for an engine (`EngineProvision`) and hears the loop end through the
    watch. Tested in `cli/tests/daemon.rs`
    (`local_client_shares_the_loop_with_the_socket`) and
-   `DaemonClientTests`. `HostCmd` is deferred to phase 2, where the
+   `EngineClientTests`. `HostCmd` is deferred to phase 2, where the
    first variant the socket must not reach appears. Socket untouched.
 2. **Mirror on the engine** (built 2026-11-03). `HostCmd`,
    `LocalClient::subscribe` / `Subscription::import` / lease / fan-out

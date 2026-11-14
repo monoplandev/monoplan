@@ -9,7 +9,7 @@ final class FocusTests: XCTestCase {
      {"pos":4,"id":"d","text":"Fourth","list_id":"inbox","state":"todo"}]
     """
 
-    func testParsesTheDaemonsShapeIgnoringPlace() throws {
+    func testParsesTheEnginesShapeIgnoringPlace() throws {
         let rows = try Focus.parse(sample)
         XCTAssertEqual(rows.map(\.id), ["a", "b", "c", "d"])
         XCTAssertEqual(rows[0].listId, "work")

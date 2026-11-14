@@ -24,7 +24,7 @@ let debug = ProcessInfo.processInfo.environment["MONOPLAN_MAC_DEBUG"] == "1"
 final class TrayController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
-    private let client: DaemonClient
+    private let client: EngineClient
     private let location: ProfileLocation
     private let engineController: EngineController
     private var settingsWindow: SettingsWindowController?
@@ -80,7 +80,7 @@ final class TrayController: NSObject, NSMenuDelegate {
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         location = ProfileLocation.resolve()
-        client = DaemonClient()
+        client = EngineClient()
         engineController = EngineController(location: location, client: client)
         super.init()
 

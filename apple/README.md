@@ -78,7 +78,7 @@ on macOS the process that normally runs the profile's engine (`spec/daemon-plan.
 amendment 2026-10-27). One process: it runs the Rust engine loop
 in-process (`Engine` from `MonoplanCore`, the same loop as `monoplan
 daemon`) on a background thread, and its tray is an in-process client
-of that loop: `DaemonClient` (MonoplanMacKit) speaks the socket's
+of that loop: `EngineClient` (MonoplanMacKit) speaks the socket's
 MessagePack payloads over an `EngineTransport`, which in the app is
 `FFITransport` over `Engine.request` / `Engine.watch`, never the socket. It
 sends hello, opens a watch, and re-fetches `agenda --days 0 --json`
@@ -263,7 +263,7 @@ architecture, not to be used yet: sign in, sign out, run a sync, and
 show what the engine reports.
 
 The app runs the profile's engine, as the Mac app does: `EngineController`
-runs `Engine` from MonoplanCore in process and `DaemonClient` (the Kit,
+runs `Engine` from MonoplanCore in process and `EngineClient` (the Kit,
 consumed as the `MonoplanMacKit` product of `../MonoplanMac`) talks to
 it through `FFITransport`, hello then watch. Two things differ from
 the Mac. The engine serves **no socket**: nothing on iOS would dial one,
@@ -393,11 +393,11 @@ lookup beside Photon (`spec/place-plan.md`). There is no Inbox page of its own: 
 its workspace section in Home, a list page like any other. The lens
 reads are refetched on every `Changed` event, coalesced over 250 ms as
 the Mac tray's agenda is. **Starred** (`StarredView.swift`) is the
-Focus lens as the daemon resolves it (`Request.focus(all: true)`, i.e.
+Focus lens as the engine resolves it (`Request.focus(all: true)`, i.e.
 `starred --all --json`, `spec/cli.md` §Focus: Home's curated order with
 its cross-workspace entries resolved), each row with its list name and,
 when not Personal's, its workspace; read-only. **Agenda** (`AgendaView.swift`) is the
-daemon's merged agenda (`Request.agenda(days: AppModel.agendaDays, all: true)`, i.e.
+engine's merged agenda (`Request.agenda(days: AppModel.agendaDays, all: true)`, i.e.
 `agenda --all --json`, `spec/cli.md` §Items: every open workspace in
 one placement, the Home doc's hidden-from-calendar docs left out; the
 horizon is a century, so the whole future in one fetch, no paging), every

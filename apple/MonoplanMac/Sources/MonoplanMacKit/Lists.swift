@@ -1,7 +1,7 @@
 // List names as `monoplan lists ls --json --all` returns them
 // (cli/src/commands/lists.rs `ListJson`), reduced to the one thing the
 // tray needs: id → display name. The reserved lists (spec/data-model.md)
-// have client-side labels, so they resolve even if the daemon's list
+// have client-side labels, so they resolve even if the engine's list
 // view omits them.
 
 import Foundation

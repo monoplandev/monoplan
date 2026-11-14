@@ -122,16 +122,16 @@ One binary, two roles; and on macOS a third host, the app, which runs the same l
 
 Dispatch, at the top of `Cli::run`:
 
-- Doc commands (`item …`, `agenda`, `done`, `starred`, `list`, `bin`, `workspace export-json`, `workspace reconcile`) open the profile through `bootstrap::open_or_init`, which creates the local-only workspace on a fresh install (holding `daemon.lock` while it writes, so a racing second command waits and finds it), then are forwarded as a `DocCmd` and their output comes back as text. `item add -` reads stdin in the client; `workspace export-json --out` writes the file in the client. A hand-run `monoplan daemon start` on a fresh install creates the workspace the same way.
+- Doc commands (`item …`, `agenda`, `done`, `starred`, `list`, `bin`, `workspace export-json`, `workspace reconcile`) open the profile through `bootstrap::open_or_init`, which creates the local-only workspace on a fresh install (holding `engine.lock` while it writes, so a racing second command waits and finds it), then are forwarded as a `DocCmd` and their output comes back as text. `item add -` reads stdin in the client; `workspace export-json --out` writes the file in the client. A hand-run `monoplan daemon start` on a fresh install creates the workspace the same way.
 - `status` and `db status` are direct, read-only sqlite reads and never contact or start the daemon. `db clear` refuses while a daemon is running.
-- `signup`, `login`, `recover`, `password` and `logout` work on the profile files, so each first stops a running host and holds `daemon.lock` until the files are written (`client::claim`), keeping the app and any auto-spawn out meanwhile; `login` and `recover` then sync through a fresh host, which is what starts it (or the app, if it re-hosted first).
+- `signup`, `login`, `recover`, `password` and `logout` work on the profile files, so each first stops a running host and holds `engine.lock` until the files are written (`client::claim`), keeping the app and any auto-spawn out meanwhile; `login` and `recover` then sync through a fresh host, which is what starts it (or the app, if it re-hosted first).
 - `share` is HTTP against the server and runs in the client.
 
 ### Starting the daemon
 
-A client that finds no daemon starts one: it spawns `monoplan daemon --detach` from its own executable (`current_exe()`), in a new session (`setsid`), with the profile dir passed explicitly, and blocks on the child's first stdout line. Two clients racing to start it resolve through `daemon.lock`: the loser prints `already-running` and exits, and its parent connects normally. The first start prints one stderr line (`started monoplan daemon (pid N); …`).
+A client that finds no daemon starts one: it spawns `monoplan daemon --detach` from its own executable (`current_exe()`), in a new session (`setsid`), with the profile dir passed explicitly, and blocks on the child's first stdout line. Two clients racing to start it resolve through `engine.lock`: the loser prints `already-running` and exits, and its parent connects normally. The first start prints one stderr line (`started monoplan daemon (pid N); …`).
 
-A client that finds `daemon.lock` held but the socket not answering is looking at a daemon that is still starting or is wedged; it retries for a few seconds, then fails with a pointer to `daemon stop`.
+A client that finds `engine.lock` held but the socket not answering is looking at a daemon that is still starting or is wedged; it retries for a few seconds, then fails with a pointer to `daemon stop`.
 
 `--no-spawn` (or `MONOPLAN_NO_SPAWN=1`) turns a missing daemon into an error, for scripts and CI. Like `-w` it is a root-level flag, given before the verb.
 
@@ -154,8 +154,8 @@ Every connection starts with a hello carrying a build id (package version plus t
 Single account per install. One dir under XDG paths (`~/.local/share/monoplan/` on linux, equivalents elsewhere) — `logout` wipes it, signup/login re-creates it. Two side-by-side test accounts in dev: point `MONOPLAN_DATA_DIR` at distinct roots.
 
 - `monoplan.sqlite` — doc store (append-only `wal` + per-doc `snapshots`), the per-doc sync cursor (`docs.last_acked_server_seq` / `last_sync_at`), and the singleton `account` row (primary-doc id, plus account/device ids + email, all three NULL for a local-only workspace). `primary_doc_id` is the id of the Home doc, used to key local snapshot storage: server-assigned at login/recover, minted locally for a local-only workspace and kept through signup. See `spec/storage.md`.
-- `daemon.lock` — flock held by the running daemon (never unlinked; see `spec/peer-id-plan.md` for the rules). `peer-<n>.lock` — the peer-id slot leases.
-- `daemon.sock` — the daemon's Unix socket (mode 0600; falls back to a hash-named socket in the temp dir when the profile path is too long for `sun_path`). `engine.log` — stderr of a detached daemon and the embedded host's log; at each engine start a file over 1 MiB is cut back to its last 256 KiB.
+- `engine.lock` — flock held by the running daemon (never unlinked; see `spec/peer-id-plan.md` for the rules). `peer-<n>.lock` — the peer-id slot leases.
+- `engine.sock` — the daemon's Unix socket (mode 0600; falls back to a hash-named socket in the temp dir when the profile path is too long for `sun_path`). `engine.log` — stderr of a detached daemon and the embedded host's log; at each engine start a file over 1 MiB is cut back to its last 256 KiB.
 - `config.toml` — `{ server_url }`. Written by signup/login/recover; absent on a local-only workspace, which has no server to name. Operator-editable.
 - `secrets.toml` — optional `device_token` plus one `[docs."<doc_id>"] dek_hex = "…"` table per doc this install can open, in cleartext. The DEK is a doc key (`encryption.md`): login/recover store one entry per membership (the primary's unwrapped with the password or recovery KEK, the rest with the primary's DEK — the Home DEK); a local-only workspace holds its one minted doc; `monoplan auth password` re-wraps only the primary entry, since every other server-side wrap is under the Home DEK. Its presence is the "profile exists" marker (`Profile::active`), and the token the "has an account" one (`Secrets::has_account`): server-backed verbs fail with `ConfigError::NoAccount` without it.
 

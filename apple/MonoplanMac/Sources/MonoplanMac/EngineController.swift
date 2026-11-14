@@ -1,7 +1,7 @@
 // The app running the profile's engine (spec/daemon-plan.md, amended
 // 2026-10-27). One process: this controller runs the Rust engine loop
 // (`Engine` from MonoplanCore, the same loop as `monoplan daemon`) on a
-// background thread, and the tray's `DaemonClient` talks to it in
+// background thread, and the tray's `EngineClient` talks to it in
 // process through `FFITransport` (spec/mac-window-plan.md, phase 1).
 // The socket the engine serves is for the CLI; the app never opens it,
 // and it only ever talks to its own engine.
@@ -29,7 +29,7 @@ import MonoplanMacKit
 
 final class EngineController {
     private let location: ProfileLocation
-    private let client: DaemonClient
+    private let client: EngineClient
     private var engine: MonoplanCore.Engine?
     private var starting = false
     /// The engine is being started (`Engine.start` off the main thread):
@@ -45,7 +45,7 @@ final class EngineController {
     /// on disk says mid-way.
     var isBusy: Bool { accountWork != nil }
 
-    init(location: ProfileLocation, client: DaemonClient) {
+    init(location: ProfileLocation, client: EngineClient) {
         self.location = location
         self.client = client
         client.engineProvider = { [weak self] in

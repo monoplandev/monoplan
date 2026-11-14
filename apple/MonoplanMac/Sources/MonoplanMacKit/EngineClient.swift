@@ -230,7 +230,7 @@ public enum Request {
     /// every list id an item can carry resolves. `workspace` as for
     /// `items`.
     case lists(workspace: String? = nil)
-    /// Who is logged in, from the daemon's account row.
+    /// Who is logged in, from the engine's account row.
     case account
     /// Create a workspace the account owns, by name, and open it on the
     /// engine (`Request::CreateWorkspace`; the reply is `workspaceCreated`).
@@ -460,14 +460,14 @@ public enum Reply: Equatable {
 public enum ClientError: Error, LocalizedError {
     case notConnected
     case engineStopped
-    case daemon(String)
+    case engine(String)
     case protocolError(String)
 
     public var errorDescription: String? {
         switch self {
         case .notConnected: return String(localized: "not connected to the engine")
         case .engineStopped: return String(localized: "the engine has stopped")
-        case .daemon(let m): return m
+        case .engine(let m): return m
         case .protocolError(let m): return "protocol: \(m)"
         }
     }
@@ -494,7 +494,7 @@ public enum EngineProvision {
     case pending(String)
 }
 
-/// Where the profile lives and how to reach its daemon. Same rules as
+/// Where the profile lives and how to reach its engine. Same rules as
 /// `Profile` / `ipc::socket_path` in the CLI.
 public struct ProfileLocation {
     public let dir: URL
@@ -515,14 +515,14 @@ public struct ProfileLocation {
     /// hash-named fallback in the temp dir; both computed exactly as
     /// `ipc::socket_path` does.
     public func socketPath(tempDir: String = ProcessInfo.processInfo.environment["TMPDIR"] ?? "/tmp") -> String {
-        let direct = dir.path + "/daemon.sock"
+        let direct = dir.path + "/engine.sock"
         if direct.utf8.count <= 100 { return direct }
         let hash = String(format: "%016llx", Self.fnv1a(Array(dir.path.utf8)))
         let base = tempDir.hasSuffix("/") ? tempDir : tempDir + "/"
         return base + "monoplan-\(hash).sock"
     }
 
-    public var lockPath: String { dir.path + "/daemon.lock" }
+    public var lockPath: String { dir.path + "/engine.lock" }
 
     /// A profile exists, by the CLI's own rule (`Profile::active`):
     /// `secrets.toml` is there. True for an account's device and for a
@@ -576,14 +576,14 @@ public struct ProfileLocation {
     }
 }
 
-public final class DaemonClient {
+public final class EngineClient {
     public enum State: Equatable {
         case connecting(String)
         case connected(SyncStatus)
     }
 
     /// What the engine said about itself in its `Hello`.
-    public struct DaemonInfo: Equatable {
+    public struct EngineInfo: Equatable {
         public let buildId: String
         public let pid: Int64
     }
@@ -591,7 +591,7 @@ public final class DaemonClient {
     public var onEvent: ((WatchEvent) -> Void)?
     public var onState: ((State) -> Void)?
     /// Set on a successful handshake, cleared when the engine goes.
-    public private(set) var daemon: DaemonInfo?
+    public private(set) var engine: EngineInfo?
     public private(set) var state: State = .connecting(String(localized: "starting")) {
         didSet { if state != oldValue { onState?(state) } }
     }
@@ -690,7 +690,7 @@ public final class DaemonClient {
                     self.drop(reason: "bad hello")
                     return
                 }
-                self.daemon = DaemonInfo(buildId: buildId, pid: pid)
+                self.engine = EngineInfo(buildId: buildId, pid: pid)
                 t.watch(
                     onFrame: { [weak self] data in
                         self?.queue.async {
@@ -720,7 +720,7 @@ public final class DaemonClient {
     private func detach() {
         transport?.close()
         transport = nil
-        daemon = nil
+        engine = nil
     }
 
     private func scheduleRetry() {
@@ -760,7 +760,7 @@ public final class DaemonClient {
             if case .workspaceDeleted(_, let sync) = reply, case .connected = state {
                 state = .connected(sync)
             }
-            if case .error(let m) = reply { return .failure(ClientError.daemon(m)) }
+            if case .error(let m) = reply { return .failure(ClientError.engine(m)) }
             return .success(reply)
         }
     }

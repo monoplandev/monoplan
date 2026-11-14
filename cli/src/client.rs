@@ -83,7 +83,7 @@ pub async fn stop_if_running(profile_dir: &Path) -> anyhow::Result<bool> {
     Ok(true)
 }
 
-/// Stop whatever hosts the profile and hold `daemon.lock` until the
+/// Stop whatever hosts the profile and hold `engine.lock` until the
 /// guard drops, so nothing boots the doc while the caller rewrites the
 /// profile: not a client's auto-spawn, and not the app, which re-hosts
 /// as soon as it can after yielding to `Shutdown`. Drop the guard

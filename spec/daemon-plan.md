@@ -91,7 +91,7 @@ user-visible friction). The app only ever talks to its own engine.
    the CLI's auto-spawn does after the app quits.
 2. The app's engine honours `Shutdown` like any daemon. `logout`, `login`,
    `recover`, `signup` and `password` from the terminal stop it and
-   hold `daemon.lock` while they rewrite the profile (`client::claim`,
+   hold `engine.lock` while they rewrite the profile (`client::claim`,
    dropped before anything that needs a host, such as `login`'s
    initial sync), so neither the app nor a client's auto-spawn boots a
    half-written profile; the app starts its engine again once the lock is free.
@@ -128,9 +128,9 @@ tray / window     ──FFI──┘        │   (`monoplan daemon`, or the mac
                                   │    request / watch for the tray, subscribe / import /
                                   │    session for the window's mirror, spec/mac-window-plan.md)
                                   ├── <profile>/monoplan.sqlite
-                                  ├── <profile>/daemon.lock   (held: "a daemon owns this profile")
+                                  ├── <profile>/engine.lock   (held: "a daemon owns this profile")
                                   ├── <profile>/peer-<n>.lock (held: its Loro peer id)
-                                  └── <profile>/daemon.sock
+                                  └── <profile>/engine.sock
 ```
 
 - The socket lives in the profile dir, beside the db. The profile dir is
@@ -138,13 +138,13 @@ tray / window     ──FFI──┘        │   (`monoplan daemon`, or the mac
   isolation comes for free. macOS caps `sun_path` at 104 bytes; if the
   profile path is too long (tempdirs in tests can be), fall back to
   `$TMPDIR/monoplan-<blake3(profile dir)[..16]>.sock` and record the
-  path in `<profile>/daemon.sock.path` so clients find it.
-- The daemon holds `daemon.lock` for its lifetime: the same kernel
+  path in `<profile>/engine.sock.path` so clients find it.
+- The daemon holds `engine.lock` for its lifetime: the same kernel
   flock mechanism and rules as the peer lease (`spec/peer-id-plan.md`),
   released on any exit path, never unlinked. That lock, not a peer slot,
   is the election and the "is a daemon running" probe: the peer slot
   only identifies a Loro peer, and the daemon claims the lowest free one
-  like any process. A client that finds `daemon.lock` held but the
+  like any process. A client that finds `engine.lock` held but the
   socket not answering is looking at a daemon that is still starting
   (or wedged), and waits with bounded retries rather than proceeding
   alone.
@@ -159,11 +159,11 @@ Top of `Cli::run`:
 2. `status` and `db status` stay direct, read-only sqlite reads (WAL
    mode allows a concurrent reader) and never spawn or contact the
    daemon, as `spec/cli.md` already requires. `db clear` refuses
-   while `daemon.lock` is held.
+   while `engine.lock` is held.
 3. Account bootstrap (`signup`, `login`, `recover`, `logout`,
    `password`) runs in the client process as today, because it works
    on the profile files, not the doc. Each first sends `Shutdown` to a
-   running daemon and waits for `daemon.lock` to release; the next command
+   running daemon and waits for `engine.lock` to release; the next command
    respawns it. Pre-release this is simpler than teaching the daemon to
    hot-reload a profile. `login` and `recover` drop their "initial
    sync" step: the daemon syncs on start.
@@ -183,14 +183,14 @@ stays as the barrier `login` / `recover` and the tests use.
 The client spawns `current_exe() daemon --detach` as a child with stdin
 nulled, stdout piped and stderr sent to `engine.log`. The child's stdout
 *is* the readiness pipe: it `setsid`s (done by the parent's `pre_exec`),
-takes `daemon.lock`, binds the socket, opens the doc, then prints one
+takes `engine.lock`, binds the socket, opens the doc, then prints one
 line (`ready`, `already-running`, or `error: …`) and never uses stdout
 again. The client blocks on that line, so startup is deterministic and a
 failure carries a message. No `fork` in the client: it is multithreaded
 once tokio is up.
 
 Two clients may race and spawn two daemons. The loser fails the
-`daemon.lock` flock and exits 0 after printing `already-running`; its
+`engine.lock` flock and exits 0 after printing `already-running`; its
 parent connects normally. The lease is the election; nothing else is
 needed.
 
@@ -204,7 +204,7 @@ error (scripts, CI).
 
 The hello exchange carries a build id: `CARGO_PKG_VERSION` plus the
 executable's own mtime, so any rebuild changes it without a `build.rs`.
-On mismatch the client sends `Shutdown`, waits for `daemon.lock`, and
+On mismatch the client sends `Shutdown`, waits for `engine.lock`, and
 respawns from its own executable. Pre-release there is no compatibility
 window.
 
@@ -370,7 +370,7 @@ The host is `Engine` held open instead of torn down after one command
 - No idle timeout. Background sync is the point. `daemon stop` is the
   way out, and `install` makes the question moot.
 - On clean exit: persist, fold, close the WS, unlink the socket,
-  release `daemon.lock` (drop the `File`).
+  release `engine.lock` (drop the `File`).
 
 The daemon is headless. GUI run loops (NSApplication) belong to client
 processes.
@@ -447,7 +447,7 @@ about the product.
 1. **Host loop** (built). `monoplan daemon` runs `Engine` in the
    select loop with WS reconnect, liveness ping and the persist tick,
    attached to the terminal. No socket yet. `Engine::open` refuses
-   with `DaemonRunning` while `daemon.lock` is held, so the mixed-mode
+   with `DaemonRunning` while `engine.lock` is held, so the mixed-mode
    hazard cannot occur during the transition. Wake notifications are
    not hooked yet; the pong timeout covers sleep for now.
 2. **Socket and client** (built). `ipc.rs`, hello and build id,

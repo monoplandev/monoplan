@@ -20,7 +20,7 @@ final class AgendaTests: XCTestCase {
         Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 26, hour: h, minute: m))!
     }
 
-    func testParsesTheDaemonsShape() throws {
+    func testParsesTheEnginesShape() throws {
         let days = try Agenda.parse(sample)
         XCTAssertEqual(days.count, 3)
         XCTAssertEqual(days[0].rows.map(\.id), ["a", "b", "c", "d", "e"])

@@ -42,7 +42,7 @@ pub enum EngineError {
     /// No `secrets.toml` in the profile dir: nothing to run.
     #[error("not logged in")]
     NotLoggedIn,
-    /// Something `start` will not take over holds `daemon.lock`:
+    /// Something `start` will not take over holds `engine.lock`:
     /// another app's engine, an engine still starting, or a CLI command
     /// rewriting the profile (`client::claim`). Try again later.
     #[error("another process holds this profile")]

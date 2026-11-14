@@ -1,7 +1,7 @@
 // The one observable the views read: the client's state (what the
 // engine says about sync), the engine's identity, the session (account,
 // server, open docs) and the in-flight account work. It owns the
-// `DaemonClient` and the `EngineController`, exactly as the macOS app's
+// `EngineClient` and the `EngineController`, exactly as the macOS app's
 // delegate does; the views never touch either.
 
 import Combine
@@ -12,9 +12,9 @@ import WidgetKit
 
 final class AppModel: ObservableObject {
     /// Connected with the engine's current sync status, or why not yet.
-    @Published private(set) var clientState: DaemonClient.State = .connecting("starting")
+    @Published private(set) var clientState: EngineClient.State = .connecting("starting")
     /// What the engine said in its hello: its build id and pid.
-    @Published private(set) var engineInfo: DaemonClient.DaemonInfo?
+    @Published private(set) var engineInfo: EngineClient.EngineInfo?
     /// Identity, server and open docs, from `Engine.session`; nil without
     /// an engine.
     @Published private(set) var session: EngineSession?
@@ -81,7 +81,7 @@ final class AppModel: ObservableObject {
     @Published var signInError: String?
 
     let location: ProfileLocation
-    private let client: DaemonClient
+    private let client: EngineClient
     private let engineController: EngineController
 
     init() {
@@ -90,7 +90,7 @@ final class AppModel: ObservableObject {
         // the Rust side creates the profile dir itself but not its
         // parents.
         try? FileManager.default.createDirectory(at: location.dir, withIntermediateDirectories: true)
-        client = DaemonClient(clientId: "monoplan-ios")
+        client = EngineClient(clientId: "monoplan-ios")
         engineController = EngineController(location: location, client: client)
         hasAccount = location.hasAccount
         client.onState = { [weak self] state in self?.stateChanged(state) }
@@ -104,9 +104,9 @@ final class AppModel: ObservableObject {
         return nil
     }
 
-    private func stateChanged(_ state: DaemonClient.State) {
+    private func stateChanged(_ state: EngineClient.State) {
         clientState = state
-        engineInfo = client.daemon
+        engineInfo = client.engine
         hasAccount = location.hasAccount
         if case .connected = state {
             loadSession()

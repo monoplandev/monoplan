@@ -78,7 +78,7 @@ public struct MenuLine: Equatable {
 }
 
 public enum TodayMenu {
-    /// Today's rows as menu lines, in the order the daemon placed them.
+    /// Today's rows as menu lines, in the order the engine placed them.
     /// Only the Today group is shown; other groups (Unscheduled, later
     /// days) are not a tray's business.
     public static func lines(from days: [AgendaDay], now: Date, calendar: Calendar = .current) -> [MenuLine] {
