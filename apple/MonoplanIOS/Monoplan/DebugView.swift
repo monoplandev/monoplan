@@ -1,7 +1,8 @@
 // The Debug page, pushed from Settings: what the engine reports that
 // only a developer reads. The raw sync flags and the `Changed` events
 // counted as they arrive, with Sync now (push now) and Reconnect (drop
-// the socket and dial again); the engine's build, pid and profile path; and the session's
+// the socket and dial again); the engine's build, pid, profile path and
+// the profile's size on disc, file by file; and the session's
 // ids (account, device, each open doc). Account actions and the plain
 // sync status are in Settings (`SettingsView.swift`).
 
@@ -11,6 +12,7 @@ import SwiftUI
 
 struct DebugView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var localFiles: [(name: String, bytes: Int64)]?
 
     var body: some View {
         List {
@@ -20,10 +22,41 @@ struct DebugView: View {
         }
         .navigationTitle("Debug")
         .navigationBarTitleDisplayMode(.inline)
+        .task { await measureLocalData() }
         .refreshable {
             model.syncNow()
             model.loadSession()
+            await measureLocalData()
         }
+    }
+
+    private func measureLocalData() async {
+        let dir = model.location.dir
+        localFiles = await Task.detached { Self.fileSizes(dir) }.value
+    }
+
+    /// Bytes allocated to every regular file under `dir`, largest
+    /// first: the whole profile, not the sqlite file alone, since the
+    /// WAL sidecar can hold a real share of it between checkpoints.
+    private nonisolated static func fileSizes(_ dir: URL) -> [(name: String, bytes: Int64)] {
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .totalFileAllocatedSizeKey, .fileSizeKey]
+        guard let files = FileManager.default.enumerator(
+            at: dir, includingPropertiesForKeys: Array(keys)
+        ) else { return [] }
+        var sizes: [(name: String, bytes: Int64)] = []
+        let root = dir.standardizedFileURL.path + "/"
+        for case let url as URL in files {
+            guard let values = try? url.resourceValues(forKeys: keys),
+                  values.isRegularFile == true else { continue }
+            let path = url.standardizedFileURL.path
+            let name = path.hasPrefix(root) ? String(path.dropFirst(root.count)) : path
+            sizes.append((name, Int64(values.totalFileAllocatedSize ?? values.fileSize ?? 0)))
+        }
+        return sizes.sorted { $0.bytes > $1.bytes }
+    }
+
+    private static func format(bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
     private var syncSection: some View {
@@ -63,6 +96,19 @@ struct DebugView: View {
                     .font(.caption2.monospaced())
                     .multilineTextAlignment(.trailing)
                     .textSelection(.enabled)
+            }
+            if let files = localFiles {
+                LabeledContent(
+                    "Local data",
+                    value: Self.format(bytes: files.reduce(0) { $0 + $1.bytes }))
+                ForEach(files.filter { $0.bytes > 0 }, id: \.name) { file in
+                    LabeledContent {
+                        Text(Self.format(bytes: file.bytes))
+                    } label: {
+                        Text(file.name).font(.caption.monospaced())
+                    }
+                    .foregroundStyle(.secondary)
+                }
             }
         }
     }
