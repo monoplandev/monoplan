@@ -1436,6 +1436,31 @@ impl Host {
                     }
                 }
             }
+            // `places --items`: the Open items carrying a place, over
+            // every open doc, tagged by workspace (`commands/items.rs`).
+            // Account-scoped as `places` is, so `-w` does not narrow
+            // it. Read-only, like the three above.
+            Request::Doc {
+                workspace: _,
+                cmd: crate::commands::DocCmd::Places(args),
+            } if args.items => {
+                let candidates = self.engine.candidates();
+                let docs: Vec<(Option<&crate::workspace::Candidate>, &monoplan_core::Doc)> =
+                    candidates
+                        .iter()
+                        .filter_map(|c| self.engine.doc_for(c.doc_id).map(|d| (Some(c), d)))
+                        .collect();
+                let mut buf = Vec::new();
+                match crate::commands::items::placed_items(&docs, &args, &mut buf) {
+                    Ok(()) => Reply::Output {
+                        stdout: String::from_utf8_lossy(&buf).into_owned(),
+                        sync: self.sync_status(),
+                    },
+                    Err(e) => Reply::Err {
+                        message: format!("{e:#}"),
+                    },
+                }
+            }
             Request::Doc { workspace, cmd } => {
                 let doc_id = match self.engine.resolve(workspace.as_deref()) {
                     Ok(id) => id,

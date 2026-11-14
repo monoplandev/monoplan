@@ -1,6 +1,6 @@
 // Home: the root page and the app's one navigation stack; there is
-// no tab bar. First the pages that are not one list: Starred, Agenda
-// and Done (Starred with its count). Then a section per open workspace (Personal first, as
+// no tab bar. First the pages that are not one list: Starred, Agenda,
+// Map and Done (Starred with its count). Then a section per open workspace (Personal first, as
 // `Engine.session` orders them), each with its Inbox (and how many
 // Open items it holds) and then its
 // active lists in the doc's order, each led by its emoji (a folder
@@ -10,7 +10,8 @@
 // button sits at the top left and opens the sign-in sheet.
 // A floating bar (`BottomBar`: search, and an
 // add button that captures a new item into the list being shown, else
-// the Personal Inbox) sits under every page; while its field has
+// the Personal Inbox) sits under every page but the Map, whose sheet
+// has its own search; while its field has
 // focus or text, `SearchView` covers the stack. Every page is pushed
 // from here, and item rows on any of them tick and open the item's sheet.
 // Archived lists and the reserved `events` list (calendar-only,
@@ -93,6 +94,7 @@ struct SharedWorkspaceBadge: View {
 enum HomePage: Hashable {
     case starred
     case agenda
+    case map
     case done
     case settings
 }
@@ -121,6 +123,8 @@ struct HomeView: View {
     /// captures to.
     @State private var shownList: ListRef?
     @State private var showSignIn = false
+    /// The Map page is up: its sheet stands where the bottom bar does.
+    @State private var mapShown = false
 
     /// The device's list-counts preference (Settings), off by default:
     /// count each list's Open items on its row. The Inbox and Starred
@@ -155,6 +159,9 @@ struct HomeView: View {
                     }
                     NavigationLink(value: HomePage.agenda) {
                         Label("Calendar", systemImage: "calendar")
+                    }
+                    NavigationLink(value: HomePage.map) {
+                        Label("Map", systemImage: "map")
                     }
                     NavigationLink(value: HomePage.done) {
                         Label("Done", systemImage: "checkmark.circle")
@@ -230,6 +237,10 @@ struct HomeView: View {
                 switch page {
                 case .starred: StarredView()
                 case .agenda: AgendaView()
+                case .map:
+                    PlacesMapView()
+                        .onAppear { mapShown = true }
+                        .onDisappear { mapShown = false }
                 case .done: DoneView()
                 case .settings: SettingsView()
                 }
@@ -277,7 +288,9 @@ struct HomeView: View {
             path.append(captured.list)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            BottomBar(query: $query, searching: $searching, captureList: shownList)
+            if !mapShown {
+                BottomBar(query: $query, searching: $searching, captureList: shownList)
+            }
         }
         // The inset on the stack does not reach the scroll views inside
         // it, so every page's content gets the bar's height as a bottom

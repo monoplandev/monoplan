@@ -246,6 +246,22 @@ anything the web client has looked up once.
   them, coordinates; a label naming a known place takes its coordinates
   (see "Reuse").
 
+- `monoplan places [query]` lists the known places; `--items` lists
+  the Open items at a place across every workspace (`spec/cli.md`).
+
+## iOS map
+
+Built 2026-11-14 (`apple/MonoplanIOS/Monoplan/PlacesMapView.swift`): a
+Map page pushed from Home, reading `places --items --json`. One marker
+per distinct coordinates; a sheet over the map (strip / half / full)
+lists the pinned items nearest first, searchable, and opens an item's
+page in place. Distance is from the phone's location (Core Location,
+when-in-use, computed on the device, never sent) or, without
+permission, from the middle of the map. Items whose place has no
+coordinates are counted, not pinned. Map tiles come from Apple. Not
+built: narrowing the list to the visible region, ticking from the
+list, a tasks / events filter.
+
 ## Deferred, with their extension points
 
 - **Server-configured provider.** A `geocoder` section in `server.toml`

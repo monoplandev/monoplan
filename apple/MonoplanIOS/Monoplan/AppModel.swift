@@ -34,6 +34,11 @@ final class AppModel: ObservableObject {
     /// with its cross-workspace entries resolved.
     @Published private(set) var starred: [FocusRow] = []
     @Published private(set) var starredError: String?
+    /// The Open items that carry a place, every workspace (`places
+    /// --items --json`): what the Map page shows. Fetched while that
+    /// page is up.
+    @Published private(set) var placed: [PlacedItem] = []
+    @Published private(set) var placedError: String?
     /// The Done lens (`done -n <limit> --json`): the Personal
     /// workspace's newest `doneLimit` Done items, grouped by the day
     /// each was ticked. A window, never the whole history: the view
@@ -453,6 +458,14 @@ final class AppModel: ObservableObject {
         fetch(.focus(all: true), what: "starred", parse: Focus.parse) { [weak self] rows, error in
             if let rows { self?.starred = rows }
             self?.starredError = error
+        }
+    }
+
+    /// `places --items --json` through the engine.
+    func refreshPlaced() {
+        fetch(.placedItems, what: "placed items", parse: Placed.parse) { [weak self] rows, error in
+            if let rows { self?.placed = rows }
+            self?.placedError = error
         }
     }
 

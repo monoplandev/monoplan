@@ -9,10 +9,12 @@ use std::io::{BufRead, IsTerminal, Write};
 
 use clap::{ArgGroup, Parser, ValueEnum};
 use monoplan_core::{
-    Doc, ItemLifecycle, ItemView, LIST_INBOX, Place, PlaceSuggestion, WorkflowState, fold_label,
-    place_suggestions,
+    Doc, ItemLifecycle, ItemView, LIST_EVENTS, LIST_INBOX, Place, PlaceSuggestion, WorkflowState,
+    fold_label, place_matches, place_suggestions,
 };
 use serde::{Deserialize, Serialize};
+
+use crate::workspace::{Candidate, HOME_LABEL};
 
 // ---------- add ----------
 
@@ -321,6 +323,11 @@ pub struct PlacesArgs {
     /// Machine-parseable output.
     #[arg(long)]
     pub json: bool,
+    /// The Open items that carry a place, instead of the places: every
+    /// workspace this install can open, rows tagged with theirs.
+    #[arg(long)]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub items: bool,
 }
 
 #[derive(Serialize)]
@@ -358,6 +365,87 @@ pub fn places(open_docs: &[&Doc], args: PlacesArgs, out: &mut dyn Write) -> anyh
                 Some(address) => writeln!(out, "{}  ({address})  x{}", r.place.label, r.count)?,
                 None => writeln!(out, "{}  x{}", r.place.label, r.count)?,
             }
+        }
+    }
+    Ok(())
+}
+
+/// A `places --items` row: the `item ls --json` row plus where it is.
+#[derive(Serialize)]
+struct PlacedItemJson<'a> {
+    #[serde(flatten)]
+    item: ItemJson<'a>,
+    /// Absent for the reserved lists' ids no client labels.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    list_name: Option<String>,
+    /// The row's workspace, when the caller tagged its docs (the
+    /// daemon does). `doc_name` is absent for Home and an unnamed doc.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    doc_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    doc_name: Option<&'a str>,
+}
+
+/// `places --items`: the Open items (not closed, not binned) that carry
+/// a place, over `docs`, each doc's in its own item order; `query`
+/// keeps those whose place matches, as for the places themselves, and
+/// `limit` caps the rows. A place without coordinates counts: what can
+/// be pinned is the reader's question. What the iOS map reads.
+pub fn placed_items(
+    docs: &[(Option<&Candidate>, &Doc)],
+    args: &PlacesArgs,
+    out: &mut dyn Write,
+) -> anyhow::Result<()> {
+    let query = args.query.as_deref().unwrap_or("");
+    let mut rows: Vec<(Option<&Candidate>, ItemView, Option<String>)> = Vec::new();
+    for (tag, doc) in docs {
+        let names: std::collections::HashMap<String, String> = doc
+            .all_lists()
+            .into_iter()
+            .map(|l| (l.id, l.name))
+            .collect();
+        for item in doc.all_items() {
+            let placed = item.place.as_ref().is_some_and(|p| place_matches(p, query));
+            if !item.is_open() || !placed {
+                continue;
+            }
+            // The reserved lists have no `ListMeta` row, so they are
+            // named here as the clients label them.
+            let list_name = match item.list_id.as_str() {
+                LIST_INBOX => Some("Inbox".to_string()),
+                LIST_EVENTS => Some("Events".to_string()),
+                other => names.get(other).cloned(),
+            };
+            rows.push((*tag, item, list_name));
+        }
+    }
+    if args.limit > 0 {
+        rows.truncate(args.limit);
+    }
+    if args.json {
+        let json: Vec<PlacedItemJson> = rows
+            .iter()
+            .map(|(tag, item, list_name)| PlacedItemJson {
+                item: item_json(item),
+                list_name: list_name.clone(),
+                doc_id: tag.map(|c| c.doc_id.0.to_string()),
+                doc_name: tag.and_then(|c| c.name.as_deref()),
+            })
+            .collect();
+        write_json(out, &json)?;
+    } else {
+        for (tag, item, _) in &rows {
+            let doc = tag
+                .map(|c| format!("  [{}]", c.name.as_deref().unwrap_or(HOME_LABEL)))
+                .unwrap_or_default();
+            writeln!(
+                out,
+                "{}  {} {}{}{doc}",
+                item.id,
+                row_box(item),
+                item.text,
+                date_tags(item)
+            )?;
         }
     }
     Ok(())
@@ -754,6 +842,7 @@ mod tests {
                     query: query.map(str::to_string),
                     limit: 0,
                     json: true,
+                    items: false,
                 },
                 &mut out,
             )
@@ -790,6 +879,88 @@ mod tests {
         assert!(
             matches!(cmd, DocCmd::Places(a) if a.query.as_deref() == Some("gy") && a.limit == 8)
         );
+    }
+
+    /// The frame `Request.placedItems` hand-encodes.
+    #[test]
+    fn placed_items_frame_from_the_apps_decodes() {
+        use crate::commands::DocCmd;
+        let cmd: DocCmd = serde_json::from_value(serde_json::json!(
+            {"Places": {"query": null, "limit": 0, "json": true, "items": true}}
+        ))
+        .unwrap();
+        assert!(matches!(cmd, DocCmd::Places(a) if a.items && a.query.is_none()));
+    }
+
+    #[test]
+    fn placed_items_are_the_open_ones_with_a_place_tagged_by_workspace() {
+        use crate::workspace::Candidate;
+        use monoplan_core::DocId;
+        let place = |label: &str, coords: Option<(f64, f64)>| Place {
+            label: label.into(),
+            lat: coords.map(|c| c.0),
+            lon: coords.map(|c| c.1),
+            address: None,
+            reference: None,
+        };
+        let home = Doc::new().unwrap();
+        let gym = home.add_item(LIST_INBOX, "lift").unwrap();
+        home.set_item_place(&gym, Some(&place("Gym", Some((1.5, 2.5)))))
+            .unwrap();
+        home.add_item(LIST_INBOX, "no place").unwrap();
+        let done = home.add_item(LIST_INBOX, "done there").unwrap();
+        home.set_item_place(&done, Some(&place("Gym", Some((1.5, 2.5)))))
+            .unwrap();
+        home.set_item_lifecycle(&done, ItemLifecycle::Done).unwrap();
+        let binned = home.add_item(LIST_INBOX, "binned there").unwrap();
+        home.set_item_place(&binned, Some(&place("Gym", Some((1.5, 2.5)))))
+            .unwrap();
+        home.set_item_binned(&binned, true).unwrap();
+
+        let work = Doc::new().unwrap();
+        let list = work.add_list("Ops").unwrap();
+        let standup = work.add_item(&list, "standup").unwrap();
+        work.set_item_place(&standup, Some(&place("Office", None)))
+            .unwrap();
+
+        let home_tag = Candidate {
+            doc_id: DocId(uuid::Uuid::from_u128(1)),
+            name: None,
+        };
+        let work_tag = Candidate {
+            doc_id: DocId(uuid::Uuid::from_u128(2)),
+            name: Some("Work".into()),
+        };
+        let run = |query: Option<&str>| {
+            let mut out = Vec::new();
+            placed_items(
+                &[(Some(&home_tag), &home), (Some(&work_tag), &work)],
+                &PlacesArgs {
+                    query: query.map(str::to_string),
+                    limit: 0,
+                    json: true,
+                    items: true,
+                },
+                &mut out,
+            )
+            .unwrap();
+            serde_json::from_slice::<serde_json::Value>(&out).unwrap()
+        };
+        let all = run(None);
+        let rows = all.as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["id"], gym.as_str());
+        assert_eq!(rows[0]["place"]["lat"], 1.5);
+        assert_eq!(rows[0]["list_name"], "Inbox");
+        assert_eq!(rows[0]["doc_id"], home_tag.doc_id.0.to_string());
+        assert!(rows[0].get("doc_name").is_none());
+        assert_eq!(rows[1]["id"], standup.as_str());
+        assert_eq!(rows[1]["list_name"], "Ops");
+        assert_eq!(rows[1]["doc_name"], "Work");
+
+        let office = run(Some("off"));
+        assert_eq!(office.as_array().unwrap().len(), 1);
+        assert_eq!(office[0]["id"], standup.as_str());
     }
 
     #[test]

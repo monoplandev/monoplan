@@ -247,6 +247,13 @@ pub fn run_doc(
         DocCmd::Done(a) => done::run(doc, a, out),
         DocCmd::Focus(a) => focus::run(doc, a, out),
         DocCmd::Lists(a) => lists::run(doc, a, out),
+        // The daemon serves `--items` itself, tagged by workspace;
+        // here (no tags to give) the rows are the open docs' untagged.
+        DocCmd::Places(a) if a.items => {
+            let docs: Vec<(Option<&crate::workspace::Candidate>, &Doc)> =
+                open_docs.iter().map(|d| (None, *d)).collect();
+            items::placed_items(&docs, &a, out)
+        }
         DocCmd::Places(a) => items::places(open_docs, a, out),
         DocCmd::Find(a) => find::run(doc, a, out),
         DocCmd::ExportJson => {

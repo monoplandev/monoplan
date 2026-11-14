@@ -408,7 +408,7 @@ group as a section: Today, Unscheduled events, then each non-empty
 day, with the row's time, its workspace under the text when it is not
 Personal's, and the duration or overdue / due-today tone; read-only
 markup, nothing tappable yet. **Home** (`HomeView.swift`,
-2026-11-13) is the root and the index: first a section with Starred, Agenda and Done, then a section per open workspace (`Engine.session`'s
+2026-11-13) is the root and the index: first a section with Starred, Agenda, Map and Done, then a section per open workspace (`Engine.session`'s
 docs, Personal first), each with its Inbox and then its active lists
 (`Request.lists(workspace:)`, i.e. `list ls --json --all -w <doc id>`,
 one fetch per doc, refetched with the session on every `Changed`;
@@ -416,7 +416,16 @@ one fetch per doc, refetched with the session on every `Changed`;
 emoji (`ListIcon`: the `icon` the list JSON carries, a folder without
 one) on its Home row, in its page's title and on the item sheet. A list pushes its Open
 items (`Request.items(list:workspace:)`), refetched on `Changed` while
-shown; read-only. A gear at the top right of the index opens Settings, pushed onto the same stack. **Done** (`DoneView.swift`) is the
+shown; read-only. A gear at the top right of the index opens Settings, pushed onto the same stack. **Map**
+(`PlacesMapView.swift`, 2026-11-14) is the Open items that carry a
+place with coordinates (`Request.placedItems`, i.e. `places --items
+--json`, every open workspace), one marker per spot, under a sheet
+that stays up with the page (strip, half, full; the map stays live up
+to half): the items nearest first, from the phone's location
+(`LocationSource`, when-in-use, used on the device only) or else the
+middle of the map, with a search field; a marker narrows the list to
+its spot, and a row pushes the item's page inside the sheet. Home's
+bottom bar is hidden while it is up. **Done** (`DoneView.swift`) is the
 Personal workspace's Done items across every list, newest first, in a
 section per day ticked (`Request.done(limit:)`, i.e. `done -n N --json`,
 grouped by `Done.days`), each row with its list name. It is a window,

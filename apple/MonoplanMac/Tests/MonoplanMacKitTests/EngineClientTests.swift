@@ -156,6 +156,12 @@ final class EngineClientTests: XCTestCase {
             ])])])])
         )
         XCTAssertEqual(
+            Request.placedItems.value,
+            .map(["Doc": .map(["cmd": .map(["Places": .map([
+                "query": .nil, "limit": .int(0), "json": .bool(true), "items": .bool(true),
+            ])])])])
+        )
+        XCTAssertEqual(
             Request.find(query: "buy gro", limit: 50).value,
             .map(["Doc": .map(["cmd": .map(["Find": .map([
                 "query": .string("buy gro"), "limit": .int(50), "json": .bool(true),

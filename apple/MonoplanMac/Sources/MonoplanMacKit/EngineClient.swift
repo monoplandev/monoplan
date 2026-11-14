@@ -214,6 +214,11 @@ public enum Request {
     /// places, most recently used first (`KnownPlace.parse`). Spans
     /// every open doc, so it takes no workspace.
     case places(query: String, limit: Int)
+    /// `monoplan places --items --json`: the Open items that carry a
+    /// place, every open doc, tagged by workspace (`Placed.parse`).
+    /// The frame is pinned on the Rust side by
+    /// `placed_items_frame_from_the_apps_decodes`.
+    case placedItems
     /// `monoplan find <query> -n <limit> --json`: the search index of
     /// every open doc, merged and ranked (`Find.parse`). Spans every
     /// open doc, so it takes no workspace.
@@ -325,6 +330,10 @@ public enum Request {
             return Self.doc(nil, .map(["Places": .map([
                 "query": query.isEmpty ? .nil : .string(query),
                 "limit": .int(Int64(limit)), "json": .bool(true),
+            ])]))
+        case .placedItems:
+            return Self.doc(nil, .map(["Places": .map([
+                "query": .nil, "limit": .int(0), "json": .bool(true), "items": .bool(true),
             ])]))
         case .find(let query, let limit):
             return Self.doc(nil, .map(["Find": .map([
