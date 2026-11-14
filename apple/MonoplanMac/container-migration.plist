@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Copied into Contents/Resources by build-app.sh. When the sandboxed app
+  first launches and macOS creates its container, this moves the profile
+  an unsandboxed build left at ~/Library/Application Support/app.monoplan.mac
+  to the same place inside the container. It runs once, at container
+  creation, and does nothing if the old directory is missing.
+-->
+<plist version="1.0">
+<dict>
+	<key>Move</key>
+	<array>
+		<string>${ApplicationSupport}/app.monoplan.mac</string>
+	</array>
+</dict>
+</plist>

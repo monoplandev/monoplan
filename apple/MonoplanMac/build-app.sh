@@ -142,8 +142,14 @@ PLIST
 rm -f "$PARTIAL"
 printf 'APPL????' > "$CONTENTS/PkgInfo"
 
+# Moves an unsandboxed build's profile into the container on the first
+# sandboxed launch (see the file).
+cp "$PKG/container-migration.plist" "$CONTENTS/Resources/container-migration.plist"
+
 # Ad-hoc signatures: unsigned bundles are refused by Login Items and get
-# a fresh TCC identity every build.
-codesign --force --sign - "$APP" >/dev/null 2>&1
+# a fresh TCC identity every build. The entitlements turn on the App
+# Sandbox in every configuration, so dev runs hit the same walls the
+# store build will.
+codesign --force --sign - --entitlements "$PKG/Monoplan.entitlements" "$APP" >/dev/null
 
 echo ">> $APP"

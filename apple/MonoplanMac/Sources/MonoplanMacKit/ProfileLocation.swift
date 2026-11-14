@@ -11,15 +11,22 @@ import Foundation
 public struct ProfileLocation {
     public let dir: URL
 
-    /// `MONOPLAN_APP_DATA_DIR` verbatim, else `app.monoplan.mac` under
-    /// Application Support (inside the container once the app is
-    /// sandboxed). Not the CLI's `MONOPLAN_DATA_DIR`, so a shell that
-    /// exports it never points the app at the CLI's profile.
+    /// `app.monoplan.mac` under Application Support, which is inside the
+    /// app's container (both apps are sandboxed). `MONOPLAN_APP_DATA_DIR`
+    /// picks another profile: a relative value is a directory beside
+    /// the default one under Application Support (`dev` is
+    /// `…/Application Support/dev`), since the sandbox refuses paths
+    /// outside the container; an absolute value is taken verbatim, for
+    /// tests and unsandboxed runs. Not the CLI's `MONOPLAN_DATA_DIR`, so
+    /// a shell that exports it never points the app at the CLI's profile.
     public static func resolve(environment: [String: String] = ProcessInfo.processInfo.environment) -> ProfileLocation {
-        if let raw = environment["MONOPLAN_APP_DATA_DIR"], !raw.isEmpty {
-            return ProfileLocation(dir: URL(fileURLWithPath: raw).standardizedFileURL)
-        }
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        if let raw = environment["MONOPLAN_APP_DATA_DIR"], !raw.isEmpty {
+            let dir = raw.hasPrefix("/")
+                ? URL(fileURLWithPath: raw)
+                : support.appendingPathComponent(raw, isDirectory: true)
+            return ProfileLocation(dir: dir.standardizedFileURL)
+        }
         return ProfileLocation(dir: support.appendingPathComponent("app.monoplan.mac", isDirectory: true))
     }
 

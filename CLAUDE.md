@@ -11,6 +11,7 @@ Workflow: a reserved primary capture list ("Inbox", id `inbox`), any number of u
 - **CLI** (`cli/`) — Monoplan CLI
 - **Web** (`js/web/`, consuming `core/web/` wasm via `js/core/`) — browser client; multi-device proof spans CLI ↔ web.
 - **iOS** (`apple/MonoplanIOS/`) — native SwiftUI client over the same embedded engine and FFI, no webview; first surface (sign in / out, sync state) built 2026-11-05, see `apple/README.md`. **Android** — future
+- **No private APIs in the Apple apps** (decided 2026-11-15, for App Store review): only documented, public Apple API. No `NSClassFromString` / `NSSelectorFromString` on undocumented names, no `value(forKey:)` on undocumented keys, no swizzling (`method_exchangeImplementations`), no reaching into SwiftUI's or AppKit's internal view classes. If the public API can't do it, do without or build it ourselves.
 
 E2EE: password-derived KEK wraps a randomly-generated DEK. DEK encrypts every update blob. Server has no key. Recovery via a user-held recovery code (independent wrap of DEK) is implemented; server-assisted escrow (Vault-backed, opt-in) is future work.
 

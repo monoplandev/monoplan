@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The Mac app's entitlements, signed in by build-app.sh. The App Sandbox
+  (required on the Mac App Store) with outgoing network only: the sync
+  server over HTTPS / WebSocket and MapKit's tiles. Everything the app
+  writes is the profile under Application Support, which the sandbox
+  puts in the app's container.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+</dict>
+</plist>

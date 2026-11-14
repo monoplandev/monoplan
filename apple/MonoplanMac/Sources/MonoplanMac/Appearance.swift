@@ -45,24 +45,6 @@ enum PaneColor {
         }
     }
 
-    /// A selected row's gray, `system` (the row's own) brightened by
-    /// half: in light halfway to white (#dcdcdc to #eeeeee), in dark
-    /// half as bright again (#464646 to #696969).
-    static func rowSelection(_ system: NSColor) -> NSColor {
-        NSColor(name: nil) { appearance in
-            var resolved = system
-            appearance.performAsCurrentDrawingAppearance {
-                resolved = system.usingColorSpace(.sRGB) ?? system
-            }
-            guard appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua else {
-                return resolved.blended(withFraction: 0.5, of: .white) ?? resolved
-            }
-            return NSColor(
-                srgbRed: min(resolved.redComponent * 1.5, 1), green: min(resolved.greenComponent * 1.5, 1),
-                blue: min(resolved.blueComponent * 1.5, 1), alpha: resolved.alphaComponent)
-        }
-    }
-
     /// A rule across the item's panel: the system separator in dark;
     /// in light, the panes' divider (lighter than `Divider()`'s).
     static let panelRule = NSColor(name: nil) { appearance in

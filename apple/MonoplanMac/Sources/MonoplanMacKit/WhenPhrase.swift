@@ -13,10 +13,10 @@
 // bare month, a bare duration). It gives a range and a resolved `Date`
 // and nothing else, so this file adds what the web's rules need:
 //
-//   - All-day or timed. The detector reports an all-day date as 12:00;
-//     whether a time was actually written is its `timeIsSignificant`,
-//     an undocumented key, read only if the result answers to it.
-//     Without it a 12:00 result reads as all-day.
+//   - All-day or timed. The detector reports an all-day date as 12:00,
+//     so a 12:00 result reads as all-day unless the phrase names noon
+//     itself ("at noon", "12pm"). The detector's own flag for this is
+//     private API, which the app does not use.
 //   - A time-of-day word with no clock time ("friday night") takes the
 //     web's estimated hours (morning 09:00, afternoon 15:00, evening
 //     18:00, night 20:00), not the detector's (its night is 19:00).
@@ -65,7 +65,7 @@ public struct WhenPhrase: Equatable {
         for match in matches.reversed() {
             guard let date = match.date else { continue }
             let phrase = string.substring(with: match.range)
-            if let when = value(of: phrase, date: date, timed: timeWritten(match, date), now: now) {
+            if let when = value(of: phrase, date: date, timed: timeWritten(phrase, date), now: now) {
                 return WhenPhrase(text: phrase, when: when)
             }
         }
@@ -113,16 +113,21 @@ public struct WhenPhrase: Equatable {
         return calendar
     }
 
-    /// Whether the phrase said a time. The detector's own answer where
-    /// it has one; else anything but its all-day placeholder, noon.
-    private static func timeWritten(_ match: NSTextCheckingResult, _ date: Date) -> Bool {
-        if match.responds(to: NSSelectorFromString("timeIsSignificant")),
-           let written = match.value(forKey: "timeIsSignificant") as? Bool {
-            return written
-        }
+    /// Whether the phrase said a time: anything but the detector's
+    /// all-day placeholder, noon, unless the phrase itself names noon
+    /// ("at noon", "12pm", "12:00", "mediodía").
+    private static func timeWritten(_ phrase: String, _ date: Date) -> Bool {
         let c = calendar.dateComponents([.hour, .minute], from: date)
-        return !(c.hour == 12 && c.minute == 0)
+        guard c.hour == 12, c.minute == 0 else { return true }
+        let range = NSRange(location: 0, length: (phrase as NSString).length)
+        return saysNoon.firstMatch(in: phrase, range: range) != nil
     }
+
+    /// Noon written out: the word, or 12 as a clock time (with minutes,
+    /// pm or h), never a bare 12, which is a day of the month.
+    private static let saysNoon = try! NSRegularExpression(
+        pattern: #"\b(noon|midday|mediod[ií]a)\b|\b12(:00|\s*p\.?m\.?|\s*h)"#,
+        options: [.caseInsensitive])
 
     /// Time-of-day words and the hour each estimates (the web's
     /// `TIME_OF_DAY`, both grammars: the detector does not say which

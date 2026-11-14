@@ -28,6 +28,17 @@ monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's 
          → MonoplanMac, MonoplanIOS      consume MonoplanCore (and MonoplanMac's Kit product) as local packages
 ```
 
+## Public API only
+
+Both apps use only documented, public Apple API (decided 2026-11-15):
+App Store review scans binaries for private class and selector names,
+and private hooks break silently across OS releases. No
+`NSClassFromString` / `NSSelectorFromString` on undocumented names, no
+`value(forKey:)` on undocumented keys, no swizzling, no patching
+SwiftUI's or AppKit's internal classes. This is why list selections use
+the system's accent highlight, and why `WhenPhrase` tells a typed noon
+from the detector's all-day placeholder by the phrase's own words.
+
 ## Prerequisites
 
 - **Rust** with the Apple targets (the build script adds them for you):
@@ -161,12 +172,22 @@ bun run mac                                           # build Monoplan.app (debu
 bun run mac:app                                       # build Monoplan.app (release) and `open` it
 bun run mac:install                                   # build release, quit a running Monoplan, install to /Applications (`-d ~/Applications`, `--no-open`) and launch
 swift test --package-path apple/MonoplanMac           # Kit and tray-row tests, no engine started
-MONOPLAN_APP_DATA_DIR=local/mac bun run mac           # a different profile (the app ignores the CLI's MONOPLAN_DATA_DIR)
+MONOPLAN_APP_DATA_DIR=dev bun run mac                 # a different profile, beside the default one in the container (the app ignores the CLI's MONOPLAN_DATA_DIR)
 MONOPLAN_MAC_DEBUG=1 bun run mac                      # log state and rows to stderr
 ```
 
-The in-app engine logs to `engine.log` in the profile dir (`~/Library/
-Application Support/monoplan/engine.log` by default; `RUST_LOG`
+The app is sandboxed in every build (`Monoplan.entitlements`: App
+Sandbox plus outgoing network, signed in by `build-app.sh`), so its
+Application Support is the container's:
+`~/Library/Containers/app.monoplan.mac/Data/Library/Application Support/app.monoplan.mac`
+is the profile. A relative `MONOPLAN_APP_DATA_DIR` lands beside it; an
+absolute one outside the container is refused by the sandbox. On the
+first sandboxed launch `container-migration.plist` moves a profile an
+earlier unsandboxed build left at `~/Library/Application Support/app.monoplan.mac`
+into the container.
+
+The in-app engine logs to `engine.log` in the profile dir (the
+container path above by default; `RUST_LOG`
 overrides the `info` level): connect failures and drops land there
 once per distinct reason, and the same reason shows on the Settings
 Sync row and in `monoplan daemon status` ("offline; never synced
@@ -175,12 +196,11 @@ log: `log show --predicate 'process == "MonoplanMac"' --last 1h`.
 
 `apple/MonoplanMac/build-app.sh` lays out `apple/MonoplanMac/.build/Monoplan.app`
 (gitignored): the SwiftPM binary (which links MonoplanCore; the script
-runs `build-xcframework.sh` when the XCFramework is missing), the
-`monoplan` CLI beside it in `Contents/MacOS` (built by cargo in the same
-configuration, for the terminal), an
+runs `build-xcframework.sh` when the XCFramework is missing), an
 Info.plist (`app.monoplan.mac`,
-`LSUIElement`, version from the workspace `Cargo.toml`), ad-hoc
-signatures, and the app icon. The icon is the Icon Composer document
+`LSUIElement`, version from the workspace `Cargo.toml`), the container
+migration plist, an ad-hoc signature carrying the sandbox entitlements,
+and the app icon. The icon is the Icon Composer document
 `apple/icon.icon`; `actool` compiles it straight from that file into
 `Assets.car` (the layered icon macOS 26 renders) and `icon.icns` (the
 flat fallback for macOS 14 and 15). Edit the icon in Icon Composer and
