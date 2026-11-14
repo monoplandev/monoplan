@@ -101,16 +101,6 @@
         }
       }
     },
-    "Add an item": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Añadir un elemento"
-          }
-        }
-      }
-    },
     "Advanced": {
       "localizations": {
         "es": {
@@ -401,6 +391,16 @@
         }
       }
     },
+    "Duplicate": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Duplicar"
+          }
+        }
+      }
+    },
     "Edit": {
       "localizations": {
         "es": {
@@ -637,6 +637,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Minimizar"
+          }
+        }
+      }
+    },
+    "More": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Más"
+          }
+        }
+      }
+    },
+    "Move to Bin": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mover a la papelera"
           }
         }
       }

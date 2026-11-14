@@ -596,6 +596,21 @@ final class MainWindowModel: ObservableObject {
         write { try $0.setStarred(workspace: workspace, id: id, starred: starred) }
     }
 
+    /// Copy an item beside itself in its own list
+    /// (`Engine.duplicateItem`). On Starred the copy is starred too,
+    /// under the row it came from, as on iOS.
+    func duplicate(workspace: String?, id: String) {
+        let star = shown.lens == .starred
+        write { _ = try $0.duplicateItem(workspace: workspace, id: id, star: star) }
+    }
+
+    /// Send an item to the Bin (`Engine.setBinned`); its panel shuts
+    /// with it. No confirmation: the Bin restores it.
+    func bin(workspace: String?, id: String) {
+        if selected?.id == id { clearItem() }
+        write { try $0.setBinned(workspace: workspace, id: id, binned: true) }
+    }
+
     func add(_ text: String) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -625,7 +640,6 @@ let listCountsKey = "listCounts"
 
 struct MainWindowView: View {
     @ObservedObject var model: MainWindowModel
-    @State private var draft = ""
     /// The device's list-counts preference (Settings), off by default:
     /// whether a list's row carries its Open count, as the web's "Show
     /// list counts in nav".
@@ -786,6 +800,7 @@ struct MainWindowView: View {
                         }
                     }
                     .itemRow()
+                    .itemMenu(model, workspace: model.shown.workspace, id: item.id)
                     .tag(item.id)
                 }
                 if model.items.isEmpty {
@@ -794,14 +809,6 @@ struct MainWindowView: View {
             }
             .listStyle(.inset)
             .scrollContentBackground(.hidden)
-            Divider()
-            TextField("Add an item", text: $draft)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit {
-                    model.add(draft)
-                    draft = ""
-                }
-                .padding(8)
         }
     }
 
@@ -817,7 +824,7 @@ struct MainWindowView: View {
             ForEach(model.agenda, id: \.day) { group in
                 Section {
                     ForEach(group.rows, id: \.id) { row in
-                        agendaRow(row).itemRow().tag(row.id)
+                        agendaRow(row).itemRow().itemMenu(model, workspace: row.docId, id: row.id).tag(row.id)
                     }
                     if group.rows.isEmpty {
                         Text("Nothing today").foregroundStyle(.secondary)
@@ -879,6 +886,7 @@ struct MainWindowView: View {
                         .lineLimit(1)
                 }
                 .itemRow()
+                .itemMenu(model, workspace: row.docId, id: row.id)
                 .tag(row.id)
             }
             if model.starred.isEmpty {
@@ -913,6 +921,7 @@ struct MainWindowView: View {
                         .fixedSize()
                 }
                 .itemRow()
+                .itemMenu(model, workspace: row.workspace, id: row.item.id)
                 .tag(row.item.id)
             }
             if model.done.isEmpty {
@@ -955,6 +964,16 @@ private extension View {
     func itemRow() -> some View {
         frame(height: 24)
             .listRowSeparatorTint(Color(nsColor: PaneColor.rowDivider))
+    }
+
+    /// An item row's right-click menu: the same actions as the panel's
+    /// "…" button in the toolbar (`MainSplitViewController`).
+    func itemMenu(_ model: MainWindowModel, workspace: String?, id: String) -> some View {
+        contextMenu {
+            Button("Duplicate") { model.duplicate(workspace: workspace, id: id) }
+            Divider()
+            Button("Move to Bin") { model.bin(workspace: workspace, id: id) }
+        }
     }
 }
 

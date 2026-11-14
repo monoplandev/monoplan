@@ -13,8 +13,6 @@
 // here first: in a window made by hand their toolbar items do not
 // land over the panel.
 //
-// The panel has no state menu and no more menu yet: it has no writes
-// for them.
 
 import AppKit
 import MonoplanCore
@@ -23,6 +21,10 @@ import SwiftUI
 private extension NSToolbarItem.Identifier {
     static let itemStatus = NSToolbarItem.Identifier("MonoplanItemStatus")
     static let itemStar = NSToolbarItem.Identifier("MonoplanItemStar")
+    /// The item's "…" menu, after the star with no space between, so
+    /// the two share one glass. The rows' right-click menu holds the
+    /// same actions.
+    static let itemMore = NSToolbarItem.Identifier("MonoplanItemMore")
     /// The separator tracking the panel's edge (the system's own
     /// inspector separator wants an inspector item).
     static let panelSeparator = NSToolbarItem.Identifier("MonoplanPanelSeparator")
@@ -170,15 +172,18 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate, N
 
     /// The panel's part of the bar: nothing with the panel shut; else
     /// its separator, the status once the item is read, and the star
-    /// at the far edge. No close button: Escape, or its edge dragged
-    /// shut. Only an Open item can be starred (spec/focus.md).
+    /// and the "…" menu at the far edge. No close button: Escape, or
+    /// its edge dragged shut. Only an Open item can be starred
+    /// (spec/focus.md); a binned item has neither.
     private func panelItems() -> [NSToolbarItem.Identifier] {
         guard model.selected != nil else { return [] }
         var items: [NSToolbarItem.Identifier] = [.panelSeparator]
         guard let item = model.detail else { return items }
         items.append(.itemStatus)
-        if item.item.binnedAt == nil, item.closedAt == nil {
-            items += [.flexibleSpace, .itemStar]
+        if item.item.binnedAt == nil {
+            items.append(.flexibleSpace)
+            if item.closedAt == nil { items.append(.itemStar) }
+            items.append(.itemMore)
         }
         return items
     }
@@ -226,7 +231,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate, N
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        Self.fixedItems + [.panelSeparator, .signIn, .account, .itemStatus, .itemStar]
+        Self.fixedItems + [.panelSeparator, .signIn, .account, .itemStatus, .itemStar, .itemMore]
     }
 
     func toolbar(
@@ -246,6 +251,16 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate, N
             item.showsIndicator = false
             item.menu.delegate = self
             item.menu.autoenablesItems = false
+            return item
+        }
+        if identifier == .itemMore {
+            let item = NSMenuToolbarItem(itemIdentifier: identifier)
+            let label = String(localized: "More")
+            item.image = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: label)
+            item.label = label
+            item.toolTip = label
+            item.showsIndicator = false
+            item.menu = itemMenu()
             return item
         }
         let item = NSToolbarItem(itemIdentifier: identifier)
@@ -360,6 +375,30 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate, N
             let selected = model.selected
         else { return }
         model.setState(workspace: selected.workspace, id: selected.id, state: state)
+    }
+
+    /// The "…" menu: the rows' right-click menu (`itemMenu` in
+    /// `MainWindow.swift`), for the panel's item.
+    private func itemMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let duplicate = NSMenuItem(
+            title: String(localized: "Duplicate"), action: #selector(duplicateItem(_:)), keyEquivalent: "")
+        let bin = NSMenuItem(
+            title: String(localized: "Move to Bin"), action: #selector(binItem(_:)), keyEquivalent: "")
+        for row in [duplicate, bin] { row.target = self }
+        menu.items = [duplicate, .separator(), bin]
+        return menu
+    }
+
+    @objc private func duplicateItem(_ sender: Any?) {
+        guard let selected = model.selected else { return }
+        model.duplicate(workspace: selected.workspace, id: selected.id)
+    }
+
+    @objc private func binItem(_ sender: Any?) {
+        guard let selected = model.selected else { return }
+        model.bin(workspace: selected.workspace, id: selected.id)
     }
 
     @objc private func toggleStar(_ sender: Any?) {
