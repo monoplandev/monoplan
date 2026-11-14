@@ -79,7 +79,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in
                 guard let self, let window = self.window else { return }
-                let title = self.model.listTitle
+                let title = self.model.windowTitle
                 if window.title != title { window.title = title }
                 self.split.sync()
             }
@@ -309,6 +309,19 @@ final class MainWindowModel: ObservableObject {
             guard let found = lists.first(where: { $0.id == list }) else { return list }
             return [found.icon, found.name].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
         }
+    }
+
+    /// The window's title: the list's name with its Open count, as the
+    /// sidebar row has it. Starred counts its rows; the Calendar and
+    /// Done have no count (Done's rows are capped). None for zero.
+    var windowTitle: String {
+        let count: Int
+        switch shown.lens {
+        case .starred: count = starred.count
+        case .agenda, .done: count = 0
+        case nil: count = items.count
+        }
+        return count > 0 ? "\(listTitle) (\(count))" : listTitle
     }
 
     func engineStateChanged(_ state: EngineState) {
