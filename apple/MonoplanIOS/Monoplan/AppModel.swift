@@ -3,6 +3,14 @@
 // server, open docs) and the in-flight account work. It owns the
 // `EngineClient` and the `EngineController`, exactly as the macOS app's
 // delegate does; the views never touch either.
+//
+// Two paths reach the one engine while the app moves off the CLI's
+// wire (spec/swift-bindings-plan.md, phase 2). Home's lists, a list
+// page's items, capture and the tick are typed calls (`call` / `read`
+// below, over `EngineCalls`) returning the generated records (`Item`,
+// `ListInfo`); everything else is still a `Request` through
+// `EngineClient` (`fetch` / `write`), decoded into the Kit's models,
+// and so are the `Changed` events.
 
 import Combine
 import Foundation
@@ -75,12 +83,14 @@ final class AppModel: ObservableObject {
     private var binRound = 0
     /// List id → display name, for the rows of lenses that span lists.
     @Published private(set) var listNames = Lists.names(from: [])
-    /// Each open workspace's lists (`list ls --json --all` per doc),
-    /// keyed by doc id: the Home index. Refetched with the session.
-    @Published private(set) var listsByDoc: [String: [ListRow]] = [:]
-    /// A browsed list's Open items, keyed by `ListRef.key`, fetched when
-    /// its page appears and again on each `Changed` while it is shown.
-    @Published private(set) var listItems: [String: [ItemRow]] = [:]
+    /// Each open workspace's lists, archived ones included
+    /// (`Engine.lists` per doc), keyed by doc id: the Home index.
+    /// Refetched with the session.
+    @Published private(set) var listsByDoc: [String: [ListInfo]] = [:]
+    /// A browsed list's Open items (`Engine.items`), keyed by
+    /// `ListRef.key`, fetched when its page appears and again on each
+    /// `Changed` while it is shown.
+    @Published private(set) var listItems: [String: [Item]] = [:]
     @Published private(set) var listErrors: [String: String] = [:]
     /// The lists opened so far, to reread after a write of ours.
     private var browsedLists: [String: ListRef] = [:]
@@ -216,7 +226,7 @@ final class AppModel: ObservableObject {
     func showedCaptured() { captured = nil }
 
     /// Capture: create an item at the top of `list`, in Backlog
-    /// (`item add <text> --list --top`), then reread what is on screen as
+    /// (`Engine.addItem`), then reread what is on screen as
     /// `setDone` does. `done` gets the new item, or why there is none;
     /// it may be left out by a caller that is going away (a capture
     /// sheet closing over a typed title).
@@ -224,43 +234,45 @@ final class AppModel: ObservableObject {
         text: String, to list: ListRef, whenSuggested: String? = nil,
         done: ((ItemRef?, String?) -> Void)? = nil
     ) {
-        client.send(.addItem(text: text, list: list.listId, top: true, workspace: selector(list.docId))) { [weak self] result in
+        let workspace = selector(list.docId)
+        let listId = list.listId
+        call({ try $0.addItem(workspace: workspace, list: listId, text: text, top: true) }) { [weak self] result in
             guard let self else { return }
-            let failure: String
             switch result {
-            case .success(.output(let stdout, _)):
-                let id = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !id.isEmpty {
-                    refreshLenses()
-                    refreshListRows()
-                    for list in browsedLists.values { refreshList(list) }
-                    let ref = ItemRef(docId: list.docId, itemId: id, title: text)
-                    captured = Captured(list: list, itemId: id)
-                    // The date its title named, as a question on the
-                    // new item (`WhenSuggest`).
-                    if let whenSuggested { setWhenSuggested(ref, when: whenSuggested) }
-                    done?(ref, nil)
-                    return
-                }
-                failure = "could not add item: no id came back"
-            case .success(let other):
-                failure = "could not add item: \(String(describing: other))"
+            case .success(let id):
+                refreshLenses()
+                refreshListRows()
+                for list in browsedLists.values { refreshList(list) }
+                let ref = ItemRef(docId: list.docId, itemId: id, title: text)
+                captured = Captured(list: list, itemId: id)
+                // The date its title named, as a question on the
+                // new item (`WhenSuggest`).
+                if let whenSuggested { setWhenSuggested(ref, when: whenSuggested) }
+                done?(ref, nil)
             case .failure(let error):
-                failure = "could not add item: \(engineErrorMessage(error))"
+                let failure = "could not add item: \(engineErrorMessage(error))"
+                lastError = failure
+                done?(nil, failure)
             }
-            lastError = failure
-            done?(nil, failure)
         }
     }
 
-    /// Tick an item, or reopen a closed one (`item set --lifecycle`).
+    /// Tick an item, or reopen a closed one (`Engine.setDone`).
     /// Nothing is assumed about the result: once the engine has applied
     /// it, everything on screen is read again at once rather than after
     /// the `Changed` coalescing delay, so the tick lands in the same
     /// frame or two. In process, the write and the reads are
     /// milliseconds.
     func setDone(_ ref: ItemRef, done: Bool) {
-        write(.setDone(id: ref.itemId, done: done, workspace: selector(ref.docId)), to: ref)
+        let workspace = selector(ref.docId)
+        let id = ref.itemId
+        call({ try $0.setDone(workspace: workspace, id: id, done: done) }) { [weak self] result in
+            switch result {
+            case .success: self?.wrote(to: ref)
+            case .failure(let error):
+                self?.lastError = "could not update item: \(engineErrorMessage(error))"
+            }
+        }
     }
 
     /// Move an item to any workflow state, by its JSON name
@@ -448,7 +460,7 @@ final class AppModel: ObservableObject {
     /// The name of a list in any open workspace, for a row that names
     /// the list its item is in.
     func listName(_ listId: String, inDoc docId: String) -> String? {
-        Lists.names(from: listsByDoc[docId] ?? [])[listId]
+        (listsByDoc[docId] ?? []).names[listId]
     }
 
     /// Set or clear (nil) an item's planned date, with what to do to
@@ -483,7 +495,7 @@ final class AppModel: ObservableObject {
     func lists(inDoc docId: String?) -> [ListRef] {
         guard let docId = docId ?? session?.primaryDocId else { return [] }
         return [ListRef(docId: docId, listId: "inbox", name: "Inbox")]
-            + Lists.active(listsByDoc[docId] ?? []).map {
+            + (listsByDoc[docId] ?? []).userLists.map {
                 ListRef(docId: docId, listId: $0.id, name: $0.name, icon: $0.icon)
             }
     }
@@ -596,14 +608,50 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             switch result {
             case .success(.output):
-                refreshLenses()
-                if itemDetails[ref.key] != nil { refreshItem(ref) }
-                refreshListRows()
-                for list in browsedLists.values { refreshList(list) }
+                wrote(to: ref)
             case .success(let other):
                 lastError = "could not update item: \(String(describing: other))"
             case .failure(let error):
                 lastError = "could not update item: \(engineErrorMessage(error))"
+            }
+        }
+    }
+
+    /// An item write of ours has been applied: read again everything
+    /// that may show it.
+    private func wrote(to ref: ItemRef) {
+        refreshLenses()
+        if itemDetails[ref.key] != nil { refreshItem(ref) }
+        refreshListRows()
+        for list in browsedLists.values { refreshList(list) }
+    }
+
+    /// One typed call on the running engine (`EngineCalls`: off the
+    /// main thread, in the order made); `done` gets the result back on
+    /// the main queue. With no engine it fails as a stopped one does.
+    private func call<T>(
+        _ body: @escaping (MonoplanCore.Engine) throws -> T,
+        done: @escaping (Result<T, Error>) -> Void
+    ) {
+        guard let calls = engineController.calls else {
+            DispatchQueue.main.async { done(.failure(EngineError.Stopped)) }
+            return
+        }
+        calls.run(body, completion: done)
+    }
+
+    /// A typed read. No engine is not an error, as in `fetch`: the rows
+    /// stay until the next engine's refresh replaces them, so `done`
+    /// gets neither rows nor an error then.
+    private func read<T>(
+        _ body: @escaping (MonoplanCore.Engine) throws -> T,
+        done: @escaping (T?, String?) -> Void
+    ) {
+        call(body) { result in
+            switch result {
+            case .success(let value): done(value, nil)
+            case .failure(EngineError.Stopped): return
+            case .failure(let error): done(nil, engineErrorMessage(error))
             }
         }
     }
@@ -652,7 +700,8 @@ final class AppModel: ObservableObject {
     /// Home's rows follow it.
     private func refreshListRows() {
         for doc in session?.docs ?? [] {
-            fetch(.lists(workspace: selector(doc.docId)), what: "lists", parse: Lists.parse) { [weak self] rows, _ in
+            let workspace = selector(doc.docId)
+            read({ try $0.lists(workspace: workspace, filter: .all) }) { [weak self] rows, _ in
                 if let rows { self?.listsByDoc[doc.docId] = rows }
             }
         }
@@ -663,11 +712,12 @@ final class AppModel: ObservableObject {
         listItems["\(docId)/inbox"]?.count
     }
 
-    /// `item ls --list <list> -w <doc> --json`: one browsed list's Open
-    /// items.
+    /// `Engine.items`: one browsed list's Open items.
     func refreshList(_ ref: ListRef) {
         browsedLists[ref.key] = ref
-        fetch(.items(list: ref.listId, workspace: selector(ref.docId)), what: ref.name, parse: Items.parse) { [weak self] rows, error in
+        let workspace = selector(ref.docId)
+        let listId = ref.listId
+        read({ try $0.items(workspace: workspace, list: listId, includeDone: false) }) { [weak self] rows, error in
             if let rows { self?.listItems[ref.key] = rows }
             self?.listErrors[ref.key] = error
         }

@@ -1,4 +1,4 @@
-# Typed Swift bindings (plan; phase 1 built 2026-11-14)
+# Typed Swift bindings (plan; phases 1 and 2 built 2026-11-14)
 
 Decided 2026-11-14. Supersedes the client half of
 [`mac-window-plan.md`](mac-window-plan.md): the webview window is
@@ -159,7 +159,9 @@ needed for this.
 
 - `MonoplanCore` gets a thin facade over `Engine`: `EngineCalls`
   (one serial queue; `try await calls.run { try $0.items(...) }`, so
-  there is no per-verb wrapper to keep in step) and
+  there is no per-verb wrapper to keep in step; a callback form,
+  `calls.run({ ... }) { result in }` delivering on the main queue, for
+  the callback-shaped `AppModel` and the AppKit tray) and
   `Engine.observe(onChanged:onSync:onStopped:)` delivering on the main
   queue. This replaces `EngineClient` and both `FFITransport`s.
 - `MonoplanMacKit` loses `MessagePack.swift`, `EngineClient.swift`,
@@ -197,10 +199,30 @@ views with iOS later, which is its own piece of work.
    starts a local-only engine and round-trips an item. Not yet in this
    phase: `sync`, `reconnect`, `account` and the workspace calls
    (phase 3, with the screens that use them).
-2. **iOS slice.** The Home list screen reads and writes through the
-   new calls; everything else stays on `EngineClient`. Both run against
-   the same engine. This is where naming, error shape and the facade
-   get settled; expect to revise phase 1.
+2. **iOS slice.** Built 2026-11-14. The Home list screen reads and
+   writes through the new calls; everything else stays on
+   `EngineClient`. Both run against the same engine. What moved:
+   Home's list index (`lists`, `.all`), a list page's rows and the
+   Inbox counts (`items`), capture (`add_item`) and the tick
+   (`set_done`, from every page's checkbox, since they share
+   `AppModel.setDone`). `listsByDoc` / `listItems` hold `ListInfo` /
+   `Item`. What settled:
+   - Phase 1's Rust surface and names held; no Rust change.
+   - Facade: `EngineCalls` gained the callback `run`; `EngineController`
+     hands out one `EngineCalls` per engine (`calls`); `AppModel.call`
+     is a write, `AppModel.read` a read that stays quiet with no
+     engine, as `fetch` does. `Item` and `ListInfo` are `Identifiable`
+     in `MonoplanCore`.
+   - Errors: `EngineError` as is. A call with no engine fails as
+     `Stopped`; reads drop it, writes say it.
+   - Ordering between the two paths: each has its own serial queue, so
+     only "reread in the write's completion" is ordered across them.
+     That is how every write already rereads.
+   - Bridges that go in phase 3: `ItemState.name` (`TypedRows.swift`)
+     for `CheckboxRow` / `ItemRowMenu`, which still take the state's
+     wire name from the pages on the old models; the list page's
+     reorder, rename, emoji and archive and the Done page's list names
+     are still `Request`s.
 3. **The rest of the verbs**, area by area, Rust and iOS together:
    item detail and setters, agenda, starred, bin, done, find, places,
    list management, account, workspaces. iOS ends with no
@@ -222,12 +244,12 @@ Phases 1 to 3 touch no macOS code and phase 4 no iOS code. The socket,
 
 ## Open
 
-- iOS cannot be built here (no simulator). Phases 2 and 3 are verified
-  by `swift build` on the shared packages and by the user building in
-  Xcode. `swiftc -typecheck -sdk $(xcrun --sdk iphoneos --show-sdk-path)
-  -target arm64-apple-ios17.0` does run here against the device SDK, so
-  a type check of the app's sources may be possible; untried on the
-  whole target.
+- iOS cannot be run here (no simulator), but it can be compiled: an
+  unsigned device build type-checks and links the whole app,
+  `xcodebuild -project apple/MonoplanIOS/Monoplan.xcodeproj -scheme Monoplan
+  -destination 'generic/platform=iOS' -derivedDataPath <scratch>
+  CODE_SIGNING_ALLOWED=NO build` (used for phase 2; delete the derived
+  data after). Behaviour is still verified by the user on a device.
 - `AgendaWidget` reads a snapshot file, not the engine; left alone
   unless its model type goes away with the JSON models.
 - Whether the typed layer later moves out of the cli crate into an

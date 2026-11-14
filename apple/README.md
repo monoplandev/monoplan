@@ -74,9 +74,13 @@ gitignored:
 The typed calls are replacing `Engine.request` verb by verb
 ([`spec/swift-bindings-plan.md`](../spec/swift-bindings-plan.md), phase 1
 built 2026-11-14). From Swift: `EngineCalls(engine)` and
-`try await calls.run { try $0.items(workspace: nil, list: "inbox", includeDone: false) }`;
-`engine.observe(onChanged:onSync:)` for the change and sync events. Neither
-app uses them yet.
+`try await calls.run { try $0.items(workspace: nil, list: "inbox", includeDone: false) }`
+(or `calls.run({ ... }) { result in ... }`, the result on the main queue,
+for a caller that is not async);
+`engine.observe(onChanged:onSync:)` for the change and sync events. The iOS
+app's Home index, list pages, capture and tick use them (phase 2,
+2026-11-14: `AppModel.call` / `read`); the rest of iOS and all of macOS
+are still on `Engine.request`.
 
 Run it before `swift build` / `swift test` on a fresh checkout — the package
 won't compile without those outputs present.
@@ -421,12 +425,12 @@ Personal's, and the duration or overdue / due-today tone; read-only
 markup, nothing tappable yet. **Home** (`HomeView.swift`,
 2026-11-13) is the root and the index: first a section with Starred, Agenda, Map, Done and Bin, then a section per open workspace (`Engine.session`'s
 docs, Personal first), each with its Inbox and then its active lists
-(`Request.lists(workspace:)`, i.e. `list ls --json --all -w <doc id>`,
-one fetch per doc, refetched with the session on every `Changed`;
-`Lists.active` drops archived and reserved rows). A list shows its
+(the typed `Engine.lists(workspace:filter: .all)`,
+one read per doc, refetched with the session on every `Changed`;
+`userLists` in `TypedRows.swift` drops archived and reserved rows). A list shows its
 emoji (`ListIcon`: the `icon` the list JSON carries, a folder without
 one) on its Home row, in its page's title and on the item sheet. A list pushes its Open
-items (`Request.items(list:workspace:)`), refetched on `Changed` while
+items (the typed `Engine.items`), refetched on `Changed` while
 shown; a long press and drag reorders a row (2026-11-14: `onMove`,
 `Request.reorderItem`, i.e. `item set <id> --pos <pos>`; the rows are
 reordered locally first, then reread). A gear at the top right of the index opens Settings, pushed onto the same stack. **Map**

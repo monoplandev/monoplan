@@ -90,4 +90,37 @@ final class EngineTests: XCTestCase {
 
         await fulfillment(of: [changed, synced], timeout: 5)
     }
+
+    /// The callback form of `run`: results on the main queue, and in
+    /// one order with the async form (a read made after a write sees
+    /// it, whichever form each used). Rows list by their own id.
+    func testCallbackCallsDeliverOnMainInOrder() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        try ensureLocalWorkspace(profileDir: dir)
+        let engine = try MonoplanCore.Engine.start(profileDir: dir)
+        defer { engine.shutdown() }
+        let calls = EngineCalls(engine)
+
+        let added = expectation(description: "added")
+        var newId: String?
+        calls.run({ try $0.addItem(workspace: nil, list: "inbox", text: "by callback", top: true) }) { result in
+            XCTAssertTrue(Thread.isMainThread)
+            newId = try? result.get()
+            added.fulfill()
+        }
+        // Made before the write's completion has run: still after it.
+        let rows = try await calls.run { try $0.items(workspace: nil, list: "inbox", includeDone: false) }
+        await fulfillment(of: [added], timeout: 5)
+        let id = try XCTUnwrap(newId)
+        XCTAssertEqual(rows.first?.id, id)
+        func listed<Row: Identifiable>(_ rows: [Row]) -> [Row.ID] { rows.map(\.id) }
+        XCTAssertEqual(listed(rows).first, id)
+
+        let failed = expectation(description: "failed")
+        calls.run({ try $0.lists(workspace: "nope", filter: .all) }) { result in
+            if case .failure(EngineError.Failed) = result { failed.fulfill() }
+        }
+        await fulfillment(of: [failed], timeout: 5)
+    }
 }

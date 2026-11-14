@@ -1,16 +1,16 @@
 // The row every plain item list shows (a list's page in Home): the
 // checkbox, the text, and the tags worth saying.
 
-import MonoplanMacKit
+import MonoplanCore
 import SwiftUI
 
 /// One item: its text, with the workflow state underneath
 /// when there is something beyond the default to say.
 struct ItemRowView: View {
-    let item: ItemRow
+    let item: Item
 
     var body: some View {
-        CheckboxRow(state: item.state) {
+        CheckboxRow(state: item.state.name) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.text)
                     .itemTextSlot()
@@ -25,8 +25,8 @@ struct ItemRowView: View {
 
     private var tags: [String] {
         var out: [String] = []
-        if item.state != "backlog" && item.state != "todo" {
-            out.append(Self.stateLabel(item.state))
+        if item.state != .backlog && item.state != .todo {
+            out.append(Self.stateLabel(item.state.name))
         }
         return out
     }

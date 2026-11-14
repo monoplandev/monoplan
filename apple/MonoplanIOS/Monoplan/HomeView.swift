@@ -245,12 +245,12 @@ struct HomeView: View {
                         // The Inbox's Open items, counted; nothing is
                         // drawn for an empty one.
                         row(ListRef(docId: doc.docId, listId: "inbox", name: "Inbox"), count: model.inboxCount(doc.docId) ?? 0)
-                        ForEach(Lists.active(model.listsByDoc[doc.docId] ?? [])) { list in
+                        ForEach((model.listsByDoc[doc.docId] ?? []).userLists) { list in
                             // Counted only when Settings says so
                             // (the web's "Show list counts in nav").
                             row(
                                 ListRef(docId: doc.docId, listId: list.id, name: list.name, icon: list.icon),
-                                count: showListCounts ? list.open ?? 0 : 0)
+                                count: showListCounts ? Int(list.open) : 0)
                         }
                     } header: {
                         // A shared workspace's title is led by the
@@ -664,7 +664,7 @@ struct ListItemsView: View {
     /// archived.
     private var editable: Bool { list.listId != "inbox" && list.listId != "events" }
 
-    private func showCaptured(in items: [ItemRow], _ proxy: ScrollViewProxy) {
+    private func showCaptured(in items: [Item], _ proxy: ScrollViewProxy) {
         guard let captured = model.captured, captured.list.key == list.key,
               items.contains(where: { $0.id == captured.itemId })
         else { return }

@@ -32,7 +32,25 @@ public final class EngineCalls: @unchecked Sendable {
             }
         }
     }
+
+    /// `run` for a caller that is not async: `completion` gets the
+    /// result on `queue` (the main queue unless told otherwise). Same
+    /// serial queue, so the two forms keep one order between them.
+    public func run<T>(
+        _ body: @escaping (Engine) throws -> T,
+        on queue: DispatchQueue = .main,
+        completion: @escaping (Result<T, Error>) -> Void
+    ) {
+        self.queue.async { [engine] in
+            let result = Result { try body(engine) }
+            queue.async { completion(result) }
+        }
+    }
 }
+
+// The rows carry their own id, so SwiftUI can list them as they are.
+extension Item: Identifiable {}
+extension ListInfo: Identifiable {}
 
 extension Engine {
     /// `observe` with closures. Each is called on `queue` (the main

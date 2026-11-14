@@ -27,6 +27,7 @@ final class EngineController {
     private let location: ProfileLocation
     private let client: EngineClient
     private var engine: MonoplanCore.Engine?
+    private var engineCalls: EngineCalls?
     private var starting = false
     /// The last failed start, shown once and then retried.
     private var failure: String?
@@ -46,6 +47,20 @@ final class EngineController {
     var runningEngine: MonoplanCore.Engine? {
         if let engine, engine.isRunning() { return engine }
         return nil
+    }
+
+    /// The running engine's typed calls (spec/swift-bindings-plan.md);
+    /// nil between engines. One queue per engine, kept for its life, so
+    /// the calls made to it stay in the order they were made.
+    var calls: EngineCalls? {
+        guard let engine = runningEngine else {
+            engineCalls = nil
+            return nil
+        }
+        if let engineCalls, engineCalls.engine === engine { return engineCalls }
+        let calls = EngineCalls(engine)
+        engineCalls = calls
+        return calls
     }
 
     /// Called by the client whenever it has no engine: a transport to the
