@@ -305,12 +305,18 @@ views with iOS later, which is its own piece of work.
    - Window (`MainWindow.swift`): the session line, a sidebar with
      one foldable group per open workspace (stacked as in the web nav
      since 2026-11-14, replacing the workspace picker), each with
-     Inbox / Calendar / the active lists with their open counts, the selected list's open items with a
+     Inbox / the active lists with their open counts, the lenses
+     over every workspace above them (Starred from `starred`, Calendar
+     from `agenda`, Done from `done` per workspace, merged), the selected list's open items with a
      tick (`set_done`) and an add field (`add_item`). One snapshot read
      on `changed`, on a new engine and after each write; a read in
-     flight when the selection moves is dropped. A tray row opens the
-     window on the item's list in its workspace: there is no item page
-     to open it on yet. Monoplan › New Workspace… stays
+     flight when the selection moves is dropped. Rows are selectable since
+     2026-11-14: the selected item's page (`item`, read in the same
+     snapshot) shows in a panel at the right (`ItemPanel.swift`), the
+     iOS item page read only but for its tick and star (`set_starred`);
+     a Mac-local view, not yet one shared with iOS. A tray row opens
+     the window on the item's list in its workspace with that item
+     selected. Monoplan › New Workspace… stays
      (`create_workspace`, then the window shows it); delete workspace
      has no Mac surface until the window grows one.
    - Gone with the page: View › Reload and the zoom items, the doc's

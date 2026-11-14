@@ -270,7 +270,7 @@ final class TrayController: NSObject, NSMenuDelegate {
     private func rowItem(_ line: MenuLine, noteTab: CGFloat) -> NSMenuItem {
         let item = NSMenuItem(title: "", action: #selector(openItem(_:)), keyEquivalent: "")
         item.target = self
-        item.representedObject = RowTarget(listId: line.listId, docId: line.docId)
+        item.representedObject = RowTarget(itemId: line.id, listId: line.listId, docId: line.docId)
         var titleAttributes: [NSAttributedString.Key: Any] = [.font: Self.titleFont]
         if line.done { titleAttributes[.foregroundColor] = NSColor.secondaryLabelColor }
         let title = NSMutableAttributedString(string: Self.displayTitle(line), attributes: titleAttributes)
@@ -404,10 +404,10 @@ final class TrayController: NSObject, NSMenuDelegate {
     }
 
     /// A row of the menu: the window on the item's list, in its
-    /// workspace. The window has no item page yet.
+    /// workspace, with the item's panel open.
     @objc private func openItem(_ sender: NSMenuItem) {
         guard let target = sender.representedObject as? RowTarget else { return }
-        mainWindow.show(list: target.listId, workspace: target.docId)
+        mainWindow.show(list: target.listId, workspace: target.docId, item: target.itemId)
     }
 
     /// Quitting ends the engine too (`applicationShouldTerminate`), which
@@ -426,10 +426,12 @@ final class TrayController: NSObject, NSMenuDelegate {
 
 /// What a menu row opens: `NSMenuItem.representedObject` wants an object.
 private final class RowTarget: NSObject {
+    let itemId: String
     let listId: String
     let docId: String?
 
-    init(listId: String, docId: String?) {
+    init(itemId: String, listId: String, docId: String?) {
+        self.itemId = itemId
         self.listId = listId
         self.docId = docId
     }

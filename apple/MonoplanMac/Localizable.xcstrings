@@ -1,12 +1,32 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ at %@": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ a las %@"
+          }
+        }
+      }
+    },
     "%@ exists and is not a symlink; remove it first": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
             "value": "%@ existe y no es un enlace simbólico; elimínalo primero"
+          }
+        }
+      }
+    },
+    "%lld days": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld días"
           }
         }
       }
@@ -111,6 +131,26 @@
         }
       }
     },
+    "Backlog": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pendiente"
+          }
+        }
+      }
+    },
+    "Binned": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En la papelera"
+          }
+        }
+      }
+    },
     "Build": {
       "localizations": {
         "es": {
@@ -141,6 +181,26 @@
         }
       }
     },
+    "Cancelled": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelado"
+          }
+        }
+      }
+    },
+    "Cancelled %@": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelado %@"
+          }
+        }
+      }
+    },
     "Close": {
       "localizations": {
         "es": {
@@ -157,6 +217,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Línea de comandos"
+          }
+        }
+      }
+    },
+    "Completed %@": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Completado %@"
           }
         }
       }
@@ -251,6 +321,16 @@
         }
       }
     },
+    "Created %@": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Creado %@"
+          }
+        }
+      }
+    },
     "Cut": {
       "localizations": {
         "es": {
@@ -271,6 +351,16 @@
         }
       }
     },
+    "Date": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fecha"
+          }
+        }
+      }
+    },
     "Device name": {
       "localizations": {
         "es": {
@@ -287,6 +377,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Dispositivos"
+          }
+        }
+      }
+    },
+    "Done": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hecho"
+          }
+        }
+      }
+    },
+    "Due %@": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vence el %@"
           }
         }
       }
@@ -317,6 +427,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Usar pantalla completa"
+          }
+        }
+      }
+    },
+    "Event": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Evento"
           }
         }
       }
@@ -367,6 +487,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "He anotado estas 12 palabras"
+          }
+        }
+      }
+    },
+    "In progress": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En curso"
           }
         }
       }
@@ -471,12 +601,32 @@
         }
       }
     },
+    "Map of %@": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mapa de %@"
+          }
+        }
+      }
+    },
     "Mark as done": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
             "value": "Marcar como hecho"
+          }
+        }
+      }
+    },
+    "Mark as not done": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Marcar como no hecho"
           }
         }
       }
@@ -567,6 +717,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Sesión no iniciada"
+          }
+        }
+      }
+    },
+    "Notes": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notas"
           }
         }
       }
@@ -691,6 +851,16 @@
         }
       }
     },
+    "Place": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lugar"
+          }
+        }
+      }
+    },
     "Profile": {
       "localizations": {
         "es": {
@@ -721,6 +891,16 @@
         }
       }
     },
+    "Remove star": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quitar estrella"
+          }
+        }
+      }
+    },
     "Rename device": {
       "localizations": {
         "es": {
@@ -747,6 +927,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Mostrar"
+          }
+        }
+      }
+    },
+    "Review": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revisión"
           }
         }
       }
@@ -931,6 +1121,16 @@
         }
       }
     },
+    "Star": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Destacar"
+          }
+        }
+      }
+    },
     "Starred": {
       "localizations": {
         "es": {
@@ -1031,6 +1231,26 @@
         }
       }
     },
+    "To do": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Por hacer"
+          }
+        }
+      }
+    },
+    "today %@": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hoy %@"
+          }
+        }
+      }
+    },
     "Today · %@": {
       "localizations": {
         "es": {
@@ -1041,12 +1261,32 @@
         }
       }
     },
+    "Took %@": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tardó %@"
+          }
+        }
+      }
+    },
     "Undo": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
             "value": "Deshacer"
+          }
+        }
+      }
+    },
+    "Unscheduled": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sin programar"
           }
         }
       }

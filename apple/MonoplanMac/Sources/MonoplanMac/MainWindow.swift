@@ -1,13 +1,18 @@
 // The window: native SwiftUI over the engine's typed calls
 // (spec/swift-bindings-plan.md "The macOS window"), replacing the
 // webview. Deliberately a debug screen for now: a session line (who,
-// which server, sync), a sidebar with one group per open workspace
-// stacked as on the web (Personal first, each a collapsible heading over
-// its Inbox, Calendar and lists), and the open items of the selected
-// list with a tick and a field to add one. No board, no drag and drop,
-// no item editor; those come from sharing views with iOS.
+// which server, sync), a sidebar laid out as the web nav is (the lenses
+// Starred, Calendar and Done on top, then one group per open workspace,
+// Personal first, each a collapsible heading over its Inbox and lists),
+// and either the open items of the selected list with a tick and a
+// field to add one, or a lens over every workspace: Starred in its
+// curated order, the Calendar (the engine's agenda, by day), or Done,
+// newest first. A row of any of them can be selected, which opens the
+// item's panel at the right (`ItemPanel.swift`): the iOS item page,
+// read only but for its tick and star. No board, no drag and drop, no
+// item editor; those come from sharing views with iOS.
 //
-// It holds no doc and no state of its own beyond the selection: every
+// It holds no doc and no state of its own beyond the selections: every
 // read is a typed call, made again whenever the engine says a doc
 // changed and after each of its own writes. Nothing is optimistic.
 //
@@ -17,6 +22,7 @@
 import AppKit
 import SwiftUI
 import MonoplanCore
+import MonoplanMacKit
 
 final class MainWindowController: NSWindowController, NSWindowDelegate {
     private let model: MainWindowModel
@@ -43,12 +49,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     required init?(coder: NSCoder) { fatalError() }
 
     /// Bring the window forward, on a list when one is given (a tray
-    /// row: the item's list in its workspace, nil being Home's).
-    func show(list: String? = nil, workspace: String? = nil) {
+    /// row: the item's list in its workspace, nil being Home's), with
+    /// the item's panel open when the row names one.
+    func show(list: String? = nil, workspace: String? = nil, item: String? = nil) {
         onVisibility(true)
         model.visible = true
         if let list {
             model.select(workspace: workspace, list: list)
+            if let item { model.selectItem(workspace: workspace, id: item) }
         } else {
             model.reload()
         }
@@ -105,7 +113,7 @@ struct NavSection: Identifiable {
     /// engine's default.
     var target: String? { workspace.home ? nil : workspace.docId }
 
-    /// The lists shown under Inbox and Calendar: active ones, in the
+    /// The lists shown under Inbox: active ones, in the
     /// doc's order, without the reserved ids (which have no `ListMeta`
     /// row of their own).
     var userLists: [ListInfo] {
@@ -115,10 +123,34 @@ struct NavSection: Identifiable {
     }
 }
 
-/// A sidebar row: a list in a workspace (nil being Home).
-struct NavTarget: Hashable {
+/// The views over every workspace, on top of the sidebar.
+enum Lens: Hashable {
+    case starred, agenda, done
+}
+
+/// A Done row: the item, tagged with the workspace it was read from.
+struct DoneRow: Identifiable {
+    let item: Item
+    /// What a typed call's `workspace` takes: nil for Home.
     let workspace: String?
-    let list: String
+    /// The workspace's name; nil for Home and an unnamed doc.
+    let workspaceName: String?
+
+    var id: String { "\(workspace ?? "")/\(item.id)" }
+}
+
+/// The item whose panel is open. Rows are selected by item id alone
+/// (an id is unique across workspaces: a cross-doc move keeps it); the
+/// workspace is what the typed calls for it take.
+struct ItemSelection: Equatable {
+    let workspace: String?
+    let id: String
+}
+
+/// A sidebar row: a lens, or a list in a workspace (nil being Home).
+enum NavTarget: Hashable {
+    case lens(Lens)
+    case list(workspace: String?, list: String)
 }
 
 /// What the window shows. Main queue throughout; the reads run on the
@@ -136,6 +168,18 @@ final class MainWindowModel: ObservableObject {
     /// The selected list's id.
     @Published private(set) var list = MainWindowModel.inbox
     @Published private(set) var items: [Item] = []
+    /// The lens shown in place of a list, if any. The list selection
+    /// under it is kept, though nothing shows it.
+    @Published private(set) var lens: Lens?
+    /// Each lens's rows, read only while it is the one shown.
+    @Published private(set) var starred: [StarredItem] = []
+    @Published private(set) var agenda: [AgendaGroup] = []
+    @Published private(set) var done: [DoneRow] = []
+    /// The selected row's item, if one is: its panel is open.
+    @Published private(set) var selected: ItemSelection?
+    /// That item's page, once read. An item that cannot be read (hard
+    /// deleted, its workspace gone) closes the panel.
+    @Published private(set) var detail: ItemInfo?
     /// The last failed read or write, until the next one succeeds.
     @Published private(set) var error: String?
 
@@ -154,6 +198,10 @@ final class MainWindowModel: ObservableObject {
     private static let collapsedKey = "MonoplanNavCollapsed"
     static let inbox = "inbox"
     static let events = "events"
+    /// Far enough out to be the whole future, as on iOS.
+    static let agendaDays: UInt32 = 36_500
+    /// How many Done rows the lens shows, newest first.
+    static let doneLimit = 200
 
     init(engine: EngineController) {
         self.engine = engine
@@ -173,9 +221,14 @@ final class MainWindowModel: ObservableObject {
 
     /// The selected list's name, for the items' heading.
     var listTitle: String {
+        switch lens {
+        case .starred: return String(localized: "Starred")
+        case .agenda: return String(localized: "Calendar")
+        case .done: return String(localized: "Done")
+        case nil: break
+        }
         switch list {
         case Self.inbox: return String(localized: "Inbox")
-        case Self.events: return String(localized: "Calendar")
         default:
             let lists = sections.first { $0.target == workspace }?.lists ?? []
             return lists.first { $0.id == list }?.name ?? list
@@ -200,12 +253,59 @@ final class MainWindowModel: ObservableObject {
         select(workspace: workspace, list: list)
     }
 
-    func select(workspace: String?, list: String) {
-        reveal = true
-        if workspace == self.workspace, list == self.list {
+    /// Show a lens.
+    func select(lens: Lens) {
+        if lens == self.lens {
             reload()
             return
         }
+        self.lens = lens
+        items = []
+        clearLenses()
+        clearItem()
+        generation += 1
+        reload()
+    }
+
+    /// Select a row's item, opening its panel; nil closes it.
+    func selectItem(workspace: String?, id: String?) {
+        guard let id else { return clearItem() }
+        guard id != selected?.id else { return }
+        selected = ItemSelection(workspace: workspace, id: id)
+        detail = nil
+        reload()
+    }
+
+    func closeItem() {
+        clearItem()
+    }
+
+    private func clearItem() {
+        selected = nil
+        detail = nil
+    }
+
+    /// A shared workspace's name, for the panel; nil for Home, which
+    /// a tray row names by its id.
+    func sharedWorkspaceName(_ workspace: String?) -> String? {
+        guard let section = sections.first(where: { $0.workspace.docId == workspace }),
+              !section.workspace.home
+        else { return nil }
+        return section.workspace.name
+    }
+
+    func select(workspace: String?, list: String) {
+        // Events surface only on the Calendar (spec/events-plan.md):
+        // a tray row for one opens it rather than a bare list.
+        if list == Self.events { return select(lens: .agenda) }
+        reveal = true
+        if lens == nil, workspace == self.workspace, list == self.list {
+            reload()
+            return
+        }
+        lens = nil
+        clearLenses()
+        clearItem()
         self.workspace = workspace
         self.list = list
         // The old list's rows are not this one's.
@@ -220,10 +320,18 @@ final class MainWindowModel: ObservableObject {
         UserDefaults.standard.set(collapsed.sorted(), forKey: Self.collapsedKey)
     }
 
+    private func clearLenses() {
+        starred = []
+        agenda = []
+        done = []
+    }
+
     private func clear() {
         account = nil
         sections = []
         items = []
+        clearLenses()
+        clearItem()
         generation += 1
     }
 
@@ -233,13 +341,20 @@ final class MainWindowModel: ObservableObject {
         var workspace: String?
         var list: String
         var items: [Item]
+        var starred: [StarredItem] = []
+        var agenda: [AgendaGroup] = []
+        var done: [DoneRow] = []
+        /// The selection the read was made for, and its item.
+        var selected: ItemSelection?
+        var detail: ItemInfo?
     }
 
     /// Read everything shown, in one turn of the call queue so the
     /// parts agree with each other.
     func reload() {
         guard visible, let calls = engine.calls else { return }
-        let workspace = workspace, list = list, generation = generation
+        let workspace = workspace, list = list, generation = generation, lens = lens
+        let picked = selected
         calls.run({ engine -> Snapshot in
             let workspaces = try engine.workspaces()
             // A workspace that has gone (deleted, left, another
@@ -256,12 +371,36 @@ final class MainWindowModel: ObservableObject {
                     lists: try engine.lists(workspace: workspace.home ? nil : workspace.docId, filter: .all))
             }
             let lists = sections.first { $0.target == selected }?.lists ?? []
-            let known = list == Self.inbox || list == Self.events || lists.contains { $0.id == list }
+            let known = list == Self.inbox || lists.contains { $0.id == list }
             let shown = !gone && known ? list : Self.inbox
-            return Snapshot(
+            var snapshot = Snapshot(
                 account: try engine.account(), sections: sections, workspace: selected,
-                list: shown,
-                items: try engine.items(workspace: selected, list: shown, includeDone: false))
+                list: shown, items: [])
+            switch lens {
+            case .starred:
+                snapshot.starred = try engine.starred()
+            case .agenda:
+                snapshot.agenda = try engine.agenda(days: Self.agendaDays)
+            case .done:
+                // The engine reads Done a workspace at a time: the
+                // newest of each, merged, newest first.
+                let rows = try sections.flatMap { section in
+                    try engine.done(workspace: section.target, limit: UInt32(Self.doneLimit)).map {
+                        DoneRow(item: $0, workspace: section.target, workspaceName: section.workspace.name)
+                    }
+                }
+                snapshot.done = Array(
+                    rows.sorted { $0.item.lifecycleAt > $1.item.lifecycleAt }.prefix(Self.doneLimit))
+            case nil:
+                snapshot.items = try engine.items(workspace: selected, list: shown, includeDone: false)
+            }
+            if let picked {
+                snapshot.selected = picked
+                // Whatever the reason it cannot be read, there is no
+                // page to show: the panel closes.
+                snapshot.detail = try? engine.item(workspace: picked.workspace, id: picked.id)
+            }
+            return snapshot
         }) { [weak self] result in
             guard let self, generation == self.generation else { return }
             switch result {
@@ -271,6 +410,15 @@ final class MainWindowModel: ObservableObject {
                 self.workspace = snapshot.workspace
                 self.list = snapshot.list
                 self.items = snapshot.items
+                self.starred = snapshot.starred
+                self.agenda = snapshot.agenda
+                self.done = snapshot.done
+                // An item selected since the read went out keeps its
+                // (empty) panel until its own read lands.
+                if snapshot.selected == self.selected {
+                    self.detail = snapshot.detail
+                    if snapshot.detail == nil { self.selected = nil }
+                }
                 self.error = nil
                 if self.reveal {
                     self.reveal = false
@@ -309,6 +457,20 @@ final class MainWindowModel: ObservableObject {
     func tick(_ item: Item) {
         let workspace = workspace
         write { try $0.setDone(workspace: workspace, id: item.id, done: true) }
+    }
+
+    /// Tick or untick a lens's row, in its own workspace.
+    func setDone(workspace: String?, id: String, done: Bool) {
+        write { try $0.setDone(workspace: workspace, id: id, done: done) }
+    }
+
+    func setStarred(workspace: String?, id: String, starred: Bool) {
+        write { try $0.setStarred(workspace: workspace, id: id, starred: starred) }
+    }
+
+    /// Take a row out of Starred.
+    func unstar(_ row: StarredItem) {
+        write { try $0.setStarred(workspace: row.docId, id: row.id, starred: false) }
     }
 
     func add(_ text: String) {
@@ -355,27 +517,47 @@ struct MainWindowView: View {
                 sidebar
                     .frame(minWidth: 160, idealWidth: 200, maxWidth: 320)
                 items
-                    .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 260, maxWidth: .infinity, maxHeight: .infinity)
+                if let selected = model.selected {
+                    ItemPanel(
+                        item: model.detail,
+                        workspaceName: model.sharedWorkspaceName(selected.workspace),
+                        setDone: { model.setDone(workspace: selected.workspace, id: selected.id, done: $0) },
+                        setStarred: { model.setStarred(workspace: selected.workspace, id: selected.id, starred: $0) },
+                        close: model.closeItem)
+                        .frame(minWidth: 240, idealWidth: 300, maxWidth: 440)
+                }
             }
         }
     }
 
-    /// One group per open workspace, stacked, Home ("Personal") first:
-    /// a heading that folds the group, then its Inbox, Calendar and
-    /// lists. The selection is a list in a workspace, so picking a row
-    /// in another group moves both at once.
+    /// The web nav's shape: the lenses over every workspace on top
+    /// (Starred, Calendar, Done), then one group per open workspace, stacked, Home
+    /// ("Personal") first: a heading that folds the group, then its
+    /// Inbox and lists. A list row carries its workspace, so picking
+    /// one in another group moves both at once.
     private var sidebar: some View {
         List(selection: Binding<NavTarget?>(
-            get: { NavTarget(workspace: model.workspace, list: model.list) },
-            set: { if let target = $0 { model.select(workspace: target.workspace, list: target.list) } }
+            get: { model.lens.map(NavTarget.lens) ?? .list(workspace: model.workspace, list: model.list) },
+            set: {
+                switch $0 {
+                case .lens(let lens): model.select(lens: lens)
+                case .list(let workspace, let list): model.select(workspace: workspace, list: list)
+                case nil: break
+                }
+            }
         )) {
+            Section {
+                Label("Starred", systemImage: "star").tag(NavTarget.lens(.starred))
+                Label("Calendar", systemImage: "calendar").tag(NavTarget.lens(.agenda))
+                Label("Done", systemImage: "checkmark").tag(NavTarget.lens(.done))
+            }
             ForEach(model.sections) { section in
                 Section(isExpanded: Binding(
                     get: { !model.collapsed.contains(section.id) },
                     set: { model.setCollapsed(section.id, !$0) }
                 )) {
-                    Text("Inbox").tag(NavTarget(workspace: section.target, list: MainWindowModel.inbox))
-                    Text("Calendar").tag(NavTarget(workspace: section.target, list: MainWindowModel.events))
+                    Text("Inbox").tag(NavTarget.list(workspace: section.target, list: MainWindowModel.inbox))
                     ForEach(section.userLists) { list in
                         HStack {
                             Text(verbatim: [list.icon, list.name].compactMap { $0 }.joined(separator: " "))
@@ -385,7 +567,7 @@ struct MainWindowView: View {
                                 Text(verbatim: "\(list.open)").foregroundStyle(.secondary).monospacedDigit()
                             }
                         }
-                        .tag(NavTarget(workspace: section.target, list: list.id))
+                        .tag(NavTarget.list(workspace: section.target, list: list.id))
                     }
                 } header: {
                     if section.workspace.home {
@@ -412,7 +594,27 @@ struct MainWindowView: View {
                     .padding(.horizontal, 12)
                     .padding(.bottom, 6)
             }
-            List {
+            switch model.lens {
+            case .starred: starred
+            case .agenda: agenda
+            case .done: done
+            case nil: list
+            }
+        }
+    }
+
+    /// A list's row selection: the selected item's id, a pick opening
+    /// that item's panel. `workspace` says where a row's item lives.
+    /// A click on no row closes the panel.
+    private func selection(_ workspace: @escaping (String) -> String?) -> Binding<String?> {
+        Binding(
+            get: { model.selected?.id },
+            set: { id in model.selectItem(workspace: id.flatMap(workspace), id: id) })
+    }
+
+    private var list: some View {
+        VStack(spacing: 0) {
+            List(selection: selection { _ in model.workspace }) {
                 ForEach(model.items) { item in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Button {
@@ -423,12 +625,12 @@ struct MainWindowView: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel(Text("Mark as done"))
                         Text(verbatim: item.text)
-                            .textSelection(.enabled)
                         Spacer()
                         if let when = item.when ?? item.deadline {
                             Text(verbatim: when).foregroundStyle(.secondary).monospacedDigit()
                         }
                     }
+                    .tag(item.id)
                 }
                 if model.items.isEmpty {
                     Text("Nothing here").foregroundStyle(.secondary)
@@ -444,6 +646,150 @@ struct MainWindowView: View {
                 }
                 .padding(8)
         }
+    }
+
+    /// The Calendar: the engine's agenda as it groups it. Today first
+    /// and always there (overdue rows folded in), Unscheduled events
+    /// after it, then each non-empty day. A row has its tick, its clock
+    /// time when timed, its text, the workspace when it is not
+    /// Personal's, and the tone's note.
+    private var agenda: some View {
+        List(selection: selection { id in
+            model.agenda.lazy.flatMap(\.rows).first { $0.id == id }?.docId
+        }) {
+            ForEach(model.agenda, id: \.day) { group in
+                Section {
+                    ForEach(group.rows, id: \.id) { row in
+                        agendaRow(row).tag(row.id)
+                    }
+                    if group.rows.isEmpty {
+                        Text("Nothing today").foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text(verbatim: Self.heading(for: group))
+                }
+            }
+        }
+        .listStyle(.inset)
+    }
+
+    private func agendaRow(_ row: AgendaEntry) -> some View {
+        let done = row.state == .done
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Button {
+                model.setDone(workspace: row.docId, id: row.id, done: !done)
+            } label: {
+                Image(systemName: done ? "checkmark.circle.fill" : "circle")
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("Mark as done"))
+            if TodayMenu.isTimed(row), let when = row.when {
+                Text(verbatim: String(when.dropFirst(11).prefix(5)))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Text(verbatim: row.text)
+                .foregroundStyle(done ? .secondary : .primary)
+            if let name = row.docName {
+                Text(verbatim: name).font(.footnote).foregroundStyle(.tertiary).lineLimit(1)
+            }
+            Spacer()
+            switch row.tone {
+            case .overdue: Text("overdue").font(.footnote).foregroundStyle(.red)
+            case .warning: Text("due today").font(.footnote).foregroundStyle(.orange)
+            case .neutral: EmptyView()
+            }
+        }
+    }
+
+    /// Starred: Home's curated order over every workspace. A row has
+    /// its tick, its text, where it lives (the list, and the workspace
+    /// when it is not Personal's) and a star that takes it out.
+    private var starred: some View {
+        List(selection: selection { id in model.starred.first { $0.id == id }?.docId }) {
+            ForEach(model.starred, id: \.id) { row in
+                let done = row.state == .done
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Button {
+                        model.setDone(workspace: row.docId, id: row.id, done: !done)
+                    } label: {
+                        Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text("Mark as done"))
+                    Text(verbatim: row.text)
+                        .foregroundStyle(done ? .secondary : .primary)
+                    Spacer()
+                    Text(verbatim: [row.listName, row.docName].compactMap { $0 }.joined(separator: " · "))
+                        .font(.footnote)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                    Button {
+                        model.unstar(row)
+                    } label: {
+                        Image(systemName: "star.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text("Remove star"))
+                }
+                .tag(row.id)
+            }
+            if model.starred.isEmpty {
+                Text("Nothing starred").foregroundStyle(.secondary)
+            }
+        }
+        .listStyle(.inset)
+    }
+
+    /// Done: every workspace's newest Done items, newest first. The
+    /// tick puts a row back; the stamp is when it entered Done.
+    private var done: some View {
+        List(selection: selection { id in model.done.first { $0.item.id == id }?.workspace }) {
+            ForEach(model.done) { row in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Button {
+                        model.setDone(workspace: row.workspace, id: row.item.id, done: false)
+                    } label: {
+                        Image(systemName: "checkmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text("Mark as not done"))
+                    Text(verbatim: row.item.text)
+                        .foregroundStyle(.secondary)
+                    if let name = row.workspaceName {
+                        Text(verbatim: name).font(.footnote).foregroundStyle(.tertiary).lineLimit(1)
+                    }
+                    Spacer()
+                    Text(verbatim: Self.stamp(row.item.lifecycleAt))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                .tag(row.item.id)
+            }
+            if model.done.isEmpty {
+                Text("Nothing here").foregroundStyle(.secondary)
+            }
+        }
+        .listStyle(.inset)
+    }
+
+    /// A Done row's moment (unix ms), as a short date and time.
+    static func stamp(_ millis: Int64) -> String {
+        Date(timeIntervalSince1970: TimeInterval(millis) / 1000)
+            .formatted(date: .abbreviated, time: .shortened)
+    }
+
+    /// "Today · 14 Nov", "Unscheduled", or the day spelled out
+    /// ("Friday 20 Nov").
+    static func heading(for group: AgendaGroup) -> String {
+        if group.today {
+            let date = group.day.flatMap { Agenda.start(of: $0) } ?? Date()
+            return String(localized: "Today · \(date.formatted(.dateTime.day().month(.abbreviated)))")
+        }
+        guard let text = group.day else { return String(localized: "Unscheduled") }
+        guard let date = Agenda.start(of: text) else { return text }
+        return date.formatted(.dateTime.weekday(.wide).day().month(.abbreviated))
     }
 }
 
