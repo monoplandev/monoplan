@@ -48,16 +48,9 @@ export interface Session {
   email: string | null;
   /** Null on anonymous sessions. */
   deviceId: string | null;
-  /** True in the macOS app's window (`spec/mac-window-plan.md`): the
-   *  session came from the in-process host, the docs are mirrors of
-   *  the host's, and the webview holds no key, so every flow that
-   *  wraps or unwraps a DEK (password change, recovery, doc creation,
-   *  invites) is unavailable here and lives in the tray and the CLI. */
-  mirror: boolean;
   /** The Home DEK: the primary doc's key, which is also the account key
-   *  every other membership's wrap is under (spec/encryption.md). Null
-   *  only on a mirror session, which never holds a key. */
-  dek: Dek | null;
+   *  every other membership's wrap is under (spec/encryption.md). */
+  dek: Dek;
   /** Every doc the account can open, keyed by doc id, primary included
    *  (its entry is `dek`). Populated from the memberships array at
    *  login/signup and vaulted one entry per doc id, so a session restored
@@ -139,10 +132,9 @@ function AuthForm(props: {
           // than starting a fresh one; a signup while already authed
           // (not reachable from the UI today) would start fresh.
           const current = session();
-          const adopt: AdoptedDoc | null =
-            current.anonymous && current.dek
-              ? { primaryDocId: current.primaryDocId, dek: current.dek }
-              : null;
+          const adopt: AdoptedDoc | null = current.anonymous
+            ? { primaryDocId: current.primaryDocId, dek: current.dek }
+            : null;
           const { session: next, recoveryCode } = await doSignup(
             email(),
             password(),
@@ -450,7 +442,6 @@ async function doLogin(
     dek,
     docKeys,
     freshSignup: false,
-    mirror: false,
   };
   await persistVault(session);
   return session;
@@ -542,7 +533,6 @@ async function doSignup(
     // An adopted doc already exists in IndexedDB (seeded, with the
     // user's history); boot replays it instead of creating a new one.
     freshSignup: adopt === null,
-    mirror: false,
   };
   await persistVault(session);
   return { session, recoveryCode: recovery.code };
@@ -622,7 +612,6 @@ async function doRecover(
     dek,
     docKeys,
     freshSignup: false,
-    mirror: false,
   };
   await persistVault(session);
   return session;
@@ -632,9 +621,6 @@ async function persistVault(session: Session): Promise<void> {
   // Wrap every doc's DEK and stash them in IndexedDB so a reload skips
   // the password prompt. Failure is non-fatal — the in-memory session is
   // still usable; the user just gets bounced back to login on reload.
-  // A mirror session holds no key and nothing to vault.
-  const dek = session.dek;
-  if (!dek) return;
   try {
     await dekVault.save({
       anonymous: session.anonymous,
@@ -642,7 +628,7 @@ async function persistVault(session: Session): Promise<void> {
       primaryDocId: session.primaryDocId,
       email: session.email,
       deviceId: session.deviceId,
-      dek,
+      dek: session.dek,
       docKeys: session.docKeys,
     });
   } catch (e) {

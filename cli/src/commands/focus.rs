@@ -271,12 +271,11 @@ mod tests {
     use super::*;
     use monoplan_core::{ItemLifecycle, LIST_INBOX};
 
-    /// `Request.moveStarred`: the frames the apps send for a drag on
-    /// the Starred page. `after` lands the item directly under its
-    /// neighbour even with an entry between them the page cannot show.
+    /// A drag on the Starred page (`Engine::move_starred`, `starred mv
+    /// --after`): `after` lands the item directly under its neighbour
+    /// even with an entry between them the page cannot show.
     #[test]
-    fn mv_frames_from_the_apps_reorder_past_hidden_entries() {
-        use super::super::DocCmd;
+    fn mv_reorders_past_hidden_entries() {
         let home = Doc::new().unwrap();
         let ids: Vec<String> = ["a", "b", "c"]
             .iter()
@@ -300,33 +299,27 @@ mod tests {
                 .collect()
         };
         assert_eq!(order(), ["a", "hidden", "b", "c"]);
-        let run = |mv: serde_json::Value| {
-            let cmd: DocCmd = serde_json::from_value(
-                serde_json::json!({"Focus": {"cmd": {"Mv": mv}, "json": false}}),
-            )
-            .unwrap();
-            let DocCmd::Focus(args) = cmd else {
-                panic!("not a Focus frame")
-            };
-            run(
+        let mv = |item: &str, pos: Option<usize>, after: Option<&str>| {
+            api::starred::move_starred(
                 &Ctx::bare(&home, &[&home], &Lens::home(&home)),
-                args,
-                &mut Vec::new(),
+                item,
+                pos,
+                after,
             )
         };
         // Down: a under b.
-        run(serde_json::json!({"item_id": ids[0], "pos": null, "after": ids[1]})).unwrap();
+        mv(&ids[0], None, Some(&ids[1])).unwrap();
         assert_eq!(order(), ["hidden", "b", "a", "c"]);
         // Up: c under b.
-        run(serde_json::json!({"item_id": ids[2], "pos": null, "after": ids[1]})).unwrap();
+        mv(&ids[2], None, Some(&ids[1])).unwrap();
         assert_eq!(order(), ["hidden", "b", "c", "a"]);
         // To the top: a position, above the hidden entry too.
-        run(serde_json::json!({"item_id": ids[0], "pos": 1})).unwrap();
+        mv(&ids[0], Some(1), None).unwrap();
         assert_eq!(order(), ["a", "hidden", "b", "c"]);
         // Under the last row.
-        run(serde_json::json!({"item_id": ids[0], "pos": null, "after": ids[2]})).unwrap();
+        mv(&ids[0], None, Some(&ids[2])).unwrap();
         assert_eq!(order(), ["hidden", "b", "c", "a"]);
-        assert!(run(serde_json::json!({"item_id": ids[0], "pos": null, "after": "nope"})).is_err());
+        assert!(mv(&ids[0], None, Some("nope")).is_err());
     }
 
     #[test]

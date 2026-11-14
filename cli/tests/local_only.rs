@@ -166,9 +166,9 @@ async fn signup_without_a_local_workspace_seeds_a_fresh_doc() {
     engine.flush().await.unwrap();
 }
 
-/// The macOS app hosts a local-only workspace like any other and asks
-/// the loop for the window's session (`spec/mac-window-plan.md` "Swift
-/// side"): no identity and no server, `local_only` set, the one doc.
+/// The apps host a local-only workspace like any other and ask the
+/// loop for its session (`Engine::account` / `workspaces`): no identity
+/// and no server, `local_only` set, the one doc.
 #[tokio::test]
 async fn embedded_host_reports_a_local_only_session() {
     let tmp = tempfile::tempdir().unwrap();

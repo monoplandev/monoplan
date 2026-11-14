@@ -253,54 +253,44 @@ export function SharingDialog(props: {
                   when={isOwner()}
                   fallback={<p class="confirm-dialog-message">{m().sharing.ownerOnly}</p>}
                 >
-                  {/* A link wraps the doc's DEK under the invite KEK; the
-                      app window holds no key (`Session.mirror`), so it
-                      only lists and revokes. */}
+                  <p class="confirm-dialog-message">{m().sharing.linkHint}</p>
                   <Show
-                    when={!session.session().mirror}
+                    when={link()}
                     fallback={
-                      <p class="confirm-dialog-message">{m().sharing.appWindowNoInvites}</p>
+                      <button
+                        type="button"
+                        class="confirm-dialog-btn confirm-dialog-confirm sharing-create"
+                        disabled={creating()}
+                        onClick={() => void createLink()}
+                      >
+                        {creating() ? m().sharing.creating : m().sharing.createLink}
+                      </button>
                     }
                   >
-                    <p class="confirm-dialog-message">{m().sharing.linkHint}</p>
-                    <Show
-                      when={link()}
-                      fallback={
+                    {(url) => (
+                      <div class="sharing-link-row">
+                        <input
+                          class="name-dialog-input sharing-link-input"
+                          type="text"
+                          readOnly
+                          value={url()}
+                          aria-label={m().sharing.inviteLink}
+                          onFocus={(e) => e.currentTarget.select()}
+                        />
                         <button
                           type="button"
-                          class="confirm-dialog-btn confirm-dialog-confirm sharing-create"
-                          disabled={creating()}
-                          onClick={() => void createLink()}
+                          class="confirm-dialog-btn confirm-dialog-confirm"
+                          onClick={() => void copyLink()}
                         >
-                          {creating() ? m().sharing.creating : m().sharing.createLink}
+                          {copied() ? m().sharing.copied : m().common.copy}
                         </button>
-                      }
-                    >
-                      {(url) => (
-                        <div class="sharing-link-row">
-                          <input
-                            class="name-dialog-input sharing-link-input"
-                            type="text"
-                            readOnly
-                            value={url()}
-                            aria-label={m().sharing.inviteLink}
-                            onFocus={(e) => e.currentTarget.select()}
-                          />
-                          <button
-                            type="button"
-                            class="confirm-dialog-btn confirm-dialog-confirm"
-                            onClick={() => void copyLink()}
-                          >
-                            {copied() ? m().sharing.copied : m().common.copy}
-                          </button>
-                        </div>
-                      )}
-                    </Show>
-                    <Show when={createError()}>
-                      <p class="name-dialog-error" role="alert">
-                        {m().sharing.createFailed}
-                      </p>
-                    </Show>
+                      </div>
+                    )}
+                  </Show>
+                  <Show when={createError()}>
+                    <p class="name-dialog-error" role="alert">
+                      {m().sharing.createFailed}
+                    </p>
                   </Show>
                   <Show when={openInvites().length > 0}>
                     <h4 class="sharing-subheading">{m().sharing.pendingLinks}</h4>

@@ -66,7 +66,6 @@ export function App(props: {
           dek: v.dek,
           docKeys: v.docKeys,
           freshSignup: false,
-          mirror: false,
         });
         return;
       }
@@ -226,7 +225,6 @@ async function refreshDocKeys(session: Session): Promise<DocRefresh> {
   const none: DocRefresh = { fresh: new Map<string, Dek>(), stale: [] };
   if (session.anonymous) return none;
   const homeDek = session.dek;
-  if (!homeDek) return none;
   const timeout = new Promise<null>((resolve) =>
     setTimeout(() => resolve(null), DOC_REFRESH_TIMEOUT_MS),
   );
@@ -298,7 +296,6 @@ async function createAnonymousSession(): Promise<Session> {
     // Seed the doc on first run via Doc.create(). On reload we read
     // the IndexedDB op log instead.
     freshSignup: true,
-    mirror: false,
   };
   try {
     await dekVault.save({
@@ -417,11 +414,7 @@ function BootGate(props: {
       // Home first, so a failure there is the one reported; replay is
       // main-thread wasm work either way, so there is nothing to gain
       // from interleaving the docs.
-      // The browser always holds the Home key; only the app's mirror
-      // session (`Session.mirror`) does not, and it never boots here.
-      const homeDek = props.session.dek;
-      if (!homeDek) throw new Error("this session holds no key to open the Home doc with");
-      let docs: DocBoot[] = [await bootDoc(props.session.primaryDocId, homeDek)];
+      let docs: DocBoot[] = [await bootDoc(props.session.primaryDocId, props.session.dek)];
       for (const [docId, dek] of props.session.docKeys) {
         if (docId === props.session.primaryDocId) continue;
         docs.push(await bootDoc(docId, dek));

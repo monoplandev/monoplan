@@ -1,15 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   agendaItemHash,
-  appBase,
   itemHash,
   namesItem,
-  itemUrl,
-  listUrl,
   parseHash,
   parseInternalUrl,
-  serverLinkBase,
-  setLinkBase,
   stateHash,
   viewHash,
 } from "../src/url.ts";
@@ -111,30 +106,5 @@ describe("internal links", () => {
     expect(parseInternalUrl(`${base}docs#item_${ID}`, base)).toBeNull();
     expect(parseInternalUrl(base, base)).toBeNull();
     expect(parseInternalUrl("not a url", base)).toBeNull();
-  });
-});
-
-describe("link base", () => {
-  test("serverLinkBase is the server's origin with the root path", () => {
-    expect(serverLinkBase("https://alpha.monoplan.app")).toBe("https://alpha.monoplan.app/");
-    expect(serverLinkBase("https://alpha.monoplan.app/")).toBe("https://alpha.monoplan.app/");
-    expect(serverLinkBase("http://127.0.0.1:8000/api/")).toBe("http://127.0.0.1:8000/");
-  });
-
-  test("setLinkBase redirects shareable links and the internal-link test", () => {
-    const base = "https://alpha.monoplan.app/";
-    setLinkBase(base);
-    try {
-      expect(appBase()).toBe(base);
-      expect(itemUrl(ID)).toBe(`${base}#item_${ID}`);
-      expect(listUrl(ID)).toBe(`${base}#list_${ID}`);
-      expect(listUrl("inbox", "0192f5c1-a3b7-4e6c-9d2f-8a1b3c4d5e6f")).toBe(
-        `${base}#inbox_0192f5c1-a3b7-4e6c-9d2f-8a1b3c4d5e6f`,
-      );
-      expect(parseInternalUrl(`${base}#item_${ID}`)).toEqual({ kind: "item", id: ID });
-      expect(parseInternalUrl(`monoplan://app/mirror.html#item_${ID}`)).toBeNull();
-    } finally {
-      setLinkBase(null);
-    }
   });
 });

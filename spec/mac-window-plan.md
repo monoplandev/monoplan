@@ -1,11 +1,15 @@
 # macOS window: plan
 
-**Superseded on the Swift side, 2026-11-14.** The webview window is
-gone: `WebWindow.swift`, the scheme handler, `MirrorFraming`, `PageZoom`
-and `WindowSettings` were deleted and the app's window is native
-(`spec/swift-bindings-plan.md`, phase 4). The engine and js halves of
-the mirror described below are still in the tree until that plan's
-phase 5 removes them. What follows is kept as the record of the design.
+**Superseded, 2026-11-14. Nothing described here is in the tree.** The
+webview window is gone: `WebWindow.swift`, the scheme handler,
+`MirrorFraming`, `PageZoom` and `WindowSettings` were deleted and the
+app's window is native (`spec/swift-bindings-plan.md`, phase 4). The
+engine and js halves of the mirror went the same day (that plan's
+phase 5): `Engine.subscribe` / `import` / `session`, the `HostCmd`
+mirror variants and fan-out, `Doc::import_mirror_update` and the
+`mirror` commit origin, `Replica.mirror`, `Doc.loadWithPeer`,
+`MirrorBridge`, `mirror.html`, `createMirrorRuntime`, `MirrorApp` and
+`Session.mirror`. What follows is kept as the record of the design.
 
 Status: decided 2026-10-29; phase 1 (tray over the FFI) built the same
 day, phase 2 (the mirror on the engine: `Engine.subscribe` / `Engine.import`,

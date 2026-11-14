@@ -11,11 +11,10 @@ use monoplan_cli::config::Profile;
 use monoplan_cli::daemon;
 use monoplan_cli::ipc::{self, Reply, Request, WatchEvent, read_frame, write_frame};
 use monoplan_cli::sync::{Engine, SyncError};
-use monoplan_core::{Doc, LIST_INBOX};
+use monoplan_core::LIST_INBOX;
 use monoplan_server::sync::queries;
 use support::{
     TEST_PASSWORD, TestServer, login_device, materialize_profile, reopen_profile, signup_account,
-    wait_for_updates,
 };
 use tokio::net::UnixStream;
 use uuid::Uuid;
@@ -375,9 +374,9 @@ async fn local_client_shares_the_loop_with_the_socket() {
     ));
     assert!(!local.is_stopped());
 
-    // The window's `session` request (spec/mac-window-plan.md "Swift
-    // side"): the identity the loop booted with, the server, and the
-    // open docs, Home first. In process only; the socket has no frame.
+    // The session the apps read (`Engine::account` / `workspaces`):
+    // the identity the loop booted with, the server, and the open
+    // docs, Home first. In process only; the socket has no frame.
     let info = local.session().await.unwrap();
     assert_eq!(info.account_id, signup.account_id);
     assert_eq!(info.email, signup.email);
@@ -564,241 +563,6 @@ async fn take_over_stops_headless_only() {
     handle.shutdown().await.unwrap();
     drop(claim);
     assert!(!daemon::is_running(tmp.path()).unwrap());
-}
-
-/// A mirror sink that hands everything to a channel: `Some(bytes)` per
-/// update, `None` for `stopped`.
-struct ChanSink(tokio::sync::mpsc::UnboundedSender<Option<Vec<u8>>>);
-
-impl daemon::MirrorSink for ChanSink {
-    fn update(&self, bytes: Vec<u8>) {
-        let _ = self.0.send(Some(bytes));
-    }
-    fn stopped(&self) {
-        let _ = self.0.send(None);
-    }
-}
-
-async fn next_update(
-    rx: &mut tokio::sync::mpsc::UnboundedReceiver<Option<Vec<u8>>>,
-    what: &str,
-) -> Vec<u8> {
-    tokio::time::timeout(Duration::from_secs(5), rx.recv())
-        .await
-        .unwrap_or_else(|_| panic!("timed out waiting for mirror update: {what}"))
-        .unwrap_or_else(|| panic!("sink channel dropped waiting for {what}"))
-        .unwrap_or_else(|| panic!("mirror stopped waiting for {what}"))
-}
-
-/// Is `peer-<slot>.lock` held by someone (the host's lease for a mirror)?
-fn slot_is_leased(dir: &std::path::Path, slot: u32) -> bool {
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(dir.join(format!("peer-{slot}.lock")))
-        .unwrap();
-    match file.try_lock() {
-        Ok(()) => false,
-        Err(std::fs::TryLockError::WouldBlock) => true,
-        Err(std::fs::TryLockError::Error(e)) => panic!("{e}"),
-    }
-}
-
-/// The host side of the mirror (`spec/mac-window-plan.md`, phase 2): a
-/// second in-process `Doc`, seeded by `subscribe` under a leased peer
-/// of its own, converges after a CLI command on the socket and after a
-/// remote device's push; an op it commits and `import`s is applied as
-/// local on the host (visible to a command, WALed, pushed so another
-/// device pulls it) without echoing back; a duplicate import is a
-/// no-op; its slot is released when the subscription drops; and a
-/// subscription outliving the loop hears `stopped`.
-#[tokio::test]
-async fn mirror_converges_both_ways_through_the_host() {
-    let server = TestServer::start().await;
-    let signup = signup_account(&server, "mirror-a").await;
-    let tmp = tempfile::tempdir().unwrap();
-    let profile = materialize_profile(
-        tmp.path(),
-        &server.base,
-        &signup.account_id,
-        &signup.primary_doc_id,
-        &signup.device_id,
-        &signup.device_token,
-        &signup.dek,
-        &signup.email,
-        true,
-    )
-    .await;
-    let mut handle = daemon::spawn_with(profile, true).await.unwrap();
-    wait_until(&mut handle.status, "daemon online", |s| s.online).await;
-    let local = handle.client.clone();
-    let primary_doc_id = Uuid::parse_str(&signup.primary_doc_id).unwrap();
-
-    // Seed: the host holds slot 0; the mirror is leased slot 1 and
-    // loads the snapshot under that peer.
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let sub = local.subscribe(None, Box::new(ChanSink(tx))).await.unwrap();
-    assert_eq!(sub.doc_id.0, primary_doc_id);
-    assert!(slot_is_leased(tmp.path(), 1), "mirror's slot is held");
-    let mut mirror = Doc::empty_with_peer(sub.peer_id).unwrap();
-    mirror.import_oplog_updates(&sub.snapshot).unwrap();
-    assert_eq!(mirror.peer_id(), sub.peer_id);
-    assert!(mirror.items_in_list(LIST_INBOX, false).is_empty());
-
-    // Host to mirror, from a CLI command on the socket.
-    let mut cli = connect(tmp.path()).await;
-    let add = |text: &str| Request::Doc {
-        workspace: None,
-        cmd: DocCmd::Add {
-            list: LIST_INBOX.to_string(),
-            texts: vec![text.into()],
-            top: false,
-        },
-    };
-    write_frame(&mut cli, &add("from-the-cli")).await.unwrap();
-    expect_frame(&mut cli, "add output", |r| {
-        matches!(r, Reply::Output { .. })
-    })
-    .await;
-    let bytes = next_update(&mut rx, "cli add").await;
-    mirror.import_oplog_updates(&bytes).unwrap();
-    let texts = |doc: &Doc| -> Vec<String> {
-        doc.items_in_list(LIST_INBOX, false)
-            .into_iter()
-            .map(|i| i.text)
-            .collect()
-    };
-    assert_eq!(texts(&mirror), vec!["from-the-cli".to_string()]);
-
-    // Host to mirror, from a remote device's push.
-    let login = login_device(&server.base, &signup.email, TEST_PASSWORD, "mirror-b")
-        .await
-        .unwrap();
-    let tmp_b = tempfile::tempdir().unwrap();
-    let profile_b = materialize_profile(
-        tmp_b.path(),
-        &server.base,
-        &login.account_id,
-        &login.primary_doc_id,
-        &login.device_id,
-        &login.device_token,
-        &login.dek,
-        &signup.email,
-        false,
-    )
-    .await;
-    let engine_b = Engine::open_with_profile(profile_b, true).await.unwrap();
-    engine_b
-        .doc()
-        .add_item(LIST_INBOX, "from-device-b")
-        .unwrap();
-    engine_b.flush().await.unwrap();
-    let bytes = next_update(&mut rx, "remote push").await;
-    mirror.import_oplog_updates(&bytes).unwrap();
-    assert!(texts(&mirror).contains(&"from-device-b".to_string()));
-    assert_eq!(mirror.items_in_list(LIST_INBOX, false).len(), 2);
-
-    // Mirror to host: committed under the mirror's peer, exported since
-    // its last send, imported as local.
-    let blobs_before = queries::fetch_updates_batch(&server.state.db, primary_doc_id, 0)
-        .await
-        .unwrap()
-        .updates
-        .len();
-    let since = mirror.oplog_vv();
-    let window_item = mirror.add_item(LIST_INBOX, "from-the-window").unwrap();
-    let ops = mirror.export_updates_after(&since).unwrap();
-    sub.import(ops.clone()).await.unwrap();
-    let listing = local
-        .request(Request::Doc {
-            workspace: None,
-            cmd: DocCmd::Ls(monoplan_cli::commands::items::LsArgs {
-                list: LIST_INBOX.to_string(),
-                done: false,
-                json: true,
-            }),
-        })
-        .await;
-    match listing {
-        Reply::Output { stdout, .. } => assert!(stdout.contains("from-the-window"), "{stdout}"),
-        other => panic!("unexpected: {other:?}"),
-    }
-    // Pushed: the server has a new blob and another device pulls it.
-    wait_for_updates(&server, primary_doc_id, blobs_before + 1).await;
-    let engine_b = Engine::open_with_profile(reopen_profile(tmp_b.path()), true)
-        .await
-        .unwrap();
-    assert_eq!(
-        engine_b.doc().get_item(&window_item).map(|i| i.text),
-        Some("from-the-window".to_string()),
-        "device B pulled the window's op"
-    );
-    // Not echoed, and a duplicate import is a no-op.
-    sub.import(ops).await.unwrap();
-    assert!(
-        tokio::time::timeout(Duration::from_millis(300), rx.recv())
-            .await
-            .is_err(),
-        "the mirror's own ops do not come back to it"
-    );
-    match local
-        .request(Request::Doc {
-            workspace: None,
-            cmd: DocCmd::Ls(monoplan_cli::commands::items::LsArgs {
-                list: LIST_INBOX.to_string(),
-                done: false,
-                json: true,
-            }),
-        })
-        .await
-    {
-        Reply::Output { stdout, .. } => {
-            assert_eq!(stdout.matches("from-the-window").count(), 1, "{stdout}")
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-
-    // A second mirror takes the next slot and is seeded with everything
-    // so far, the window's op included.
-    let (tx2, mut rx2) = tokio::sync::mpsc::unbounded_channel();
-    let sub2 = local
-        .subscribe(None, Box::new(ChanSink(tx2)))
-        .await
-        .unwrap();
-    assert_ne!(sub2.peer_id, sub.peer_id);
-    assert!(slot_is_leased(tmp.path(), 2));
-    let mut mirror2 = Doc::empty_with_peer(sub2.peer_id).unwrap();
-    mirror2.import_oplog_updates(&sub2.snapshot).unwrap();
-    assert_eq!(mirror2.items_in_list(LIST_INBOX, false).len(), 3);
-
-    // Dropping a subscription releases its slot.
-    drop(sub);
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while slot_is_leased(tmp.path(), 1) {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("slot 1 released after the subscription dropped");
-    assert!(
-        slot_is_leased(tmp.path(), 2),
-        "the other mirror keeps its slot"
-    );
-
-    // The loop ending tells a live mirror so.
-    handle.shutdown().await.unwrap();
-    assert_eq!(
-        tokio::time::timeout(Duration::from_secs(5), rx2.recv())
-            .await
-            .expect("stopped arrives"),
-        Some(None)
-    );
-    assert!(matches!(
-        sub2.import(Vec::new()).await,
-        Err(daemon::MirrorError::Stopped)
-    ));
-    assert!(!slot_is_leased(tmp.path(), 2), "leases go with the loop");
 }
 
 /// `Request::Reconnect` (the app's wake / foreground / network-change

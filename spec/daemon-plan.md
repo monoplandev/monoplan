@@ -1,6 +1,6 @@
 # Daemon plan
 
-Status: phases 1 to 3 built 2026-10-21 (`cli/src/daemon.rs` host + socket server, `cli/src/ipc.rs`, `cli/src/client.rs`, every doc verb ported, `-s` removed, `daemon stop|status`; tests in `cli/tests/daemon.rs` and `cli/tests/cli_bin.rs`). Phase 5's projection tier built 2026-10-26 (`Watch` / `Watching` / `Event`; first watcher is the macOS menubar app in `apple/MonoplanMac`). `daemon install|uninstall` built 2026-10-27 (`cli/src/service.rs`: the headless path for Linux and CLI-only Macs). Amended 2026-10-27 (see "Decision", amendment): on macOS the app runs the loop in-process (`monoplan-ffi::Engine`, `apple/MonoplanMac/Sources/MonoplanMac/EngineController.swift`) for its whole life, the headless daemon is the alternative rather than a partner, and login uses the Login Items API; the mirror tier is no longer needed for the macOS window. Amended 2026-10-29 (`spec/mac-window-plan.md`): the mirror is an FFI surface on `Engine`, never socket frames; the window is a webview running the web client over a mirror doc with its own peer; the tray moved to the FFI the same day (`daemon::LocalClient`, `Engine.request` / `Engine.watch`), so the socket is the CLI's alone; the mirror's engine side (`HostCmd`, `Engine.subscribe` / `Engine.import`) built 2026-11-03. Not built: the locked state, wake notifications. Written 2026-10-21. The built behaviour is documented in `spec/cli.md` "Process model"; this file keeps the reasoning and the remaining plan. Supersedes the deleted
+Status: phases 1 to 3 built 2026-10-21 (`cli/src/daemon.rs` host + socket server, `cli/src/ipc.rs`, `cli/src/client.rs`, every doc verb ported, `-s` removed, `daemon stop|status`; tests in `cli/tests/daemon.rs` and `cli/tests/cli_bin.rs`). Phase 5's projection tier built 2026-10-26 (`Watch` / `Watching` / `Event`; first watcher is the macOS menubar app in `apple/MonoplanMac`). `daemon install|uninstall` built 2026-10-27 (`cli/src/service.rs`: the headless path for Linux and CLI-only Macs). Amended 2026-10-27 (see "Decision", amendment): on macOS the app runs the loop in-process (`monoplan-ffi::Engine`, `apple/MonoplanMac/Sources/MonoplanMac/EngineController.swift`) for its whole life, the headless daemon is the alternative rather than a partner, and login uses the Login Items API; the mirror tier is no longer needed for the macOS window. Amended 2026-10-29 (`spec/mac-window-plan.md`): the mirror is an FFI surface on `Engine`, never socket frames; the window is a webview running the web client over a mirror doc with its own peer; the tray moved to the FFI the same day (`daemon::LocalClient`, `Engine.request` / `Engine.watch`), so the socket is the CLI's alone; the mirror's engine side (`HostCmd`, `Engine.subscribe` / `Engine.import`) built 2026-11-03. Amended 2026-11-14 (`spec/swift-bindings-plan.md`): the Apple apps call the loop through typed FFI methods (`HostCmd::Call`, `cli/src/api/`) and follow it with `Engine.observe`; the mirror (`Engine.subscribe` / `import` / `session`, its `HostCmd` variants and fan-out) and the msgpack `Engine.request` / `watch` are removed, and the mirror tier described below is the record of a design no longer in the tree. Not built: the locked state, wake notifications. Written 2026-10-21. The built behaviour is documented in `spec/cli.md` "Process model"; this file keeps the reasoning and the remaining plan. Supersedes the deleted
 `spec/tui-plan.md` (its "no daemon" conclusion rested on boot time,
 which is no longer the question) and answers the daemon question that
 `spec/cli.md` "Sync lifecycle" deferred.
@@ -69,10 +69,11 @@ app runs the engine in-process: the same Rust loop, split into
 the window are clients of the app's own `Engine` through the FFI
 (`daemon::LocalClient` through `monoplan-ffi`, built 2026-10-29; until
 then the tray was a socket client of its own process). The socket is
-served for the CLI only. The window is a
-webview running the web client over a mirror doc that `Engine` seeds and
-converges (`spec/mac-window-plan.md`); the mirror tier below is that
-FFI surface and is never carried by the socket. The headless `monoplan daemon` remains the
+served for the CLI only. The window was a
+webview running the web client over a mirror doc that `Engine` seeded and
+converged (`spec/mac-window-plan.md`) until 2026-11-14, when it went
+native over typed calls (`spec/swift-bindings-plan.md`) and the mirror
+was removed. The headless `monoplan daemon` remains the
 host for CLI-only use, Linux and servers (`daemon install` writes the
 systemd unit or launchd agent for that path) and is what the CLI
 auto-spawns when nothing holds the profile. Rules:
@@ -125,8 +126,8 @@ monoplan item ls  ──UDS──┤
 monoplan tui      ──UDS──┼──>  host loop ──WS──> server
 tray / window     ──FFI──┘        │   (`monoplan daemon`, or the macOS app's
                   (in-process)    │    `monoplan-ffi::Engine`; the FFI edge exists only there:
-                                  │    request / watch for the tray, subscribe / import /
-                                  │    session for the window's mirror, spec/mac-window-plan.md)
+                                  │    typed calls and `observe`,
+                                  │    spec/swift-bindings-plan.md)
                                   ├── <profile>/monoplan.sqlite
                                   ├── <profile>/engine.lock   (held: "a daemon owns this profile")
                                   ├── <profile>/peer-<n>.lock (held: its Loro peer id)
@@ -267,7 +268,11 @@ inside `--json` payloads is not done: every documented `--json` shape in
 decide separately.
 
 **Live clients mirror the doc, not projections.** Decided 2026-10-21,
-amended 2026-10-29. A full-view client holds a `Doc` of its own, seeded
+amended 2026-10-29, reversed 2026-11-14: the native apps read typed
+projections (`cli/src/api/` rows over the FFI) and re-read on
+`changed`, and the mirror is out of the tree
+(`spec/swift-bindings-plan.md`). The rest of this passage is the
+record of the mirror design. A full-view client holds a `Doc` of its own, seeded
 by a snapshot from the host and converged by the plaintext update bytes
 of every later apply (local command, remote frame, another mirror's
 import), and runs core's own read functions locally: board, agenda,
@@ -471,6 +476,8 @@ about the product.
    `Engine::subscribe` / `Engine::import` on the FFI, specified and tested
    in `spec/mac-window-plan.md` and built 2026-11-03, reached through
    the internal `HostCmd` enum the socket handler cannot construct.
+   Removed 2026-11-14 (`spec/swift-bindings-plan.md` phase 5); the
+   apps use `HostCmd::Call` and `Engine.observe`.
 
 Update `spec/cli.md` ("Sync lifecycle", "Status", the `-s` flag) as
 each phase lands rather than in one rewrite.

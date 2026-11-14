@@ -1,11 +1,9 @@
-// `monoplan.sync()` in the devtools console, browser and app window
-// alike: the per-workspace sync facts (status, seq, epoch, fingerprint,
-// counts, doc id) that used to be the Settings dialog's Advanced
-// section. A console table reads better than a dialog for comparing
-// two devices, and nothing else needed the section
-// (spec/mac-window-plan.md "Settings"). Direct replica reads, no
-// reactivity, so it works from the console with no owner. A debug
-// build of the app is inspectable (`isInspectable`).
+// `monoplan.sync()` in the devtools console: the per-workspace sync
+// facts (status, seq, epoch, fingerprint, counts, doc id) that used to
+// be the Settings dialog's Advanced section. A console table reads
+// better than a dialog for comparing two devices, and nothing else
+// needed the section. Direct replica reads, no reactivity, so it works
+// from the console with no owner.
 
 import type { DocsLayer } from "./sync/docs.ts";
 

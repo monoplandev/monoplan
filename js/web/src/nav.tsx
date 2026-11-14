@@ -23,7 +23,6 @@ import { Avatar } from "./Avatar.tsx";
 import { useCanCopyLink, useSession } from "./SessionContext.tsx";
 import type { PresentAccount } from "./sync/runtime.ts";
 import { pendingInvite } from "./invite.ts";
-import { isMacShell, onTitlebarMouseDown } from "./sync/mirrorHost.ts";
 import type { AttentionBadge } from "./dayGroups.ts";
 import { Dnd, DndSelection, type DndOp } from "./dnd/solid";
 import { EmojiPicker } from "./EmojiPicker.tsx";
@@ -279,7 +278,7 @@ export function Nav(props: {
   setView: (v: ViewKey) => void;
   /** Delete a non-Home doc (`runtime.deleteDoc`), or null when this
    *  session can't (anonymous). Drives the heading menu's Delete item. */
-  onDeleteDoc: ((docId: string, name: string) => Promise<void>) | null;
+  onDeleteDoc: ((docId: string) => Promise<void>) | null;
   /** Leave a shared doc the account does not own (`runtime.leaveDoc`),
    *  or null when this session can't. The heading menu offers it in
    *  place of Delete to a member who is not the owner. */
@@ -291,8 +290,7 @@ export function Nav(props: {
    *  the shared marker's tooltip on non-Home headings. */
   members: MemberDirectory;
   /** Chrome pinned to the bottom of the sidebar (app menu + account/sync
-   *  widget) — see `.nav-footer` in styles.css. Absent (no footer row at
-   *  all) in the macOS app's window. */
+   *  widget) — see `.nav-footer` in styles.css. */
   footer?: JSX.Element;
 }) {
   const { m } = useAppI18n();
@@ -334,15 +332,6 @@ export function Nav(props: {
 
   return (
     <nav class="nav">
-      {/* The macOS app's window (mirror.tsx) has no title bar: its traffic
-          lights sit over this strip, which stands in for the bar it
-          replaced, so a drag moves the window and a double-click does
-          what the title bar's would. The thinner `.app-titlebar` in
-          Workspace.tsx does the same across the other panes. Hidden
-          everywhere else. */}
-      <Show when={isMacShell()}>
-        <div class="nav-titlebar" onMouseDown={onTitlebarMouseDown} />
-      </Show>
       <div class="nav-scroll" tabIndex={-1} ref={navScrollEl}>
       <div class="nav-group">
         {/* Focus: a reserved lens (spec/focus.md), not a `ListMeta` row, so
@@ -517,7 +506,7 @@ function DocSection(props: {
   setView: (v: ViewKey) => void;
   showListCounts: boolean;
   onToggled: () => void;
-  onDeleteDoc: ((docId: string, name: string) => Promise<void>) | null;
+  onDeleteDoc: ((docId: string) => Promise<void>) | null;
   onLeaveDoc: ((docId: string) => Promise<void>) | null;
   presence: (docId: string) => PresentAccount[];
   members: MemberDirectory;
@@ -573,16 +562,12 @@ function DocSection(props: {
   // Sharing is offered on non-Home docs only (Home is the account's
   // private doc and its DEK is the account key; `spec/sharing-plan.md`).
   const [sharingOpen, setSharingOpen] = createSignal(false);
-  // In the macOS app the confirmation is the app's own sheet (typed
-  // name and all), reached by calling straight through: the page's
-  // dialog is not rendered there.
-  const nativeConfirm = isMacShell();
   const deleteDoc = (): void => {
     const run = props.onDeleteDoc;
     if (!run || props.entry.home) return;
     // The collapse flag is per doc id; nothing else will ever clear it.
     saveSectionCollapsed(docId, false, false);
-    run(docId, label()).catch((err) => {
+    run(docId).catch((err) => {
       console.error("delete workspace failed:", err);
       alert(m().nav.deleteDocFailed);
     });
@@ -917,7 +902,7 @@ function DocSection(props: {
               <DropdownMenu.Separator class="dropdown-menu-separator" />
               <DropdownMenu.Item
                 class="dropdown-menu-item"
-                onSelect={() => (nativeConfirm ? deleteDoc() : setDeleteConfirm(true))}
+                onSelect={() => setDeleteConfirm(true)}
               >
                 {m().nav.deleteDoc}
               </DropdownMenu.Item>
@@ -977,7 +962,7 @@ function DocSection(props: {
         style={{ display: "none" }}
         onChange={onImportFilePicked}
       />
-      <Show when={canDelete() && !nativeConfirm}>
+      <Show when={canDelete()}>
         <ConfirmDialog
           open={deleteConfirmOpen()}
           onOpenChange={setDeleteConfirm}
@@ -1275,9 +1260,7 @@ export function NavFindButton(props: { onClick: () => void }) {
 /** The app-menu dropdown (undo/redo | new workspace, settings | website,
  *  shortcuts, auth) plus the auth dialog the Sign in / Sign up items
  *  open. Import / export live on each workspace heading's "..." menu. Lives in the
- *  sidebar footer (see `Nav`'s `footer` prop). Not rendered in the macOS
- *  app's window (spec/mac-window-plan.md "Settings"): the menu bar has
- *  Settings and Edit › Undo / Redo, the tray signs out. */
+ *  sidebar footer (see `Nav`'s `footer` prop). */
 export function NavMenu(props: {
   /** Undo / redo go through the layer (the doc that acted last). */
   docs: DocsLayer;

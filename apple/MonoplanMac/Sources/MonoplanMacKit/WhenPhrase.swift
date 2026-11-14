@@ -33,6 +33,16 @@
 
 import Foundation
 
+/// What a write does to the item's pending date suggestion
+/// (`when_suggested`, `WhenSuggest`).
+public enum SuggestionEdit: Equatable {
+    case keep
+    /// Drop it: the user's "no", or its phrase left the title.
+    case clear
+    /// Raise one: a `when`-shaped value read out of the title.
+    case set(String)
+}
+
 public struct WhenPhrase: Equatable {
     /// The phrase as typed.
     public let text: String

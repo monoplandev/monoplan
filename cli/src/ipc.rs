@@ -48,7 +48,7 @@ pub enum Request {
     Reconnect,
     /// Who is logged in: the account row the daemon booted with. Read
     /// here rather than from the profile files so a client that holds
-    /// no db (the menubar app) still gets the email.
+    /// no db still gets the email.
     Account,
     /// Create a workspace the account owns and open it now
     /// (`spec/sharing-plan.md` Phase 5; `Engine::create_doc`): a fresh
@@ -350,11 +350,11 @@ mod tests {
         assert!(read_frame::<_, Reply>(&mut b).await.unwrap().is_none());
     }
 
-    /// The wire shape foreign clients (the Swift menubar app) encode by
-    /// hand: `rmp_serde::to_vec_named`, so struct fields are string-keyed
-    /// maps, a unit variant is a bare string, and any other variant is a
-    /// one-entry map from the variant name to its payload. Pinned here
-    /// so a serde attribute change cannot silently strand them.
+    /// The socket's wire shape: `rmp_serde::to_vec_named`, so struct
+    /// fields are string-keyed maps, a unit variant is a bare string,
+    /// and any other variant is a one-entry map from the variant name to
+    /// its payload. Pinned here so a serde attribute change cannot
+    /// silently strand a daemon and a CLI of different builds.
     #[test]
     fn wire_shape_is_named_maps_and_bare_unit_variants() {
         use crate::commands::{DocCmd, agenda::AgendaArgs};
@@ -457,7 +457,7 @@ mod tests {
             }),
             serde_json::json!({"Doc": {"cmd": {"Find": {"query": "buy gro", "limit": 50, "json": true}}}})
         );
-        // A client that omits `workspace` (the macOS app) means Home.
+        // A client that omits `workspace` means Home.
         let home: Request = rmp_serde::from_slice(
             &rmp_serde::to_vec_named(&serde_json::json!({"Doc": {"cmd": {"Lists": {"cmd": {"Ls": {"json": true, "archived": false, "all": true}}}}}})).unwrap(),
         )
@@ -551,8 +551,8 @@ mod tests {
         let p = socket_path(&long);
         assert!(p.starts_with(std::env::temp_dir()));
         assert_eq!(p, socket_path(&long), "deterministic");
-        // Pinned so a foreign client (the Swift menubar app) computing
-        // the same fallback name can test against the same vector.
+        // Pinned: a daemon and a CLI of different builds must compute
+        // the same fallback name.
         assert_eq!(fnv1a(b"/tmp/p"), 0x6cc12addf2745004);
     }
 }

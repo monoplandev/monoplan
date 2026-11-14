@@ -4,8 +4,6 @@
 //! `Doc` through a storage adapter and (b) drive the sans-IO
 //! `Replica` from a browser-owned `WebSocket`, (c) password/recovery derivation.
 
-use std::collections::VecDeque;
-
 use wasm_bindgen::prelude::*;
 
 use monoplan_core::{
@@ -15,10 +13,9 @@ use monoplan_core::{
     InviteSecret as CoreInviteSecret, ItemLifecycle as CoreItemLifecycle, Kek as CoreKek,
     LocalSeq as CoreLocalSeq, LocalStorage as CoreLocalStorage, NotesDeltaOp, PushId as CorePushId,
     RemoteWalRow as CoreRemoteWalRow, Replica as CoreReplica, ServerSeq as CoreServerSeq,
-    StorageError as CoreStorageError, VersionVector, WrappedDek as CoreWrappedDek,
-    derive_password_master, derive_recovery_master, generate_recovery_code,
-    hello_frame as core_hello_frame, kek_from_master,
-    parse_hello_response as core_parse_hello_response, parse_recovery_code,
+    StorageError as CoreStorageError, WrappedDek as CoreWrappedDek, derive_password_master,
+    derive_recovery_master, generate_recovery_code, hello_frame as core_hello_frame,
+    kek_from_master, parse_hello_response as core_parse_hello_response, parse_recovery_code,
     server_frame_doc_id as core_server_frame_doc_id,
 };
 use monoplan_protocol::{EncryptedBlob as CoreEncryptedBlob, KdfParams as CoreKdfParams};
@@ -43,17 +40,6 @@ fn parse_doc_id(doc_id: &str) -> Result<CoreDocId, JsError> {
     uuid::Uuid::parse_str(doc_id)
         .map(CoreDocId)
         .map_err(|e| JsError::new(&format!("invalid doc_id: {e}")))
-}
-
-/// Log from a method that has no error channel to JS (`flush`).
-fn console_error(msg: &str) {
-    let f = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("console"))
-        .ok()
-        .and_then(|c| js_sys::Reflect::get(&c, &JsValue::from_str("error")).ok())
-        .and_then(|f| f.dyn_into::<js_sys::Function>().ok());
-    if let Some(f) = f {
-        let _ = f.call1(&JsValue::NULL, &JsValue::from_str(msg));
-    }
 }
 
 /// Search tokenizer (`spec/search.md` "Normalization"), exported so JS
@@ -208,21 +194,6 @@ impl Doc {
         Ok(Doc {
             inner: CoreDoc::load(bytes).map_err(js_err)?,
         })
-    }
-
-    /// The mirror's seed (`spec/mac-window-plan.md` "Seed"): a plaintext
-    /// Loro snapshot from the in-process host, loaded under the peer id
-    /// the host leased for this doc. The peer is bound before the import
-    /// so Loro resumes its counter from any history that peer already
-    /// has (a reused slot), and every later local op carries it. The
-    /// snapshot's ops are history, not undo steps and not uncaptured
-    /// local work. `peer` is a BigInt in JS.
-    #[wasm_bindgen(js_name = loadWithPeer)]
-    pub fn load_with_peer(bytes: &[u8], peer: u64) -> Result<Doc, JsError> {
-        let mut inner = CoreDoc::empty_with_peer(peer).map_err(js_err)?;
-        inner.import_oplog_updates(bytes).map_err(js_err)?;
-        inner.mark_persisted();
-        Ok(Doc { inner })
     }
 
     /// Snapshot + last-pushed VV envelope. Persist this verbatim.
@@ -1494,53 +1465,14 @@ pub fn server_frame_doc_id(bytes: &[u8]) -> Option<String> {
 
 // ---------- Replica ----------
 
-/// What a [`Replica`] wraps. `Synced` is the sans-IO replica the
-/// browser drives over a WebSocket with a DEK and a `ReplicaStorage`.
-/// `Mirror` is the macOS app's webview (`spec/mac-window-plan.md`): a
-/// doc with no DEK, no storage and no server, seeded by the in-process
-/// host and converged with it by exchanging plaintext Loro updates. The
-/// store's mutation and read surface is identical over both; only the
-/// sync verbs differ, and in mirror mode the WebSocket ones are inert.
-enum Inner {
-    Synced(CoreReplica),
-    Mirror(MirrorReplica),
-}
-
-struct MirrorReplica {
-    doc: CoreDoc,
-    doc_id: CoreDocId,
-    /// The oplog frontier as of the last `flush`: the base of the next
-    /// outbound export. One VV is the whole mirror-to-host state.
-    last_sent: VersionVector,
-    /// Updates `flush` exported and the bridge has not taken yet.
-    outbox: VecDeque<Vec<u8>>,
-}
-
 #[wasm_bindgen]
 pub struct Replica {
-    inner: Inner,
+    inner: CoreReplica,
 }
 
 impl Replica {
     fn doc(&self) -> &CoreDoc {
-        match &self.inner {
-            Inner::Synced(e) => e.doc(),
-            Inner::Mirror(m) => &m.doc,
-        }
-    }
-
-    fn synced(&self) -> Option<&CoreReplica> {
-        match &self.inner {
-            Inner::Synced(e) => Some(e),
-            Inner::Mirror(_) => None,
-        }
-    }
-
-    fn synced_mut(&mut self) -> Option<&mut CoreReplica> {
-        match &mut self.inner {
-            Inner::Synced(e) => Some(e),
-            Inner::Mirror(_) => None,
-        }
+        self.inner.doc()
     }
 }
 
@@ -1565,55 +1497,21 @@ impl Replica {
         // mirror): capture, ack, and remote-apply all flow through it.
         let dyn_storage: Box<dyn CoreLocalStorage> = Box::new(WebStorage { js: storage });
         Ok(Replica {
-            inner: Inner::Synced(CoreReplica::new(
-                doc.inner,
-                parsed,
-                dek.inner,
-                last_acked_seq,
-                dyn_storage,
-            )),
+            inner: CoreReplica::new(doc.inner, parsed, dek.inner, last_acked_seq, dyn_storage),
         })
-    }
-
-    /// A mirror replica (`spec/mac-window-plan.md` "Wasm side"): the
-    /// doc came from `Doc.loadWithPeer` on the host's seed. No DEK, no
-    /// storage, no WebSocket; `flush` exports the doc's ops since the
-    /// last flush for `takeMirrorOutbox`, and `applyMirrorUpdate` takes
-    /// the host's. Everything the store calls works unchanged; the
-    /// WebSocket verbs (`handleConnected`, `handleServerBytes`,
-    /// `popOutbox`, ...) and the persistence verbs (`captureLocalOps`,
-    /// the snapshot folds, the seeds) are no-ops here.
-    #[wasm_bindgen(js_name = mirror)]
-    pub fn mirror(doc: Doc, doc_id: String) -> Result<Replica, JsError> {
-        let doc_id = parse_doc_id(&doc_id)?;
-        let last_sent = doc.inner.oplog_vv();
-        Ok(Replica {
-            inner: Inner::Mirror(MirrorReplica {
-                doc: doc.inner,
-                doc_id,
-                last_sent,
-                outbox: VecDeque::new(),
-            }),
-        })
-    }
-
-    /// True for a replica built by [`Replica::mirror`].
-    #[wasm_bindgen(js_name = isMirror)]
-    pub fn is_mirror(&self) -> bool {
-        matches!(self.inner, Inner::Mirror(_))
     }
 
     /// Persist any locally-committed mutations as a durable WAL row
     /// (and advance the capture cursor). Returns the assigned `localSeq`
     /// or `undefined` when nothing was pending. Call **before**
-    /// `flush()` so pushed bytes are always disk-bound first. A mirror
-    /// has no WAL: `undefined`, always.
+    /// `flush()` so pushed bytes are always disk-bound first.
     #[wasm_bindgen(js_name = captureLocalOps)]
     pub fn capture_local_ops(&mut self) -> Result<Option<f64>, JsError> {
-        let Some(e) = self.synced_mut() else {
-            return Ok(None);
-        };
-        Ok(e.capture_local_ops().map_err(js_err)?.map(|s| s.0 as f64))
+        Ok(self
+            .inner
+            .capture_local_ops()
+            .map_err(js_err)?
+            .map(|s| s.0 as f64))
     }
 
     /// Fold the WAL into a fresh full-history snapshot when it has at
@@ -1622,56 +1520,44 @@ impl Replica {
     /// folding (the push derives them from `server_known_vv`).
     /// Snapshot export is O(doc) — pass a real row threshold on hot
     /// pulses (per-ack) and `1` from idle hooks. Returns whether a
-    /// snapshot was written (never, for a mirror).
+    /// snapshot was written.
     #[wasm_bindgen(js_name = snapshotIfWalExceeds)]
     pub fn snapshot_if_wal_exceeds(
         &mut self,
         max_rows: u32,
         max_bytes: f64,
     ) -> Result<bool, JsError> {
-        let Some(e) = self.synced_mut() else {
-            return Ok(false);
-        };
-        e.snapshot_if_wal_exceeds(u64::from(max_rows), max_bytes as u64)
+        self.inner
+            .snapshot_if_wal_exceeds(u64::from(max_rows), max_bytes as u64)
             .map_err(js_err)
     }
 
     /// Unconditionally fold any non-empty WAL into a snapshot — the
-    /// exit/hide hook. `false` when the WAL was already empty (and for
-    /// a mirror).
+    /// exit/hide hook. `false` when the WAL was already empty.
     #[wasm_bindgen(js_name = forceSnapshot)]
     pub fn force_snapshot(&mut self) -> Result<bool, JsError> {
-        let Some(e) = self.synced_mut() else {
-            return Ok(false);
-        };
-        e.force_snapshot().map_err(js_err)
+        self.inner.force_snapshot().map_err(js_err)
     }
 
     /// Seed the highest `localSeq` the storage has assigned for this
     /// doc (from the JS boot). Call once right after construction.
     #[wasm_bindgen(js_name = setLastLocalSeq)]
     pub fn set_last_local_seq(&mut self, seq: f64) {
-        if let Some(e) = self.synced_mut() {
-            e.set_last_local_seq(CoreLocalSeq(seq as u64));
-        }
+        self.inner.set_last_local_seq(CoreLocalSeq(seq as u64));
     }
 
     /// Seed the WAL statistics (surviving rows / payload bytes past
     /// the last snapshot) from the JS boot.
     #[wasm_bindgen(js_name = seedWalStats)]
     pub fn seed_wal_stats(&mut self, rows: f64, bytes: f64) {
-        if let Some(e) = self.synced_mut() {
-            e.seed_wal_stats(rows as u64, bytes as u64);
-        }
+        self.inner.seed_wal_stats(rows as u64, bytes as u64);
     }
 
     /// Seed `server_known_vv` from its persisted encoding (empty array
     /// = never synced). Call once right after construction.
     #[wasm_bindgen(js_name = seedServerKnownVv)]
     pub fn seed_server_known_vv(&mut self, encoded: &[u8]) {
-        if let Some(e) = self.synced_mut() {
-            e.seed_server_known_vv(encoded);
-        }
+        self.inner.seed_server_known_vv(encoded);
     }
 
     /// Seed the durable in-flight push from a previous session; the
@@ -1696,21 +1582,15 @@ impl Replica {
             from_vv: from_vv.to_vec(),
             to_vv: to_vv.to_vec(),
         };
-        if let Some(e) = self.synced_mut() {
-            e.seed_in_flight_push(push);
-        }
+        self.inner.seed_in_flight_push(push);
         Ok(())
     }
 
     /// The doc this replica syncs (uuid string) — the routing key the
-    /// host matches `serverFrameDocId` against, and the one a mirror
-    /// bridge routes host updates by.
+    /// host matches `serverFrameDocId` against.
     #[wasm_bindgen(js_name = docId)]
     pub fn doc_id(&self) -> String {
-        match &self.inner {
-            Inner::Synced(e) => e.doc_id().0.to_string(),
-            Inner::Mirror(m) => m.doc_id.0.to_string(),
-        }
+        self.inner.doc_id().0.to_string()
     }
 
     // -- transport callbacks --
@@ -1719,18 +1599,14 @@ impl Replica {
     /// Replica queues `OpenDoc` for its doc.
     #[wasm_bindgen(js_name = handleConnected)]
     pub fn handle_connected(&mut self) {
-        if let Some(e) = self.synced_mut() {
-            e.handle_connected();
-        }
+        self.inner.handle_connected();
     }
 
     /// Caller's WebSocket dropped. Replica returns to `Disconnected` and
     /// clears the outbox; reconnect re-derives any pending frames.
     #[wasm_bindgen(js_name = handleDisconnected)]
     pub fn handle_disconnected(&mut self) {
-        if let Some(e) = self.synced_mut() {
-            e.handle_disconnected();
-        }
+        self.inner.handle_disconnected();
     }
 
     /// Caller-driven tick: escalates the `OpenDoc` watchdog (no-op
@@ -1738,96 +1614,35 @@ impl Replica {
     /// via `setInterval`).
     #[wasm_bindgen(js_name = handleTimeout)]
     pub fn handle_timeout(&mut self) {
-        if let Some(e) = self.synced_mut() {
-            e.handle_timeout();
-        }
+        self.inner.handle_timeout();
     }
 
     /// Hand one binary WebSocket frame to the replica.
     #[wasm_bindgen(js_name = handleServerBytes)]
     pub fn handle_server_bytes(&mut self, bytes: &[u8]) {
-        if let Some(e) = self.synced_mut() {
-            e.handle_server_bytes(bytes);
-        }
+        self.inner.handle_server_bytes(bytes);
     }
 
     // -- caller drives --
 
-    /// Signal that the user just committed local mutations. Synced:
-    /// triggers a push when idle; queues the intent otherwise. Mirror:
-    /// exports the doc's ops since the previous flush into the mirror
-    /// outbox (`takeMirrorOutbox`), the same cadence that reaches the
-    /// WAL in the browser.
+    /// Signal that the user just committed local mutations. Triggers
+    /// a push when idle; queues the intent otherwise.
     pub fn flush(&mut self) {
-        match &mut self.inner {
-            Inner::Synced(e) => e.flush(),
-            Inner::Mirror(m) => {
-                let now = m.doc.oplog_vv();
-                if m.last_sent.includes_vv(&now) {
-                    return;
-                }
-                match m.doc.export_updates_after(&m.last_sent) {
-                    Ok(bytes) => {
-                        if !bytes.is_empty() {
-                            m.outbox.push_back(bytes);
-                        }
-                        m.last_sent = now;
-                    }
-                    Err(e) => console_error(&format!("mirror export failed: {e}")),
-                }
-            }
-        }
+        self.inner.flush();
     }
 
     /// Drain the next frame to ship to the server. Returns `undefined`
-    /// when the outbox is empty (always, for a mirror: its bytes come
-    /// out of `takeMirrorOutbox`).
+    /// when the outbox is empty.
     #[wasm_bindgen(js_name = popOutbox)]
     pub fn pop_outbox(&mut self) -> Option<Vec<u8>> {
-        self.synced_mut().and_then(|e| e.pop_outbox())
-    }
-
-    /// Mirror only: the next plaintext Loro update `flush` exported for
-    /// the host, or `undefined` when there is none (and always on a
-    /// synced replica). The bridge drains to empty after every flush
-    /// and hands each one to `Engine.import`.
-    #[wasm_bindgen(js_name = takeMirrorOutbox)]
-    pub fn take_mirror_outbox(&mut self) -> Option<Vec<u8>> {
-        match &mut self.inner {
-            Inner::Synced(_) => None,
-            Inner::Mirror(m) => m.outbox.pop_front(),
-        }
-    }
-
-    /// Mirror only: apply a plaintext Loro update from the host (what
-    /// it exported since it last sent this mirror). Imported tagged
-    /// `remote`, so it never enters this doc's undo stack, and queued as
-    /// AppEvents the way `apply_remote` queues a server frame's: the
-    /// bridge drains them into the store afterwards. Ops the mirror
-    /// already has (its own, echoing back) are skipped. Errors on a
-    /// synced replica, and when Loro refuses the bytes.
-    #[wasm_bindgen(js_name = applyMirrorUpdate)]
-    pub fn apply_mirror_update(&mut self, bytes: &[u8]) -> Result<(), JsError> {
-        match &mut self.inner {
-            Inner::Synced(_) => Err(JsError::new("applyMirrorUpdate: not a mirror replica")),
-            Inner::Mirror(m) => {
-                let range = m.doc.import_host_update(bytes).map_err(js_err)?;
-                // The host's ops are not ours to send back: fold them
-                // into the send base so the next flush exports only
-                // what this mirror committed since.
-                m.last_sent.merge(&range);
-                Ok(())
-            }
-        }
+        self.inner.pop_outbox()
     }
 
     /// Drain the next replica event. Returns `undefined` when the queue
-    /// is empty. A mirror has no connection and emits none.
+    /// is empty.
     #[wasm_bindgen(js_name = popEvent)]
     pub fn pop_event(&mut self) -> Option<ReplicaEvent> {
-        self.synced_mut()
-            .and_then(|e| e.pop_event())
-            .map(ReplicaEvent::from)
+        self.inner.pop_event().map(ReplicaEvent::from)
     }
 
     /// Drain the next domain-level change event. Pair with `popEvent`
@@ -1861,20 +1676,15 @@ impl Replica {
     }
 
     // -- introspection --
-    //
-    // A mirror has no connection of its own: the link state and the
-    // server cursors below are the synced replica's and read as
-    // offline / zero / unknown on a mirror. The window's status comes
-    // from the host (`spec/mac-window-plan.md`).
 
     #[wasm_bindgen(js_name = isOnline)]
     pub fn is_online(&self) -> bool {
-        self.synced().is_some_and(|e| e.is_online())
+        self.inner.is_online()
     }
 
     #[wasm_bindgen(js_name = isIdle)]
     pub fn is_idle(&self) -> bool {
-        self.synced().is_none_or(|e| e.is_idle())
+        self.inner.is_idle()
     }
 
     /// Contiguous-prefix seq the replica has applied **in memory**.
@@ -1883,14 +1693,14 @@ impl Replica {
     /// seq the local oplog doesn't cover.
     #[wasm_bindgen(js_name = lastContiguousSeq)]
     pub fn last_contiguous_seq(&self) -> u64 {
-        self.synced().map_or(0, |e| e.last_contiguous_seq())
+        self.inner.last_contiguous_seq()
     }
 
     /// The doc's history epoch from the last `DocOpened`, or
     /// `undefined` before the first successful handshake.
     #[wasm_bindgen(js_name = serverEpoch)]
     pub fn server_epoch(&self) -> Option<u64> {
-        self.synced().and_then(|e| e.server_epoch())
+        self.inner.server_epoch()
     }
 
     /// Contiguous-prefix seq the host has confirmed locally durable.
@@ -1898,7 +1708,7 @@ impl Replica {
     /// will ship) in `Ack` frames. Persist this between sessions.
     #[wasm_bindgen(js_name = lastDurableSeq)]
     pub fn last_durable_seq(&self) -> u64 {
-        self.synced().map_or(0, |e| e.last_durable_seq())
+        self.inner.last_durable_seq()
     }
 
     /// Host signal: bytes covering up to `seq` are now durable in
@@ -1908,9 +1718,7 @@ impl Replica {
     /// drain the queued frame onto the wire.
     #[wasm_bindgen(js_name = notifyOplogDurable)]
     pub fn notify_oplog_durable(&mut self, seq: u64) {
-        if let Some(e) = self.synced_mut() {
-            e.notify_oplog_durable(seq);
-        }
+        self.inner.notify_oplog_durable(seq);
     }
 
     // -- doc passthrough --
@@ -1937,15 +1745,10 @@ impl Replica {
 
     /// True when local operations lack server proof (commits beyond
     /// `server_known_vv`, or an outstanding in-flight push) — the UI's
-    /// "pending changes" indicator. On a mirror: commits the host has
-    /// not been handed yet (between a commit and its flush); whether
-    /// the host has pushed them is the host's to say.
+    /// "pending changes" indicator.
     #[wasm_bindgen(js_name = hasUnsyncedOps)]
     pub fn has_unsynced_ops(&self) -> bool {
-        match &self.inner {
-            Inner::Synced(e) => e.has_unsynced_ops(),
-            Inner::Mirror(m) => !m.last_sent.includes_vv(&m.doc.oplog_vv()),
-        }
+        self.inner.has_unsynced_ops()
     }
 
     // -- oplog passthrough --

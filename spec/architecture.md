@@ -31,7 +31,7 @@ Four words, one meaning each. Use them this way in code, specs and UI.
 | `Doc` | Plaintext Loro state and the domain rules (`core/src/doc.rs`). Knows nothing about crypto, storage or network. | one per replica |
 | `Replica` | This device's copy of one doc plus what keeps it converged: the `Doc`, the DEK, `LocalStorage`, the sync cursors and the push / pull / ack state machine (`core/src/sync.rs`). Sans-IO. A mirror (`spec/mac-window-plan.md`) is a replica too, fed by an engine instead of the server. | one per open doc, plus mirrors |
 | Engine | What owns the IO for a profile: the one WebSocket, the storage handle, the peer lease, and N replicas it routes frames to by `doc_id`. Defined by what it owns, not by a type: `cli::sync::Engine` on native, `monoplan-ffi::Engine` as the Apple handle to it, and `SyncBridge` + `createWorkspaceRuntime` on web. | one per profile |
-| host | An engine that also serves local clients and holds `engine.lock`: the `monoplan daemon` loop (`cli/src/daemon.rs` `Host`) and the Mac app running that loop in-process. Also still the ordinary word for the webview's host app and URL hosts. | CLI daemon, Mac app |
+| host | An engine that also serves local clients and holds `engine.lock`: the `monoplan daemon` loop (`cli/src/daemon.rs` `Host`) and the Mac app running that loop in-process. Also still the ordinary word for URL hosts. | CLI daemon, Mac app |
 
 The server sits outside all of this: it sees `(doc_id, seq, ciphertext)` and nothing else.
 

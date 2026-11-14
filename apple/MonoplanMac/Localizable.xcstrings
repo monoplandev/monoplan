@@ -1161,16 +1161,6 @@
         }
       }
     },
-    "engine stopped": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "motor detenido"
-          }
-        }
-      }
-    },
     "in %@": {
       "localizations": {
         "es": {
@@ -1211,32 +1201,12 @@
         }
       }
     },
-    "not connected to the engine": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "sin conexión con el motor"
-          }
-        }
-      }
-    },
     "not signed in": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
             "value": "sesión no iniciada"
-          }
-        }
-      }
-    },
-    "no engine is running": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ningún motor en ejecución"
           }
         }
       }

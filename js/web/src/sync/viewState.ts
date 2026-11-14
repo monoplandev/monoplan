@@ -1,8 +1,7 @@
 // The workspace view ("which list / Done / Bin am I on?") as a signal
 // seeded from, and written through to, the per-account prefs row.
-// Shared by the browser runtime (`runtime.ts`) and the app window's
-// mirror runtime (`mirrorRuntime.ts`): the view is local UI state in
-// both, independent of how the docs behind it are synced.
+// Kept apart from the runtime (`runtime.ts`): the view is local UI
+// state, independent of how the docs behind it are synced.
 
 import { createEffect, createSignal, on, type Accessor } from "solid-js";
 import { savePrefs, type Prefs, type ViewKey } from "../prefs.ts";

@@ -373,7 +373,7 @@ mod tests {
     use monoplan_core::{Doc, LIST_INBOX};
 
     /// The `--json` row is pinned here, field for field: what every
-    /// script and (until `Engine.request` goes) both apps decode.
+    /// script decodes.
     #[test]
     fn item_serialises_as_the_ls_json_row() {
         let doc = Doc::new().unwrap();

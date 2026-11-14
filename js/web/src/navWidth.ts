@@ -8,9 +8,6 @@
 
 const KEY = "monoplan.nav.width";
 
-// The macOS app's window lays its sidebar glass to the maximum
-// (`sidebarWidth` in apple/MonoplanMac/.../WebWindow.swift): raise one,
-// raise the other.
 export const NAV_WIDTH_MIN = 200;
 export const NAV_WIDTH_MAX = 320;
 export const NAV_WIDTH_DEFAULT = 260;

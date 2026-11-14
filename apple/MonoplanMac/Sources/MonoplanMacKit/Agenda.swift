@@ -13,6 +13,21 @@ public struct AgendaDay: Decodable, Equatable {
     public let rows: [AgendaRow]
 }
 
+/// A row's place, as the `--json` row carries it.
+public struct PlaceInfo: Decodable, Equatable {
+    public let label: String
+    public let lat: Double?
+    public let lon: Double?
+    public let address: String?
+
+    public init(label: String, lat: Double? = nil, lon: Double? = nil, address: String? = nil) {
+        self.label = label
+        self.lat = lat
+        self.lon = lon
+        self.address = address
+    }
+}
+
 public struct AgendaRow: Decodable, Equatable {
     public let id: String
     public let text: String

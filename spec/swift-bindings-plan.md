@@ -1,9 +1,8 @@
-# Typed Swift bindings (plan; phases 1 to 4 built 2026-11-14)
+# Typed Swift bindings (built 2026-11-14)
 
-Decided 2026-11-14. Supersedes the client half of
-[`mac-window-plan.md`](mac-window-plan.md): the webview window is
-scrapped, macOS goes native like iOS, and both apps stop driving the
-engine through CLI commands.
+Decided 2026-11-14. Supersedes [`mac-window-plan.md`](mac-window-plan.md):
+the webview window is scrapped, macOS goes native like iOS, and both
+apps stop driving the engine through CLI commands.
 
 ## Goal
 
@@ -13,10 +12,10 @@ engine through CLI commands.
 2. A very basic native macOS window replaces the webview. A debug
    screen is enough.
 
-`Engine.request` and the rest of the old surface are removed once both
-apps are over (phase 5), not before.
+`Engine.request` and the rest of the old surface were removed once
+both apps were over (phase 5).
 
-## What is wrong today
+## What was wrong before
 
 Every read and write from Swift goes: hand-encoded msgpack shaped like
 the clap arg structs → `Engine.request(bytes)` → `run_doc` renders to a
@@ -326,24 +325,40 @@ views with iOS later, which is its own piece of work.
      and the JSON models (`Bin`, `Done`, `Find`, `Focus`, `ItemDetail`,
      `Items`, `Lists`, `Placed`) with their tests. Nothing in either
      app uses them; `Agenda.swift` stays for the widget.
-5. **Cleanup.** Remove `Engine.request`, the frame `watch`,
-   `subscribe`, `import`, `session` (and `EngineSession` / `EngineDoc`);
-   `HostCmd::{Subscribe, Import, Unsubscribe}`
-   and the mirror fan-out in the loop (`HostCmd::Session` stays: it is
-   what `account` and `workspaces` read); `Doc::import_mirror_update`;
-   `Replica.mirror`, `Doc.loadWithPeer`, `MirrorBridge`, `mirror.html`,
-   `createMirrorRuntime`, `MirrorApp`, `Session.mirror` in js; the
-   Swift codec, client and JSON models (`ProfileLocation` and
-   `SuggestionEdit` move out of `EngineClient.swift` first: both apps
-   keep the one, `WhenSuggest` returns the other; `PlaceInfo` stays
-   for the widget's `AgendaRow`); the "frame from the
-   apps" tests in `commands/*`; the wire-shape test's Swift-facing comment.
-   Mirror peer slots stop being leased. Update `apple/README.md`,
-   `daemon-plan.md` and mark `mac-window-plan.md` superseded.
+5. **Cleanup.** Built 2026-11-14. Removed:
+   - FFI: `Engine.request`, the frame `watch` and `EngineSink`,
+     `subscribe` / `import` (`MirrorSink`, `Subscription`), `session`
+     (`EngineSession`, `EngineDoc`). `device_token` stays (the Mac's
+     Devices pane).
+   - Loop: `HostCmd::{Subscribe, Import, Unsubscribe}`, the fan-out and
+     `MirrorError`. `HostCmd::Session` stays, answering with
+     `ApiError`: it is what `account` and `workspaces` read. No mirror
+     peer slot is leased any more (`Engine::claim_peer` is gone).
+   - Core: `Doc::import_mirror_update`, its webview-side twin
+     `Doc::import_host_update`, and the `mirror` commit origin.
+   - Wasm and js: `Replica.mirror` (with `isMirror`, `takeMirrorOutbox`,
+     `applyMirrorUpdate`), `Doc.loadWithPeer`, `MirrorBridge`,
+     `mirror.html`, `createMirrorRuntime`, `MirrorApp`, `Session.mirror`
+     and every branch on it (`Session.dek` is never null again), and
+     what existed only for the webview shell: `hostSettings`, the
+     title-bar strips and `[data-shell="mac"]` styles, the menu-bar
+     undo / redo / find bridge, `setLinkBase` (`spec/urls.md`).
+   - Swift: the Kit's `MessagePack.swift`, `EngineClient.swift` and the
+     JSON models (`Bin`, `Done`, `Find`, `Focus`, `ItemDetail`,
+     `Items`, `Lists`, `Placed`) with their tests. `ProfileLocation`
+     has its own file, without the socket path it no longer needs;
+     `SuggestionEdit` lives beside `WhenSuggest`; `PlaceInfo` beside
+     the widget's `AgendaRow`.
+   - Tests: the "frame from the apps" tests in `commands/*` (the
+     hand-encoded frames they pinned have no sender). The one piece of
+     behaviour only they covered, a Starred reorder past hidden
+     entries, is kept as `mv_reorders_past_hidden_entries` against
+     `api::starred::move_starred`. The wire-shape test stays for the
+     socket, its comment no longer about Swift.
 
-Phases 1 to 3 touch no macOS code and phase 4 no iOS code (the Kit
-lost only files iOS never used). The socket,
-`ipc.rs` and the CLI's own request path are untouched throughout.
+Phases 1 to 3 touched no macOS code and phase 4 no iOS code (the Kit
+lost only files iOS never used). The socket, `ipc.rs` and the CLI's
+own request path were untouched throughout.
 
 ## Open
 
@@ -353,8 +368,8 @@ lost only files iOS never used). The socket,
   -destination 'generic/platform=iOS' -derivedDataPath <scratch>
   CODE_SIGNING_ALLOWED=NO build` (used for phase 2; delete the derived
   data after). Behaviour is still verified by the user on a device.
-- `AgendaWidget` reads a snapshot file, not the engine; left alone
-  unless its model type goes away with the JSON models.
+- `AgendaWidget` reads a snapshot file, not the engine, and still
+  decodes it with the Kit's `AgendaDay` (`Agenda.swift`).
 - Whether the typed layer later moves out of the cli crate into an
   engine crate that both `cli` and `ffi` depend on. Not needed for any
   of the above.

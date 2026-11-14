@@ -149,7 +149,7 @@ Every connection starts with a hello carrying a build id (package version plus t
 - There is no idle timeout: background sync is the point.
 - `Reconnect` (since 2026-11-04) drops the socket if there is one and connects again now with the backoff reset, replying `Synced` with the status as of the drop. For a host that cannot see the network itself: the macOS app sends it on a network path change (`NWPathMonitor`) and on wake from sleep, so a socket left dead by a Wi-Fi change is replaced in about a second rather than when the next ping misses its pong. No CLI verb sends it.
 - `Watch` turns a connection into a watcher: the daemon replies `Watching` and then sends `Event(Changed)` whenever the doc changes (a local command committed, remote ops applied; a burst is one event) and `Event(Sync(..))` when online/offline, `pending` or `last_synced_at` moves. Requests still work on a watching connection; replies and events are told apart by variant. The macOS menubar app (`apple/MonoplanMac`) is the first watcher, through `daemon::LocalClient` and the FFI rather than the socket since 2026-10-29 (`spec/mac-window-plan.md`): it re-fetches `agenda --days 0 --json` on `Changed`. No CLI verb exposes `Watch` yet.
-- Not built yet: the locked state (`Unlock` over the socket when the DEK is not readable non-interactively), wake notifications. The doc mirror for full-view clients is an FFI surface on the app's in-process host, not a socket feature (`spec/mac-window-plan.md`).
+- Not built yet: the locked state (`Unlock` over the socket when the DEK is not readable non-interactively), wake notifications. The Apple apps reach their in-process host through typed FFI calls, not the socket (`spec/swift-bindings-plan.md`).
 
 ## Local state
 

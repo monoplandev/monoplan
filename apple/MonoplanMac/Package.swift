@@ -9,9 +9,7 @@
 // prebuilt XCFramework.
 //
 // Two targets: `MonoplanMacKit` (Foundation-only helpers with no
-// MonoplanCore dependency, and until phase 5 of that plan the
-// MessagePack codec and engine client nothing uses any more) and the
-// `MonoplanMac` executable (status item, menu, window, settings). Run
+// MonoplanCore dependency) and the `MonoplanMac` executable (status item, menu, window, settings). Run
 // from the repo root with `bun run mac`; `swift test --package-path
 // apple/MonoplanMac` runs both test targets. `MonoplanMacTests` covers
 // the executable's pure code (the tray's rows) and so links

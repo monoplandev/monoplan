@@ -19,30 +19,20 @@
 //!   against durable bytes), threshold fold on the hot path, full fold
 //!   on clean exit.
 //! - **Two client paths, one loop.** Socket connections and in-process
-//!   clients ([`LocalClient`]: the macOS app's tray and window through
-//!   `monoplan-ffi`) feed the same command channel and subscribe to the
-//!   same watch broadcast; the loop never knows which it is serving.
-//!   The socket is the CLI's path; the app only ever uses the local
-//!   one (`spec/mac-window-plan.md`).
-//! - **The mirror** (`spec/mac-window-plan.md`, phase 2). An in-process
-//!   client can [`subscribe`](LocalClient::subscribe) to a doc: it gets
-//!   a plaintext snapshot and a peer slot leased for it, then every
-//!   change the host applies (a command, a remote frame, another
-//!   mirror's import) as Loro update bytes through its [`MirrorSink`],
-//!   and hands its own ops back with [`Subscription::import`], which
-//!   the host applies as local, WALs and pushes. These are
-//!   [`HostCmd`] variants the socket codec cannot produce: `Request`
-//!   has no such frame, so the mirror is unreachable over the socket by
-//!   construction.
+//!   clients ([`LocalClient`]: the Apple apps through `monoplan-ffi`)
+//!   feed the same command channel and subscribe to the same watch
+//!   broadcast; the loop never knows which it is serving. The socket is
+//!   the CLI's path; an app only ever uses the local one, mostly as
+//!   typed calls ([`LocalClient::call_blocking`], `crate::api`), which
+//!   are [`HostCmd`] variants the socket codec cannot produce.
 
-use std::collections::HashMap;
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use clap::{Parser, Subcommand};
 use futures_util::{SinkExt, StreamExt};
-use monoplan_core::{DocId, Event, VersionVector, hello_frame, parse_hello_response};
+use monoplan_core::{DocId, Event, hello_frame, parse_hello_response};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_tungstenite::tungstenite::Message;
@@ -51,7 +41,6 @@ use crate::api::{ApiError, Ctx};
 use crate::commands::run_doc;
 use crate::config::Profile;
 use crate::ipc::{self, Reply, Request, SyncStatus, WatchEvent, read_frame, write_frame};
-use crate::peer::PeerLease;
 use crate::sync::{Engine, SyncError, WsStream, connect_ws, engine_options, send_outboxes};
 
 /// Socket connect + version handshake budget. Longer than the one-shot
@@ -359,9 +348,9 @@ impl Serving {
 }
 
 /// An in-process client of the host: what a socket connection task is,
-/// without the socket. The macOS app's tray and window reach their own
-/// host this way through `monoplan-ffi` (`spec/mac-window-plan.md`),
-/// never over the socket. Cheap to clone; every clone is a client.
+/// without the socket. The Apple apps reach their own host this way
+/// through `monoplan-ffi` (`spec/swift-bindings-plan.md`), never over
+/// the socket. Cheap to clone; every clone is a client.
 ///
 /// `Hello` and `Watch` are answered here, as the connection task
 /// answers them, since they need no doc. Everything else is handed to
@@ -473,80 +462,25 @@ impl LocalClient {
         rx.blocking_recv().map_err(|_| ApiError::Stopped)?
     }
 
-    /// Mirror a doc in process (`spec/mac-window-plan.md`): the reply
-    /// carries a plaintext snapshot of the doc `workspace` names (`None`
-    /// is Home) and a peer id leased for the mirror, and from then on
-    /// `sink.update` gets every change the host applies, as Loro update
-    /// bytes since the previous delivery, until the [`Subscription`] is
-    /// dropped. `sink.stopped` fires once if the loop ends or the doc
-    /// is closed under it. The mirror's own ops come back through
-    /// [`Subscription::import`].
-    pub async fn subscribe(
-        &self,
-        workspace: Option<String>,
-        sink: Box<dyn MirrorSink>,
-    ) -> Result<Subscription, MirrorError> {
-        let (tx, rx) = oneshot::channel();
-        self.requests
-            .send(HostCmd::Subscribe {
-                workspace,
-                sink,
-                reply: tx,
-            })
-            .map_err(|_| MirrorError::Stopped)?;
-        let seed = rx.await.map_err(|_| MirrorError::Stopped)??;
-        Ok(self.subscription(seed))
-    }
-
-    /// [`subscribe`](Self::subscribe) for a thread that is not on the
-    /// runtime (an FFI call from the app's own threads).
-    pub fn subscribe_blocking(
-        &self,
-        workspace: Option<String>,
-        sink: Box<dyn MirrorSink>,
-    ) -> Result<Subscription, MirrorError> {
-        let (tx, rx) = oneshot::channel();
-        self.requests
-            .send(HostCmd::Subscribe {
-                workspace,
-                sink,
-                reply: tx,
-            })
-            .map_err(|_| MirrorError::Stopped)?;
-        let seed = rx.blocking_recv().map_err(|_| MirrorError::Stopped)??;
-        Ok(self.subscription(seed))
-    }
-
-    fn subscription(&self, seed: Seed) -> Subscription {
-        Subscription {
-            id: seed.id,
-            doc_id: seed.doc_id,
-            peer_id: seed.peer_id,
-            snapshot: seed.snapshot,
-            requests: self.requests.clone(),
-        }
-    }
-
-    /// The profile as the window should see it: identity, server, and
-    /// the open docs, Home first (`spec/mac-window-plan.md` "Swift
-    /// side"). A local-only workspace answers with empty identity
-    /// fields and `local_only` set.
-    pub async fn session(&self) -> Result<SessionInfo, MirrorError> {
+    /// The profile as an app shows it: identity, server, and the open
+    /// docs, Home first. A local-only workspace answers with empty
+    /// identity fields and `local_only` set.
+    pub async fn session(&self) -> Result<SessionInfo, ApiError> {
         let (tx, rx) = oneshot::channel();
         self.requests
             .send(HostCmd::Session { reply: tx })
-            .map_err(|_| MirrorError::Stopped)?;
-        rx.await.map_err(|_| MirrorError::Stopped)?
+            .map_err(|_| ApiError::Stopped)?;
+        rx.await.map_err(|_| ApiError::Stopped)?
     }
 
     /// [`session`](Self::session) for a thread that is not on the
     /// runtime (an FFI call from the app's own threads).
-    pub fn session_blocking(&self) -> Result<SessionInfo, MirrorError> {
+    pub fn session_blocking(&self) -> Result<SessionInfo, ApiError> {
         let (tx, rx) = oneshot::channel();
         self.requests
             .send(HostCmd::Session { reply: tx })
-            .map_err(|_| MirrorError::Stopped)?;
-        rx.blocking_recv().map_err(|_| MirrorError::Stopped)?
+            .map_err(|_| ApiError::Stopped)?;
+        rx.blocking_recv().map_err(|_| ApiError::Stopped)?
     }
 
     /// Subscribe to the watch stream: the sync status as of now (what
@@ -736,100 +670,10 @@ fn peer_is_us(stream: &UnixStream) -> bool {
     stream.peer_cred().map(|c| c.uid() == me).unwrap_or(false)
 }
 
-/// Where a mirror's updates go (`spec/mac-window-plan.md` "Host to
-/// mirror"). Called on the host loop's thread, so an implementation
-/// hands the bytes off rather than importing inline.
-pub trait MirrorSink: Send + 'static {
-    /// Loro update bytes: everything the host's doc holds beyond what
-    /// this sink was last given. Import tagged `remote`; ops the mirror
-    /// already has (its own, echoing) are skipped by Loro.
-    fn update(&self, bytes: Vec<u8>);
-    /// No update follows: the loop has ended, or the doc was closed
-    /// under the mirror (membership removed). The mirror is stale from
-    /// here; reopen by subscribing again once there is a host.
-    fn stopped(&self);
-}
-
-/// A failed mirror call.
-#[derive(Debug, thiserror::Error)]
-pub enum MirrorError {
-    /// The loop has ended: nothing is answered until a new host runs.
-    #[error("the host has stopped")]
-    Stopped,
-    /// No such workspace, the doc is closed, the update would not
-    /// import, or the lease could not be taken. The message says which.
-    #[error("{0}")]
-    Failed(String),
-}
-
-/// One live mirror of one doc: the seed it was given and the handle
-/// its own ops go back through. Dropping it ends the subscription and
-/// releases the peer slot; the sink hears nothing more.
-pub struct Subscription {
-    id: u64,
-    pub doc_id: DocId,
-    /// The peer the mirror must write under, leased until this drops.
-    pub peer_id: u64,
-    /// Plaintext Loro snapshot of the doc at subscribe time. Updates
-    /// delivered to the sink continue from exactly here.
-    pub snapshot: Vec<u8>,
-    requests: mpsc::UnboundedSender<HostCmd>,
-}
-
-impl Subscription {
-    /// Apply the mirror's ops (Loro update bytes since its last import)
-    /// to the host's doc. They are local from here: WAL row on the next
-    /// capture, pushed with everything else, fanned out to the other
-    /// mirrors; the host's own undo never touches them. Resolved once
-    /// the loop has applied and persisted them.
-    pub async fn import(&self, bytes: Vec<u8>) -> Result<(), MirrorError> {
-        let (tx, rx) = oneshot::channel();
-        self.requests
-            .send(HostCmd::Import {
-                id: self.id,
-                bytes,
-                reply: tx,
-            })
-            .map_err(|_| MirrorError::Stopped)?;
-        rx.await.map_err(|_| MirrorError::Stopped)?
-    }
-
-    /// [`import`](Self::import) off the runtime (an FFI call).
-    pub fn import_blocking(&self, bytes: Vec<u8>) -> Result<(), MirrorError> {
-        let (tx, rx) = oneshot::channel();
-        self.requests
-            .send(HostCmd::Import {
-                id: self.id,
-                bytes,
-                reply: tx,
-            })
-            .map_err(|_| MirrorError::Stopped)?;
-        rx.blocking_recv().map_err(|_| MirrorError::Stopped)?
-    }
-}
-
-impl Drop for Subscription {
-    fn drop(&mut self) {
-        // A closed channel means the loop has already stopped and
-        // released everything.
-        let _ = self.requests.send(HostCmd::Unsubscribe { id: self.id });
-    }
-}
-
-/// What `Subscribe` answers with; the client wraps it in a
-/// [`Subscription`] carrying the channel.
-pub(crate) struct Seed {
-    id: u64,
-    doc_id: DocId,
-    peer_id: u64,
-    snapshot: Vec<u8>,
-}
-
-/// What the window needs to know about the profile before it mirrors
-/// anything (`spec/mac-window-plan.md` "Swift side", the `session`
-/// request): the identity the loop booted with, the server it syncs
-/// with, and every doc it has open, Home first. In-process only, like
-/// the mirror: the socket has no frame for it.
+/// What an app needs to know about the profile (`Engine::account` and
+/// `Engine::workspaces` on the FFI): the identity the loop booted with,
+/// the server it syncs with, and every doc it has open, Home first.
+/// In-process only: the socket has no frame for it.
 #[derive(Debug, Clone)]
 pub struct SessionInfo {
     /// Empty for a local-only workspace, as are `email`, `device_id`
@@ -839,8 +683,7 @@ pub struct SessionInfo {
     pub device_id: String,
     pub primary_doc_id: DocId,
     pub server_url: String,
-    /// No account behind the profile (`crate::bootstrap`): the window
-    /// runs it as the web client runs an anonymous session.
+    /// No account behind the profile (`crate::bootstrap`).
     pub local_only: bool,
     pub docs: Vec<SessionDoc>,
 }
@@ -855,26 +698,12 @@ pub struct SessionDoc {
 
 /// Everything the loop is asked to do, from either client path. The
 /// socket's connection task deserialises `Request`s and can only build
-/// `Ipc`; the mirror variants exist for in-process clients alone
-/// (`spec/mac-window-plan.md` "Internal command enum").
+/// `Ipc`; the other variants exist for in-process clients alone.
 pub(crate) enum HostCmd {
     Ipc(Request, oneshot::Sender<Reply>),
-    Subscribe {
-        workspace: Option<String>,
-        sink: Box<dyn MirrorSink>,
-        reply: oneshot::Sender<Result<Seed, MirrorError>>,
-    },
-    Import {
-        id: u64,
-        bytes: Vec<u8>,
-        reply: oneshot::Sender<Result<(), MirrorError>>,
-    },
-    Unsubscribe {
-        id: u64,
-    },
-    /// The profile as the window should see it (`SessionInfo`).
+    /// The profile as an app shows it (`SessionInfo`).
     Session {
-        reply: oneshot::Sender<Result<SessionInfo, MirrorError>>,
+        reply: oneshot::Sender<Result<SessionInfo, ApiError>>,
     },
     /// A typed call (`crate::api`, `spec/swift-bindings-plan.md`):
     /// `run` is handed the context for `workspace` (`None` is Home),
@@ -890,18 +719,6 @@ pub(crate) enum HostCmd {
 /// The body of a [`HostCmd::Call`], run once on the loop.
 pub(crate) type CallFn =
     Box<dyn FnOnce(Result<&Ctx<'_>, ApiError>) -> Box<dyn FnOnce() + Send> + Send>;
-
-/// One mirror as the loop sees it.
-struct Subscriber {
-    doc_id: DocId,
-    sink: Box<dyn MirrorSink>,
-    /// The doc's version as of the last delivery (or the snapshot):
-    /// the next delivery is `export(updates(&last_sent))`. One VV per
-    /// subscriber is the whole fan-out state.
-    last_sent: VersionVector,
-    /// The mirror's peer slot, held for the subscription's life.
-    _lease: PeerLease,
-}
 
 /// Requests are read by a separate task and handed over a channel, so
 /// the `select!` below never cancels a half-read frame (a `read_frame`
@@ -1076,9 +893,6 @@ struct Host {
     /// Fan-out to watching connections. `send` fails when nobody is
     /// watching, which is the common case and not an error.
     watchers: broadcast::Sender<WatchEvent>,
-    /// Live mirrors, by subscription id (`spec/mac-window-plan.md`).
-    subscribers: HashMap<u64, Subscriber>,
-    next_subscriber: u64,
     ws: Option<WsStream>,
     backoff: Duration,
     next_connect: Instant,
@@ -1116,8 +930,6 @@ impl Host {
             status,
             requests,
             watchers,
-            subscribers: HashMap::new(),
-            next_subscriber: 0,
             ws: None,
             backoff: BACKOFF_MIN,
             next_connect: Instant::now(),
@@ -1182,10 +994,6 @@ impl Host {
         // Clean exit: everything durable, WAL folded (cheap boot next
         // time), socket closed politely. Errors here are reported, not
         // swallowed — the lock releases regardless when `self` drops.
-        // Mirrors hear the end first; their leases go with `self`.
-        for (_, sub) in self.subscribers.drain() {
-            sub.sink.stopped();
-        }
         self.engine.persist_replica_state().await?;
         self.engine.force_snapshot()?;
         if let Some(mut ws) = self.ws.take() {
@@ -1199,25 +1007,6 @@ impl Host {
     async fn on_cmd(&mut self, cmd: HostCmd) -> Result<bool, SyncError> {
         match cmd {
             HostCmd::Ipc(req, reply) => self.on_request(req, reply).await,
-            HostCmd::Subscribe {
-                workspace,
-                sink,
-                reply,
-            } => {
-                let _ = reply.send(self.on_subscribe(workspace, sink));
-                Ok(false)
-            }
-            HostCmd::Import { id, bytes, reply } => {
-                let result = self.on_import(id, &bytes).await?;
-                let _ = reply.send(result);
-                Ok(false)
-            }
-            HostCmd::Unsubscribe { id } => {
-                // The lease releases with the record; the sink's owner
-                // dropped the subscription and expects nothing more.
-                self.subscribers.remove(&id);
-                Ok(false)
-            }
             HostCmd::Session { reply } => {
                 let _ = reply.send(self.on_session());
                 Ok(false)
@@ -1290,15 +1079,13 @@ impl Host {
         Ok(())
     }
 
-    /// The profile for the window: identity and server when there is
-    /// an account; for a local-only workspace (`crate::bootstrap`) the
-    /// identity fields are empty and `local_only` says so, which the
-    /// window shows as the web client's anonymous session.
-    fn on_session(&self) -> Result<SessionInfo, MirrorError> {
-        let account = self
-            .engine
-            .account()
-            .map_err(|e| MirrorError::Failed(format!("read account: {e}")))?;
+    /// The profile for an app: identity and server when there is an
+    /// account; for a local-only workspace (`crate::bootstrap`) the
+    /// identity fields are empty and `local_only` says so.
+    fn on_session(&self) -> Result<SessionInfo, ApiError> {
+        let account = self.engine.account().map_err(|e| ApiError::Failed {
+            message: format!("read account: {e}"),
+        })?;
         let (identity, server_url) = match (account.identity, self.engine.connect_params()) {
             (Some(identity), Some((_, server_url))) => (Some(identity), server_url.to_string()),
             _ => (None, String::new()),
@@ -1322,110 +1109,6 @@ impl Host {
                 })
                 .collect(),
         })
-    }
-
-    fn on_subscribe(
-        &mut self,
-        workspace: Option<String>,
-        sink: Box<dyn MirrorSink>,
-    ) -> Result<Seed, MirrorError> {
-        let doc_id = self
-            .engine
-            .resolve(workspace.as_deref())
-            .map_err(|e| MirrorError::Failed(e.to_string()))?;
-        let lease = self
-            .engine
-            .claim_peer()
-            .map_err(|e| MirrorError::Failed(format!("peer lease: {e}")))?;
-        let doc = self
-            .engine
-            .doc_for(doc_id)
-            .expect("resolved against open docs");
-        let snapshot = doc
-            .export_snapshot_bytes()
-            .map_err(|e| MirrorError::Failed(format!("snapshot: {e}")))?;
-        let last_sent = doc.oplog_vv();
-        let id = self.next_subscriber;
-        self.next_subscriber += 1;
-        let peer_id = lease.peer_id;
-        self.subscribers.insert(
-            id,
-            Subscriber {
-                doc_id,
-                sink,
-                last_sent,
-                _lease: lease,
-            },
-        );
-        Ok(Seed {
-            id,
-            doc_id,
-            peer_id,
-            snapshot,
-        })
-    }
-
-    /// Apply a mirror's ops as local: durable before the mirror hears
-    /// back, on the wire right after, and fanned out to every other
-    /// mirror. The outer error is the loop's (persistence failed); the
-    /// inner one is the mirror's (bad bytes, closed doc).
-    async fn on_import(
-        &mut self,
-        id: u64,
-        bytes: &[u8],
-    ) -> Result<Result<(), MirrorError>, SyncError> {
-        let Some(doc_id) = self.subscribers.get(&id).map(|s| s.doc_id) else {
-            return Ok(Err(MirrorError::Failed("unknown subscription".into())));
-        };
-        let Some(doc) = self.engine.doc_mut_for(doc_id) else {
-            return Ok(Err(MirrorError::Failed("the doc has been closed".into())));
-        };
-        let imported = match doc.import_mirror_update(bytes) {
-            Ok(vv) => vv,
-            Err(e) => return Ok(Err(MirrorError::Failed(format!("import: {e}")))),
-        };
-        // The mirror provably holds what it just sent: start its next
-        // delivery past it rather than echoing its own ops back.
-        if let Some(sub) = self.subscribers.get_mut(&id) {
-            sub.last_sent.merge(&imported);
-        }
-        self.engine.persist_replica_state().await?;
-        self.engine.flush_replicas();
-        self.pump().await;
-        self.notify_if_changed();
-        Ok(Ok(()))
-    }
-
-    /// Deliver to every mirror whatever its doc holds beyond its last
-    /// delivery (`spec/mac-window-plan.md` "Fan-out"). A VV compare per
-    /// subscriber when nothing changed. A mirror whose doc is gone is
-    /// told so and dropped.
-    fn fan_out(&mut self) {
-        let mut closed = Vec::new();
-        for (id, sub) in self.subscribers.iter_mut() {
-            let Some(doc) = self.engine.doc_for(sub.doc_id) else {
-                closed.push(*id);
-                continue;
-            };
-            let now = doc.oplog_vv();
-            if sub.last_sent.includes_vv(&now) {
-                continue;
-            }
-            match doc.export_updates_after(&sub.last_sent) {
-                Ok(bytes) => {
-                    if !bytes.is_empty() {
-                        sub.sink.update(bytes);
-                    }
-                    sub.last_sent = now;
-                }
-                Err(e) => tracing::warn!("mirror export for {}: {e}", sub.doc_id.0),
-            }
-        }
-        for id in closed {
-            if let Some(sub) = self.subscribers.remove(&id) {
-                sub.sink.stopped();
-            }
-        }
     }
 
     /// Run one client request inline. Returns `true` on `Shutdown`.
@@ -1574,10 +1257,7 @@ impl Host {
                     },
                     Ok(doc_id) => match self.engine.delete_doc(doc_id).await {
                         Ok(()) => {
-                            // Mirrors of the doc hear `stopped` now (the
-                            // fan-out finds no doc behind them), watchers
-                            // re-list; both before the client's reply.
-                            self.fan_out();
+                            // Watchers re-list before the client's reply.
                             let _ = self.watchers.send(WatchEvent::Changed);
                             Reply::WorkspaceDeleted {
                                 doc_id: doc_id.0.to_string(),
@@ -1828,17 +1508,11 @@ impl Host {
         if self.ws.is_some() && !self.engine.home_replica().is_online() {
             self.drop_socket("replica disconnected");
         }
-        let forgot = !forget.is_empty();
         for doc_id in forget {
             if let Err(e) = self.engine.forget_doc(doc_id) {
                 tracing::warn!("forget doc {}: {e}", doc_id.0);
             }
             let _ = self.watchers.send(WatchEvent::Changed);
-        }
-        if forgot {
-            // Mirrors of a doc that just went: told now, not on the
-            // next tick.
-            self.fan_out();
         }
         self.publish();
     }
@@ -1901,15 +1575,12 @@ impl Host {
     }
 
     /// Drain the doc's `AppEvent` queue and, if it held anything, tell
-    /// watchers once; then deliver the new ops themselves to the
-    /// mirrors. Over IPC a watcher re-fetches its projection, so a
-    /// burst of N events is one frame; a mirror gets the bytes and
-    /// derives its own events from them.
+    /// watchers once. A watcher re-fetches its projection, so a burst
+    /// of N events is one frame.
     fn notify_if_changed(&mut self) {
         if self.engine.drain_app_events() {
             let _ = self.watchers.send(WatchEvent::Changed);
         }
-        self.fan_out();
     }
 }
 

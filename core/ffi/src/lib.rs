@@ -4,19 +4,16 @@
 //! `login`, `signup` and `logout`: the local-only bootstrap and the
 //! bodies of the CLI commands of the same names), `Engine`, the daemon
 //! loop embedded in the app's process (`spec/daemon-plan.md`, amended
-//! 2026-10-27), and the app's client path into it: `Engine::request`
-//! and `Engine::watch`, the socket's request and watch frames as
-//! function calls (`spec/mac-window-plan.md`, phase 1), and the mirror
-//! for the window: `Engine::subscribe` (a snapshot, a leased peer id, and
-//! updates streamed to a `MirrorSink`) and `Engine::import` (the
-//! window's ops applied as local), phase 2 of the same plan. Replacing
-//! `request` / `watch` (`spec/swift-bindings-plan.md`): typed calls on
-//! `Engine`, one per `monoplan_cli::api` function and returning the
-//! records it defines, typed versions of the requests that are not doc
-//! commands (`sync`, `reconnect`, `account`, `workspaces`,
-//! `create_workspace`, `delete_workspace`), and `Engine::observe`, the
-//! watch as an `EngineObserver`. iOS uses nothing else; `request`,
-//! `watch` and the mirror stay until macOS is over too. The app
+//! 2026-10-27), and the app's client path into it
+//! (`spec/swift-bindings-plan.md`): typed calls on `Engine`, one per
+//! `monoplan_cli::api` function and returning the records it defines,
+//! typed versions of the requests that are not doc commands (`sync`,
+//! `reconnect`, `account`, `workspaces`, `create_workspace`,
+//! `delete_workspace`), and `Engine::observe`, the loop's watch stream
+//! as an `EngineObserver`. No bytes cross: the msgpack `request` /
+//! `watch` pair and the webview's mirror (`subscribe` / `import` /
+//! `session`, `spec/mac-window-plan.md`) were removed on 2026-11-14,
+//! once both apps were on the typed calls. The app
 //! is a client of its own engine here and never over the socket, which
 //! stays the CLI's. The earlier offline `MonoplanStore`
 //! prototype (`spec/swift-ffi-plan.md`) was removed on 2026-10-27: it
@@ -323,19 +320,8 @@ pub struct Engine {
     profile_dir: PathBuf,
 }
 
-/// Where a watch's frames go: the app's object, called from the engine's
-/// threads, so the app hops to its own queue inside. The first frame is
-/// `Reply::Watching`, then one `Reply::Event` per event, each msgpack-
-/// encoded exactly as the socket would carry it after the length prefix.
-#[uniffi::export(with_foreign)]
-pub trait EngineSink: Send + Sync {
-    fn frame(&self, frame: Vec<u8>);
-    /// The engine loop has ended. No frame follows.
-    fn stopped(&self);
-}
-
-/// One live watch. Dropping it, or `cancel`, ends the forwarding; the
-/// sink hears nothing more and no `stopped`.
+/// One live `Engine::observe`. Dropping it, or `cancel`, ends the
+/// forwarding; the observer hears nothing more and no `stopped`.
 #[derive(uniffi::Object)]
 pub struct Watcher {
     cancelled: Arc<AtomicBool>,
@@ -448,108 +434,6 @@ pub trait EngineObserver: Send + Sync {
     fn stopped(&self);
 }
 
-/// Where a mirror's updates go (`spec/mac-window-plan.md` "Engine to
-/// mirror"): the app's object, called on the engine loop's thread, so the
-/// app hops to the webview's queue inside and never calls back into
-/// `Engine` synchronously (the loop is busy delivering; an `import` from
-/// inside `update` would wait on itself). Each `update` is Loro update
-/// bytes since the previous one (or since the snapshot), to import into
-/// the mirror doc tagged `remote`.
-#[uniffi::export(with_foreign)]
-pub trait MirrorSink: Send + Sync {
-    fn update(&self, bytes: Vec<u8>);
-    /// The engine loop has ended, or the doc was closed under the mirror.
-    /// No update follows; subscribe again once there is an engine.
-    fn stopped(&self);
-}
-
-/// Adapts the uniffi callback to the daemon's sink trait.
-struct ForeignSink(Arc<dyn MirrorSink>);
-
-impl monoplan_cli::daemon::MirrorSink for ForeignSink {
-    fn update(&self, bytes: Vec<u8>) {
-        self.0.update(bytes);
-    }
-    fn stopped(&self) {
-        self.0.stopped();
-    }
-}
-
-/// One live mirror of one doc (`spec/mac-window-plan.md`): the seed the
-/// webview loads and the handle its ops go back through
-/// (`Engine::import`). Dropping it, or `close`, ends the subscription and
-/// releases the peer slot; the sink hears nothing more.
-#[derive(uniffi::Object)]
-pub struct Subscription {
-    inner: Mutex<Option<monoplan_cli::daemon::Subscription>>,
-    doc_id: String,
-    peer_id: u64,
-    snapshot: Vec<u8>,
-}
-
-#[uniffi::export]
-impl Subscription {
-    /// The doc being mirrored, as its UUID string.
-    pub fn doc_id(&self) -> String {
-        self.doc_id.clone()
-    }
-
-    /// The peer the mirror doc must write under for the life of this
-    /// subscription (`Doc.loadWithPeer` on the wasm side).
-    pub fn peer_id(&self) -> u64 {
-        self.peer_id
-    }
-
-    /// Plaintext Loro snapshot of the doc at subscribe time; the sink's
-    /// updates continue from exactly here.
-    pub fn snapshot(&self) -> Vec<u8> {
-        self.snapshot.clone()
-    }
-
-    /// End the subscription now rather than on release.
-    pub fn close(&self) {
-        self.inner.lock().unwrap().take();
-    }
-}
-
-impl From<monoplan_cli::daemon::MirrorError> for EngineError {
-    fn from(e: monoplan_cli::daemon::MirrorError) -> Self {
-        use monoplan_cli::daemon::MirrorError;
-        match e {
-            MirrorError::Stopped => EngineError::Stopped,
-            MirrorError::Failed(message) => EngineError::Failed { message },
-        }
-    }
-}
-
-/// The profile as the window should see it (`spec/mac-window-plan.md`
-/// "Swift side", the `session` request): what `Engine::session` answers.
-/// No credential: the device token stays with the app
-/// (`Engine::device_token`) and never reaches the webview.
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct EngineSession {
-    /// Empty for a local-only workspace, as are `email`, `device_id`
-    /// and `server_url`.
-    pub account_id: String,
-    pub email: String,
-    pub device_id: String,
-    pub primary_doc_id: String,
-    /// The server the engine syncs with: where the window's HTTP calls go.
-    pub server_url: String,
-    /// No account behind the profile: the window runs it as the web
-    /// client runs an anonymous session (`spec/auth.md`).
-    pub local_only: bool,
-    /// Every doc the engine has open, Home first.
-    pub docs: Vec<EngineDoc>,
-}
-
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct EngineDoc {
-    pub doc_id: String,
-    /// The doc's name; nil for Home and for an unnamed doc.
-    pub name: Option<String>,
-}
-
 fn unexpected(reply: monoplan_cli::ipc::Reply) -> EngineError {
     EngineError::Failed {
         message: format!("unexpected reply: {reply:?}"),
@@ -588,12 +472,6 @@ impl Engine {
 #[uniffi::export]
 pub fn build_id() -> String {
     monoplan_cli::ipc::build_id()
-}
-
-fn encode(reply: &monoplan_cli::ipc::Reply) -> Vec<u8> {
-    // `Reply` is plain data over serde; the only failure is a
-    // msgpack bug, which the socket path would hit identically.
-    monoplan_cli::ipc::encode_payload(reply).expect("reply encodes")
 }
 
 #[uniffi::export]
@@ -700,80 +578,18 @@ impl Engine {
         }
     }
 
-    /// One IPC request as a function call: a msgpack `Request` in, the
-    /// msgpack `Reply` out, the bytes the socket carries after its
-    /// length prefix. Blocks until the loop has answered (a doc command
-    /// runs inline there), so call it off the main thread. `Hello` is
-    /// answered without the loop; `Watch` is `watch` below.
-    pub fn request(&self, frame: Vec<u8>) -> Result<Vec<u8>, EngineError> {
-        use monoplan_cli::ipc::{Request, decode_payload};
-        if self.client.is_stopped() {
-            return Err(EngineError::Stopped);
-        }
-        let req: Request = decode_payload(&frame).map_err(|e| EngineError::Failed {
-            message: e.to_string(),
-        })?;
-        Ok(encode(&self.client.request_blocking(req)))
-    }
-
-    /// Subscribe to the loop's watch stream (`spec/daemon-plan.md`
-    /// projection tier): `sink` gets `Watching` now, then one `Event`
-    /// frame per event, each msgpack-encoded exactly as the socket
-    /// would carry it after the length prefix, and `stopped` once when
-    /// the loop ends.
+    /// Follow the loop's watch stream (`spec/daemon-plan.md` projection
+    /// tier): `observer.sync` now with the current state, then
+    /// `changed` / `sync` per event and `stopped` once when the loop
+    /// ends.
     ///
     /// The forwarder is a plain thread, not a task on the engine's
     /// runtime: that runtime is dropped as soon as the loop returns,
     /// which cancels its tasks, and a forwarder cancelled between the
     /// channel closing and its next poll would never deliver the one
-    /// event the app's client depends on to notice the engine is gone
-    /// (a sign-in's claim or a terminal command ending it). A blocking
+    /// event the app depends on to notice the engine is gone (a
+    /// sign-in's claim or a terminal command ending it). A blocking
     /// receive sees `Closed` whatever happened to the runtime.
-    pub fn watch(&self, sink: Arc<dyn EngineSink>) -> Result<Arc<Watcher>, EngineError> {
-        use monoplan_cli::ipc::{Reply, WatchEvent};
-        use tokio::sync::broadcast::error::RecvError;
-        if self.client.is_stopped() {
-            return Err(EngineError::Stopped);
-        }
-        let (sync, mut rx) = self.client.watch();
-        sink.frame(encode(&Reply::Watching { sync }));
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let flag = cancelled.clone();
-        std::thread::Builder::new()
-            .name("monoplan-watch".into())
-            .spawn(move || {
-                loop {
-                    let ev = match rx.blocking_recv() {
-                        Ok(ev) => ev,
-                        // Behind by more than the buffer: the backlog
-                        // collapses to "something changed", as on the socket.
-                        Err(RecvError::Lagged(_)) => WatchEvent::Changed,
-                        Err(RecvError::Closed) => {
-                            if !flag.load(Ordering::SeqCst) {
-                                sink.stopped();
-                            }
-                            return;
-                        }
-                    };
-                    // A cancelled watch stays subscribed until the next
-                    // event or the loop's end, and says nothing.
-                    if flag.load(Ordering::SeqCst) {
-                        return;
-                    }
-                    sink.frame(encode(&Reply::Event(ev)));
-                }
-            })
-            .map_err(|e| EngineError::Failed {
-                message: e.to_string(),
-            })?;
-        Ok(Arc::new(Watcher { cancelled }))
-    }
-
-    /// [`watch`](Self::watch) without the frames
-    /// (`spec/swift-bindings-plan.md`): `observer.sync` now with the
-    /// current state, then `changed` / `sync` per event and `stopped`
-    /// once when the loop ends. The same forwarder thread, for the
-    /// same reason.
     pub fn observe(&self, observer: Arc<dyn EngineObserver>) -> Result<Arc<Watcher>, EngineError> {
         use monoplan_cli::ipc::WatchEvent;
         use tokio::sync::broadcast::error::RecvError;
@@ -790,6 +606,8 @@ impl Engine {
                 loop {
                     let ev = match rx.blocking_recv() {
                         Ok(ev) => ev,
+                        // Behind by more than the buffer: the backlog
+                        // collapses to "something changed", as on the socket.
                         Err(RecvError::Lagged(_)) => WatchEvent::Changed,
                         Err(RecvError::Closed) => {
                             if !flag.load(Ordering::SeqCst) {
@@ -798,6 +616,8 @@ impl Engine {
                             return;
                         }
                     };
+                    // A cancelled observer stays subscribed until the
+                    // next event or the loop's end, and says nothing.
                     if flag.load(Ordering::SeqCst) {
                         return;
                     }
@@ -1273,86 +1093,10 @@ impl Engine {
         }
     }
 
-    /// Mirror a doc in the window (`spec/mac-window-plan.md`, phase 2):
-    /// `workspace` is a `-w` selector or nil for Home. The returned
-    /// subscription carries the snapshot and the leased peer id; from
-    /// then on `sink.update` gets every change the engine applies (a CLI
-    /// command, a remote frame, another window's import) until the
-    /// subscription is closed or released. Blocks for the snapshot
-    /// export, so call it off the main thread.
-    pub fn subscribe(
-        &self,
-        workspace: Option<String>,
-        sink: Arc<dyn MirrorSink>,
-    ) -> Result<Arc<Subscription>, EngineError> {
-        if self.client.is_stopped() {
-            return Err(EngineError::Stopped);
-        }
-        let sub = self
-            .client
-            .subscribe_blocking(workspace, Box::new(ForeignSink(sink)))?;
-        Ok(Arc::new(Subscription {
-            doc_id: sub.doc_id.0.to_string(),
-            peer_id: sub.peer_id,
-            snapshot: sub.snapshot.clone(),
-            inner: Mutex::new(Some(sub)),
-        }))
-    }
-
-    /// Apply the window's ops (Loro update bytes since its last send)
-    /// to the engine's doc: local from here, WALed on the next capture,
-    /// pushed, and fanned out to any other mirror. Blocks until they
-    /// are durable, so call it off the main thread. `Failed` after
-    /// `close`, or for bytes Loro will not import.
-    pub fn import(
-        &self,
-        subscription: Arc<Subscription>,
-        bytes: Vec<u8>,
-    ) -> Result<(), EngineError> {
-        // Held for the call, so a concurrent `close` waits for the
-        // import to land rather than racing it.
-        let guard = subscription.inner.lock().unwrap();
-        let Some(sub) = guard.as_ref() else {
-            return Err(EngineError::Failed {
-                message: "subscription closed".into(),
-            });
-        };
-        Ok(sub.import_blocking(bytes)?)
-    }
-
-    /// The profile as the window should see it (`spec/mac-window-plan.md`
-    /// "Swift side"): identity, server, and the open docs, Home first.
-    /// Blocks for the loop's turn, so call it off the main thread.
-    /// A local-only workspace answers with `local_only` set and empty
-    /// identity fields.
-    pub fn session(&self) -> Result<EngineSession, EngineError> {
-        if self.client.is_stopped() {
-            return Err(EngineError::Stopped);
-        }
-        let info = self.client.session_blocking()?;
-        Ok(EngineSession {
-            account_id: info.account_id,
-            email: info.email,
-            device_id: info.device_id,
-            primary_doc_id: info.primary_doc_id.0.to_string(),
-            server_url: info.server_url,
-            local_only: info.local_only,
-            docs: info
-                .docs
-                .into_iter()
-                .map(|d| EngineDoc {
-                    doc_id: d.doc_id.0.to_string(),
-                    name: d.name,
-                })
-                .collect(),
-        })
-    }
-
-    /// This device's server token, for the app to put on the window's
-    /// HTTP calls (`Authorization: Bearer`, `spec/auth.md`). Read from
-    /// the profile on each call; nil for a local-only workspace. The
-    /// webview never sees it: the app's scheme handler adds it on the
-    /// way out.
+    /// This device's server token, for the app's own HTTP calls (the
+    /// Mac's Devices pane: `Authorization: Bearer`, `spec/auth.md`).
+    /// Read from the profile on each call; nil for a local-only
+    /// workspace.
     pub fn device_token(&self) -> Option<String> {
         use monoplan_cli::config::Profile;
         Profile::active_at(self.profile_dir.clone())?
@@ -1364,8 +1108,8 @@ impl Engine {
     /// Still serving? False once the loop has ended (a client's
     /// `Shutdown`, a command's `claim`), from the moment it ends: the
     /// thread is still unwinding then, and a request to it would only
-    /// get `Stopped`, so the app must not hand this engine to a new page
-    /// or client meanwhile.
+    /// get `Stopped`, so the app must not hand this engine to a new
+    /// caller meanwhile.
     pub fn is_running(&self) -> bool {
         !self.client.is_stopped()
             && self

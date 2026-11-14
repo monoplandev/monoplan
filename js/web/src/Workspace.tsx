@@ -71,13 +71,6 @@ import type { ListOption } from "./ListPicker.tsx";
 import { MovePalette } from "./MovePalette.tsx";
 import { EditableNavLabel, Nav, NavFindButton, NavMenu, StatusSlot } from "./nav.tsx";
 import { listCountsPref } from "./listCounts.ts";
-import {
-  isMacShell,
-  onTitlebarMouseDown,
-  postUndoState,
-  setFindHandler,
-  setUndoRedoHandler,
-} from "./sync/mirrorHost.ts";
 import { installConsoleApi } from "./consoleApi.ts";
 import { digitNavTarget } from "./navShortcuts.ts";
 import {
@@ -273,9 +266,8 @@ export function Workspace(props: {
    *  (`runtime.joinDoc`); the DEK came out of the link. */
   joinDoc: (docId: string, dek: Dek) => Promise<string>;
   /** Delete a non-Home doc the account owns and forget it here
-   *  (`runtime.deleteDoc`); rejects on Home or anonymous sessions. The
-   *  shown name rides along for the app's native confirm. */
-  deleteDoc: (docId: string, name: string) => Promise<void>;
+   *  (`runtime.deleteDoc`); rejects on Home or anonymous sessions. */
+  deleteDoc: (docId: string) => Promise<void>;
   /** Leave a shared doc the account is a member of but does not own,
    *  and forget it here (`runtime.leaveDoc`). */
   leaveDoc: (docId: string) => Promise<void>;
@@ -909,16 +901,9 @@ export function Workspace(props: {
   // as present since (a member who joined after the load opens the doc
   // and is announced before their first item can arrive).
   const members = createMemberDirectory();
-  // Creating a doc wraps a DEK: one workspace per accountless install
-  // (`auth.md`), and the macOS app's window holds no key
-  // (`Session.mirror`; its New Workspace… is the app's own menu), so
-  // both hide the verb. Deleting touches no key, so the window offers
-  // it too; the app confirms natively and its host does the work.
-  const canManageDocs = (): boolean => {
-    const s = session.session();
-    return !s.anonymous && !s.mirror;
-  };
-  const canDeleteDocs = (): boolean => !session.session().anonymous;
+  // One workspace per accountless install (`auth.md`): creating,
+  // deleting and leaving docs need an account.
+  const canManageDocs = (): boolean => !session.session().anonymous;
   createEffect(() => {
     if (session.session().anonymous) return;
     for (const d of docs.docs()) if (!d.home) members.ensure(d.docId);
@@ -2125,43 +2110,6 @@ export function Workspace(props: {
   };
   onGlobalKey(onUndoRedoKey);
 
-  // In the app's window the menu bar's Edit › Undo / Redo is the one
-  // undo surface (the sidebar menu hides its rows). A click there, or
-  // a ⌘Z the handler above let through, arrives here: a focused text
-  // field keeps its own undo (what the browser would have done with
-  // the keystroke); otherwise the doc's, with the overlay guard the
-  // key path has. The items are enabled from the same two facts.
-  if (isMacShell()) {
-    const editableFocused = (): boolean =>
-      !!document.activeElement?.closest('input, textarea, [contenteditable="true"]');
-    setUndoRedoHandler((kind) => {
-      if (editableFocused()) {
-        document.execCommand(kind);
-        return;
-      }
-      if (isOverlayOpen()) return;
-      if (kind === "undo") docs.undo();
-      else docs.redo();
-    });
-    const [editing, setEditing] = createSignal(editableFocused());
-    const onFocusChange = () => setEditing(editableFocused());
-    document.addEventListener("focusin", onFocusChange);
-    document.addEventListener("focusout", onFocusChange);
-    // The window's search bubble, as the sidebar's Find button.
-    setFindHandler(() => setFindOpen(true));
-    onCleanup(() => {
-      setUndoRedoHandler(null);
-      setFindHandler(null);
-      document.removeEventListener("focusin", onFocusChange);
-      document.removeEventListener("focusout", onFocusChange);
-    });
-    createEffect(() => {
-      docs.version();
-      const e = editing();
-      postUndoState(e || docs.canUndo(), e || docs.canRedo());
-    });
-  }
-
   let dndHandle: DndImperative | null = null;
   let boardHandle: BoardImperative | null = null;
   let upcomingHandle: UpcomingImperative | null = null;
@@ -3012,7 +2960,7 @@ export function Workspace(props: {
     null;
   const onNavResizeDown = (e: PointerEvent) => {
     if (e.button !== 0) return;
-    // No text selection (or window drag in the macOS shell) underneath.
+    // No text selection underneath.
     e.preventDefault();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     navDrag = { pointerId: e.pointerId, startX: e.clientX, startWidth: navWidth() };
@@ -3041,13 +2989,6 @@ export function Workspace(props: {
       }}
       style={{ "--nav-width": `${navWidth()}px` }}
     >
-      {/* The macOS app's window has no title bar: a thin strip across the
-          top of every pane drags it (the sidebar's own `.nav-titlebar`
-          is the tall one under the traffic lights). The main surface and
-          side panel are nudged down under it (`[data-shell="mac"]`). */}
-      <Show when={isMacShell()}>
-        <div class="app-titlebar" onMouseDown={onTitlebarMouseDown} />
-      </Show>
       <div
         class="nav-resizer"
         classList={{ "nav-resizer-active": navResizing() }}
@@ -3070,39 +3011,32 @@ export function Workspace(props: {
         showListCounts={listCountsPref()}
         view={view()}
         setView={navigateTo}
-        onDeleteDoc={canDeleteDocs() ? props.deleteDoc : null}
-        onLeaveDoc={canDeleteDocs() ? props.leaveDoc : null}
+        onDeleteDoc={canManageDocs() ? props.deleteDoc : null}
+        onLeaveDoc={canManageDocs() ? props.leaveDoc : null}
         presence={props.presence}
         members={members}
-        // No footer at all in the app's window (spec/mac-window-plan.md
-        // "Settings"): the menu bar has Settings and Undo / Redo, the
-        // account and search bubbles over the page have the account
-        // menu and Find, and the tray shows the sync state; the
-        // shortcuts dialog is not reachable there for now.
         footer={
-          session.session().mirror ? undefined : (
-            <>
-              <NavMenu
-                docs={docs}
-                session={session.session()}
-                logout={() => setLogoutConfirmOpen(true)}
-                onOpenSettings={() => setSettingsOpen(true)}
-                onOpenShortcuts={() => setShortcutsOpen(true)}
-                onSession={session.swapSession}
-                // One workspace per accountless install (`auth.md`); signup
-                // is the gate to more.
-                onNewDoc={canManageDocs() ? () => setNewDocOpen(true) : null}
-              />
-              <StatusSlot
-                docs={docs}
-                online={session.online()}
-                lastSyncAt={session.lastSyncAt()}
-                session={session.session()}
-                onSession={session.swapSession}
-              />
-              <NavFindButton onClick={() => setFindOpen(true)} />
-            </>
-          )
+          <>
+            <NavMenu
+              docs={docs}
+              session={session.session()}
+              logout={() => setLogoutConfirmOpen(true)}
+              onOpenSettings={() => setSettingsOpen(true)}
+              onOpenShortcuts={() => setShortcutsOpen(true)}
+              onSession={session.swapSession}
+              // One workspace per accountless install (`auth.md`); signup
+              // is the gate to more.
+              onNewDoc={canManageDocs() ? () => setNewDocOpen(true) : null}
+            />
+            <StatusSlot
+              docs={docs}
+              online={session.online()}
+              lastSyncAt={session.lastSyncAt()}
+              session={session.session()}
+              onSession={session.swapSession}
+            />
+            <NavFindButton onClick={() => setFindOpen(true)} />
+          </>
         }
       />
       <FindPalette
@@ -3137,10 +3071,6 @@ export function Workspace(props: {
         confirmLabel={m().common.move}
         onConfirm={() => crossMove()?.run()}
       />
-      {/* Not in the app's window (spec/mac-window-plan.md "Settings"):
-          the app's Settings window has every pane; the dialog is not
-          reachable there and keeps no conditions for it. */}
-      <Show when={!session.session().mirror}>
       <Settings
         open={settingsOpen()}
         onOpenChange={setSettingsOpen}
@@ -3158,7 +3088,6 @@ export function Workspace(props: {
         }
         docs={docs}
       />
-      </Show>
       {/* Sign-out confirmation, same wording as the macOS app's alert:
           the local copy goes, unsynced changes with it, synced data
           comes back on the next sign-in. Confirming is what wipes. */}

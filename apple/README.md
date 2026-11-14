@@ -6,21 +6,21 @@ the CLI commands) and `Engine`, the daemon loop embedded in the app's
 process (`spec/daemon-plan.md`, amended 2026-10-27), which both apps
 drive through typed calls returning generated records and follow with
 `Engine.observe` ([`spec/swift-bindings-plan.md`](../spec/swift-bindings-plan.md),
-phases 1 to 4 built 2026-11-14). Neither app opens the socket, encodes
+built 2026-11-14). Neither app opens the socket, encodes
 a request or decodes JSON from the engine; the socket stays the CLI's.
 Both are native: `apple/MonoplanIOS` (2026-11-05) and, since
 2026-11-14, the Mac app's window, which replaced the webview of
-[`spec/mac-window-plan.md`](../spec/mac-window-plan.md). The old
-surface that webview used (`Engine.request`, `watch`, `subscribe`,
-`import`, `session`) is still exported and unused; the bindings plan's
-phase 5 removes it. The offline `MonoplanStore` prototype from
+[`spec/mac-window-plan.md`](../spec/mac-window-plan.md). The surface
+that webview and the first tray used (`Engine.request`, `watch`,
+`subscribe`, `import`, `session`) was removed on 2026-11-14 with the
+mirror behind it (the bindings plan's phase 5). The offline `MonoplanStore` prototype from
 [`spec/swift-ffi-plan.md`](../spec/swift-ffi-plan.md) was removed on
 2026-10-27; that plan is kept for the build pipeline it set up.
 
 ## Layering
 
 ```
-monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's daemon: Engine (start, shutdown, is_running, device_token; typed: one method per `monoplan_cli::api` function, plus sync, reconnect, account, workspaces, create_workspace, delete_workspace, observe; unused until phase 5 removes them: request, watch, subscribe, import, session), login, signup, logout, ensure_local_workspace, matches_name, build_id
+monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's daemon: Engine (start, shutdown, is_running, device_token; typed: one method per `monoplan_cli::api` function, plus sync, reconnect, account, workspaces, create_workspace, delete_workspace, observe), login, signup, logout, ensure_local_workspace, matches_name, build_id
    → MonoplanCoreFFI.xcframework        static libs (macOS/iOS/iOS-sim) + C headers
       → MonoplanCore (SwiftPM)          generated Swift bindings + a thin facade
          → MonoplanMac, MonoplanIOS      consume MonoplanCore (and MonoplanMac's Kit product) as local packages
@@ -109,9 +109,7 @@ bundled CLI symlinked onto `PATH` guarantees.
 Targets: `MonoplanMacKit` (Foundation-only helpers: `ProfileLocation`,
 `WhenPhrase`, the widget's agenda snapshot, the device API requests,
 install / launch / appearance preferences; no MonoplanCore dependency,
-because the iOS widget links it and must not link the engine; it still
-carries the MessagePack codec, `EngineClient` and the JSON row models
-nothing uses any more, until the bindings plan's phase 5), the
+because the iOS widget links it and must not link the engine), the
 `MonoplanMac` executable (AppKit and SwiftUI: the engine controller,
 the tray, the window, Settings) and `MonoplanCore` (the prebuilt
 XCFramework). Two test targets: `MonoplanMacKitTests`, and
@@ -239,9 +237,7 @@ translation is missing, or its placeholders differ from the English.
 Adding a string means adding the key and its Spanish to the catalog in
 the same change; the build will not let it drift.
 
-Next: `spec/swift-bindings-plan.md` phase 5 (remove the old FFI
-surface, the mirror and the Kit's codec), then real views in the
-window, shared with iOS.
+Next: real views in the window, shared with iOS.
 
 ## MonoplanIOS — the native iOS surface
 

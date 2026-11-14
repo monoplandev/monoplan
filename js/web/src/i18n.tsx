@@ -4,12 +4,10 @@ import {
   createContext,
   createMemo,
   createSignal,
-  onCleanup,
   useContext,
   type Accessor,
   type JSX,
 } from "solid-js";
-import { hasHostSettings, hostSetting, onHostSettings } from "./hostSettings.ts";
 
 export type AppLanguage = "es" | "en";
 
@@ -22,12 +20,8 @@ function cookieAttrs(maxAge: number): string {
 }
 
 // A cookie, like the theme (`theme.ts`), with `localStorage` beside it;
-// the cookie wins where both exist. In the macOS app's window the
-// language is the app's own (`hostSettings.ts`): read from there,
-// followed live, never written.
+// the cookie wins where both exist.
 function readLanguage(): AppLanguage {
-  const host = hostSetting("language");
-  if (host) return host;
   try {
     const m = document.cookie.match(/(?:^|; )locale=(es|en)/);
     if (m?.[1] === "es" || m?.[1] === "en") return m[1];
@@ -40,7 +34,6 @@ function readLanguage(): AppLanguage {
 }
 
 function writeLanguage(language: AppLanguage) {
-  if (hasHostSettings()) return;
   try {
     document.cookie = `${COOKIE_NAME}=${language};${cookieAttrs(MAX_AGE)}`;
   } catch {}
@@ -100,14 +93,6 @@ export type Messages = {
      *  text is rendered as an anchor to the mailing-list signup. */
     prereleaseNotice: string;
     prereleaseLink: string;
-  };
-  /** The macOS app's window before it has a host to mirror
-   *  (`MirrorApp`): waiting on the host. */
-  mirror: {
-    /** Waiting on the host; the app's reason follows in smaller type. */
-    waiting: string;
-    notInApp: string;
-    failedToStart: string;
   };
   nav: {
     inbox: string;
@@ -530,8 +515,6 @@ export type Messages = {
     timeFormat12: string;
     timeFormat24: string;
     localOnlyAccount: string;
-    /** The macOS app's window: sign-out and account deletion are the
-     *  menu bar's (`Session.mirror`). */
     loginToSeeDevices: string;
     email: string;
     thisDevice: string;
@@ -576,8 +559,6 @@ export type Messages = {
     createdAgo: (rel: string) => string;
     revoke: string;
     ownerOnly: string;
-    /** The macOS app's window holds no key, so it cannot mint a link. */
-    appWindowNoInvites: string;
     loadFailed: string;
     createFailed: string;
     revokeFailed: string;
@@ -653,11 +634,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         "Esta es una versión preliminar. Los datos se borrarán con regularidad.",
       prereleaseLink:
         "Suscríbete a nuestra lista de correo para saber cuándo se lance Monoplan.",
-    },
-    mirror: {
-      waiting: "Esperando a la app…",
-      notInApp: "Esta página solo funciona dentro de la app de Monoplan.",
-      failedToStart: "No se pudo iniciar",
     },
     nav: {
       inbox: "Bandeja de entrada",
@@ -969,7 +945,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       createdAgo: (rel) => `Creado ${rel}`,
       revoke: "Revocar",
       ownerOnly: "Solo el propietario del espacio puede invitar.",
-      appWindowNoInvites: "Crea enlaces de invitación desde el navegador o con `monoplan workspace share`.",
       loadFailed: "No se pudieron cargar los detalles",
       createFailed: "No se pudo crear el enlace",
       revokeFailed: "No se pudo revocar el enlace",
@@ -1047,11 +1022,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         "This is a pre-release build. Data will be regularly deleted.",
       prereleaseLink:
         "Sign up to the mailing list to get notified when Monoplan releases.",
-    },
-    mirror: {
-      waiting: "Waiting for the app…",
-      notInApp: "This page only runs inside the Monoplan app.",
-      failedToStart: "Failed to start",
     },
     nav: {
       inbox: "Inbox",
@@ -1359,7 +1329,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       createdAgo: (rel) => `Created ${rel}`,
       revoke: "Revoke",
       ownerOnly: "Only the workspace owner can invite people.",
-      appWindowNoInvites: "Create invite links from the browser or with `monoplan workspace share`.",
       loadFailed: "Could not load sharing details",
       createFailed: "Could not create the link",
       revokeFailed: "Could not revoke the link",
@@ -1407,11 +1376,6 @@ const AppI18nContext = createContext<AppI18nContextValue>();
 
 export function AppI18nProvider(props: { children: JSX.Element }) {
   const [language, setLanguageSignal] = createSignal<AppLanguage>(readLanguage());
-  onCleanup(
-    onHostSettings((s) => {
-      if (s.language) setLanguageSignal(s.language);
-    }),
-  );
   const localeCode = createMemo(() => localeByLanguage[language()]);
   const messages = createMemo(() => messagesByLanguage[language()]);
 

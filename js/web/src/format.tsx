@@ -1,5 +1,4 @@
 import { createSignal } from "solid-js";
-import { hasHostSettings, hostSetting, onHostSettings } from "./hostSettings.ts";
 
 // Shared 60s tick for relative-time labels ("5m ago"). One signal, one
 // interval — every Row that reads it stays fresh without spawning its
@@ -13,9 +12,7 @@ export { nowMs };
 // "auto" defers to the browser's locale default (what `Intl` picks for
 // the active locale); "12h" / "24h" force a cycle. A per-device display
 // preference like theme and language, so it lives in a cookie alongside
-// them rather than in the synced doc. In the macOS app's window it is
-// the system's hour cycle (`hostSettings.ts`): read from there,
-// followed live, never written.
+// them rather than in the synced doc.
 
 export type TimeFormatPreference = "auto" | "12h" | "24h";
 
@@ -23,8 +20,6 @@ const TIME_FORMAT_COOKIE = "hourcycle";
 const TIME_FORMAT_MAX_AGE = 31536000; // 1 year
 
 function readTimeFormat(): TimeFormatPreference {
-  const host = hostSetting("hourCycle");
-  if (host) return host;
   try {
     const m = document.cookie.match(/(?:^|; )hourcycle=(12|24)/);
     if (m?.[1] === "12") return "12h";
@@ -36,7 +31,6 @@ function readTimeFormat(): TimeFormatPreference {
 // Same tolerance as the reader: no `document` (tests, workers) means the
 // signal still flips, the cookie just isn't persisted.
 function writeTimeFormat(pref: TimeFormatPreference) {
-  if (hasHostSettings()) return;
   const attrs = (maxAge: number) => `path=/;max-age=${maxAge};SameSite=Lax`;
   try {
     if (pref === "auto") {
@@ -51,9 +45,6 @@ const [timeFormatPref, setTimeFormatSignal] = createSignal<TimeFormatPreference>
   readTimeFormat(),
 );
 export { timeFormatPref };
-onHostSettings((s) => {
-  if (s.hourCycle) setTimeFormatSignal(s.hourCycle);
-});
 
 export function setTimeFormatPref(pref: TimeFormatPreference): void {
   setTimeFormatSignal(pref);

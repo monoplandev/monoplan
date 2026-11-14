@@ -10,8 +10,7 @@
   /* The browser's own canvas, behind anything that paints no background
      (the loading / failed states, the ground behind the sign-in dialog):
      nothing at the root paints one, so the canvas follows the theme
-     here rather than defaulting to white. In the macOS app the webview
-     is transparent and the window's material shows instead. */
+     here rather than defaulting to white. */
   color-scheme: light;
   --bg: #fafafc;
   --bg-board-col: #fbfcfd;
@@ -170,8 +169,7 @@ body {
 /* Drag handle over the nav's right edge (Workspace.tsx sets
    `--nav-width`, navWidth.ts bounds and stores it). Out of the grid's
    flow so it takes no column; a few px either side of the hairline so
-   it's easy to hit, with only a thin line drawn, on hover or mid-drag.
-   Under the macOS drag strip (`.app-titlebar`, z-index 30). */
+   it's easy to hit, with only a thin line drawn, on hover or mid-drag. */
 .nav-resizer {
   position: absolute;
   top: 0;
@@ -211,58 +209,6 @@ body {
   display: flex;
   flex-direction: column;
   border-right: 0.5px solid var(--border-surface);
-}
-
-/* The macOS app's window has no title bar (`[data-shell="mac"]`,
-   mirror.tsx): the traffic lights sit over this strip at the top of the
-   sidebar, which replaces the nav's top padding and drags the window
-   (nav.tsx). Tall enough that the lights (13px to 27px from the top,
-   in the app's compact unified title bar) clear the first row. */
-.nav-titlebar {
-  flex-shrink: 0;
-  height: 42px;
-}
-
-/* The app's window is a vibrant sidebar material under a transparent
-   webview (WebWindow.swift), so the nav paints nothing and the blur
-   shows through it; the main column stays opaque. */
-[data-shell="mac"] .nav {
-  padding-top: 0;
-  background: transparent;
-}
-
-/* The same window's thin drag strip across the top of every pane
-   (Workspace.tsx), over the content but under dialogs and palettes
-   (z-index 100+); the main surface and side panel start below it. */
-.app-titlebar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 24px;
-  z-index: 30;
-}
-
-[data-shell="mac"] .content,
-[data-shell="mac"] .side-panel {
-  padding-top: 24px;
-}
-
-/* In full screen (`window.__monoplanHost.fullScreen`) the title bar
-   hides with the menu bar and the traffic lights are gone, so the
-   strips fall back to the plain layout: the nav's usual top padding,
-   no drag strip, no nudge. */
-[data-shell="mac"][data-fullscreen] .nav-titlebar {
-  height: 12px;
-}
-
-[data-shell="mac"][data-fullscreen] .app-titlebar {
-  display: none;
-}
-
-[data-shell="mac"][data-fullscreen] .content,
-[data-shell="mac"][data-fullscreen] .side-panel {
-  padding-top: 0;
 }
 
 /* Sidebar-scoped footer: app menu at the left, account/sync widget
@@ -947,23 +893,6 @@ body {
   color: #fff;
 }
 
-/* Over the app's glass (WebWindow.swift) the opaque greys read wrong:
-   the selected row's `--bg-active` comes out darker than the tinted
-   ground in dark mode and heavy in light, and the faint section
-   labels sink into it. Translucent fills instead, as native sidebars
-   use, so they track whatever the glass shows. */
-[data-shell="mac"] .nav-item[data-active] {
-  background: rgba(0, 0, 0, 0.07);
-}
-
-[data-shell="mac"][data-theme="dark"] .nav-item[data-active] {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-[data-shell="mac"][data-theme="dark"] .nav-section {
-  color: rgba(255, 255, 255, 0.55);
-}
-
 /* On the selected row, drop the muted glyph colour so the SVG icon reads
    as part of the label rather than a dimmer decoration. Emoji icons are
    already `color: inherit` and unaffected (their colour is intrinsic). */
@@ -1022,9 +951,7 @@ body {
   pointer-events: none;
 }
 
-/* Right-hand column: the main surface fills the pane row. Painted
-   itself so the macOS app's drag strip above the main surface matches
-   it rather than showing the window's material. */
+/* Right-hand column: the main surface fills the pane row. */
 .content {
   display: flex;
   flex-direction: column;
@@ -1662,35 +1589,6 @@ input.task-check:hover {
   .splash .side-panel {
     display: flex;
   }
-}
-
-/* The app window without a host yet (MirrorApp's HostGate): waiting
-   on it. Fills the window and centres its two lines; the reason is
-   secondary. */
-.mirror-gate {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 40px 20px;
-  text-align: center;
-  color: var(--text);
-}
-
-.mirror-gate p {
-  margin: 0;
-}
-
-.mirror-gate-title {
-  font-size: 1.1em;
-  font-weight: 500;
-}
-
-.mirror-gate-hint {
-  color: var(--text-muted);
-  max-width: 32em;
 }
 
 .connection-indicator {

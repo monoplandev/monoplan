@@ -13,13 +13,12 @@ pub use doc::{
     DefaultView, Doc, DocError, EVENTS_NAME, ExportItem, ExportLifecycle, ExportList,
     ExportSettings, FocusRef, FocusRetarget, INBOX_NAME, ImportSummary, ItemLifecycle, ItemView,
     JsonExport, LIST_EVENTS, LIST_INBOX, LaneSet, ListView, MAX_DURATION_MINUTES,
-    MAX_PLACE_DETAIL_CHARS, MAX_PLACE_LABEL_CHARS, MIRROR_ORIGIN, NOTES_ORIGIN_PREFIX,
-    NotesDeltaOp, Place, SettingsView, VIEW_ORIGIN, WELCOME_ITEM, WorkflowState,
-    move_items_across_docs,
+    MAX_PLACE_DETAIL_CHARS, MAX_PLACE_LABEL_CHARS, NOTES_ORIGIN_PREFIX, NotesDeltaOp, Place,
+    SettingsView, VIEW_ORIGIN, WELCOME_ITEM, WorkflowState, move_items_across_docs,
 };
 pub use events::AppEvent;
-/// Loro's version vector, re-exported so hosts that keep one per
-/// consumer (the daemon's mirror fan-out) need no `loro` dependency.
+/// Loro's version vector, re-exported so a host that holds one
+/// (`Doc::oplog_vv`) needs no `loro` dependency.
 pub use loro::VersionVector;
 pub use places::{
     PlaceSuggestion, fold_label, merge_place_uses, place_matches, place_suggestions, place_uses,

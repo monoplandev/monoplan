@@ -526,7 +526,6 @@ export function createWorkspaceRuntime(props: {
       throw new Error("sign in to create a workspace");
     }
     const homeDek = props.session.dek;
-    if (!homeDek) throw new Error("this session holds no key to create a workspace with");
     const dek = Dek.generate();
     const wrapped = wrapDekWithDek(homeDek, dek);
     const { doc_id: docId } = await api.createDoc({
