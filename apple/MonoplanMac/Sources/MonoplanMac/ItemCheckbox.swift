@@ -77,7 +77,9 @@ enum ItemCheckArt {
         let side = CheckMetrics.side
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
             let radius = side * CheckMetrics.radius
-            let stroke = NSColor.tertiaryLabelColor
+            // Tertiary is too faint on a dark toolbar: secondary there.
+            let dark = NSAppearance.currentDrawing().bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            let stroke = dark ? NSColor.secondaryLabelColor : NSColor.tertiaryLabelColor
             if state == .done {
                 NSColor.controlAccentColor.setFill()
                 NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
