@@ -392,6 +392,9 @@ final class TrayController: NSObject, NSMenuDelegate {
             signIn: { [weak self] creds, done in self?.engineController.signIn(creds, completion: done) },
             signUp: { [weak self] creds, done in self?.engineController.signUp(creds, completion: done) },
             signOut: { [weak self] done in self?.engineController.signOut(completion: done) },
+            deleteAccount: { [weak self] password, done in
+                self?.engineController.deleteAccount(password: password, completion: done)
+            },
             // The Devices pane's server access: who the engine is signed
             // in as and its device token. `account()` blocks briefly;
             // the pane asks off the main thread.

@@ -13,7 +13,7 @@ pub const MIN_PASSWORD_LEN: usize = 10;
 pub mod agenda;
 pub mod bin;
 pub mod db;
-mod delete_account;
+pub mod delete_account;
 pub mod done;
 pub mod export;
 pub mod find;

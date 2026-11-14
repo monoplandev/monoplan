@@ -11,9 +11,8 @@ use crate::net::{Client, NetError};
 /// password with the server, then wipe the profile as `logout` does.
 pub async fn run() -> anyhow::Result<()> {
     let profile = Profile::require_active()?;
-    let secrets = profile.read_secrets()?;
-    let device_token = secrets.device_token()?.to_string();
-    let config = profile.read_config()?;
+    // No token, no account: fail before asking anything.
+    profile.read_secrets()?.device_token()?;
     let storage = crate::storage::open_storage(&profile)?;
     let account = storage.read_account()?;
     let identity = account.identity()?.clone();
@@ -41,18 +40,31 @@ pub async fn run() -> anyhow::Result<()> {
         return Ok(());
     }
     let password: String = Password::new().with_prompt("Password").interact()?;
+    println!("Verifying password…");
+    delete_account(&profile, &password).await?;
+    println!("Account deleted. Local state wiped.");
+    Ok(())
+}
+
+/// The server half and the wipe, once the user has confirmed: re-derive
+/// the auth secret from `password`, `DELETE /api/account`, then the
+/// local half of `logout`. A wrong password changes nothing. Shared
+/// with the apps' Settings (`monoplan-ffi::delete_account`), which stop
+/// their own engine first.
+pub async fn delete_account(profile: &Profile, password: &str) -> anyhow::Result<()> {
+    let secrets = profile.read_secrets()?;
+    let device_token = secrets.device_token()?.to_string();
+    let config = profile.read_config()?;
+    let storage = crate::storage::open_storage(profile)?;
+    let email = storage.read_account()?.identity()?.email.clone();
+    drop(storage);
 
     let client = Client::new(config.server_url.clone());
     let pre: PreloginResponse = client
-        .post(
-            "/api/account/prelogin",
-            &PreloginRequest {
-                email: identity.email.clone(),
-            },
-        )
+        .post("/api/account/prelogin", &PreloginRequest { email })
         .await?;
-    println!("Verifying password…");
     let master = {
+        let password = password.to_string();
         let salt = pre.master_salt.clone();
         let params = pre.kdf_params;
         tokio::task::spawn_blocking(move || derive_master(&password, &salt, params)).await??
@@ -78,7 +90,5 @@ pub async fn run() -> anyhow::Result<()> {
 
     // The server has already forgotten this device, so this is the
     // local half of `logout`: stop the host, drop the agent, wipe.
-    super::logout::logout_local(&profile).await?;
-    println!("Account deleted. Local state wiped.");
-    Ok(())
+    super::logout::logout_local(profile).await
 }

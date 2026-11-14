@@ -232,6 +232,26 @@ final class EngineController {
         }
     }
 
+    /// Delete the account: what `monoplan auth delete-account` does
+    /// once the sheet has the email typed back and the password
+    /// (`MonoplanCore.deleteAccount`). Our engine is stopped first, as
+    /// for `signOut`; a wrong password changes nothing and the next
+    /// engine starts on the untouched profile. On success the profile
+    /// is wiped and the next engine seeds a fresh local workspace.
+    func deleteAccount(password: String, completion: @escaping (Error?) -> Void) {
+        let running = beginAccountWork(String(localized: "deleting the account"))
+        let dir = location.dir.path
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            running?.shutdown()
+            let result = Result { try MonoplanCore.deleteAccount(profileDir: dir, password: password) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.finishAccountWork()
+                completion(result.failure.map(EngineFailure.init))
+            }
+        }
+    }
+
     /// Sign in: what `monoplan auth login` does (`MonoplanCore.login`), off
     /// the main thread for the key derivation. Our engine is stopped
     /// first: the Rust side's claim waits for the profile to be free,

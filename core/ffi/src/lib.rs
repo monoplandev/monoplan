@@ -297,6 +297,29 @@ pub fn logout(profile_dir: String) -> Result<(), EngineError> {
         })
 }
 
+/// Delete the account: what `monoplan auth delete-account` does once
+/// the user has typed their email back and given the password, for the
+/// app's Settings. Re-verifies the password with the server (a wrong
+/// one changes nothing and fails with "wrong password"), deletes the
+/// account (`spec/auth.md` §Account deletion), then wipes the profile
+/// like `logout`. The app stops its own engine first, as for `logout`.
+/// Blocks for the key derivation; call it off the main thread.
+#[uniffi::export]
+pub fn delete_account(profile_dir: String, password: String) -> Result<(), EngineError> {
+    use monoplan_cli::{commands::delete_account, config::Profile};
+    let profile = Profile::active_at(PathBuf::from(profile_dir)).ok_or(EngineError::NotLoggedIn)?;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| EngineError::Failed {
+            message: e.to_string(),
+        })?;
+    rt.block_on(delete_account::delete_account(&profile, &password))
+        .map_err(|e| EngineError::Failed {
+            message: format!("{e:#}"),
+        })
+}
+
 /// One running engine loop. Dropping it does *not* stop the loop; call
 /// `shutdown` (clean exit: persist, fold, release the lock). A loop that
 /// ends on its own (a fatal error) leaves `is_running` false, and the

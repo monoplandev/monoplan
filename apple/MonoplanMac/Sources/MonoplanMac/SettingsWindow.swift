@@ -35,11 +35,12 @@ final class SettingsWindowController: NSWindowController {
         signIn: @escaping (SignInCredentials, @escaping (Error?) -> Void) -> Void,
         signUp: @escaping (SignInCredentials, @escaping (Result<SignupOutcome, Error>) -> Void) -> Void,
         signOut: @escaping (@escaping (Error?) -> Void) -> Void,
+        deleteAccount: @escaping (String, @escaping (Error?) -> Void) -> Void,
         credential: @escaping () -> APICredential?
     ) {
         model = SettingsModel(
             location: location, engine: engine, signIn: signIn, signUp: signUp, signOut: signOut,
-            credential: credential)
+            deleteAccount: deleteAccount, credential: credential)
         // The toolbar tab style: AppKit builds the toolbar from the tab
         // items (one icon + label each) and, with the `.preference`
         // toolbar style, draws it as the full-height icon surface every
@@ -132,6 +133,9 @@ final class SettingsModel: ObservableObject {
     @Published var signingOut = false
     @Published var signOutError: String?
     @Published var showSignIn = false
+    @Published var showDeleteAccount = false
+    @Published var deletingAccount = false
+    @Published var deleteAccountError: String?
     /// Which form the sheet opens on; the sheet can switch.
     @Published var signInMode: SignInSheet.Mode = .signIn
     @Published var signingIn = false
@@ -157,6 +161,7 @@ final class SettingsModel: ObservableObject {
     private let signInAction: (SignInCredentials, @escaping (Error?) -> Void) -> Void
     private let signUpAction: (SignInCredentials, @escaping (Result<SignupOutcome, Error>) -> Void) -> Void
     private let signOutAction: (@escaping (Error?) -> Void) -> Void
+    private let deleteAccountAction: (String, @escaping (Error?) -> Void) -> Void
     private let credential: () -> APICredential?
     private let api: URLSession = {
         let c = URLSessionConfiguration.ephemeral
@@ -170,9 +175,11 @@ final class SettingsModel: ObservableObject {
         signIn: @escaping (SignInCredentials, @escaping (Error?) -> Void) -> Void,
         signUp: @escaping (SignInCredentials, @escaping (Result<SignupOutcome, Error>) -> Void) -> Void,
         signOut: @escaping (@escaping (Error?) -> Void) -> Void,
+        deleteAccount: @escaping (String, @escaping (Error?) -> Void) -> Void,
         credential: @escaping () -> APICredential?
     ) {
         self.location = location
+        self.deleteAccountAction = deleteAccount
         self.engine = engine
         self.signInAction = signIn
         self.signUpAction = signUp
@@ -238,6 +245,22 @@ final class SettingsModel: ObservableObject {
             self.signOutError = error?.localizedDescription
             self.email = nil
             self.refresh()
+        }
+    }
+
+    /// The delete sheet's submit.
+    /// The password goes straight to Rust. On success the profile is
+    /// wiped, as after Sign Out, and the sheet closes itself.
+    func deleteAccount(password: String, done: @escaping (Bool) -> Void) {
+        deletingAccount = true
+        deleteAccountError = nil
+        deleteAccountAction(password) { [weak self] error in
+            guard let self else { return }
+            self.deletingAccount = false
+            self.deleteAccountError = error?.localizedDescription
+            if error == nil { self.email = nil }
+            self.refresh()
+            done(error == nil)
         }
     }
 
@@ -485,11 +508,84 @@ struct AccountPane: View {
             if let error = model.signOutError {
                 Text(error).font(.footnote).foregroundStyle(.red)
             }
+            if model.signedIn {
+                Section {
+                    LabeledContent("") {
+                        Button("Delete Account…", role: .destructive) { model.showDeleteAccount = true }
+                            .disabled(model.signingOut || model.email == nil)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
         .frame(width: 460)
         .sheet(isPresented: $model.showSignIn) {
             SignInSheet(model: model)
+        }
+        .sheet(isPresented: $model.showDeleteAccount) {
+            if let email = model.email {
+                DeleteAccountSheet(model: model, email: email)
+            }
+        }
+    }
+}
+
+/// Settings › Account › Delete Account… (`spec/auth.md` §Account
+/// deletion), the CLI's `auth delete-account` as a sheet: what goes,
+/// then the password, which the server re-verifies.
+/// No emailed confirmation: the password is the re-auth boundary, as
+/// on the web and the CLI.
+struct DeleteAccountSheet: View {
+    @ObservedObject var model: SettingsModel
+    let email: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var password = ""
+
+    private var canSubmit: Bool {
+        !model.deletingAccount && !password.isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Delete your account?").font(.headline)
+            Text("This deletes the account \(email) and cannot be undone.")
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Your Personal workspace and every workspace you own are erased from the server for everyone, including anyone they are shared with.")
+                Text("You leave every workspace shared with you.")
+                Text("All your devices are signed out, and the local copy on this Mac is wiped.")
+            }
+            .font(.footnote).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            Form {
+                SecureField("Password", text: $password)
+                    .textContentType(.password)
+                    .onSubmit { if canSubmit { submit() } }
+            }
+            .formStyle(.columns)
+            .disabled(model.deletingAccount)
+            if let error = model.deleteAccountError {
+                Text(error).font(.footnote).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Spacer()
+                if model.deletingAccount { ProgressView().controlSize(.small) }
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(model.deletingAccount)
+                Button("Delete Account", role: .destructive) { submit() }
+                    .disabled(!canSubmit)
+            }
+        }
+        .padding(20)
+        .frame(width: 400)
+        .onDisappear { model.deleteAccountError = nil }
+    }
+
+    private func submit() {
+        model.deleteAccount(password: password) { ok in
+            if ok { dismiss() }
         }
     }
 }
