@@ -398,6 +398,17 @@ private struct NewListPopover: View {
     @State private var picked: String?
     @FocusState private var focused: Bool
 
+    /// The shared glyph for a menu entry. A menu draws an asset image
+    /// at its natural size (the SVG's, far too big), so it is drawn
+    /// down to a symbol's size here, as a template the menu tints.
+    private static let menuSharedIcon: UIImage = {
+        let size = CGSize(width: 20, height: 20)
+        guard let source = UIImage(named: "Users") else { return UIImage() }
+        return UIGraphicsImageRenderer(size: size).image { _ in
+            source.draw(in: CGRect(origin: .zero, size: size))
+        }.withRenderingMode(.alwaysTemplate)
+    }()
+
     private var docs: [(id: String, name: String, shared: Bool)] {
         (model.session?.docs ?? []).map {
             let shared = model.sharedWorkspaceName($0.docId)
@@ -426,7 +437,8 @@ private struct NewListPopover: View {
                     Picker("Workspace", selection: Binding(get: { docId ?? "" }, set: { picked = $0 })) {
                         ForEach(docs, id: \.id) { doc in
                             if doc.shared {
-                                Label(doc.name, image: "Users").tag(doc.id)
+                                Label { Text(doc.name) } icon: { Image(uiImage: Self.menuSharedIcon) }
+                                    .tag(doc.id)
                             } else {
                                 Text(doc.name).tag(doc.id)
                             }
