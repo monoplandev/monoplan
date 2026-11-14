@@ -3,8 +3,8 @@
 // item's panel), each one a SwiftUI view, under one toolbar that the
 // split view divides. The toolbar has a separator tracking each
 // divider, so what comes after the panel's separator sits over the
-// panel wherever its edge is dragged: the close button, the status
-// control and the star, the iOS item page's bar (`ItemView.bar`). The
+// panel wherever its edge is dragged: the status control and the
+// star, the iOS item page's bar (`ItemView.bar`). The
 // system draws each on its glass. The window's title, which the bar
 // shows over the list, is the name of what is listed
 // (`MainWindowController`).
@@ -21,15 +21,23 @@ import MonoplanCore
 import SwiftUI
 
 private extension NSToolbarItem.Identifier {
-    static let closePanel = NSToolbarItem.Identifier("MonoplanClosePanel")
     static let itemStatus = NSToolbarItem.Identifier("MonoplanItemStatus")
     static let itemStar = NSToolbarItem.Identifier("MonoplanItemStar")
     /// The separator tracking the panel's edge (the system's own
     /// inspector separator wants an inspector item).
     static let panelSeparator = NSToolbarItem.Identifier("MonoplanPanelSeparator")
+    /// The list's section, at its trailing edge: search, then new.
+    static let search = NSToolbarItem.Identifier("MonoplanSearch")
+    static let newItem = NSToolbarItem.Identifier("MonoplanNewItem")
+    /// Over the sidebar, at its trailing edge, while there is no
+    /// account.
+    static let signIn = NSToolbarItem.Identifier("MonoplanSignIn")
+    /// In Sign In's place once there is one: the account's menu, as
+    /// the avatar on the iOS Home page.
+    static let account = NSToolbarItem.Identifier("MonoplanAccount")
 }
 
-final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
+final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate, NSMenuDelegate {
     private let model: MainWindowModel
     private let sidebarItem: NSSplitViewItem
     private let listItem: NSSplitViewItem
@@ -38,14 +46,29 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     /// Set while `sync` moves the panel itself, so the resize it
     /// causes is not read as the user folding the panel away.
     private var syncing = false
+    /// Whether the profile has an account: the bar leads with the
+    /// account's menu with one, with Sign In without. The window's
+    /// controller keeps it and calls `sync`.
+    var signedIn = true
+    /// The account's email, once the engine has said; the menu's
+    /// heading.
+    var email: String?
+    /// Sign In was clicked.
+    var onSignIn: () -> Void = {}
+    /// The account menu's New Workspace… was picked.
+    var onNewWorkspace: () -> Void = {}
 
     static let sidebarWidth = (min: 160.0, initial: 200.0, max: 400.0)
     static let panelWidth = (min: 240.0, max: 520.0)
 
-    /// The toolbar with the panel shut: the title's section, between
-    /// the two tracking separators.
+    /// The toolbar with the panel shut: the title's section after the
+    /// sidebar's separator, with search and new at its end. The
+    /// panel's separator is there only with the panel (`panelItems`):
+    /// with the panel shut it would draw at the window's edge.
+    /// The space between those two keeps each on its own glass:
+    /// adjacent buttons would share one.
     private static let fixedItems: [NSToolbarItem.Identifier] = [
-        .sidebarTrackingSeparator, .flexibleSpace, .panelSeparator,
+        .sidebarTrackingSeparator, .flexibleSpace, .search, .space, .newItem,
     ]
 
     init(model: MainWindowModel) {
@@ -59,6 +82,11 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         panelItem = NSSplitViewItem(
             viewController: Self.pane(ItemPanelPane(model: model)))
         super.init(nibName: nil, bundle: nil)
+        // Before the panes go in: the split view with our dividers.
+        let split = PaneSplitView()
+        split.isVertical = true
+        split.dividerStyle = .thin
+        splitView = split
         sidebarItem.minimumThickness = Self.sidebarWidth.min
         sidebarItem.maximumThickness = Self.sidebarWidth.max
         sidebarItem.canCollapse = false
@@ -114,10 +142,23 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             panelItem.isCollapsed = !open
             syncing = false
         }
+        // The account's menu, or Sign In without an account, leads
+        // the bar, before the sidebar's separator, so it sits over the
+        // sidebar; the space before it pushes it to the sidebar's
+        // trailing edge.
+        let lead: [NSToolbarItem.Identifier] = [.flexibleSpace, signedIn ? .account : .signIn]
+        let leading = toolbar.items.firstIndex { $0.itemIdentifier == .sidebarTrackingSeparator } ?? 0
+        if toolbar.items.prefix(leading).map(\.itemIdentifier) != lead {
+            for _ in 0..<leading { toolbar.removeItem(at: 0) }
+            for (index, identifier) in lead.enumerated() {
+                toolbar.insertItem(withItemIdentifier: identifier, at: index)
+            }
+        }
+        let fixed = Self.fixedItems.count + lead.count
         let wanted = panelItems()
-        let have = toolbar.items.dropFirst(Self.fixedItems.count).map(\.itemIdentifier)
+        let have = toolbar.items.dropFirst(fixed).map(\.itemIdentifier)
         if have != wanted {
-            while toolbar.items.count > Self.fixedItems.count {
+            while toolbar.items.count > fixed {
                 toolbar.removeItem(at: toolbar.items.count - 1)
             }
             for identifier in wanted {
@@ -127,13 +168,13 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         for item in toolbar.items { update(item) }
     }
 
-    /// What follows the panel's separator: nothing with the panel
-    /// shut; else the close button, the status once the item is read,
-    /// and the star at the far edge. Only an Open item can be starred
-    /// (spec/focus.md).
+    /// The panel's part of the bar: nothing with the panel shut; else
+    /// its separator, the status once the item is read, and the star
+    /// at the far edge. No close button: Escape, or its edge dragged
+    /// shut. Only an Open item can be starred (spec/focus.md).
     private func panelItems() -> [NSToolbarItem.Identifier] {
         guard model.selected != nil else { return [] }
-        var items: [NSToolbarItem.Identifier] = [.closePanel]
+        var items: [NSToolbarItem.Identifier] = [.panelSeparator]
         guard let item = model.detail else { return items }
         items.append(.itemStatus)
         if item.item.binnedAt == nil, item.closedAt == nil {
@@ -179,7 +220,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        Self.fixedItems + [.closePanel, .itemStatus, .itemStar]
+        Self.fixedItems + [.panelSeparator, .signIn, .account, .itemStatus, .itemStar]
     }
 
     func toolbar(
@@ -189,16 +230,47 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         if identifier == .panelSeparator {
             return NSTrackingSeparatorToolbarItem(identifier: identifier, splitView: splitView, dividerIndex: 1)
         }
+        if identifier == .account {
+            // The menu is filled as it opens (`menuNeedsUpdate`).
+            let item = NSMenuToolbarItem(itemIdentifier: identifier)
+            let label = String(localized: "Account")
+            item.image = NSImage(systemSymbolName: "person.crop.circle", accessibilityDescription: label)
+            item.label = label
+            item.toolTip = label
+            item.showsIndicator = false
+            item.menu.delegate = self
+            item.menu.autoenablesItems = false
+            return item
+        }
         let item = NSToolbarItem(itemIdentifier: identifier)
         switch identifier {
-        case .closePanel:
-            let label = String(localized: "Close")
-            item.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: label)
+        case .signIn:
+            let label = String(localized: "Sign In")
+            item.title = label
+            item.label = label
+            item.isBordered = true
+            item.target = self
+            item.action = #selector(signIn(_:))
+        case .search:
+            // Not wired yet: a later surface is search's. The action
+            // does nothing (without one the button draws disabled).
+            let label = String(localized: "Search")
+            item.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: label)
             item.label = label
             item.toolTip = label
             item.isBordered = true
             item.target = self
-            item.action = #selector(closePanel(_:))
+            item.action = #selector(openSearch(_:))
+        case .newItem:
+            // Not wired yet: the action does nothing (without one the
+            // toolbar would draw the button disabled).
+            let label = String(localized: "New Item")
+            item.image = NSImage(systemSymbolName: "square.and.pencil", accessibilityDescription: label)
+            item.label = label
+            item.toolTip = label
+            item.isBordered = true
+            item.target = self
+            item.action = #selector(newItem(_:))
         case .itemStatus:
             // The checkbox and the workflow state as one control: a
             // click ticks and reopens.
@@ -217,9 +289,29 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         return item
     }
 
-    @objc private func closePanel(_ sender: Any?) {
-        model.closeItem()
+    @objc private func signIn(_ sender: Any?) {
+        onSignIn()
     }
+
+    /// The account's menu, as on iOS: the email as its heading, then
+    /// New Workspace…, which needs a running engine.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        if let email { menu.addItem(.sectionHeader(title: email)) }
+        let new = NSMenuItem(
+            title: String(localized: "New Workspace…"), action: #selector(newWorkspace(_:)), keyEquivalent: "")
+        new.target = self
+        if case .connected = model.state { new.isEnabled = true } else { new.isEnabled = false }
+        menu.addItem(new)
+    }
+
+    @objc private func newWorkspace(_ sender: Any?) {
+        onNewWorkspace()
+    }
+
+    @objc private func openSearch(_ sender: Any?) {}
+
+    @objc private func newItem(_ sender: Any?) {}
 
     @objc private func toggleDone(_ sender: Any?) {
         guard let selected = model.selected, let item = model.detail, item.item.binnedAt == nil else { return }
@@ -253,9 +345,18 @@ struct ItemPanelPane: View {
     var body: some View {
         Group {
             if let selected = model.selected {
-                ItemPanel(item: model.detail, workspaceName: model.sharedWorkspaceName(selected.workspace))
+                ItemPanel(item: model.detail, workspaceName: model.sharedWorkspaceName(selected.workspace)) {
+                    model.setText(workspace: selected.workspace, item: $0, text: $1)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: PaneColor.panel).ignoresSafeArea())
     }
+}
+
+/// The window's split view, for its dividers' colour: the panes'
+/// borders are near-black in dark, the system's in light.
+private final class PaneSplitView: NSSplitView {
+    override var dividerColor: NSColor { PaneColor.divider(super.dividerColor) }
 }

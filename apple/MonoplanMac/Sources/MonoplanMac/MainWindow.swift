@@ -32,19 +32,31 @@ import MonoplanMacKit
 
 final class MainWindowController: NSWindowController, NSWindowDelegate {
     private let model: MainWindowModel
+    private let engine: EngineController
     private let onVisibility: (Bool) -> Void
+    /// Whether the profile has an account: asked when the window
+    /// shows and when the engine's state moves (a sign-in or sign-out
+    /// restarts the engine).
+    private let signedIn: () -> Bool
     private var newWorkspacePrompt: NewWorkspacePrompt?
     private var modelSync: AnyCancellable?
     private let split: MainSplitViewController
 
-    init(engine: EngineController, onVisibility: @escaping (Bool) -> Void) {
+    init(
+        engine: EngineController, signedIn: @escaping () -> Bool, onSignIn: @escaping () -> Void,
+        onVisibility: @escaping (Bool) -> Void
+    ) {
         model = MainWindowModel(engine: engine)
+        self.engine = engine
+        self.signedIn = signedIn
         self.onVisibility = onVisibility
         // A toolbar window, as Finder or Notes: the tall unified bar
         // with the large traffic lights. The content view takes the
         // whole frame so the sidebar runs to the top edge under them.
         // The panes and the toolbar are `MainSplitViewController`'s.
         split = MainSplitViewController(model: model)
+        split.signedIn = signedIn()
+        split.onSignIn = onSignIn
         let window = NSWindow(contentViewController: split)
         window.title = "Monoplan"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
@@ -58,6 +70,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.setFrameAutosaveName("MonoplanWindow")
         super.init(window: window)
         window.delegate = self
+        split.onNewWorkspace = { [weak self] in self?.promptNewWorkspace() }
         split.restoreDividers()
         // The bar's title is the window's, drawn over the list: the
         // name of what is shown. It and the panel's toolbar items
@@ -82,6 +95,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     func show(list: String? = nil, workspace: String? = nil, item: String? = nil) {
         onVisibility(true)
         model.visible = true
+        syncSignedIn()
         if let list {
             model.select(workspace: workspace, list: list)
             if let item { model.selectItem(workspace: workspace, id: item) }
@@ -96,6 +110,21 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     /// The engine's state moved (started, stopped, sync).
     func engineStateChanged(_ state: EngineState) {
         model.engineStateChanged(state)
+        syncSignedIn()
+    }
+
+    /// The toolbar's Sign In, there while there is no account, and
+    /// the account's menu in its place with one, headed by the email
+    /// the engine gives.
+    private func syncSignedIn() {
+        let signedIn = signedIn()
+        split.signedIn = signedIn
+        if !signedIn { split.email = nil }
+        split.sync()
+        guard signedIn else { return }
+        engine.calls?.run({ try $0.account() }) { [weak self] result in
+            if case .success(let account) = result { self?.split.email = account?.email }
+        }
     }
 
     /// A doc changed: read again what is shown.
@@ -268,7 +297,9 @@ final class MainWindowModel: ObservableObject {
         case Self.inbox: return String(localized: "Inbox")
         default:
             let lists = sections.first { $0.target == workspace }?.lists ?? []
-            return lists.first { $0.id == list }?.name ?? list
+            // A list's emoji leads its name, as in the sidebar.
+            guard let found = lists.first(where: { $0.id == list }) else { return list }
+            return [found.icon, found.name].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
         }
     }
 
@@ -522,6 +553,22 @@ final class MainWindowModel: ObservableObject {
         write { try $0.setDone(workspace: workspace, id: id, done: done) }
     }
 
+    /// Retitle an item, with what the new title does to its pending
+    /// date suggestion (`WhenSuggest.edit`, as on iOS).
+    func setText(workspace: String?, item: ItemInfo, text: String) {
+        let id = item.item.id
+        let suggestion: SuggestionChange
+        switch WhenSuggest.edit(
+            title: text, was: item.item.text, when: item.item.when, pending: item.item.whenSuggested,
+            closed: item.closedAt != nil)
+        {
+        case .keep: suggestion = .keep
+        case .clear: suggestion = .clear
+        case .set(let when): suggestion = .set(when: when)
+        }
+        write { try $0.setText(workspace: workspace, id: id, text: text, suggestion: suggestion) }
+    }
+
     func setStarred(workspace: String?, id: String, starred: Bool) {
         write { try $0.setStarred(workspace: workspace, id: id, starred: starred) }
     }
@@ -573,7 +620,11 @@ struct MainWindowView: View {
     var body: some View {
         switch pane {
         case .sidebar: sidebar
-        case .list: items.frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The lists draw no background of their own
+        // (`scrollContentBackground`): the pane's shows through.
+        case .list:
+            items.frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: PaneColor.list).ignoresSafeArea())
         }
     }
 
@@ -716,6 +767,7 @@ struct MainWindowView: View {
                 }
             }
             .listStyle(.inset)
+            .scrollContentBackground(.hidden)
             Divider()
             TextField("Add an item", text: $draft)
                 .textFieldStyle(.roundedBorder)
@@ -750,6 +802,7 @@ struct MainWindowView: View {
             }
         }
         .listStyle(.inset)
+        .scrollContentBackground(.hidden)
     }
 
     private func agendaRow(_ row: AgendaEntry) -> some View {
@@ -812,6 +865,7 @@ struct MainWindowView: View {
             }
         }
         .listStyle(.inset)
+        .scrollContentBackground(.hidden)
     }
 
     /// Done: every workspace's newest Done items, newest first. The
@@ -845,6 +899,7 @@ struct MainWindowView: View {
             }
         }
         .listStyle(.inset)
+        .scrollContentBackground(.hidden)
     }
 
     /// A Done row's moment (unix ms), as a short date and time.
@@ -874,9 +929,11 @@ private extension View {
 
     /// An item row's size, fixed: 32 pt, the web's row height
     /// (`ROW_HEIGHT` in `js/web/src/Workspace.tsx`). The list adds 4 pt
-    /// above and below the content.
+    /// above and below the content. The line between two rows is the
+    /// web's too.
     func itemRow() -> some View {
         frame(height: 24)
+            .listRowSeparatorTint(Color(nsColor: PaneColor.rowDivider))
     }
 }
 

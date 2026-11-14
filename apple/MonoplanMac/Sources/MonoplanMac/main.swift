@@ -29,6 +29,8 @@ final class TrayController: NSObject, NSMenuDelegate {
     /// The window: one per process, made on first open.
     private lazy var mainWindow = MainWindowController(
         engine: engineController,
+        signedIn: { [location] in location.hasAccount },
+        onSignIn: { [weak self] in self?.signIn() },
         onVisibility: { visible in NSApp.setActivationPolicy(visible ? .regular : .accessory) })
     /// Whether the last engine state was running, to tell an engine
     /// coming (back) up from a sync report.

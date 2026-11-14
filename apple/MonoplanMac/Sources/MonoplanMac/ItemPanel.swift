@@ -23,16 +23,26 @@ struct ItemPanel: View {
     let item: ItemInfo?
     /// The item's workspace when it is a shared one.
     let workspaceName: String?
+    /// The title was edited: the new one, trimmed, not empty and not
+    /// the old one.
+    let retitle: (ItemInfo, String) -> Void
 
     var body: some View {
         Group {
             if let item {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text(verbatim: item.item.text)
-                            .font(.title2.weight(.semibold))
-                            .foregroundStyle(item.closedAt == nil ? .primary : .secondary)
-                            .textSelection(.enabled)
+                        // The bin masks an item: nothing of it is
+                        // edited until it is restored.
+                        if item.item.binnedAt == nil {
+                            PanelTitle(text: item.item.text, closed: item.closedAt != nil) { retitle(item, $0) }
+                                .id(item.item.id)
+                        } else {
+                            Text(verbatim: item.item.text)
+                                .font(.title2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
                         fields(item)
                         Divider()
                         notes(item)
@@ -274,5 +284,57 @@ private struct PlaceMapCard: View {
             URLQueryItem(name: "q", value: label),
         ]
         return parts?.url
+    }
+}
+
+/// The item's title, edited in place: it reads as the heading it was
+/// and takes the caret on a click. Return or the focus leaving commits;
+/// an empty title is not one, and puts the old one back. Escape is
+/// the panel's (it shuts), and the edit so far is committed as the
+/// focus goes.
+private struct PanelTitle: View {
+    /// The item's title as the engine has it.
+    let text: String
+    let closed: Bool
+    let commit: (String) -> Void
+    @State private var draft: String
+    @FocusState private var focused: Bool
+
+    init(text: String, closed: Bool, commit: @escaping (String) -> Void) {
+        self.text = text
+        self.closed = closed
+        self.commit = commit
+        _draft = State(initialValue: text)
+    }
+
+    var body: some View {
+        // Wraps like the heading it replaces.
+        TextField("Title", text: $draft, axis: .vertical)
+            .textFieldStyle(.plain)
+            .font(.title2.weight(.semibold))
+            .foregroundStyle(closed ? .secondary : .primary)
+            .focused($focused)
+            .onSubmit { focused = false }
+            .onChange(of: draft) {
+                // A title is one line: a break typed or pasted in is a
+                // space, and a typed one is Return.
+                guard draft.contains(where: \.isNewline) else { return }
+                draft = draft.split(whereSeparator: \.isNewline).joined(separator: " ")
+                focused = false
+            }
+            .onChange(of: focused) { if !focused { finish() } }
+            // Changed elsewhere (another device, an undo): shown,
+            // unless this one is being typed in.
+            .onChange(of: text) { if !focused { draft = text } }
+    }
+
+    private func finish() {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == text {
+            draft = text
+        } else {
+            draft = trimmed
+            commit(trimmed)
+        }
     }
 }
