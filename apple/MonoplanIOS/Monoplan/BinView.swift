@@ -11,6 +11,7 @@ import SwiftUI
 
 struct BinView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.openItem) private var openItem
     /// The row whose "Delete" is waiting on its confirmation.
     @State private var deleting: BinnedItem?
@@ -67,7 +68,11 @@ struct BinView: View {
             Text("It is removed from every device and cannot be restored.")
         }
         .confirmationDialog(emptyTitle, isPresented: $confirmingEmpty, titleVisibility: .visible) {
-            Button("Empty Bin", role: .destructive) { model.emptyBin() }
+            // Nothing is left to show: back to Home at once.
+            Button("Empty Bin", role: .destructive) {
+                model.emptyBin()
+                dismiss()
+            }
         } message: {
             Text("They are removed from every device and cannot be restored.")
         }
