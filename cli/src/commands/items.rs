@@ -569,6 +569,10 @@ pub struct SetArgs {
     /// Move to this list (`events` makes the item an event; moving it back out makes it a task again, dates intact).
     #[arg(long, group = "field", value_name = "LIST")]
     pub list: Option<String>,
+    /// 1-based position among the list's open items: with --list, where the item lands there; alone, a reorder within its own list. Past the end clamps to the end.
+    #[arg(long, group = "field", value_name = "POS")]
+    #[serde(default)]
+    pub pos: Option<usize>,
     /// Workflow state: backlog | todo | in_progress | review | done | cancelled.
     #[arg(long, group = "field", value_name = "STATE")]
     pub lifecycle: Option<LifecycleState>,
@@ -628,11 +632,25 @@ pub fn set(
     if let Some(text) = &args.text {
         doc.edit_item_text(id, text)?;
     }
-    if let Some(list) = &args.list {
-        // Append at the end of the target list (target_index = current
-        // length); `move_item` clamps to the existing range anyway.
-        let target_idx = doc.items_in_list(list, true).len();
-        doc.move_item(id, list, target_idx)?;
+    if args.list.is_some() || args.pos.is_some() {
+        // `--pos` alone reorders within the item's own list.
+        let list = match &args.list {
+            Some(list) => list.clone(),
+            None => {
+                doc.get_item(id)
+                    .ok_or_else(|| anyhow::anyhow!("item not found: {id}"))?
+                    .list_id
+            }
+        };
+        // No position appends (target_index = current length);
+        // `move_item` clamps to the existing range anyway. The index
+        // is the slot the item ends up in: `move_item` counts it over
+        // the projection without the moving item.
+        let target_idx = match args.pos {
+            Some(pos) => super::focus::one_based_to_index(pos),
+            None => doc.items_in_list(&list, true).len(),
+        };
+        doc.move_item(id, &list, target_idx)?;
     }
     if let Some(state) = args.lifecycle {
         doc.set_item_lifecycle(id, state.into())?;
@@ -791,6 +809,7 @@ mod tests {
             item_id: item_id.to_string(),
             text: None,
             list: None,
+            pos: None,
             lifecycle: None,
             when: None,
             when_suggested: None,
@@ -1197,6 +1216,55 @@ mod tests {
     /// `Request.emptyBin` in MonoplanMacKit: bin, restore, then bin
     /// again and hard-delete from the bin; then list the bin and empty
     /// it.
+    /// `Request.reorderItem` / `moveItem(…, pos:)`: `pos` is the
+    /// 1-based slot the item ends up in among the list's open items,
+    /// whichever way it travels; the frames without it still decode.
+    #[test]
+    fn pos_frame_from_the_apps_reorders_and_places() {
+        use super::super::DocCmd;
+        let doc = Doc::new().unwrap();
+        let ids: Vec<String> = ["a", "b", "c", "d"]
+            .iter()
+            .map(|t| doc.add_item(LIST_INBOX, t).unwrap())
+            .collect();
+        let order = |list: &str| -> Vec<String> {
+            doc.items_in_list(list, false)
+                .into_iter()
+                .map(|i| i.text)
+                .collect()
+        };
+        let frame = |id: &str, list: Option<&str>, pos: usize| {
+            let cmd: DocCmd = serde_json::from_value(serde_json::json!({"Set": {
+                "item_id": id, "text": null, "list": list, "pos": pos, "lifecycle": null,
+                "when": null, "duration": null, "deadline": null, "place": null,
+                "coords": null, "address": null, "new_place": false,
+                "star": null, "unstar": false,
+            }}))
+            .unwrap();
+            let DocCmd::Set(args) = cmd else {
+                panic!("not a Set frame")
+            };
+            set(&doc, &[&doc], &Lens::home(&doc), *args, &mut Vec::new())
+        };
+        // Down: a to the third slot.
+        frame(&ids[0], None, 3).unwrap();
+        assert_eq!(order(LIST_INBOX), ["b", "c", "a", "d"]);
+        // Up: d to the first.
+        frame(&ids[3], None, 1).unwrap();
+        assert_eq!(order(LIST_INBOX), ["d", "b", "c", "a"]);
+        // Past the end clamps to the end.
+        frame(&ids[3], None, 99).unwrap();
+        assert_eq!(order(LIST_INBOX), ["b", "c", "a", "d"]);
+        // With a list: lands at that slot there.
+        let work = doc.add_list("Work").unwrap();
+        frame(&ids[0], Some(&work), 1).unwrap();
+        frame(&ids[1], Some(&work), 1).unwrap();
+        frame(&ids[2], Some(&work), 2).unwrap();
+        assert_eq!(order(&work), ["b", "c", "a"]);
+        assert_eq!(order(LIST_INBOX), ["d"]);
+        assert!(frame("nope", None, 1).is_err());
+    }
+
     #[test]
     fn bin_frames_from_the_apps_decode_and_apply() {
         use crate::commands::{DocCmd, run_doc};

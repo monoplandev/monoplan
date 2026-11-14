@@ -40,6 +40,8 @@ struct BinView: View {
                         restoreButton(item)
                         deleteButton(item)
                     }
+                    // No dividers between item rows, as `CheckboxRow` has it.
+                    .listRowSeparator(.hidden)
                 }
                 // Plain, so a row reads as a row rather than a tinted link.
                 .buttonStyle(.plain)

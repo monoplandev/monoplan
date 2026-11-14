@@ -137,6 +137,13 @@ public enum Request {
     /// `all` is `--all`: Home's entries with their cross-workspace refs
     /// resolved, rows tagged with `doc_id` / `doc_name` / `list_name`.
     case focus(all: Bool = false)
+    /// `monoplan starred mv <id> --after <other>` / `starred mv <id> 1`:
+    /// reorder a starred item to directly under another one, or to the
+    /// top (`after` nil). A neighbour, not a position: a position
+    /// counts entries the resolved lens does not show. Starred is the
+    /// Home doc's, so there is no `workspace`. The frame is pinned on
+    /// the Rust side by `mv_frames_from_the_apps_reorder_past_hidden_entries`.
+    case moveStarred(id: String, after: String?)
     /// `monoplan item ls --list <list> [--done] --json`: a list's items
     /// (`Items.parse`); Open only unless `done`. `workspace` is the
     /// `-w` selector (a doc id here); nil is the Personal workspace.
@@ -175,6 +182,11 @@ public enum Request {
     /// `monoplan item set <id> --list <list>`: move the item to another
     /// list of the same workspace (appended). `workspace` as for `items`.
     case moveItem(id: String, list: String, workspace: String? = nil)
+    /// `monoplan item set <id> --pos <pos>`: reorder the item within
+    /// its own list, to the 1-based slot it ends up in among the list's
+    /// Open items. `workspace` as for `items`. The frame is pinned on
+    /// the Rust side by `pos_frame_from_the_apps_reorders_and_places`.
+    case reorderItem(id: String, pos: Int, workspace: String? = nil)
     /// `monoplan item set <id> --star 1` / `--unstar`: put the item at
     /// the top of Starred (as the web's star does), or take it out. Starred is the Home doc's
     /// whatever `workspace` the item is in; the engine writes the ref
@@ -289,6 +301,12 @@ public enum Request {
             var args: [String: MPValue] = ["cmd": .nil, "json": .bool(true)]
             if all { args["all"] = .bool(true) }
             return .map(["Doc": .map(["cmd": .map(["Focus": .map(args)])])])
+        case .moveStarred(let id, let after):
+            let mv: [String: MPValue] = after.map { ["item_id": .string(id), "pos": .nil, "after": .string($0)] }
+                ?? ["item_id": .string(id), "pos": .int(1)]
+            return .map(["Doc": .map(["cmd": .map(["Focus": .map([
+                "cmd": .map(["Mv": .map(mv)]), "json": .bool(false),
+            ])])])])
         case .items(let list, let done, let workspace):
             return Self.doc(workspace, .map(["Ls": .map([
                 "list": .string(list), "done": .bool(done), "json": .bool(true),
@@ -321,6 +339,8 @@ public enum Request {
             return Self.set(id, workspace, ["when_suggested": .string(when ?? "-")])
         case .moveItem(let id, let list, let workspace):
             return Self.set(id, workspace, ["list": .string(list)])
+        case .reorderItem(let id, let pos, let workspace):
+            return Self.set(id, workspace, ["pos": .int(Int64(pos))])
         case .setStarred(let id, let starred, let workspace):
             return Self.set(id, workspace, starred ? ["star": .map(["At": .int(1)])] : ["unstar": .bool(true)])
         case .setWhen(let id, let when, let duration, let workspace):

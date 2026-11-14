@@ -116,6 +116,29 @@ final class EngineClientTests: XCTestCase {
             ])])])])
         )
         XCTAssertEqual(
+            Request.moveStarred(id: "i1", after: "i2").value,
+            .map(["Doc": .map(["cmd": .map(["Focus": .map([
+                "cmd": .map(["Mv": .map(["item_id": .string("i1"), "pos": .nil, "after": .string("i2")])]),
+                "json": .bool(false),
+            ])])])])
+        )
+        XCTAssertEqual(
+            Request.moveStarred(id: "i1", after: nil).value,
+            .map(["Doc": .map(["cmd": .map(["Focus": .map([
+                "cmd": .map(["Mv": .map(["item_id": .string("i1"), "pos": .int(1)])]),
+                "json": .bool(false),
+            ])])])])
+        )
+        XCTAssertEqual(
+            Request.reorderItem(id: "i1", pos: 3, workspace: "d1").value,
+            .map(["Doc": .map(["workspace": .string("d1"), "cmd": .map(["Set": .map([
+                "item_id": .string("i1"), "pos": .int(3), "list": .nil, "lifecycle": .nil,
+                "text": .nil, "when": .nil, "duration": .nil, "deadline": .nil,
+                "place": .nil, "coords": .nil, "address": .nil, "new_place": .bool(false),
+                "star": .nil, "unstar": .bool(false),
+            ])])])])
+        )
+        XCTAssertEqual(
             Request.moveItem(id: "i1", list: "l2", workspace: "d1").value,
             .map(["Doc": .map(["workspace": .string("d1"), "cmd": .map(["Set": .map([
                 "item_id": .string("i1"), "list": .string("l2"), "lifecycle": .nil,

@@ -399,7 +399,8 @@ the Mac tray's agenda is. **Starred** (`StarredView.swift`) is the
 Focus lens as the engine resolves it (`Request.focus(all: true)`, i.e.
 `starred --all --json`, `spec/cli.md` §Focus: Home's curated order with
 its cross-workspace entries resolved), each row with its list name and,
-when not Personal's, its workspace; read-only. **Agenda** (`AgendaView.swift`) is the
+when not Personal's, its workspace; a long press and drag reorders a row
+(2026-11-14: `Request.moveStarred`, i.e. `starred mv <id> --after <other>`). **Agenda** (`AgendaView.swift`) is the
 engine's merged agenda (`Request.agenda(days: AppModel.agendaDays, all: true)`, i.e.
 `agenda --all --json`, `spec/cli.md` §Items: every open workspace in
 one placement, the Home doc's hidden-from-calendar docs left out; the
@@ -416,7 +417,9 @@ one fetch per doc, refetched with the session on every `Changed`;
 emoji (`ListIcon`: the `icon` the list JSON carries, a folder without
 one) on its Home row, in its page's title and on the item sheet. A list pushes its Open
 items (`Request.items(list:workspace:)`), refetched on `Changed` while
-shown; read-only. A gear at the top right of the index opens Settings, pushed onto the same stack. **Map**
+shown; a long press and drag reorders a row (2026-11-14: `onMove`,
+`Request.reorderItem`, i.e. `item set <id> --pos <pos>`; the rows are
+reordered locally first, then reread). A gear at the top right of the index opens Settings, pushed onto the same stack. **Map**
 (`PlacesMapView.swift`, 2026-11-14) is the Open items that carry a
 place with coordinates (`Request.placedItems`, i.e. `places --items
 --json`, every open workspace), one marker per spot, under a sheet

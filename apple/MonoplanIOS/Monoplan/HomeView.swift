@@ -676,10 +676,16 @@ struct ListItemsView: View {
         Group {
             if let items = model.listItems[list.key], !items.isEmpty {
                 ScrollViewReader { proxy in
-                    List(items) { item in
-                        ItemLink(ItemRef(docId: list.docId, itemId: item.id, title: item.text)) {
-                            ItemRowView(item: item)
+                    // A long press and drag moves a row: the list parts
+                    // to show where it will land (`onMove`), and the
+                    // drop is the list's order from then on.
+                    List {
+                        ForEach(items) { item in
+                            ItemLink(ItemRef(docId: list.docId, itemId: item.id, title: item.text)) {
+                                ItemRowView(item: item)
+                            }
                         }
+                        .onMove { model.reorderItem(in: list, from: $0, to: $1) }
                     }
                     .listStyle(.plain)
                     .animation(.default, value: items)

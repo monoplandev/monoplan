@@ -288,6 +288,64 @@ final class AppModel: ObservableObject {
         write(.moveItem(id: ref.itemId, list: listId, workspace: selector(ref.docId)), to: ref)
     }
 
+    /// A row of a browsed list dragged to a new place, in `onMove`'s
+    /// terms: `destination` is the gap it was dropped in, counted in
+    /// the order as it was. The rows are reordered here first, so the
+    /// row stays where it was dropped while the write and its reread
+    /// are on their way; the engine takes the 1-based slot the item
+    /// ends up in (`item set --pos`). The list is reread either way: a
+    /// refused move puts the row back.
+    func reorderItem(in list: ListRef, from source: IndexSet, to destination: Int) {
+        guard var items = listItems[list.key], source.count == 1, let from = source.first,
+              items.indices.contains(from)
+        else { return }
+        let slot = destination > from ? destination - 1 : destination
+        guard slot != from else { return }
+        let id = items[from].id
+        items.move(fromOffsets: source, toOffset: destination)
+        listItems[list.key] = items
+        client.send(.reorderItem(id: id, pos: slot + 1, workspace: selector(list.docId))) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(.output):
+                break
+            case .success(let other):
+                lastError = "could not move item: \(String(describing: other))"
+            case .failure(let error):
+                lastError = "could not move item: \(engineErrorMessage(error))"
+            }
+            refreshList(list)
+        }
+    }
+
+    /// A Starred row dragged to a new place, in `onMove`'s terms, as
+    /// `reorderItem` has a list's: reordered here first, then written
+    /// and reread. The engine is told the row it now sits under
+    /// (`starred mv --after`), or the top: Starred's positions count
+    /// entries this page does not show.
+    func moveStarred(from source: IndexSet, to destination: Int) {
+        var rows = starred
+        guard source.count == 1, let from = source.first, rows.indices.contains(from) else { return }
+        let slot = destination > from ? destination - 1 : destination
+        guard slot != from else { return }
+        let id = rows[from].id
+        rows.move(fromOffsets: source, toOffset: destination)
+        starred = rows
+        let after = slot > 0 ? rows[slot - 1].id : nil
+        client.send(.moveStarred(id: id, after: after)) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(.output):
+                break
+            case .success(let other):
+                lastError = "could not move item: \(String(describing: other))"
+            case .failure(let error):
+                lastError = "could not move item: \(engineErrorMessage(error))"
+            }
+            refreshStarred()
+        }
+    }
+
     /// Star an item (to the top of Starred) or unstar it
     /// (`item set --star 1` / `--unstar`). The ref is the Home doc's
     /// whichever workspace the item is in; the engine sees to that.

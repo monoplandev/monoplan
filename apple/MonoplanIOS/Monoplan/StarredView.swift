@@ -3,7 +3,7 @@
 // name) as the engine resolves it with `starred --all`: Home's curated
 // order, entries from other workspaces included, each row naming its
 // list and, when not Personal's, its workspace. The order is the
-// position; no number is shown. A row's checkbox ticks the item
+// position; no number is shown, and a long press and drag changes it. A row's checkbox ticks the item
 // (which drops it from Starred); the row opens its sheet.
 
 import MonoplanMacKit
@@ -17,10 +17,15 @@ struct StarredView: View {
             if model.starred.isEmpty {
                 emptyState
             } else {
-                List(model.starred, id: \.id) { row in
-                    ItemLink(ItemRef(docId: row.docId, itemId: row.id, title: row.text)) {
-                        StarredRowView(row: row)
+                // A long press and drag moves a row, as on a list's
+                // page; the drop is Starred's order from then on.
+                List {
+                    ForEach(model.starred, id: \.id) { row in
+                        ItemLink(ItemRef(docId: row.docId, itemId: row.id, title: row.text)) {
+                            StarredRowView(row: row)
+                        }
                     }
+                    .onMove { model.moveStarred(from: $0, to: $1) }
                 }
                 .listStyle(.plain)
                 .animation(.default, value: model.starred)

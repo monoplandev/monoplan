@@ -61,8 +61,16 @@ pub enum FocusCmd {
     /// Hidden pre-rename spelling of `item set --unstar`.
     #[command(hide = true)]
     Rm { item_id: String },
-    /// Reorder a starred item to a 1-based position.
-    Mv { item_id: String, pos: usize },
+    /// Reorder a starred item: to a 1-based position, or directly after another starred item.
+    Mv {
+        item_id: String,
+        #[arg(required_unless_present = "after")]
+        pos: Option<usize>,
+        /// Put it directly after this starred item instead of at a position.
+        #[arg(long, value_name = "ITEM_ID", conflicts_with = "pos")]
+        #[serde(default)]
+        after: Option<String>,
+    },
 }
 
 /// Starred as seen from the doc a command runs on. The lens lives in
@@ -146,7 +154,11 @@ pub fn run(doc: &Doc, args: FocusArgs, out: &mut dyn Write) -> anyhow::Result<()
         None => show(doc, args.json, out),
         Some(FocusCmd::Add { item_id, pos }) => add(doc, &item_id, pos, out),
         Some(FocusCmd::Rm { item_id }) => rm(doc, &item_id, out),
-        Some(FocusCmd::Mv { item_id, pos }) => mv(doc, &item_id, pos, out),
+        Some(FocusCmd::Mv {
+            item_id,
+            pos,
+            after,
+        }) => mv(doc, &item_id, pos, after.as_deref(), out),
     }
 }
 
@@ -274,8 +286,35 @@ fn rm(doc: &Doc, item_id: &str, out: &mut dyn Write) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn mv(doc: &Doc, item_id: &str, pos: usize, out: &mut dyn Write) -> anyhow::Result<()> {
-    doc.move_in_focus(item_id, one_based_to_index(pos))?;
+/// A position counts every live entry, the ones a client cannot show
+/// included (a ref into a workspace that is not open, or to an item
+/// that has closed there), so a client that shows the resolved lens
+/// (`starred --all`) names a neighbour with `after` instead: the item
+/// lands directly under it, whatever hidden entries sit around them.
+fn mv(
+    doc: &Doc,
+    item_id: &str,
+    pos: Option<usize>,
+    after: Option<&str>,
+    out: &mut dyn Write,
+) -> anyhow::Result<()> {
+    let index = match after {
+        Some(anchor) => {
+            let entries = doc.focus_entries();
+            let at = |id: &str| entries.iter().position(|e| e.item_id == id);
+            let Some(anchor_at) = at(anchor) else {
+                anyhow::bail!("not starred: {anchor}");
+            };
+            match at(item_id) {
+                // The slot the item ends up in: taking it out from
+                // above the anchor moves the anchor up one.
+                Some(from) if from < anchor_at => anchor_at,
+                _ => anchor_at + 1,
+            }
+        }
+        None => one_based_to_index(pos.unwrap_or(1)),
+    };
+    doc.move_in_focus(item_id, index)?;
     writeln!(out, "{item_id}")?;
     Ok(())
 }
@@ -340,6 +379,59 @@ fn item_json<'a>(
 mod tests {
     use super::*;
     use monoplan_core::{ItemLifecycle, LIST_INBOX};
+
+    /// `Request.moveStarred`: the frames the apps send for a drag on
+    /// the Starred page. `after` lands the item directly under its
+    /// neighbour even with an entry between them the page cannot show.
+    #[test]
+    fn mv_frames_from_the_apps_reorder_past_hidden_entries() {
+        use super::super::DocCmd;
+        let home = Doc::new().unwrap();
+        let ids: Vec<String> = ["a", "b", "c"]
+            .iter()
+            .map(|t| {
+                let id = home.add_item(LIST_INBOX, t).unwrap();
+                home.add_to_focus(&id, usize::MAX).unwrap();
+                id
+            })
+            .collect();
+        // A ref into a doc that is not open, between a and b.
+        let hidden = "01000000000000000000000000000000";
+        home.add_foreign_to_focus(&Uuid::from_u128(9).to_string(), hidden, 1)
+            .unwrap();
+        let order = || -> Vec<String> {
+            home.focus_entries()
+                .into_iter()
+                .map(|e| match home.get_item(&e.item_id) {
+                    Some(item) => item.text,
+                    None => "hidden".into(),
+                })
+                .collect()
+        };
+        assert_eq!(order(), ["a", "hidden", "b", "c"]);
+        let run = |mv: serde_json::Value| {
+            let cmd: DocCmd =
+                serde_json::from_value(serde_json::json!({"Focus": {"cmd": {"Mv": mv}, "json": false}}))
+                    .unwrap();
+            let DocCmd::Focus(args) = cmd else {
+                panic!("not a Focus frame")
+            };
+            run(&home, args, &mut Vec::new())
+        };
+        // Down: a under b.
+        run(serde_json::json!({"item_id": ids[0], "pos": null, "after": ids[1]})).unwrap();
+        assert_eq!(order(), ["hidden", "b", "a", "c"]);
+        // Up: c under b.
+        run(serde_json::json!({"item_id": ids[2], "pos": null, "after": ids[1]})).unwrap();
+        assert_eq!(order(), ["hidden", "b", "c", "a"]);
+        // To the top: a position, above the hidden entry too.
+        run(serde_json::json!({"item_id": ids[0], "pos": 1})).unwrap();
+        assert_eq!(order(), ["a", "hidden", "b", "c"]);
+        // Under the last row.
+        run(serde_json::json!({"item_id": ids[0], "pos": null, "after": ids[2]})).unwrap();
+        assert_eq!(order(), ["hidden", "b", "c", "a"]);
+        assert!(run(serde_json::json!({"item_id": ids[0], "pos": null, "after": "nope"})).is_err());
+    }
 
     #[test]
     fn full_lens_resolves_foreign_refs_in_home_order_and_skips_the_rest() {

@@ -253,6 +253,7 @@ struct PlacesMapView: View {
             ForEach(rows, id: \.item.key) { pin in
                 Button { open(pin) } label: { PlacedRowView(pin: pin, from: location.location) }
                     .buttonStyle(.plain)
+                    .listRowSeparator(.hidden)
             }
             if rows.isEmpty {
                 emptyState.listRowSeparator(.hidden)

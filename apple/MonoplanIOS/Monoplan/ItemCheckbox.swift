@@ -102,10 +102,8 @@ struct CheckboxRow<Content: View>: View {
         }
         .padding(.vertical, 2)
         .modifier(ItemRowMenu(ref: ref, state: state))
-        // A list starts its separator at the row's first text by
-        // default, which leaves the checkbox hanging outside the line;
-        // start it at the row's leading edge so it spans the checkbox.
-        .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
+        // No dividers between item rows, on any page that lists them.
+        .listRowSeparator(.hidden)
     }
 }
 
