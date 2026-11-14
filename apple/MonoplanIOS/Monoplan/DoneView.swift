@@ -33,11 +33,16 @@ struct DoneView: View {
                         ProgressView()
                             .frame(maxWidth: .infinity)
                             .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                             .id(model.doneLoadedLimit)
                             .onAppear { model.loadMoreDone() }
                     }
                 }
-                .listStyle(.insetGrouped)
+                // Plain: no grouped surface, the day's header is
+                // enough. A plain list also pins the header of the
+                // section being read under the bar, so the day stays
+                // in sight until the next one pushes it out.
+                .listStyle(.plain)
                 .animation(.default, value: model.doneDays)
             }
         }
