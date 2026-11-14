@@ -11,16 +11,6 @@
         }
       }
     },
-    "%@ exists and is not a symlink; remove it first": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ existe y no es un enlace simbólico; elimínalo primero"
-          }
-        }
-      }
-    },
     "%lld days": {
       "localizations": {
         "es": {
@@ -197,16 +187,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Cerrar"
-          }
-        }
-      }
-    },
-    "Command line": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Línea de comandos"
           }
         }
       }
@@ -511,26 +491,6 @@
         }
       }
     },
-    "Install": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Instalar"
-          }
-        }
-      }
-    },
-    "Installed · %@": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Instalado · %@"
-          }
-        }
-      }
-    },
     "It will be signed out and will have to sign in again to reach your account.": {
       "localizations": {
         "es": {
@@ -687,26 +647,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nuevo espacio…"
-          }
-        }
-      }
-    },
-    "No bundled binary (run the built app)": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sin binario incluido (ejecuta la app compilada)"
-          }
-        }
-      }
-    },
-    "Not installed": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No instalado"
           }
         }
       }
@@ -1401,16 +1341,6 @@
         }
       }
     },
-    "cancelled": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "cancelado"
-          }
-        }
-      }
-    },
     "due today": {
       "localizations": {
         "es": {
@@ -1447,16 +1377,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "ahora mismo"
-          }
-        }
-      }
-    },
-    "link was not created": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "no se creó el enlace"
           }
         }
       }

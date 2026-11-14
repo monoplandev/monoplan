@@ -56,20 +56,6 @@ if [ -n "$GIT_COMMIT" ] && [ -n "$(git -C "$ROOT" status --porcelain 2>/dev/null
   GIT_COMMIT="$GIT_COMMIT+"
 fi
 
-# The app bundles the `monoplan` binary (spec/daemon-plan.md) so the
-# Settings "Command line" row can symlink it onto PATH: the terminal
-# then talks to the app's in-process engine at the app's own version.
-# The app never starts it; the engine loop is linked in via MonoplanCore.
-# Debug and release follow the app's configuration; sync on a
-# real-sized doc is slow in debug, so install the release build.
-echo ">> cargo build -p monoplan ($CONFIG)"
-if [ "$CONFIG" = release ]; then
-  cargo build -p monoplan --release
-else
-  cargo build -p monoplan
-fi
-CLI="$ROOT/target/$CONFIG/monoplan"
-
 # The app links MonoplanCore (the Rust engine loop) through a prebuilt
 # XCFramework. Build it when missing; after core changes, refresh it
 # yourself with `bun run build:apple` (it is release-only and slow).
@@ -102,7 +88,6 @@ mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 # signing, which this invalidates.
 xcrun vtool -set-build-version macos 14.0 "$(xcrun --show-sdk-version)" -replace \
   -output "$CONTENTS/MacOS/MonoplanMac" "$BIN"
-cp "$CLI" "$CONTENTS/MacOS/monoplan"
 
 # SwiftPM cannot put the catalog in Bundle.main, so compile it here:
 # xcstringstool emits one <lang>.lproj/Localizable.strings per
@@ -158,9 +143,7 @@ rm -f "$PARTIAL"
 printf 'APPL????' > "$CONTENTS/PkgInfo"
 
 # Ad-hoc signatures: unsigned bundles are refused by Login Items and get
-# a fresh TCC identity every build. The helper is signed on its own;
-# bundle signing does not descend into Contents/MacOS siblings.
-codesign --force --sign - "$CONTENTS/MacOS/monoplan" >/dev/null 2>&1
+# a fresh TCC identity every build.
 codesign --force --sign - "$APP" >/dev/null 2>&1
 
 echo ">> $APP"

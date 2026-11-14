@@ -3,7 +3,7 @@
 // Settings-scale catalogues). Four panes: General (the device
 // preferences the app owns), Account (what a user looks at), Devices (the account's
 // devices over the server API) and Advanced (the engine process, the
-// command line, the profile on disk and its size). Panes are SwiftUI
+// profile on disk and its size). Panes are SwiftUI
 // views hosted in an AppKit tab view controller, so adding one is a
 // view, a label and an SF Symbol.
 //
@@ -139,8 +139,6 @@ final class SettingsModel: ObservableObject {
     /// A signup's recovery code, held only while the sheet shows it
     /// once; cleared when the sheet closes.
     @Published var recoveryCode: String?
-    @Published var cliLine: String = "—"
-    @Published var cliError: String?
     /// Settings › Devices. Nil until the first load (or without a
     /// signed-in engine); reloaded when the pane appears and after every
     /// rename or revoke, never on doc events (it is server state).
@@ -153,8 +151,6 @@ final class SettingsModel: ObservableObject {
     @Published var thisDeviceId: String?
     /// The row the rename sheet is up for.
     @Published var renaming: DeviceRow?
-    /// nil when there is no bundled binary to link to (a `swift run`).
-    let cli: CommandLineLink? = bundledBinary().map { CommandLineLink(target: $0) }
 
     private let location: ProfileLocation
     private let engine: EngineController
@@ -249,15 +245,6 @@ final class SettingsModel: ObservableObject {
         serverURL = location.serverURL ?? "—"
         signedIn = location.hasAccount
         openAtLogin = SMAppService.mainApp.status == .enabled
-        if let cli {
-            switch cli.state {
-            case .installed: cliLine = String(localized: "Installed · \(cli.link)")
-            case .other(let what): cliLine = "\(cli.link) → \(what)"
-            case .missing: cliLine = String(localized: "Not installed")
-            }
-        } else {
-            cliLine = String(localized: "No bundled binary (run the built app)")
-        }
         // Devices are the account's: nothing to show once signed out,
         // and the pane's own load again once an engine serves (the
         // credential needs one).
@@ -426,19 +413,6 @@ final class SettingsModel: ObservableObject {
             loginError = nil
         } catch {
             loginError = error.localizedDescription
-        }
-        refresh()
-    }
-
-    /// Symlink the bundled CLI onto PATH, at the app's version so its
-    /// hello is accepted.
-    func installCLI() {
-        guard let cli else { return }
-        do {
-            try cli.install()
-            cliError = nil
-        } catch {
-            cliError = error.localizedDescription
         }
         refresh()
     }
@@ -823,7 +797,7 @@ struct RenameDeviceSheet: View {
     }
 }
 
-/// The process-level view: the in-app engine, the bundled CLI, and
+/// The process-level view: the in-app engine, its build, and
 /// where the profile lives. Nothing here needs touching day to day.
 struct AdvancedPane: View {
     @ObservedObject var model: SettingsModel
@@ -877,20 +851,6 @@ struct AdvancedPane: View {
         Form {
             LabeledContent("Engine", value: model.engineLine)
             LabeledContent("Build", value: model.buildLine)
-            LabeledContent("Command line") {
-                HStack {
-                    Text(model.cliLine)
-                        .truncationMode(.middle)
-                        .lineLimit(1)
-                        .foregroundStyle(.secondary)
-                    if let cli = model.cli, cli.state != .installed {
-                        Button("Install") { model.installCLI() }
-                    }
-                }
-            }
-            if let error = model.cliError {
-                Text(error).font(.footnote).foregroundStyle(.red)
-            }
             LabeledContent("Profile") {
                 HStack {
                     Text(model.profilePath)

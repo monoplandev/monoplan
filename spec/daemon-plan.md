@@ -104,8 +104,9 @@ user-visible friction). The app only ever talks to its own engine.
 4. A client never restarts an embedded engine for staleness. The build-id
    check applies to headless daemons only; against an embedded engine the
    package version must match, else the command fails naming both
-   versions. The bundled CLI, symlinked onto `PATH` from Settings, is
-   how the terminal stays at the app's version.
+   versions. The app does not bundle or install the CLI (dropped
+   2026-11-15, see the Mac App Store sandbox): it is installed on its
+   own and has to be kept at the app's version.
 5. Login item is `SMAppService.mainApp` (System Settings › Login
    Items), not a launchd agent. `daemon install` is the headless path
    and is not used on a Mac that runs the app.

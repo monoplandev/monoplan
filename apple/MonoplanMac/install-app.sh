@@ -68,18 +68,6 @@ ditto "$SRC" "$STAGE"
 rm -rf "$DEST"
 mv "$STAGE" "$DEST"
 
-# The Settings "Command line" row symlinks /usr/local/bin/monoplan to
-# the bundled binary. Say where it points so a link into a dev
-# checkout is noticed; the app's Install button re-points it.
-LINK=/usr/local/bin/monoplan
-if [ -L "$LINK" ]; then
-  TARGET="$(readlink "$LINK")"
-  case "$TARGET" in
-    "$DEST"/*) echo ">> $LINK -> installed bundle" ;;
-    *) echo ">> note: $LINK -> $TARGET (not the installed bundle; use Settings > Command line > Install)" ;;
-  esac
-fi
-
 echo ">> $DEST"
 if [ "$OPEN" = 1 ]; then
   open "$DEST"

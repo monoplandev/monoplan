@@ -55,8 +55,8 @@ pub fn is_installed_for(profile_dir: &Path) -> bool {
 
 pub async fn install() -> anyhow::Result<()> {
     let profile = Profile::require_active()?;
-    // Resolve symlinks (a `/usr/local/bin/monoplan` into the app
-    // bundle) so the agent survives the link being moved.
+    // Resolve symlinks (a `/usr/local/bin/monoplan` into a build
+    // directory, say) so the agent survives the link being moved.
     let exe = std::env::current_exe()?.canonicalize()?;
     let path = unit_path()?;
     if let Some(parent) = path.parent() {

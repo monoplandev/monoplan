@@ -103,12 +103,13 @@ engine still starting, or a command holding the profile; the menu says
 "profile in use" and the start is retried, backing off to ten seconds.
 Doc commands from
 the CLI work against the app's engine; it is never restarted as stale,
-its hello only has to match the app's package version, which the
-bundled CLI symlinked onto `PATH` guarantees.
+its hello only has to match the app's package version. The app does
+not ship or install the CLI: it is installed on its own, and has to be
+at the app's version to talk to it.
 
 Targets: `MonoplanMacKit` (Foundation-only helpers: `ProfileLocation`,
 `WhenPhrase`, the widget's agenda snapshot, the device API requests,
-install / launch / appearance preferences; no MonoplanCore dependency,
+launch / appearance preferences; no MonoplanCore dependency,
 because the iOS widget links it and must not link the engine), the
 `MonoplanMac` executable (AppKit and SwiftUI: the engine controller,
 the tray, the window, Settings) and `MonoplanCore` (the prebuilt
@@ -218,9 +219,7 @@ and a fresh local workspace takes its place.
 Advanced: the
 Engine row (running, or why not), the Build row (package version, then
 the short commit `build-app.sh` baked into Info.plist, "+" if the tree
-was dirty), a
-"Command line" row whose Install button symlinks `/usr/local/bin/monoplan`
-to the bundled binary (admin prompt if the directory is root's), and
+was dirty) and
 the profile path with a Reveal button. The
 launchd agent from `monoplan daemon install` is the headless
 alternative for Macs without the app: the app takes its daemon over at

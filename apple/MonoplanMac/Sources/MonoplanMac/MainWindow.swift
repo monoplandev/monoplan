@@ -679,13 +679,6 @@ struct MainWindowView: View {
     /// hosts each apart).
     enum Pane { case sidebar, list }
     let pane: Pane
-    /// Whether the sidebar has drawn once. A sidebar `List` whose
-    /// selection is already set on its first render draws that row's
-    /// label bold, and the bold stays when the selection moves on
-    /// (macOS 26, probed 2026-11-15); selecting after the first render
-    /// leaves every label regular. So the selection reads as none
-    /// until then.
-    @State private var sidebarDrawn = false
 
     var body: some View {
         switch pane {
@@ -704,11 +697,17 @@ struct MainWindowView: View {
     /// Inbox and lists. A list row carries its workspace, so picking
     /// one in another group moves both at once.
     private var sidebar: some View {
-        List(selection: Binding<NavTarget?>(
-            get: {
-                guard sidebarDrawn else { return nil }
-                return model.lens.map(NavTarget.lens) ?? .list(workspace: model.workspace, list: model.list)
-            },
+        let current = model.lens.map(NavTarget.lens) ?? .list(workspace: model.workspace, list: model.list)
+        // Every row's label is regular, selected or not. A sidebar
+        // `List` whose selection is set on its first render draws that
+        // row bold and keeps it bold after the selection moves on
+        // (macOS 26, probed 2026-11-15); the explicit weight on each
+        // row (`navRow`) overrides it.
+        func row<V: View>(_ target: NavTarget, _ content: V) -> some View {
+            content.navRow().tag(target)
+        }
+        return List(selection: Binding<NavTarget?>(
+            get: { current },
             set: {
                 switch $0 {
                 case .lens(let lens): model.select(lens: lens)
@@ -720,30 +719,26 @@ struct MainWindowView: View {
             Section {
                 // Starred and the Inbox are counted whatever the
                 // preference says, as on iOS.
-                HStack {
+                row(.lens(.starred), HStack {
                     Label { Text("Starred") } icon: { StarOutline() }
                     Spacer()
                     count(model.starred.count)
-                }
-                .navRow()
-                .tag(NavTarget.lens(.starred))
-                Label { Text("Calendar") } icon: { NavIcon(image: NavArt.calendar) }.navRow().tag(NavTarget.lens(.agenda))
-                Label { Text("Done") } icon: { NavIcon(image: NavArt.done) }.navRow().tag(NavTarget.lens(.done))
+                })
+                row(.lens(.agenda), Label { Text("Calendar") } icon: { NavIcon(image: NavArt.calendar) })
+                row(.lens(.done), Label { Text("Done") } icon: { NavIcon(image: NavArt.done) })
             }
             ForEach(model.sections) { section in
                 Section(isExpanded: Binding(
                     get: { !model.collapsed.contains(section.id) },
                     set: { model.setCollapsed(section.id, !$0) }
                 )) {
-                    HStack {
+                    row(.list(workspace: section.target, list: MainWindowModel.inbox), HStack {
                         Label { Text("Inbox") } icon: { NavIcon(image: NavArt.inbox) }
                         Spacer()
                         count(section.inboxOpen)
-                    }
-                    .navRow()
-                    .tag(NavTarget.list(workspace: section.target, list: MainWindowModel.inbox))
+                    })
                     ForEach(section.userLists) { list in
-                        HStack {
+                        row(.list(workspace: section.target, list: list.id), HStack {
                             // The list's emoji as its icon, a folder
                             // without one, as on iOS: the names line
                             // up under Inbox's.
@@ -758,9 +753,7 @@ struct MainWindowView: View {
                             }
                             Spacer()
                             if showListCounts { count(Int(list.open)) }
-                        }
-                        .navRow()
-                        .tag(NavTarget.list(workspace: section.target, list: list.id))
+                        })
                     }
                 } header: {
                     if section.workspace.home {
@@ -772,7 +765,6 @@ struct MainWindowView: View {
             }
         }
         .listStyle(.sidebar)
-        .onAppear { DispatchQueue.main.async { sidebarDrawn = true } }
         // Rows of 28 pt, between the system's small (24) and medium
         // (32), which has no such step: the small size, with each row
         // (`navRow`) at the medium's type and 4 pt taller.
@@ -993,7 +985,8 @@ struct MainWindowView: View {
 private extension View {
     /// A sidebar row's size: see the sidebar's `sidebarRowSize`.
     func navRow() -> some View {
-        font(.body).imageScale(.medium).frame(minHeight: 20)
+        font(.body).fontWeight(.regular)
+            .imageScale(.medium).frame(minHeight: 20)
     }
 
     /// An item row's size, fixed: 32 pt, the web's row height
