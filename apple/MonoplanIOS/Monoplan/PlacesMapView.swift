@@ -114,6 +114,8 @@ struct PlacesMapView: View {
     @State private var path: [ItemRef] = []
     @State private var query = ""
     @FocusState private var searching: Bool
+    /// Ties the controls drawn over the map to it.
+    @Namespace private var mapScope
 
     private static let strip = PresentationDetent.height(120)
 
@@ -158,7 +160,12 @@ struct PlacesMapView: View {
 
     var body: some View {
         GeometryReader { geo in
-            Map(position: $camera, selection: $spot) {
+            // How much of the page the sheet covers, measured up from
+            // the bottom safe area: the strip's height, or half the
+            // screen (the full sheet covers the controls anyway).
+            let covered = detent == Self.strip
+                ? 120 : (geo.size.height + geo.safeAreaInsets.top + geo.safeAreaInsets.bottom) / 2
+            Map(position: $camera, selection: $spot, scope: mapScope) {
                 UserAnnotation()
                 ForEach(spots) { spot in
                     if spot.count > 1 {
@@ -170,18 +177,31 @@ struct PlacesMapView: View {
                     }
                 }
             }
-            .mapControls {
-                MapUserLocationButton()
-                MapCompass()
-            }
+            // The map's own controls would sit under the status bar
+            // (the map ignores the safe area): none there, and ours at
+            // the bottom right instead.
+            .mapControls {}
             .onMapCameraChange(frequency: .onEnd) { centre = $0.region.center }
             // The sheet covers the foot of the map: keep what the
-            // camera frames, and the map's own controls, above it.
-            .safeAreaPadding(.bottom, detent == Self.strip ? 120 : geo.size.height / 2)
+            // camera frames above it.
+            .safeAreaPadding(.bottom, covered)
             // The map runs to the top of the screen, under the back
-            // button; its controls still keep to the safe area.
+            // button.
             .ignoresSafeArea()
+            // The location button, and the compass while the map is
+            // turned, at the bottom right just above the sheet.
+            .overlay(alignment: .bottomTrailing) {
+                VStack(spacing: 8) {
+                    MapCompass(scope: mapScope)
+                    MapUserLocationButton(scope: mapScope)
+                }
+                .buttonBorderShape(.circle)
+                .padding(.trailing, 12)
+                .padding(.bottom, covered + 12)
+                .animation(.default, value: detent)
+            }
         }
+        .mapScope(mapScope)
         // No title and no bar surface: the map says what the page is.
         // The back button stays.
         .navigationTitle("")
