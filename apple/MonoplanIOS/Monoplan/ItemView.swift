@@ -155,6 +155,8 @@ struct ItemView: View {
     @State private var editing: Editor?
     /// The "Delete" of the more menu is waiting on its confirmation.
     @State private var confirmingDelete = false
+    /// As is its "Move to Bin".
+    @State private var confirmingBin = false
 
     enum Editor {
         case title
@@ -242,6 +244,14 @@ struct ItemView: View {
         .scrollBounceBehavior(.basedOnSize)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { bar }
+        .confirmationDialog("Move this item to the Bin?", isPresented: $confirmingBin, titleVisibility: .visible) {
+            Button("Move to Bin", role: .destructive) {
+                model.setBinned(ref, binned: true)
+                dismiss()
+            }
+        } message: {
+            Text("It can be restored from the Bin.")
+        }
         // A hard delete cannot be taken back (no undo here, and the
         // bin was the second chance), so it asks first.
         .confirmationDialog("Delete this item for good?", isPresented: $confirmingDelete, titleVisibility: .visible) {
@@ -319,8 +329,7 @@ struct ItemView: View {
         Menu {
             if item.binnedAt == nil {
                 Button("Move to Bin", systemImage: "trash", role: .destructive) {
-                    model.setBinned(ref, binned: true)
-                    dismiss()
+                    confirmingBin = true
                 }
             } else {
                 Button("Restore", systemImage: "arrow.uturn.backward") {

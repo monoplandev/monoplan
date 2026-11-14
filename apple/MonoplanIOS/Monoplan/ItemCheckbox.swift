@@ -124,7 +124,7 @@ extension EnvironmentValues {
 
 /// The menu a long press on an item row opens, the same on every row
 /// surface: tick or reopen, star or unstar, copy the title, duplicate,
-/// bin. Without an item (`ref` nil) there is no menu. On the Starred
+/// bin (which asks first). Without an item (`ref` nil) there is no menu. On the Starred
 /// page (`duplicatesStarred`) a duplicate is starred too, under the
 /// row it came from.
 struct ItemRowMenu: ViewModifier {
@@ -134,11 +134,20 @@ struct ItemRowMenu: ViewModifier {
     /// The workflow state name, as the engine's JSON carries it.
     let state: String
 
+    /// "Move to Bin" is waiting on its confirmation.
+    @State private var confirmingBin = false
+
     private var closed: Bool { state == "done" || state == "cancelled" }
 
     func body(content: Content) -> some View {
         if let ref {
-            content.contextMenu { items(ref) }
+            content
+                .contextMenu { items(ref) }
+                .confirmationDialog("Move this item to the Bin?", isPresented: $confirmingBin, titleVisibility: .visible) {
+                    Button("Move to Bin", role: .destructive) { model.setBinned(ref, binned: true) }
+                } message: {
+                    Text("It can be restored from the Bin.")
+                }
         } else {
             content
         }
@@ -176,7 +185,7 @@ struct ItemRowMenu: ViewModifier {
             Label("Duplicate", systemImage: "plus.square.on.square")
         }
         Button(role: .destructive) {
-            model.setBinned(ref, binned: true)
+            confirmingBin = true
         } label: {
             Label("Move to Bin", systemImage: "trash")
         }

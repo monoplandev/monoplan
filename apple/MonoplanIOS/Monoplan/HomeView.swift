@@ -6,7 +6,11 @@
 // active lists in the doc's order, each led by its emoji (a folder
 // when it has none); a list opens its Open items.
 // The gear at the top right opens Settings (account and sync, with
-// Debug a level under it), and the folder beside it makes a new list:
+// Debug a level under it). With an account, the avatar at the top left
+// is the account's menu: its email and New Workspace (named in an
+// alert); a shared workspace's section header has a "..." menu with
+// Delete Workspace, which asks for the name typed back, as the Mac
+// app's does. The folder beside it makes a new list:
 // a popover under it takes the name (and, with more than one workspace
 // open, which one: Personal unless changed) and the new list's page
 // is pushed. While the profile has no account, a Sign In
@@ -155,8 +159,25 @@ struct HomeView: View {
     @State private var mapShown = false
     /// The new-list popover is up.
     @State private var showNewList = false
-    /// Why the last new list was not made; shown in an alert.
-    @State private var newListError: String?
+    /// An action of Home's that failed; shown in an alert.
+    @State private var failure: Failure?
+    /// The New Workspace alert is up, over what is typed in it.
+    @State private var namingWorkspace = false
+    @State private var workspaceName = ""
+    /// The workspace Delete is asking about, and what has been typed
+    /// back of its name.
+    @State private var deleting: Deleting?
+    @State private var deleteTyped = ""
+
+    struct Failure {
+        let title: String
+        let message: String
+    }
+
+    struct Deleting {
+        let docId: String
+        let name: String
+    }
 
     /// The device's list-counts preference (Settings), off by default:
     /// count each list's Open items on its row. The Inbox and Starred
@@ -235,12 +256,28 @@ struct HomeView: View {
                         // A shared workspace's title is led by the
                         // shared glyph, as its lists' badges are.
                         if let shared = model.sharedWorkspaceName(doc.docId) {
-                            HStack(spacing: 4) {
-                                SharedIcon()
-                                Text(shared)
+                            HStack {
+                                HStack(spacing: 4) {
+                                    SharedIcon()
+                                    Text(shared)
+                                }
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel("\(shared), shared workspace")
+                                Spacer()
+                                // The workspace's own actions.
+                                Menu {
+                                    Button("Delete Workspace…", systemImage: "trash", role: .destructive) {
+                                        deleteTyped = ""
+                                        deleting = Deleting(docId: doc.docId, name: shared)
+                                    }
+                                } label: {
+                                    Image(systemName: "ellipsis")
+                                        .font(.body)
+                                        .frame(width: 44, height: 28, alignment: .trailing)
+                                        .contentShape(Rectangle())
+                                        .accessibilityLabel("\(shared) options")
+                                }
                             }
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel("\(shared), shared workspace")
                         } else {
                             Text(doc.name ?? "Personal")
                         }
@@ -259,6 +296,20 @@ struct HomeView: View {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Sign In") { showSignIn = true }
                             .disabled(model.busy != nil)
+                    }
+                } else if let session = model.session {
+                    // Signed in: the account's menu stands there.
+                    ToolbarItem(placement: .topBarLeading) {
+                        Menu {
+                            Section(session.email) {
+                                Button("New Workspace…", systemImage: "plus") {
+                                    workspaceName = ""
+                                    namingWorkspace = true
+                                }
+                            }
+                        } label: {
+                            Label("Account", systemImage: "person.crop.circle")
+                        }
                     }
                 }
                 if let session = model.session, !session.docs.isEmpty {
@@ -317,12 +368,42 @@ struct HomeView: View {
                 .environmentObject(model)
         }
         .alert(
-            "Could not create list",
-            isPresented: Binding(get: { newListError != nil }, set: { if !$0 { newListError = nil } })
+            failure?.title ?? "",
+            isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })
         ) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(newListError ?? "")
+            Text(failure?.message ?? "")
+        }
+        .alert("New Workspace", isPresented: $namingWorkspace) {
+            TextField("Name", text: $workspaceName)
+            Button("Cancel", role: .cancel) {}
+            Button("Create") {
+                let name = workspaceName.trimmingCharacters(in: .whitespacesAndNewlines)
+                model.createWorkspace(name: name) { error in
+                    if let error { failure = Failure(title: "Could not create workspace", message: error) }
+                }
+            }
+            .disabled(workspaceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        // Cross-device and final, so a tap through is not enough: the
+        // name is typed back first.
+        .alert(
+            "Delete “\(deleting?.name ?? "")”?",
+            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+            presenting: deleting
+        ) { target in
+            TextField("Type “\(target.name)” to confirm", text: $deleteTyped)
+                .autocorrectionDisabled()
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                model.deleteWorkspace(target.docId) { error in
+                    if let error { failure = Failure(title: "Could not delete workspace", message: error) }
+                }
+            }
+            .disabled(deleteTyped.trimmingCharacters(in: .whitespacesAndNewlines) != target.name)
+        } message: { _ in
+            Text("Its lists and items are removed from every device, and anyone it is shared with loses access. This cannot be undone.")
         }
         // Search covers the stack, navigation bar included, and sits
         // under the bar. A page or list result closes it and is pushed
@@ -370,7 +451,7 @@ struct HomeView: View {
             if let list {
                 path.append(list)
             } else {
-                newListError = error
+                failure = Failure(title: "Could not create list", message: error ?? "")
             }
         }
     }

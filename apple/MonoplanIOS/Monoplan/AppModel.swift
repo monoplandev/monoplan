@@ -457,6 +457,44 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Create a workspace the account owns, by name
+    /// (`Request.createWorkspace`): the engine opens it, and the
+    /// session reread puts its section on Home. `done` gets why not,
+    /// or nil once it exists.
+    func createWorkspace(name: String, done: @escaping (String?) -> Void) {
+        client.send(.createWorkspace(name: name)) { [weak self] result in
+            switch result {
+            case .success(.workspaceCreated):
+                self?.loadSession()
+                done(nil)
+            case .success(let other):
+                done("unexpected reply: \(String(describing: other))")
+            case .failure(let error):
+                done(engineErrorMessage(error))
+            }
+        }
+    }
+
+    /// Delete a workspace the account owns, for every device
+    /// (`Request.deleteWorkspace`). The server refuses one that is not
+    /// ours or still has other members; `done` gets why not, or nil
+    /// once it is gone.
+    func deleteWorkspace(_ docId: String, done: @escaping (String?) -> Void) {
+        client.send(.deleteWorkspace(docId: docId)) { [weak self] result in
+            switch result {
+            case .success(.workspaceDeleted):
+                self?.loadSession()
+                self?.refreshLenses()
+                self?.refreshBin()
+                done(nil)
+            case .success(let other):
+                done("unexpected reply: \(String(describing: other))")
+            case .failure(let error):
+                done(engineErrorMessage(error))
+            }
+        }
+    }
+
     /// Rename a user-created list (`list rename`).
     func renameList(_ list: ListRef, to name: String) {
         writeList(.renameList(id: list.listId, name: name, workspace: selector(list.docId)))
