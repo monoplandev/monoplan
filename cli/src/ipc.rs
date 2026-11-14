@@ -84,10 +84,6 @@ pub enum Reply {
     Hello {
         build_id: String,
         pid: u32,
-        /// The host loop runs inside a GUI process (the macOS app)
-        /// rather than a headless `monoplan daemon`. Clients never
-        /// restart an embedded host for staleness (`client::connect`).
-        embedded: bool,
         sync: SyncStatus,
     },
     /// The command ran; `stdout` is what to print, verbatim.
@@ -152,7 +148,7 @@ pub struct SyncStatus {
     /// any run of the daemon (it is persisted beside the sync cursor).
     pub last_synced_at: Option<i64>,
     /// Why the last connect attempt failed or the socket dropped, for
-    /// a human: an embedded host has no terminal, so this is how
+    /// a human: an app's host has no terminal, so this is how
     /// "offline" says what is wrong. Absent while online or before the
     /// first attempt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -208,12 +204,6 @@ fn ago(millis: i64) -> String {
 /// built from different sources. Version plus the executable's own
 /// mtime: any rebuild changes the latter, which is what matters in
 /// development where the version string does not move.
-/// The package-version half of a build id: what has to agree between a
-/// CLI and an embedded host, where the executables legitimately differ.
-pub fn version_of(build_id: &str) -> &str {
-    build_id.split(':').next().unwrap_or(build_id)
-}
-
 pub fn build_id() -> String {
     let mtime = std::env::current_exe()
         .and_then(|p| p.metadata())

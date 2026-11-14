@@ -170,15 +170,13 @@ async fn signup_without_a_local_workspace_seeds_a_fresh_doc() {
 /// loop for its session (`Engine::account` / `workspaces`): no identity
 /// and no server, `local_only` set, the one doc.
 #[tokio::test]
-async fn embedded_host_reports_a_local_only_session() {
+async fn app_host_reports_a_local_only_session() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("profile");
     let profile = bootstrap::open_or_init_at(dir.clone()).await.unwrap();
     let (local_doc_id, _) = bootstrap::local_only_doc(&profile).unwrap().unwrap();
 
-    let handle = daemon::spawn_with(reopen_profile(&dir), true)
-        .await
-        .unwrap();
+    let handle = daemon::spawn(reopen_profile(&dir)).await.unwrap();
     let info = handle.client.session().await.unwrap();
     assert!(info.local_only);
     assert_eq!(info.account_id, "");
@@ -221,9 +219,7 @@ async fn login_over_a_local_only_workspace_then_host_boots() {
     .unwrap();
     assert_eq!(outcome.account_id, account.account_id);
 
-    let handle = daemon::spawn_with(reopen_profile(&dir), true)
-        .await
-        .unwrap();
+    let handle = daemon::spawn(reopen_profile(&dir)).await.unwrap();
     let info = handle.client.session().await.unwrap();
     assert!(!info.local_only);
     assert_eq!(info.account_id, account.account_id);
@@ -249,9 +245,7 @@ async fn typed_calls_run_on_the_loop_and_agree_with_the_cli() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("profile");
     bootstrap::open_or_init_at(dir.clone()).await.unwrap();
-    let handle = daemon::spawn_with(reopen_profile(&dir), true)
-        .await
-        .unwrap();
+    let handle = daemon::spawn(reopen_profile(&dir)).await.unwrap();
     let client = handle.client.clone();
     // A list made the CLI's way, for the typed calls to fill and count.
     let made = client
@@ -360,9 +354,7 @@ async fn typed_reads_that_span_workspaces_tag_their_rows() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("profile");
     bootstrap::open_or_init_at(dir.clone()).await.unwrap();
-    let handle = daemon::spawn_with(reopen_profile(&dir), true)
-        .await
-        .unwrap();
+    let handle = daemon::spawn(reopen_profile(&dir)).await.unwrap();
     let home = handle.client.session().await.unwrap().primary_doc_id;
     let home = home.0.to_string();
 

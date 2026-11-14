@@ -6,8 +6,10 @@ the CLI commands) and `Engine`, the daemon loop embedded in the app's
 process (`spec/daemon-plan.md`, amended 2026-10-27), which both apps
 drive through typed calls returning generated records and follow with
 `Engine.observe` ([`spec/swift-bindings-plan.md`](../spec/swift-bindings-plan.md),
-built 2026-11-14). Neither app opens the socket, encodes
-a request or decodes JSON from the engine; the socket stays the CLI's.
+built 2026-11-14). Neither app opens a socket, encodes
+a request or decodes JSON from the engine, and neither engine serves
+one: each app's profile is its own, never the CLI's (amended
+2026-11-15).
 Both are native: `apple/MonoplanIOS` (2026-11-05) and, since
 2026-11-14, the Mac app's window, which replaced the webview of
 [`spec/mac-window-plan.md`](../spec/mac-window-plan.md). The surface
@@ -71,9 +73,9 @@ won't compile without those outputs present.
 
 ## MonoplanMac — the menubar app
 
-`apple/MonoplanMac/` is a SwiftPM package: the macOS status-item app, and
-on macOS the process that normally runs the profile's engine (`spec/daemon-plan.md`,
-amendment 2026-10-27). One process: it runs the Rust engine loop
+`apple/MonoplanMac/` is a SwiftPM package: the macOS status-item app,
+which runs its own engine on its own profile (`spec/daemon-plan.md`,
+amendments 2026-10-27 and 2026-11-15). One process: it runs the Rust engine loop
 in-process (`Engine` from `MonoplanCore`, the same loop as `monoplan
 daemon`) on a background thread, and its tray and window call that
 engine's typed methods (`EngineCalls`), never the socket. The tray
@@ -89,23 +91,18 @@ workspace. An item row opens the window on the item's list. The rows
 are rendered in `Sources/MonoplanMac/TrayMenu.swift`.
 
 Engine rules (`Sources/MonoplanMac/EngineController.swift`): the engine
-runs whenever the app does, and the app only ever talks to its own engine. Whenever
-there is no engine it starts one, which takes a headless `monoplan
-daemon` over (asks it to exit, then claims the profile), follows it
-with `Engine.observe` and reports its state (`EngineState`: running
-with the sync state, or not and why). It
-honours `Shutdown`, so `logout`, `login` and `password` in the
-terminal stop it, hold the profile while they rewrite it, and the app
-starts the engine again once it is free: the observer hears the loop
-end. The one thing it
-waits out rather than takes over is "busy": another copy of the app, an
-engine still starting, or a command holding the profile; the menu says
-"profile in use" and the start is retried, backing off to ten seconds.
-Doc commands from
-the CLI work against the app's engine; it is never restarted as stale,
-its hello only has to match the app's package version. The app does
-not ship or install the CLI: it is installed on its own, and has to be
-at the app's version to talk to it.
+runs whenever the app does, on the app's own profile
+(`~/Library/Application Support/app.monoplan.mac`, `ProfileLocation`),
+and serves no socket (`spec/daemon-plan.md`, amended 2026-11-15).
+Whenever there is no engine the app starts one, follows it with
+`Engine.observe` and reports its state (`EngineState`: running with the
+sync state, or not and why). Sign in, sign up and sign out stop the
+engine first, rewrite the profile, and start the next one. "Busy"
+(another copy of the app, or an engine still starting) is waited out:
+the menu says "profile in use" and the start is retried, backing off to
+ten seconds. The CLI is a separate install with its own profile: on the
+same Mac it is another device of the account, and the two meet only
+through the server.
 
 Targets: `MonoplanMacKit` (Foundation-only helpers: `ProfileLocation`,
 `WhenPhrase`, the widget's agenda snapshot, the device API requests,
@@ -164,7 +161,7 @@ bun run mac                                           # build Monoplan.app (debu
 bun run mac:app                                       # build Monoplan.app (release) and `open` it
 bun run mac:install                                   # build release, quit a running Monoplan, install to /Applications (`-d ~/Applications`, `--no-open`) and launch
 swift test --package-path apple/MonoplanMac           # Kit and tray-row tests, no engine started
-MONOPLAN_DATA_DIR=local/cli bun run mac               # a different profile, same rule as the CLI
+MONOPLAN_APP_DATA_DIR=local/mac bun run mac           # a different profile (the app ignores the CLI's MONOPLAN_DATA_DIR)
 MONOPLAN_MAC_DEBUG=1 bun run mac                      # log state and rows to stderr
 ```
 
@@ -220,10 +217,7 @@ Advanced: the
 Engine row (running, or why not), the Build row (package version, then
 the short commit `build-app.sh` baked into Info.plist, "+" if the tree
 was dirty) and
-the profile path with a Reveal button. The
-launchd agent from `monoplan daemon install` is the headless
-alternative for Macs without the app: the app takes its daemon over at
-launch, and `install` refuses while the app's engine runs.
+the profile path with a Reveal button.
 
 ### Localisation
 
@@ -276,17 +270,17 @@ what is not wire: `ProfileLocation`, `WhenPhrase` / `WhenSuggest`,
 `Agenda.start(of:)` and the widget's `AgendaSnapshot`. Two things differ from
 the Mac. The engine serves **no socket**: nothing on iOS would dial one,
 and the container paths are longer than `sun_path` allows, so
-`monoplan-ffi` passes `serve_socket = false` (`daemon::start_with`)
-under `target_os = "ios"` and skips the headless-daemon takeover. And
+`monoplan-ffi` passes `serve_socket = false` (`daemon::start_with`),
+as it does on the Mac since 2026-11-15. And
 the process is suspended rather than quit: on return to the
 foreground the app calls `Engine.reconnect`, since the WebSocket is dead by
 then (`spec/daemon-plan.md` "Mobile hosts"); there is no clean
 shutdown, the engine's persist tick and the WAL cover a kill. The
-missing socket also means `login` cannot stop the app's engine itself,
-as it does on the Mac (`client::claim` sends `Shutdown` over the
-socket and would wait out its deadline here), so `EngineController`
-shuts its engine down before calling `login`, as both apps already do
-before `logout`; a rejected password costs an engine restart. `signup`
+missing socket also means `login` cannot stop the app's engine itself
+(`client::claim` sends `Shutdown` over the socket and would wait out
+its deadline), so `EngineController` shuts its engine down before
+calling `login`, as it does before `logout`, and as the Mac app does
+too; a rejected password costs an engine restart. `signup`
 (2026-11-14) goes the same way: the shutdown persists the local-only
 workspace, signup adopts it, and the sheet shows the recovery code
 once.

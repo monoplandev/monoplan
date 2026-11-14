@@ -1,22 +1,26 @@
 // The profile directory the app's engine runs on, and what its files
 // say without an engine: whether there is a profile, whether an account
-// is behind it, which server it syncs with. The app never opens the
-// CLI's socket; it reaches its engine through `MonoplanCore.Engine`.
+// is behind it, which server it syncs with. The profile is the app's
+// own, never the CLI's (spec/daemon-plan.md, amended 2026-11-15): the
+// app and a CLI on the same Mac are two devices of the account.
 
 import Foundation
 
-/// Where the profile lives, by the same rules as `Profile` in the CLI.
+/// Where the profile lives: the files are the CLI's `Profile` layout,
+/// in a directory of the app's own.
 public struct ProfileLocation {
     public let dir: URL
 
-    /// `MONOPLAN_DATA_DIR` verbatim, else the platform default the CLI
-    /// uses (`dirs::data_local_dir()/monoplan`).
+    /// `MONOPLAN_APP_DATA_DIR` verbatim, else `app.monoplan.mac` under
+    /// Application Support (inside the container once the app is
+    /// sandboxed). Not the CLI's `MONOPLAN_DATA_DIR`, so a shell that
+    /// exports it never points the app at the CLI's profile.
     public static func resolve(environment: [String: String] = ProcessInfo.processInfo.environment) -> ProfileLocation {
-        if let raw = environment["MONOPLAN_DATA_DIR"], !raw.isEmpty {
+        if let raw = environment["MONOPLAN_APP_DATA_DIR"], !raw.isEmpty {
             return ProfileLocation(dir: URL(fileURLWithPath: raw).standardizedFileURL)
         }
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return ProfileLocation(dir: support.appendingPathComponent("monoplan", isDirectory: true))
+        return ProfileLocation(dir: support.appendingPathComponent("app.monoplan.mac", isDirectory: true))
     }
 
     public init(dir: URL) { self.dir = dir }

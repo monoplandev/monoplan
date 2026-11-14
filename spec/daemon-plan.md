@@ -78,38 +78,42 @@ host for CLI-only use, Linux and servers (`daemon install` writes the
 systemd unit or launchd agent for that path) and is what the CLI
 auto-spawns when nothing holds the profile. Rules:
 
-The engine runs whenever the app does (revised 2026-10-27, replacing the
-"alternatives, not partners" rules under which the app stayed a client
-of a foreign daemon and refused `Shutdown`; that branch was code for a
-case nobody needs, and the refusals it forced on the CLI were the only
-user-visible friction). The app only ever talks to its own engine.
+**Amended 2026-11-15: the app's profile is its own.** The app's engine
+serves no socket, as on iOS, and runs on a profile directory of the
+app's (`~/Library/Application Support/app.monoplan.mac`,
+`MONOPLAN_APP_DATA_DIR` to override), never the CLI's. The app and a CLI
+on the same Mac are two devices of the account and meet only through
+the server. Why: a Mac App Store build is sandboxed, so its files live
+in its container, where a CLI outside it cannot reach the socket and
+the app cannot reach a daemon's; and sharing one profile tied the CLI
+to the app's exact version. Gone with it: the app taking a headless
+daemon over at launch (`client::take_over`), the `embedded` flag in the
+hello and the version-only check it allowed, `daemon install` refusing
+while the app hosts (`client::hosted_by_app`), and the app re-hosting
+after a terminal command's `Shutdown` or `claim`.
 
-1. Whenever its socket is down and the profile is signed in, the app
-   starts its engine. `Engine.start` first takes a headless `monoplan
-   daemon` over: asks it to exit over the socket, waits for the lock,
-   then claims the profile (`client::take_over`). The headless daemon
-   fills in on a Mac only while the app is not running, which is what
-   the CLI's auto-spawn does after the app quits.
-2. The app's engine honours `Shutdown` like any daemon. `logout`, `login`,
-   `recover`, `signup` and `password` from the terminal stop it and
-   hold `engine.lock` while they rewrite the profile (`client::claim`,
-   dropped before anything that needs a host, such as `login`'s
-   initial sync), so neither the app nor a client's auto-spawn boots a
-   half-written profile; the app starts its engine again once the lock is free.
-3. The app never takes over another app's engine (two copies taking turns
-   would never settle), an engine still starting, or a profile held by a
-   command: `Engine.start` reports `Busy`, the menu says "profile in use"
-   and the client's reconnect backoff retries. `daemon install` refuses
-   while the app's engine runs: the agent is for Macs without the app.
-4. A client never restarts an embedded engine for staleness. The build-id
-   check applies to headless daemons only; against an embedded engine the
-   package version must match, else the command fails naming both
-   versions. The app does not bundle or install the CLI (dropped
-   2026-11-15, see the Mac App Store sandbox): it is installed on its
-   own and has to be kept at the app's version.
-5. Login item is `SMAppService.mainApp` (System Settings › Login
-   Items), not a launchd agent. `daemon install` is the headless path
-   and is not used on a Mac that runs the app.
+Rules now:
+
+1. The engine runs whenever the app does. Whenever there is none, the
+   app starts one (`Engine.start`, `daemon::start_with(profile, false)`).
+2. Account work in the app (sign in, sign up, sign out) stops the app's
+   engine first, then rewrites the profile (`client::claim` inside the
+   FFI's `login` / `signup` / `logout` finds the lock free), then the
+   app starts the next engine.
+3. `Busy` (`engine.lock` held: another copy of the app, or an engine
+   still starting or releasing) is retried with backoff, up to ten
+   seconds.
+4. Login item is `SMAppService.mainApp` (System Settings › Login
+   Items). `daemon install` is the CLI's own headless path, unrelated
+   to the app.
+
+Superseded rules (2026-10-27 to 2026-11-15), for the record: the app
+took a headless daemon over at launch; honoured `Shutdown` from
+terminal commands and re-hosted once the profile was free; never took
+over another app's engine; was never restarted as stale by a client,
+which only had to match its package version; and the CLI bundled in the
+app, symlinked onto `PATH` from Settings, kept the two at one version
+(the bundling was dropped first, the same day).
 
 Why the 2026-10-21 reasons no longer hold: "a GUI that hosts takes the
 doc down when the user quits it" is covered by the CLI's auto-spawn;
@@ -123,16 +127,20 @@ apps share one shape.
 
 ```
 monoplan item add ──UDS──┐
-monoplan item ls  ──UDS──┤
-monoplan tui      ──UDS──┼──>  host loop ──WS──> server
-tray / window     ──FFI──┘        │   (`monoplan daemon`, or the macOS app's
-                  (in-process)    │    `monoplan-ffi::Engine`; the FFI edge exists only there:
-                                  │    typed calls and `observe`,
-                                  │    spec/swift-bindings-plan.md)
+monoplan item ls  ──UDS──┼──>  host loop ──WS──> server
+monoplan tui      ──UDS──┘        │   (`monoplan daemon`)
                                   ├── <profile>/monoplan.sqlite
                                   ├── <profile>/engine.lock   (held: "a daemon owns this profile")
                                   ├── <profile>/peer-<n>.lock (held: its Loro peer id)
                                   └── <profile>/engine.sock
+
+tray / window     ──FFI──>  host loop ──WS──> server
+                  (in-process)    │   (the app's `monoplan-ffi::Engine`: typed calls and
+                                  │    `observe`, spec/swift-bindings-plan.md; since
+                                  │    2026-11-15 on the app's own profile, no socket)
+                                  ├── <app profile>/monoplan.sqlite
+                                  ├── <app profile>/engine.lock
+                                  └── <app profile>/peer-<n>.lock
 ```
 
 - The socket lives in the profile dir, beside the db. The profile dir is

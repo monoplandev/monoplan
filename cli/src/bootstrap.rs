@@ -37,7 +37,7 @@ pub async fn open_or_init() -> anyhow::Result<Profile> {
     open_or_init_at(Profile::root()?).await
 }
 
-/// `open_or_init` for an explicit directory (tests; an embedded host
+/// `open_or_init` for an explicit directory (tests; an app's host,
 /// handed its path).
 pub async fn open_or_init_at(dir: PathBuf) -> anyhow::Result<Profile> {
     if let Some(profile) = Profile::active_at(dir.clone()) {

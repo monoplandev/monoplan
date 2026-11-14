@@ -3,8 +3,9 @@ import XCTest
 
 final class ProfileLocationTests: XCTestCase {
     func testDataDirOverrideIsTakenVerbatim() {
-        XCTAssertEqual(ProfileLocation.resolve(environment: ["MONOPLAN_DATA_DIR": "/x/y"]).dir.path, "/x/y")
-        XCTAssertTrue(ProfileLocation.resolve(environment: [:]).dir.path.hasSuffix("/Library/Application Support/monoplan"))
+        XCTAssertEqual(ProfileLocation.resolve(environment: ["MONOPLAN_APP_DATA_DIR": "/x/y"]).dir.path, "/x/y")
+        // The CLI's variable is not the app's.
+        XCTAssertTrue(ProfileLocation.resolve(environment: ["MONOPLAN_DATA_DIR": "/x/y"]).dir.path.hasSuffix("/Library/Application Support/app.monoplan.mac"))
     }
 
     func testConfigTomlStringScan() {

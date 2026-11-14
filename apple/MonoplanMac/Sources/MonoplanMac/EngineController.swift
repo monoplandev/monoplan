@@ -5,30 +5,25 @@
 // typed calls (`EngineCalls`) and `Engine.observe`
 // (spec/swift-bindings-plan.md, phase 4). There is no client object or
 // wire format between the two: this says what the engine's state is and
-// when a doc changed. The socket the engine serves is for the CLI; the
-// app never opens it, and it only ever talks to its own engine.
+// when a doc changed. The engine serves no socket and its profile is
+// the app's own (`ProfileLocation`): the CLI is a separate device with
+// its own profile (spec/daemon-plan.md, amended 2026-11-15).
 //
 // The engine runs whenever the app does:
 // - Whenever there is no engine, start one. No profile (a first run,
 //   or just after a sign-out's wipe) first gets a local-only workspace
 //   (`ensureLocalWorkspace`, what the CLI's first doc command does), so
 //   the app never needs an account to be used, as the web client does
-//   not (spec/auth.md). `Engine.start` takes a headless `monoplan daemon`
-//   over (asks it to exit, then claims the profile) and blocks while
-//   the doc boots, so it runs off the main thread and the menu says
-//   "starting" meanwhile.
-// - A client's `Shutdown` ends our engine like any other: `logout`,
-//   `login`, `password` from the terminal stop it, hold the profile
-//   while they rewrite it, and we start the engine again once it is
-//   free. The observer hears the loop end and the next start follows.
-// - "Busy" is the one thing we wait out rather than take over: another
-//   copy of the app, a command holding the profile, or an engine still
-//   starting. The menu says so and the start is retried, backing off to
-//   ten seconds.
+//   not (spec/auth.md). `Engine.start` blocks while the doc boots, so
+//   it runs off the main thread and the menu says "starting" meanwhile.
+// - Account work (sign in, sign up, sign out) stops our engine first,
+//   rewrites the profile, and starts the next engine on what it left.
+// - "Busy" is waited out: another copy of the app, or an engine still
+//   starting or releasing the profile. The menu says so and the start
+//   is retried, backing off to ten seconds.
 //
-// The iOS app's `EngineController` is the same thing with fewer cases
-// (no socket, so it stops its engine before a sign-in rather than
-// letting the Rust side's claim do it). Sharing one is the follow-up.
+// The iOS app's `EngineController` is now the same thing. Sharing one
+// is the follow-up.
 
 import Foundation
 import MonoplanCore
@@ -163,8 +158,8 @@ final class EngineController {
         }
     }
 
-    /// The engine is no longer ours to use (its loop ended: a terminal
-    /// command's or a sign-in's claim): forget it and start the next.
+    /// The engine is no longer ours to use (its loop ended): forget it
+    /// and start the next.
     private func engineGone(reason: String) {
         watcher?.cancel()
         watcher = nil
@@ -186,14 +181,25 @@ final class EngineController {
         }
     }
 
-    /// Account work is over. If it ended our engine (a sign-out, or a
-    /// sign-in the server accepted), start the next one on whatever the
-    /// profile now is; if it never got that far (a wrong password), the
-    /// engine is still running and nothing changes.
+    /// Account work begins: our engine is forgotten (the caller shuts
+    /// it down off the main thread) and none starts until it is over.
+    private func beginAccountWork(_ what: String) -> MonoplanCore.Engine? {
+        accountWork = what
+        let running = engine
+        watcher?.cancel()
+        watcher = nil
+        engine = nil
+        engineCalls = nil
+        state = .connecting(what)
+        return running
+    }
+
+    /// Account work is over: start the next engine on whatever the
+    /// profile now is.
     private func finishAccountWork() {
         accountWork = nil
         backoff = 1
-        if runningEngine == nil { engineGone(reason: String(localized: "starting")) }
+        ensure()
     }
 
     /// Clean exit on quit: persist, fold, release the profile. Blocks.
@@ -213,13 +219,7 @@ final class EngineController {
     /// the engine's clean exit persists and folds; `accountWork` keeps
     /// a fresh engine from starting between the stop and the wipe.
     func signOut(completion: @escaping (Error?) -> Void) {
-        accountWork = String(localized: "signing out")
-        let running = engine
-        watcher?.cancel()
-        watcher = nil
-        engine = nil
-        engineCalls = nil
-        state = .connecting(String(localized: "signing out"))
+        let running = beginAccountWork(String(localized: "signing out"))
         let dir = location.dir.path
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             running?.shutdown()
@@ -233,16 +233,18 @@ final class EngineController {
     }
 
     /// Sign in: what `monoplan auth login` does (`MonoplanCore.login`), off
-    /// the main thread for the key derivation. The Rust side claims the
-    /// profile only once the server has accepted the credentials, so a
-    /// running engine (the local-only workspace's, or another account's)
-    /// is stopped then and not before; the observer hears it end, and on
-    /// return the profile is free and the next engine starts on it. A
-    /// local-only workspace is replaced (the sheet says so first).
+    /// the main thread for the key derivation. Our engine is stopped
+    /// first: the Rust side's claim waits for the profile to be free,
+    /// and a socket-less engine is never asked to free it. A wrong
+    /// password therefore costs an engine restart (the next one starts
+    /// on the untouched profile again); on success the next engine
+    /// starts on the account's. A local-only workspace is replaced (the
+    /// sheet says so first).
     func signIn(_ creds: SignInCredentials, completion: @escaping (Error?) -> Void) {
-        accountWork = String(localized: "signing in")
+        let running = beginAccountWork(String(localized: "signing in"))
         let dir = location.dir.path
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            running?.shutdown()
             let result = Result {
                 try MonoplanCore.login(
                     profileDir: dir, server: creds.server, email: creds.email,
@@ -257,15 +259,17 @@ final class EngineController {
     }
 
     /// Create an account: what `monoplan auth signup` does
-    /// (`MonoplanCore.signup`), off the main thread. The local-only
-    /// workspace the engine has been running is adopted as the account's
-    /// Home doc (same id, same key; `spec/auth.md` §Device pairing), so
-    /// nothing captured before is lost; the engine that comes up after
+    /// (`MonoplanCore.signup`), off the main thread. Our engine is
+    /// stopped first, as for `signIn`; its shutdown persists the
+    /// local-only workspace, which signup adopts as the account's Home
+    /// doc (same id, same key; `spec/auth.md` §Device pairing), so
+    /// nothing captured before is lost. The engine that comes up after
     /// pushes its whole history on the first connect.
     func signUp(_ creds: SignInCredentials, completion: @escaping (Result<SignupOutcome, Error>) -> Void) {
-        accountWork = String(localized: "signing in")
+        let running = beginAccountWork(String(localized: "signing in"))
         let dir = location.dir.path
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            running?.shutdown()
             let result = Result {
                 try MonoplanCore.signup(
                     profileDir: dir, server: creds.server, email: creds.email,

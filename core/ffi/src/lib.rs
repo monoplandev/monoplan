@@ -13,9 +13,10 @@
 //! as an `EngineObserver`. No bytes cross: the msgpack `request` /
 //! `watch` pair and the webview's mirror (`subscribe` / `import` /
 //! `session`, `spec/mac-window-plan.md`) were removed on 2026-11-14,
-//! once both apps were on the typed calls. The app
-//! is a client of its own engine here and never over the socket, which
-//! stays the CLI's. The earlier offline `MonoplanStore`
+//! once both apps were on the typed calls. The app is a client of its
+//! own engine here, and the engine serves no socket: the app's profile
+//! is its own, never the CLI's (since 2026-11-15). The earlier offline
+//! `MonoplanStore`
 //! prototype (`spec/swift-ffi-plan.md`) was removed on 2026-10-27: it
 //! booted a second doc under a fake doc id with a caller-held DEK, and
 //! nothing but its smoke test used it.
@@ -42,14 +43,11 @@ use monoplan_cli::api::{
 
 // ---------------------------------------------------------------------
 // Engine: the daemon loop, embedded (spec/daemon-plan.md, amended
-// 2026-10-27). On macOS the app runs the engine whenever it runs: it runs
-// `daemon::start` / `daemon::Serving` on its own thread and its UI is
-// an in-process client of that loop (`daemon::LocalClient`), the same
-// loop the CLI reaches over the socket. The headless
-// `monoplan daemon` stays for CLI-only, Linux and servers, and fills in
-// on a Mac only while the app is not running: `start` takes a headless
-// daemon over, and the CLI's auto-spawn starts one again if the app
-// has quit.
+// 2026-10-27 and 2026-11-15). The app runs the engine whenever it runs:
+// `daemon::start_with` / `daemon::Serving` on its own thread, its UI an
+// in-process client of that loop (`daemon::LocalClient`). No socket:
+// the profile is the app's alone, so the CLI is a separate device with
+// its own profile and its own headless `monoplan daemon`.
 // ---------------------------------------------------------------------
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -57,9 +55,9 @@ pub enum EngineError {
     /// No `secrets.toml` in the profile dir: nothing to run.
     #[error("not logged in")]
     NotLoggedIn,
-    /// Something `start` will not take over holds `engine.lock`:
-    /// another app's engine, an engine still starting, or a CLI command
-    /// rewriting the profile (`client::claim`). Try again later.
+    /// Something else holds `engine.lock`: another copy of the app, or
+    /// an engine still starting or still releasing the profile. Try
+    /// again later.
     #[error("another process holds this profile")]
     Busy,
     /// The loop has ended (`shutdown`, or a client's `Shutdown`): no
@@ -117,12 +115,6 @@ fn init_log(profile_dir: &std::path::Path) {
         .with_writer(Append(profile_dir.join(monoplan_cli::daemon::LOG_FILE)))
         .try_init();
 }
-
-/// Whether the embedded engine serves the CLI's Unix socket. Every
-/// platform with a terminal, except iOS: no CLI runs there, nothing
-/// else can hold the profile, and the app container's paths are longer
-/// than a socket path may be (`daemon::start_with`).
-const SERVE_SOCKET: bool = !cfg!(target_os = "ios");
 
 fn runtime() -> Result<tokio::runtime::Runtime, EngineError> {
     tokio::runtime::Builder::new_current_thread()
@@ -306,10 +298,9 @@ pub fn logout(profile_dir: String) -> Result<(), EngineError> {
 }
 
 /// One running engine loop. Dropping it does *not* stop the loop; call
-/// `shutdown` (clean exit: persist, fold, close the socket, release the
-/// lock). A client's `Shutdown` request (`daemon stop`, `logout`,
-/// `login`, `password`) ends the loop too, after which `is_running` is
-/// false and the app starts a new one once the profile is free.
+/// `shutdown` (clean exit: persist, fold, release the lock). A loop that
+/// ends on its own (a fatal error) leaves `is_running` false, and the
+/// app starts a new one.
 #[derive(uniffi::Object)]
 pub struct Engine {
     shutdown: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
@@ -476,13 +467,12 @@ pub fn build_id() -> String {
 
 #[uniffi::export]
 impl Engine {
-    /// Claim the profile (stopping a headless daemon that holds it),
-    /// bind the socket, boot the doc, and serve on a background thread.
-    /// Returns once the socket is listening (or the start failed), so
+    /// Claim the profile, boot the doc, and serve on a background
+    /// thread. Returns once the loop is ready (or the start failed), so
     /// call it off the main thread: booting a large doc takes a moment.
     #[uniffi::constructor]
     pub fn start(profile_dir: String) -> Result<Arc<Engine>, EngineError> {
-        use monoplan_cli::{client, config::Profile, daemon};
+        use monoplan_cli::{config::Profile, daemon};
         let profile =
             Profile::active_at(PathBuf::from(profile_dir)).ok_or(EngineError::NotLoggedIn)?;
         init_log(&profile.dir);
@@ -506,30 +496,13 @@ impl Engine {
                     }
                 };
                 rt.block_on(async move {
-                    // On iOS nothing else can hold the profile (no CLI,
-                    // no headless daemon, one process per container),
-                    // and the engine serves no socket: the app is its
-                    // only client, and the container paths are longer
-                    // than `sun_path` allows anyway.
-                    if SERVE_SOCKET {
-                        match client::take_over(&profile.dir).await {
-                            Ok(true) => {}
-                            Ok(false) => {
-                                let _ = ready_tx.send(Err(EngineError::Busy));
-                                return;
-                            }
-                            Err(e) => {
-                                let _ = ready_tx.send(Err(EngineError::Failed {
-                                    message: format!("{e:#}"),
-                                }));
-                                return;
-                            }
-                        }
-                    }
-                    let started = match daemon::start_with(profile, SERVE_SOCKET).await {
+                    // No socket: the app is the engine's only client
+                    // (on iOS the container paths are longer than
+                    // `sun_path` allows anyway).
+                    let started = match daemon::start_with(profile, false).await {
                         Ok(Some(s)) => s,
-                        // Lost the lock to someone between the takeover
-                        // and the claim; the app tries again later.
+                        // Someone else holds the lock; the app tries
+                        // again later.
                         Ok(None) => {
                             let _ = ready_tx.send(Err(EngineError::Busy));
                             return;
@@ -541,7 +514,7 @@ impl Engine {
                             return;
                         }
                     };
-                    let (serving, client) = daemon::Serving::new(started, true);
+                    let (serving, client) = daemon::Serving::new(started);
                     let _ = ready_tx.send(Ok(client));
                     if let Err(e) = serving.run(shutdown_rx).await {
                         eprintln!("monoplan engine: {e:#}");
@@ -587,8 +560,7 @@ impl Engine {
     /// runtime: that runtime is dropped as soon as the loop returns,
     /// which cancels its tasks, and a forwarder cancelled between the
     /// channel closing and its next poll would never deliver the one
-    /// event the app depends on to notice the engine is gone (a
-    /// sign-in's claim or a terminal command ending it). A blocking
+    /// event the app depends on to notice the engine is gone. A blocking
     /// receive sees `Closed` whatever happened to the runtime.
     pub fn observe(&self, observer: Arc<dyn EngineObserver>) -> Result<Arc<Watcher>, EngineError> {
         use monoplan_cli::ipc::WatchEvent;
@@ -1105,8 +1077,8 @@ impl Engine {
             .device_token
     }
 
-    /// Still serving? False once the loop has ended (a client's
-    /// `Shutdown`, a command's `claim`), from the moment it ends: the
+    /// Still serving? False once the loop has ended, from the moment it
+    /// ends: the
     /// thread is still unwinding then, and a request to it would only
     /// get `Stopped`, so the app must not hand this engine to a new
     /// caller meanwhile.

@@ -65,8 +65,8 @@ const PERSIST_INTERVAL: Duration = Duration::from_secs(1);
 const WATCH_BUFFER: usize = 64;
 
 const LOCK_FILE: &str = "engine.lock";
-/// The engine's log in the profile dir: the embedded host's `tracing`
-/// output and a headless daemon's stderr, both appended.
+/// The engine's log in the profile dir: an app's in-process host's
+/// `tracing` output and a headless daemon's stderr, both appended.
 pub const LOG_FILE: &str = "engine.log";
 /// Past this size at engine start the log is cut back to its tail.
 const LOG_CAP: u64 = 1024 * 1024;
@@ -198,10 +198,10 @@ impl DaemonHandle {
 /// (`monoplan-ffi::Engine`, `spec/daemon-plan.md` amendment 2026-10-27).
 pub struct Started {
     lock: DaemonLock,
-    /// `None` for a host with no CLI to serve (the iOS app): the loop
-    /// runs, the in-process [`LocalClient`] is its only client, and no
-    /// socket file is made. On iOS the container paths also exceed
-    /// `sun_path`, so a bind there would fail outright.
+    /// `None` for a host with no CLI to serve (the Apple apps): the
+    /// loop runs, the in-process [`LocalClient`] is its only client,
+    /// and no socket file is made. On iOS the container paths also
+    /// exceed `sun_path`, so a bind there would fail outright.
     listener: Option<UnixListener>,
     engine: Engine,
 }
@@ -213,8 +213,9 @@ pub async fn start(profile: Profile) -> anyhow::Result<Option<Started>> {
 }
 
 /// `start`, with the socket optional: `serve_socket` false hosts the
-/// doc for in-process clients only (the mobile host, which has no CLI
-/// and no path short enough for a socket).
+/// doc for in-process clients only (the Apple apps, whose profile is
+/// their own: no CLI shares it, and on iOS no path is short enough for
+/// a socket).
 pub async fn start_with(profile: Profile, serve_socket: bool) -> anyhow::Result<Option<Started>> {
     let Some(lock) = try_acquire(&profile.dir)? else {
         return Ok(None);
@@ -263,21 +264,14 @@ fn trim_log(path: &Path, cap: u64, keep: u64) {
 }
 
 /// Serve until `shutdown` fires or a client asks (`Request::Shutdown`).
-/// `embedded` is what the hello reports: a GUI-hosted loop, which
-/// clients must not restart for staleness and which the app, taking a
-/// profile over at launch, leaves alone. Installs no signal handlers;
-/// the headless `run` does that itself.
-pub async fn serve(
-    started: Started,
-    shutdown: oneshot::Receiver<()>,
-    embedded: bool,
-) -> anyhow::Result<()> {
+/// Installs no signal handlers; the headless `run` does that itself.
+pub async fn serve(started: Started, shutdown: oneshot::Receiver<()>) -> anyhow::Result<()> {
     if started.engine.is_local_only() {
         eprintln!("monoplan daemon: listening; local-only workspace, no server");
     } else {
         eprintln!("monoplan daemon: listening, connecting to server…");
     }
-    let (serving, _client) = Serving::new(started, embedded);
+    let (serving, _client) = Serving::new(started);
     let result = serving.run(shutdown).await;
     eprintln!("monoplan daemon: stopped");
     Ok(result?)
@@ -296,7 +290,7 @@ pub struct Serving {
 impl Serving {
     /// Wire the loop and start accepting socket connections. Must be
     /// called inside a Tokio runtime (the accept task is spawned here).
-    pub fn new(started: Started, embedded: bool) -> (Serving, LocalClient) {
+    pub fn new(started: Started) -> (Serving, LocalClient) {
         let Started {
             lock,
             listener,
@@ -322,16 +316,14 @@ impl Serving {
                 req_tx.clone(),
                 status_rx.clone(),
                 watch_tx.subscribe(),
-                embedded,
             ))
         });
         let client = LocalClient {
             requests: req_tx,
             status: status_rx,
             watchers: watch_tx.subscribe(),
-            embedded,
         };
-        let host = Host::new(engine, lock, status_tx, req_rx, watch_tx, embedded);
+        let host = Host::new(engine, lock, status_tx, req_rx, watch_tx);
         (Serving { host, accept }, client)
     }
 
@@ -362,7 +354,6 @@ pub struct LocalClient {
     /// would keep the stream open after the loop (its only sender) has
     /// gone, and a watcher would never hear `Closed`.
     watchers: broadcast::Receiver<WatchEvent>,
-    embedded: bool,
 }
 
 impl Clone for LocalClient {
@@ -371,7 +362,6 @@ impl Clone for LocalClient {
             requests: self.requests.clone(),
             status: self.status.clone(),
             watchers: self.watchers.resubscribe(),
-            embedded: self.embedded,
         }
     }
 }
@@ -391,7 +381,6 @@ impl LocalClient {
         Reply::Hello {
             build_id: ipc::build_id(),
             pid: std::process::id(),
-            embedded: self.embedded,
             sync: self.sync_status(),
         }
     }
@@ -533,7 +522,7 @@ pub async fn run(args: DaemonArgs) -> anyhow::Result<()> {
         wait_for_signal().await;
         let _ = shutdown_tx.send(());
     });
-    serve(started, shutdown_rx, false).await
+    serve(started, shutdown_rx).await
 }
 
 /// The one line a spawning client reads. Written with the error
@@ -581,17 +570,10 @@ async fn status() -> anyhow::Result<()> {
         Some(Reply::Hello {
             build_id,
             pid,
-            embedded,
             sync,
         }) => {
             let mine = ipc::build_id();
-            let note = if embedded {
-                if ipc::version_of(&build_id) == ipc::version_of(&mine) {
-                    "  (hosted by Monoplan.app)"
-                } else {
-                    "  (hosted by Monoplan.app at another version; commands will refuse)"
-                }
-            } else if build_id == mine {
+            let note = if build_id == mine {
                 ""
             } else {
                 "  (different build; the next command restarts it)"
@@ -638,7 +620,6 @@ async fn accept_loop(
     req_tx: mpsc::UnboundedSender<HostCmd>,
     status: watch::Receiver<DaemonStatus>,
     watch_rx: broadcast::Receiver<WatchEvent>,
-    embedded: bool,
 ) {
     loop {
         let (stream, _) = match listener.accept().await {
@@ -656,7 +637,7 @@ async fn accept_loop(
         let status = status.clone();
         let watch_rx = watch_rx.resubscribe();
         tokio::spawn(async move {
-            if let Err(e) = serve_conn(stream, req_tx, status, watch_rx, embedded).await {
+            if let Err(e) = serve_conn(stream, req_tx, status, watch_rx).await {
                 tracing::debug!("conn: {e}");
             }
         });
@@ -732,7 +713,6 @@ async fn serve_conn(
     req_tx: mpsc::UnboundedSender<HostCmd>,
     status: watch::Receiver<DaemonStatus>,
     watch_rx: broadcast::Receiver<WatchEvent>,
-    embedded: bool,
 ) -> anyhow::Result<()> {
     let (mut rd, mut wr) = stream.into_split();
     let (in_tx, mut in_rx) = mpsc::channel::<Request>(1);
@@ -758,7 +738,6 @@ async fn serve_conn(
                     Request::Hello { .. } => Reply::Hello {
                         build_id: ipc::build_id(),
                         pid: std::process::id(),
-                        embedded,
                         sync: status.borrow().sync(),
                     },
                     Request::Watch => {
@@ -803,26 +782,17 @@ async fn serve_conn(
 /// fast if a daemon already holds the profile. Used by tests; `run` is
 /// the binary's path.
 pub async fn spawn(profile: Profile) -> Result<DaemonHandle, SyncError> {
-    spawn_with(profile, false).await
-}
-
-/// `spawn` reporting itself as embedded (what the app's host does), to
-/// test the client-facing rules without an app.
-pub async fn spawn_with(profile: Profile, embedded: bool) -> Result<DaemonHandle, SyncError> {
     let lock = try_acquire(&profile.dir)
         .map_err(crate::peer::PeerError::Io)?
         .ok_or(SyncError::DaemonRunning)?;
     let listener = bind(&profile.dir).map_err(|e| SyncError::Engine(format!("bind: {e}")))?;
     let engine = Engine::open_resident(profile).await?;
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    let (serving, client) = Serving::new(
-        Started {
-            lock,
-            listener: Some(listener),
-            engine,
-        },
-        embedded,
-    );
+    let (serving, client) = Serving::new(Started {
+        lock,
+        listener: Some(listener),
+        engine,
+    });
     let status = client.status.clone();
     let task = tokio::spawn(serving.run(shutdown_rx));
     Ok(DaemonHandle {
@@ -908,7 +878,6 @@ struct Host {
     offline_reason: Option<String>,
     /// No account: never connect, never report offline.
     local_only: bool,
-    embedded: bool,
 }
 
 impl Host {
@@ -918,7 +887,6 @@ impl Host {
         status: watch::Sender<DaemonStatus>,
         requests: mpsc::UnboundedReceiver<HostCmd>,
         watchers: broadcast::Sender<WatchEvent>,
-        embedded: bool,
     ) -> Self {
         let dir = engine.profile_dir().to_path_buf();
         let local_only = engine.is_local_only();
@@ -939,7 +907,6 @@ impl Host {
             pending_syncs: Vec::new(),
             offline_reason: None,
             local_only,
-            embedded,
         }
     }
 
@@ -1121,7 +1088,6 @@ impl Host {
             Request::Hello { .. } => Reply::Hello {
                 build_id: ipc::build_id(),
                 pid: std::process::id(),
-                embedded: self.embedded,
                 sync: self.sync_status(),
             },
             // The reads that span every open doc (`agenda --all`,

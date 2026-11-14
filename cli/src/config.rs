@@ -141,7 +141,7 @@ impl Profile {
         Ok(Self::active_at(dir))
     }
 
-    /// `active()` for an explicit directory: the embedded host
+    /// `active()` for an explicit directory: an app's host
     /// (`monoplan-ffi`) is handed the profile path by the app rather
     /// than reading `MONOPLAN_DATA_DIR`.
     pub fn active_at(dir: PathBuf) -> Option<Self> {

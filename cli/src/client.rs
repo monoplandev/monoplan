@@ -67,9 +67,9 @@ pub async fn call(profile: &Profile, req: Request, spawn: Spawn) -> anyhow::Resu
 }
 
 /// Ask a running host to exit and wait until the profile is free.
-/// `Ok(false)` when none was running. The app's host honours this
-/// like a headless daemon and re-hosts once the profile is free again,
-/// so a caller about to rewrite the profile uses [`claim`] instead.
+/// `Ok(false)` when none was running. A caller about to rewrite the
+/// profile uses [`claim`] instead, so that nothing starts a new host
+/// before it is done.
 pub async fn stop_if_running(profile_dir: &Path) -> anyhow::Result<bool> {
     if !daemon::is_running(profile_dir)? {
         return Ok(false);
@@ -85,9 +85,8 @@ pub async fn stop_if_running(profile_dir: &Path) -> anyhow::Result<bool> {
 
 /// Stop whatever hosts the profile and hold `engine.lock` until the
 /// guard drops, so nothing boots the doc while the caller rewrites the
-/// profile: not a client's auto-spawn, and not the app, which re-hosts
-/// as soon as it can after yielding to `Shutdown`. Drop the guard
-/// before anything that needs a host (`login`'s initial sync).
+/// profile, a client's auto-spawn included. Drop the guard before
+/// anything that needs a host (`login`'s initial sync).
 pub async fn claim(profile_dir: &Path) -> anyhow::Result<daemon::DaemonLock> {
     let deadline = Instant::now() + WAIT_FOR_STOP;
     loop {
@@ -101,43 +100,6 @@ pub async fn claim(profile_dir: &Path) -> anyhow::Result<daemon::DaemonLock> {
             anyhow::bail!("could not claim the profile within {WAIT_FOR_STOP:?}");
         }
     }
-}
-
-/// The app taking the profile over at launch (`monoplan-ffi::Engine`):
-/// a headless daemon is asked to exit; another app's host is left
-/// alone, since two apps taking turns would never settle. `Ok(true)`
-/// once the profile is free, `Ok(false)` when it stays held, whether
-/// by another app, by a host that is still starting, or by a command
-/// holding [`claim`]. The caller retries later; nothing waits here.
-pub async fn take_over(profile_dir: &Path) -> anyhow::Result<bool> {
-    if !daemon::is_running(profile_dir)? {
-        return Ok(true);
-    }
-    let path = ipc::socket_path(profile_dir);
-    let Ok(mut stream) = UnixStream::connect(&path).await else {
-        return Ok(false);
-    };
-    if let Some(Reply::Hello { embedded: true, .. }) = hello(&mut stream).await {
-        return Ok(false);
-    }
-    shutdown(&mut stream).await?;
-    wait_until_stopped(profile_dir).await?;
-    Ok(true)
-}
-
-/// Is the profile's host an app (`embedded` in its hello)? False when
-/// nothing hosts it or the host is not answering.
-pub async fn hosted_by_app(profile_dir: &Path) -> anyhow::Result<bool> {
-    if !daemon::is_running(profile_dir)? {
-        return Ok(false);
-    }
-    let Ok(mut stream) = UnixStream::connect(ipc::socket_path(profile_dir)).await else {
-        return Ok(false);
-    };
-    Ok(matches!(
-        hello(&mut stream).await,
-        Some(Reply::Hello { embedded: true, .. })
-    ))
 }
 
 async fn hello(stream: &mut UnixStream) -> Option<Reply> {
@@ -189,23 +151,6 @@ async fn connect(profile: &Profile, spawn: Spawn) -> anyhow::Result<UnixStream> 
                 .await?;
                 match read_frame::<_, Reply>(&mut stream).await? {
                     Some(Reply::Hello { build_id, .. }) if build_id == mine => return Ok(stream),
-                    Some(Reply::Hello {
-                        build_id,
-                        embedded: true,
-                        ..
-                    }) => {
-                        // The app hosts this profile. Its executable is
-                        // never ours, so only the version has to agree;
-                        // it is not ours to restart either way.
-                        let (theirs, ours) = (ipc::version_of(&build_id), ipc::version_of(&mine));
-                        if theirs == ours {
-                            return Ok(stream);
-                        }
-                        anyhow::bail!(
-                            "the Monoplan app is hosting this profile at version {theirs}; \
-                             this CLI is {ours}. Update one of them (or quit the app)"
-                        );
-                    }
                     Some(Reply::Hello { build_id, pid, .. }) => {
                         tracing::info!(
                             "daemon pid {pid} is build {build_id}, this is {mine}; restarting it"
