@@ -249,6 +249,15 @@ public enum Request {
     /// `items`. The frame is pinned on the Rust side by
     /// `add_list_frame_from_the_apps_decodes_and_applies`.
     case addList(name: String, workspace: String? = nil)
+    /// `monoplan list rename <list> <name>`, `monoplan list icon <list>
+    /// [emoji]` (nil clears the emoji) and `monoplan list archive
+    /// <list>`: edits to a user-created list; the engine refuses them
+    /// for the reserved ones. `workspace` as for `items`. The frames
+    /// are pinned on the Rust side by
+    /// `list_edit_frames_from_the_apps_decode_and_apply`.
+    case renameList(id: String, name: String, workspace: String? = nil)
+    case setListIcon(id: String, icon: String?, workspace: String? = nil)
+    case archiveList(id: String, workspace: String? = nil)
     /// Who is logged in, from the engine's account row.
     case account
     /// Create a workspace the account owns, by name, and open it on the
@@ -374,6 +383,18 @@ public enum Request {
         case .addList(let name, let workspace):
             return Self.doc(workspace, .map(["Lists": .map(["cmd": .map(["Add": .map([
                 "name": .string(name),
+            ])])])]))
+        case .renameList(let id, let name, let workspace):
+            return Self.doc(workspace, .map(["Lists": .map(["cmd": .map(["Rename": .map([
+                "list": .string(id), "name": .string(name),
+            ])])])]))
+        case .setListIcon(let id, let icon, let workspace):
+            return Self.doc(workspace, .map(["Lists": .map(["cmd": .map(["Icon": .map([
+                "list": .string(id), "icon": icon.map(MPValue.string) ?? .nil,
+            ])])])]))
+        case .archiveList(let id, let workspace):
+            return Self.doc(workspace, .map(["Lists": .map(["cmd": .map(["Archive": .map([
+                "list": .string(id),
             ])])])]))
         case .account:
             return .string("Account")

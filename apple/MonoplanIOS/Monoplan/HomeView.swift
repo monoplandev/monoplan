@@ -17,6 +17,9 @@
 // has its own search; while its field has
 // focus or text, `SearchView` covers the stack. Every page is pushed
 // from here, and item rows on any of them tick and open the item's sheet.
+// A user-created list's page has a "..." menu at the top right: rename
+// (an alert), choose emoji (the system emoji keyboard,
+// `EmojiKeyboard.swift`) and archive (confirmed; the page pops).
 // Archived lists and the reserved `events` list (calendar-only,
 // spec/events-plan.md) are left out.
 
@@ -555,7 +558,30 @@ extension View {
 /// (an Inbox included). Refetched on every doc change while shown.
 struct ListItemsView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
     let list: ListRef
+
+    /// The rename alert is up, over what is typed in it.
+    @State private var renaming = false
+    @State private var renameText = ""
+    /// The emoji keyboard is up, picking the list's emoji.
+    @State private var pickingEmoji = false
+    /// The user has no emoji keyboard to pick with; said in an alert.
+    @State private var noEmojiKeyboard = false
+    @State private var confirmArchive = false
+    @State private var archiveError: String?
+
+    /// The list as it is now: the page was pushed with the name and
+    /// emoji of that moment, and either can be changed from here (or
+    /// from another device) while it is up.
+    private var current: ListRef {
+        guard let row = model.listsByDoc[list.docId]?.first(where: { $0.id == list.listId }) else { return list }
+        return ListRef(docId: list.docId, listId: list.listId, name: row.name, icon: row.icon)
+    }
+
+    /// Only a user-created list can be renamed, given an emoji or
+    /// archived.
+    private var editable: Bool { list.listId != "inbox" && list.listId != "events" }
 
     private func showCaptured(in items: [ItemRow], _ proxy: ScrollViewProxy) {
         guard let captured = model.captured, captured.list.key == list.key,
@@ -591,10 +617,79 @@ struct ListItemsView: View {
         // has, once they have loaded; a shared workspace's list has the
         // workspace's name before its own.
         .countedTitle(
-            list.name, count: model.listItems[list.key]?.count,
+            current.name, count: model.listItems[list.key]?.count,
             workspace: model.sharedWorkspaceName(list.docId)
         ) {
-            ListIcon(listId: list.listId, emoji: list.icon)
+            ListIcon(listId: list.listId, emoji: current.icon)
+        }
+        .toolbar {
+            if editable {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button {
+                            renameText = current.name
+                            renaming = true
+                        } label: {
+                            Label("Rename", systemImage: "pencil")
+                        }
+                        Button {
+                            if EmojiKeyboard.available {
+                                pickingEmoji = true
+                            } else {
+                                noEmojiKeyboard = true
+                            }
+                        } label: {
+                            Label("Choose Emoji", systemImage: "face.smiling")
+                        }
+                        Divider()
+                        Button { confirmArchive = true } label: {
+                            Label("Archive", systemImage: "archivebox")
+                        }
+                    } label: {
+                        Label("List options", systemImage: "ellipsis")
+                    }
+                }
+            }
+        }
+        // The emoji keyboard's unseen field; a pick is written at once.
+        .background {
+            EmojiKeyboardField(isActive: $pickingEmoji, canRemove: !(current.icon ?? "").isEmpty) { emoji in
+                model.setListIcon(list, icon: emoji)
+            }
+            .frame(width: 0, height: 0)
+        }
+        .alert("Rename List", isPresented: $renaming) {
+            TextField("Name", text: $renameText)
+            Button("Cancel", role: .cancel) {}
+            Button("Rename") {
+                let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if name != current.name { model.renameList(list, to: name) }
+            }
+            .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .alert("No emoji keyboard", isPresented: $noEmojiKeyboard) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Turn on the Emoji keyboard in Settings to choose an emoji.")
+        }
+        .confirmationDialog(
+            "Archive \(current.name)?", isPresented: $confirmArchive, titleVisibility: .visible
+        ) {
+            Button("Archive") {
+                model.archiveList(list) { error in
+                    if let error { archiveError = error } else { dismiss() }
+                }
+            }
+        } message: {
+            Text("The list leaves Home. Its items are kept.")
+        }
+        .alert(
+            "Could not archive list",
+            isPresented: Binding(get: { archiveError != nil }, set: { if !$0 { archiveError = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(archiveError ?? "")
         }
         .refreshable { model.refreshList(list) }
         .onAppear { model.refreshList(list) }
@@ -604,6 +699,7 @@ struct ListItemsView: View {
     /// The page's name for the back button: the list's emoji, when it
     /// has one, before its name.
     private var title: String {
+        let list = current
         guard let icon = list.icon, !icon.isEmpty else { return list.name }
         return "\(icon) \(list.name)"
     }
@@ -612,7 +708,7 @@ struct ListItemsView: View {
         ScrollView {
             if let error = model.listErrors[list.key] {
                 ContentUnavailableView(
-                    "\(list.name) unavailable",
+                    "\(current.name) unavailable",
                     systemImage: "exclamationmark.triangle",
                     description: Text(error)
                 )
@@ -622,7 +718,7 @@ struct ListItemsView: View {
                 ContentUnavailableView(
                     "Nothing open",
                     systemImage: list.listId == "inbox" ? "tray" : "folder",
-                    description: Text("Open items in \(list.name) show here.")
+                    description: Text("Open items in \(current.name) show here.")
                 )
             }
         }

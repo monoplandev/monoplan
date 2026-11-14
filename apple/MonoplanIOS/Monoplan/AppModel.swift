@@ -457,6 +457,44 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Rename a user-created list (`list rename`).
+    func renameList(_ list: ListRef, to name: String) {
+        writeList(.renameList(id: list.listId, name: name, workspace: selector(list.docId)))
+    }
+
+    /// Set a list's emoji, or clear it (nil) (`list icon`).
+    func setListIcon(_ list: ListRef, icon: String?) {
+        writeList(.setListIcon(id: list.listId, icon: icon, workspace: selector(list.docId)))
+    }
+
+    /// Archive a list (`list archive`): it leaves Home, its items
+    /// kept. `done` gets why not, or nil once it is archived.
+    func archiveList(_ list: ListRef, done: @escaping (String?) -> Void) {
+        writeList(.archiveList(id: list.listId, workspace: selector(list.docId)), done: done)
+    }
+
+    /// A list edit, then Home's list rows reread; item rows elsewhere
+    /// name their list, so the lenses are reread too.
+    private func writeList(_ request: Request, done: ((String?) -> Void)? = nil) {
+        client.send(request) { [weak self] result in
+            guard let self else { return }
+            let failure: String
+            switch result {
+            case .success(.output):
+                refreshListRows()
+                refreshLenses()
+                done?(nil)
+                return
+            case .success(let other):
+                failure = "could not update list: \(String(describing: other))"
+            case .failure(let error):
+                failure = "could not update list: \(engineErrorMessage(error))"
+            }
+            lastError = failure
+            done?(failure)
+        }
+    }
+
     private func write(_ request: Request, to ref: ItemRef) {
         client.send(request) { [weak self] result in
             guard let self else { return }
