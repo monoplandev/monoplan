@@ -302,9 +302,10 @@ views with iOS later, which is its own piece of work.
      app target (`TrayMenu.swift`: `TodayMenu`, `StarredMenu`,
      `MenuLine`, and `SyncState.line` / `offlineNotice`), tested by a
      second test target, `MonoplanMacTests`, which links `MonoplanCore`.
-   - Window (`MainWindow.swift`): the session line, a workspace picker
-     when there is more than one, Inbox / Calendar / the active lists
-     with their open counts, the selected list's open items with a
+   - Window (`MainWindow.swift`): the session line, a sidebar with
+     one foldable group per open workspace (stacked as in the web nav
+     since 2026-11-14, replacing the workspace picker), each with
+     Inbox / Calendar / the active lists with their open counts, the selected list's open items with a
      tick (`set_done`) and an add field (`add_item`). One snapshot read
      on `changed`, on a new engine and after each write; a read in
      flight when the selection moves is dropped. A tray row opens the

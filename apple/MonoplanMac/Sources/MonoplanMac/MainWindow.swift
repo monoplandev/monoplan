@@ -1,10 +1,11 @@
 // The window: native SwiftUI over the engine's typed calls
 // (spec/swift-bindings-plan.md "The macOS window"), replacing the
 // webview. Deliberately a debug screen for now: a session line (who,
-// which server, sync), a workspace picker, the workspace's lists, and
-// the open items of the selected list with a tick and a field to add
-// one. No board, no drag and drop, no item editor; those come from
-// sharing views with iOS.
+// which server, sync), a sidebar with one group per open workspace
+// stacked as on the web (Personal first, each a collapsible heading over
+// its Inbox, Calendar and lists), and the open items of the selected
+// list with a tick and a field to add one. No board, no drag and drop,
+// no item editor; those come from sharing views with iOS.
 //
 // It holds no doc and no state of its own beyond the selection: every
 // read is a typed call, made again whenever the engine says a doc
@@ -92,15 +93,46 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     }
 }
 
+/// One workspace's group in the sidebar: its heading and its lists.
+struct NavSection: Identifiable {
+    let workspace: WorkspaceInfo
+    /// Every list of the workspace, archived ones included.
+    let lists: [ListInfo]
+
+    var id: String { workspace.docId }
+
+    /// What a typed call's `workspace` takes: Home is nil, the
+    /// engine's default.
+    var target: String? { workspace.home ? nil : workspace.docId }
+
+    /// The lists shown under Inbox and Calendar: active ones, in the
+    /// doc's order, without the reserved ids (which have no `ListMeta`
+    /// row of their own).
+    var userLists: [ListInfo] {
+        lists.filter {
+            $0.archivedAt == nil && $0.id != MainWindowModel.inbox && $0.id != MainWindowModel.events
+        }
+    }
+}
+
+/// A sidebar row: a list in a workspace (nil being Home).
+struct NavTarget: Hashable {
+    let workspace: String?
+    let list: String
+}
+
 /// What the window shows. Main queue throughout; the reads run on the
 /// engine's call queue and come back here.
 final class MainWindowModel: ObservableObject {
     @Published private(set) var state: EngineState
     @Published private(set) var account: AccountInfo?
-    @Published private(set) var workspaces: [WorkspaceInfo] = []
+    /// The sidebar: every open workspace with its lists, Home first.
+    @Published private(set) var sections: [NavSection] = []
+    /// The doc ids of the workspaces whose group is folded. Local to
+    /// this Mac, kept across launches.
+    @Published private(set) var collapsed: Set<String>
     /// The selected workspace's doc id; nil is Home.
     @Published private(set) var workspace: String?
-    @Published private(set) var lists: [ListInfo] = []
     /// The selected list's id.
     @Published private(set) var list = MainWindowModel.inbox
     @Published private(set) var items: [Item] = []
@@ -114,13 +146,19 @@ final class MainWindowModel: ObservableObject {
     /// Counts selections, so a read that was in flight when the
     /// selection moved is dropped rather than shown under the new one.
     private var generation = 0
+    /// Set by a selection, taken by the read that follows it: unfold
+    /// the group the selection is in. Only a selection does this, so a
+    /// group folded by hand while on one of its lists stays folded.
+    private var reveal = false
 
+    private static let collapsedKey = "MonoplanNavCollapsed"
     static let inbox = "inbox"
     static let events = "events"
 
     init(engine: EngineController) {
         self.engine = engine
         state = engine.state
+        collapsed = Set(UserDefaults.standard.stringArray(forKey: Self.collapsedKey) ?? [])
     }
 
     /// The first line of the window: who is signed in and where, then
@@ -133,19 +171,14 @@ final class MainWindowModel: ObservableObject {
         }
     }
 
-    /// The lists the sidebar shows under Inbox and Calendar: active
-    /// ones, in the doc's order, without the reserved ids (which have
-    /// no `ListMeta` row of their own).
-    var userLists: [ListInfo] {
-        lists.filter { $0.archivedAt == nil && $0.id != Self.inbox && $0.id != Self.events }
-    }
-
     /// The selected list's name, for the items' heading.
     var listTitle: String {
         switch list {
         case Self.inbox: return String(localized: "Inbox")
         case Self.events: return String(localized: "Calendar")
-        default: return lists.first { $0.id == list }?.name ?? list
+        default:
+            let lists = sections.first { $0.target == workspace }?.lists ?? []
+            return lists.first { $0.id == list }?.name ?? list
         }
     }
 
@@ -168,6 +201,7 @@ final class MainWindowModel: ObservableObject {
     }
 
     func select(workspace: String?, list: String) {
+        reveal = true
         if workspace == self.workspace, list == self.list {
             reload()
             return
@@ -180,19 +214,23 @@ final class MainWindowModel: ObservableObject {
         reload()
     }
 
+    /// Fold or unfold a workspace's group.
+    func setCollapsed(_ docId: String, _ folded: Bool) {
+        if folded { collapsed.insert(docId) } else { collapsed.remove(docId) }
+        UserDefaults.standard.set(collapsed.sorted(), forKey: Self.collapsedKey)
+    }
+
     private func clear() {
         account = nil
-        workspaces = []
-        lists = []
+        sections = []
         items = []
         generation += 1
     }
 
     private struct Snapshot {
         var account: AccountInfo?
-        var workspaces: [WorkspaceInfo]
+        var sections: [NavSection]
         var workspace: String?
-        var lists: [ListInfo]
         var list: String
         var items: [Item]
     }
@@ -212,24 +250,35 @@ final class MainWindowModel: ObservableObject {
             let found = workspaces.first { $0.docId == workspace }
             let selected = found.map { $0.home ? nil : $0.docId } ?? nil
             let gone = workspace != nil && found == nil
-            let lists = try engine.lists(workspace: selected, filter: .all)
+            let sections = try workspaces.map { workspace in
+                NavSection(
+                    workspace: workspace,
+                    lists: try engine.lists(workspace: workspace.home ? nil : workspace.docId, filter: .all))
+            }
+            let lists = sections.first { $0.target == selected }?.lists ?? []
             let known = list == Self.inbox || list == Self.events || lists.contains { $0.id == list }
             let shown = !gone && known ? list : Self.inbox
             return Snapshot(
-                account: try engine.account(), workspaces: workspaces, workspace: selected,
-                lists: lists, list: shown,
+                account: try engine.account(), sections: sections, workspace: selected,
+                list: shown,
                 items: try engine.items(workspace: selected, list: shown, includeDone: false))
         }) { [weak self] result in
             guard let self, generation == self.generation else { return }
             switch result {
             case .success(let snapshot):
                 self.account = snapshot.account
-                self.workspaces = snapshot.workspaces
+                self.sections = snapshot.sections
                 self.workspace = snapshot.workspace
-                self.lists = snapshot.lists
                 self.list = snapshot.list
                 self.items = snapshot.items
                 self.error = nil
+                if self.reveal {
+                    self.reveal = false
+                    if let shown = snapshot.sections.first(where: { $0.target == snapshot.workspace }),
+                       self.collapsed.contains(shown.id) {
+                        self.setCollapsed(shown.id, false)
+                    }
+                }
             case .failure(EngineError.Stopped):
                 // The engine went under the read; its end clears the
                 // window and the next one fills it.
@@ -311,46 +360,43 @@ struct MainWindowView: View {
         }
     }
 
+    /// One group per open workspace, stacked, Home ("Personal") first:
+    /// a heading that folds the group, then its Inbox, Calendar and
+    /// lists. The selection is a list in a workspace, so picking a row
+    /// in another group moves both at once.
     private var sidebar: some View {
-        VStack(spacing: 0) {
-            // One workspace needs no picker.
-            if model.workspaces.count > 1 {
-                Picker("Workspace", selection: Binding(
-                    get: { model.workspace },
-                    set: { model.select(workspace: $0) }
+        List(selection: Binding<NavTarget?>(
+            get: { NavTarget(workspace: model.workspace, list: model.list) },
+            set: { if let target = $0 { model.select(workspace: target.workspace, list: target.list) } }
+        )) {
+            ForEach(model.sections) { section in
+                Section(isExpanded: Binding(
+                    get: { !model.collapsed.contains(section.id) },
+                    set: { model.setCollapsed(section.id, !$0) }
                 )) {
-                    ForEach(model.workspaces, id: \.docId) { workspace in
-                        // Home is the nil selection: the engine's default.
-                        if workspace.home {
-                            Text("Personal").tag(String?.none)
-                        } else {
-                            Text(verbatim: workspace.name ?? workspace.docId).tag(String?.some(workspace.docId))
+                    Text("Inbox").tag(NavTarget(workspace: section.target, list: MainWindowModel.inbox))
+                    Text("Calendar").tag(NavTarget(workspace: section.target, list: MainWindowModel.events))
+                    ForEach(section.userLists) { list in
+                        HStack {
+                            Text(verbatim: [list.icon, list.name].compactMap { $0 }.joined(separator: " "))
+                                .lineLimit(1)
+                            Spacer()
+                            if list.open > 0 {
+                                Text(verbatim: "\(list.open)").foregroundStyle(.secondary).monospacedDigit()
+                            }
                         }
+                        .tag(NavTarget(workspace: section.target, list: list.id))
+                    }
+                } header: {
+                    if section.workspace.home {
+                        Text("Personal")
+                    } else {
+                        Text(verbatim: section.workspace.name ?? section.workspace.docId)
                     }
                 }
-                .labelsHidden()
-                .padding(8)
             }
-            List(selection: Binding<String?>(
-                get: { model.list },
-                set: { if let list = $0 { model.select(list: list) } }
-            )) {
-                Text("Inbox").tag(MainWindowModel.inbox)
-                Text("Calendar").tag(MainWindowModel.events)
-                ForEach(model.userLists) { list in
-                    HStack {
-                        Text(verbatim: [list.icon, list.name].compactMap { $0 }.joined(separator: " "))
-                            .lineLimit(1)
-                        Spacer()
-                        if list.open > 0 {
-                            Text(verbatim: "\(list.open)").foregroundStyle(.secondary).monospacedDigit()
-                        }
-                    }
-                    .tag(list.id)
-                }
-            }
-            .listStyle(.sidebar)
         }
+        .listStyle(.sidebar)
     }
 
     private var items: some View {

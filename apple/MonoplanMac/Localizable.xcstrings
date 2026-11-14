@@ -1081,16 +1081,6 @@
         }
       }
     },
-    "Workspace": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Espacio de trabajo"
-          }
-        }
-      }
-    },
     "Write these 12 words down and keep them somewhere safe. They are shown only once and are the only way to reset a forgotten password.": {
       "localizations": {
         "es": {

@@ -122,9 +122,11 @@ which links MonoplanCore and so needs `build:apple` run first.
 [`spec/swift-bindings-plan.md`](../spec/swift-bindings-plan.md) "The
 macOS window": native SwiftUI over the typed calls, and for now
 deliberately a debug screen. A session line (email, server, sync
-status, or why the engine is not running), a workspace picker when
-more than one is open, a sidebar of Inbox, Calendar and the active
-lists with their open counts (`Engine.lists`), and the selected list's
+status, or why the engine is not running), a sidebar with one group per
+open workspace stacked as in the web nav (Personal first; each a
+heading that folds its group, the fold kept in `UserDefaults`, over
+Inbox, Calendar and the active lists with their open counts,
+`Engine.lists` once per workspace), and the selected list's
 open items (`Engine.items`) with a tick (`Engine.setDone`) and a field
 that adds one (`Engine.addItem`). Everything shown is read in one turn
 of the call queue, again on every change the engine reports, on a new
