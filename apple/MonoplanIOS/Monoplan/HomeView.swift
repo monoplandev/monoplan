@@ -1,6 +1,6 @@
 // Home: the root page and the app's one navigation stack; there is
 // no tab bar. First the pages that are not one list: Starred, Agenda,
-// Map and Done (Starred with its count). Then a section per open workspace (Personal first, as
+// Map, Done and Bin (Starred with its count). Then a section per open workspace (Personal first, as
 // `Engine.session` orders them), each with its Inbox (and how many
 // Open items it holds) and then its
 // active lists in the doc's order, each led by its emoji (a folder
@@ -117,6 +117,7 @@ enum HomePage: Hashable {
     case agenda
     case map
     case done
+    case bin
     case settings
 }
 
@@ -186,6 +187,13 @@ struct HomeView: View {
                     }
                     NavigationLink(value: HomePage.done) {
                         Label("Done", systemImage: "checkmark.circle")
+                    }
+                    // Only while something is binned; search still
+                    // reaches the empty page.
+                    if !model.binned.isEmpty {
+                        NavigationLink(value: HomePage.bin) {
+                            Label("Bin", systemImage: "trash")
+                        }
                     }
                 }
                 if !today.isEmpty {
@@ -263,6 +271,7 @@ struct HomeView: View {
                         .onAppear { mapShown = true }
                         .onDisappear { mapShown = false }
                 case .done: DoneView()
+                case .bin: BinView()
                 case .settings: SettingsView()
                 }
             }

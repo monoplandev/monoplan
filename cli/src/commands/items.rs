@@ -1193,8 +1193,10 @@ mod tests {
         assert_eq!(frame(Some("-"), None), (None, None));
     }
 
-    /// `Request.setBinned` and `Request.deleteBinned` in MonoplanMacKit:
-    /// bin, restore, then bin again and hard-delete from the bin.
+    /// `Request.setBinned`, `Request.deleteBinned`, `Request.bin` and
+    /// `Request.emptyBin` in MonoplanMacKit: bin, restore, then bin
+    /// again and hard-delete from the bin; then list the bin and empty
+    /// it.
     #[test]
     fn bin_frames_from_the_apps_decode_and_apply() {
         use crate::commands::{DocCmd, run_doc};
@@ -1211,6 +1213,32 @@ mod tests {
         run(serde_json::json!({"ItemBin": {"item_id": id}}));
         run(serde_json::json!({"Bin": {"sub": {"Rm": {"item_id": id}}, "json": false}}));
         assert!(doc.get_item(&id).is_none());
+
+        let read = |frame: serde_json::Value| {
+            let cmd: DocCmd = serde_json::from_value(frame).unwrap();
+            let mut out = Vec::new();
+            run_doc(cmd, &doc, &[&doc], &Lens::home(&doc), &mut out).unwrap();
+            String::from_utf8(out).unwrap()
+        };
+        let a = doc.add_item(LIST_INBOX, "a").unwrap();
+        let b = doc.add_item(LIST_INBOX, "b").unwrap();
+        run(serde_json::json!({"ItemBin": {"item_id": a}}));
+        run(serde_json::json!({"ItemBin": {"item_id": b}}));
+        let shown: serde_json::Value =
+            serde_json::from_str(&read(serde_json::json!({"Bin": {"sub": "Show", "json": true}})))
+                .unwrap();
+        let rows = shown.as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        for row in rows {
+            assert!(row["id"].is_string() && row["text"].is_string());
+            assert_eq!(row["list_id"], LIST_INBOX);
+            assert!(row["binned_at"].as_i64().unwrap() > 0);
+        }
+        assert_eq!(
+            read(serde_json::json!({"Bin": {"sub": "Empty", "json": false}})).trim(),
+            "removed 2"
+        );
+        assert!(doc.binned_items().is_empty());
     }
 
     /// `Request.duplicateItem` in MonoplanMacKit: the reply is the

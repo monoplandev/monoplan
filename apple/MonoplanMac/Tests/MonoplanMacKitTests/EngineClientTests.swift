@@ -83,6 +83,18 @@ final class EngineClientTests: XCTestCase {
             ])])])])
         )
         XCTAssertEqual(
+            Request.bin(workspace: "d1").value,
+            .map(["Doc": .map(["workspace": .string("d1"), "cmd": .map(["Bin": .map([
+                "sub": .string("Show"), "json": .bool(true),
+            ])])])])
+        )
+        XCTAssertEqual(
+            Request.emptyBin().value,
+            .map(["Doc": .map(["cmd": .map(["Bin": .map([
+                "sub": .string("Empty"), "json": .bool(false),
+            ])])])])
+        )
+        XCTAssertEqual(
             Request.addItem(text: "Call the bank", list: "inbox", workspace: "d1").value,
             .map(["Doc": .map(["workspace": .string("d1"), "cmd": .map(["Add": .map([
                 "list": .string("inbox"), "texts": .array([.string("Call the bank")]),

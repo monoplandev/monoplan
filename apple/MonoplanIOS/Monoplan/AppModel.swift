@@ -10,6 +10,15 @@ import MonoplanCore
 import MonoplanMacKit
 import WidgetKit
 
+/// One binned item and the workspace it is in.
+struct BinnedItem: Equatable, Identifiable {
+    let docId: String
+    let row: BinnedRow
+
+    var id: String { "\(docId)/\(row.id)" }
+    var ref: ItemRef { ItemRef(docId: docId, itemId: row.id, title: row.text) }
+}
+
 final class AppModel: ObservableObject {
     /// Connected with the engine's current sync status, or why not yet.
     @Published private(set) var clientState: EngineClient.State = .connecting("starting")
@@ -55,6 +64,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var doneTotal: Int?
     private var doneLimit = AppModel.donePage
     static let donePage = 50
+    /// The bin (`bin show --json` per open workspace), newest binned
+    /// first. Fetched with the other lenses: Home shows its Bin row
+    /// only while there is something in it.
+    @Published private(set) var binned: [BinnedItem] = []
+    @Published private(set) var binError: String?
+    /// The bin has been read at least once.
+    @Published private(set) var binLoaded = false
+    /// Counts bin fetches, so replies to a superseded round are dropped.
+    private var binRound = 0
     /// List id → display name, for the rows of lenses that span lists.
     @Published private(set) var listNames = Lists.names(from: [])
     /// Each open workspace's lists (`list ls --json --all` per doc),
@@ -150,6 +168,7 @@ final class AppModel: ObservableObject {
         refreshStarred()
         refreshDone()
         refreshSearch()
+        refreshBin()
     }
 
     /// Search for what the bar's field holds, on every keystroke: the
@@ -295,6 +314,83 @@ final class AppModel: ObservableObject {
     func deleteBinned(_ ref: ItemRef) {
         itemDetails[ref.key] = nil
         write(.deleteBinned(id: ref.itemId, workspace: selector(ref.docId)), to: ref)
+    }
+
+    /// Hard-delete everything in the bin, a workspace at a time
+    /// (`bin empty`), then reread as `setDone` does. Only the
+    /// workspaces with something binned are asked.
+    func emptyBin() {
+        let docs = Set(binned.map(\.docId))
+        for docId in docs {
+            for item in binned where item.docId == docId {
+                itemDetails[item.ref.key] = nil
+            }
+            client.send(.emptyBin(workspace: selector(docId))) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .success(.output):
+                    refreshLenses()
+                case .success(let other):
+                    lastError = "could not empty the bin: \(String(describing: other))"
+                case .failure(let error):
+                    lastError = "could not empty the bin: \(engineErrorMessage(error))"
+                }
+            }
+        }
+    }
+
+    /// `bin show --json` for each open workspace, merged newest binned
+    /// first. A workspace that fails keeps the others' rows and leaves
+    /// its error.
+    func refreshBin() {
+        guard let session else { return }
+        binRound += 1
+        let round = binRound
+        var rows: [BinnedItem] = []
+        var failure: String?
+        var waiting = session.docs.count
+        if waiting == 0 {
+            binned = []
+            binLoaded = true
+            return
+        }
+        for doc in session.docs {
+            let docId = doc.docId
+            client.send(.bin(workspace: selector(docId))) { [weak self] result in
+                guard let self, round == binRound else { return }
+                switch result {
+                case .success(.output(let stdout, _)):
+                    do {
+                        rows += try Bin.parse(stdout).map { BinnedItem(docId: docId, row: $0) }
+                    } catch {
+                        failure = "could not read the bin: \(error.localizedDescription)"
+                    }
+                case .success(let other):
+                    failure = "unexpected reply: \(String(describing: other))"
+                case .failure(let error):
+                    // No engine is not an error (as in `fetch`): the
+                    // next one's refresh replaces the rows.
+                    if case ClientError.notConnected = error { return }
+                    if case ClientError.engineStopped = error { return }
+                    if case EngineError.Stopped = error { return }
+                    failure = engineErrorMessage(error)
+                }
+                waiting -= 1
+                if waiting == 0 {
+                    binned = rows.sorted {
+                        ($0.row.binnedAt, $0.id) > ($1.row.binnedAt, $1.id)
+                    }
+                    binError = failure
+                    binLoaded = true
+                }
+            }
+        }
+    }
+
+    /// The name of a list in any open workspace, for a row that names
+    /// the list its item is in.
+    func listName(_ listId: String, inDoc docId: String) -> String? {
+        Lists.names(from: listsByDoc[docId] ?? [])[listId]
     }
 
     /// Set or clear (nil) an item's planned date, with what to do to
@@ -545,6 +641,9 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.async {
                 self?.session = result
                 self?.refreshLists()
+                // The first read waits for the session: it names
+                // the docs to ask.
+                if let self, !self.binLoaded { self.refreshBin() }
             }
         }
     }

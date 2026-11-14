@@ -41,6 +41,7 @@ struct SearchView: View {
             BuiltIn(title: "Calendar", systemImage: "calendar", pick: .page(.agenda)),
             BuiltIn(title: "Map", systemImage: "map", pick: .page(.map)),
             BuiltIn(title: "Done", systemImage: "checkmark.circle", pick: .page(.done)),
+            BuiltIn(title: "Bin", systemImage: "trash", pick: .page(.bin)),
         ]
         if let home = model.session?.primaryDocId {
             all.append(BuiltIn(

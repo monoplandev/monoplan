@@ -408,7 +408,7 @@ group as a section: Today, Unscheduled events, then each non-empty
 day, with the row's time, its workspace under the text when it is not
 Personal's, and the duration or overdue / due-today tone; read-only
 markup, nothing tappable yet. **Home** (`HomeView.swift`,
-2026-11-13) is the root and the index: first a section with Starred, Agenda, Map and Done, then a section per open workspace (`Engine.session`'s
+2026-11-13) is the root and the index: first a section with Starred, Agenda, Map, Done and Bin, then a section per open workspace (`Engine.session`'s
 docs, Personal first), each with its Inbox and then its active lists
 (`Request.lists(workspace:)`, i.e. `list ls --json --all -w <doc id>`,
 one fetch per doc, refetched with the session on every `Changed`;
@@ -433,7 +433,17 @@ not the history: 50 rows to start, doubled each time the end of the
 list scrolls into sight (`AppModel.loadMoreDone`), and a `Changed`
 refetches only the window reached; read-only. The title's count is
 the whole history's, read on its own (`Request.doneCount`, i.e.
-`done --count`). **Settings**
+`done --count`). **Bin** (`BinView.swift`, 2026-11-14) is every open
+workspace's binned items, newest binned first (`Request.bin(workspace:)`,
+i.e. `bin show --json`, one fetch per doc, merged in `AppModel.refreshBin`;
+fetched with the other lenses, and Home shows its Bin row only while
+something is binned; search reaches the page either way),
+each row with its list, its workspace when not Personal's, and how long
+ago it was binned. A row opens the item's sheet (Restore, Delete); a
+swipe or a long press restores (`Request.setBinned`) or deletes
+(`Request.deleteBinned`) from the list, and "Empty" deletes the lot
+(`Request.emptyBin`, i.e. `bin empty`, per workspace with something
+binned). Both deletes ask first. **Settings**
 (`SettingsView.swift`, 2026-11-13) holds what a person acts on: the
 account (email, server, sign in / sign out), sync (the status line,
 last synced) and the last error. **Debug**

@@ -210,6 +210,14 @@ public enum Request {
     /// `monoplan bin rm <id>`: hard-delete a binned item. The engine
     /// refuses one that is not in the bin. `workspace` as for `items`.
     case deleteBinned(id: String, workspace: String? = nil)
+    /// `monoplan bin show --json`: one workspace's binned items, in no
+    /// particular order (`Bin.parse`). `workspace` as for `items`.
+    case bin(workspace: String? = nil)
+    /// `monoplan bin empty`: hard-delete every binned item of one
+    /// workspace; the reply is `removed <n>`.
+    /// `workspace` as for `items`. Both frames are pinned on the Rust
+    /// side by `bin_frames_from_the_apps_decode_and_apply`.
+    case emptyBin(workspace: String? = nil)
     /// `monoplan places [query] -n <limit> --json`: the account's known
     /// places, most recently used first (`KnownPlace.parse`). Spans
     /// every open doc, so it takes no workspace.
@@ -326,6 +334,10 @@ public enum Request {
             return Self.doc(workspace, .map(["Bin": .map([
                 "sub": .map(["Rm": .map(["item_id": .string(id)])]), "json": .bool(false),
             ])]))
+        case .bin(let workspace):
+            return Self.doc(workspace, .map(["Bin": .map(["sub": .string("Show"), "json": .bool(true)])]))
+        case .emptyBin(let workspace):
+            return Self.doc(workspace, .map(["Bin": .map(["sub": .string("Empty"), "json": .bool(false)])]))
         case .places(let query, let limit):
             return Self.doc(nil, .map(["Places": .map([
                 "query": query.isEmpty ? .nil : .string(query),
