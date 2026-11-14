@@ -3,6 +3,7 @@
 // again from the General pane.
 
 import AppKit
+import SwiftUI
 import MonoplanMacKit
 
 extension AppearancePreference {
@@ -62,6 +63,17 @@ enum PaneColor {
         }
     }
 
+    /// A rule across the item's panel: the system separator in dark;
+    /// in light, the panes' divider (lighter than `Divider()`'s).
+    static let panelRule = NSColor(name: nil) { appearance in
+        var resolved = NSColor.separatorColor
+        appearance.performAsCurrentDrawingAppearance {
+            resolved = NSColor.separatorColor.usingColorSpace(.sRGB) ?? .separatorColor
+        }
+        guard appearance.bestMatch(from: [.aqua, .darkAqua]) != .darkAqua else { return resolved }
+        return resolved.withAlphaComponent(resolved.alphaComponent * 0.5)
+    }
+
     /// The hairline between two item rows, just visible: the web's
     /// `--row-divider` (`js/web/src/styles.css`).
     static let rowDivider = dynamic(dark: 0x2a, light: grey(0xf5))
@@ -78,5 +90,13 @@ enum PaneColor {
             guard appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua else { return light }
             return grey(dark)
         }
+    }
+}
+
+
+/// A horizontal rule in the item's panel, `PaneColor.panelRule`.
+struct PanelRule: View {
+    var body: some View {
+        Rectangle().fill(Color(nsColor: PaneColor.panelRule)).frame(height: 1)
     }
 }

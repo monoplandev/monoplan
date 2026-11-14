@@ -32,14 +32,12 @@ private extension NSToolbarItem.Identifier {
     static let search = NSToolbarItem.Identifier("MonoplanSearch")
     static let newItem = NSToolbarItem.Identifier("MonoplanNewItem")
     /// Over the sidebar, at its trailing edge, while there is no
-    /// account.
+    /// account. Nothing takes its place once there is one: the
+    /// account lives in Settings, New Workspace… in the app menu.
     static let signIn = NSToolbarItem.Identifier("MonoplanSignIn")
-    /// In Sign In's place once there is one: the account's menu, as
-    /// the avatar on the iOS Home page.
-    static let account = NSToolbarItem.Identifier("MonoplanAccount")
 }
 
-final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate, NSMenuDelegate {
+final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     private let model: MainWindowModel
     private let sidebarItem: NSSplitViewItem
     private let listItem: NSSplitViewItem
@@ -48,17 +46,11 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate, N
     /// Set while `sync` moves the panel itself, so the resize it
     /// causes is not read as the user folding the panel away.
     private var syncing = false
-    /// Whether the profile has an account: the bar leads with the
-    /// account's menu with one, with Sign In without. The window's
-    /// controller keeps it and calls `sync`.
+    /// Whether the profile has an account: without one the bar leads
+    /// with Sign In. The window's controller keeps it and calls `sync`.
     var signedIn = true
-    /// The account's email, once the engine has said; the menu's
-    /// heading.
-    var email: String?
     /// Sign In was clicked.
     var onSignIn: () -> Void = {}
-    /// The account menu's New Workspace… was picked.
-    var onNewWorkspace: () -> Void = {}
 
     static let sidebarWidth = (min: 160.0, initial: 200.0, max: 400.0)
     static let panelWidth = (min: 240.0, max: 520.0)
@@ -144,11 +136,10 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate, N
             panelItem.isCollapsed = !open
             syncing = false
         }
-        // The account's menu, or Sign In without an account, leads
-        // the bar, before the sidebar's separator, so it sits over the
-        // sidebar; the space before it pushes it to the sidebar's
-        // trailing edge.
-        let lead: [NSToolbarItem.Identifier] = [.flexibleSpace, signedIn ? .account : .signIn]
+        // Sign In, without an account, leads the bar, before the
+        // sidebar's separator, so it sits over the sidebar; the space
+        // before it pushes it to the sidebar's trailing edge.
+        let lead: [NSToolbarItem.Identifier] = signedIn ? [] : [.flexibleSpace, .signIn]
         let leading = toolbar.items.firstIndex { $0.itemIdentifier == .sidebarTrackingSeparator } ?? 0
         if toolbar.items.prefix(leading).map(\.itemIdentifier) != lead {
             for _ in 0..<leading { toolbar.removeItem(at: 0) }
@@ -231,7 +222,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate, N
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        Self.fixedItems + [.panelSeparator, .signIn, .account, .itemStatus, .itemStar, .itemMore]
+        Self.fixedItems + [.panelSeparator, .signIn, .itemStatus, .itemStar, .itemMore]
     }
 
     func toolbar(
@@ -240,18 +231,6 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate, N
     ) -> NSToolbarItem? {
         if identifier == .panelSeparator {
             return NSTrackingSeparatorToolbarItem(identifier: identifier, splitView: splitView, dividerIndex: 1)
-        }
-        if identifier == .account {
-            // The menu is filled as it opens (`menuNeedsUpdate`).
-            let item = NSMenuToolbarItem(itemIdentifier: identifier)
-            let label = String(localized: "Account")
-            item.image = NSImage(systemSymbolName: "person.crop.circle", accessibilityDescription: label)
-            item.label = label
-            item.toolTip = label
-            item.showsIndicator = false
-            item.menu.delegate = self
-            item.menu.autoenablesItems = false
-            return item
         }
         if identifier == .itemMore {
             let item = NSMenuToolbarItem(itemIdentifier: identifier)
@@ -314,22 +293,6 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate, N
 
     @objc private func signIn(_ sender: Any?) {
         onSignIn()
-    }
-
-    /// The account's menu, as on iOS: the email as its heading, then
-    /// New Workspace…, which needs a running engine.
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
-        if let email { menu.addItem(.sectionHeader(title: email)) }
-        let new = NSMenuItem(
-            title: String(localized: "New Workspace…"), action: #selector(newWorkspace(_:)), keyEquivalent: "")
-        new.target = self
-        if case .connected = model.state { new.isEnabled = true } else { new.isEnabled = false }
-        menu.addItem(new)
-    }
-
-    @objc private func newWorkspace(_ sender: Any?) {
-        onNewWorkspace()
     }
 
     @objc private func openSearch(_ sender: Any?) {}

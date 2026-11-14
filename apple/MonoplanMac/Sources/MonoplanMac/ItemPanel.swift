@@ -49,9 +49,9 @@ struct ItemPanel: View {
                                 .textSelection(.enabled)
                         }
                         fields(item)
-                        Divider()
+                        PanelRule()
                         notes(item)
-                        Divider()
+                        PanelRule()
                         activity(item)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

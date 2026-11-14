@@ -70,7 +70,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.setFrameAutosaveName("MonoplanWindow")
         super.init(window: window)
         window.delegate = self
-        split.onNewWorkspace = { [weak self] in self?.promptNewWorkspace() }
         split.restoreDividers()
         // The bar's title is the window's, drawn over the list: the
         // name of what is shown. It and the panel's toolbar items
@@ -113,18 +112,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         syncSignedIn()
     }
 
-    /// The toolbar's Sign In, there while there is no account, and
-    /// the account's menu in its place with one, headed by the email
-    /// the engine gives.
+    /// The toolbar's Sign In, there while there is no account.
     private func syncSignedIn() {
-        let signedIn = signedIn()
-        split.signedIn = signedIn
-        if !signedIn { split.email = nil }
+        split.signedIn = signedIn()
         split.sync()
-        guard signedIn else { return }
-        engine.calls?.run({ try $0.account() }) { [weak self] result in
-            if case .success(let account) = result { self?.split.email = account?.email }
-        }
     }
 
     /// A doc changed: read again what is shown.
@@ -846,9 +837,6 @@ struct MainWindowView: View {
                             .truncationMode(.tail)
                         Spacer()
                         if model.starredIds.contains(item.id) { starMark }
-                        if let when = item.when ?? item.deadline {
-                            Text(verbatim: when).foregroundStyle(.secondary).monospacedDigit().fixedSize()
-                        }
                     }
                     .itemRow()
                     .itemMenu(model, workspace: model.shown.workspace, id: item.id)
