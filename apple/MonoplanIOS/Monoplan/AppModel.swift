@@ -110,6 +110,8 @@ final class AppModel: ObservableObject {
     @Published var lastError: String?
     @Published var signingIn = false
     @Published var signInError: String?
+    @Published var deletingAccount = false
+    @Published var deleteAccountError: String?
 
     let location: ProfileLocation
     private let engineController: EngineController
@@ -843,6 +845,26 @@ final class AppModel: ObservableObject {
             hasAccount = location.hasAccount
             if let error { lastError = error.localizedDescription }
             if !hasAccount { Self.clearWidgetSnapshot() }
+        }
+    }
+
+    /// The delete sheet's submit. The password goes straight to Rust,
+    /// which re-verifies it with the server; a wrong one changes
+    /// nothing. On success the profile is wiped, as after Sign Out.
+    /// The completion says whether the account is gone (the sheet then
+    /// closes itself); `deleteAccountError` says why not.
+    func deleteAccount(password: String, completion: @escaping (Bool) -> Void) {
+        deletingAccount = true
+        deleteAccountError = nil
+        busy = "Deleting account"
+        engineController.deleteAccount(password: password) { [weak self] error in
+            guard let self else { return }
+            deletingAccount = false
+            busy = nil
+            hasAccount = location.hasAccount
+            deleteAccountError = error?.localizedDescription
+            if !hasAccount { Self.clearWidgetSnapshot() }
+            completion(error == nil)
         }
     }
 
