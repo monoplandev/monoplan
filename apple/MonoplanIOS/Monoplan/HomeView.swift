@@ -67,6 +67,27 @@ struct SharedIcon: View {
     }
 }
 
+/// The web's place pin (`js/web/src/icons/map-pin.svg`, in the asset
+/// catalog as `MapPin`), wherever an item's place is named: `size` is
+/// its side beside body text (a field's icon) and grows with Dynamic
+/// Type; rows that name the place in caption text pass a smaller one.
+/// Takes the foreground style around it.
+struct PinIcon: View {
+    @ScaledMetric private var side: CGFloat
+
+    init(size: CGFloat = 18) {
+        _side = ScaledMetric(wrappedValue: size, relativeTo: .body)
+    }
+
+    var body: some View {
+        Image("MapPin")
+            .resizable()
+            .scaledToFit()
+            .frame(width: side, height: side)
+            .accessibilityHidden(true)
+    }
+}
+
 /// What marks a list as a shared workspace's wherever it is named away
 /// from Home's sections (the item page's list field, the list editor's
 /// rows): the shared glyph and the workspace's name, muted, after the list's own name. Draws nothing for

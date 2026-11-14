@@ -1,4 +1,5 @@
-// The Map page, pushed from Home: the Open items that carry a place
+// The Map page, pushed from Home, with no title or bar surface over
+// the map, only the back button: the Open items that carry a place
 // with coordinates (`places --items`, every workspace, events
 // included), one marker per spot, over a sheet that stays up for as
 // long as the page does. The sheet lists the items nearest first: from
@@ -177,9 +178,15 @@ struct PlacesMapView: View {
             // The sheet covers the foot of the map: keep what the
             // camera frames, and the map's own controls, above it.
             .safeAreaPadding(.bottom, detent == Self.strip ? 120 : geo.size.height / 2)
+            // The map runs to the top of the screen, under the back
+            // button; its controls still keep to the safe area.
+            .ignoresSafeArea()
         }
-        .navigationTitle("Map")
+        // No title and no bar surface: the map says what the page is.
+        // The back button stays.
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .navigationBar)
         .sheet(isPresented: $sheetUp) { sheet }
         .onAppear {
             model.refreshPlaced()
@@ -215,7 +222,7 @@ struct PlacesMapView: View {
         List {
             if let spot, let picked = spots.first(where: { $0.id == spot }) {
                 HStack {
-                    Label(picked.label, systemImage: "mappin")
+                    Label { Text(picked.label) } icon: { PinIcon(size: 15) }
                         .lineLimit(1)
                     Spacer()
                     Button("Show All") { self.spot = nil }
@@ -307,8 +314,7 @@ private struct PlacedRowView: View {
             Text(pin.item.text)
                 .lineLimit(2)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Image(systemName: "map")
-                    .accessibilityHidden(true)
+                PinIcon(size: 11)
                 Text(note).lineLimit(1)
             }
             .font(.caption)

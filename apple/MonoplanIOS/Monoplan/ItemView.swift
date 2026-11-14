@@ -368,9 +368,9 @@ struct ItemView: View {
             // map card stays under it.
             HStack(spacing: 8) {
                 if let place = item.place {
-                    FieldRow("map", text: place.label, note: place.address)
+                    FieldRow(text: place.label, note: place.address) { PinIcon() }
                 } else {
-                    FieldRow("map", text: "Place", empty: true)
+                    FieldRow(text: "Place", empty: true) { PinIcon() }
                 }
                 if item.place != nil {
                     Spacer(minLength: 8)

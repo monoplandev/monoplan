@@ -89,8 +89,7 @@ struct AgendaRowView: View {
                         if let place = row.place {
                             // The item page's place glyph, then the label.
                             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                                Image(systemName: "map")
-                                    .accessibilityHidden(true)
+                                PinIcon(size: 11)
                                 Text(place.label).lineLimit(1)
                             }
                             .font(.caption)

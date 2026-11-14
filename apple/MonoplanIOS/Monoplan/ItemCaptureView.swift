@@ -149,7 +149,7 @@ struct ItemCaptureView: View {
                     // for a title.
                     fieldRow("calendar", "Date", what: "date", opens: .date)
                     Divider()
-                    fieldRow("map", "Place", what: "place", opens: .place)
+                    fieldRow("Place", what: "place", opens: .place) { PinIcon() }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -167,7 +167,13 @@ struct ItemCaptureView: View {
     }
 
     private func fieldRow(_ systemImage: String, _ name: String, what: String, opens editor: ItemView.Editor) -> some View {
-        FieldRow(systemImage, text: name, empty: true)
+        fieldRow(name, what: what, opens: editor) { Image(systemName: systemImage) }
+    }
+
+    private func fieldRow<Icon: View>(
+        _ name: String, what: String, opens editor: ItemView.Editor, @ViewBuilder icon: () -> Icon
+    ) -> some View {
+        FieldRow(text: name, empty: true, icon: icon)
             .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
             .addsOnTap(!trimmed.isEmpty, what: what) { settle(.stay(editor)) }
     }

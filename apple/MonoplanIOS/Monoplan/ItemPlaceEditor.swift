@@ -30,7 +30,7 @@ struct ItemPlaceEditor: View {
             List {
                 if typed.isEmpty, let place = item.place {
                     Section("Current") {
-                        PlaceRow(title: place.label, subtitle: place.address, systemImage: "map")
+                        PlaceRow(title: place.label, subtitle: place.address)
                         Button("Clear place", role: .destructive) {
                             model.setPlace(ref, place: nil)
                             done()
@@ -66,7 +66,7 @@ struct ItemPlaceEditor: View {
                                     done()
                                 }
                             } label: {
-                                PlaceRow(title: result.title, subtitle: result.subtitle, systemImage: "mappin")
+                                PlaceRow(title: result.title, subtitle: result.subtitle)
                             }
                         }
                     }
@@ -133,13 +133,16 @@ struct ItemPlaceEditor: View {
 private struct PlaceRow: View {
     let title: String
     let subtitle: String?
-    let systemImage: String
+    /// The row's symbol; nil is a place, which has the web's pin.
+    var systemImage: String? = nil
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Image(systemName: systemImage)
-                .foregroundStyle(.secondary)
-                .frame(width: 24)
+            Group {
+                if let systemImage { Image(systemName: systemImage) } else { PinIcon() }
+            }
+            .foregroundStyle(.secondary)
+            .frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                 if let subtitle, !subtitle.isEmpty {
