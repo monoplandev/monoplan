@@ -43,6 +43,12 @@ tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 http = "1"
 futures-util = "0.3"
 libc = "0.2"
+# Only for the derives on `api`'s row types; `monoplan-ffi` turns the
+# feature on (`spec/swift-bindings-plan.md`).
+uniffi = { version = "0.32", optional = true }
+
+[features]
+uniffi = ["dep:uniffi"]
 
 [dev-dependencies]
 monoplan-server = { path = "../server" }

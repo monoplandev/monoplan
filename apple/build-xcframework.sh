@@ -20,7 +20,6 @@ cd "$ROOT"
 CRATE=monoplan-ffi
 STATICLIB=libmonoplan_ffi.a
 DYLIB=libmonoplan_ffi.dylib
-NAMESPACE=monoplan_ffi            # uniffi namespace == crate lib name
 
 PKG_DIR="$ROOT/apple/MonoplanCore"
 XCFRAMEWORK="$PKG_DIR/MonoplanCoreFFI.xcframework"
@@ -86,13 +85,17 @@ cargo run -q -p "$CRATE" --bin uniffi-bindgen -- \
   --language swift \
   --out-dir "$GEN_TMP"
 
-# XCFramework header dirs want the modulemap named `module.modulemap`;
-# uniffi emits `<namespace>FFI.modulemap`. The module *name* inside is
-# unchanged, so the generated `.swift`'s `import ${NAMESPACE}FFI` still
-# resolves. All three slices share the one generated header.
+# Library mode emits one `<namespace>.swift`, `<namespace>FFI.h` and
+# `<namespace>FFI.modulemap` per crate that carries uniffi metadata:
+# `monoplan_ffi` (the exports) and `monoplan_cli` (the row types its
+# `api` module defines, spec/swift-bindings-plan.md). XCFramework header
+# dirs want one modulemap named `module.modulemap`, so the per-crate
+# ones are concatenated; the module *names* inside are unchanged, so
+# each generated `.swift`'s `import <namespace>FFI` still resolves. All
+# three slices share the generated headers.
 echo ">> assembling headers"
-cp "$GEN_TMP/${NAMESPACE}FFI.h" "$HEADERS_TMP/"
-cp "$GEN_TMP/${NAMESPACE}FFI.modulemap" "$HEADERS_TMP/module.modulemap"
+cp "$GEN_TMP"/*FFI.h "$HEADERS_TMP/"
+cat "$GEN_TMP"/*FFI.modulemap > "$HEADERS_TMP/module.modulemap"
 
 echo ">> creating xcframework"
 rm -rf "$XCFRAMEWORK"
@@ -105,8 +108,10 @@ xcodebuild -create-xcframework "${xcargs[@]}" -output "$XCFRAMEWORK"
 echo ">> installing generated bindings"
 rm -rf "$GEN_SWIFT_DIR"
 mkdir -p "$GEN_SWIFT_DIR"
-cp "$GEN_TMP/${NAMESPACE}.swift" "$GEN_SWIFT_DIR/"
+cp "$GEN_TMP"/*.swift "$GEN_SWIFT_DIR/"
 
 echo "done:"
 echo "  $XCFRAMEWORK"
-echo "  $GEN_SWIFT_DIR/${NAMESPACE}.swift"
+for f in "$GEN_SWIFT_DIR"/*.swift; do
+  echo "  $f"
+done

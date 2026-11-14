@@ -35,4 +35,59 @@ final class EngineTests: XCTestCase {
             XCTAssertEqual(error as? EngineError, .Busy)
         }
     }
+
+    /// The typed calls against a local-only engine (no server): an item
+    /// added, listed, ticked and counted, the observer told, and a
+    /// workspace nobody has refused. Records, enums and errors all cross
+    /// from the `monoplan_cli` crate's generated file.
+    func testTypedCallsRoundTripOnALocalOnlyEngine() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        try ensureLocalWorkspace(profileDir: dir)
+        let engine = try MonoplanCore.Engine.start(profileDir: dir)
+        defer { engine.shutdown() }
+        let calls = EngineCalls(engine)
+
+        let changed = expectation(description: "changed")
+        changed.assertForOverFulfill = false
+        let synced = expectation(description: "sync state on observe")
+        synced.assertForOverFulfill = false
+        let watcher = try engine.observe(
+            onChanged: { changed.fulfill() },
+            onSync: { state in
+                XCTAssertTrue(state.localOnly)
+                synced.fulfill()
+            })
+        defer { watcher.cancel() }
+
+        let id = try await calls.run {
+            try $0.addItem(workspace: nil, list: "inbox", text: "from swift", top: true)
+        }
+        var rows = try await calls.run { try $0.items(workspace: nil, list: "inbox", includeDone: false) }
+        XCTAssertEqual(rows.first?.id, id)
+        XCTAssertEqual(rows.first?.text, "from swift")
+        XCTAssertEqual(rows.first?.state, .backlog)
+        XCTAssertNil(rows.first?.doneAt)
+
+        try await calls.run { try $0.setDone(workspace: nil, id: id, done: true) }
+        rows = try await calls.run { try $0.items(workspace: nil, list: "inbox", includeDone: false) }
+        XCTAssertFalse(rows.contains { $0.id == id })
+        rows = try await calls.run { try $0.items(workspace: nil, list: "inbox", includeDone: true) }
+        let done = try XCTUnwrap(rows.first { $0.id == id })
+        XCTAssertEqual(done.state, .done)
+        XCTAssertNotNil(done.doneAt)
+
+        // A fresh workspace has nothing archived.
+        let archived = try await calls.run { try $0.lists(workspace: nil, filter: .archived) }
+        XCTAssertTrue(archived.isEmpty)
+
+        do {
+            _ = try await calls.run { try $0.items(workspace: "nope", list: "inbox", includeDone: false) }
+            XCTFail("an unknown workspace should throw")
+        } catch let error as EngineError {
+            guard case .Failed = error else { return XCTFail("unexpected: \(error)") }
+        }
+
+        await fulfillment(of: [changed, synced], timeout: 5)
+    }
 }

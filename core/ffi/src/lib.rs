@@ -9,7 +9,11 @@
 //! function calls (`spec/mac-window-plan.md`, phase 1), and the mirror
 //! for the window: `Engine::subscribe` (a snapshot, a leased peer id, and
 //! updates streamed to a `MirrorSink`) and `Engine::import` (the
-//! window's ops applied as local), phase 2 of the same plan. The app
+//! window's ops applied as local), phase 2 of the same plan. Replacing
+//! `request` / `watch` verb by verb (`spec/swift-bindings-plan.md`):
+//! typed calls on `Engine` (`lists`, `items`, `add_item`, `set_done`)
+//! returning the records `monoplan_cli::api` defines, and
+//! `Engine::observe`, the watch as an `EngineObserver`. The app
 //! is a client of its own engine here and never over the socket, which
 //! stays the CLI's. The earlier offline `MonoplanStore`
 //! prototype (`spec/swift-ffi-plan.md`) was removed on 2026-10-27: it
@@ -24,6 +28,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 uniffi::setup_scaffolding!();
+
+use monoplan_cli::api::{
+    self,
+    items::Item,
+    lists::{ListFilter, ListInfo},
+};
 
 // ---------------------------------------------------------------------
 // Engine: the daemon loop, embedded (spec/daemon-plan.md, amended
@@ -54,6 +64,18 @@ pub enum EngineError {
     Stopped,
     #[error("{message}")]
     Failed { message: String },
+}
+
+impl From<monoplan_cli::api::ApiError> for EngineError {
+    fn from(e: monoplan_cli::api::ApiError) -> Self {
+        use monoplan_cli::api::ApiError;
+        match e {
+            ApiError::Stopped => EngineError::Stopped,
+            ApiError::NoSuchWorkspace { message } | ApiError::Failed { message } => {
+                EngineError::Failed { message }
+            }
+        }
+    }
 }
 
 /// Where the embedded engine's `tracing` output goes: `engine.log` in
@@ -322,6 +344,51 @@ impl Drop for Watcher {
     fn drop(&mut self) {
         self.cancel();
     }
+}
+
+/// The engine's sync state as the app shows it (`ipc::SyncStatus`).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct SyncState {
+    /// Socket up and the doc open on it right now.
+    pub online: bool,
+    /// Unix millis of the last completed exchange with the server, on
+    /// any run of the engine.
+    pub last_synced_at: Option<i64>,
+    /// Why the engine is offline, for a human, when it knows.
+    pub offline_reason: Option<String>,
+    /// No account: the engine never connects, so there is nothing to
+    /// be offline from.
+    pub local_only: bool,
+    /// Local work the server has not confirmed yet.
+    pub pending: bool,
+}
+
+impl From<monoplan_cli::ipc::SyncStatus> for SyncState {
+    fn from(s: monoplan_cli::ipc::SyncStatus) -> Self {
+        SyncState {
+            online: s.online,
+            last_synced_at: s.last_synced_at,
+            offline_reason: s.offline_reason,
+            local_only: s.local_only,
+            pending: s.pending,
+        }
+    }
+}
+
+/// Where the engine's events go (`Engine::observe`): the app's object,
+/// called from a thread of the engine's, so the app hops to its own
+/// queue inside.
+#[uniffi::export(with_foreign)]
+pub trait EngineObserver: Send + Sync {
+    /// A doc changed: a call or command committed, or remote ops were
+    /// applied. Read again whatever is on screen.
+    fn changed(&self);
+    /// Online / offline flipped, pending work started or settled, or
+    /// `last_synced_at` moved. Called once with the current state as
+    /// `observe` starts.
+    fn sync(&self, state: SyncState);
+    /// The engine loop has ended. Nothing follows.
+    fn stopped(&self);
 }
 
 /// Where a mirror's updates go (`spec/mac-window-plan.md` "Engine to
@@ -603,6 +670,108 @@ impl Engine {
                 message: e.to_string(),
             })?;
         Ok(Arc::new(Watcher { cancelled }))
+    }
+
+    /// [`watch`](Self::watch) without the frames
+    /// (`spec/swift-bindings-plan.md`): `observer.sync` now with the
+    /// current state, then `changed` / `sync` per event and `stopped`
+    /// once when the loop ends. The same forwarder thread, for the
+    /// same reason.
+    pub fn observe(&self, observer: Arc<dyn EngineObserver>) -> Result<Arc<Watcher>, EngineError> {
+        use monoplan_cli::ipc::WatchEvent;
+        use tokio::sync::broadcast::error::RecvError;
+        if self.client.is_stopped() {
+            return Err(EngineError::Stopped);
+        }
+        let (sync, mut rx) = self.client.watch();
+        observer.sync(sync.into());
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let flag = cancelled.clone();
+        std::thread::Builder::new()
+            .name("monoplan-observe".into())
+            .spawn(move || {
+                loop {
+                    let ev = match rx.blocking_recv() {
+                        Ok(ev) => ev,
+                        Err(RecvError::Lagged(_)) => WatchEvent::Changed,
+                        Err(RecvError::Closed) => {
+                            if !flag.load(Ordering::SeqCst) {
+                                observer.stopped();
+                            }
+                            return;
+                        }
+                    };
+                    if flag.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    match ev {
+                        WatchEvent::Changed => observer.changed(),
+                        WatchEvent::Sync(s) => observer.sync(s.into()),
+                    }
+                }
+            })
+            .map_err(|e| EngineError::Failed {
+                message: e.to_string(),
+            })?;
+        Ok(Arc::new(Watcher { cancelled }))
+    }
+
+    // ----- typed calls (`monoplan_cli::api`) -----
+    //
+    // Each runs on the engine loop against the doc `workspace` names
+    // (a `-w` selector: name or doc id; nil is Home) and blocks for
+    // its answer, so call them off the main thread. A write is durable
+    // when it returns, and `EngineObserver::changed` follows.
+
+    /// The workspace's lists, in order, each with its open count.
+    pub fn lists(
+        &self,
+        workspace: Option<String>,
+        filter: ListFilter,
+    ) -> Result<Vec<ListInfo>, EngineError> {
+        Ok(self
+            .client
+            .call_blocking(workspace, move |cx| api::lists::lists(cx, filter))?)
+    }
+
+    /// The items of `list` in order, binned ones left out; closed ones
+    /// only with `include_done`.
+    pub fn items(
+        &self,
+        workspace: Option<String>,
+        list: String,
+        include_done: bool,
+    ) -> Result<Vec<Item>, EngineError> {
+        Ok(self.client.call_blocking(workspace, move |cx| {
+            api::items::items(cx, &list, include_done)
+        })?)
+    }
+
+    /// Add an item to `list` (at the top with `top`, else the end) and
+    /// return its id.
+    pub fn add_item(
+        &self,
+        workspace: Option<String>,
+        list: String,
+        text: String,
+        top: bool,
+    ) -> Result<String, EngineError> {
+        Ok(self.client.call_blocking(workspace, move |cx| {
+            let mut ids = api::items::add_items(cx, &list, &[text], top)?;
+            Ok(ids.remove(0))
+        })?)
+    }
+
+    /// Tick or untick an item: `Done`, or back to `Backlog`.
+    pub fn set_done(
+        &self,
+        workspace: Option<String>,
+        id: String,
+        done: bool,
+    ) -> Result<(), EngineError> {
+        Ok(self
+            .client
+            .call_blocking(workspace, move |cx| api::items::set_done(cx, &id, done))?)
     }
 
     /// Mirror a doc in the window (`spec/mac-window-plan.md`, phase 2):

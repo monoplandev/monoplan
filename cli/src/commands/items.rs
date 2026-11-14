@@ -14,6 +14,7 @@ use monoplan_core::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::api::{self, Ctx, items::Item};
 use crate::workspace::{Candidate, HOME_LABEL};
 
 // ---------- add ----------
@@ -35,26 +36,13 @@ pub struct AddArgs {
 /// `top` puts them, in the order given, above the list's open items
 /// (one commit); otherwise each is appended.
 pub fn add(
-    doc: &Doc,
+    cx: &Ctx,
     list: &str,
     texts: &[String],
     top: bool,
     out: &mut dyn Write,
 ) -> anyhow::Result<()> {
-    if texts.is_empty() {
-        anyhow::bail!("no item text provided");
-    }
-    let ids = if top {
-        let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
-        doc.add_items_at(list, &texts, 0)?
-    } else {
-        let mut ids = Vec::with_capacity(texts.len());
-        for text in texts {
-            ids.push(doc.add_item(list, text)?);
-        }
-        ids
-    };
-    for id in ids {
+    for id in api::items::add_items(cx, list, texts, top)? {
         writeln!(out, "{id}")?;
     }
     Ok(())
@@ -99,11 +87,8 @@ pub struct LsArgs {
     pub json: bool,
 }
 
-pub fn ls(doc: &Doc, args: LsArgs, out: &mut dyn Write) -> anyhow::Result<()> {
-    let mut items = doc.items_in_list(&args.list, false);
-    if !args.done {
-        items.retain(|i| !i.is_closed());
-    }
+pub fn ls(cx: &Ctx, args: LsArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+    let items = api::items::item_views(cx, &args.list, args.done);
     if args.json {
         write_json(out, &items.iter().map(item_json).collect::<Vec<_>>())?;
     } else {
@@ -112,57 +97,10 @@ pub fn ls(doc: &Doc, args: LsArgs, out: &mut dyn Write) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[derive(Serialize)]
-pub(super) struct ItemJson<'a> {
-    id: &'a str,
-    text: &'a str,
-    list_id: &'a str,
-    /// Workflow register state name (`spec/data-model.md` "Lifecycle").
-    state: &'static str,
-    /// Unix millis the register's state was entered.
-    lifecycle_at: i64,
-    created_at: i64,
-    /// Creator's account id, when the creating client stamped one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    created_by: Option<&'a str>,
-    started_at: Option<i64>,
-    done_at: Option<i64>,
-    binned_at: Option<i64>,
-    /// Date-only deadline (`YYYY-MM-DD`), when set.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    deadline: Option<&'a str>,
-    /// Planned date (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`), when set.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    when: Option<&'a str>,
-    /// Pending date suggestion (`when`-shaped), when one is unanswered.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    when_suggested: Option<&'a str>,
-    /// Duration in whole minutes, when set.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    duration: Option<u32>,
-    /// Place (`{label, lat?, lon?, address?, ref?}`), when set.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    place: Option<&'a Place>,
-}
-
-pub(super) fn item_json(item: &ItemView) -> ItemJson<'_> {
-    ItemJson {
-        id: &item.id,
-        text: &item.text,
-        list_id: &item.list_id,
-        state: item.state.name(),
-        lifecycle_at: item.lifecycle_at,
-        created_at: item.created_at,
-        created_by: item.created_by.as_deref(),
-        started_at: item.started_at,
-        done_at: item.done_at,
-        binned_at: item.binned_at,
-        deadline: item.deadline.as_deref(),
-        when: item.when.as_deref(),
-        when_suggested: item.when_suggested.as_deref(),
-        duration: item.duration,
-        place: item.place.as_ref(),
-    }
+/// The `--json` row every item-shaped output shares
+/// (`api::items::Item`).
+pub(super) fn item_json(item: &ItemView) -> Item {
+    Item::from(item)
 }
 
 /// Trailing tags for a text row: ` @<when>` (with `+<duration>`
@@ -270,7 +208,7 @@ pub struct ShowArgs {
 #[derive(Serialize)]
 struct ItemDetailJson<'a> {
     #[serde(flatten)]
-    item: ItemJson<'a>,
+    item: Item,
     notes: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     list_name: Option<String>,
@@ -374,7 +312,7 @@ pub fn places(open_docs: &[&Doc], args: PlacesArgs, out: &mut dyn Write) -> anyh
 #[derive(Serialize)]
 struct PlacedItemJson<'a> {
     #[serde(flatten)]
-    item: ItemJson<'a>,
+    item: Item,
     /// Absent for the reserved lists' ids no client labels.
     #[serde(skip_serializing_if = "Option::is_none")]
     list_name: Option<String>,
@@ -1066,7 +1004,13 @@ mod tests {
         };
         assert!(!top, "an absent `top` appends");
         let mut out = Vec::new();
-        add(&doc, &list, &texts, top, &mut out).unwrap();
+        let lens = crate::commands::focus::Lens::home(&doc);
+        let cx = Ctx {
+            doc: &doc,
+            open_docs: &[&doc],
+            lens: &lens,
+        };
+        add(&cx, &list, &texts, top, &mut out).unwrap();
         let id = String::from_utf8(out).unwrap();
         let item = doc.get_item(id.trim()).unwrap();
         assert_eq!(item.text, "Call the bank");

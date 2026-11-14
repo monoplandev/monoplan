@@ -234,9 +234,14 @@ pub fn run_doc(
     lens: &focus::Lens,
     out: &mut dyn Write,
 ) -> anyhow::Result<()> {
+    let cx = crate::api::Ctx {
+        doc,
+        open_docs,
+        lens,
+    };
     match cmd {
-        DocCmd::Add { list, texts, top } => items::add(doc, &list, &texts, top, out),
-        DocCmd::Ls(a) => items::ls(doc, a, out),
+        DocCmd::Add { list, texts, top } => items::add(&cx, &list, &texts, top, out),
+        DocCmd::Ls(a) => items::ls(&cx, a, out),
         DocCmd::Show(a) => items::show(doc, lens, a, out),
         DocCmd::Set(a) => items::set(doc, open_docs, lens, *a, out),
         DocCmd::ItemBin(a) => items::bin(doc, a, out),
@@ -246,7 +251,7 @@ pub fn run_doc(
         DocCmd::Agenda(a) => agenda::run(doc, a, out),
         DocCmd::Done(a) => done::run(doc, a, out),
         DocCmd::Focus(a) => focus::run(doc, a, out),
-        DocCmd::Lists(a) => lists::run(doc, a, out),
+        DocCmd::Lists(a) => lists::run(&cx, a, out),
         // The daemon serves `--items` itself, tagged by workspace;
         // here (no tags to give) the rows are the open docs' untagged.
         DocCmd::Places(a) if a.items => {

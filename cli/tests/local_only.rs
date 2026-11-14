@@ -230,3 +230,122 @@ async fn login_over_a_local_only_workspace_then_host_boots() {
     assert_eq!(info.primary_doc_id.0.to_string(), account.primary_doc_id);
     handle.shutdown().await.unwrap();
 }
+
+/// The typed path the apps call (`spec/swift-bindings-plan.md`):
+/// `LocalClient::call_blocking` runs `api` functions on the loop from a
+/// thread off the runtime, a write raises `Changed` for the watchers
+/// and shows up in the CLI's own rendering of the same rows, and a
+/// workspace nobody has is its own error.
+#[tokio::test(flavor = "multi_thread")]
+async fn typed_calls_run_on_the_loop_and_agree_with_the_cli() {
+    use monoplan_cli::api::{self, ApiError, items::ItemState, lists::ListFilter};
+    use monoplan_cli::commands::{
+        DocCmd,
+        items::LsArgs,
+        lists::{ListsArgs, ListsCmd},
+    };
+    use monoplan_cli::ipc::{Reply, Request, WatchEvent};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("profile");
+    bootstrap::open_or_init_at(dir.clone()).await.unwrap();
+    let handle = daemon::spawn_with(reopen_profile(&dir), true)
+        .await
+        .unwrap();
+    let client = handle.client.clone();
+    // A list made the CLI's way, for the typed calls to fill and count.
+    let made = client
+        .request(Request::Doc {
+            workspace: None,
+            cmd: DocCmd::Lists(ListsArgs {
+                cmd: ListsCmd::Add {
+                    name: "Errands".into(),
+                },
+            }),
+        })
+        .await;
+    let Reply::Output { stdout, .. } = made else {
+        panic!("unexpected: {made:?}");
+    };
+    let errands = stdout.trim().to_string();
+    let (_, mut events) = client.watch();
+
+    let c = client.clone();
+    let list = errands.clone();
+    let (id, rows, lists) = tokio::task::spawn_blocking(move || {
+        let id = c
+            .call_blocking(None, {
+                let list = list.clone();
+                move |cx| {
+                    Ok(api::items::add_items(cx, &list, &["typed".to_string()], true)?.remove(0))
+                }
+            })
+            .unwrap();
+        let rows = c
+            .call_blocking(None, move |cx| api::items::items(cx, &list, false))
+            .unwrap();
+        let lists = c
+            .call_blocking(None, |cx| api::lists::lists(cx, ListFilter::Active))
+            .unwrap();
+        (id, rows, lists)
+    })
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, id);
+    assert_eq!(rows[0].text, "typed");
+    assert_eq!(rows[0].state, ItemState::Backlog);
+    let row = lists.iter().find(|l| l.id == errands).unwrap();
+    assert_eq!((row.name.as_str(), row.open), ("Errands", 1));
+    assert!(matches!(events.recv().await.unwrap(), WatchEvent::Changed));
+
+    // Ticked through the typed path, read back through the CLI's.
+    let (c, done_id) = (client.clone(), id.clone());
+    tokio::task::spawn_blocking(move || {
+        c.call_blocking(None, move |cx| api::items::set_done(cx, &done_id, true))
+            .unwrap();
+    })
+    .await
+    .unwrap();
+    let listing = client
+        .request(Request::Doc {
+            workspace: None,
+            cmd: DocCmd::Ls(LsArgs {
+                list: errands.clone(),
+                done: true,
+                json: true,
+            }),
+        })
+        .await;
+    let Reply::Output { stdout, .. } = listing else {
+        panic!("unexpected: {listing:?}");
+    };
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let row = json
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == id.as_str())
+        .unwrap();
+    assert_eq!(row["state"], "done");
+    assert!(row["done_at"].is_i64());
+
+    let c = client.clone();
+    let missing = tokio::task::spawn_blocking(move || {
+        c.call_blocking(Some("nope".into()), |cx| {
+            api::items::items(cx, LIST_INBOX, false)
+        })
+    })
+    .await
+    .unwrap();
+    assert!(matches!(missing, Err(ApiError::NoSuchWorkspace { .. })));
+
+    handle.shutdown().await.unwrap();
+    let c = client.clone();
+    let stopped = tokio::task::spawn_blocking(move || {
+        c.call_blocking(None, |cx| api::items::items(cx, LIST_INBOX, false))
+    })
+    .await
+    .unwrap();
+    assert_eq!(stopped.unwrap_err(), ApiError::Stopped);
+}

@@ -1969,6 +1969,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "uniffi",
  "uuid",
  "zeroize",
 ]

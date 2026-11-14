@@ -1,4 +1,4 @@
-# Typed Swift bindings (plan, not built)
+# Typed Swift bindings (plan; phase 1 built 2026-11-14)
 
 Decided 2026-11-14. Supersedes the client half of
 [`mac-window-plan.md`](mac-window-plan.md): the webview window is
@@ -57,7 +57,12 @@ What it takes:
   (`ItemJson<'a>`, `RowJson<'a>`), so they cannot be reused as is.
 - Generated names land unprefixed in the app's module. A Rust `State`
   becomes a Swift `State` and collides with SwiftUI's `@State`; name
-  the types for Swift (`ItemState`, `ItemRow`, `PlaceRow`, `AgendaDay`).
+  the types for Swift (`ItemState`, `ListInfo`). Until `MonoplanMacKit`'s
+  models are deleted they must not share its names either (`ItemRow`,
+  `ListRow`, `SyncStatus`, `AgendaDay`, `AgendaRow`, ...): a file that
+  imports both modules would stop compiling on the ambiguity. Hence
+  `Item`, `ListInfo`, `Place`, `SyncState`; all checked free in SwiftUI,
+  MapKit, CoreLocation and WidgetKit on the macOS and iOS SDKs.
 
 Not probed: three crates deep (core → cli → ffi). Same mechanism; not
 needed under the layout below.
@@ -77,8 +82,8 @@ pub struct Ctx<'a> {
     pub lens: &'a focus::Lens<'a>,
 }
 
-pub fn items(cx: &Ctx, list: &str, include_done: bool) -> Result<Vec<ItemRow>, ApiError>;
-pub fn add_item(cx: &Ctx, list: &str, text: &str, top: bool) -> Result<String, ApiError>;
+pub fn items(cx: &Ctx, list: &str, include_done: bool) -> anyhow::Result<Vec<Item>>;
+pub fn add_items(cx: &Ctx, list: &str, texts: &[String], top: bool) -> anyhow::Result<Vec<String>>;
 ```
 
 This is the query / mutate half of what each `commands/*.rs` function
@@ -99,10 +104,13 @@ the existing CLI tests). Behaviour moves; it is not duplicated.
   small enum (`DurationEdit`).
 - Writes return nothing (`add_item` returns the id). The UI re-reads on
   the change event, as it does today.
-- `ApiError`: `Stopped`, `NoSuchWorkspace`, `NotFound { what, id }`,
-  `Invalid { message }`, `Failed { message }`. Start with `Failed` for
-  everything that is `anyhow` today and promote a case to its own
-  variant when Swift needs to branch on it.
+- Functions return `anyhow::Result`, as the commands they came out of
+  do, so a command calls them with `?`. A caller outside the loop gets
+  `ApiError` (`Stopped`, `NoSuchWorkspace`, `Failed { message }`),
+  converted at `call_blocking`. A failure Swift has to branch on is
+  raised as an `ApiError` variant inside the `anyhow::Error` and
+  downcast back out; add variants when one is needed. At the FFI it
+  maps into the existing `EngineError`, so Swift keeps one error type.
 
 ### Reaching the loop
 
@@ -112,9 +120,13 @@ request and reply enum per verb:
 ```rust
 HostCmd::Call {
     workspace: Option<String>,
-    run: Box<dyn FnOnce(Result<&Ctx, ApiError>) + Send>,
+    run: Box<dyn FnOnce(Result<&Ctx, ApiError>) -> Box<dyn FnOnce() + Send> + Send>,
 }
 ```
+
+`run` computes the result and returns the thunk that sends it; the
+loop runs the thunk after the tail below, so a write is durable before
+its caller hears back, as with a doc command's reply.
 
 `LocalClient::call_blocking(workspace, |cx| api::items(cx, ..))` wraps
 the closure around a oneshot and blocks for it. The loop resolves the
@@ -133,11 +145,11 @@ Starred, `find`, `places --items`) become api functions over
 `Engine` gains one method per api function, each a `call_blocking`,
 plus typed versions of the non-doc requests:
 
-- `sync()`, `reconnect()` → `SyncStatus`
+- `sync()`, `reconnect()` → `SyncState`
 - `account()` → `Account?`
 - `create_workspace(name)`, `delete_workspace(doc_id)`
 - `observe(observer)` → `Watcher`, with
-  `trait EngineObserver { fn changed(); fn sync(status: SyncStatus); fn stopped(); }`
+  `trait EngineObserver { fn changed(); fn sync(state: SyncState); fn stopped(); }`
   replacing the msgpack frame sink. Same forwarder thread as `watch`.
 
 Calls stay blocking; Swift puts them on a queue. uniffi async is not
@@ -145,10 +157,11 @@ needed for this.
 
 ## Swift side
 
-- `MonoplanCore` gets a thin async facade over `Engine` (a serial
-  queue, `async throws` methods) and the observer bridged to an
-  `AsyncStream` or a callback on the main actor. This replaces
-  `EngineClient` and both `FFITransport`s.
+- `MonoplanCore` gets a thin facade over `Engine`: `EngineCalls`
+  (one serial queue; `try await calls.run { try $0.items(...) }`, so
+  there is no per-verb wrapper to keep in step) and
+  `Engine.observe(onChanged:onSync:onStopped:)` delivering on the main
+  queue. This replaces `EngineClient` and both `FFITransport`s.
 - `MonoplanMacKit` loses `MessagePack.swift`, `EngineClient.swift`,
   `MirrorFraming.swift` and the JSON model files; the generated
   records replace the models, with extensions for the derived bits
@@ -175,13 +188,15 @@ views with iOS later, which is its own piece of work.
 
 ## Phases
 
-1. **Rust foundation and one slice.** `api::{lists, items}` with
+1. **Rust foundation and one slice.** Built 2026-11-14. `api::{lists, items}` with
    `lists`, `items`, `add_item`, `set_done`; `HostCmd::Call` and the
    shared tail; the `uniffi` feature; `Engine.lists/items/add_item/set_done/observe`;
    build script handles multiple generated files. `item ls` / `item add`
    / `list ls` render from the api rows. Check: `cargo test` (CLI JSON
    unchanged), `bun run build:apple`, a `MonoplanCore` Swift test that
-   starts a local-only engine and round-trips an item.
+   starts a local-only engine and round-trips an item. Not yet in this
+   phase: `sync`, `reconnect`, `account` and the workspace calls
+   (phase 3, with the screens that use them).
 2. **iOS slice.** The Home list screen reads and writes through the
    new calls; everything else stays on `EngineClient`. Both run against
    the same engine. This is where naming, error shape and the facade
@@ -209,8 +224,10 @@ Phases 1 to 3 touch no macOS code and phase 4 no iOS code. The socket,
 
 - iOS cannot be built here (no simulator). Phases 2 and 3 are verified
   by `swift build` on the shared packages and by the user building in
-  Xcode; whether `xcodebuild -destination generic/platform=iOS` works
-  as a compile check without signing is untested.
+  Xcode. `swiftc -typecheck -sdk $(xcrun --sdk iphoneos --show-sdk-path)
+  -target arm64-apple-ios17.0` does run here against the device SDK, so
+  a type check of the app's sources may be possible; untried on the
+  whole target.
 - `AgendaWidget` reads a snapshot file, not the engine; left alone
   unless its model type goes away with the JSON models.
 - Whether the typed layer later moves out of the cli crate into an

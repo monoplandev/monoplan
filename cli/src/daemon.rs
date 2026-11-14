@@ -47,6 +47,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::api::{ApiError, Ctx};
 use crate::commands::run_doc;
 use crate::config::Profile;
 use crate::ipc::{self, Reply, Request, SyncStatus, WatchEvent, read_frame, write_frame};
@@ -312,7 +313,15 @@ impl Serving {
             listener,
             engine,
         } = started;
-        let (status_tx, status_rx) = watch::channel(DaemonStatus::default());
+        // What is known before the loop's first `publish`: a client
+        // that reads the status straight after `start` (the app's
+        // `observe`) must not be told a local-only workspace is an
+        // account that is offline.
+        let (status_tx, status_rx) = watch::channel(DaemonStatus {
+            local_only: engine.is_local_only(),
+            last_synced_at: engine.last_synced_at(),
+            ..DaemonStatus::default()
+        });
         // Unbounded: every client awaits its reply before its next
         // command, so the queue is bounded by the client count, and a
         // `Subscription`'s `Drop` can release its slot without a runtime.
@@ -438,6 +447,30 @@ impl LocalClient {
                 rx.blocking_recv().unwrap_or_else(|_| Self::stopped())
             }
         }
+    }
+
+    /// A typed call (`crate::api`) from a thread that is not on the
+    /// runtime (an FFI call from the app's own threads): `f` runs on
+    /// the loop against the doc `workspace` names (`None` is Home),
+    /// in order with the loop's other clients, and this blocks for its
+    /// answer. What it committed is durable when this returns, and a
+    /// `Changed` event goes to the watchers if it changed anything.
+    pub fn call_blocking<T, F>(&self, workspace: Option<String>, f: F) -> Result<T, ApiError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Ctx<'_>) -> anyhow::Result<T> + Send + 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+        let run: CallFn = Box::new(move |cx| {
+            let result = cx.and_then(|cx| f(cx).map_err(ApiError::from));
+            Box::new(move || {
+                let _ = tx.send(result);
+            })
+        });
+        self.requests
+            .send(HostCmd::Call { workspace, run })
+            .map_err(|_| ApiError::Stopped)?;
+        rx.blocking_recv().map_err(|_| ApiError::Stopped)?
     }
 
     /// Mirror a doc in process (`spec/mac-window-plan.md`): the reply
@@ -843,7 +876,20 @@ pub(crate) enum HostCmd {
     Session {
         reply: oneshot::Sender<Result<SessionInfo, MirrorError>>,
     },
+    /// A typed call (`crate::api`, `spec/swift-bindings-plan.md`):
+    /// `run` is handed the context for `workspace` (`None` is Home),
+    /// or why there is none, and returns the thunk that answers its
+    /// caller. The loop runs that once what the call committed is
+    /// durable, as a doc command's reply waits for the same.
+    Call {
+        workspace: Option<String>,
+        run: CallFn,
+    },
 }
+
+/// The body of a [`HostCmd::Call`], run once on the loop.
+pub(crate) type CallFn =
+    Box<dyn FnOnce(Result<&Ctx<'_>, ApiError>) -> Box<dyn FnOnce() + Send> + Send>;
 
 /// One mirror as the loop sees it.
 struct Subscriber {
@@ -1176,7 +1222,67 @@ impl Host {
                 let _ = reply.send(self.on_session());
                 Ok(false)
             }
+            HostCmd::Call { workspace, run } => {
+                self.on_call(workspace, run).await?;
+                Ok(false)
+            }
         }
+    }
+
+    /// Run a typed call against the doc `workspace` names, with the
+    /// context a doc command gets (`run_doc`), then make what it
+    /// committed durable and put it on the wire.
+    async fn on_call(&mut self, workspace: Option<String>, run: CallFn) -> Result<(), SyncError> {
+        let doc_id = match self.engine.resolve(workspace.as_deref()) {
+            Ok(id) => id,
+            Err(e) => {
+                run(Err(ApiError::NoSuchWorkspace {
+                    message: e.to_string(),
+                }))();
+                return Ok(());
+            }
+        };
+        let answer = self.with_ctx(doc_id, |cx| run(Ok(cx)));
+        self.after_doc_work().await?;
+        answer();
+        Ok(())
+    }
+
+    /// The context a command or call on `doc_id` runs with: that doc,
+    /// every open doc, and Starred as seen from it. Starred is Home's
+    /// alone; a command on another workspace stars through a foreign
+    /// ref there.
+    fn with_ctx<T>(&self, doc_id: DocId, f: impl FnOnce(&Ctx<'_>) -> T) -> T {
+        let doc = self
+            .engine
+            .doc_for(doc_id)
+            .expect("resolved against open docs");
+        let open_docs: Vec<&monoplan_core::Doc> = self
+            .engine
+            .doc_ids()
+            .into_iter()
+            .filter_map(|id| self.engine.doc_for(id))
+            .collect();
+        let lens = if doc_id == self.engine.primary_doc_id() {
+            crate::commands::focus::Lens::home(doc)
+        } else {
+            crate::commands::focus::Lens::foreign(self.engine.doc(), doc_id)
+        };
+        f(&Ctx {
+            doc,
+            open_docs: &open_docs,
+            lens: &lens,
+        })
+    }
+
+    /// After a command or call ran: whatever it committed is durable
+    /// before the client hears back, and on the wire right after.
+    async fn after_doc_work(&mut self) -> Result<(), SyncError> {
+        self.engine.persist_replica_state().await?;
+        self.engine.flush_replicas();
+        self.pump().await;
+        self.notify_if_changed();
+        Ok(())
     }
 
     /// The profile for the window: identity and server when there is
@@ -1472,31 +1578,10 @@ impl Host {
                     }
                 };
                 let mut buf = Vec::new();
-                let doc = self
-                    .engine
-                    .doc_for(doc_id)
-                    .expect("resolved against open docs");
-                let open_docs: Vec<&monoplan_core::Doc> = self
-                    .engine
-                    .doc_ids()
-                    .into_iter()
-                    .filter_map(|id| self.engine.doc_for(id))
-                    .collect();
-                // Starred is Home's alone; a command on another
-                // workspace stars through a foreign ref there.
-                let primary = self.engine.primary_doc_id();
-                let lens = if doc_id == primary {
-                    crate::commands::focus::Lens::home(doc)
-                } else {
-                    crate::commands::focus::Lens::foreign(self.engine.doc(), doc_id)
-                };
-                let result = run_doc(cmd, doc, &open_docs, &lens, &mut buf);
-                // Whatever the command committed is durable before the
-                // client hears back, and on the wire right after.
-                self.engine.persist_replica_state().await?;
-                self.engine.flush_replicas();
-                self.pump().await;
-                self.notify_if_changed();
+                let result = self.with_ctx(doc_id, |cx| {
+                    run_doc(cmd, cx.doc, cx.open_docs, cx.lens, &mut buf)
+                });
+                self.after_doc_work().await?;
                 match result {
                     Ok(()) => Reply::Output {
                         stdout: String::from_utf8_lossy(&buf).into_owned(),

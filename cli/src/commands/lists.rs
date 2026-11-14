@@ -8,13 +8,13 @@
 //! core's destructive `delete_list` stays internal.
 
 use clap::{Parser, Subcommand};
-use std::collections::HashMap;
 use std::io::Write;
 
 use monoplan_core::{Doc, ListView};
 use serde::{Deserialize, Serialize};
 
 use super::items::write_json;
+use crate::api::{self, Ctx, lists::ListFilter};
 
 #[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 #[command(subcommand_required = true, arg_required_else_help = true)]
@@ -53,13 +53,14 @@ pub enum ListsCmd {
     Unarchive { list: String },
 }
 
-pub fn run(doc: &Doc, args: ListsArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+pub fn run(cx: &Ctx, args: ListsArgs, out: &mut dyn Write) -> anyhow::Result<()> {
+    let doc = cx.doc;
     match args.cmd {
         ListsCmd::Ls {
             json,
             archived,
             all,
-        } => show(doc, json, archived, all, out),
+        } => show(doc, cx, json, archived, all, out),
         ListsCmd::Add { name } => add(doc, &name, out),
         ListsCmd::Rename { list, name } => rename(doc, &list, &name, out),
         ListsCmd::Icon { list, icon } => set_icon(doc, &list, icon.as_deref(), out),
@@ -70,36 +71,30 @@ pub fn run(doc: &Doc, args: ListsArgs, out: &mut dyn Write) -> anyhow::Result<()
 
 fn show(
     doc: &Doc,
+    cx: &Ctx,
     json: bool,
     archived_only: bool,
     all: bool,
     out: &mut dyn Write,
 ) -> anyhow::Result<()> {
+    if json {
+        let filter = match (all, archived_only) {
+            (true, _) => ListFilter::All,
+            (false, true) => ListFilter::Archived,
+            (false, false) => ListFilter::Active,
+        };
+        return write_json(out, &api::lists::lists(cx, filter)?);
+    }
     let lists: Vec<ListView> = doc
         .all_lists()
         .into_iter()
         .filter(|l| all || (l.archived_at.is_some() == archived_only))
         .collect();
-    if json {
-        // One walk of the doc's items for every list's open count.
-        let mut open = HashMap::<String, usize>::new();
-        for item in doc.all_items() {
-            if item.is_open() {
-                *open.entry(item.list_id).or_insert(0) += 1;
-            }
-        }
-        let rows: Vec<_> = lists
-            .iter()
-            .map(|l| list_json(l, open.get(&l.id).copied().unwrap_or(0)))
-            .collect();
-        write_json(out, &rows)?;
-    } else {
-        for l in &lists {
-            if l.archived_at.is_some() {
-                writeln!(out, "{}  {}  (archived)", l.id, l.name)?;
-            } else {
-                writeln!(out, "{}  {}", l.id, l.name)?;
-            }
+    for l in &lists {
+        if l.archived_at.is_some() {
+            writeln!(out, "{}  {}  (archived)", l.id, l.name)?;
+        } else {
+            writeln!(out, "{}  {}", l.id, l.name)?;
         }
     }
     Ok(())
@@ -137,30 +132,6 @@ fn set_archived(
     doc.set_list_archived(list_id, archived)?;
     writeln!(out, "{list_id}")?;
     Ok(())
-}
-
-#[derive(Serialize)]
-struct ListJson<'a> {
-    id: &'a str,
-    name: &'a str,
-    /// The list's emoji, when the user picked one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    icon: Option<&'a str>,
-    archived_at: Option<i64>,
-    created_at: i64,
-    /// How many Open items the list holds (not closed, not binned).
-    open: usize,
-}
-
-fn list_json(l: &ListView, open: usize) -> ListJson<'_> {
-    ListJson {
-        id: &l.id,
-        name: &l.name,
-        icon: l.icon.as_deref(),
-        archived_at: l.archived_at,
-        created_at: l.created_at,
-        open,
-    }
 }
 
 #[cfg(test)]

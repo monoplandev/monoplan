@@ -34,7 +34,7 @@ so the FFI grows typed reads as that UI does. The offline
 ## Layering
 
 ```
-monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's daemon: Engine (start, request, watch, subscribe, import, session, device_token, shutdown), login, logout, matches_name
+monoplan-ffi (Rust staticlib)          core/ffi — uniffi over the CLI crate's daemon: Engine (start, request, watch, subscribe, import, session, device_token, shutdown; typed: lists, items, add_item, set_done, observe), login, logout, matches_name
    → MonoplanCoreFFI.xcframework        static libs (macOS/iOS/iOS-sim) + C headers
       → MonoplanCore (SwiftPM)          generated Swift bindings + a thin facade
          → MonoplanMac, MonoplanIOS      consume MonoplanCore (and MonoplanMac's Kit product) as local packages
@@ -66,7 +66,17 @@ swift test --package-path apple/MonoplanCore
 gitignored:
 
 - `apple/MonoplanCore/MonoplanCoreFFI.xcframework` — the static libs + headers.
-- `apple/MonoplanCore/Sources/MonoplanCore/Generated/` — the uniffi Swift bindings.
+- `apple/MonoplanCore/Sources/MonoplanCore/Generated/` — the uniffi Swift bindings,
+  one file per Rust crate that defines exported types: `monoplan_ffi.swift`
+  (`Engine` and its methods) and `monoplan_cli.swift` (the records the typed
+  calls return: `Item`, `ListInfo`, ...).
+
+The typed calls are replacing `Engine.request` verb by verb
+([`spec/swift-bindings-plan.md`](../spec/swift-bindings-plan.md), phase 1
+built 2026-11-14). From Swift: `EngineCalls(engine)` and
+`try await calls.run { try $0.items(workspace: nil, list: "inbox", includeDone: false) }`;
+`engine.observe(onChanged:onSync:)` for the change and sync events. Neither
+app uses them yet.
 
 Run it before `swift build` / `swift test` on a fresh checkout — the package
 won't compile without those outputs present.

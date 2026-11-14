@@ -1,5 +1,9 @@
 //! Internals shared between the `monoplan` binary and integration tests.
 
+#[cfg(feature = "uniffi")]
+uniffi::setup_scaffolding!();
+
+pub mod api;
 pub mod bootstrap;
 pub mod client;
 pub mod commands;
