@@ -58,6 +58,14 @@ final class AppModel: ObservableObject {
     /// page is up.
     @Published private(set) var placed: [LocatedItem] = []
     @Published private(set) var placedError: String?
+    /// Whether the account owns each shared workspace, by doc id, from
+    /// its member list (`Engine.workspaceMembers`): Home's "..." menu
+    /// offers Delete to an owner and Leave to anyone else, and neither
+    /// while this is unknown (offline, or still loading), as the web's
+    /// menu waits for its member directory.
+    @Published private(set) var ownsWorkspace: [String: Bool] = [:]
+    /// Shared workspaces whose role is being asked for now.
+    private var rolesLoading: Set<String> = []
     /// The Done lens (`Engine.done`): the Personal
     /// workspace's newest `doneLimit` Done items, grouped by the day
     /// each was ticked. A window, never the whole history: the view
@@ -518,6 +526,75 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Leave a shared workspace the account does not own
+    /// (`Engine.leaveWorkspace`). The engine forgets it once the
+    /// server's `DocClosed` lands, and the `Changed` that follows
+    /// rereads the session; the reread here only makes it sooner.
+    /// `done` gets why not, or nil once the server has let go.
+    func leaveWorkspace(_ docId: String, done: @escaping (String?) -> Void) {
+        sharing({ try $0.leaveWorkspace(docId: docId) }) { [weak self] result in
+            switch result {
+            case .success:
+                self?.ownsWorkspace[docId] = nil
+                self?.loadSession()
+                self?.refreshLenses()
+                done(nil)
+            case .failure(let error):
+                done(engineErrorMessage(error))
+            }
+        }
+    }
+
+    /// One of the engine's sharing calls (`Engine.workspaceMembers`,
+    /// `createInvite`, ...). Each is a round trip to the server, so it
+    /// runs on a queue of its own rather than the doc calls' serial
+    /// one: an unreachable server must not hold up a tick. `done` gets
+    /// the result on the main queue.
+    func sharing<T>(
+        _ body: @escaping (MonoplanCore.Engine) throws -> T,
+        done: @escaping (Result<T, Error>) -> Void
+    ) {
+        guard let engine = engineController.calls?.engine else {
+            DispatchQueue.main.async { done(.failure(EngineError.Stopped)) }
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { try body(engine) }
+            DispatchQueue.main.async { done(result) }
+        }
+    }
+
+    /// What a member list says of the account's role on a workspace:
+    /// the Sharing sheet reports each list it loads, so the menu
+    /// follows a change it shows.
+    func noteMembers(_ members: [WorkspaceMember], of docId: String) {
+        guard let me = session?.accountId, !me.isEmpty else { return }
+        ownsWorkspace[docId] = members.first(where: { $0.accountId == me })?.owner ?? false
+    }
+
+    /// Ask for the role on every shared workspace not yet known, and
+    /// forget the ones that have closed. Once per workspace per run of
+    /// the app, not per session reread: the reread follows every burst
+    /// of changes, and roles only change by transfer, which is not
+    /// built.
+    private func refreshRoles() {
+        guard let session, !session.localOnly else {
+            ownsWorkspace = [:]
+            return
+        }
+        let shared = Set(session.docs.filter { !$0.home }.map(\.docId))
+        for gone in ownsWorkspace.keys where !shared.contains(gone) { ownsWorkspace[gone] = nil }
+        for docId in shared where ownsWorkspace[docId] == nil && !rolesLoading.contains(docId) {
+            rolesLoading.insert(docId)
+            sharing({ try $0.workspaceMembers(docId: docId) }) { [weak self] result in
+                guard let self else { return }
+                rolesLoading.remove(docId)
+                // A failure leaves it unknown; the next reread asks again.
+                if case .success(let members) = result { noteMembers(members, of: docId) }
+            }
+        }
+    }
+
     /// Rename a user-created list (`Engine.renameList`).
     func renameList(_ list: ListRef, to name: String) {
         let (workspace, id) = (selector(list.docId), list.listId)
@@ -778,6 +855,7 @@ final class AppModel: ObservableObject {
             guard let self, let session else { return }
             self.session = session
             refreshLists()
+            refreshRoles()
             if !binLoaded { refreshBin() }
         }
     }

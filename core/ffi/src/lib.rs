@@ -39,6 +39,7 @@ use monoplan_cli::api::{
     lists::{ListFilter, ListInfo},
     moves::ItemRef,
     places::{LocatedItem, PlaceSuggestion},
+    sharing::{IssuedInvite, PendingInvite, WorkspaceMember},
     starred::StarredItem,
 };
 
@@ -474,12 +475,55 @@ impl Engine {
         }
     }
 
+    /// The profile and a shared workspace's doc id, for the sharing
+    /// calls: not Home (its key is the account key, so it is never
+    /// shared), and only a doc this engine has open.
+    fn shared(
+        &self,
+        doc_id: &str,
+    ) -> Result<(monoplan_cli::config::Profile, monoplan_core::DocId), EngineError> {
+        let info = self.client.session_blocking()?;
+        if info.local_only {
+            return Err(failed("sharing needs an account"));
+        }
+        let doc = info
+            .docs
+            .iter()
+            .map(|d| d.doc_id)
+            .find(|d| d.0.to_string() == doc_id)
+            .ok_or_else(|| failed("no such workspace on this device"))?;
+        if doc == info.primary_doc_id {
+            return Err(failed(
+                "the Personal workspace cannot be shared: its key is the account key",
+            ));
+        }
+        let profile = monoplan_cli::config::Profile::active_at(self.profile_dir.clone())
+            .ok_or(EngineError::NotLoggedIn)?;
+        Ok((profile, doc))
+    }
+
     fn synced(&self, req: monoplan_cli::ipc::Request) -> Result<SyncState, EngineError> {
         match self.reply(req)? {
             monoplan_cli::ipc::Reply::Synced { sync } => Ok(sync.into()),
             other => Err(unexpected(other)),
         }
     }
+}
+
+fn failed(message: impl Into<String>) -> EngineError {
+    EngineError::Failed {
+        message: message.into(),
+    }
+}
+
+/// An async `api` call run to completion on a runtime of its own, its
+/// error chain as the message.
+fn block<T, E: std::fmt::Display>(
+    fut: impl std::future::Future<Output = Result<T, E>>,
+) -> Result<T, EngineError> {
+    runtime()?
+        .block_on(fut)
+        .map_err(|e| failed(format!("{e:#}")))
 }
 
 /// The engine's build id (`ipc::build_id`): the crate version and the
@@ -1191,6 +1235,54 @@ impl Engine {
             Reply::WorkspaceDeleted { .. } => Ok(()),
             other => Err(unexpected(other)),
         }
+    }
+
+    // ----- sharing (`monoplan_cli::api::sharing`) -----
+    //
+    // HTTP round trips on the device token, not loop calls: they never
+    // wait behind the engine, and the engine never waits behind them.
+    // Each blocks for the server, so call it off the main thread and
+    // off the queue the doc calls are made on. `doc_id` is a shared
+    // workspace's; Home is refused here, as the server would.
+
+    /// The workspace's active members. Any member may ask.
+    pub fn workspace_members(&self, doc_id: String) -> Result<Vec<WorkspaceMember>, EngineError> {
+        let (profile, doc) = self.shared(&doc_id)?;
+        block(api::sharing::members(&profile, doc))
+    }
+
+    /// The workspace's unused, unexpired invite links (owner only).
+    pub fn pending_invites(&self, doc_id: String) -> Result<Vec<PendingInvite>, EngineError> {
+        let (profile, doc) = self.shared(&doc_id)?;
+        block(api::sharing::pending_invites(&profile, doc))
+    }
+
+    /// Issue a single-use invite link (owner only): the returned link
+    /// is the only copy there will be.
+    pub fn create_invite(&self, doc_id: String) -> Result<IssuedInvite, EngineError> {
+        let (profile, doc) = self.shared(&doc_id)?;
+        block(api::sharing::create_invite(&profile, doc, None))
+    }
+
+    /// Revoke an unused invite link.
+    pub fn revoke_invite(&self, doc_id: String, invite_id: String) -> Result<(), EngineError> {
+        let (profile, doc) = self.shared(&doc_id)?;
+        block(api::sharing::revoke_invite(&profile, doc, &invite_id))
+    }
+
+    /// Remove another member (owner only; never the last owner).
+    pub fn remove_member(&self, doc_id: String, account_id: String) -> Result<(), EngineError> {
+        let (profile, doc) = self.shared(&doc_id)?;
+        block(api::sharing::remove_member(&profile, doc, &account_id))
+    }
+
+    /// Leave a workspace this account does not own. The engine forgets
+    /// it when the server's `DocClosed` arrives, and
+    /// `EngineObserver::changed` follows.
+    pub fn leave_workspace(&self, doc_id: String) -> Result<(), EngineError> {
+        let (profile, doc) = self.shared(&doc_id)?;
+        let account_id = self.client.session_blocking()?.account_id;
+        block(api::sharing::leave(&profile, doc, &account_id))
     }
 
     /// This device's server token, for the app's own HTTP calls (the

@@ -13,11 +13,9 @@
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
 use monoplan_core::{AEAD_NONCE_LEN, DocId, InviteSecret, WrappedDek};
-use monoplan_protocol::{
-    AcceptInviteRequest, AcceptInviteResponse, CreateInviteRequest, CreateInviteResponse,
-    InvitePayloadResponse, InvitesListResponse, MembersListResponse,
-};
+use monoplan_protocol::{AcceptInviteRequest, AcceptInviteResponse, InvitePayloadResponse};
 
+use crate::api::sharing;
 use crate::config::{DocSecrets, Profile};
 use crate::keystore::dek_for_doc;
 use crate::net::Client;
@@ -81,7 +79,6 @@ struct Ctx {
     profile: Profile,
     client: Client,
     token: String,
-    server_url: String,
 }
 
 fn ctx() -> anyhow::Result<Ctx> {
@@ -91,9 +88,8 @@ fn ctx() -> anyhow::Result<Ctx> {
     let token = secrets.device_token()?.to_string();
     let config = profile.read_config()?;
     Ok(Ctx {
-        client: Client::new(config.server_url.clone()),
+        client: Client::new(config.server_url),
         token,
-        server_url: config.server_url,
         profile,
     })
 }
@@ -118,53 +114,20 @@ impl Ctx {
 }
 
 async fn link(c: &Ctx, doc_id: DocId, expires_days: Option<u64>) -> anyhow::Result<()> {
-    let secrets = c.profile.read_secrets()?;
-    let dek = dek_for_doc(&secrets, doc_id)?;
-
-    let secret = InviteSecret::generate();
-    let w = secret.wrap(&dek)?;
-    let resp: CreateInviteResponse = c
-        .client
-        .post_authed(
-            &format!("/api/docs/{}/invites", doc_id.0),
-            &c.token,
-            &CreateInviteRequest {
-                invite_id: hex::encode(secret.id()?),
-                wrapped_dek: w.ciphertext,
-                wrapped_dek_nonce: w.nonce.to_vec(),
-                expires_in_secs: expires_days.map(|d| d * 24 * 60 * 60),
-            },
-        )
-        .await
-        .context("issuing the invite")?;
-
-    let secret_hex = hex::encode(secret.as_bytes());
-    println!(
-        "{}/#invite_{}",
-        c.server_url.trim_end_matches('/'),
-        secret_hex
-    );
+    let issued = sharing::create_invite(&c.profile, doc_id, expires_days).await?;
+    println!("{}", issued.link);
     eprintln!();
-    eprintln!("Single use. Expires {}.", format_ts(resp.expires_at));
+    eprintln!("Single use. Expires {}.", format_ts(issued.expires_at));
     eprintln!(
         "Anyone with this link can join and read the whole workspace. It is shown once; \
          revoke it with `monoplan -w {} workspace share revoke {}`.",
-        doc_id.0, resp.invite_id
+        doc_id.0, issued.invite_id
     );
     Ok(())
 }
 
 async fn pending(c: &Ctx, doc_id: DocId) -> anyhow::Result<()> {
-    let resp: InvitesListResponse = c
-        .client
-        .get_authed(&format!("/api/docs/{}/invites", doc_id.0), &c.token)
-        .await?;
-    let now = now_millis();
-    let open: Vec<_> = resp
-        .invites
-        .iter()
-        .filter(|i| i.consumed_at.is_none() && i.expires_at > now)
-        .collect();
+    let open = sharing::pending_invites(&c.profile, doc_id).await?;
     if open.is_empty() {
         println!("No unused invite links.");
         return Ok(());
@@ -181,13 +144,7 @@ async fn pending(c: &Ctx, doc_id: DocId) -> anyhow::Result<()> {
 }
 
 async fn revoke(c: &Ctx, doc_id: DocId, invite_id: &str) -> anyhow::Result<()> {
-    c.client
-        .delete_authed(
-            &format!("/api/docs/{}/invites/{}", doc_id.0, invite_id.trim()),
-            &c.token,
-        )
-        .await
-        .context("revoking the invite")?;
+    sharing::revoke_invite(&c.profile, doc_id, invite_id).await?;
     println!("Revoked.");
     Ok(())
 }
@@ -251,15 +208,11 @@ async fn accept(link: &str) -> anyhow::Result<()> {
 }
 
 async fn members(c: &Ctx, doc_id: DocId) -> anyhow::Result<()> {
-    let resp: MembersListResponse = c
-        .client
-        .get_authed(&format!("/api/docs/{}/members", doc_id.0), &c.token)
-        .await?;
-    for m in resp.members {
+    for m in sharing::members(&c.profile, doc_id).await? {
         println!(
             "{}  {}  joined {}",
             m.email,
-            m.role.as_str(),
+            if m.owner { "owner" } else { "member" },
             format_ts(m.added_at)
         );
     }
@@ -268,23 +221,14 @@ async fn members(c: &Ctx, doc_id: DocId) -> anyhow::Result<()> {
 
 async fn remove(c: &Ctx, doc_id: DocId, email: &str) -> anyhow::Result<()> {
     let wanted = email.trim();
-    let list: MembersListResponse = c
-        .client
-        .get_authed(&format!("/api/docs/{}/members", doc_id.0), &c.token)
+    let list = sharing::members(&c.profile, doc_id)
         .await
         .context("listing the members")?;
     let target = list
-        .members
         .iter()
         .find(|m| m.email.eq_ignore_ascii_case(wanted))
         .with_context(|| format!("{wanted} is not a member of this workspace"))?;
-    c.client
-        .delete_authed(
-            &format!("/api/docs/{}/members/{}", doc_id.0, target.account_id),
-            &c.token,
-        )
-        .await
-        .context("removing the member")?;
+    sharing::remove_member(&c.profile, doc_id, &target.account_id).await?;
     println!("Removed {}.", target.email);
     eprintln!(
         "They keep whatever they already synced; the server serves them nothing further from this workspace."
@@ -312,13 +256,6 @@ fn wrapped(ciphertext: &[u8], nonce: &[u8]) -> anyhow::Result<WrappedDek> {
         ciphertext: ciphertext.to_vec(),
         nonce,
     })
-}
-
-fn now_millis() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 /// Unix millis as a local-time-free ISO-ish stamp (UTC); enough for a

@@ -9,8 +9,12 @@
 // Debug a level under it). With an account, the avatar at the top left
 // is the account's menu: its email and New Workspace (named in an
 // alert); a shared workspace's section header has a "..." menu with
-// Delete Workspace, which asks for the name typed back, as the Mac
-// app's does. The folder beside it makes a new list:
+// Share… (the Sharing sheet, `SharingView`: members, invite links),
+// then Delete Workspace to its owner, which asks for the name typed
+// back, as the Mac app's does, or Leave Workspace to anyone else
+// (a plain confirm: nothing is destroyed, and an invite undoes it);
+// neither until the role is known (`AppModel.ownsWorkspace`), as on
+// the web. The folder beside it makes a new list:
 // a popover under it takes the name (and, with more than one workspace
 // open, which one: Personal unless changed) and the new list's page
 // is pushed. While the profile has no account, a Sign In
@@ -190,6 +194,10 @@ struct HomeView: View {
     /// back of its name.
     @State private var deleting: Deleting?
     @State private var deleteTyped = ""
+    /// The workspace whose Sharing sheet is up.
+    @State private var sharing: SharingTarget?
+    /// The workspace Leave is asking about.
+    @State private var leaving: Deleting?
 
     struct Failure {
         let title: String
@@ -288,9 +296,26 @@ struct HomeView: View {
                                 Spacer()
                                 // The workspace's own actions.
                                 Menu {
-                                    Button("Delete Workspace…", systemImage: "trash", role: .destructive) {
-                                        deleteTyped = ""
-                                        deleting = Deleting(docId: doc.docId, name: shared)
+                                    Button("Share…", systemImage: "person.crop.circle.badge.plus") {
+                                        sharing = SharingTarget(docId: doc.docId, name: shared)
+                                    }
+                                    switch model.ownsWorkspace[doc.docId] {
+                                    case true?:
+                                        Divider()
+                                        Button("Delete Workspace…", systemImage: "trash", role: .destructive) {
+                                            deleteTyped = ""
+                                            deleting = Deleting(docId: doc.docId, name: shared)
+                                        }
+                                    case false?:
+                                        Divider()
+                                        Button(
+                                            "Leave Workspace…", systemImage: "rectangle.portrait.and.arrow.right",
+                                            role: .destructive
+                                        ) {
+                                            leaving = Deleting(docId: doc.docId, name: shared)
+                                        }
+                                    case nil:
+                                        EmptyView()
                                     }
                                 } label: {
                                     Image(systemName: "ellipsis")
@@ -426,6 +451,24 @@ struct HomeView: View {
             .disabled(deleteTyped.trimmingCharacters(in: .whitespacesAndNewlines) != target.name)
         } message: { _ in
             Text("Its lists and items are removed from every device, and anyone it is shared with loses access. This cannot be undone.")
+        }
+        .sheet(item: $sharing) { target in
+            SharingView(target: target)
+                .environmentObject(model)
+        }
+        .alert(
+            "Leave “\(leaving?.name ?? "")”?",
+            isPresented: Binding(get: { leaving != nil }, set: { if !$0 { leaving = nil } }),
+            presenting: leaving
+        ) { target in
+            Button("Cancel", role: .cancel) {}
+            Button("Leave", role: .destructive) {
+                model.leaveWorkspace(target.docId) { error in
+                    if let error { failure = Failure(title: "Could not leave workspace", message: error) }
+                }
+            }
+        } message: { _ in
+            Text("It is removed from your devices and you lose access. The other members keep it; you will need a new invite link to rejoin.")
         }
         // Search covers the stack, navigation bar included, and sits
         // under the bar. A page or list result closes it and is pushed

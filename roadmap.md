@@ -119,3 +119,4 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - Cal adapter / Event RSVPs?
 - signing out while offline and failing a server token revocation never re-attempts
 - normalise nlp date suggestions acros platforms
+- task links / "blocked" feature? link? tag? both?

@@ -36,6 +36,7 @@ pub mod items;
 pub mod lists;
 pub mod moves;
 pub mod places;
+pub mod sharing;
 pub mod starred;
 
 /// What a call runs against: the workspace it named, every open doc

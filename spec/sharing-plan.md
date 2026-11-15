@@ -1,6 +1,6 @@
 # Sharing — design + implementation plan
 
-**Status:** Substrate, multi-doc clients, **invites** and **member removal with live revocation** (`DocClosed`, 2026-10-26) built; **leave** built 2026-11-11 (server + web / macOS window; no CLI verb); ownership transfer is not. Invites (sharing links) landed 2026-10-21: see §Invites below.
+**Status:** Substrate, multi-doc clients, **invites** and **member removal with live revocation** (`DocClosed`, 2026-10-26) built; **leave** built 2026-11-11 (server + web / macOS window; no CLI verb); ownership transfer is not. Invites (sharing links) landed 2026-10-21: see §Invites below. iOS sharing sheet built 2026-11-15: see §iOS.
 
 This document preserves the multi-doc / sharing design discussed during early planning. Pre-release, we made a deliberate scoping decision: lay the doc-keyed substrate now (so the eventual migration is incremental) but defer everything that needs a second doc to exist — membership tables, per-doc DEKs, multi-doc clients, sharing UX — until there is real conviction that shared lists are part of the product.
 
@@ -111,6 +111,12 @@ Neither is built. Revisit only if forgery shows up in a real shared workspace.
 ### Ownership transfer
 
 `POST /api/docs/:doc_id/transfer-ownership { to_account_id }` (current owner only): atomic UPDATE setting target's role to `'owner'`. Old owner stays a member unless they also `DELETE .../members/:self` in the same client flow. `accounts.primary_doc_id` is **not** affected — primary doc ≠ owned doc. (You can't transfer ownership of your primary doc; it's not shared.)
+
+### iOS (built 2026-11-15)
+
+The web `SharingDialog` as a native sheet (`apple/MonoplanIOS/Monoplan/SharingView.swift`), opened by **Share…** in the "..." menu on a shared workspace's section header on Home. Members (the web's avatar palette and pick, "You" / "Owner" tags; an owner removes another member by swipe or long press, confirmed with the forward-only copy), the invite link for the owner (create, then the system share sheet or Copy; shown once, gone with the sheet), and the unused links with Revoke. The same menu shows **Delete Workspace…** to the owner and **Leave Workspace…** to anyone else, neither until the role is known (`AppModel.ownsWorkspace`, from one member-list fetch per shared workspace per run, refreshed by the sheet). Leave is the self-removal route; the engine forgets the doc on the `DocClosed { reason: "left" }` it then receives, like the web.
+
+The calls are `cli/src/api/sharing.rs` (members, pending invites, create, revoke, remove, leave: HTTP on the device token, the DEK read from `secrets.toml` to wrap under the invite KEK), shared with `monoplan workspace share`, and exported as `Engine.workspace_members` / `pending_invites` / `create_invite` / `revoke_invite` / `remove_member` / `leave_workspace`. They are not loop calls: each runs on its own runtime, and the app runs them off the doc calls' serial queue, so an unreachable server never holds up a tick. Not built on iOS: accepting an invite (the engine would have to boot a joined doc live; the CLI restarts its daemon instead), the presence row.
 
 ### Member removal
 
