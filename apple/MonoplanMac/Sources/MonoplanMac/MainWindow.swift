@@ -1238,18 +1238,16 @@ struct MainWindowView: View {
         .pickerStyle(.inline)
     }
 
-    /// A user list's right-click menu: Delete…, which asks where its
-    /// items go (`ListConfirm`).
+    /// A user list's right-click menu: Delete…, which confirms and bins
+    /// its open items (`ListConfirm`).
     @ViewBuilder
     private func listMenu(_ section: NavSection, _ list: ListInfo) -> some View {
         let target = section.target
         Button("Delete…") {
             let shared = model.hasOtherMembers(section.id)
                 ? section.workspace.name ?? section.workspace.docId : nil
-            ListConfirm.delete(
-                name: list.name, open: Int(list.open), sharedWith: shared, on: NSApp.keyWindow
-            ) { mode in
-                model.deleteList(workspace: target, list: list.id, mode: mode)
+            ListConfirm.delete(name: list.name, sharedWith: shared, on: NSApp.keyWindow) {
+                model.deleteList(workspace: target, list: list.id, mode: .toBin)
             }
         }
     }
@@ -1624,37 +1622,24 @@ enum BinConfirm {
     }
 }
 
-/// Delete on a user list asks where its items go: to the Inbox (the
-/// default button) or to the Bin, as the web's dialog. On a workspace
-/// with other members it says they will all see the result. A list
-/// with nothing open just asks to delete (its done items still go to
-/// the Inbox).
+/// Delete on a user list confirms, saying its open items go to the Bin, as
+/// the web's dialog. On a workspace with other members it says they
+/// will all see the result.
 enum ListConfirm {
     static func delete(
-        name: String, open: Int, sharedWith workspace: String?, on window: NSWindow?,
-        then confirmed: @escaping (DeleteMode) -> Void
+        name: String, sharedWith workspace: String?, on window: NSWindow?,
+        then confirmed: @escaping () -> Void
     ) {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = String(localized: "Delete “\(name)”?")
-        if open > 0, let workspace {
-            alert.informativeText = String(localized: "Everyone in \(workspace) will see them.")
-        }
-        let modes: [DeleteMode]
-        if open > 0 {
-            alert.addButton(withTitle: open == 1
-                ? String(localized: "Move 1 Open Item to Inbox")
-                : String(localized: "Move \(open) Open Items to Inbox"))
-            alert.addButton(withTitle: String(localized: "Bin Them")).hasDestructiveAction = true
-            modes = [.toInbox, .toBin]
-        } else {
-            alert.addButton(withTitle: String(localized: "Delete")).hasDestructiveAction = true
-            modes = [.toInbox]
-        }
+        alert.informativeText = workspace.map {
+            String(localized: "Its open items go to the Bin. Everyone in \($0) will see them.")
+        } ?? String(localized: "Its open items go to the Bin.")
+        alert.addButton(withTitle: String(localized: "Delete")).hasDestructiveAction = true
         alert.addButton(withTitle: String(localized: "Cancel"))
         let finish = { (response: NSApplication.ModalResponse) in
-            let index = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
-            if modes.indices.contains(index) { confirmed(modes[index]) }
+            if response == .alertFirstButtonReturn { confirmed() }
         }
         if let window {
             alert.beginSheetModal(for: window, completionHandler: finish)

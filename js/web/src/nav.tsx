@@ -639,7 +639,7 @@ function DocSection(props: {
         if (isActive(id)) open("inbox");
       },
     });
-  // Delete always asks where the items go (`DeleteListDialog`); the
+  // Delete confirms, then bins the items (`DeleteListDialog`); the
   // list's row goes, so hop to this doc's Inbox first when it is on
   // screen. A non-Home doc counts as shared unless its member list is
   // loaded and says one, as the cross-workspace move does.

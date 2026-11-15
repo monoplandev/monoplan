@@ -397,12 +397,8 @@ impl Cli {
             Cmd::Done(a) => DocCmd::Done(a),
             Cmd::Starred(a) => DocCmd::Focus(a),
             Cmd::List(a) => {
-                if let lists::ListsCmd::Delete {
-                    list,
-                    bin,
-                    yes: false,
-                } = &a.cmd
-                    && !lists::confirm_delete(workspace.clone(), list, *bin, spawn).await?
+                if let lists::ListsCmd::Delete { list, yes: false } = &a.cmd
+                    && !lists::confirm_delete(workspace.clone(), list, spawn).await?
                 {
                     println!("aborted");
                     return Ok(());

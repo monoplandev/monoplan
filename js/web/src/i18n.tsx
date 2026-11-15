@@ -120,11 +120,10 @@ export type Messages = {
      *  (`spec/inbox-plan.md`); opens the delete dialog. */
     deleteList: string;
     /** Delete dialog: title with the list name, the confirm button, the
-     *  two choices for the list's items (Inbox is the default), and the
-     *  note naming a shared workspace whose members will see them. */
+     *  note that the list's open items go to the Bin, and the note naming a
+     *  shared workspace whose members will see them. */
     deleteListTitle: (name: string) => string;
     deleteListConfirm: string;
-    deleteListToInbox: (n: number) => string;
     deleteListToBin: string;
     deleteListShared: (workspace: string) => string;
     renameList: string;
@@ -669,11 +668,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       deleteList: "Eliminar…",
       deleteListTitle: (name) => `Eliminar «${name}»`,
       deleteListConfirm: "Eliminar",
-      deleteListToInbox: (n) =>
-        n === 1
-          ? "Mover 1 elemento abierto a la bandeja de entrada"
-          : `Mover ${n} elementos abiertos a la bandeja de entrada`,
-      deleteListToBin: "Enviarlos a la papelera",
+      deleteListToBin: "Sus elementos abiertos irán a la papelera.",
       deleteListShared: (ws) => `Todos en «${ws}» los verán.`,
       renameList: "Renombrar",
       changeListIcon: "Cambiar icono",
@@ -1064,9 +1059,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       deleteList: "Delete…",
       deleteListTitle: (name) => `Delete “${name}”`,
       deleteListConfirm: "Delete",
-      deleteListToInbox: (n) =>
-        n === 1 ? "Move 1 open item to Inbox" : `Move ${n} open items to Inbox`,
-      deleteListToBin: "Bin them",
+      deleteListToBin: "Its open items go to the Bin.",
       deleteListShared: (ws) => `Everyone in “${ws}” will see them.`,
       renameList: "Rename",
       changeListIcon: "Change icon",

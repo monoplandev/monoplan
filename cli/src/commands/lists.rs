@@ -50,13 +50,10 @@ pub enum ListsCmd {
     Archive { list: String },
     /// Restore an archived list to the active workspace.
     Unarchive { list: String },
-    /// Delete a user-created list: its items (open, done and binned)
-    /// move to Inbox, at the end of the queue. One undo restores it.
+    /// Delete a user-created list: its open items go to the Bin, its
+    /// done and cancelled ones to Inbox, closed. One undo restores it.
     Delete {
         list: String,
-        /// Bin the items instead of leaving them open in Inbox.
-        #[arg(long)]
-        bin: bool,
         /// Skip the confirmation prompt.
         #[arg(long)]
         yes: bool,
@@ -88,13 +85,8 @@ pub fn run(cx: &Ctx, args: ListsArgs, out: &mut dyn Write) -> anyhow::Result<()>
             api::lists::set_list_archived(cx, &list, false)?;
             list
         }
-        ListsCmd::Delete { list, bin, .. } => {
-            let mode = if bin {
-                api::lists::DeleteMode::ToBin
-            } else {
-                api::lists::DeleteMode::ToInbox
-            };
-            api::lists::delete_list(cx, &list, mode)?;
+        ListsCmd::Delete { list, .. } => {
+            api::lists::delete_list(cx, &list, api::lists::DeleteMode::ToBin)?;
             list
         }
     };
@@ -129,13 +121,12 @@ fn show(
 }
 
 /// Ask before `list delete`, naming the list and how many open items it
-/// sends to Inbox (or the Bin). Runs in the thin client: one `list ls`
+/// sends to the Bin. Runs in the thin client: one `list ls`
 /// round trip for the count. `true` means go ahead; a list the read
 /// doesn't find goes ahead too, so the delete itself reports the error.
 pub(crate) async fn confirm_delete(
     workspace: Option<String>,
     list: &str,
-    bin: bool,
     spawn: crate::client::Spawn,
 ) -> anyhow::Result<bool> {
     let profile = crate::bootstrap::open_or_init().await?;
@@ -154,13 +145,10 @@ pub(crate) async fn confirm_delete(
     let name = row["name"].as_str().unwrap_or(list);
     let open = row["open"].as_u64().unwrap_or(0);
     let items = if open == 1 { "item" } else { "items" };
-    let fate = if bin {
-        format!("{open} open {items} go to the Bin")
-    } else {
-        format!("{open} open {items} move to Inbox")
-    };
     Ok(dialoguer::Confirm::new()
-        .with_prompt(format!("Delete list {name:?}? Its {fate}."))
+        .with_prompt(format!(
+            "Delete list {name:?}? Its {open} open {items} go to the Bin."
+        ))
         .default(false)
         .interact()?)
 }

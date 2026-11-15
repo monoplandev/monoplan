@@ -777,16 +777,6 @@ struct ListItemsView: View {
         isInbox && inboxNewestFirst ? Array(items.reversed()) : items
     }
 
-    /// How many Open items the list holds, for Delete's confirm.
-    private var openCount: Int {
-        if let items = model.listItems[list.key] { return items.count }
-        return Int(model.listsByDoc[list.docId]?.first(where: { $0.id == list.listId })?.open ?? 0)
-    }
-
-    private var deleteMoveTitle: String {
-        openCount == 1 ? "Move 1 open item to Inbox" : "Move \(openCount) open items to Inbox"
-    }
-
     /// A capture into this list: scroll its row into view. A capture
     /// lands at the bottom of an Inbox shown oldest first (the queue's
     /// end), so the last row is brought up from the bottom edge.
@@ -914,21 +904,17 @@ struct ListItemsView: View {
         } message: {
             Text("The list leaves Home. Its items are kept.")
         }
-        // Every item it held goes to the Inbox (the default, first) or
-        // the Bin; a shared workspace's members all see the result.
+        // Its open items go to the Bin, closed ones to the Inbox; a shared workspace's
+        // members all see the result.
         .confirmationDialog(
             "Delete \(current.name)?", isPresented: $confirmDelete, titleVisibility: .visible
         ) {
-            if openCount > 0 {
-                Button(deleteMoveTitle) { deleteList(.toInbox) }
-                Button("Bin Them", role: .destructive) { deleteList(.toBin) }
-            } else {
-                Button("Delete List", role: .destructive) { deleteList(.toInbox) }
-            }
+            Button("Delete List", role: .destructive) { deleteList() }
         } message: {
-            if openCount > 0, model.hasOtherMembers(list.docId),
-               let name = model.sharedWorkspaceName(list.docId) {
-                Text("Everyone in \(name) will see them.")
+            if model.hasOtherMembers(list.docId), let name = model.sharedWorkspaceName(list.docId) {
+                Text("Its open items go to the Bin. Everyone in \(name) will see them.")
+            } else {
+                Text("Its open items go to the Bin.")
             }
         }
         .alert(
@@ -952,8 +938,8 @@ struct ListItemsView: View {
         .onChange(of: model.changeCount) { model.refreshList(list) }
     }
 
-    private func deleteList(_ mode: DeleteMode) {
-        model.deleteList(list, mode: mode) { error in
+    private func deleteList() {
+        model.deleteList(list) { error in
             if let error { deleteError = error } else { dismiss() }
         }
     }

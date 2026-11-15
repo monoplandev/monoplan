@@ -382,7 +382,8 @@ pub enum DeleteListMode {
     /// Items keep their lifecycle: open ones land open in Inbox.
     #[default]
     ToInbox,
-    /// Items not already binned are binned as well.
+    /// Open items are binned as well; done and cancelled ones land
+    /// closed in Inbox, and binned ones stay binned.
     ToBin,
 }
 
@@ -3679,8 +3680,8 @@ impl Doc {
     /// Refuses for the reserved `inbox` and `events`. Every item located
     /// in the list (open, closed and binned) is relocated to Inbox with
     /// a fresh placement and one shared `inbox_at = now`; with
-    /// [`DeleteListMode::ToBin`] the items not already binned are binned
-    /// too. Workflow registers, stamps and everything else stay. One
+    /// [`DeleteListMode::ToBin`] the open items are binned too (done and
+    /// cancelled ones stay closed, unbinned, in Inbox). Workflow registers, stamps and everything else stay. One
     /// commit, so one undo restores the row and every register. The
     /// abandoned order container remains as unreachable history.
     pub fn delete_list(&self, list_id: &str, mode: DeleteListMode) -> Result<(), DocError> {
@@ -3700,7 +3701,7 @@ impl Doc {
             let map = self.find_item(item_id)?;
             write_location(&map, LIST_INBOX, "")?;
             map.insert(KEY_INBOX_AT, now)?;
-            if mode == DeleteListMode::ToBin && read_i64(&map, KEY_BINNED_AT).is_none() {
+            if mode == DeleteListMode::ToBin && is_open(&map) {
                 map.insert(KEY_BINNED_AT, now)?;
             }
         }
@@ -5110,10 +5111,12 @@ impl Doc {
         }
 
         // The live list ids after the frame. An item whose list row
-        // appeared or vanished without its own register changing is an
+        // appeared or vanished without its own location changing is an
         // orphan folding into or out of Inbox (`spec/inbox-plan.md`
         // "Membership"): rare (a concurrent delete, or undoing one), so
-        // that frame takes the rebuild.
+        // that frame takes the rebuild. Other dirty keys on the item
+        // (a text edit in the same frame) don't count: only a location
+        // change makes the per-item plan emit the list change.
         let post_live: Option<HashSet<String>> = if lists_dirty {
             let post: HashSet<String> = self.all_lists().into_iter().map(|l| l.id).collect();
             let guard = self.item_index.lock().expect("item index mutex poisoned");
@@ -5124,7 +5127,9 @@ impl Doc {
                     flipped.contains(&m.located_in)
                         && !upserts.contains(id)
                         && !removals.contains(id)
-                        && !dirty_keys_by_id.contains_key(id)
+                        && !dirty_keys_by_id
+                            .get(id)
+                            .is_some_and(|keys| keys.contains(KEY_LOCATION))
                 });
                 // A list row coming back (undoing a delete) finds its
                 // abandoned order container still populated; the index
@@ -8210,7 +8215,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_list_bins_open_done_and_binned_items_with_fresh_placements() {
+    fn delete_list_bins_open_items_and_leaves_closed_ones_in_inbox() {
         let doc = Doc::new().unwrap();
         let mylist = doc.add_list("Errands").unwrap();
         let open = doc.add_item(&mylist, "live").unwrap();
@@ -8225,15 +8230,16 @@ mod tests {
         for id in [&open, &done, &binned] {
             assert_eq!(doc.get_item(id).unwrap().list_id, LIST_INBOX);
         }
-        // Everything from the deleted list is now binned, so the open
-        // projection of main is unchanged (only the pre-existing item).
+        // The open item is binned, so the open projection of Inbox is
+        // unchanged (only the pre-existing item).
         assert_eq!(doc.open_item_ids(LIST_INBOX), vec![main_existing]);
-        // The formerly-done item is now done *and* binned, so it leaves
-        // the done-only view; all three land in the bin.
-        assert_eq!(doc.done_item_ids(), Vec::<String>::new());
+        // The done item stays done and unbinned, now in Inbox; the open
+        // and already-binned ones are in the bin.
+        assert_eq!(doc.done_item_ids(), vec![done.clone()]);
+        assert!(!doc.get_item(&done).unwrap().is_binned());
         let mut in_bin = doc.binned_item_ids();
         in_bin.sort();
-        let mut expected = vec![open, done, binned];
+        let mut expected = vec![open, binned];
         expected.sort();
         assert_eq!(in_bin, expected);
         assert_open_projection_matches_doc(&doc);
@@ -9479,6 +9485,41 @@ mod tests {
             expected,
             "emitted events interleave on the consumer; got {evs:?}"
         );
+    }
+
+    /// A remote list delete strands an item this peer moved into the
+    /// list concurrently, in a frame that also edits the item's text:
+    /// the item folds into Inbox with no location change of its own.
+    /// The consumer must see it leave the deleted list (here via the
+    /// rebuild's resync), not keep it there because the item was dirty
+    /// for an unrelated key.
+    #[test]
+    fn remote_delete_strands_item_with_other_dirty_keys_on_consumer() {
+        let dek = Dek::generate();
+        let mut a = Doc::new().unwrap();
+        let x = a.add_list("X").unwrap();
+        let i = a.add_item(LIST_INBOX, "i").unwrap();
+        let mut b = sync_fresh_peer(&mut a, &dek);
+        a.move_item(&i, &x, 0).unwrap();
+        a.mark_persisted();
+        let _ = a.drain_events();
+
+        b.delete_list(&x, DeleteListMode::ToBin).unwrap();
+        b.edit_item_text(&i, "edited").unwrap();
+        let pre_open = open_state(&a);
+        let blob = b.pending_export(&dek).unwrap().unwrap();
+        a.apply_remote(&dek, &blob).unwrap();
+
+        let evs = a.drain_events();
+        assert_eq!(a.get_item(&i).unwrap().list_id, LIST_INBOX);
+        assert_eq!(a.open_item_ids(LIST_INBOX), vec![i.clone()]);
+        assert_open_projection_matches_doc(&a);
+        let consumer = if evs.contains(&AppEvent::FullResync) {
+            open_state(&a)
+        } else {
+            replay_open_events(&pre_open, &evs)
+        };
+        assert_eq!(consumer, open_state(&a), "consumer drifted; got {evs:?}");
     }
 
     #[test]
@@ -13739,11 +13780,23 @@ mod tests {
         for id in [&open, &done, &binned] {
             let view = doc.get_item(id).unwrap();
             assert_eq!(view.list_id, LIST_INBOX);
-            assert!(view.is_binned());
             assert!(view.inbox_at.is_some());
         }
+        assert!(doc.get_item(&open).unwrap().is_binned());
         assert_eq!(doc.get_item(&binned).unwrap().binned_at, Some(1));
-        assert!(doc.get_item(&done).unwrap().is_done(), "done-ness kept");
+        let done_view = doc.get_item(&done).unwrap();
+        assert!(done_view.is_done(), "done-ness kept");
+        assert!(!done_view.is_binned(), "closed items are not binned");
+
+        // Cancelled is closed too: it lands in Inbox unbinned.
+        let list = doc.add_list("Later").unwrap();
+        let cancelled = doc.add_item(&list, "cancelled").unwrap();
+        doc.set_item_lifecycle(&cancelled, ItemLifecycle::Cancelled)
+            .unwrap();
+        doc.delete_list(&list, DeleteListMode::ToBin).unwrap();
+        let v = doc.get_item(&cancelled).unwrap();
+        assert_eq!(v.list_id, LIST_INBOX);
+        assert!(v.is_cancelled() && !v.is_binned());
         assert_open_projection_matches_doc(&doc);
     }
 

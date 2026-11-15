@@ -631,14 +631,13 @@ final class AppModel: ObservableObject {
         writeList({ try $0.setListArchived(workspace: workspace, list: id, archived: true) }, done: done)
     }
 
-    /// Delete a user-created list (`Engine.deleteList`): every item it
-    /// held goes to the end of the Inbox's queue, and with `.toBin` to
-    /// the Bin too. One undo step restores the list and its items.
-    /// `done` gets why not, or nil once it is gone; the Inboxes on
-    /// screen are reread, as the items landed in one.
-    func deleteList(_ list: ListRef, mode: DeleteMode, done: @escaping (String?) -> Void) {
+    /// Delete a user-created list (`Engine.deleteList`): its open items
+    /// go to the Bin, its done and cancelled ones to the Inbox, closed. One undo step restores the list and its items.
+    /// `done` gets why not, or nil once it is gone; the lists on screen
+    /// are reread.
+    func deleteList(_ list: ListRef, done: @escaping (String?) -> Void) {
         let (workspace, id) = (selector(list.docId), list.listId)
-        writeList({ try $0.deleteList(workspace: workspace, list: id, mode: mode) }) { [weak self] error in
+        writeList({ try $0.deleteList(workspace: workspace, list: id, mode: .toBin) }) { [weak self] error in
             if error == nil, let self {
                 browsedLists[list.key] = nil
                 for list in browsedLists.values { refreshList(list) }

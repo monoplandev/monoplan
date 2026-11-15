@@ -91,11 +91,11 @@ Marking a starred item `done` removes it from Starred automatically; binning/del
 - `monoplan list icon <list> [emoji]` — set the list's emoji, or clear it when none is given. Refuses for `inbox` and `events`.
 - `monoplan list archive <list>` — remove a list from the active workspace without touching its items, ordering, or metadata (`spec/data-model.md` "Archived lists"). Refuses for `inbox` and `events`.
 - `monoplan list unarchive <list>` — restore an archived list to the active workspace.
-- `monoplan list delete <list> [--bin] [--yes]` (built 2026-11-16) — delete a user list: every item it holds (open, done and binned) moves to the end of Inbox's queue, and `--bin` bins them too (`spec/inbox-plan.md`). The thin client asks first, naming the list and its open count (one `list ls --json` round trip); `--yes` skips that. One undo step. Refuses for `inbox` and `events`.
+- `monoplan list delete <list> [--yes]` (built 2026-11-16) — delete a user list: every item it holds moves to the end of Inbox's queue, and its open items are binned (done and cancelled ones stay closed in Inbox, already-binned ones stay binned) (`spec/inbox-plan.md`; `--bin` and the move-to-Inbox default dropped 2026-11-16). The thin client asks first, naming the list and its open count (one `list ls --json` round trip); `--yes` skips that. One undo step. Refuses for `inbox` and `events`.
 
 Noun groups are singular (`item`, `list`, `workspace`, `daemon`, `bin`, `db`); `monoplan lists …` is a hidden alias of `list`. Views that return a collection and carry no verbs (`agenda`, `starred`, `done`) keep their own names.
 
-Archive shelves a list intact; delete drops it and sends its items to Inbox.
+Archive shelves a list intact; delete drops it and bins its open items.
 
 ### Bin
 Binning and restoring an item are `monoplan item bin` / `item restore` (see "Items"); the namespace is the bin itself.

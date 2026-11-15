@@ -121,16 +121,6 @@
         }
       }
     },
-    "Bin Them": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Enviarlos a la papelera"
-          }
-        }
-      }
-    },
     "Binned": {
       "localizations": {
         "es": {
@@ -441,16 +431,6 @@
         }
       }
     },
-    "Everyone in %@ will see them.": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Todos en %@ los verán."
-          }
-        }
-      }
-    },
     "General": {
       "localizations": {
         "es": {
@@ -637,26 +617,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Más"
-          }
-        }
-      }
-    },
-    "Move %lld Open Items to Inbox": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Mover %lld elementos abiertos a la bandeja de entrada"
-          }
-        }
-      }
-    },
-    "Move 1 Open Item to Inbox": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Mover 1 elemento abierto a la bandeja de entrada"
           }
         }
       }
@@ -2357,6 +2317,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Archivada"
+          }
+        }
+      }
+    },
+    "Its open items go to the Bin.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sus elementos abiertos irán a la papelera."
+          }
+        }
+      }
+    },
+    "Its open items go to the Bin. Everyone in %@ will see them.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sus elementos abiertos irán a la papelera. Todos en %@ los verán."
           }
         }
       }

@@ -137,8 +137,9 @@ Each change below is still **one Loro commit**.
   located in the list (open, closed, binned):
   - `location = inbox:<fresh placement>`
   - `inbox_at = now` (shared)
-  - `ToBin` only: `binned_at = now` on items not already binned (the current
-    behaviour).
+  - `ToBin` only: `binned_at = now` on open items (since 2026-11-16; before,
+    every item not already binned). Done and cancelled items land closed and
+    unbinned in Inbox.
 
   Workflow registers, stamps, notes, dates, place and Starred refs are
   untouched. Closed items therefore show in the Done view with Inbox as their
@@ -247,6 +248,13 @@ states who will see the result.
   older doc, an unparseable value and an orphan all read the same, so no
   migration. `inbox` stays the id every API, URL and client uses to name
   that bucket, and the product still calls it Inbox.
+- **Delete always bins** (2026-11-16): the user-facing choice is gone. Web,
+  iOS, macOS and `list delete` confirm once ("Its open items go to the Bin",
+  plus the shared-workspace note) and call `delete_list(ToBin)`, which bins
+  only open items: done and cancelled ones go to Inbox closed, where they show
+  in the Done view with no list. The CLI's `--bin` flag is removed. `ToInbox` stays in core, `api::lists::DeleteMode`, the FFI
+  and the wasm `deleteList(id, toBin)` with no caller, so no binding changed.
+  The surface table above records the original two-choice build.
 - **Archive vs delete:** Delete is offered wherever the list menu is (web nav
   and header, iOS list page, Mac sidebar), so an archived list's header menu
   on the web offers it too; there is no separate action.
