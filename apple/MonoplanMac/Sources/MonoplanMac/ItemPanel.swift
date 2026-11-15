@@ -71,21 +71,21 @@ struct ItemPanel: View {
             listField(item)
             if let when = item.item.when {
                 PanelField(text: Self.whenText(when), note: Self.lengthText(item)) {
-                    Image(systemName: "calendar")
+                    PanelGlyph(image: NavArt.calendar)
                 }
             } else {
-                PanelField(text: String(localized: "Date"), empty: true) { Image(systemName: "calendar") }
+                PanelField(text: String(localized: "Date"), empty: true) { PanelGlyph(image: NavArt.calendar) }
             }
             if let deadline = item.item.deadline {
                 PanelField(text: String(localized: "Due \(Self.dayText(deadline))")) { Image(systemName: "timer") }
             }
             if let place = item.item.place {
-                PanelField(text: place.label, note: place.address) { Image(systemName: "mappin.and.ellipse") }
+                PanelField(text: place.label, note: place.address) { PanelGlyph(image: NavArt.pin) }
                 if let lat = place.lat, let lon = place.lon {
                     PlaceMapCard(label: place.label, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
                 }
             } else {
-                PanelField(text: String(localized: "Place"), empty: true) { Image(systemName: "mappin.and.ellipse") }
+                PanelField(text: String(localized: "Place"), empty: true) { PanelGlyph(image: NavArt.pin) }
             }
         }
     }
@@ -118,7 +118,7 @@ struct ItemPanel: View {
                     if let emoji = item.listIcon {
                         Text(verbatim: emoji)
                     } else {
-                        Image(systemName: Self.listSymbol(item.item.listId))
+                        Self.listIcon(item.item.listId)
                     }
                 }
                 .foregroundStyle(.secondary)
@@ -204,11 +204,14 @@ struct ItemPanel: View {
     static let taskStates: [ItemState] = [.backlog, .todo, .inProgress, .review, .done, .cancelled]
     static let eventStates: [ItemState] = [.backlog, .done, .cancelled]
 
-    static func listSymbol(_ listId: String) -> String {
+    /// A list's glyph when it has no emoji: the sidebar's for the Inbox
+    /// and the calendar's own list, a bullet list for any other.
+    @ViewBuilder
+    private static func listIcon(_ listId: String) -> some View {
         switch listId {
-        case MainWindowModel.inbox: return "tray"
-        case MainWindowModel.events: return "calendar"
-        default: return "list.bullet"
+        case MainWindowModel.inbox: PanelGlyph(image: NavArt.inbox)
+        case MainWindowModel.events: PanelGlyph(image: NavArt.calendar)
+        default: Image(systemName: "list.bullet")
         }
     }
 
@@ -331,6 +334,19 @@ struct PanelList: Identifiable {
 
 /// One field of the panel: its icon, its value, and a secondary line
 /// under it when there is one. `empty` mutes a field that is unset.
+/// One of `NavArt`'s glyphs as a panel row's icon, where a symbol
+/// would be: an image's baseline is its bottom edge, so it is lowered
+/// to sit on the text's baseline the way a symbol does.
+private struct PanelGlyph: View {
+    let image: NSImage
+    var size: CGFloat = 15
+
+    var body: some View {
+        NavIcon(image: image, size: size)
+            .alignmentGuide(.firstTextBaseline) { $0[.bottom] - size * 0.2 }
+    }
+}
+
 private struct PanelField<Icon: View>: View {
     let text: String
     var note: String? = nil

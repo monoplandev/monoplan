@@ -46,7 +46,8 @@ struct ListRef: Hashable {
 }
 
 /// A list's icon: its emoji when the user picked one, else the built-in
-/// glyph (a tray for the Inbox, a folder for any other list).
+/// glyph (the web's inbox tray for the Inbox, a folder for any other
+/// list).
 struct ListIcon: View {
     let listId: String
     let emoji: String?
@@ -55,8 +56,30 @@ struct ListIcon: View {
         if let emoji, !emoji.isEmpty {
             Text(emoji)
         } else {
-            Image(systemName: listId == "inbox" ? "tray" : "folder")
+            if listId == "inbox" {
+                CatalogIcon(name: "Inbox")
+            } else {
+                Image(systemName: "folder")
+            }
         }
+    }
+}
+
+/// One of the web's glyphs from the asset catalog (`Inbox` is
+/// `js/web/src/icons/archive.svg`, `Calendar` is `calendar.svg`),
+/// standing where a symbol would as a label's icon: about a symbol's
+/// side beside body text, growing with Dynamic Type. Takes the
+/// foreground style around it.
+struct CatalogIcon: View {
+    let name: String
+    @ScaledMetric(relativeTo: .body) private var side: CGFloat = 20
+
+    var body: some View {
+        Image(name)
+            .resizable()
+            .scaledToFit()
+            .frame(width: side, height: side)
+            .accessibilityHidden(true)
     }
 }
 
@@ -210,7 +233,7 @@ struct HomeView: View {
                             .counted(model.starred.count)
                     }
                     NavigationLink(value: HomePage.agenda) {
-                        Label("Calendar", systemImage: "calendar")
+                        Label { Text("Calendar") } icon: { CatalogIcon(name: "Calendar") }
                     }
                     NavigationLink(value: HomePage.map) {
                         Label("Map", systemImage: "map")

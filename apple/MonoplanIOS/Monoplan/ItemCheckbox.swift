@@ -22,11 +22,11 @@ struct ItemCheckbox: View {
         ZStack {
             if state == .done {
                 shape.fill(.tint)
-                mark("checkmark").foregroundStyle(.white)
+                mark(cancelled: false).foregroundStyle(.white)
             } else {
                 shape.strokeBorder(.tertiary, lineWidth: Self.border)
                 if state == .cancelled {
-                    mark("xmark").foregroundStyle(.tertiary)
+                    mark(cancelled: true).foregroundStyle(.tertiary)
                 }
             }
         }
@@ -39,9 +39,8 @@ struct ItemCheckbox: View {
         .accessibilityLabel(label)
     }
 
-    private func mark(_ name: String) -> some View {
-        Image(systemName: name)
-            .font(.system(size: side * 0.55, weight: .semibold))
+    private func mark(cancelled: Bool) -> some View {
+        CheckGlyph(cancelled: cancelled).stroked(side)
     }
 
     private var label: String {
@@ -203,5 +202,33 @@ extension View {
     func itemListRow() -> some View {
         listRowSeparator(.hidden)
             .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+    }
+}
+
+/// The web's tick and cross (`js/web/src/icons/check.svg`, and the
+/// `.task-check` cross in `styles.css`): strokes on a 16-unit grid
+/// that spans the whole box, stroked an eighth of its side, rounded.
+struct CheckGlyph: Shape {
+    let cancelled: Bool
+
+    /// The strokes as polylines in grid units, y down.
+    static func strokes(cancelled: Bool) -> [[CGPoint]] {
+        cancelled
+            ? [[CGPoint(x: 5, y: 5), CGPoint(x: 11, y: 11)], [CGPoint(x: 11, y: 5), CGPoint(x: 5, y: 11)]]
+            : [[CGPoint(x: 3.5, y: 8.5), CGPoint(x: 6.5, y: 11.5), CGPoint(x: 12.5, y: 5.5)]]
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let unit = rect.width / 16
+        var path = Path()
+        for stroke in Self.strokes(cancelled: cancelled) {
+            path.addLines(stroke.map { CGPoint(x: rect.minX + $0.x * unit, y: rect.minY + $0.y * unit) })
+        }
+        return path
+    }
+
+    /// Stroked for a box `side` across.
+    func stroked(_ side: CGFloat) -> some Shape {
+        stroke(style: StrokeStyle(lineWidth: side / 8, lineCap: .round, lineJoin: .round))
     }
 }

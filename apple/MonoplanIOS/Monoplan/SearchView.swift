@@ -29,24 +29,29 @@ struct SearchView: View {
     /// its label is matched here, with the index's own name rule.
     private struct BuiltIn: Identifiable {
         let title: String
-        /// The page's symbol; nil is Starred, which has the web's star.
+        /// The page's symbol; nil is Starred, which has the web's star,
+        /// or a page with a `catalog` glyph.
         let systemImage: String?
         let pick: SearchPick
+        /// The web's glyph from the asset catalog, for pages that use
+        /// one on Home (`CatalogIcon`).
+        var catalog: String? = nil
         var id: String { title }
     }
 
     private var builtIns: [BuiltIn] {
         var all = [
             BuiltIn(title: "Starred", systemImage: nil, pick: .page(.starred)),
-            BuiltIn(title: "Calendar", systemImage: "calendar", pick: .page(.agenda)),
+            BuiltIn(title: "Calendar", systemImage: nil, pick: .page(.agenda), catalog: "Calendar"),
             BuiltIn(title: "Map", systemImage: "map", pick: .page(.map)),
             BuiltIn(title: "Done", systemImage: "checkmark.circle", pick: .page(.done)),
             BuiltIn(title: "Bin", systemImage: "trash", pick: .page(.bin)),
         ]
         if let home = model.session?.primaryDocId {
             all.append(BuiltIn(
-                title: "Inbox", systemImage: "tray",
-                pick: .list(ListRef(docId: home, listId: "inbox", name: "Inbox"))
+                title: "Inbox", systemImage: nil,
+                pick: .list(ListRef(docId: home, listId: "inbox", name: "Inbox")),
+                catalog: "Inbox"
             ))
         }
         return all.filter { matchesName(name: $0.title, query: trimmed) }
@@ -86,7 +91,9 @@ struct SearchView: View {
                             Label {
                                 Text(page.title)
                             } icon: {
-                                if let symbol = page.systemImage {
+                                if let catalog = page.catalog {
+                                    CatalogIcon(name: catalog)
+                                } else if let symbol = page.systemImage {
                                     Image(systemName: symbol)
                                 } else {
                                     StarIcon()

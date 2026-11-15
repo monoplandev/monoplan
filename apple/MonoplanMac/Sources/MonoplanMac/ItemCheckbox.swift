@@ -15,7 +15,6 @@ private enum CheckMetrics {
     static let side: CGFloat = 15
     static let radius: CGFloat = 0.32
     static let border: CGFloat = 1.25
-    static let mark: CGFloat = 0.55
     static let nudge: CGFloat = 1
 }
 
@@ -31,11 +30,11 @@ struct ItemCheckbox: View {
         ZStack {
             if state == .done {
                 shape.fill(.tint)
-                mark("checkmark").foregroundStyle(.white)
+                mark(cancelled: false).foregroundStyle(.white)
             } else {
                 shape.strokeBorder(.tertiary, lineWidth: CheckMetrics.border)
                 if state == .cancelled {
-                    mark("xmark").foregroundStyle(.tertiary)
+                    mark(cancelled: true).foregroundStyle(.tertiary)
                 }
             }
         }
@@ -46,9 +45,8 @@ struct ItemCheckbox: View {
         .alignmentGuide(.firstTextBaseline) { $0[.bottom] - side * 0.2 - CheckMetrics.nudge }
     }
 
-    private func mark(_ name: String) -> some View {
-        Image(systemName: name)
-            .font(.system(size: side * CheckMetrics.mark, weight: .semibold))
+    private func mark(cancelled: Bool) -> some View {
+        CheckGlyph(cancelled: cancelled).stroked(side)
     }
 }
 
@@ -83,7 +81,7 @@ enum ItemCheckArt {
             if state == .done {
                 NSColor.controlAccentColor.setFill()
                 NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
-                mark("checkmark", colour: .white, in: rect)
+                mark(cancelled: false, colour: .white, in: rect)
             } else {
                 let inset = rect.insetBy(dx: CheckMetrics.border / 2, dy: CheckMetrics.border / 2)
                 let path = NSBezierPath(
@@ -92,7 +90,7 @@ enum ItemCheckArt {
                 path.lineWidth = CheckMetrics.border
                 stroke.setStroke()
                 path.stroke()
-                if state == .cancelled { mark("xmark", colour: stroke, in: rect) }
+                if state == .cancelled { mark(cancelled: true, colour: stroke, in: rect) }
             }
             return true
         }
@@ -100,18 +98,48 @@ enum ItemCheckArt {
         return image
     }
 
-    private static func mark(_ name: String, colour: NSColor, in rect: NSRect) {
-        let configuration = NSImage.SymbolConfiguration(
-            pointSize: rect.width * CheckMetrics.mark, weight: .semibold
-        ).applying(.init(paletteColors: [colour]))
-        guard
-            let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-                .withSymbolConfiguration(configuration)
-        else { return }
-        let size = symbol.size
-        symbol.draw(
-            in: NSRect(
-                x: rect.midX - size.width / 2, y: rect.midY - size.height / 2,
-                width: size.width, height: size.height))
+    /// `CheckGlyph`'s strokes, flipped into AppKit's y-up drawing.
+    private static func mark(cancelled: Bool, colour: NSColor, in rect: NSRect) {
+        let unit = rect.width / 16
+        let path = NSBezierPath()
+        for stroke in CheckGlyph.strokes(cancelled: cancelled) {
+            for (i, point) in stroke.enumerated() {
+                let p = NSPoint(x: rect.minX + point.x * unit, y: rect.maxY - point.y * unit)
+                if i == 0 { path.move(to: p) } else { path.line(to: p) }
+            }
+        }
+        path.lineWidth = rect.width / 8
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        colour.setStroke()
+        path.stroke()
+    }
+}
+
+/// The web's tick and cross (`js/web/src/icons/check.svg`, and the
+/// `.task-check` cross in `styles.css`): strokes on a 16-unit grid
+/// that spans the whole box, stroked an eighth of its side, rounded.
+struct CheckGlyph: Shape {
+    let cancelled: Bool
+
+    /// The strokes as polylines in grid units, y down.
+    static func strokes(cancelled: Bool) -> [[CGPoint]] {
+        cancelled
+            ? [[CGPoint(x: 5, y: 5), CGPoint(x: 11, y: 11)], [CGPoint(x: 11, y: 5), CGPoint(x: 5, y: 11)]]
+            : [[CGPoint(x: 3.5, y: 8.5), CGPoint(x: 6.5, y: 11.5), CGPoint(x: 12.5, y: 5.5)]]
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let unit = rect.width / 16
+        var path = Path()
+        for stroke in Self.strokes(cancelled: cancelled) {
+            path.addLines(stroke.map { CGPoint(x: rect.minX + $0.x * unit, y: rect.minY + $0.y * unit) })
+        }
+        return path
+    }
+
+    /// Stroked for a box `side` across.
+    func stroked(_ side: CGFloat) -> some Shape {
+        stroke(style: StrokeStyle(lineWidth: side / 8, lineCap: .round, lineJoin: .round))
     }
 }
