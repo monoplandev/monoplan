@@ -2339,7 +2339,7 @@ input.task-check:hover {
 
 .confirm-dialog-title {
   margin: 0;
-  font-size: 16px;
+  font-size: inherit;
   font-weight: 600;
 }
 
@@ -2360,8 +2360,10 @@ input.task-check:hover {
   gap: 8px;
 }
 
+/* Same text padding as the bin's "Empty" button (2px vertical); the
+   1px border comes out of the horizontal padding. */
 .confirm-dialog-btn {
-  padding: 6px 14px;
+  padding: 2px 7px;
   border: 1px solid var(--border-input);
   border-radius: 4px;
   background: transparent;
@@ -2374,13 +2376,17 @@ input.task-check:hover {
   background: var(--bg-hover);
 }
 
-/* The primary action inverts the surface: white on black in light,
-   black on white in dark. Red is reserved for inline errors. */
+/* The primary action is a filled grey, a step off the dialog surface
+   rather than an inverted one. Red is reserved for inline errors. */
 .confirm-dialog-confirm {
   border-color: transparent;
-  background: var(--text);
-  color: var(--bg-elevated);
-  font-weight: 500;
+  background: #e0e0e0;
+  color: #000;
+}
+
+[data-theme="dark"] .confirm-dialog-confirm {
+  background: #3a3a3c;
+  color: #fff;
 }
 
 .confirm-dialog-confirm:hover:not(:disabled) {
@@ -4156,7 +4162,7 @@ input.task-check:hover {
 }
 
 .settings-logout {
-  padding: 6px 12px;
+  padding: 2px 7px;
   border: 1px solid var(--border-input);
   background: var(--bg-elevated);
   color: var(--text);

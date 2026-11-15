@@ -112,10 +112,9 @@ export type Messages = {
     /** Context-menu / header action that restores an archived list. */
     unarchiveList: string;
     /** Archive confirmation (shown only when the list has open items):
-     *  title with the list name, body, and the pre-checked "move open
+     *  title with the list name and the pre-checked "move open
      *  items to Inbox" box. */
     archiveListTitle: (name: string) => string;
-    archiveListConfirm: string;
     archiveListMoveOpen: (n: number) => string;
     renameList: string;
     /** Context-menu item on a user list: opens the emoji picker for its icon. */
@@ -649,8 +648,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       archived: "Archivada",
       unarchiveList: "Restaurar",
       archiveListTitle: (name) => `Archivar «${name}»`,
-      archiveListConfirm:
-        "Los elementos abiertos que queden en una lista archivada permanecen fuera de la vista hasta que la restaures.",
       archiveListMoveOpen: (n) =>
         n === 1
           ? "¿Mover 1 elemento abierto a la bandeja de entrada?"
@@ -1038,8 +1035,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       archived: "Archived",
       unarchiveList: "Unarchive",
       archiveListTitle: (name) => `Archive “${name}”`,
-      archiveListConfirm:
-        "Open items left in an archived list stay out of the way until you unarchive it.",
       archiveListMoveOpen: (n) =>
         n === 1 ? "Move 1 open item to Inbox?" : `Move ${n} open items to Inbox?`,
       renameList: "Rename",

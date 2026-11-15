@@ -94,7 +94,6 @@ export function ArchiveListDialog(props: {
         if (!b) props.onClose();
       }}
       title={m().nav.archiveListTitle(name())}
-      message={m().nav.archiveListConfirm}
       confirmLabel={m().nav.archiveList}
       onConfirm={confirm}
     >

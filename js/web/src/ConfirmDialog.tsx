@@ -16,7 +16,8 @@ import { closeToItems, trackOverlay } from "./overlay.ts";
 export function ConfirmDialog(props: {
   open: boolean;
   onOpenChange: (b: boolean) => void;
-  message: string;
+  /** Muted description under the title; omit for a title-only header. */
+  message?: string;
   /** Short heading above the message; every confirmation carries one. */
   title: string;
   confirmLabel?: string;
@@ -57,9 +58,11 @@ export function ConfirmDialog(props: {
               <Dialog.Title class="confirm-dialog-title">
                 {props.title}
               </Dialog.Title>
-              <Dialog.Description class="confirm-dialog-message">
-                {props.message}
-              </Dialog.Description>
+              <Show when={props.message}>
+                <Dialog.Description class="confirm-dialog-message">
+                  {props.message}
+                </Dialog.Description>
+              </Show>
             </section>
             <Show when={props.children}>
               <section class="confirm-dialog-section confirm-dialog-body">
