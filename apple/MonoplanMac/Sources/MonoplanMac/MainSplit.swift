@@ -5,9 +5,10 @@
 // divider, so what comes after the panel's separator sits over the
 // panel wherever its edge is dragged: the status control and the
 // star, the iOS item page's bar (`ItemView.bar`). The
-// system draws each on its glass. The window's title, which the bar
-// shows over the list, is the name of what is listed
-// (`MainWindowController`).
+// system draws each on its glass. Over the list the bar shows the
+// name of what is listed: the bar's own title item, a button, since the
+// window's title cannot be clicked; on a user list it opens a popover
+// that renames the list.
 //
 // SwiftUI's own `NavigationSplitView` and `.inspector` were tried
 // here first: in a window made by hand their toolbar items do not
@@ -35,6 +36,9 @@ private extension NSToolbarItem.Identifier {
     /// account. Nothing takes its place once there is one: the
     /// account lives in Settings, New Workspace… in the app menu.
     static let signIn = NSToolbarItem.Identifier("MonoplanSignIn")
+    /// The list's name, in the window title's place, after the
+    /// sidebar's separator. On a user list a click renames it.
+    static let title = NSToolbarItem.Identifier("MonoplanTitle")
 }
 
 final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
@@ -51,6 +55,8 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     var signedIn = true
     /// Sign In was clicked.
     var onSignIn: () -> Void = {}
+    /// The rename popover, while it is up.
+    private var renamePopover: NSPopover?
 
     static let sidebarWidth = (min: 160.0, initial: 200.0, max: 400.0)
     static let panelWidth = (min: 240.0, max: 520.0)
@@ -62,7 +68,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     /// The space between those two keeps each on its own glass:
     /// adjacent buttons would share one.
     private static let fixedItems: [NSToolbarItem.Identifier] = [
-        .sidebarTrackingSeparator, .flexibleSpace, .search, .space, .newItem,
+        .sidebarTrackingSeparator, .title, .flexibleSpace, .search, .space, .newItem,
     ]
 
     init(model: MainWindowModel) {
@@ -179,6 +185,14 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     }
 
     private func update(_ toolbarItem: NSToolbarItem) {
+        if toolbarItem.itemIdentifier == .title {
+            guard let view = toolbarItem.view as? ToolbarTitleView else { return }
+            let title = model.windowTitle
+            view.title = title
+            view.renamable = model.renamableList != nil
+            toolbarItem.label = title
+            return
+        }
         guard let item = model.detail else { return }
         switch toolbarItem.itemIdentifier {
         case .itemStatus:
@@ -250,6 +264,17 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         }
         let item = NSToolbarItem(itemIdentifier: identifier)
         switch identifier {
+        case .title:
+            // Text with a caret on hover, not a bordered control: no
+            // glass. The click does nothing off a user list.
+            let view = ToolbarTitleView()
+            view.title = model.windowTitle
+            view.onClick = { [weak self, weak view] in
+                guard let self, let view else { return }
+                self.titleClicked(view)
+            }
+            item.view = view
+            item.isBordered = false
         case .signIn:
             let label = String(localized: "Sign In")
             item.title = label
@@ -302,6 +327,28 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     }
 
     @objc private func openSearch(_ sender: Any?) {}
+
+    /// The title on a user list: a popover under it with the list's
+    /// name to edit. Rename (or Return) writes it; Cancel, Escape or a
+    /// click outside leaves it.
+    private func titleClicked(_ sender: NSView) {
+        if let renamePopover, renamePopover.isShown {
+            renamePopover.performClose(nil)
+            return
+        }
+        guard let target = model.renamableList else { return }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        let close: () -> Void = { [weak popover] in popover?.performClose(nil) }
+        let host = NSHostingController(rootView: RenameListForm(name: target.name, commit: { [model] name in
+            model.renameList(workspace: target.workspace, list: target.list, name: name)
+            close()
+        }, cancel: close))
+        host.sizingOptions = .preferredContentSize
+        popover.contentViewController = host
+        renamePopover = popover
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: sender.isFlipped ? .maxY : .minY)
+    }
 
     @objc private func newItem(_ sender: Any?) {}
 
@@ -438,4 +485,126 @@ struct ItemPanelPane: View {
 /// borders are near-black in dark, the system's in light.
 private final class PaneSplitView: NSSplitView {
     override var dividerColor: NSColor { PaneColor.divider(super.dividerColor) }
+}
+
+/// The title's rename popover: the list's name in a field, Rename
+/// enabled once it has a non-blank character.
+private struct RenameListForm: View {
+    @State var name: String
+    let commit: (String) -> Void
+    let cancel: () -> Void
+    @FocusState private var focused: Bool
+
+    private var valid: Bool { !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Rename List").font(.headline)
+            TextField("Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 240)
+                .focused($focused)
+                .onSubmit { if valid { commit(name) } }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel, action: cancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Rename") { commit(name) }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!valid)
+            }
+        }
+        .padding(16)
+        .onAppear { focused = true }
+    }
+}
+
+/// The bar's title: the list's name, inset from the sidebar's edge,
+/// in the label colour, with a down caret beside it while the pointer
+/// is over a renamable one: the caret a document window's title shows
+/// (an `NSDocument` gets that for free; a list is not a document, so
+/// this draws its own). The caret's room is always kept, so the title
+/// does not shift when it appears.
+final class ToolbarTitleView: NSView {
+    var title = "" {
+        didSet { if label.stringValue != title { label.stringValue = title } }
+    }
+    /// Whether a click renames: the caret, tooltip and click follow it.
+    var renamable = false {
+        didSet {
+            toolTip = renamable ? String(localized: "Rename List") : nil
+            setAccessibilityRole(renamable ? .button : .staticText)
+            syncCaret()
+        }
+    }
+    var onClick: () -> Void = {}
+
+    private let label = NSTextField(labelWithString: "")
+    private let caret = NSImageView()
+    private var hovering = false {
+        didSet { syncCaret() }
+    }
+    /// From the sidebar's separator to the title.
+    static let inset: CGFloat = 10
+
+    init() {
+        super.init(frame: .zero)
+        label.font = .systemFont(ofSize: NSFont.systemFontSize + 2, weight: .bold)
+        label.textColor = .labelColor
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        caret.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
+        caret.contentTintColor = .secondaryLabelColor
+        caret.isHidden = true
+        for view in [label, caret] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.inset),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            caret.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 4),
+            caret.centerYAnchor.constraint(equalTo: label.centerYAnchor, constant: 1),
+            caret.trailingAnchor.constraint(equalTo: trailingAnchor),
+            heightAnchor.constraint(greaterThanOrEqualTo: label.heightAnchor),
+        ])
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func accessibilityLabel() -> String? { title }
+
+    override func accessibilityPerformPress() -> Bool {
+        guard renamable else { return false }
+        onClick()
+        return true
+    }
+
+    private func syncCaret() {
+        caret.isHidden = !(renamable && hovering)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) { hovering = true }
+    override func mouseExited(with event: NSEvent) { hovering = false }
+
+    /// A click on an inactive window renames at once, as a toolbar
+    /// button would.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        guard renamable else { return super.mouseDown(with: event) }
+        onClick()
+    }
 }

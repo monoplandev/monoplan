@@ -63,6 +63,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         window.toolbar = split.toolbar
         window.toolbarStyle = .unified
+        // The bar draws the title itself, as a button that renames the
+        // list (`MainSplitViewController`'s title item); the window's
+        // own title stays set for the Window menu and Mission Control.
+        window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 520, height: 360)
         window.setContentSize(NSSize(width: 860, height: 560))
@@ -72,9 +76,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         super.init(window: window)
         window.delegate = self
         split.restoreDividers()
-        // The bar's title is the window's, drawn over the list: the
-        // name of what is shown. It and the panel's toolbar items
-        // follow the model. `objectWillChange` is before the change,
+        // The window's title is the name of what is shown. It, the
+        // bar's title item and the panel's toolbar items follow the
+        // model. `objectWillChange` is before the change,
         // hence the hop.
         modelSync = model.objectWillChange
             .receive(on: DispatchQueue.main)
@@ -647,6 +651,26 @@ final class MainWindowModel: ObservableObject {
     /// (`Engine.moveItem`).
     func moveItem(workspace: String?, id: String, list: String) {
         write { try $0.moveItem(workspace: workspace, id: id, list: list) }
+    }
+
+    /// The shown list when it can be renamed from the title: a
+    /// user-created list (the reserved ones and the lenses cannot).
+    var renamableList: (workspace: String?, list: String, name: String)? {
+        let workspace = shown.workspace, list = shown.list
+        guard shown.lens == nil, list != Self.inbox, list != Self.events,
+              let found = sections.first(where: { $0.target == workspace })?.lists
+                .first(where: { $0.id == list })
+        else { return nil }
+        return (workspace, list, found.name)
+    }
+
+    /// Rename a user-created list (`Engine.renameList`). A blank or
+    /// unchanged name writes nothing, so no empty undo step.
+    func renameList(workspace: String?, list: String, name: String) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let current = sections.first { $0.target == workspace }?.lists.first { $0.id == list }?.name
+        guard !name.isEmpty, name != current else { return }
+        write { try $0.renameList(workspace: workspace, list: list, name: name) }
     }
 
     /// Move an item to any workflow state (`Engine.setState`).
