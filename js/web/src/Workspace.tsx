@@ -36,7 +36,6 @@ import eyeOpenSvg from "./icons/eye-open.svg?raw";
 import listBulletSvg from "./icons/list-bullet.svg?raw";
 import mixerHzSvg from "./icons/mixer-hz.svg?raw";
 import plusSvg from "./icons/plus.svg?raw";
-import trashSvg from "./icons/trash.svg?raw";
 import { Board, type BoardImperative } from "./Board.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { createArchiveListFlow } from "./ArchiveListDialog.tsx";
@@ -3290,12 +3289,11 @@ export function Workspace(props: {
             >
               <button
                 type="button"
-                class="add-button"
+                class="add-button empty-bin-button"
                 tabIndex={-1}
                 onClick={() => setEmptyBinConfirmOpen(true)}
               >
-                <span class="add-button-icon" innerHTML={trashSvg} />
-                <span>{m().workspace.emptyBin}</span>
+                {m().workspace.emptyBin}
               </button>
             </Show>
             {/* The view's icon buttons (list menu, display options, add)

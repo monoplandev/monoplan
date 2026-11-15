@@ -200,6 +200,9 @@ export type Messages = {
     notes: string;
     /** Hover text on a Bin row's stamp; `when` is the full local date-time. */
     binnedAt: (when: string) => string;
+    /** Status text in the task dialog header for a binned item, in place
+     *  of the lifecycle picker (the bin mask hides the workflow state). */
+    binnedStatus: string;
     markDone: string;
     markNotDone: string;
     /** Cancel: the closed-but-not-completed sibling of Done
@@ -713,6 +716,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       emptyState: "Nada aquí.",
       notes: "Notas",
       binnedAt: (when) => `Eliminado ${when}`,
+      binnedStatus: "Eliminado",
       markDone: "Marcar como hecho",
       markNotDone: "Marcar como no hecho",
       markCancelled: "Cancelar",
@@ -1097,6 +1101,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       emptyState: "Nothing here.",
       notes: "Notes",
       binnedAt: (when) => `Binned ${when}`,
+      binnedStatus: "Binned",
       markDone: "Mark as done",
       markNotDone: "Mark as not done",
       markCancelled: "Cancel",

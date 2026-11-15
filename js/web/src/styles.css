@@ -375,7 +375,7 @@ body {
   font-size: 1.25em;
   /* Padding lives on the base rule so focusing does not shift the
      text; only the surface colour changes. */
-  padding: 2px 4px;
+  padding: 2px 8px;
   background: transparent;
   border-radius: 3px;
 }
@@ -383,7 +383,7 @@ body {
 /* Same inset as the title so the two text blocks share a left edge. */
 .task-panel .task-dialog-notes,
 .task-modal .task-dialog-notes {
-  padding: 2px 4px;
+  padding: 2px 8px;
 }
 
 /* Editing state: a light field surface so the pane title reads as
@@ -1054,6 +1054,10 @@ body {
   box-shadow:
     rgba(0, 0, 0, 0.06) 0 0 0 1px inset,
     rgba(0, 0, 0, 0.08) 0 1px 0 0 inset;
+}
+
+.empty-bin-button {
+  padding: 2px 8px;
 }
 
 [data-theme="dark"] .add-button {
@@ -3055,6 +3059,15 @@ input.task-check:hover {
 .task-dialog-lifecycle:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: 1px;
+}
+
+/* Non-interactive stand-in for the trigger on a binned item: same text
+   treatment, no pointer, and outside the wrapper's :has() hover. */
+.task-dialog-lifecycle-static {
+  font-size: 14px;
+  line-height: var(--lh-compact);
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .task-dialog-lifecycle-value {

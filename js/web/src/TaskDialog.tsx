@@ -1380,11 +1380,18 @@ export function TaskDialog(props: {
             />
             {/* Lifecycle badge beside the checkbox: the state the item is
                 in (or a capture will be filed in), and a menu to change
-                it. Hidden while binned (the bin mask overrides the
-                workflow state; Restore is the way out). The created /
-                completed timeline lives in the activity section under
-                the notes. */}
-            <Show when={!vBinned()}>
+                it. While binned it's a static "Binned" label instead (the
+                bin mask overrides the workflow state; Restore is the way
+                out). The created / completed timeline lives in the
+                activity section under the notes. */}
+            <Show
+              when={!vBinned()}
+              fallback={
+                <span class="task-dialog-lifecycle-static">
+                  {m().workspace.binnedStatus}
+                </span>
+              }
+            >
               <LifecycleBadge
                 value={vState}
                 onChange={setState}
