@@ -2130,6 +2130,56 @@
           }
         }
       }
+    },
+    "Searches for another place": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Busca otro lugar"
+          }
+        }
+      }
+    },
+    "Clear place": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quitar lugar"
+          }
+        }
+      }
+    },
+    "Use “%@”": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usar «%@»"
+          }
+        }
+      }
+    },
+    "Recent": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recientes"
+          }
+        }
+      }
+    },
+    "Your places": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tus lugares"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

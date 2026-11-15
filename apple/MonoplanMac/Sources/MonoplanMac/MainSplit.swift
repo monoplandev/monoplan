@@ -530,7 +530,9 @@ struct ItemPanelPane: View {
                     item: model.detail, workspaceName: model.sharedWorkspaceName(shown.workspace),
                     lists: model.moveLists(workspace: shown.workspace),
                     retitle: { model.setText(workspace: shown.workspace, item: $0, text: $1) },
-                    move: { model.moveItem(workspace: shown.workspace, id: $0.item.id, list: $1) })
+                    move: { model.moveItem(workspace: shown.workspace, id: $0.item.id, list: $1) },
+                    knownPlaces: { model.knownPlaces(matching: $0, completion: $1) },
+                    setPlace: { model.setPlace(workspace: shown.workspace, id: $0.item.id, place: $1, exact: $2) })
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -10,7 +10,8 @@
 // Both are toolbar items with the close button, over the panel in the
 // window's bar and on the system's glass, as the iOS page's navigation
 // bar (`MainSplit.swift`).
-// No field editors, no state menu, no bin: those come with the views
+// The place row is edited in place (`PlaceField.swift`). No other
+// field editors, no state menu, no bin: those come with the views
 // shared with iOS.
 
 import MapKit
@@ -31,6 +32,11 @@ struct ItemPanel: View {
     let retitle: (ItemInfo, String) -> Void
     /// Another list was picked for the item: its id.
     let move: (ItemInfo, String) -> Void
+    /// The account's known places matching the text.
+    let knownPlaces: (String, @escaping ([PlaceSuggestion]) -> Void) -> Void
+    /// A place was picked for the item, or cleared (nil); `exact` for
+    /// a known place, written as it is.
+    let setPlace: (ItemInfo, Place?, Bool) -> Void
 
     var body: some View {
         Group {
@@ -49,6 +55,8 @@ struct ItemPanel: View {
                                 .textSelection(.enabled)
                         }
                         fields(item)
+                            // The place list floats over the rows below.
+                            .zIndex(1)
                         PanelRule()
                         notes(item)
                         PanelRule()
@@ -79,13 +87,18 @@ struct ItemPanel: View {
             if let deadline = item.item.deadline {
                 PanelField(text: String(localized: "Due \(Self.dayText(deadline))")) { Image(systemName: "timer") }
             }
-            if let place = item.item.place {
+            if item.item.binnedAt == nil {
+                PlaceField(place: item.item.place, knownPlaces: knownPlaces) { setPlace(item, $0, $1) }
+                    .id(item.item.id)
+                    // Its list floats over the map card under it.
+                    .zIndex(1)
+            } else if let place = item.item.place {
                 PanelField(text: place.label, note: place.address) { PanelGlyph(image: NavArt.pin) }
-                if let lat = place.lat, let lon = place.lon {
-                    PlaceMapCard(label: place.label, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
-                }
             } else {
                 PanelField(text: String(localized: "Place"), empty: true) { PanelGlyph(image: NavArt.pin) }
+            }
+            if let place = item.item.place, let lat = place.lat, let lon = place.lon {
+                PlaceMapCard(label: place.label, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
             }
         }
     }
@@ -337,7 +350,7 @@ struct PanelList: Identifiable {
 /// One of `NavArt`'s glyphs as a panel row's icon, where a symbol
 /// would be: an image's baseline is its bottom edge, so it is lowered
 /// to sit on the text's baseline the way a symbol does.
-private struct PanelGlyph: View {
+struct PanelGlyph: View {
     let image: NSImage
     var size: CGFloat = 15
 

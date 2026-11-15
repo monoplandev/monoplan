@@ -687,6 +687,23 @@ final class MainWindowModel: ObservableObject {
         write { try $0.moveItem(workspace: workspace, id: id, list: list) }
     }
 
+    /// Set or clear an item's place (`Engine.setPlace`). `exact` writes
+    /// a known place as it is; otherwise the engine may fill a bare
+    /// label from a known place of that label (spec/place-plan.md).
+    func setPlace(workspace: String?, id: String, place: Place?, exact: Bool = false) {
+        write { try $0.setPlace(workspace: workspace, id: id, place: place, exact: exact) }
+    }
+
+    /// The account's known places matching `query` (all when empty),
+    /// most recently used first, as the iOS place editor offers them.
+    /// Nothing comes back on failure.
+    func knownPlaces(matching query: String, limit: UInt32 = 6, completion: @escaping ([PlaceSuggestion]) -> Void) {
+        guard let calls = engine.calls else { return }
+        calls.run({ try $0.places(query: query, limit: limit) }) { result in
+            if case .success(let rows) = result { completion(rows) }
+        }
+    }
+
     /// The shown list when it can be renamed from the title: a
     /// user-created list (the reserved ones and the lenses cannot).
     var renamableList: (workspace: String?, list: String, name: String)? {
@@ -1318,7 +1335,11 @@ struct MainWindowView: View {
     /// plain bar over a divider.
     @ViewBuilder private var bin: some View {
         if #available(macOS 26, *) {
-            binList.safeAreaBar(edge: .top) { binBar }
+            // The hard style: a sharp edge under the bar, as for a
+            // pinned header, not the soft fade.
+            binList
+                .safeAreaBar(edge: .top) { binBar }
+                .scrollEdgeEffectStyle(.hard, for: .top)
         } else {
             VStack(spacing: 0) {
                 binBar
