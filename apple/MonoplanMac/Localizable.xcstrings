@@ -2180,6 +2180,86 @@
           }
         }
       }
+    },
+    "Export JSON…": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exportar JSON…"
+          }
+        }
+      }
+    },
+    "Import JSON…": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Importar JSON…"
+          }
+        }
+      }
+    },
+    "Could not export": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo exportar"
+          }
+        }
+      }
+    },
+    "Could not import the file": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo importar el archivo"
+          }
+        }
+      }
+    },
+    "Import finished": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Importación terminada"
+          }
+        }
+      }
+    },
+    "Items added: %lld": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elementos añadidos: %lld"
+          }
+        }
+      }
+    },
+    "Lists added: %lld": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listas añadidas: %lld"
+          }
+        }
+      }
+    },
+    "Already present, skipped: %lld": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ya existentes, omitidos: %lld"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

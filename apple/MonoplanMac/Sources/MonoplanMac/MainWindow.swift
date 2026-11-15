@@ -4,7 +4,8 @@
 // the web nav is (the lenses
 // Starred, Calendar and Done on top, then one group per open workspace,
 // Personal first, each a heading row over its Inbox and lists: the row
-// folds the group, and a shared workspace's has a "…" menu with Share…
+// folds the group, and each has a "…" menu: Export and Import JSON
+// (`WorkspaceJSON.swift`), and on a shared workspace Share…
 // (`SharingSheet.swift`) and Delete or Leave),
 // and either the open items of the selected list with a tick and a
 // field to add one, or a lens over every workspace: Starred in its
@@ -821,6 +822,26 @@ final class MainWindowModel: ObservableObject {
         }
     }
 
+    /// A workspace as JSON (`Engine.exportJson`), for Export JSON….
+    /// `done` gets it, or why not, on the main queue.
+    func exportJson(workspace: String?, done: @escaping (Result<String, Error>) -> Void) {
+        guard let calls = engine.calls else { return done(.failure(EngineError.Stopped)) }
+        calls.run({ try $0.exportJson(workspace: workspace) }, completion: done)
+    }
+
+    /// Add an export's lists and items to a workspace
+    /// (`Engine.importJson`), for Import JSON…. `done` gets the counts,
+    /// or why not, on the main queue.
+    func importJson(
+        workspace: String?, json: String, done: @escaping (Result<ImportCounts, Error>) -> Void
+    ) {
+        guard let calls = engine.calls else { return done(.failure(EngineError.Stopped)) }
+        calls.run({ try $0.importJson(workspace: workspace, json: json) }) { [weak self] result in
+            if case .success = result { self?.reload() }
+            done(result)
+        }
+    }
+
     /// Leave a shared workspace the account does not own
     /// (`Engine.leaveWorkspace`). The engine forgets it once the
     /// server's `DocClosed` lands, and the `Changed` that follows
@@ -1020,12 +1041,14 @@ struct MainWindowView: View {
     /// A workspace's heading, a row of its own the size of a list's
     /// (not the sidebar's section header, whose small type and hover
     /// chevron are the system's and take no menu): the name (regular,
-    /// muted), then at the trailing edge a shared workspace's "…" menu and the fold
+    /// muted), then at the trailing edge the "…" menu and the fold
     /// chevron, both muted and shown only while the pointer is over
     /// the row, as the system header's chevron. A click anywhere on it
-    /// folds the group. The "…" menu is as the section header's on
-    /// iOS: Share…, then Delete Workspace… to its owner or Leave
-    /// Workspace… to anyone else, neither until the role is known
+    /// folds the group. The "…" menu is the web's workspace menu:
+    /// Share… on a shared workspace, Export JSON… and Import JSON… on
+    /// every one (Personal included), then on a shared workspace
+    /// Delete Workspace… to its owner or Leave Workspace… to anyone
+    /// else, neither until the role is known
     /// (`MainWindowModel.ownsWorkspace`). Right-click opens the same
     /// menu. Not selectable.
     private func workspaceRow(_ section: NavSection) -> some View {
@@ -1043,24 +1066,22 @@ struct MainWindowView: View {
         return HStack(spacing: 2) {
             Text(verbatim: name).foregroundStyle(.secondary).lineLimit(1)
             Spacer(minLength: 0)
-            if !section.workspace.home {
-                Menu {
-                    workspaceMenu(section, name: name)
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .foregroundStyle(muted)
-                        .frame(width: 20, height: 20)
-                        .contentShape(Rectangle())
-                }
-                // A plain button's menu draws the label as given.
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .opacity(controls)
-                .accessibilityLabel(Text("Workspace Actions"))
-                .help(Text("Workspace Actions"))
+            Menu {
+                workspaceMenu(section, name: name)
+            } label: {
+                Image(systemName: "ellipsis")
+                    .foregroundStyle(muted)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
             }
+            // A plain button's menu draws the label as given.
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .opacity(controls)
+            .accessibilityLabel(Text("Workspace Actions"))
+            .help(Text("Workspace Actions"))
             Image(systemName: "chevron.right")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(muted)
@@ -1083,9 +1104,7 @@ struct MainWindowView: View {
                 hoveredWorkspace = nil
             }
         }
-        .contextMenu {
-            if !section.workspace.home { workspaceMenu(section, name: name) }
-        }
+        .contextMenu { workspaceMenu(section, name: name) }
         .selectionDisabled()
         .accessibilityAddTraits(.isHeader)
         .accessibilityAction(named: folded ? Text("Expand") : Text("Collapse")) {
@@ -1096,8 +1115,18 @@ struct MainWindowView: View {
     @ViewBuilder
     private func workspaceMenu(_ section: NavSection, name: String) -> some View {
         let docId = section.id
-        Button("Share…") { sharing = SharingTarget(docId: docId, name: name) }
-        switch model.ownsWorkspace[docId] {
+        let target = section.target
+        if !section.workspace.home {
+            Button("Share…") { sharing = SharingTarget(docId: docId, name: name) }
+            Divider()
+        }
+        Button("Export JSON…") {
+            WorkspaceJSON.save(workspace: target, name: name, model: model, on: NSApp.keyWindow)
+        }
+        Button("Import JSON…") {
+            WorkspaceJSON.load(workspace: target, model: model, on: NSApp.keyWindow)
+        }
+        switch section.workspace.home ? nil : model.ownsWorkspace[docId] {
         case true?:
             Divider()
             Button("Delete Workspace…") {

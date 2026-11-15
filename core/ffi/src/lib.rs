@@ -36,6 +36,7 @@ use monoplan_cli::api::{
     bin::BinEntry,
     find::FindHit,
     items::{Item, ItemInfo, ItemState, Place},
+    json::ImportCounts,
     lists::{ListFilter, ListInfo},
     moves::ItemRef,
     places::{LocatedItem, PlaceSuggestion},
@@ -920,6 +921,28 @@ impl Engine {
         Ok(self
             .client
             .call_blocking(workspace, move |cx| api::lists::add_list(cx, &name))?)
+    }
+
+    /// The workspace as JSON (`spec/data-model.md` "JSON export /
+    /// import"): its lists and items, readable and lossy, what Import
+    /// JSON takes back.
+    pub fn export_json(&self, workspace: Option<String>) -> Result<String, EngineError> {
+        Ok(self
+            .client
+            .call_blocking(workspace, api::json::export_json)?)
+    }
+
+    /// Add an export's lists and items to the workspace; rows already
+    /// there by id are left alone, so importing twice adds nothing.
+    /// One undo step. An invalid file is refused whole.
+    pub fn import_json(
+        &self,
+        workspace: Option<String>,
+        json: String,
+    ) -> Result<ImportCounts, EngineError> {
+        Ok(self
+            .client
+            .call_blocking(workspace, move |cx| api::json::import_json(cx, &json))?)
     }
 
     /// Rename a user-created list.

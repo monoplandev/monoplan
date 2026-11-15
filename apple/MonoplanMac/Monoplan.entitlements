@@ -4,14 +4,18 @@
   The Mac app's entitlements, signed in by build-app.sh. The App Sandbox
   (required on the Mac App Store) with outgoing network only: the sync
   server over HTTPS / WebSocket and MapKit's tiles. Everything the app
-  writes is the profile under Application Support, which the sandbox
-  puts in the app's container.
+  writes on its own is the profile under Application Support, which the
+  sandbox puts in the app's container; beyond it, only the one file the
+  user picks in a save or open panel (a workspace's Export / Import
+  JSON, WorkspaceJSON.swift).
 -->
 <plist version="1.0">
 <dict>
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
 	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
 </dict>
 </plist>
