@@ -187,10 +187,11 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     private func update(_ toolbarItem: NSToolbarItem) {
         if toolbarItem.itemIdentifier == .title {
             guard let view = toolbarItem.view as? ToolbarTitleView else { return }
-            let title = model.windowTitle
-            view.title = title
+            view.title = model.listTitle
+            view.count = model.titleCount
+            view.icon = model.titleIcon
+            toolbarItem.label = model.windowTitle
             view.renamable = model.renamableList != nil
-            toolbarItem.label = title
             return
         }
         guard let item = model.detail else { return }
@@ -268,7 +269,9 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             // Text with a caret on hover, not a bordered control: no
             // glass. The click does nothing off a user list.
             let view = ToolbarTitleView()
-            view.title = model.windowTitle
+            view.title = model.listTitle
+            view.count = model.titleCount
+            view.icon = model.titleIcon
             view.onClick = { [weak self, weak view] in
                 guard let self, let view else { return }
                 self.titleClicked(view)
@@ -329,8 +332,9 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     @objc private func openSearch(_ sender: Any?) {}
 
     /// The title on a user list: a popover under it with the list's
-    /// name to edit. Rename (or Return) writes it; Cancel, Escape or a
-    /// click outside leaves it.
+    /// name in a field and nothing else. The name is written when the
+    /// popover shuts (Return, a click outside, the title again) unless
+    /// it is blank or unchanged; Escape shuts it without writing.
     private func titleClicked(_ sender: NSView) {
         if let renamePopover, renamePopover.isShown {
             renamePopover.performClose(nil)
@@ -339,11 +343,13 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         guard let target = model.renamableList else { return }
         let popover = NSPopover()
         popover.behavior = .transient
-        let close: () -> Void = { [weak popover] in popover?.performClose(nil) }
-        let host = NSHostingController(rootView: RenameListForm(name: target.name, commit: { [model] name in
+        let draft = RenameDraft(name: target.name)
+        draft.close = { [weak popover] in popover?.performClose(nil) }
+        draft.commit = { [model] name in
             model.renameList(workspace: target.workspace, list: target.list, name: name)
-            close()
-        }, cancel: close))
+        }
+        popover.delegate = draft
+        let host = NSHostingController(rootView: RenameListForm(draft: draft))
         host.sizingOptions = .preferredContentSize
         popover.contentViewController = host
         renamePopover = popover
@@ -487,34 +493,42 @@ private final class PaneSplitView: NSSplitView {
     override var dividerColor: NSColor { PaneColor.divider(super.dividerColor) }
 }
 
-/// The title's rename popover: the list's name in a field, Rename
-/// enabled once it has a non-blank character.
+/// The rename popover's state, and its delegate: whatever is in the
+/// field when it shuts is written, unless Escape discarded it. The
+/// model drops a blank or unchanged name.
+private final class RenameDraft: NSObject, ObservableObject, NSPopoverDelegate {
+    @Published var name: String
+    var discarded = false
+    var close: () -> Void = {}
+    var commit: (String) -> Void = { _ in }
+
+    init(name: String) { self.name = name }
+
+    func popoverDidClose(_ notification: Notification) {
+        if !discarded { commit(name) }
+    }
+}
+
+/// The title's rename popover: the list's name in a field, labelled.
 private struct RenameListForm: View {
-    @State var name: String
-    let commit: (String) -> Void
-    let cancel: () -> Void
+    @ObservedObject var draft: RenameDraft
     @FocusState private var focused: Bool
 
-    private var valid: Bool { !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Rename List").font(.headline)
-            TextField("Name", text: $name)
+        HStack(spacing: 8) {
+            Text("Name")
+            TextField("Name", text: $draft.name)
+                .labelsHidden()
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 240)
                 .focused($focused)
-                .onSubmit { if valid { commit(name) } }
-            HStack {
-                Spacer()
-                Button("Cancel", role: .cancel, action: cancel)
-                    .keyboardShortcut(.cancelAction)
-                Button("Rename") { commit(name) }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!valid)
-            }
+                .onSubmit { draft.close() }
+                .onExitCommand {
+                    draft.discarded = true
+                    draft.close()
+                }
         }
-        .padding(16)
+        .padding(10)
         .onAppear { focused = true }
     }
 }
@@ -529,6 +543,24 @@ final class ToolbarTitleView: NSView {
     var title = "" {
         didSet { if label.stringValue != title { label.stringValue = title } }
     }
+    /// The sidebar row's glyph, before the name, if it has one.
+    var icon: NSImage? {
+        didSet {
+            guard icon !== oldValue else { return }
+            iconView.image = icon
+            iconView.isHidden = icon == nil
+            labelAfterIcon.isActive = icon != nil
+            labelAtInset.isActive = icon == nil
+        }
+    }
+    /// Shown muted after the name; none for zero.
+    var count = 0 {
+        didSet {
+            let text = count > 0 ? String(count) : ""
+            if countLabel.stringValue != text { countLabel.stringValue = text }
+            countLabel.isHidden = count == 0
+        }
+    }
     /// Whether a click renames: the caret, tooltip and click follow it.
     var renamable = false {
         didSet {
@@ -540,6 +572,10 @@ final class ToolbarTitleView: NSView {
     var onClick: () -> Void = {}
 
     private let label = NSTextField(labelWithString: "")
+    private let countLabel = NSTextField(labelWithString: "")
+    private let iconView = NSImageView()
+    private lazy var labelAtInset = label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.inset)
+    private lazy var labelAfterIcon = label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 6)
     private let caret = NSImageView()
     private var hovering = false {
         didSet { syncCaret() }
@@ -553,18 +589,31 @@ final class ToolbarTitleView: NSView {
         label.textColor = .labelColor
         label.lineBreakMode = .byTruncatingTail
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        iconView.contentTintColor = .labelColor
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.isHidden = true
+        countLabel.font = .systemFont(ofSize: NSFont.systemFontSize + 2, weight: .regular)
+        countLabel.textColor = .secondaryLabelColor
+        countLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        countLabel.isHidden = true
         caret.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
         caret.contentTintColor = .secondaryLabelColor
         caret.isHidden = true
-        for view in [label, caret] {
+        for view in [iconView, label, countLabel, caret] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.inset),
+            labelAtInset,
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.inset),
+            iconView.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 16),
+            iconView.heightAnchor.constraint(equalToConstant: 16),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            caret.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 4),
+            countLabel.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 6),
+            countLabel.firstBaselineAnchor.constraint(equalTo: label.firstBaselineAnchor),
+            caret.leadingAnchor.constraint(equalTo: countLabel.trailingAnchor, constant: 4),
             caret.centerYAnchor.constraint(equalTo: label.centerYAnchor, constant: 1),
             caret.trailingAnchor.constraint(equalTo: trailingAnchor),
             heightAnchor.constraint(greaterThanOrEqualTo: label.heightAnchor),
@@ -576,7 +625,7 @@ final class ToolbarTitleView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    override func accessibilityLabel() -> String? { title }
+    override func accessibilityLabel() -> String? { count > 0 ? "\(title), \(count)" : title }
 
     override func accessibilityPerformPress() -> Bool {
         guard renamable else { return false }

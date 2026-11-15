@@ -325,14 +325,31 @@ final class MainWindowModel: ObservableObject {
     /// Calendar and Done have no count (Done's rows are capped). None
     /// for zero.
     var windowTitle: String {
-        let count: Int
-        switch shown.lens {
-        case .starred: count = starred.count
-        case .bin: count = binned.count
-        case .agenda, .done: count = 0
-        case nil: count = items.count
-        }
+        let count = titleCount
         return count > 0 ? "\(listTitle) (\(count))" : listTitle
+    }
+
+    /// The sidebar row's glyph for what is shown, before the bar's
+    /// title: the lenses' and Inbox's. A user list has none here (its
+    /// emoji, if any, leads `listTitle`).
+    var titleIcon: NSImage? {
+        switch shown.lens {
+        case .starred: return StarArt.outline
+        case .agenda: return NavArt.calendar
+        case .done: return NavArt.done
+        case .bin: return NavArt.bin
+        case nil: return shown.list == Self.inbox ? NavArt.inbox : nil
+        }
+    }
+
+    /// The count beside the bar's title, muted after the name.
+    var titleCount: Int {
+        switch shown.lens {
+        case .starred: return starred.count
+        case .bin: return binned.count
+        case .agenda, .done: return 0
+        case nil: return items.count
+        }
     }
 
     func engineStateChanged(_ state: EngineState) {

@@ -871,16 +871,6 @@
         }
       }
     },
-    "Rename": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Renombrar"
-          }
-        }
-      }
-    },
     "Rename List": {
       "localizations": {
         "es": {
