@@ -6,7 +6,12 @@ macOS window"): reorder inside a list, Starred and the sidebar's lists;
 drag items onto a list, Starred or the Bin in the sidebar. No board
 (the Mac window has none yet), no lifecycle lane drops.
 
-Status: phase 1 built 2026-11-15. Phases 2–4 not built.
+Status: phase 1 built 2026-11-15. Phase 2 attempted 2026-11-15 and
+**abandoned**: the Swift code was reverted, the window is back on
+SwiftUI lists. What was learnt is in "Phase 2 attempt" below; a v2
+spec for the macOS side is to be written before another attempt.
+Phases 3–4 not built. The AppKit mapping below is the original plan,
+not a design proven in the app.
 
 ## What the web does
 
@@ -50,7 +55,7 @@ web component with public API (CLAUDE.md "No private APIs"):
 |---|---|
 | Drag the selection after a 3px slop | `tableView(_:pasteboardWriterForRow:)`, one writer per selected row; AppKit drags every selected row |
 | Overlay stack + count | `NSDraggingSession.draggingFormation = .stack`; the count badge is the system's |
-| Placeholder + nudge | `draggingDestinationFeedbackStyle = .gap` |
+| Placeholder + nudge | `draggingDestinationFeedbackStyle = .gap` (the attempt's sticking point, below) |
 | Between rows vs onto a row; end slot | `validateDrop` / `acceptDrop` with `.above` vs `.on`, retargeted via `setDropRow(_:dropOperation:)` |
 | Autoscroll | built in |
 | Escape cancels | built in |
@@ -121,6 +126,7 @@ Cross-workspace relocation (`move_items_across_docs`) is phase 4.
    Starred list in `MainWindow.swift` with an AppKit table (hosted
    SwiftUI cells, same selection → panel contract), multi-select,
    `.gap` reorder via `reorder_items` / `reorder_starred`, `⌘↑/⌘↓`.
+   Attempted and abandoned 2026-11-15 (below).
    Done when: reorder of one and several (discontiguous) rows works in
    a list and in Starred, one Undo reverts it, list switching is no
    slower than today.
@@ -138,10 +144,64 @@ Cross-workspace relocation (`move_items_across_docs`) is phase 4.
    when the audience changes. Done when: a drop onto another
    workspace's list moves, undoes as one step, and asks first.
 
+## Phase 2 attempt (2026-11-15, abandoned)
+
+`ItemTable.swift` replaced the list and Starred with an `NSTableView`
+(hosted SwiftUI cells, multi-select, `.gap` drag, ⌘↑ / ⌘↓ through
+`reorder_items` / `reorder_starred`). It ran, with too many
+interaction defects to converge by iterating without seeing it run;
+the Swift was reverted. Kept from it:
+
+**Hosted cells are fast enough, updated in place.** Switching between
+two lists, off-screen window at the app's size, to laid out and drawn,
+median per switch (macOS 26, release build):
+
+| | 50 rows | 300 | 1,000 |
+|---|---|---|---|
+| SwiftUI `List` (today's, positional ids) | 6 ms | 8 ms | 9 ms |
+| table, `reloadData`, hosted cells | 42 ms | 44 ms | 47 ms |
+| table, `reloadData`, plain `NSTableCellView` | 53 ms | 58 ms | 62 ms |
+| table, in place, hosted cells | 4.3 ms | 4.2 ms | 4.5 ms |
+| table, in place, plain cells | 3.0 ms | 3.5 ms | 3.9 ms |
+
+The row count barely matters (the table makes only the ~18 visible
+cells). `reloadData` builds every visible cell again rather than
+reusing them, and on macOS 26 even an AppKit checkbox measures itself
+through SwiftUI, so plain cells are no cheaper to build. In place
+means by position, as the SwiftUI list's `id: \.offset`: rewrite the
+cells the table holds, insert or remove rows only at the end, keep the
+selection by id. This part worked.
+
+**What went wrong, as reported from the app:**
+
+- Rows moved by `moveRow` animate at AppKit's default pace, far too
+  slow; wrapping in `NSAnimationContext` with a short duration was
+  tried, effect unconfirmed.
+- Transparent, layer-backed rows flickered and blended as they slid;
+  their dividers flickered. Opaque rows, redraw-on-demand
+  (`layerContentsRedrawPolicy`), no divider at a selection and raising
+  the moved rows (`zPosition`) were tried; a flicker remained.
+- The drag image sat a row above the pointer from the drag's start,
+  and the row right above the dragged one did not nudge when dragging
+  up. View and layer geometry were probed equal (no SwiftUI offset).
+  The likely cause, not confirmed: AppKit validates a drop at the
+  drag's start, over the source row, and `.gap` opens a gap there,
+  sliding the source row down under a still image. Refusing slots
+  where nothing would move was the last change, untested in the app.
+- Hiding the dragged rows for the drag (`hideRows`) left a gap under
+  the dropped rows and fixed nothing: dropped.
+- A hosted cell's drag image needs its own `draggingImageComponents`
+  (the default builds it from `textField` / `imageView`), drawn on an
+  opaque background; `.stack` formation jumps the images to the
+  pointer.
+
+**For v2:** decide the drag feedback first (AppKit's `.gap`, its
+`.regular` insertion line, or our own nudge and slot over a table with
+feedback off): the attempt's failures were all there. And build a way
+to see it before the feature: a harness window with fake rows whose
+frames can be captured during a scripted drag.
+
 ## Open questions
 
-- Hosted SwiftUI cells: does `NSHostingView` per cell keep list
-  switching fast at a few hundred rows? Measure in phase 2 before
-  committing; fallback is plain `NSTableCellView` rows.
 - Drag out to other apps (plain text of the titles, like `itemClip.ts`)
-  — cheap to add as a second pasteboard type in phase 2; not required.
+  — cheap to add as a second pasteboard type; not required.
