@@ -48,6 +48,11 @@ enum MainMenu {
         edit.addItem(withTitle: String(localized: "Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         edit.addItem(withTitle: String(localized: "Paste"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         edit.addItem(withTitle: String(localized: "Select All"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        edit.addItem(.separator())
+        // Search's overlay, through the responder chain to the window's
+        // split view controller: disabled with no window in front.
+        edit.addItem(withTitle: String(localized: "Find…"),
+                     action: #selector(MainSplitViewController.openSearch(_:)), keyEquivalent: "f")
         main.addItem(submenu(edit, title: edit.title))
 
         let view = NSMenu(title: String(localized: "View"))

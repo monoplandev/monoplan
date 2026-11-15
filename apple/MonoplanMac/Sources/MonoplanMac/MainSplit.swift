@@ -62,6 +62,8 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     private var renamePopover: NSPopover?
     /// The new-list popover, while it is up.
     private var newListPopover: NSPopover?
+    /// Search's overlay (`SearchPanel.swift`).
+    private lazy var searchPanel = SearchPanelController(model: model)
 
     static let sidebarWidth = (min: 160.0, initial: 200.0, max: 400.0)
     static let panelWidth = (min: 240.0, max: 520.0)
@@ -299,8 +301,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             item.target = self
             item.action = #selector(newList(_:))
         case .search:
-            // Not wired yet: a later surface is search's. The action
-            // does nothing (without one the button draws disabled).
+            // Search's overlay, as ⌘F (Edit › Find…).
             let label = String(localized: "Search")
             item.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: label)
             item.label = label
@@ -342,7 +343,12 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         onSignIn()
     }
 
-    @objc private func openSearch(_ sender: Any?) {}
+    /// The toolbar's magnifying glass and Edit › Find…: Spotlight's bar
+    /// over the window (`SearchPanel.swift`). Again shuts it.
+    @objc func openSearch(_ sender: Any?) {
+        guard let window = view.window else { return }
+        searchPanel.toggle(over: window)
+    }
 
     /// New List: a popover under the button with the name and, with
     /// more than one workspace open, which one (Personal unless

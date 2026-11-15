@@ -705,6 +705,37 @@ final class MainWindowModel: ObservableObject {
         }
     }
 
+    /// Search's hits for `query` over every open workspace
+    /// (`Engine.find`, spec/search.md), ranked. `completion` gets nil
+    /// on failure.
+    func find(_ query: String, limit: UInt32, completion: @escaping ([FindHit]?) -> Void) {
+        guard let calls = engine.calls else { return completion(nil) }
+        calls.run({ try $0.find(query: query, limit: limit) }) { result in
+            completion(try? result.get())
+        }
+    }
+
+    /// Show what a search hit names. A list opens as a sidebar row
+    /// would. An item opens its panel over where its row is: an Open
+    /// one in its list (an event's is the Calendar), a closed one in
+    /// Done, a binned one in the Bin.
+    func open(_ hit: FindHit) {
+        // A hit names its doc by id, Home's included; the calls take
+        // nil for Home.
+        let workspace = sections.first { $0.workspace.docId == hit.docId }?.target
+        switch hit.kind {
+        case .list:
+            select(workspace: workspace, list: hit.id)
+        case .item:
+            switch hit.state {
+            case .binned?: select(lens: .bin)
+            case .done?, .cancelled?: select(lens: .done)
+            default: select(workspace: workspace, list: hit.listId ?? Self.inbox)
+            }
+            selectItem(workspace: workspace, id: hit.id)
+        }
+    }
+
     /// The shown list when it can be renamed from the title: a
     /// user-created list (the reserved ones and the lenses cannot).
     var renamableList: (workspace: String?, list: String, name: String)? {

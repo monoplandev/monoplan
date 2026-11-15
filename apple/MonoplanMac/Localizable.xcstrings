@@ -2260,6 +2260,36 @@
           }
         }
       }
+    },
+    "Find…": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buscar…"
+          }
+        }
+      }
+    },
+    "No Results": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sin resultados"
+          }
+        }
+      }
+    },
+    "Archived": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archivada"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
