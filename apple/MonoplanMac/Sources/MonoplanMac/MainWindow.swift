@@ -1079,6 +1079,7 @@ struct MainWindowView: View {
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .fixedSize()
+            .hoverCircle()
             .opacity(controls)
             .accessibilityLabel(Text("Workspace Actions"))
             .help(Text("Workspace Actions"))
@@ -1086,7 +1087,8 @@ struct MainWindowView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(muted)
                 .rotationEffect(.degrees(folded ? 0 : 90))
-                .frame(width: 16, height: 20)
+                .frame(width: 20, height: 20)
+                .hoverCircle()
                 .opacity(controls)
                 .accessibilityHidden(true)
         }
@@ -1548,4 +1550,22 @@ final class NewWorkspacePrompt: NSObject, NSTextFieldDelegate {
     func controlTextDidChange(_ obj: Notification) {
         alert.buttons[0].isEnabled = !field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
+}
+
+/// A translucent disc behind a small sidebar control while the pointer
+/// is over it, as a toolbar button's hover: the workspace row's "…"
+/// and chevron.
+private struct HoverCircle: ViewModifier {
+    @State private var hovered = false
+
+    func body(content: Content) -> some View {
+        content
+            .background(Circle().fill(Color.primary.opacity(hovered ? 0.1 : 0)))
+            .onHover { hovered = $0 }
+            .animation(.easeOut(duration: 0.1), value: hovered)
+    }
+}
+
+extension View {
+    fileprivate func hoverCircle() -> some View { modifier(HoverCircle()) }
 }

@@ -198,6 +198,8 @@ struct HomeView: View {
     @State private var sharing: SharingTarget?
     /// The workspace Leave is asking about.
     @State private var leaving: Deleting?
+    /// Home's Bin row was long-pressed and "Empty Bin…" picked.
+    @State private var confirmingEmptyBin = false
 
     struct Failure {
         let title: String
@@ -215,6 +217,11 @@ struct HomeView: View {
     @AppStorage(listCountsKey) private var showListCounts = false
 
     private var searchActive: Bool { searching || !query.isEmpty }
+
+    private var emptyBinTitle: String {
+        let count = model.binned.count
+        return count == 1 ? "Delete 1 item for good?" : "Delete all \(count) items for good?"
+    }
 
     /// How many of today's rows Home shows before "Show all" (which
     /// pushes the Calendar page), so a backlog of overdue rows cannot
@@ -254,6 +261,20 @@ struct HomeView: View {
                     if !model.binned.isEmpty {
                         NavigationLink(value: HomePage.bin) {
                             Label("Bin", systemImage: "trash")
+                        }
+                        // Long press: empty it without opening the page,
+                        // confirmed as the page's own Empty is.
+                        .contextMenu {
+                            Button("Empty Bin…", systemImage: "trash", role: .destructive) {
+                                confirmingEmptyBin = true
+                            }
+                        }
+                        .confirmationDialog(
+                            emptyBinTitle, isPresented: $confirmingEmptyBin, titleVisibility: .visible
+                        ) {
+                            Button("Empty Bin", role: .destructive) { model.emptyBin() }
+                        } message: {
+                            Text("They are removed from every device and cannot be restored.")
                         }
                     }
                 }
