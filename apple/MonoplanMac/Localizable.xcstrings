@@ -231,6 +231,16 @@
         }
       }
     },
+    "Could not create the list": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo crear la lista"
+          }
+        }
+      }
+    },
     "Could not create the workspace": {
       "localizations": {
         "es": {
@@ -627,6 +637,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nombre"
+          }
+        }
+      }
+    },
+    "New List": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nueva lista"
           }
         }
       }
@@ -1307,6 +1327,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ventana"
+          }
+        }
+      }
+    },
+    "Workspace": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Espacio"
           }
         }
       }

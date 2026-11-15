@@ -36,6 +36,9 @@ private extension NSToolbarItem.Identifier {
     /// account. Nothing takes its place once there is one: the
     /// account lives in Settings, New Workspace… in the app menu.
     static let signIn = NSToolbarItem.Identifier("MonoplanSignIn")
+    /// In Sign In's place once there is an account: the iOS Home's
+    /// folder button, a popover that names a new list.
+    static let newList = NSToolbarItem.Identifier("MonoplanNewList")
     /// The list's name, in the window title's place, after the
     /// sidebar's separator. On a user list a click renames it.
     static let title = NSToolbarItem.Identifier("MonoplanTitle")
@@ -57,6 +60,8 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     var onSignIn: () -> Void = {}
     /// The rename popover, while it is up.
     private var renamePopover: NSPopover?
+    /// The new-list popover, while it is up.
+    private var newListPopover: NSPopover?
 
     static let sidebarWidth = (min: 160.0, initial: 200.0, max: 400.0)
     static let panelWidth = (min: 240.0, max: 520.0)
@@ -142,10 +147,10 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             panelItem.isCollapsed = !open
             syncing = false
         }
-        // Sign In, without an account, leads the bar, before the
-        // sidebar's separator, so it sits over the sidebar; the space
-        // before it pushes it to the sidebar's trailing edge.
-        let lead: [NSToolbarItem.Identifier] = signedIn ? [] : [.flexibleSpace, .signIn]
+        // Over the sidebar, before its separator: Sign In without an
+        // account, New List with one; the space before it pushes it to
+        // the sidebar's trailing edge.
+        let lead: [NSToolbarItem.Identifier] = [.flexibleSpace, signedIn ? .newList : .signIn]
         let leading = toolbar.items.firstIndex { $0.itemIdentifier == .sidebarTrackingSeparator } ?? 0
         if toolbar.items.prefix(leading).map(\.itemIdentifier) != lead {
             for _ in 0..<leading { toolbar.removeItem(at: 0) }
@@ -243,7 +248,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        Self.fixedItems + [.panelSeparator, .signIn, .itemStatus, .itemStar, .itemMore]
+        Self.fixedItems + [.panelSeparator, .signIn, .newList, .itemStatus, .itemStar, .itemMore]
     }
 
     func toolbar(
@@ -285,6 +290,14 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             item.isBordered = true
             item.target = self
             item.action = #selector(signIn(_:))
+        case .newList:
+            let label = String(localized: "New List")
+            item.image = NSImage(systemSymbolName: "folder.badge.plus", accessibilityDescription: label)
+            item.label = label
+            item.toolTip = label
+            item.isBordered = true
+            item.target = self
+            item.action = #selector(newList(_:))
         case .search:
             // Not wired yet: a later surface is search's. The action
             // does nothing (without one the button draws disabled).
@@ -330,6 +343,44 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     }
 
     @objc private func openSearch(_ sender: Any?) {}
+
+    /// New List: a popover under the button with the name and, with
+    /// more than one workspace open, which one (Personal unless
+    /// changed), as on iOS. Create (or Return) makes the list and shows
+    /// it; a refusal is said in an alert on the window.
+    @objc private func newList(_ sender: Any?) {
+        if let newListPopover, newListPopover.isShown {
+            newListPopover.performClose(nil)
+            return
+        }
+        guard let item = toolbar.items.first(where: { $0.itemIdentifier == .newList }) else { return }
+        let workspaces = model.sections.map {
+            NewListForm.Workspace(
+                target: $0.target,
+                name: $0.workspace.home
+                    ? String(localized: "Personal") : $0.workspace.name ?? $0.workspace.docId)
+        }
+        guard !workspaces.isEmpty else { return }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        let form = NewListForm(workspaces: workspaces) { [weak self, weak popover] name, workspace in
+            popover?.performClose(nil)
+            guard let self else { return }
+            self.model.addList(workspace: workspace, name: name) { [weak self] error in
+                guard let window = self?.view.window else { return }
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = String(localized: "Could not create the list")
+                alert.informativeText = error
+                alert.beginSheetModal(for: window)
+            }
+        }
+        let host = NSHostingController(rootView: form)
+        host.sizingOptions = .preferredContentSize
+        popover.contentViewController = host
+        newListPopover = popover
+        popover.show(relativeTo: item)
+    }
 
     /// The title on a user list: a popover under it with the list's
     /// name in a field and nothing else. The name is written when the
@@ -491,6 +542,56 @@ struct ItemPanelPane: View {
 /// borders are near-black in dark, the system's in light.
 private final class PaneSplitView: NSSplitView {
     override var dividerColor: NSColor { PaneColor.divider(super.dividerColor) }
+}
+
+/// The new-list popover: the name, focused as it opens, the workspace
+/// it goes in (only while more than one is open; the first, Personal,
+/// unless changed), and Create. Return creates too. `create` gets the
+/// trimmed name and the workspace's `target`.
+private struct NewListForm: View {
+    struct Workspace: Hashable {
+        let target: String?
+        let name: String
+    }
+
+    let workspaces: [Workspace]
+    let create: (String, String?) -> Void
+
+    @State private var name = ""
+    @State private var picked = 0
+    @FocusState private var focused: Bool
+
+    private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            TextField("New List", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .focused($focused)
+                .onSubmit(submit)
+            if workspaces.count > 1 {
+                Picker("Workspace", selection: $picked) {
+                    ForEach(workspaces.indices, id: \.self) { index in
+                        Text(verbatim: workspaces[index].name).tag(index)
+                    }
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Create", action: submit)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(trimmed.isEmpty)
+            }
+        }
+        .padding(12)
+        .frame(width: 280)
+        .onAppear { focused = true }
+    }
+
+    private func submit() {
+        guard !trimmed.isEmpty, workspaces.indices.contains(picked) else { return }
+        create(trimmed, workspaces[picked].target)
+    }
 }
 
 /// The rename popover's state, and its delegate: whatever is in the

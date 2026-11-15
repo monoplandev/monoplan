@@ -754,6 +754,23 @@ final class MainWindowModel: ObservableObject {
         write { _ = try $0.addItem(workspace: workspace, list: list, text: text, top: false) }
     }
 
+    /// Create a list at the end of a workspace's lists
+    /// (`Engine.addList`) and show it; `failed` gets the reason when
+    /// the engine refuses.
+    func addList(workspace: String?, name: String, failed: @escaping (String) -> Void) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        guard let calls = engine.calls else {
+            return failed(engineErrorMessage(EngineError.Stopped))
+        }
+        calls.run({ try $0.addList(workspace: workspace, name: name) }) { [weak self] result in
+            switch result {
+            case .success(let id): self?.select(workspace: workspace, list: id)
+            case .failure(let error): failed(engineErrorMessage(error))
+            }
+        }
+    }
+
     /// Create a workspace and show it; `failed` gets the reason when
     /// the engine or the server refuses.
     func createWorkspace(name: String, failed: @escaping (String) -> Void) {
