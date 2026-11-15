@@ -376,8 +376,13 @@ struct HomeView: View {
                                 }
                             }
                         } label: {
-                            Label("Account", systemImage: "person.crop.circle")
+                            // The account's own avatar, coloured as the
+                            // sharing sheet and the web draw it.
+                            MemberAvatar(accountId: session.accountId, email: session.email)
                         }
+                        // The avatar is hidden from VoiceOver; the menu
+                        // is named instead.
+                        .accessibilityLabel("Account")
                     }
                 }
                 if let session = model.session, !session.docs.isEmpty {
