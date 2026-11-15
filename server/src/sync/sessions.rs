@@ -52,6 +52,10 @@ struct LiveConnection {
     conn_id: u64,
     account_id: Uuid,
     revoked: Arc<Revoked>,
+    /// Wakes the session to send `MembershipsChanged`. A stored
+    /// permit, so nudges that land while the session is busy collapse
+    /// into one frame, which is all the client needs.
+    memberships_changed: Arc<Notify>,
 }
 
 /// A connection's revocation signal: the flag is the fact, the notify
@@ -76,9 +80,17 @@ pub struct Connection {
     device_id: Uuid,
     conn_id: u64,
     revoked: Arc<Revoked>,
+    memberships_changed: Arc<Notify>,
 }
 
 impl Connection {
+    /// Resolves when the account has gained a membership since the
+    /// last time this resolved (`notify_memberships_changed`): the
+    /// session sends one `MembershipsChanged`.
+    pub async fn memberships_changed(&self) {
+        self.memberships_changed.notified().await
+    }
+
     /// Resolves once the device's credential has been revoked
     /// (`close_device` / `close_account`). The wakeup is a stored
     /// permit, so a revoke that lands while the session is busy with a
@@ -218,6 +230,7 @@ impl SyncSessions {
     pub fn connect(&self, device_id: Uuid, account_id: Uuid) -> Connection {
         let conn_id = next_sub_id();
         let revoked = Arc::new(Revoked::default());
+        let memberships_changed = Arc::new(Notify::new());
         self.inner
             .lock()
             .unwrap()
@@ -228,12 +241,14 @@ impl SyncSessions {
                 conn_id,
                 account_id,
                 revoked: revoked.clone(),
+                memberships_changed: memberships_changed.clone(),
             });
         Connection {
             sessions: self.clone(),
             device_id,
             conn_id,
             revoked,
+            memberships_changed,
         }
     }
 
@@ -259,6 +274,24 @@ impl SyncSessions {
         for c in inner.connections.values().flatten() {
             if c.account_id == account_id {
                 c.revoked.set();
+                told += 1;
+            }
+        }
+        told
+    }
+
+    /// The account joined or created a doc (`POST /api/invites/:id/accept`,
+    /// `POST /api/docs`): nudge every live connection of every one of
+    /// its devices to re-list its memberships. The acting device is
+    /// nudged too: its other tabs need it, and a client that already
+    /// holds the doc finds nothing new. Returns the number of
+    /// connections nudged.
+    pub fn notify_memberships_changed(&self, account_id: Uuid) -> usize {
+        let inner = self.inner.lock().unwrap();
+        let mut told = 0;
+        for c in inner.connections.values().flatten() {
+            if c.account_id == account_id {
+                c.memberships_changed.notify_one();
                 told += 1;
             }
         }

@@ -20,7 +20,7 @@ export function unwrapNewMemberships(
   home: Dek,
   primaryDocId: string,
   memberships: readonly Membership[],
-  known: ReadonlySet<string> | ReadonlyMap<string, unknown>,
+  known: { has(docId: string): boolean },
 ): Map<string, Dek> {
   const out = new Map<string, Dek>();
   for (const m of memberships) {

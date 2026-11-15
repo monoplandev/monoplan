@@ -27,6 +27,7 @@ import {
   helloFrame,
   parseHelloResponse,
   serverFrameDocId,
+  isMembershipsChanged,
   Replica,
   wrapDek,
 } from "../wasm/monoplan_core_web.js";
@@ -268,12 +269,13 @@ function attachReplicas(
   s: ServerHandle,
   token: string,
   replicas: Replica[],
+  onMembershipsChanged?: () => void,
 ): Promise<SyncBridge> {
   return new Promise((resolveOk, rejectOk) => {
     let resolved = false;
     const bridge = new SyncBridge({
       replicas,
-      codec: { helloFrame, parseHelloResponse, serverFrameDocId },
+      codec: { helloFrame, parseHelloResponse, serverFrameDocId, isMembershipsChanged },
       clientName: "monoplan-e2e",
       clientVersion: "0.0.0",
       // Bun extends `new WebSocket` with an options object that
@@ -289,6 +291,7 @@ function attachReplicas(
           resolveOk(bridge);
         }
       },
+      onMembershipsChanged,
       onError: (message) => rejectOk(new Error(`bridge error: ${message}`)),
       onReplicaEvent: (ev, docId) => {
         if (ev.kind === "error") {
@@ -583,5 +586,34 @@ describe("e2e snapshot + second-device bootstrap", () => {
 
     bridgeA.stop();
     bridgeB.stop();
+  }, 30_000);
+
+  test("a doc created on another device nudges a live bridge", async () => {
+    const dekHome = Dek.generate();
+    const account = await signup(server, dekHome.clone());
+    const homeA = new Replica(
+      Doc.create(),
+      account.primaryDocId,
+      dekHome.clone(),
+      0n,
+      new MemReplicaStorage() as unknown as ReplicaStorage,
+    );
+    let nudges = 0;
+    const bridgeA = await attachReplicas(server, account.deviceToken, [homeA], () => {
+      nudges += 1;
+    });
+    await waitFor(() => homeA.isIdle(), "home open and pulled");
+    expect(nudges).toBe(0);
+
+    // Device B creates a doc over HTTP; A's open socket hears about it
+    // as `MembershipsChanged`, which is the host's cue to re-list
+    // `GET /api/docs`. No replica sees the frame and nothing errors
+    // (`attachReplicas` rejects on any bridge or replica error).
+    const tokenB = await registerDevice(server, account.deviceToken, "device-b");
+    await createDoc(server, tokenB);
+    await waitFor(() => nudges === 1, "membership nudge reaches device A");
+    expect(bridgeA.docIds()).toEqual([account.primaryDocId]);
+
+    bridgeA.stop();
   }, 30_000);
 });

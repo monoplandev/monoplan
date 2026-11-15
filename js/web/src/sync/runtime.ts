@@ -20,6 +20,7 @@ import { api } from "../api.ts";
 import { type Prefs } from "../prefs.ts";
 import { type Session } from "../Login.tsx";
 import { dekVault } from "./dekVault.ts";
+import { unwrapNewMemberships } from "./docKeys.ts";
 import { createDocsLayer, type DocsLayer } from "./docs.ts";
 import { createHomeApp, createSyncedApp, type DocApp, type HomeApp } from "./store.ts";
 import { createSyncBridge, SyncBridge } from "./sync.ts";
@@ -296,6 +297,12 @@ export function createWorkspaceRuntime(props: {
   // Docs this device is leaving right now (`leaveDoc`): the server's
   // `DocClosed` for one of these is our own doing, not a removal.
   const leaving = new Set<string>();
+  // Docs on their way into `runtimes` (`openNewDoc` awaits the vault
+  // and the op-log store first), and creates whose server reply is
+  // still out: what keeps `joinDoc`, `createDoc` and `relistDocs` from
+  // opening one doc twice.
+  const opening = new Map<string, Promise<string>>();
+  const creating = new Set<Promise<string>>();
   // The Home doc is the one with Focus, so it alone gets the Home app.
   let home: DocRuntime<HomeApp> | undefined;
   for (const b of props.boot.docs) {
@@ -370,6 +377,9 @@ export function createWorkspaceRuntime(props: {
         if (kind === "online") {
           props.setOnline(true);
           props.setLastSyncAt(Date.now());
+          // Whatever the account joined or created while this tab was
+          // offline (or never heard a nudge for).
+          relistDocs();
         }
         if (kind === "offline") {
           props.setOnline(false);
@@ -384,6 +394,7 @@ export function createWorkspaceRuntime(props: {
         runtimes.get(docId)?.onServerFrame();
         saveDeviceSoon();
       },
+      onMembershipsChanged: () => relistDocs(),
       onAuthFailed: () => void props.logout(),
       // `docClosed`: the server refused our `OpenDoc` (`DocRejected`)
       // or unbound the doc mid-session (`DocClosed`): this account is
@@ -458,7 +469,16 @@ export function createWorkspaceRuntime(props: {
   // build its runtime, route it over the live bridge and add it to the
   // layer. Shared by `createDoc` (a seeded `Doc.create`, named) and
   // `joinDoc` (an empty doc; the server's snapshot fills it on open).
-  const openNewDoc = async (
+  const openNewDoc = (
+    docId: string,
+    dek: Dek,
+    opts: { seeded: boolean; name: string | null },
+  ): Promise<string> => {
+    const p = openNewDocInner(docId, dek, opts).finally(() => opening.delete(docId));
+    opening.set(docId, p);
+    return p;
+  };
+  const openNewDocInner = async (
     docId: string,
     dek: Dek,
     opts: { seeded: boolean; name: string | null },
@@ -528,11 +548,22 @@ export function createWorkspaceRuntime(props: {
     const homeDek = props.session.dek;
     const dek = Dek.generate();
     const wrapped = wrapDekWithDek(homeDek, dek);
-    const { doc_id: docId } = await api.createDoc({
-      wrapped_dek: wrapped.ciphertext,
-      wrapped_dek_nonce: wrapped.nonce,
-    });
-    return openNewDoc(docId, dek, { seeded: true, name });
+    const run = (async () => {
+      const { doc_id: docId } = await api.createDoc({
+        wrapped_dek: wrapped.ciphertext,
+        wrapped_dek_nonce: wrapped.nonce,
+      });
+      return openNewDoc(docId, dek, { seeded: true, name });
+    })();
+    // The server's nudge for this very doc can beat the reply above;
+    // `relistDocs` waits for the create so it never opens the doc
+    // unseeded first.
+    creating.add(run);
+    try {
+      return await run;
+    } finally {
+      creating.delete(run);
+    }
   };
 
   // Open a doc this account just joined through a sharing link
@@ -544,7 +575,58 @@ export function createWorkspaceRuntime(props: {
   // account's own, or a second accept) is left alone.
   const joinDoc = async (docId: string, dek: Dek): Promise<string> => {
     if (runtimes.has(docId)) return docId;
+    // `relistDocs` got there first (the server's nudge beat the accept
+    // reply): the same doc, already on its way in.
+    const inFlight = opening.get(docId);
+    if (inFlight) return inFlight;
     return openNewDoc(docId, dek, { seeded: false, name: null });
+  };
+
+  // Learn about docs the account joined or created on another device
+  // (or in another tab) while this session is live, without a reload
+  // (`spec/sharing-plan.md` §Learning about memberships): re-list
+  // `GET /api/docs`, unwrap what this session lacks under the Home DEK
+  // and open each like a joined doc (empty; the server's snapshot fills
+  // it). Runs on every `online` and on the server's
+  // `MembershipsChanged` nudge. Add-only: a doc the list no longer
+  // names leaves through `DocClosed` / `DocRejected`. One request at a
+  // time; a call while one is in flight, or a doc forgotten meanwhile
+  // (which a stale reply would resurrect), drops that reply and asks
+  // again. Best-effort: a failure waits for the next trigger.
+  let relisting = false;
+  let relistStale = false;
+  const relistDocs = (): void => {
+    if (props.session.anonymous) return;
+    if (relisting) {
+      relistStale = true;
+      return;
+    }
+    relisting = true;
+    void (async () => {
+      try {
+        const resp = await api.listDocs();
+        // A create whose reply is still in flight owns its doc.
+        await Promise.allSettled([...creating]);
+        if (relistStale) return;
+        const fresh = unwrapNewMemberships(
+          props.session.dek,
+          props.session.primaryDocId,
+          resp.memberships,
+          { has: (id: string) => runtimes.has(id) || opening.has(id) },
+        );
+        for (const [docId, dek] of fresh) {
+          await openNewDoc(docId, dek, { seeded: false, name: null });
+        }
+      } catch (e) {
+        console.warn("docs re-list skipped:", e);
+      } finally {
+        relisting = false;
+        if (relistStale) {
+          relistStale = false;
+          relistDocs();
+        }
+      }
+    })();
   };
 
   // Forget an open non-Home doc on this device, in an order where a
@@ -558,6 +640,7 @@ export function createWorkspaceRuntime(props: {
   const forgetOpenDoc = async (docId: string, r: DocRuntime): Promise<void> => {
     if (docs.viewDocId(view()) === docId)
       setView({ kind: "list", id: "inbox" });
+    if (relisting) relistStale = true;
     forgetPresence(docId);
     bridge?.removeReplica(docId);
     docs.removeDoc(docId);

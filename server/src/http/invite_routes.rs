@@ -156,9 +156,16 @@ pub async fn accept(
     )
     .await?
     {
-        AcceptInviteOutcome::Joined { doc_id } => Ok(Json(AcceptInviteResponse {
-            doc_id: doc_id.to_string(),
-        })),
+        AcceptInviteOutcome::Joined { doc_id } => {
+            // The joiner's other live devices learn now rather than at
+            // their next sign-in (`ServerFrame::MembershipsChanged`).
+            state
+                .sync_sessions
+                .notify_memberships_changed(auth.account_id);
+            Ok(Json(AcceptInviteResponse {
+                doc_id: doc_id.to_string(),
+            }))
+        }
         AcceptInviteOutcome::NotFound => Err(ApiError::NotFound),
         AcceptInviteOutcome::Expired => Err(ApiError::Gone("invite expired".into())),
         AcceptInviteOutcome::Consumed => Err(ApiError::Gone("invite already used".into())),

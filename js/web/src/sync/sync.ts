@@ -14,6 +14,7 @@ import {
   helloFrame,
   parseHelloResponse,
   serverFrameDocId,
+  isMembershipsChanged,
 } from "@monoplan/core/wasm";
 import { api, ApiError } from "../api.ts";
 
@@ -28,7 +29,7 @@ type WebOpts = Omit<
 export function createSyncBridge(opts: WebOpts): SyncBridge {
   return new SyncBridge({
     ...opts,
-    codec: { helloFrame, parseHelloResponse, serverFrameDocId },
+    codec: { helloFrame, parseHelloResponse, serverFrameDocId, isMembershipsChanged },
     clientName: CLIENT_NAME,
     clientVersion: CLIENT_VERSION,
     socketFactory: () => new WebSocket(wsUrl()),

@@ -20,7 +20,7 @@ use http::header::AUTHORIZATION;
 use monoplan_core::{
     Dek, Doc, DocId, EngineOptions, Event, Replica, hello_frame, parse_hello_response,
 };
-use monoplan_protocol::{CreateDocRequest, CreateDocResponse};
+use monoplan_protocol::{CreateDocRequest, CreateDocResponse, DocsListResponse, Membership};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -35,6 +35,11 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 /// a host's loop, which serves nothing else meanwhile, so an
 /// unreachable server has to fail rather than hang the host.
 const CREATE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The membership re-list (`list_memberships`). It runs as a host task
+/// beside the loop, so this only bounds how long a dead server holds
+/// the next re-list back.
+const MEMBERSHIPS_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// WAL fold thresholds (spec/vv-wal-separation.md). Evaluated after
 /// every command's WAL append and once at boot (so an interrupted
@@ -402,6 +407,11 @@ impl Engine {
     /// with a just-forgotten doc at worst); undecodable bytes go to
     /// Home, which reports the decode error as an event.
     pub(crate) fn route_server_bytes(&mut self, bytes: &[u8]) {
+        // Account-scoped, for the host (the daemon re-lists on it); a
+        // one-shot exchange has no use for it.
+        if monoplan_core::is_memberships_changed(bytes) {
+            return;
+        }
         let target = match monoplan_core::server_frame_doc_id(bytes) {
             Some(id) => DocId(id),
             None => self.primary,
@@ -593,6 +603,76 @@ impl Engine {
         self.forget_doc(doc_id)
     }
 
+    /// What [`list_memberships`] needs, borrowed out so a host can run
+    /// the request as its own task (the daemon does, beside its
+    /// `select!` loop). `None` for a local-only workspace.
+    pub(crate) fn memberships_params(&self) -> Option<(Profile, String)> {
+        self.server_url
+            .as_deref()
+            .map(|url| (Profile::new(self.profile.dir.clone()), url.to_string()))
+    }
+
+    /// Open every membership in `memberships` this engine does not hold
+    /// yet: a doc the account joined or created on another device
+    /// (`spec/sharing-plan.md` §Learning about memberships). Each key is
+    /// unwrapped under the Home DEK and stored in `secrets.toml`, then
+    /// the doc boots empty like any membership first seen on a device;
+    /// the server's snapshot fills it on open. A host with a socket up
+    /// calls [`connect_doc`](Self::connect_doc) for each id returned.
+    /// Add-only: a doc the list no longer names is left to `DocClosed` /
+    /// `DocRejected`. A membership that will not unwrap or boot is
+    /// skipped with a warning, so one bad row cannot hide the rest.
+    pub(crate) fn adopt_memberships(
+        &mut self,
+        memberships: &[Membership],
+    ) -> Result<Vec<DocId>, SyncError> {
+        let fresh: Vec<&Membership> = memberships
+            .iter()
+            .filter(|m| {
+                crate::keystore::parse_doc_id(&m.doc_id)
+                    .is_ok_and(|id| id != self.primary && !self.docs.contains_key(&id))
+            })
+            .collect();
+        if fresh.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut secrets = self.profile.read_secrets()?;
+        let home = dek_for_doc(&secrets, self.primary)?;
+        let account = self.store.read_account()?;
+        let author = account.identity.as_ref().map(|i| i.account_id.as_str());
+        let peer_id = self.peer.peer_id;
+        let mut adopted = Vec::new();
+        for m in fresh {
+            let Ok(doc_id) = crate::keystore::parse_doc_id(&m.doc_id) else {
+                continue;
+            };
+            let dek = match crate::keystore::unwrap_membership(&home, m) {
+                Ok(dek) => dek,
+                Err(e) => {
+                    tracing::warn!("membership {}: key will not unwrap: {e}", doc_id.0);
+                    continue;
+                }
+            };
+            // The key first, as in `create_doc`: a crash before the boot
+            // leaves a membership the next start opens.
+            secrets.docs.insert(
+                doc_id.0.to_string(),
+                DocSecrets {
+                    dek_hex: hex::encode(dek.as_bytes()),
+                },
+            );
+            self.profile.write_secrets(&secrets)?;
+            match boot_doc_state(&self.store, &secrets, doc_id, peer_id, author) {
+                Ok(state) => {
+                    self.docs.insert(doc_id, state);
+                    adopted.push(doc_id);
+                }
+                Err(e) => tracing::warn!("membership {}: boot failed: {e}", doc_id.0),
+            }
+        }
+        Ok(adopted)
+    }
+
     /// Open one doc on a socket that is already up and past its version
     /// handshake: the per-doc half of
     /// [`handle_connected`](Self::handle_connected), for a doc that
@@ -619,6 +699,24 @@ impl Engine {
         self.store.forget_doc(doc_id)?;
         Ok(())
     }
+}
+
+/// `GET /api/docs`: every current membership of the account, wraps
+/// included. A free function over owned params
+/// ([`Engine::memberships_params`]) so a host can spawn it.
+pub(crate) async fn list_memberships(
+    profile: Profile,
+    server_url: String,
+) -> Result<Vec<Membership>, SyncError> {
+    let token = profile.read_secrets()?.device_token()?.to_string();
+    let resp: DocsListResponse = tokio::time::timeout(
+        MEMBERSHIPS_TIMEOUT,
+        crate::net::Client::new(&server_url).get_authed("/api/docs", &token),
+    )
+    .await
+    .map_err(|_| SyncError::Ws("the server did not answer in time".into()))?
+    .map_err(|e| SyncError::Ws(e.to_string()))?;
+    Ok(resp.memberships)
 }
 
 /// Boot one doc from its op log + snapshot. A doc with no rows yet

@@ -561,3 +561,85 @@ async fn reconnect_request_comes_back_online_and_stays_live() {
 
     handle.shutdown().await.unwrap();
 }
+
+/// Poll until `pred` holds, bounded: for effects with no status field.
+async fn eventually(what: &str, pred: impl Fn() -> bool) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !pred() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
+}
+
+/// A workspace the account gains on another device reaches a resident
+/// host without a new sign-in (`spec/sharing-plan.md` §Learning about
+/// memberships): one that appeared while the host was away is picked up
+/// by the re-list on connect, one that appears while it is connected by
+/// the server's `MembershipsChanged` nudge. Either way the key lands in
+/// `secrets.toml` and the doc is opened on the live socket.
+#[tokio::test]
+async fn daemon_adopts_workspaces_gained_on_another_device() {
+    let server = TestServer::start().await;
+    let signup = signup_account(&server, "daemon-a").await;
+    let tmp_a = tempfile::tempdir().unwrap();
+    let profile_a = materialize_profile(
+        tmp_a.path(),
+        &server.base,
+        &signup.account_id,
+        &signup.primary_doc_id,
+        &signup.device_id,
+        &signup.device_token,
+        &signup.dek,
+        &signup.email,
+        true,
+    )
+    .await;
+    // Device B: HTTP only, the account's other device.
+    let login = login_device(&server.base, &signup.email, TEST_PASSWORD, "daemon-b")
+        .await
+        .unwrap();
+    let holds = |doc_id: &str| {
+        reopen_profile(tmp_a.path())
+            .read_secrets()
+            .is_ok_and(|s| s.docs.contains_key(doc_id))
+    };
+    let open_on_server = |doc_id: &str| {
+        server
+            .state
+            .sync_sessions
+            .subscriber_count(Uuid::parse_str(doc_id).unwrap())
+            == 1
+    };
+
+    // Created before A's host ever connects: the connect re-list.
+    let (before, _) = support::create_doc(&server.base, &login.device_token, &login.dek)
+        .await
+        .unwrap();
+    assert!(!holds(&before));
+    let mut handle = daemon::spawn(profile_a).await.unwrap();
+    wait_until(&mut handle.status, "daemon online", |s| s.online).await;
+    eventually("the doc created while away is adopted", || holds(&before)).await;
+    eventually("and opened on the socket", || open_on_server(&before)).await;
+
+    // Created while A is connected: the nudge.
+    let connects = handle.status.borrow().connects;
+    let (live, _) = support::create_doc(&server.base, &login.device_token, &login.dek)
+        .await
+        .unwrap();
+    eventually("the doc created live is adopted", || holds(&live)).await;
+    eventually("and opened on the socket", || open_on_server(&live)).await;
+    assert_eq!(
+        handle.status.borrow().connects,
+        connects,
+        "adopting a doc must not cycle the socket"
+    );
+
+    // Both survive a restart as ordinary docs of the profile.
+    handle.shutdown().await.unwrap();
+    let engine_a = Engine::open_with_profile(reopen_profile(tmp_a.path()), false)
+        .await
+        .unwrap();
+    assert_eq!(engine_a.doc_ids().len(), 3);
+}

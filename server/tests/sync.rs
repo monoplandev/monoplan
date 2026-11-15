@@ -2056,6 +2056,36 @@ async fn removing_a_member_closes_the_doc_on_its_live_connection() {
     expect_closed(&mut ws_again).await;
 }
 
+/// `MembershipsChanged` (`spec/sync-protocol.md`): creating a doc over
+/// HTTP nudges every live connection of that account, with or without
+/// a doc open, and nobody else's. Joining through an invite goes
+/// through the same call (`server/tests/auth.rs` covers the accept).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn creating_a_doc_nudges_the_accounts_live_connections() {
+    let owner = signup_account().await;
+    let (_other_id, other_token) = signup_second(&owner).await;
+
+    // One connection with Home open, one with nothing open yet.
+    let mut ws_open = connect_ws(&owner.server, &owner.device_token).await;
+    handshake(&mut ws_open, owner.primary_doc_id).await;
+    let mut ws_bare = connect_ws(&owner.server, &owner.device_token).await;
+    hello(&mut ws_bare).await;
+    let mut ws_other = connect_ws(&owner.server, &other_token).await;
+    hello(&mut ws_other).await;
+
+    create_doc(&owner).await;
+
+    for ws in [&mut ws_open, &mut ws_bare] {
+        match recv_msgpack::<ServerFrame>(ws).await {
+            ServerFrame::MembershipsChanged => {}
+            other => panic!("expected MembershipsChanged, got {other:?}"),
+        }
+    }
+    assert_no_frame(&mut ws_other, std::time::Duration::from_millis(200)).await;
+    // One nudge per change, not a stream of them.
+    assert_no_frame(&mut ws_open, std::time::Duration::from_millis(100)).await;
+}
+
 /// Leave (`spec/sharing-plan.md` §Member removal): a member removes
 /// themself over HTTP while they have the doc open. Their own
 /// connection, the one whose device asked, gets `DocClosed` (reason

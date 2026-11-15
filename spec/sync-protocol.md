@@ -100,6 +100,7 @@ The web client shows the *other* present accounts as avatars beside the workspac
 | `Snapshot` | `{ doc_id, up_to_seq: u64, blob: EncryptedBlob, complete: bool }` | One row of the stored chain, in reply to `PullSnapshot`. The server streams the chain one row per frame in import order (the latest full snapshot, then each delta after it), fire-and-forget like `UpdatesBatch`, with `complete: true` on the last row. `up_to_seq` is this row's state frontier; on the `complete` frame it is the chain's final frontier, which the bootstrapping client uses as its next `since_seq`. |
 | `SnapshotRequired` | `{ doc_id, up_to_seq: u64 }` | Sent in lieu of `UpdatesBatch` when the client's `since_seq` is below the latest snapshot's `compaction_floor_seq` — server can't serve the missing updates. Client must bootstrap from snapshot before resuming updates. `up_to_seq` is informational; the authoritative state frontier is the one returned in `Snapshot`. |
 | `Presence` | `{ doc_id, accounts: [PresentAccount] }` | Who has the doc open right now; see §Presence. `PresentAccount = { account_id: uuid, email: string }`. |
+| `MembershipsChanged` | none | The account gained a membership (joined through an invite, or created a doc) on some device; see §Membership nudge. The only frame scoped to the account, not a doc. |
 
 `EncryptedBlob = { nonce: bytes, ciphertext: bytes }`.
 
@@ -261,10 +262,21 @@ The `up_to_seq` carried by `SnapshotRequired` is informational; the authoritativ
 
 `SnapshotRequired` and `Snapshot` are only valid in the bootstrap path. Up-to-date devices in steady state never receive either — `UpdatesBatch` / `UpdatesBroadcast` covers them. The `Snapshot` frame is therefore only accepted by a client in its bootstrap state, never mid-pull, and the client stays in that state until the `complete` row has landed (broadcasts arriving in between are dropped; the post-bootstrap `PullUpdates` re-delivers them).
 
+## Membership nudge
+
+**Status:** Implemented (2026-11-16).
+
+Which docs a device opens is its own choice, made from the key set it holds (§Doc binding), and that set was only refreshed at sign-in (and, on the web, at page load). A device that stayed signed in never learned of a doc the account joined or created elsewhere. Two triggers now close that, both ending in the same client routine: `GET /api/docs`, unwrap every membership the device lacks under the Home DEK, store the key, boot the doc empty and send `OpenDoc` on the live socket (`spec/sharing-plan.md` §Learning about memberships).
+
+- **`MembershipsChanged`.** After `POST /api/docs` or `POST /api/invites/:id/accept` commits, the server nudges every live connection of that account (`SyncSessions::notify_memberships_changed`), whatever docs it has open. The frame has no payload: it carries no doc id and no wrap, so there is one key-delivery path (the list endpoint) and the server stays dumb. The acting device's connections are nudged too, because its other tabs need it; a client that already holds the doc finds nothing new. Nudges that land while a session is busy collapse into one frame. Not persisted, not acked.
+- **Every connect.** After `HelloAck` the client runs the same routine, which covers a device that was offline or asleep when the nudge went out, and a nudge lost with a dropped socket.
+
+The routine only adds. A membership that went away is `DocClosed` on a live connection and `DocRejected` on the next `OpenDoc`. Clients run one list request at a time; a second trigger, or a doc forgotten while a request is in flight, discards that reply and asks again, so a list fetched before a removal cannot bring the doc back.
+
 ## Reconnect
 
 **Status:** Partial. Resume-from-`last_acked_seq` is implemented in both CLI and web replicas. Exponential backoff with jitter is implemented in the JS sync bridge (`js/core/src/sync-bridge.ts`); the CLI runs one-shot so backoff doesn't apply there.
 
-Client maintains `last_acked_seq` in local state. On reconnect: WS upgrade with token → `Hello` / `HelloAck` → `OpenDoc` / `DocOpened` → `PullUpdates { since_seq: last_acked_seq }` → resume.
+Client maintains `last_acked_seq` in local state. On reconnect: WS upgrade with token → `Hello` / `HelloAck` → `OpenDoc` / `DocOpened` → `PullUpdates { since_seq: last_acked_seq }` → resume. Beside that, each connect re-lists the account's memberships and opens any doc the device lacks (§Membership nudge).
 
 Exponential backoff 1s → 30s.

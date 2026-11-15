@@ -64,9 +64,16 @@ pub async fn create(
     )
     .await?;
     match outcome {
-        CreateDocOutcome::Created(doc_id) => Ok(Json(CreateDocResponse {
-            doc_id: doc_id.to_string(),
-        })),
+        CreateDocOutcome::Created(doc_id) => {
+            // The account's other live devices learn now rather than
+            // at their next sign-in (`ServerFrame::MembershipsChanged`).
+            state
+                .sync_sessions
+                .notify_memberships_changed(auth.account_id);
+            Ok(Json(CreateDocResponse {
+                doc_id: doc_id.to_string(),
+            }))
+        }
         CreateDocOutcome::LimitReached => Err(ApiError::WorkspaceLimit(state.max_workspaces)),
     }
 }

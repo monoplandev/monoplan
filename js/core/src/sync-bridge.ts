@@ -56,6 +56,9 @@ export interface HandshakeCodec {
   helloFrame(clientName: string, clientVersion: string): Uint8Array;
   parseHelloResponse(bytes: Uint8Array): HelloOutcome;
   serverFrameDocId(bytes: Uint8Array): string | undefined;
+  /** The account-scoped `MembershipsChanged` nudge: no replica takes
+   *  it, the host does (`onMembershipsChanged`). */
+  isMembershipsChanged(bytes: Uint8Array): boolean;
 }
 
 export interface SyncBridgeOpts {
@@ -98,6 +101,11 @@ export interface SyncBridgeOpts {
    *  events are still drained (so the replica queues can't grow
    *  unbounded) but discarded. */
   onReplicaEvent?: (ev: ReplicaEvent, docId: string) => void;
+  /** The server's `MembershipsChanged` nudge: the account joined or
+   *  created a doc on some device. The host re-lists `GET /api/docs`
+   *  and adds the docs it lacks (`addReplica`). A host that wants the
+   *  same check on every (re)connect runs it from `onChange("online")`. */
+  onMembershipsChanged?: () => void;
   /** Connection-level problems the replicas never see: a rejected or
    *  malformed handshake, a timed-out handshake, a frame for a doc no
    *  replica syncs. Informational — the bridge has already decided
@@ -296,6 +304,10 @@ export class SyncBridge {
         return;
       }
       const docId = this.opts.codec.serverFrameDocId(data);
+      if (docId === undefined && this.opts.codec.isMembershipsChanged(data)) {
+        this.opts.onMembershipsChanged?.();
+        return;
+      }
       const replica = docId === undefined ? undefined : this.replicas.get(docId);
       if (!replica) {
         // Not ours: either undecodable or for a doc this device never

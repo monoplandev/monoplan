@@ -261,6 +261,17 @@ async fn run_session(
                 close_revoked(&mut socket).await;
                 break Ok(());
             }
+            // The account gained a membership on some device: nudge
+            // this one to re-list (`GET /api/docs`). Account-scoped,
+            // so it goes out whatever docs the connection has open.
+            _ = conn.memberships_changed() => {
+                if conn.is_revoked() {
+                    close_revoked(&mut socket).await;
+                    break Ok(());
+                }
+                send_msgpack(&mut socket, &ServerFrame::MembershipsChanged).await?;
+                tracing::debug!("ws memberships-changed nudge sent");
+            }
             client_frame = recv_msgpack::<ClientFrame>(&mut socket) => {
                 // Nothing is served on a dead token, even a frame that
                 // raced the revoke.

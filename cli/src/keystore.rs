@@ -73,6 +73,13 @@ pub fn parse_doc_id(hex: &str) -> Result<DocId, KeystoreError> {
         .map_err(|_| KeystoreError::MalformedDocId(hex.to_string()))
 }
 
+/// The DEK of one non-primary membership, unwrapped under the Home DEK
+/// (every wrap but the primary's is under it, `spec/encryption.md`
+/// §Wrap-states).
+pub fn unwrap_membership(home: &Dek, m: &Membership) -> Result<Dek, KeystoreError> {
+    Ok(home.unwrap_dek(&wrapped(&m.wrapped_dek, &m.wrapped_dek_nonce)?)?)
+}
+
 fn wrapped(wrapped_dek: &[u8], nonce: &[u8]) -> Result<WrappedDek, KeystoreError> {
     let nonce: [u8; AEAD_NONCE_LEN] = nonce
         .try_into()

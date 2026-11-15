@@ -15,7 +15,8 @@ use monoplan_core::{
     RemoteWalRow as CoreRemoteWalRow, Replica as CoreReplica, ServerSeq as CoreServerSeq,
     StorageError as CoreStorageError, WrappedDek as CoreWrappedDek, derive_password_master,
     derive_recovery_master, generate_recovery_code, hello_frame as core_hello_frame,
-    kek_from_master, parse_hello_response as core_parse_hello_response, parse_recovery_code,
+    is_memberships_changed as core_is_memberships_changed, kek_from_master,
+    parse_hello_response as core_parse_hello_response, parse_recovery_code,
     server_frame_doc_id as core_server_frame_doc_id,
 };
 use monoplan_protocol::{EncryptedBlob as CoreEncryptedBlob, KdfParams as CoreKdfParams};
@@ -1462,10 +1463,19 @@ pub fn parse_hello_response(bytes: &[u8]) -> HelloOutcome {
 }
 
 /// The doc id (uuid string) a post-handshake server frame names, or
-/// `undefined` when the bytes are not a `ServerFrame`.
+/// `undefined` when the frame names none (`isMembershipsChanged`) or
+/// the bytes are not a `ServerFrame`.
 #[wasm_bindgen(js_name = serverFrameDocId)]
 pub fn server_frame_doc_id(bytes: &[u8]) -> Option<String> {
     core_server_frame_doc_id(bytes).map(|id| id.to_string())
+}
+
+/// Whether a post-handshake server frame is the account-scoped
+/// `MembershipsChanged` nudge: the host re-lists `GET /api/docs` and
+/// opens the docs it lacks. No replica takes this frame.
+#[wasm_bindgen(js_name = isMembershipsChanged)]
+pub fn is_memberships_changed(bytes: &[u8]) -> bool {
+    core_is_memberships_changed(bytes)
 }
 
 // ---------- Replica ----------

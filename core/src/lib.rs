@@ -31,6 +31,6 @@ pub use storage::{
     load_doc, seed_snapshot,
 };
 pub use sync::{
-    EngineOptions, Event, HelloError, Replica, hello_frame, parse_hello_response,
-    server_frame_doc_id,
+    EngineOptions, Event, HelloError, Replica, hello_frame, is_memberships_changed,
+    parse_hello_response, server_frame_doc_id,
 };

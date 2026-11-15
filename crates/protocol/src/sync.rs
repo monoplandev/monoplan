@@ -284,11 +284,21 @@ pub enum ServerFrame {
         doc_id: Uuid,
         accounts: Vec<PresentAccount>,
     },
+    /// The account's set of memberships grew: it joined a doc through
+    /// an invite, or created one, on some device. A nudge with no
+    /// payload, sent to every live connection of the account (the
+    /// acting device's included, which finds nothing new); the client
+    /// re-lists `GET /api/docs` and opens whatever it lacks. The only
+    /// frame scoped to the account rather than a doc. Best-effort: a
+    /// client that misses it reconciles the same way on its next
+    /// connect. Shrinking is `DocClosed`'s job, not this frame's.
+    MembershipsChanged,
 }
 
 impl ServerFrame {
-    /// The doc this frame is about.
-    pub fn doc_id(&self) -> Uuid {
+    /// The doc this frame is about; `None` for the account-scoped
+    /// `MembershipsChanged`.
+    pub fn doc_id(&self) -> Option<Uuid> {
         match self {
             ServerFrame::DocOpened { doc_id, .. }
             | ServerFrame::DocRejected { doc_id, .. }
@@ -299,7 +309,8 @@ impl ServerFrame {
             | ServerFrame::SnapshotRequest { doc_id, .. }
             | ServerFrame::Snapshot { doc_id, .. }
             | ServerFrame::SnapshotRequired { doc_id, .. }
-            | ServerFrame::Presence { doc_id, .. } => *doc_id,
+            | ServerFrame::Presence { doc_id, .. } => Some(*doc_id),
+            ServerFrame::MembershipsChanged => None,
         }
     }
 }

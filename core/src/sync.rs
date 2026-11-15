@@ -187,12 +187,24 @@ pub fn parse_hello_response(bytes: &[u8]) -> Result<HelloAck, HelloError> {
 
 /// The doc a post-handshake server frame is about, for a host that
 /// routes one socket's frames to several replicas. `None` when the
-/// bytes are not a `ServerFrame`; the host should then hand them to
-/// any replica, which will report the decode error as an event.
+/// frame is account-scoped ([`is_memberships_changed`], which the host
+/// checks first) or the bytes are not a `ServerFrame`; the host should
+/// hand the latter to any replica, which will report the decode error
+/// as an event.
 pub fn server_frame_doc_id(bytes: &[u8]) -> Option<uuid::Uuid> {
     rmp_serde::from_slice::<ServerFrame>(bytes)
         .ok()
-        .map(|f| f.doc_id())
+        .and_then(|f| f.doc_id())
+}
+
+/// Whether a post-handshake server frame is `MembershipsChanged`: the
+/// account joined or created a doc somewhere. It belongs to no replica;
+/// the host re-lists `GET /api/docs` and opens the docs it lacks.
+pub fn is_memberships_changed(bytes: &[u8]) -> bool {
+    matches!(
+        rmp_serde::from_slice::<ServerFrame>(bytes),
+        Ok(ServerFrame::MembershipsChanged)
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -715,11 +727,15 @@ impl Replica {
         // Every payload frame names its doc. This replica drives exactly
         // one, so anything else is a routing error upstream — surface
         // it and leave the state machine untouched.
-        if frame.doc_id() != self.doc_id.0 {
+        // The account-scoped nudge is the host's to act on; one that
+        // reaches a replica anyway is ignored rather than an error.
+        let Some(frame_doc) = frame.doc_id() else {
+            return;
+        };
+        if frame_doc != self.doc_id.0 {
             self.events.push_back(Event::Error(format!(
                 "frame for doc {} but this replica syncs {}",
-                frame.doc_id(),
-                self.doc_id.0
+                frame_doc, self.doc_id.0
             )));
             return;
         }
@@ -1068,6 +1084,8 @@ impl Replica {
                         .push_back(Event::Error(format!("encode PushSnapshot: {e}")));
                 }
             }
+            // Names no doc, so it returned above.
+            ServerFrame::MembershipsChanged => {}
         }
     }
 
@@ -1471,6 +1489,24 @@ mod tests {
             None
         );
         assert_eq!(server_frame_doc_id(b"\x00\x01"), None);
+    }
+
+    #[test]
+    fn memberships_changed_names_no_doc_and_a_replica_ignores_it() {
+        let nudge = enc(&ServerFrame::MembershipsChanged);
+        assert!(is_memberships_changed(&nudge));
+        assert_eq!(server_frame_doc_id(&nudge), None);
+        assert!(!is_memberships_changed(&enc(&ServerFrame::DocOpened {
+            doc_id: DOC,
+            epoch: 0
+        })));
+        assert!(!is_memberships_changed(b"\x00\x01"));
+
+        let mut eng = fresh_replica_clean();
+        eng.handle_connected();
+        drain_events(&mut eng);
+        eng.handle_server_bytes(&nudge);
+        assert!(drain_events(&mut eng).is_empty());
     }
 
     #[test]

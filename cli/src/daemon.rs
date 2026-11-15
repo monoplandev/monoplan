@@ -33,6 +33,7 @@ use std::time::{Duration, Instant};
 use clap::{Parser, Subcommand};
 use futures_util::{SinkExt, StreamExt};
 use monoplan_core::{DocId, Event, hello_frame, parse_hello_response};
+use monoplan_protocol::Membership;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_tungstenite::tungstenite::Message;
@@ -901,6 +902,15 @@ struct Host {
     /// In-flight connect + version handshake, run as its own task so
     /// the loop keeps serving clients and ticks while it waits.
     connecting: Option<tokio::task::JoinHandle<Result<WsStream, SyncError>>>,
+    /// In-flight `GET /api/docs` (`start_relist`), its own task for the
+    /// same reason. Started on every connect and on the server's
+    /// `MembershipsChanged` nudge; the reply's unknown memberships are
+    /// opened (`on_relist_result`).
+    relisting: Option<tokio::task::JoinHandle<Result<Vec<Membership>, SyncError>>>,
+    /// The in-flight re-list may predate what it should have seen (a
+    /// second nudge, or a doc forgotten meanwhile, which a stale reply
+    /// would resurrect): drop its reply and ask again.
+    relist_stale: bool,
     /// `Sync` requests parked until the current connect attempt
     /// resolves (initial pull done, or the attempt failed).
     pending_syncs: Vec<oneshot::Sender<Reply>>,
@@ -937,6 +947,8 @@ impl Host {
             connected_at: None,
             awaiting_pong: false,
             connecting: None,
+            relisting: None,
+            relist_stale: false,
             pending_syncs: Vec::new(),
             offline_reason: None,
             local_only,
@@ -966,6 +978,11 @@ impl Host {
                 res = async { self.connecting.as_mut().expect("guarded").await }, if self.connecting.is_some() => {
                     self.connecting = None;
                     self.on_connect_result(res).await;
+                }
+
+                res = async { self.relisting.as_mut().expect("guarded").await }, if self.relisting.is_some() => {
+                    self.relisting = None;
+                    self.on_relist_result(res).await;
                 }
 
                 msg = async { self.ws.as_mut().expect("guarded").next().await }, if self.ws.is_some() => {
@@ -1275,6 +1292,8 @@ impl Host {
                     },
                     Ok(doc_id) => match self.engine.delete_doc(doc_id).await {
                         Ok(()) => {
+                            // A list fetched before the delete names it.
+                            self.relist_stale = self.relisting.is_some();
                             // Watchers re-list before the client's reply.
                             let _ = self.watchers.send(WatchEvent::Changed);
                             Reply::WorkspaceDeleted {
@@ -1333,6 +1352,9 @@ impl Host {
                 self.status.send_modify(|s| s.connects += 1);
                 eprintln!("monoplan daemon: connected");
                 self.pump().await;
+                // Whatever the account joined or created while this
+                // device was away (or never heard a nudge for).
+                self.start_relist();
             }
             Ok(Err(e)) => {
                 self.resolve_pending_syncs(false);
@@ -1343,6 +1365,70 @@ impl Host {
                 self.schedule_reconnect(&format!("connect task failed: {e}"));
             }
         }
+    }
+
+    /// Ask the server for the account's memberships, beside the loop.
+    /// One request at a time: a call while one is in flight marks it
+    /// stale, so its reply is dropped and the question asked again.
+    fn start_relist(&mut self) {
+        if self.relisting.is_some() {
+            self.relist_stale = true;
+            return;
+        }
+        let Some((profile, server_url)) = self.engine.memberships_params() else {
+            return;
+        };
+        self.relisting = Some(tokio::spawn(crate::sync::list_memberships(
+            profile, server_url,
+        )));
+    }
+
+    /// The membership list is back: open every doc in it this engine
+    /// does not hold (`Engine::adopt_memberships`), on the live socket
+    /// if there is one, otherwise with the rest on the next connect. A
+    /// failed request is left alone; the next connect asks again.
+    async fn on_relist_result(
+        &mut self,
+        res: Result<Result<Vec<Membership>, SyncError>, tokio::task::JoinError>,
+    ) {
+        if std::mem::take(&mut self.relist_stale) {
+            self.start_relist();
+            return;
+        }
+        let memberships = match res {
+            Ok(Ok(m)) => m,
+            Ok(Err(e)) => {
+                tracing::debug!("membership re-list failed: {e}");
+                return;
+            }
+            Err(e) => {
+                tracing::warn!("membership re-list task failed: {e}");
+                return;
+            }
+        };
+        let adopted = match self.engine.adopt_memberships(&memberships) {
+            Ok(ids) => ids,
+            Err(e) => {
+                tracing::warn!("adopt memberships: {e}");
+                return;
+            }
+        };
+        if adopted.is_empty() {
+            return;
+        }
+        for doc_id in &adopted {
+            tracing::info!(
+                "workspace {} joined on another device; opening it",
+                doc_id.0
+            );
+            if self.ws.is_some() {
+                self.engine.connect_doc(*doc_id);
+            }
+        }
+        self.pump().await;
+        // Watchers list workspaces from the host: a new one is a
+        // change even before its first item arrives.
+        let _ = self.watchers.send(WatchEvent::Changed);
     }
 
     fn resolve_pending_syncs(&mut self, online: bool) {
@@ -1387,6 +1473,11 @@ impl Host {
     ) {
         match msg {
             Some(Ok(Message::Binary(bytes))) => {
+                // The account gained a membership somewhere: re-list.
+                if monoplan_core::is_memberships_changed(&bytes) {
+                    self.start_relist();
+                    return;
+                }
                 self.engine.route_server_bytes(&bytes);
                 // Remote updates are WAL-appended by the replica as they
                 // apply; persisting now advances the durable cursor,
@@ -1530,6 +1621,8 @@ impl Host {
             if let Err(e) = self.engine.forget_doc(doc_id) {
                 tracing::warn!("forget doc {}: {e}", doc_id.0);
             }
+            // A list fetched before the close still names it.
+            self.relist_stale = self.relisting.is_some();
             let _ = self.watchers.send(WatchEvent::Changed);
         }
         self.publish();
