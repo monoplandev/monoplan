@@ -6,7 +6,9 @@
 // Personal first, each a heading row over its Inbox and lists: the row
 // folds the group, and each has a "…" menu: Export and Import JSON
 // (`WorkspaceJSON.swift`), and on a shared workspace Share…
-// (`SharingSheet.swift`) and Delete or Leave),
+// (`SharingSheet.swift`) and Delete or Leave; a list's row has
+// Delete…, its items to the Inbox or the Bin, and the Inbox's row the
+// device's Inbox order, oldest or newest first),
 // and either the open items of the selected list with a tick and a
 // field to add one, or a lens over every workspace: Starred in its
 // curated order, the Calendar (the engine's agenda, by day), Done,
@@ -282,6 +284,10 @@ final class MainWindowModel: ObservableObject {
     /// neither while this is unknown (offline, or still loading), as
     /// on iOS and the web.
     @Published private(set) var ownsWorkspace: [String: Bool] = [:]
+    /// How many members each shared workspace has, by doc id, from the
+    /// same member list: Delete's confirm on a list says who will see
+    /// the items it sends to the Inbox.
+    @Published private(set) var memberCounts: [String: Int] = [:]
     /// Shared workspaces whose role is being asked for now.
     private var rolesLoading: Set<String> = []
 
@@ -479,6 +485,7 @@ final class MainWindowModel: ObservableObject {
     private func clear() {
         sections = []
         ownsWorkspace = [:]
+        memberCounts = [:]
         items = []
         clearLenses()
         clearItem()
@@ -756,6 +763,17 @@ final class MainWindowModel: ObservableObject {
         write { try $0.renameList(workspace: workspace, list: list, name: name) }
     }
 
+    /// Delete a user-created list (`Engine.deleteList`): every item it
+    /// held goes to the end of its workspace's Inbox queue, and with
+    /// `.toBin` to the Bin too. One undo step (Edit › Undo) restores
+    /// the list and its items. The caller has asked (`ListConfirm`).
+    /// With the list shown, the reread falls back to the Inbox, where
+    /// the items went.
+    func deleteList(workspace: String?, list: String, mode: DeleteMode) {
+        if lens == nil, workspace == self.workspace, list == self.list { clearItem() }
+        write { try $0.deleteList(workspace: workspace, list: list, mode: mode) }
+    }
+
     /// Move an item to any workflow state (`Engine.setState`).
     func setState(workspace: String?, id: String, state: ItemState) {
         write { try $0.setState(workspace: workspace, id: id, state: state) }
@@ -913,6 +931,18 @@ final class MainWindowModel: ObservableObject {
     func noteMembers(_ members: [WorkspaceMember], of docId: String) {
         guard let me = accountId, !me.isEmpty else { return }
         ownsWorkspace[docId] = members.first(where: { $0.accountId == me })?.owner ?? false
+        memberCounts[docId] = members.count
+    }
+
+    /// Whether a workspace has members besides the account: false for
+    /// Home; a shared one whose member list is not known yet (offline,
+    /// still loading) counts as having some, so Delete's note errs on
+    /// saying who will see.
+    func hasOtherMembers(_ workspace: String?) -> Bool {
+        guard let workspace,
+              sections.contains(where: { $0.workspace.docId == workspace && !$0.workspace.home })
+        else { return false }
+        return (memberCounts[workspace] ?? 2) > 1
     }
 
     /// Ask for the role on every shared workspace not yet known, and
@@ -922,10 +952,12 @@ final class MainWindowModel: ObservableObject {
     private func refreshRoles() {
         guard accountId != nil else {
             ownsWorkspace = [:]
+            memberCounts = [:]
             return
         }
         let shared = Set(sections.filter { !$0.workspace.home }.map(\.id))
         for gone in ownsWorkspace.keys where !shared.contains(gone) { ownsWorkspace[gone] = nil }
+        for gone in memberCounts.keys where !shared.contains(gone) { memberCounts[gone] = nil }
         for docId in shared where ownsWorkspace[docId] == nil && !rolesLoading.contains(docId) {
             rolesLoading.insert(docId)
             sharing({ try $0.workspaceMembers(docId: docId) }) { [weak self] result in
@@ -956,12 +988,21 @@ final class MainWindowModel: ObservableObject {
 /// pane's toggle), the same key as iOS.
 let listCountsKey = "listCounts"
 
+/// `UserDefaults` key of the Inbox order preference (the Inbox row's
+/// right-click menu): newest first when set, else the queue's own
+/// oldest first (spec/inbox-plan.md). Display only; the same key as
+/// iOS.
+let inboxNewestFirstKey = "inboxNewestFirst"
+
 struct MainWindowView: View {
     @ObservedObject var model: MainWindowModel
     /// The device's list-counts preference (Settings), off by default:
     /// whether a list's row carries its Open count, as the web's "Show
     /// list counts in nav".
     @AppStorage(listCountsKey) private var showListCounts = false
+    /// The device's Inbox order (`inboxNewestFirstKey`): reverses an
+    /// Inbox's rows on screen, never the doc.
+    @AppStorage(inboxNewestFirstKey) private var inboxNewestFirst = false
     /// The workspace whose Sharing sheet is up.
     @State private var sharing: SharingTarget?
     /// The workspace row under the pointer: its "…" and chevron show.
@@ -1036,7 +1077,8 @@ struct MainWindowView: View {
                             Label { Text("Inbox") } icon: { NavIcon(image: NavArt.inbox) }
                             Spacer()
                             count(section.inboxOpen)
-                        })
+                        }
+                        .contextMenu { inboxOrderPicker })
                         ForEach(section.userLists) { list in
                             row(.list(workspace: section.target, list: list.id), HStack {
                                 // The list's emoji as its icon, a folder
@@ -1053,7 +1095,8 @@ struct MainWindowView: View {
                                 }
                                 Spacer()
                                 if showListCounts { count(Int(list.open)) }
-                            })
+                            }
+                            .contextMenu { listMenu(section, list) })
                         }
                     }
                 }
@@ -1185,6 +1228,32 @@ struct MainWindowView: View {
         }
     }
 
+    /// The Inbox's order, oldest first (the queue's own) or newest
+    /// first: a preference of this Mac's, for every Inbox.
+    private var inboxOrderPicker: some View {
+        Picker("Order", selection: $inboxNewestFirst) {
+            Text("Oldest First").tag(false)
+            Text("Newest First").tag(true)
+        }
+        .pickerStyle(.inline)
+    }
+
+    /// A user list's right-click menu: Delete…, which asks where its
+    /// items go (`ListConfirm`).
+    @ViewBuilder
+    private func listMenu(_ section: NavSection, _ list: ListInfo) -> some View {
+        let target = section.target
+        Button("Delete…") {
+            let shared = model.hasOtherMembers(section.id)
+                ? section.workspace.name ?? section.workspace.docId : nil
+            ListConfirm.delete(
+                name: list.name, open: Int(list.open), sharedWith: shared, on: NSApp.keyWindow
+            ) { mode in
+                model.deleteList(workspace: target, list: list.id, mode: mode)
+            }
+        }
+    }
+
     /// A starred item's mark on its row, in every list but Starred
     /// itself. Not a control: the item's panel stars and unstars.
     private var starMark: some View {
@@ -1236,7 +1305,12 @@ struct MainWindowView: View {
                 // screen in place, where item identity tears every one
                 // down and builds it again (a few ms each). The tag
                 // keeps selection on the item.
-                ForEach(Array(model.items.enumerated()), id: \.offset) { _, item in
+                // An Inbox is a queue in arrival order: shown newest
+                // first when this Mac says so, and never reordered by
+                // hand (no row drag, here or anywhere).
+                let rows = model.shown.list == MainWindowModel.inbox && inboxNewestFirst
+                    ? Array(model.items.reversed()) : model.items
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, item in
                     HStack(alignment: .center, spacing: 8) {
                         ItemCheckButton(state: item.state) { _ in model.tick(item) }
                         Text(verbatim: item.text)
@@ -1546,6 +1620,46 @@ enum BinConfirm {
             alert.beginSheetModal(for: window) { if $0 == .alertFirstButtonReturn { confirmed() } }
         } else if alert.runModal() == .alertFirstButtonReturn {
             confirmed()
+        }
+    }
+}
+
+/// Delete on a user list asks where its items go: to the Inbox (the
+/// default button) or to the Bin, as the web's dialog. On a workspace
+/// with other members it says they will all see the result. A list
+/// with nothing open just asks to delete (its done items still go to
+/// the Inbox).
+enum ListConfirm {
+    static func delete(
+        name: String, open: Int, sharedWith workspace: String?, on window: NSWindow?,
+        then confirmed: @escaping (DeleteMode) -> Void
+    ) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = String(localized: "Delete “\(name)”?")
+        if open > 0, let workspace {
+            alert.informativeText = String(localized: "Everyone in \(workspace) will see them.")
+        }
+        let modes: [DeleteMode]
+        if open > 0 {
+            alert.addButton(withTitle: open == 1
+                ? String(localized: "Move 1 Open Item to Inbox")
+                : String(localized: "Move \(open) Open Items to Inbox"))
+            alert.addButton(withTitle: String(localized: "Bin Them")).hasDestructiveAction = true
+            modes = [.toInbox, .toBin]
+        } else {
+            alert.addButton(withTitle: String(localized: "Delete")).hasDestructiveAction = true
+            modes = [.toInbox]
+        }
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        let finish = { (response: NSApplication.ModalResponse) in
+            let index = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+            if modes.indices.contains(index) { confirmed(modes[index]) }
+        }
+        if let window {
+            alert.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            finish(alert.runModal())
         }
     }
 }

@@ -13,7 +13,7 @@
 //! between two rows names, and it stays right when the client's rows
 //! are a filtered view of the order (Starred's hidden entries).
 
-use monoplan_core::{Doc, DocId};
+use monoplan_core::{Doc, DocId, LIST_INBOX};
 use serde::Serialize;
 
 use super::Ctx;
@@ -114,7 +114,8 @@ pub fn plan_reorder(order: &[String], moved: &[String], before: Option<&str>) ->
 /// Reorder within the rows' own list: `ids` become one block, in list
 /// order, directly above `before` (`None`: at the end of the open
 /// items). The list is the first id's; ids of another list, closed or
-/// binned are left where they are.
+/// binned are left where they are. Refused for Inbox, which keeps
+/// arrival order.
 pub fn reorder_items(cx: &Ctx, ids: &[String], before: Option<&str>) -> anyhow::Result<()> {
     let Some(first) = ids.first() else {
         return Ok(());
@@ -123,6 +124,10 @@ pub fn reorder_items(cx: &Ctx, ids: &[String], before: Option<&str>) -> anyhow::
         anyhow::bail!("item not found: {first}");
     };
     let list = item.list_id;
+    if list == LIST_INBOX {
+        // Inbox is a queue in arrival order (`spec/inbox-plan.md`).
+        anyhow::bail!("Inbox can't be reordered");
+    }
     let order: Vec<String> = super::items::item_views(cx, &list, false)
         .into_iter()
         .map(|i| i.id)
@@ -138,7 +143,8 @@ pub fn reorder_items(cx: &Ctx, ids: &[String], before: Option<&str>) -> anyhow::
 /// list in the sidebar passes 0, as the web's does. Binned rows are
 /// restored first, since a move out of the Bin has no other meaning;
 /// Done rows stay Done (reopening is its own gesture). Ids the
-/// workspace no longer has are skipped.
+/// workspace no longer has are skipped. Onto Inbox the rows land at the
+/// end of the queue in the order given, and rows already there stay.
 pub fn move_items(cx: &Ctx, ids: &[String], list: &str, index: usize) -> anyhow::Result<()> {
     let mut at = index;
     for id in ids {
@@ -147,6 +153,11 @@ pub fn move_items(cx: &Ctx, ids: &[String], list: &str, index: usize) -> anyhow:
         };
         if item.is_binned() {
             cx.doc.set_item_binned(id, false)?;
+        }
+        // Inbox is a queue: a row already in it has no slot to move to
+        // (and every row moved in lands at the end, whatever `index`).
+        if list == LIST_INBOX && item.list_id == LIST_INBOX {
+            continue;
         }
         cx.doc.move_item(id, list, at)?;
         at += 1;
@@ -421,28 +432,55 @@ mod tests {
     #[test]
     fn reorder_items_moves_a_discontiguous_block_as_one_undo_step() {
         let doc = Doc::new().unwrap();
-        let ids = add(&doc, LIST_INBOX, &["a", "b", "c", "d", "e"]);
+        let list = doc.add_list("Work").unwrap();
+        let ids = add(&doc, &list, &["a", "b", "c", "d", "e"]);
         let mut h = History::default();
         as_call(&doc, &mut h, |cx| {
             reorder_items(cx, &[ids[3].clone(), ids[0].clone()], Some(&ids[2])).unwrap()
         });
-        assert_eq!(open_texts(&doc, LIST_INBOX), s(&["b", "a", "d", "c", "e"]));
+        assert_eq!(open_texts(&doc, &list), s(&["b", "a", "d", "c", "e"]));
         undo(&doc, &mut h);
-        assert_eq!(open_texts(&doc, LIST_INBOX), s(&["a", "b", "c", "d", "e"]));
+        assert_eq!(open_texts(&doc, &list), s(&["a", "b", "c", "d", "e"]));
     }
 
     #[test]
     fn reorder_items_to_the_end_and_leaves_done_rows_alone() {
         let doc = Doc::new().unwrap();
-        let ids = add(&doc, LIST_INBOX, &["a", "b", "c"]);
-        let done = add(&doc, LIST_INBOX, &["x"]).remove(0);
+        let list = doc.add_list("Work").unwrap();
+        let ids = add(&doc, &list, &["a", "b", "c"]);
+        let done = add(&doc, &list, &["x"]).remove(0);
         doc.set_item_done(&done, true).unwrap();
         let mut h = History::default();
         as_call(&doc, &mut h, |cx| {
             reorder_items(cx, &[ids[0].clone(), done.clone()], None).unwrap()
         });
-        assert_eq!(open_texts(&doc, LIST_INBOX), s(&["b", "c", "a"]));
+        assert_eq!(open_texts(&doc, &list), s(&["b", "c", "a"]));
         assert!(doc.get_item(&done).unwrap().is_closed());
+    }
+
+    #[test]
+    fn reorder_items_refuses_inbox() {
+        let doc = Doc::new().unwrap();
+        let ids = add(&doc, LIST_INBOX, &["a", "b"]);
+        let lens = Lens::home(&doc);
+        let docs = [&doc];
+        let cx = Ctx::bare(&doc, &docs, &lens);
+        assert!(reorder_items(&cx, &[ids[1].clone()], Some(&ids[0])).is_err());
+        assert_eq!(open_texts(&doc, LIST_INBOX), s(&["a", "b"]));
+    }
+
+    #[test]
+    fn move_items_onto_inbox_queues_at_the_end_and_skips_rows_already_there() {
+        let doc = Doc::new().unwrap();
+        let list = doc.add_list("Work").unwrap();
+        let inbox = add(&doc, LIST_INBOX, &["a", "b"]);
+        let work = add(&doc, &list, &["w1", "w2"]);
+        let lens = Lens::home(&doc);
+        let docs = [&doc];
+        let cx = Ctx::bare(&doc, &docs, &lens);
+        let given = [work[1].clone(), inbox[0].clone(), work[0].clone()];
+        move_items(&cx, &given, LIST_INBOX, 0).unwrap();
+        assert_eq!(open_texts(&doc, LIST_INBOX), s(&["a", "b", "w2", "w1"]));
     }
 
     #[test]

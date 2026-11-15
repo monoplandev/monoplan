@@ -308,6 +308,7 @@ mod tests {
             started_at: None,
             done_at: None,
             binned_at: None,
+            inbox_at: None,
         }
     }
 

@@ -104,8 +104,8 @@ export type Messages = {
     upcoming: string;
     done: string;
     bin: string;
-    /** Context-menu action that archives a list (the user-facing removal
-     *  from the active workspace — there is no Delete). */
+    /** Context-menu action that archives a list: shelved intact,
+     *  restorable from the archived section. */
     archiveList: string;
     /** Header/section indicator for an archived list. */
     archived: string;
@@ -116,6 +116,17 @@ export type Messages = {
      *  items to Inbox" box. */
     archiveListTitle: (name: string) => string;
     archiveListMoveOpen: (n: number) => string;
+    /** Context-menu / header action that deletes a list
+     *  (`spec/inbox-plan.md`); opens the delete dialog. */
+    deleteList: string;
+    /** Delete dialog: title with the list name, the confirm button, the
+     *  two choices for the list's items (Inbox is the default), and the
+     *  note naming a shared workspace whose members will see them. */
+    deleteListTitle: (name: string) => string;
+    deleteListConfirm: string;
+    deleteListToInbox: (n: number) => string;
+    deleteListToBin: string;
+    deleteListShared: (workspace: string) => string;
     renameList: string;
     /** Context-menu item on a user list: opens the emoji picker for its icon. */
     changeListIcon: string;
@@ -258,6 +269,9 @@ export type Messages = {
     /** Switch label (list display options) toggling the per-row lifecycle
      *  state badge on the flat list view. */
     showState: string;
+    /** Inbox display option: show the queue newest first (a device
+     *  preference; the queue itself is oldest first). */
+    inboxNewestFirst: string;
     /** Done view header filter (`DoneFilterMenu`): the trigger's name,
      *  its two submenus, the Lists submenu's text box and empty state,
      *  and the item dropping every check. */
@@ -652,6 +666,15 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         n === 1
           ? "¿Mover 1 elemento abierto a la bandeja de entrada?"
           : `¿Mover ${n} elementos abiertos a la bandeja de entrada?`,
+      deleteList: "Eliminar…",
+      deleteListTitle: (name) => `Eliminar «${name}»`,
+      deleteListConfirm: "Eliminar",
+      deleteListToInbox: (n) =>
+        n === 1
+          ? "Mover 1 elemento abierto a la bandeja de entrada"
+          : `Mover ${n} elementos abiertos a la bandeja de entrada`,
+      deleteListToBin: "Enviarlos a la papelera",
+      deleteListShared: (ws) => `Todos en «${ws}» los verán.`,
       renameList: "Renombrar",
       changeListIcon: "Cambiar icono",
       newList: "Nueva lista",
@@ -744,6 +767,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         `${count > 1 ? "Se quitarán" : "Se quitará"} de ${source} para todos sus miembros.`,
       displayOptions: "Opciones de visualización",
       showState: "Mostrar estado",
+      inboxNewestFirst: "Más recientes primero",
       filter: "Filtrar",
       filterWorkspaces: "Espacios",
       filterLists: "Listas",
@@ -1037,6 +1061,13 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       archiveListTitle: (name) => `Archive “${name}”`,
       archiveListMoveOpen: (n) =>
         n === 1 ? "Move 1 open item to Inbox?" : `Move ${n} open items to Inbox?`,
+      deleteList: "Delete…",
+      deleteListTitle: (name) => `Delete “${name}”`,
+      deleteListConfirm: "Delete",
+      deleteListToInbox: (n) =>
+        n === 1 ? "Move 1 open item to Inbox" : `Move ${n} open items to Inbox`,
+      deleteListToBin: "Bin them",
+      deleteListShared: (ws) => `Everyone in “${ws}” will see them.`,
       renameList: "Rename",
       changeListIcon: "Change icon",
       newList: "New list",
@@ -1127,6 +1158,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         `${count > 1 ? "They" : "It"} will be removed from ${source} for everyone there.`,
       displayOptions: "Display options",
       showState: "Show state",
+      inboxNewestFirst: "Newest first",
       filter: "Filter",
       filterWorkspaces: "Workspaces",
       filterLists: "Lists",

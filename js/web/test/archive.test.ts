@@ -2,7 +2,7 @@
 // "Archived lists"): boot materialization, incremental
 // listArchivedChanged dispatch, the retained canonical projection
 // (archived lists keep labelling their items in Search / Done / Bin),
-// and the absence of any user-facing list delete.
+// and list delete.
 
 import { describe, expect, test } from "bun:test";
 
@@ -145,10 +145,40 @@ describe("store archived lists", () => {
     expect(findResultArchived(layer, rowFor(inWork))).toBe(false);
   });
 
-  test("no user-facing list delete remains on the store API", () => {
-    const app = createSyncedApp(replicaFrom(Doc.create()));
-    expect(
-      (app as unknown as Record<string, unknown>).deleteList,
-    ).toBeUndefined();
+});
+
+// List delete (`spec/inbox-plan.md`): the row goes, its items move to
+// the end of Inbox's queue (or the Bin), and one undo restores both.
+describe("store list delete", () => {
+  test("delete to Inbox queues the open items after Inbox's own", () => {
+    const doc = Doc.create();
+    const work = doc.addList("Work");
+    const app = createSyncedApp(replicaFrom(doc));
+    const first = app.addItemAt("inbox", "already here", 0);
+    const a = app.addItemAt(work, "a", 0);
+    const b = app.addItemAt(work, "b", 1);
+
+    app.deleteList(work, false);
+    expect(app.state.listsById[work]).toBeUndefined();
+    expect(app.state.listsOrder).not.toContain(work);
+    expect(app.state.listOpen.inbox).toEqual([first, a, b]);
+    expect(app.state.itemsById[a]?.listId).toBe("inbox");
+
+    app.undo();
+    expect(app.state.listsOrder).toContain(work);
+    expect(app.state.listOpen[work]).toEqual([a, b]);
+    expect(app.state.listOpen.inbox).toEqual([first]);
+  });
+
+  test("delete to Bin bins the items", () => {
+    const doc = Doc.create();
+    const work = doc.addList("Work");
+    const app = createSyncedApp(replicaFrom(doc));
+    const a = app.addItemAt(work, "a", 0);
+
+    app.deleteList(work, true);
+    expect(app.state.listOpen.inbox ?? []).toEqual([]);
+    expect(app.state.itemsById[a]?.binnedAt).toBeGreaterThan(0);
+    expect(app.state.itemsById[a]?.listId).toBe("inbox");
   });
 });

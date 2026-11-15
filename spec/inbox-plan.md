@@ -1,6 +1,8 @@
 # Inbox as a queue
 
-Plan, not built. Decided 2026-11-16.
+Built 2026-11-16 (decided the same day): core, api / CLI / FFI, web, iOS,
+macOS. "As built" at the end records where the build settled the open
+questions or differs from the plan.
 
 Inbox stops being a hand-ordered list. It becomes an **arrival-ordered queue**
 and the **catch-all** for any item that has no live list. Two consequences
@@ -218,3 +220,44 @@ states who will see the result.
   reversible from the archived section", delete is "drop the container and
   send the work to Inbox". Is a separate "delete archived list" action
   needed, or does Delete work from the archived section too?
+
+## As built (2026-11-16)
+
+- **Index.** `ItemMeta` carries `located_in` (the raw `location` list) and
+  `list_id` (the effective one: `inbox` for an orphan); `ProjectionIndex`
+  holds `live_lists`. Inbox is treated as a list whose every item is in the
+  fallback tail, sorted by the queue key, so every Inbox change re-sorts with
+  a `refresh_open` (O(n log n) for n Inbox items) rather than the binary
+  insert the plan sketched. `order/inbox` is never loaded, and remote ops on
+  it are dropped.
+- **Orphans over sync.** A remote / undo frame that adds or removes a list row
+  takes the rebuild fallback (`FullResync`) when an item it didn't touch is
+  located in that list, or when a returning row's order container still has
+  entries (undoing a delete). Order ops on a row-less list are dropped, as the
+  rebuild never loads them.
+- **Event naming:** neither. `inbox_at` is on `ItemView` and in exports (and
+  the fingerprint), but not on events: clients take Inbox order from
+  `open_index` like every list, so no client reads the register.
+- **Tiebreak after a list delete:** `created_at`, as planned.
+- **Inbox is the absence of a list** (2026-11-16, after the first build):
+  an Inbox item has **no `location` key**, instead of the plan's
+  `inbox:<placement>`. Capture into Inbox writes none, and a move in,
+  `delete_list` and an adopt into Inbox delete it; a move out writes it.
+  No placement is minted for Inbox. A leftover `inbox:<placement>` from an
+  older doc, an unparseable value and an orphan all read the same, so no
+  migration. `inbox` stays the id every API, URL and client uses to name
+  that bucket, and the product still calls it Inbox.
+- **Archive vs delete:** Delete is offered wherever the list menu is (web nav
+  and header, iOS list page, Mac sidebar), so an archived list's header menu
+  on the web offers it too; there is no separate action.
+- **Move out of Inbox** does not delete old `order/inbox` entries (nothing reads
+  them); the plan's "best-effort delete for old docs" was dropped.
+- `reconcile()` skips Inbox entirely; a missing-location item is already in
+  Inbox, so it no longer writes a location for it.
+- Clients: the CLI makes `item add --top` into Inbox an error rather than
+  ignoring it, since `add` prints only ids. `api::moves::move_items` onto
+  Inbox skips rows already there. The Mac table had no row reorder to remove,
+  and the Mac window has no capture, so the capture-feedback rule applies to
+  the web (the draft row opens at the queue's end) and iOS (scroll to the new
+  bottom row). The dialogs offer "Move N open items to Inbox" / "Bin them"
+  and name a shared workspace (non-Home, member count not known to be one).

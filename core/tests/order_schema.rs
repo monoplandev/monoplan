@@ -359,7 +359,7 @@ fn random_op(doc: &Doc, rng: &mut Lcg, op_no: usize) {
             let user_lists = doc.all_lists();
             if !user_lists.is_empty() {
                 let l = &user_lists[rng.below(user_lists.len())];
-                let _ = doc.delete_list(&l.id);
+                let _ = doc.delete_list(&l.id, monoplan_core::DeleteListMode::ToBin);
             }
         }
         90 => {

@@ -64,6 +64,10 @@ final class AppModel: ObservableObject {
     /// while this is unknown (offline, or still loading), as the web's
     /// menu waits for its member directory.
     @Published private(set) var ownsWorkspace: [String: Bool] = [:]
+    /// How many members each shared workspace has, by doc id, from the
+    /// same member list: Delete List's confirm says who will see the
+    /// items it sends to the Inbox.
+    @Published private(set) var memberCounts: [String: Int] = [:]
     /// Shared workspaces whose role is being asked for now.
     private var rolesLoading: Set<String> = []
     /// The Done lens (`Engine.done`): the Personal
@@ -237,7 +241,8 @@ final class AppModel: ObservableObject {
     /// The list page has the captured item on screen.
     func showedCaptured() { captured = nil }
 
-    /// Capture: create an item at the top of `list`, in Backlog
+    /// Capture: create an item at the top of `list` (an Inbox's at
+    /// the end of its queue, whatever is asked), in Backlog
     /// (`Engine.addItem`), then reread what is on screen as
     /// `setDone` does. `done` gets the new item, or why there is none;
     /// it may be left out by a caller that is going away (a capture
@@ -570,6 +575,16 @@ final class AppModel: ObservableObject {
     func noteMembers(_ members: [WorkspaceMember], of docId: String) {
         guard let me = session?.accountId, !me.isEmpty else { return }
         ownsWorkspace[docId] = members.first(where: { $0.accountId == me })?.owner ?? false
+        memberCounts[docId] = members.count
+    }
+
+    /// Whether a workspace has members besides the account: false for
+    /// the Personal workspace; a shared one whose member list is not
+    /// known yet (offline, still loading) counts as having some, so
+    /// Delete List's note errs on saying who will see.
+    func hasOtherMembers(_ docId: String) -> Bool {
+        guard sharedWorkspaceName(docId) != nil else { return false }
+        return (memberCounts[docId] ?? 2) > 1
     }
 
     /// Ask for the role on every shared workspace not yet known, and
@@ -580,10 +595,12 @@ final class AppModel: ObservableObject {
     private func refreshRoles() {
         guard let session, !session.localOnly else {
             ownsWorkspace = [:]
+            memberCounts = [:]
             return
         }
         let shared = Set(session.docs.filter { !$0.home }.map(\.docId))
         for gone in ownsWorkspace.keys where !shared.contains(gone) { ownsWorkspace[gone] = nil }
+        for gone in memberCounts.keys where !shared.contains(gone) { memberCounts[gone] = nil }
         for docId in shared where ownsWorkspace[docId] == nil && !rolesLoading.contains(docId) {
             rolesLoading.insert(docId)
             sharing({ try $0.workspaceMembers(docId: docId) }) { [weak self] result in
@@ -612,6 +629,22 @@ final class AppModel: ObservableObject {
     func archiveList(_ list: ListRef, done: @escaping (String?) -> Void) {
         let (workspace, id) = (selector(list.docId), list.listId)
         writeList({ try $0.setListArchived(workspace: workspace, list: id, archived: true) }, done: done)
+    }
+
+    /// Delete a user-created list (`Engine.deleteList`): every item it
+    /// held goes to the end of the Inbox's queue, and with `.toBin` to
+    /// the Bin too. One undo step restores the list and its items.
+    /// `done` gets why not, or nil once it is gone; the Inboxes on
+    /// screen are reread, as the items landed in one.
+    func deleteList(_ list: ListRef, mode: DeleteMode, done: @escaping (String?) -> Void) {
+        let (workspace, id) = (selector(list.docId), list.listId)
+        writeList({ try $0.deleteList(workspace: workspace, list: id, mode: mode) }) { [weak self] error in
+            if error == nil, let self {
+                browsedLists[list.key] = nil
+                for list in browsedLists.values { refreshList(list) }
+            }
+            done(error)
+        }
     }
 
     /// A list edit, then Home's list rows reread; item rows elsewhere

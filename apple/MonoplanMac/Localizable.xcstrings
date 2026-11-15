@@ -121,6 +121,16 @@
         }
       }
     },
+    "Bin Them": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enviarlos a la papelera"
+          }
+        }
+      }
+    },
     "Binned": {
       "localizations": {
         "es": {
@@ -431,6 +441,16 @@
         }
       }
     },
+    "Everyone in %@ will see them.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Todos en %@ los verán."
+          }
+        }
+      }
+    },
     "General": {
       "localizations": {
         "es": {
@@ -621,6 +641,26 @@
         }
       }
     },
+    "Move %lld Open Items to Inbox": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mover %lld elementos abiertos a la bandeja de entrada"
+          }
+        }
+      }
+    },
+    "Move 1 Open Item to Inbox": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mover 1 elemento abierto a la bandeja de entrada"
+          }
+        }
+      }
+    },
     "Move to Bin": {
       "localizations": {
         "es": {
@@ -667,6 +707,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nuevo espacio…"
+          }
+        }
+      }
+    },
+    "Newest First": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Más recientes primero"
           }
         }
       }
@@ -771,6 +821,16 @@
         }
       }
     },
+    "Oldest First": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Más antiguos primero"
+          }
+        }
+      }
+    },
     "Open Monoplan": {
       "localizations": {
         "es": {
@@ -797,6 +857,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Abrir la ventana al iniciar"
+          }
+        }
+      }
+    },
+    "Order": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Orden"
           }
         }
       }

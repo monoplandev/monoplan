@@ -39,6 +39,8 @@ import plusSvg from "./icons/plus.svg?raw";
 import { Board, type BoardImperative } from "./Board.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { createArchiveListFlow } from "./ArchiveListDialog.tsx";
+import { createDeleteListFlow } from "./DeleteListDialog.tsx";
+import { inboxNewestFirst, setInboxNewestFirst } from "./inboxOrder.ts";
 import { NewDocDialog } from "./NewDocDialog.tsx";
 import { captureInviteFromLocation } from "./invite.ts";
 import { InviteDialog } from "./InviteDialog.tsx";
@@ -287,6 +289,9 @@ export function Workspace(props: {
   // open items). The view stays put: the header then shows the
   // Archived badge and the menu flips to Unarchive.
   const archive = createArchiveListFlow();
+  // Header-menu delete shares the nav's dialog. The list's row goes, so
+  // the view hops to its doc's Inbox, where the items now are.
+  const deleteFlow = createDeleteListFlow();
   // Display label for a doc: Home is "Personal"; others carry their
   // name, or the untitled fallback.
   const docLabel = (docId: string): string =>
@@ -779,6 +784,9 @@ export function Workspace(props: {
         if (it) out.push(it);
       }
       overlayLinger(out, v);
+      // Inbox is a queue, oldest first; newest first is a display-only
+      // device preference (`inboxOrder.ts`).
+      if (v.id === "inbox" && inboxNewestFirst()) out.reverse();
       return out;
     }
     if (v.kind === "focus") {
@@ -965,7 +973,9 @@ export function Workspace(props: {
       });
       return;
     }
-    if (v.kind !== "list") return;
+    // Inbox keeps arrival order (`spec/inbox-plan.md`); its listbox
+    // doesn't offer reorder, and the core refuses one.
+    if (v.kind !== "list" || v.id === "inbox") return;
     const vApp = viewApp();
     const ids = items().map((it) => it.id);
     const moves = planReorderMoves(
@@ -991,12 +1001,10 @@ export function Workspace(props: {
     // flush), and lay the run out from there.
     const entryAt = docs.focusEntryIndex(atIndex);
     return home.withActionBatch(() => {
-      // Append to Home's inbox (its open length is the append slot — a
-      // large sentinel would overflow the wasm `usize`); the item's inbox
-      // position is independent of its Focus position, fixed explicitly
-      // below.
-      const inboxLen = home.state.listOpen["inbox"]?.length ?? 0;
-      const ids = home.addItemsAt("inbox", texts, inboxLen);
+      // Into Home's Inbox, a queue: the item lands at its end whatever
+      // the index (`spec/inbox-plan.md`). Its Focus position is fixed
+      // explicitly below.
+      const ids = home.addItemsAt("inbox", texts, 0);
       ids.forEach((id, i) => home.addToFocus(id, entryAt + i));
       return ids;
     });
@@ -1027,7 +1035,12 @@ export function Workspace(props: {
     const listId = isFocus ? "inbox" : v.id;
     const ids = items().map((i) => i.id);
     let insertIndex = 0;
-    if (at !== undefined) {
+    if (listId === "inbox" && !isFocus) {
+      // Inbox is a queue: a capture lands at its end, which is the
+      // bottom oldest first and the top newest first, wherever the draft
+      // was asked for.
+      insertIndex = inboxNewestFirst() ? 0 : ids.length;
+    } else if (at !== undefined) {
       insertIndex = Math.min(Math.max(at, 0), ids.length);
     } else {
       const top = selection.getSelectionTop();
@@ -1068,11 +1081,7 @@ export function Workspace(props: {
           ? (text, pin) =>
               pin
                 ? captureToFocus([text], insertIndex)[0]
-                : home.addItemAt(
-                    "inbox",
-                    text,
-                    home.state.listOpen["inbox"]?.length ?? 0,
-                  )
+                : home.addItemAt("inbox", text, 0)
           : undefined,
       });
     }
@@ -1715,7 +1724,12 @@ export function Workspace(props: {
     });
     tApp.withActionBatch(() => {
       if (toUnbin.length > 0) tApp.setBinnedMany(toUnbin, false);
-      for (const [i, id] of own.entries()) {
+      // Inbox is a queue (`spec/inbox-plan.md`): arrivals land at its
+      // end whatever the index, and a row already in it has no slot to
+      // move to (the core refuses that as a reorder).
+      const moving =
+        listId === "inbox" ? own.filter((id) => tApp.getItem(id)?.listId !== "inbox") : own;
+      for (const [i, id] of moving.entries()) {
         tApp.moveItem(id, listId, i);
       }
     });
@@ -3117,6 +3131,7 @@ export function Workspace(props: {
         onConfirm={() => docs.emptyBin()}
       />
       {archive.dialog()}
+      {deleteFlow.dialog()}
       <Show keyed when={taskApp()}>
         {(tApp) => (
       <TaskDialog
@@ -3329,6 +3344,20 @@ export function Workspace(props: {
                           ? m().nav.unarchiveList
                           : m().nav.archiveList}
                       </DropdownMenu.Item>
+                      <DropdownMenu.Item
+                        class="dropdown-menu-item"
+                        onSelect={() => {
+                          const docId = viewDocId();
+                          deleteFlow.request({
+                            app: viewApp(),
+                            listId: listId(),
+                            sharedWith: hasOtherMembers(docId) ? docLabel(docId) : undefined,
+                            before: () => setView(docs.listView(docId, "inbox")),
+                          });
+                        }}
+                      >
+                        {m().nav.deleteList}
+                      </DropdownMenu.Item>
                     </DropdownMenu.Content>
                   </DropdownMenu.Portal>
                 </DropdownMenu>
@@ -3380,6 +3409,21 @@ export function Workspace(props: {
                 {/* Flat list only: badge rows with their lifecycle state.
                     The board shows state as the lane, so the switch
                     yields to the lane rows there. */}
+                <Show when={currentListId() === "inbox"}>
+                  <Switch
+                    class="done-switch"
+                    checked={inboxNewestFirst()}
+                    onChange={setInboxNewestFirst}
+                  >
+                    <Switch.Label class="done-switch-label">
+                      {m().workspace.inboxNewestFirst}
+                    </Switch.Label>
+                    <Switch.Input class="done-switch-input" />
+                    <Switch.Control class="done-switch-control">
+                      <Switch.Thumb class="done-switch-thumb" />
+                    </Switch.Control>
+                  </Switch>
+                </Show>
                 <Show when={boardListId() === null && currentListId()}>
                   {(listId) => (
                     <Switch
@@ -3627,7 +3671,10 @@ export function Workspace(props: {
                   clearOnBlankClick
                   fillHeight
                   autofocus
-                  reorder={view().kind === "list" || view().kind === "focus"}
+                  reorder={
+                    (view().kind === "list" && currentListId() !== "inbox") ||
+                    view().kind === "focus"
+                  }
                   onReorder={onReorder}
                   onTrailerNavigate={() => startDraft(items().length)}
                   trailer={

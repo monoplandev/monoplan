@@ -384,6 +384,7 @@ async fn local_client_shares_the_loop_with_the_socket() {
                 list: LIST_INBOX.to_string(),
                 done: false,
                 json: true,
+                newest: false,
             }),
         })
         .await;

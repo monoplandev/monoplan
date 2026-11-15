@@ -55,7 +55,7 @@ There is no existing reference/alias/pointer concept in the doc model to extend 
 
 ## Container
 
-One reserved singleton container, analogous to `order/inbox`:
+One reserved singleton container, analogous to an `order/<list-id>` container:
 
 - `doc.get_movable_list("focus")` — a `LoroMovableList` of **encoded scalar
   FocusRef strings only** (never child containers — same discipline as order

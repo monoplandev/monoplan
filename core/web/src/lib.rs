@@ -434,12 +434,17 @@ impl Doc {
             .map_err(js_err)
     }
 
-    /// Internal destructive primitive — not wired to any user-facing UI
-    /// (archive is the user-facing removal). Kept for tests and future
-    /// permanent-deletion work.
+    /// Delete a user list (`spec/inbox-plan.md`): every item moves to
+    /// Inbox, and with `to_bin` the ones not already binned are binned.
+    /// One commit, one undo step.
     #[wasm_bindgen(js_name = deleteList)]
-    pub fn delete_list(&self, list_id: &str) -> Result<(), JsError> {
-        self.inner.delete_list(list_id).map_err(js_err)
+    pub fn delete_list(&self, list_id: &str, to_bin: bool) -> Result<(), JsError> {
+        let mode = if to_bin {
+            monoplan_core::DeleteListMode::ToBin
+        } else {
+            monoplan_core::DeleteListMode::ToInbox
+        };
+        self.inner.delete_list(list_id, mode).map_err(js_err)
     }
 
     /// Name the doc (`""` un-names it). Doc content: every member sees
@@ -2033,12 +2038,17 @@ impl Replica {
             .map_err(js_err)
     }
 
-    /// Internal destructive primitive — not wired to any user-facing UI
-    /// (archive is the user-facing removal). Kept for tests and future
-    /// permanent-deletion work.
+    /// Delete a user list (`spec/inbox-plan.md`): every item moves to
+    /// Inbox, and with `to_bin` the ones not already binned are binned.
+    /// One commit, one undo step.
     #[wasm_bindgen(js_name = deleteList)]
-    pub fn delete_list(&self, list_id: &str) -> Result<(), JsError> {
-        self.doc().delete_list(list_id).map_err(js_err)
+    pub fn delete_list(&self, list_id: &str, to_bin: bool) -> Result<(), JsError> {
+        let mode = if to_bin {
+            monoplan_core::DeleteListMode::ToBin
+        } else {
+            monoplan_core::DeleteListMode::ToInbox
+        };
+        self.doc().delete_list(list_id, mode).map_err(js_err)
     }
 
     /// See [`Doc::set_doc_name`].

@@ -396,7 +396,19 @@ impl Cli {
             Cmd::Agenda(a) => DocCmd::Agenda(a),
             Cmd::Done(a) => DocCmd::Done(a),
             Cmd::Starred(a) => DocCmd::Focus(a),
-            Cmd::List(a) => DocCmd::Lists(a),
+            Cmd::List(a) => {
+                if let lists::ListsCmd::Delete {
+                    list,
+                    bin,
+                    yes: false,
+                } = &a.cmd
+                    && !lists::confirm_delete(workspace.clone(), list, *bin, spawn).await?
+                {
+                    println!("aborted");
+                    return Ok(());
+                }
+                DocCmd::Lists(a)
+            }
             Cmd::Places(a) => DocCmd::Places(a),
             Cmd::Find(a) => DocCmd::Find(a),
         };

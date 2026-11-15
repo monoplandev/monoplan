@@ -1,11 +1,11 @@
 //! List management (`monoplan list …`): ls, add, rename, icon,
-//! archive/unarchive.
+//! archive/unarchive, delete.
 //! `monoplan lists …` is a hidden alias; the IPC frame is still
 //! `DocCmd::Lists`.
 //!
-//! There is deliberately no user-facing delete (`spec/cli.md`): archive
-//! is the only way to remove a list from the active workspace. The
-//! core's destructive `delete_list` stays internal.
+//! Archive shelves a list intact; delete drops the row and sends its
+//! items to Inbox (`spec/inbox-plan.md`). The confirm prompt for delete
+//! runs in the thin client (`commands::mod`), before the frame is sent.
 
 use clap::{Parser, Subcommand};
 use std::io::Write;
@@ -50,6 +50,17 @@ pub enum ListsCmd {
     Archive { list: String },
     /// Restore an archived list to the active workspace.
     Unarchive { list: String },
+    /// Delete a user-created list: its items (open, done and binned)
+    /// move to Inbox, at the end of the queue. One undo restores it.
+    Delete {
+        list: String,
+        /// Bin the items instead of leaving them open in Inbox.
+        #[arg(long)]
+        bin: bool,
+        /// Skip the confirmation prompt.
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 pub fn run(cx: &Ctx, args: ListsArgs, out: &mut dyn Write) -> anyhow::Result<()> {
@@ -75,6 +86,15 @@ pub fn run(cx: &Ctx, args: ListsArgs, out: &mut dyn Write) -> anyhow::Result<()>
         }
         ListsCmd::Unarchive { list } => {
             api::lists::set_list_archived(cx, &list, false)?;
+            list
+        }
+        ListsCmd::Delete { list, bin, .. } => {
+            let mode = if bin {
+                api::lists::DeleteMode::ToBin
+            } else {
+                api::lists::DeleteMode::ToInbox
+            };
+            api::lists::delete_list(cx, &list, mode)?;
             list
         }
     };
@@ -106,4 +126,41 @@ fn show(
         }
     }
     Ok(())
+}
+
+/// Ask before `list delete`, naming the list and how many open items it
+/// sends to Inbox (or the Bin). Runs in the thin client: one `list ls`
+/// round trip for the count. `true` means go ahead; a list the read
+/// doesn't find goes ahead too, so the delete itself reports the error.
+pub(crate) async fn confirm_delete(
+    workspace: Option<String>,
+    list: &str,
+    bin: bool,
+    spawn: crate::client::Spawn,
+) -> anyhow::Result<bool> {
+    let profile = crate::bootstrap::open_or_init().await?;
+    let ls = super::DocCmd::Lists(ListsArgs {
+        cmd: ListsCmd::Ls {
+            json: true,
+            archived: false,
+            all: true,
+        },
+    });
+    let (stdout, _) = crate::client::doc(&profile, workspace, ls, spawn).await?;
+    let rows: Vec<serde_json::Value> = serde_json::from_str(stdout.trim()).unwrap_or_default();
+    let Some(row) = rows.iter().find(|r| r["id"] == list) else {
+        return Ok(true);
+    };
+    let name = row["name"].as_str().unwrap_or(list);
+    let open = row["open"].as_u64().unwrap_or(0);
+    let items = if open == 1 { "item" } else { "items" };
+    let fate = if bin {
+        format!("{open} open {items} go to the Bin")
+    } else {
+        format!("{open} open {items} move to Inbox")
+    };
+    Ok(dialoguer::Confirm::new()
+        .with_prompt(format!("Delete list {name:?}? Its {fate}."))
+        .default(false)
+        .interact()?)
 }

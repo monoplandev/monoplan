@@ -13,7 +13,7 @@ export type ArchiveTarget = {
 };
 
 /** Archive `listId`, optionally moving its open items to the end of
- *  Inbox first (in their list order). One action batch, so a single
+ *  Inbox's queue first (`spec/inbox-plan.md`). One action batch, so a single
  *  undo walks both back. Archive itself stays the pure ListMeta write
  *  of `spec/data-model.md` "Archived lists"; the move is the user's
  *  explicit choice from the dialog. */
@@ -24,9 +24,10 @@ export function archiveListNow(
 ): void {
   app.withActionBatch(() => {
     if (moveOpenToInbox) {
-      const ids = [...(app.state.listOpen[listId] ?? [])];
-      const base = app.state.listOpen.inbox?.length ?? 0;
-      ids.forEach((id, i) => app.moveItem(id, "inbox", base + i));
+      // Inbox is a queue: a move in lands at its end, whatever index.
+      for (const id of [...(app.state.listOpen[listId] ?? [])]) {
+        app.moveItem(id, "inbox", 0);
+      }
     }
     app.setListArchived(listId, true);
   });

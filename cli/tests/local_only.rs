@@ -308,6 +308,7 @@ async fn typed_calls_run_on_the_loop_and_agree_with_the_cli() {
                 list: errands.clone(),
                 done: true,
                 json: true,
+                newest: false,
             }),
         })
         .await;

@@ -157,9 +157,8 @@ pub enum AppEvent {
         binned_at: Option<i64>,
         open_index: Option<usize>,
     },
-    /// Item's `list_id` field changed without changing position
-    /// (e.g. orphan reassignment when a list is deleted), or alongside
-    /// an `ItemMoved` (cross-list drag). `open_index` is the item's
+    /// Item's `list_id` changed: a cross-list move, including into
+    /// Inbox (whose items carry no location, `spec/inbox-plan.md`). `open_index` is the item's
     /// position within the *new* list's Open projection; `None` when
     /// the item is done/binned.
     ItemListChanged {

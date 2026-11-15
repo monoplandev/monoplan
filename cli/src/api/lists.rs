@@ -1,11 +1,12 @@
 //! Lists: the rows of the workspace's lists, and their edits.
 //!
-//! There is no delete (`spec/cli.md`): archive is the only way a list
-//! leaves the active workspace.
+//! A list leaves the active workspace by archive (kept intact,
+//! restorable) or delete (the row goes and its items move to Inbox,
+//! `spec/inbox-plan.md`).
 
 use std::collections::HashMap;
 
-use monoplan_core::{Doc, LIST_EVENTS, LIST_INBOX};
+use monoplan_core::{DeleteListMode, Doc, LIST_EVENTS, LIST_INBOX};
 use serde::Serialize;
 
 use super::Ctx;
@@ -85,6 +86,31 @@ pub fn set_list_icon(cx: &Ctx, list: &str, icon: Option<&str>) -> anyhow::Result
 /// items, ordering and metadata kept), or restore it.
 pub fn set_list_archived(cx: &Ctx, list: &str, archived: bool) -> anyhow::Result<()> {
     cx.doc.set_list_archived(list, archived)?;
+    Ok(())
+}
+
+/// What deleting a list does with its items. Both move every item to
+/// Inbox.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+pub enum DeleteMode {
+    /// Items keep their lifecycle: open ones land open in Inbox.
+    ToInbox,
+    /// Items not already binned are binned too.
+    ToBin,
+}
+
+/// Delete a user-created list (`spec/inbox-plan.md`): its row goes and
+/// every item it held (open, done and binned) moves to Inbox, at the end
+/// of the queue; [`DeleteMode::ToBin`] also bins them. One commit, so
+/// one undo restores the list and its items. The reserved lists are
+/// refused.
+pub fn delete_list(cx: &Ctx, list: &str, mode: DeleteMode) -> anyhow::Result<()> {
+    let mode = match mode {
+        DeleteMode::ToInbox => DeleteListMode::ToInbox,
+        DeleteMode::ToBin => DeleteListMode::ToBin,
+    };
+    cx.doc.delete_list(list, mode)?;
     Ok(())
 }
 

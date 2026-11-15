@@ -27,6 +27,7 @@ pub struct AddArgs {
     #[arg(long, default_value = LIST_INBOX)]
     pub list: String,
     /// Put the new items at the top of the list instead of the end.
+    /// Not for Inbox, which keeps arrival order.
     #[arg(long)]
     pub top: bool,
 }
@@ -42,6 +43,9 @@ pub fn add(
     top: bool,
     out: &mut dyn Write,
 ) -> anyhow::Result<()> {
+    if top && list == LIST_INBOX {
+        anyhow::bail!("Inbox keeps arrival order, so --top doesn't apply; new items go to the end");
+    }
     for id in api::items::add_items(cx, list, texts, top)? {
         writeln!(out, "{id}")?;
     }
@@ -85,10 +89,21 @@ pub struct LsArgs {
     /// Machine-parseable output.
     #[arg(long)]
     pub json: bool,
+    /// Inbox only: newest arrivals first (Inbox is a queue, oldest
+    /// first by default).
+    #[arg(long)]
+    #[serde(default)]
+    pub newest: bool,
 }
 
 pub fn ls(cx: &Ctx, args: LsArgs, out: &mut dyn Write) -> anyhow::Result<()> {
-    let items = api::items::item_views(cx, &args.list, args.done);
+    if args.newest && args.list != LIST_INBOX {
+        anyhow::bail!("--newest applies to Inbox only; other lists keep their own order");
+    }
+    let mut items = api::items::item_views(cx, &args.list, args.done);
+    if args.newest {
+        items.reverse();
+    }
     if args.json {
         write_json(out, &items.iter().map(item_json).collect::<Vec<_>>())?;
     } else {
@@ -381,7 +396,7 @@ pub struct SetArgs {
     /// Move to this list (`events` makes the item an event; moving it back out makes it a task again, dates intact).
     #[arg(long, group = "field", value_name = "LIST")]
     pub list: Option<String>,
-    /// 1-based position among the list's open items: with --list, where the item lands there; alone, a reorder within its own list. Past the end clamps to the end.
+    /// 1-based position among the list's open items: with --list, where the item lands there; alone, a reorder within its own list. Past the end clamps to the end. Inbox keeps arrival order: a move into it goes to the end, and it can't be reordered.
     #[arg(long, group = "field", value_name = "POS")]
     #[serde(default)]
     pub pos: Option<usize>,
@@ -439,6 +454,10 @@ pub fn set(cx: &Ctx, args: SetArgs, out: &mut dyn Write) -> anyhow::Result<()> {
     if let Some(text) = &args.text {
         write::set_text(cx, id, text)?;
     }
+    // Inbox is a queue (`spec/inbox-plan.md`): a move into it lands at
+    // the end whatever `--pos` says, and a reorder within it is refused
+    // by the core.
+    let pos_ignored = args.pos.is_some() && args.list.as_deref() == Some(LIST_INBOX);
     if args.list.is_some() || args.pos.is_some() {
         // `--pos` alone reorders within the item's own list.
         write::move_item(cx, id, args.list.as_deref(), args.pos)?;
@@ -481,6 +500,12 @@ pub fn set(cx: &Ctx, args: SetArgs, out: &mut dyn Write) -> anyhow::Result<()> {
         write::unstar(cx, id)?;
     }
     writeln!(out, "{id}")?;
+    if pos_ignored {
+        writeln!(
+            out,
+            "note: Inbox keeps arrival order, so --pos was ignored; the item is at the end"
+        )?;
+    }
     Ok(())
 }
 
@@ -1020,6 +1045,7 @@ mod tests {
             started_at: None,
             done_at: None,
             binned_at: None,
+            inbox_at: None,
         };
         assert_eq!(date_tags(&base), " @2026-10-06");
         let single = ItemView {

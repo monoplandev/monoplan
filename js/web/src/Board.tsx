@@ -125,6 +125,10 @@ export function Board(props: {
   // Open projection partitioned by each item's workflow register state
   // into the four open lanes. One walk of the list's Open array; every
   // lane preserves the shared relative order (spec/board.md).
+  // Inbox is a queue in arrival order (`spec/inbox-plan.md`): its lanes
+  // don't reorder, and a lane-to-lane drop is a lifecycle change only.
+  const queued = (): boolean => props.listId === "inbox";
+
   const laneMembers = createMemo((): Record<WorkflowState, ItemView[]> => {
     const lanes: Record<WorkflowState, ItemView[]> = {
       backlog: [],
@@ -204,7 +208,7 @@ export function Board(props: {
   // Within-lane reorder: map the lane-local drop to moves in the shared
   // Open order. The register is untouched — same lane, same lifecycle.
   const reorderWithin = (laneKey: WorkflowState, op: DndOp<ItemView>): void => {
-    if (op.type !== "move") return;
+    if (op.type !== "move" || queued()) return;
     const moved = op.keys.map(String);
     const memberIds = membersOf(laneKey).map((it) => it.id);
     const anchor = planAnchor(
@@ -494,7 +498,7 @@ export function Board(props: {
           ? remaining[foreignIdx]
           : planAnchor(memberIds, keySet, null);
       const planned =
-        anchor === undefined ? [] : planReorderMoves(open, inOrder, anchor);
+        anchor === undefined || queued() ? [] : planReorderMoves(open, inOrder, anchor);
       app.withActionBatch(() => {
         for (const id of inOrder) app.setLifecycle(id, target);
         for (const p of planned) app.moveItem(p.id, props.listId, p.index);
@@ -648,6 +652,7 @@ export function Board(props: {
             selection={selectionFor(lane)}
             members={() => laneMembers()[lane]}
             onReorder={(op) => reorderWithin(lane, op)}
+            reorder={!queued()}
             onAddItem={() => props.onAddItem(props.listId, lane)}
             registerHandle={registerHandle}
             autofocus={i() === 0}
@@ -717,6 +722,9 @@ function BoardColumn(props: {
    *  reorder — its cards are lifecycle-grouped and timestamp-sorted, not
    *  order-container backed. Its "+" logs a directly-completed item. */
   variant?: "done";
+  /** False for a lane that keeps no manual order of its own (Inbox's,
+   *  a queue); the Done lane never reorders either way. */
+  reorder?: boolean;
 }) {
   const { m } = useAppI18n();
   const app = props.app;
@@ -766,7 +774,7 @@ function BoardColumn(props: {
           placeholderGap={CARD_GAP}
           overlayRadius={CARD_RADIUS}
           fillHeight
-          reorder={!isDoneCol}
+          reorder={!isDoneCol && props.reorder !== false}
           autofocus={props.autofocus}
           onReorder={props.onReorder}
         >

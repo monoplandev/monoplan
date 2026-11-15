@@ -981,6 +981,20 @@ impl Engine {
         })?)
     }
 
+    /// Delete a user-created list: its items move to Inbox, at the end
+    /// of the queue, and with `ToBin` are binned too. One undo step
+    /// restores the list and its items (`spec/inbox-plan.md`).
+    pub fn delete_list(
+        &self,
+        workspace: Option<String>,
+        list: String,
+        mode: api::lists::DeleteMode,
+    ) -> Result<(), EngineError> {
+        Ok(self.client.call_blocking(workspace, move |cx| {
+            api::lists::delete_list(cx, &list, mode)
+        })?)
+    }
+
     // ----- drag and drop (spec/mac-dnd-plan.md) -----
     //
     // One method per gesture, so a drop of many rows is one action and

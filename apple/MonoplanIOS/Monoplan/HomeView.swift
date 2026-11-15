@@ -27,7 +27,11 @@
 // from here, and item rows on any of them tick and open the item's sheet.
 // A user-created list's page has a "..." menu at the top right: rename
 // (an alert), choose emoji (the system emoji keyboard,
-// `EmojiKeyboard.swift`) and archive (confirmed; the page pops).
+// `EmojiKeyboard.swift`), archive (confirmed; the page pops) and
+// delete (its items to the Inbox or the Bin, asked; the page pops).
+// An Inbox's page has its own "..." menu: oldest or newest first, a
+// preference of this device's. The Inbox is a queue in arrival order
+// (spec/inbox-plan.md), so its rows are never dragged to a new place.
 // Archived lists and the reserved `events` list (calendar-only,
 // spec/events-plan.md) are left out.
 
@@ -38,6 +42,11 @@ import SwiftUI
 /// `UserDefaults` key of the list-counts preference (`SettingsView`'s
 /// toggle, read by Home).
 let listCountsKey = "listCounts"
+
+/// `UserDefaults` key of the Inbox order preference (the Inbox page's
+/// menu): newest first when set, else the queue's own oldest first
+/// (spec/inbox-plan.md). Display only; the same key as the Mac's.
+let inboxNewestFirstKey = "inboxNewestFirst"
 
 struct ListRef: Hashable {
     let docId: String
@@ -742,6 +751,11 @@ struct ListItemsView: View {
     @State private var noEmojiKeyboard = false
     @State private var confirmArchive = false
     @State private var archiveError: String?
+    @State private var confirmDelete = false
+    @State private var deleteError: String?
+    /// The device's Inbox order (`inboxNewestFirstKey`): reverses an
+    /// Inbox's rows on screen, never the doc.
+    @AppStorage(inboxNewestFirstKey) private var inboxNewestFirst = false
 
     /// The list as it is now: the page was pushed with the name and
     /// emoji of that moment, and either can be changed from here (or
@@ -755,28 +769,52 @@ struct ListItemsView: View {
     /// archived.
     private var editable: Bool { list.listId != "inbox" && list.listId != "events" }
 
+    private var isInbox: Bool { list.listId == "inbox" }
+
+    /// The rows in the order shown: an Inbox newest first when the
+    /// device says so, else as the engine orders them.
+    private func shown(_ items: [Item]) -> [Item] {
+        isInbox && inboxNewestFirst ? Array(items.reversed()) : items
+    }
+
+    /// How many Open items the list holds, for Delete's confirm.
+    private var openCount: Int {
+        if let items = model.listItems[list.key] { return items.count }
+        return Int(model.listsByDoc[list.docId]?.first(where: { $0.id == list.listId })?.open ?? 0)
+    }
+
+    private var deleteMoveTitle: String {
+        openCount == 1 ? "Move 1 open item to Inbox" : "Move \(openCount) open items to Inbox"
+    }
+
+    /// A capture into this list: scroll its row into view. A capture
+    /// lands at the bottom of an Inbox shown oldest first (the queue's
+    /// end), so the last row is brought up from the bottom edge.
     private func showCaptured(in items: [Item], _ proxy: ScrollViewProxy) {
         guard let captured = model.captured, captured.list.key == list.key,
               items.contains(where: { $0.id == captured.itemId })
         else { return }
-        withAnimation { proxy.scrollTo(captured.itemId, anchor: .top) }
+        let anchor: UnitPoint = items.last?.id == captured.itemId ? .bottom : .top
+        withAnimation { proxy.scrollTo(captured.itemId, anchor: anchor) }
         model.showedCaptured()
     }
 
     var body: some View {
         Group {
-            if let items = model.listItems[list.key], !items.isEmpty {
+            if let loaded = model.listItems[list.key], !loaded.isEmpty {
+                let items = shown(loaded)
                 ScrollViewReader { proxy in
                     // A long press and drag moves a row: the list parts
                     // to show where it will land (`onMove`), and the
-                    // drop is the list's order from then on.
+                    // drop is the list's order from then on. Not in an
+                    // Inbox, whose order is arrival.
                     List {
                         ForEach(items) { item in
                             ItemLink(ItemRef(docId: list.docId, itemId: item.id, title: item.text)) {
                                 ItemRowView(item: item)
                             }
                         }
-                        .onMove { model.reorderItem(in: list, from: $0, to: $1) }
+                        .onMove(perform: isInbox ? nil : { model.reorderItem(in: list, from: $0, to: $1) })
                     }
                     .listStyle(.plain)
                     .animation(.default, value: items)
@@ -823,8 +861,23 @@ struct ListItemsView: View {
                         Button { confirmArchive = true } label: {
                             Label("Archive", systemImage: "archivebox")
                         }
+                        Button(role: .destructive) { confirmDelete = true } label: {
+                            Label("Delete List…", systemImage: "trash")
+                        }
                     } label: {
                         Label("List options", systemImage: "ellipsis")
+                    }
+                }
+            } else if isInbox {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Picker("Order", selection: $inboxNewestFirst) {
+                            Label("Oldest First", systemImage: "arrow.down").tag(false)
+                            Label("Newest First", systemImage: "arrow.up").tag(true)
+                        }
+                        .pickerStyle(.inline)
+                    } label: {
+                        Label("Inbox options", systemImage: "ellipsis")
                     }
                 }
             }
@@ -861,6 +914,31 @@ struct ListItemsView: View {
         } message: {
             Text("The list leaves Home. Its items are kept.")
         }
+        // Every item it held goes to the Inbox (the default, first) or
+        // the Bin; a shared workspace's members all see the result.
+        .confirmationDialog(
+            "Delete \(current.name)?", isPresented: $confirmDelete, titleVisibility: .visible
+        ) {
+            if openCount > 0 {
+                Button(deleteMoveTitle) { deleteList(.toInbox) }
+                Button("Bin Them", role: .destructive) { deleteList(.toBin) }
+            } else {
+                Button("Delete List", role: .destructive) { deleteList(.toInbox) }
+            }
+        } message: {
+            if openCount > 0, model.hasOtherMembers(list.docId),
+               let name = model.sharedWorkspaceName(list.docId) {
+                Text("Everyone in \(name) will see them.")
+            }
+        }
+        .alert(
+            "Could not delete list",
+            isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(deleteError ?? "")
+        }
         .alert(
             "Could not archive list",
             isPresented: Binding(get: { archiveError != nil }, set: { if !$0 { archiveError = nil } })
@@ -872,6 +950,12 @@ struct ListItemsView: View {
         .refreshable { model.refreshList(list) }
         .onAppear { model.refreshList(list) }
         .onChange(of: model.changeCount) { model.refreshList(list) }
+    }
+
+    private func deleteList(_ mode: DeleteMode) {
+        model.deleteList(list, mode: mode) { error in
+            if let error { deleteError = error } else { dismiss() }
+        }
     }
 
     /// The page's name for the back button: the list's emoji, when it

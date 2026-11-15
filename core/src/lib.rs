@@ -10,9 +10,9 @@ pub mod sync;
 
 pub use crypto::*;
 pub use doc::{
-    DefaultView, Doc, DocError, EVENTS_NAME, ExportItem, ExportLifecycle, ExportList,
-    ExportSettings, FocusRef, FocusRetarget, INBOX_NAME, ImportSummary, ItemLifecycle, ItemView,
-    JsonExport, LIST_EVENTS, LIST_INBOX, LaneSet, ListView, MAX_DURATION_MINUTES,
+    DefaultView, DeleteListMode, Doc, DocError, EVENTS_NAME, ExportItem, ExportLifecycle,
+    ExportList, ExportSettings, FocusRef, FocusRetarget, INBOX_NAME, ImportSummary, ItemLifecycle,
+    ItemView, JsonExport, LIST_EVENTS, LIST_INBOX, LaneSet, ListView, MAX_DURATION_MINUTES,
     MAX_PLACE_DETAIL_CHARS, MAX_PLACE_LABEL_CHARS, NOTES_ORIGIN_PREFIX, NotesDeltaOp, Place,
     SettingsView, VIEW_ORIGIN, WELCOME_ITEM, WorkflowState, move_items_across_docs,
 };

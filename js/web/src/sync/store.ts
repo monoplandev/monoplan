@@ -532,9 +532,13 @@ export interface DocApp extends DocItemActions {
   /** Archive (`true`) or unarchive (`false`) a user-created list — the
    *  user-facing removal from the active workspace. Metadata-only: items,
    *  ordering, lifecycle, and Focus are untouched, and the list stays in
-   *  `listsOrder` / `listsById` (`spec/data-model.md` "Archived lists").
-   *  There is deliberately no user-facing list delete. */
+   *  `listsOrder` / `listsById` (`spec/data-model.md` "Archived lists"). */
   setListArchived(id: string, archived: boolean): void;
+  /** Delete a user-created list (`spec/inbox-plan.md`): its row goes and
+   *  every item it held moves to the end of Inbox's queue; with `toBin`
+   *  the ones not already binned are binned too. One commit, so one
+   *  undo restores the list and its items. */
+  deleteList(id: string, toBin: boolean): void;
   /** Toggle the global "show counts on non-Queue lists" setting.
    *  Queue's own count is always visible (subject to count > 0) and is
    *  not gated by this flag. */
@@ -1567,6 +1571,9 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
     },
     setListArchived(id, archived) {
       mutate(() => replica.setListArchived(id, archived));
+    },
+    deleteList(id, toBin) {
+      mutate(() => replica.deleteList(id, toBin));
     },
     addToFocus(id, index) {
       // Default to the top: newly-focused items are "what am I working on

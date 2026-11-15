@@ -14,7 +14,8 @@ compatibility" below; v4 docs must never sync with v1/v2/v3 clients.
 - `doc.get_map("settings")` — `LoroMap` for account-wide synced workspace
   settings. Unchanged from v1.
 - `doc.get_movable_list("order/<list-id>")` — one **order container** per
-  logical list (`order/inbox` for the built-in list). Entries are **encoded
+  logical list. Inbox has none: it is a queue (`spec/inbox-plan.md`, built
+  2026-11-16), and an old doc's `order/inbox` is dead history nothing reads. Entries are **encoded
   scalar strings only** (OrderEntry, below) — never child containers. The
   order container carries ordering; the `items` map carries everything else.
 - `doc.get_movable_list("focus")` — the reserved **focus container**: a curated
@@ -38,8 +39,9 @@ One child `LoroMap` under `items`, keyed by `ItemId`.
 | `id` | string | same as the map key; kept inside the map so a container handle resolves back to its id during diff translation |
 | `text` | string | the user's content. Stays a string register on purpose: a title is rewritten whole, so concurrent rewrites resolve by LWW to one clean title rather than a character interleaving (`notes-plan.md` "Why `text` stays a register") |
 | `notes` | `LoroText` | optional free-form plain text as a **mergeable child text container** (`LoroMap::ensure_mergeable_text`, `notes-plan.md`). Absent until the first write; created lazily by whichever device writes first, and concurrent first writes on two devices merge into one container. Edits are applied as character diffs (`LoroText::update`), so concurrent edits from two devices merge character-wise. Clearing deletes the content and **keeps the key**: the key is never deleted, because a later `ensure` would resurface the hidden child's old content. Reads take the container's plain string; a stray string value at the key (a v3 leftover) is not read. |
-| `location` | string | **atomic placement register** — encoded `"<list_id>:<placement_id>"`, see below |
+| `location` | string? | **atomic placement register** — encoded `"<list_id>:<placement_id>"`, see below. **Absent for an item in Inbox**: Inbox is the absence of a list (`spec/inbox-plan.md`), so a move into it deletes the key and a capture into it writes none. An `inbox:<placement>` value from an older doc reads the same. |
 | `lifecycle` | value | **atomic workflow register** — a plain `LoroValue` list `[state, at]`: the current workflow state (integer `0..=5`, see "Lifecycle") and the unix millis it was entered. Absent ≡ `[Backlog, created_at]`; new items omit it. |
+| `inbox_at` | i64? | unix millis the item last **deliberately arrived** in Inbox (a move in, a cross-doc move into Inbox, `delete_list`); never written by capture, lifecycle changes or a move out. Absent ≡ `created_at`. Inbox's queue key, ignored while the item is elsewhere. Plain LWW register (`spec/inbox-plan.md`). |
 | `binned_at` | i64? | **bin mask** — unix millis when the item was binned. Present ≡ binned (masking the workflow state); absent ≡ not binned. Restore deletes the key, revealing the preserved workflow state. Orthogonal to `lifecycle`. |
 | `deadline` | string? | optional **date-only** deadline, a floating local calendar date in `YYYY-MM-DD` format (no time, no timezone, not unix millis). Absent ≡ no deadline; clearing deletes the key. Values that are not a well-formed `YYYY-MM-DD` calendar date are rejected by the mutation. Means "owed by": past it the item is overdue. |
 | `when` | string? | optional **planned date**, shape-discriminated: `YYYY-MM-DD` (all-day, 10 chars) or `YYYY-MM-DDTHH:MM` (timed, 16 chars, `HH` 00–23, `MM` 00–59). Floating wall-clock, no seconds, no zone; an RFC 9557 `[Zone]` suffix is reserved and rejected for now. Absent ≡ unset; clearing deletes the key. One register so date and time cannot tear under concurrent edit; sorts by plain string compare (all-day leads its day). Means "happens on" or "act on". Fixed: never rewritten or rolled over by the clock, and never red past its day. A past `when` has gone by like an event: there is no "slipped" state (decided 2026-09-30, `calendar-plan.md`). Independent of `deadline`. See `calendar-plan.md`. |
@@ -214,6 +216,13 @@ match wins), and can be cleaned opportunistically (see Reconciliation).
   appended after all entry-backed items of `L`, in `(created_at, id)`
   ascending order — deterministic across replicas. This is the **fallback
   tail**.
+- **Inbox is a queue** (`spec/inbox-plan.md`). It has no order container, so
+  every item in it sorts as "tail", by `(inbox_at ?? created_at, created_at,
+  id)` ascending. An item is in Inbox when its `location` is missing (what
+  Inbox writes), names `inbox` (older docs), is unparseable, or names a list id with no ListMeta row (an
+  *orphan*, left by a concurrent move into a list another device deleted);
+  views report an orphan's `list_id` as `inbox`. A reorder within Inbox is
+  refused (`Invalid`); a move into it ignores the requested index.
 - **Reads never mutate.** Projection (including the fallback tail) is pure;
   it never writes order entries. Materializing fallback placements into real
   entries happens only through the explicit reconciliation mutation.
@@ -317,16 +326,15 @@ Every mutation below forms **one Loro commit** (one undo step, one op group).
 - **Hard delete** — delete the item's key from `items`; best-effort remove
   its entries from its located order container. Entries elsewhere are
   invisible anyway (item lookup fails) and left to reconciliation.
-- **Delete list** — refuses for `inbox` and `events`. Deleting a list *discards its
-  contents to the bin* rather than dumping them into Home's Open view. Every item
-  locating to the list (open, done *and* binned) is moved to `inbox` with a
-  fresh placement, appended to `order/inbox` in the deleted list's resolved
-  order, and — unless it was already binned — marked binned with a shared
-  `binned_at` timestamp (already-binned items keep their original one; workflow
-  registers are untouched). The
-  relocation to `inbox` gives each item a real home list for when it is later
-  restored from the bin; the bin move keeps discarded items out of every
-  live view without losing them. The ListMeta row is deleted. The abandoned
+- **Delete list** `delete_list(list_id, mode)` — refuses for `inbox` and
+  `events`. Every item located in the list (open, done *and* binned) is
+  relocated to Inbox (its `location` deleted) with one shared `inbox_at = now`,
+  so it lands at the end of the queue (ties by `created_at`; the list's manual
+  order is lost). `ToInbox` (the default) leaves every lifecycle alone, so
+  open items land open in Inbox and closed ones show in Done located in Inbox;
+  `ToBin` also bins the items not already binned, with the same `now`. Other
+  registers and Starred refs are untouched. The ListMeta row is deleted in the
+  same commit, so one undo restores the row and every register. The abandoned
   `order/<list-id>` container remains as unreachable history (root containers
   can't be deleted; it simply stops being projected).
 
@@ -433,9 +441,10 @@ archived list — no client UI does today — keeps raw-index semantics). The
 emitted `ListMoved.index` remains the list's position in the full `all_lists`
 projection.
 
-`delete_list` remains an **internal destructive primitive** (tests, future
-permanent-deletion work); it is not exposed as a user-facing action in any
-client UI.
+Archive and delete are both user-facing (`spec/inbox-plan.md`): archive
+shelves a list intact and reversibly, delete drops the row and sends its items
+to Inbox (or the Bin). Delete is not owner-only in a shared workspace; the
+clients' dialogs say who will see the items.
 
 Whether the nav shows an open-item count (all Open states) beside each list is a **device preference**, not doc state (web: the `listcounts` cookie, `listCounts.ts`; macOS: `UserDefaults`, `spec/mac-window-plan.md` "Settings"; off by default; iOS shows no per-list counts). It was the synced `WorkspaceSettings.show_list_counts` until 2026-11-13; a doc may still carry that key and nothing reads it. There is no per-list override; Inbox's count is always shown regardless.
 
@@ -445,8 +454,9 @@ Monoplan has two reserved lists: the primary capture list, and the home
 of events.
 
 - `inbox` — rendered as "Inbox". This id is reserved and addressable by items,
-  but it is not stored as a `ListMeta` row in the `lists` MovableList. Its
-  order container is `order/inbox`. Its label is client-defined (the localized
+  but it is not stored as a `ListMeta` row in the `lists` MovableList. It is
+  an arrival-ordered queue with no order container (`spec/inbox-plan.md`), and
+  the catch-all for items whose list row is gone. Its label is client-defined (the localized
   built-in) and it is non-renamable, non-movable, and non-deletable — there is
   no display-name override. Doc-level settings for it live in `settings`.
 
@@ -526,7 +536,7 @@ All mutations go through Loro APIs internally; the core exposes typed helpers:
 - `set_doc_name(name)` — `Some(name)` (trimmed, non-empty) names the doc, `None` / blank un-names it (key deleted). One commit; a no-op when unchanged. Emits `SettingsChanged`.
 - `set_calendar_doc_hidden(doc_id, hidden)` — the personal cross-doc preference (Home doc only; the core does not enforce which doc). One commit, a no-op when already in the requested state, and emits `SettingsChanged`. It rejects a blank id with `Invalid` and does not validate the id otherwise (the core holds no doc registry).
 - `set_default_view(list_id, view)` — saves (`Some`) or clears (`None`) a list's default view as one encoded register; accepts the reserved `inbox`, whose value lands in `settings.inbox_view` and reports via `SettingsChanged` rather than `ListDefaultViewChanged`; refuses the reserved `events` (`Invalid`: it has no list or board view). One commit; a no-op when unchanged. See `spec/board.md`.
-- `delete_list(list_id)` — refuses for `inbox` and `events`; see "Delete list" contract above. **Internal-only**: not surfaced in any client UI (archive is the user-facing removal).
+- `delete_list(list_id, mode)` — `mode` is `DeleteListMode::ToInbox` or `ToBin`; refuses for `inbox` and `events`; see "Delete list" contract above. Exposed by every client (`spec/inbox-plan.md`).
 - `empty_bin()` — hard-deletes all `Binned` items.
 - `delete_binned(item_id)` — hard-deletes one `Binned` item.
 - `export_items(item_ids)` / `adopt_items(items, list_id, target_index)` /

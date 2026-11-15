@@ -30,10 +30,13 @@
 //!
 //! Binned is a lifecycle & items keep their location. Two well-known
 //! list ids are *reserved*: [`LIST_INBOX`] and [`LIST_EVENTS`]. They have
-//! **no ListMeta row** — items reference them by string id and clients
-//! render them with hardcoded labels ("Inbox", "Calendar"). `events` has no
-//! list or board view: its items surface only on the calendar
-//! (`spec/events-plan.md`).
+//! **no ListMeta row** and clients render them with hardcoded labels
+//! ("Inbox", "Calendar"). Inbox is the absence of a list
+//! (`spec/inbox-plan.md`): its items carry no `location`, it has no order
+//! container, and it sorts by arrival; `inbox` is only the id the API
+//! names that bucket by. `events` is a real location with an order
+//! container but no list or board view: its items surface only on the
+//! calendar (`spec/events-plan.md`).
 //!
 //! The struct holds a `last_persisted_vv` — the local WAL capture
 //! cursor. Everything at or below it has been durably appended to the
@@ -81,7 +84,8 @@ const ROOT_ITEMS: &str = "items";
 const ROOT_LISTS: &str = "lists";
 const ROOT_SETTINGS: &str = "settings";
 /// Root-container name prefix for per-list order containers:
-/// `order/main`, `order/<list-uuid>`. The container for a deleted list
+/// `order/events`, `order/<list-uuid>` (Inbox has none; an old doc's
+/// `order/inbox` is dead history). The container for a deleted list
 /// is simply never projected again (root containers can't be removed).
 const ORDER_PREFIX: &str = "order/";
 /// Reserved singleton container name: the curated Focus lens
@@ -114,7 +118,10 @@ pub const SWEEP_ORIGIN: &str = "sweep";
 pub const VIEW_ORIGIN: &str = "view";
 /// Atomic location register: `"<list_id>:<placement_id>"`. Written as
 /// one scalar so list membership and placement can never be torn apart
-/// by concurrent edits. See `Location`.
+/// by concurrent edits. See `Location`. An item in Inbox has **no**
+/// location: Inbox is the absence of a list (`spec/inbox-plan.md`), so a
+/// move into it deletes the key. A leftover `inbox:<placement>` from an
+/// older doc reads the same.
 const KEY_LOCATION: &str = "location";
 /// Atomic workflow register (`spec/data-model.md` "Lifecycle"): a plain
 /// `LoroValue` list `[state, at]` — the current `WorkflowState` code
@@ -317,6 +324,12 @@ const KEY_DONE_AT: &str = "done_at";
 /// Bin mask: present ≡ binned (masking the workflow register); absent ≡
 /// not binned. Restore deletes the key.
 const KEY_BINNED_AT: &str = "binned_at";
+/// Unix millis the item last deliberately arrived in Inbox
+/// (`spec/inbox-plan.md` "The `inbox_at` register"): stamped by a move
+/// into Inbox and by `delete_list`, never by capture (absent ≡
+/// `created_at`). Inbox's queue key; ignored while the item is in any
+/// other list. Plain LWW register.
+const KEY_INBOX_AT: &str = "inbox_at";
 /// ListMeta archive timestamp (`spec/data-model.md` "Archived lists").
 /// Absent ≡ active; present ≡ archived. Written by `set_list_archived`;
 /// unarchiving deletes the key. Metadata-only — archiving never touches
@@ -360,6 +373,17 @@ pub enum NotesDeltaOp {
     Retain { retain: usize },
     Insert { insert: String },
     Delete { delete: usize },
+}
+
+/// What [`Doc::delete_list`] does with the list's items
+/// (`spec/inbox-plan.md`). Both relocate every item to Inbox.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DeleteListMode {
+    /// Items keep their lifecycle: open ones land open in Inbox.
+    #[default]
+    ToInbox,
+    /// Items not already binned are binned as well.
+    ToBin,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -569,6 +593,10 @@ pub struct ItemView {
     /// view sorts by `lifecycle_at`, not this.
     pub done_at: Option<i64>,
     pub binned_at: Option<i64>,
+    /// Unix millis the item last deliberately arrived in Inbox; `None`
+    /// reads as `created_at`. Inbox's queue key, meaningless elsewhere
+    /// (`spec/inbox-plan.md`).
+    pub inbox_at: Option<i64>,
 }
 
 impl ItemView {
@@ -907,6 +935,10 @@ pub struct ExportItem {
     /// done-as-state — mapped to register `[Done, done_at]` on import.
     pub done_at: Option<i64>,
     pub binned_at: Option<i64>,
+    /// The `inbox_at` register (`spec/inbox-plan.md`): Inbox's queue
+    /// key. Skipped when unset so older dumps stay byte-identical.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub inbox_at: Option<i64>,
 }
 
 // ---------- location / order-entry encoding ----------
@@ -915,7 +947,9 @@ pub struct ExportItem {
 /// entry is the canonical one for it. Encoded as a single scalar string
 /// (`"<list_id>:<placement_id>"`) so both halves are written in one
 /// register op — no independently-mergeable sub-fields to conflict.
-/// `:` is reserved: ids are uuid-v7 hex or the literal `inbox`.
+/// `:` is reserved: ids are uuid-v7 hex or the literal `events`. Inbox
+/// writes no location; an older doc's `inbox:<placement>` still parses
+/// and reads as Inbox.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Location {
     list_id: String,
@@ -960,6 +994,34 @@ impl OrderEntry {
             placement_id: placement_id.to_string(),
         })
     }
+}
+
+/// A fresh placement id for an item landing in `list_id`: none for
+/// Inbox, which has no location (and so matches what `item_meta` reads
+/// back for a missing key).
+fn new_placement(list_id: &str) -> String {
+    if list_id == LIST_INBOX {
+        String::new()
+    } else {
+        new_id()
+    }
+}
+
+/// Write where an item is: `"<list_id>:<placement>"` for a list, or for
+/// Inbox no `location` at all (the key deleted when present).
+fn write_location(map: &LoroMap, list_id: &str, placement: &str) -> Result<(), DocError> {
+    if list_id == LIST_INBOX {
+        if map.get(KEY_LOCATION).is_some() {
+            map.delete(KEY_LOCATION)?;
+        }
+        return Ok(());
+    }
+    let location = Location {
+        list_id: list_id.to_string(),
+        placement_id: placement.to_string(),
+    };
+    map.insert(KEY_LOCATION, location.encode().as_str())?;
+    Ok(())
 }
 
 fn order_root_name(list_id: &str) -> String {
@@ -1072,10 +1134,36 @@ impl FocusScan {
 /// the mutation itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ItemMeta {
+    /// The list the item projects into: `located_in`, or `inbox` when
+    /// that list has no ListMeta row (an orphan, `spec/inbox-plan.md`
+    /// "Membership"). Every membership map is keyed by this.
     list_id: String,
+    /// The list id the `location` register names, verbatim.
+    located_in: String,
     placement_id: String,
     open: bool,
     created_at: i64,
+    /// The `inbox_at` register: Inbox's queue key while the item is in
+    /// Inbox, ignored elsewhere.
+    inbox_at: Option<i64>,
+}
+
+impl ItemMeta {
+    /// Inbox's queue sort key (`spec/inbox-plan.md` "Order"):
+    /// `(inbox_at ?? created_at, created_at)`, then the id.
+    fn queue_key(&self) -> (i64, i64) {
+        (self.inbox_at.unwrap_or(self.created_at), self.created_at)
+    }
+}
+
+/// The list an item located in `located_in` projects into, given the
+/// live ListMeta ids: itself when reserved or live, else `inbox`.
+fn effective_list(live: &HashSet<String>, located_in: &str) -> String {
+    if is_reserved_list(located_in) || live.contains(located_in) {
+        located_in.to_string()
+    } else {
+        LIST_INBOX.to_string()
+    }
 }
 
 /// Resolution of a target index against a list's projection — the raw
@@ -1120,9 +1208,31 @@ struct ProjectionIndex {
     /// entry must not demote its list to the walk path. Lists with
     /// zero open visible entries carry no key.
     open_visible_counts: HashMap<String, usize>,
+    /// Ids of every ListMeta row (active and archived). An item located
+    /// in a list id outside this set is an orphan and projects into
+    /// Inbox (`spec/inbox-plan.md` "Membership").
+    live_lists: HashSet<String>,
 }
 
 impl ProjectionIndex {
+    /// Set `meta.list_id` from `meta.located_in` against the live lists.
+    fn resolve(&self, mut meta: ItemMeta) -> ItemMeta {
+        meta.list_id = effective_list(&self.live_lists, &meta.located_in);
+        meta
+    }
+
+    /// Order of two items in `list_id`'s fallback tail. Inbox is a
+    /// queue, every item of it is "tail", sorted by the queue key;
+    /// other lists sort their tail by `(created_at, id)`.
+    fn tail_cmp(&self, list_id: &str, a: &str, b: &str) -> std::cmp::Ordering {
+        let (ma, mb) = (&self.meta[a], &self.meta[b]);
+        if list_id == LIST_INBOX {
+            ma.queue_key().cmp(&mb.queue_key()).then_with(|| a.cmp(b))
+        } else {
+            ma.created_at.cmp(&mb.created_at).then_with(|| a.cmp(b))
+        }
+    }
+
     /// Visible entry ids of `list_id` in container order (all lifecyclees,
     /// duplicate-guarded), borrowed — plus the visible set for the tail
     /// computation. An entry is visible iff its item exists, its
@@ -1131,6 +1241,11 @@ impl ProjectionIndex {
     fn visible_ids<'a>(&'a self, list_id: &str) -> (Vec<&'a str>, HashSet<&'a str>) {
         let mut out = Vec::new();
         let mut seen = HashSet::new();
+        // Inbox has no manual order: `order/inbox` is dead and never
+        // loaded, so every Inbox item sorts in the tail.
+        if list_id == LIST_INBOX {
+            return (out, seen);
+        }
         for entry in self
             .raw_orders
             .get(list_id)
@@ -1163,10 +1278,7 @@ impl ProjectionIndex {
             .filter(|id| !seen.contains(id.as_str()))
             .map(String::as_str)
             .collect();
-        tail.sort_by(|a, b| {
-            let (ma, mb) = (&self.meta[*a], &self.meta[*b]);
-            ma.created_at.cmp(&mb.created_at).then_with(|| a.cmp(b))
-        });
+        tail.sort_by(|a, b| self.tail_cmp(list_id, a, b));
         tail
     }
 
@@ -1184,10 +1296,7 @@ impl ProjectionIndex {
             .filter(|id| !seen.contains(id.as_str()))
             .map(String::as_str)
             .collect();
-        tail.sort_by(|a, b| {
-            let (ma, mb) = (&self.meta[*a], &self.meta[*b]);
-            ma.created_at.cmp(&mb.created_at).then_with(|| a.cmp(b))
-        });
+        tail.sort_by(|a, b| self.tail_cmp(list_id, a, b));
         tail
     }
 
@@ -1841,19 +1950,22 @@ impl Doc {
     /// the test-side "does the incremental index match the doc" check.
     fn compute_index(&self) -> ProjectionIndex {
         let items = self.items();
-        let mut idx = ProjectionIndex::default();
+        let mut idx = ProjectionIndex {
+            live_lists: self.all_lists().into_iter().map(|l| l.id).collect(),
+            ..ProjectionIndex::default()
+        };
         let keys: Vec<String> = items.keys().map(|k| k.to_string()).collect();
         for id in keys {
             let Some(map) = item_map_of(&items, &id) else {
                 continue;
             };
-            idx.set_meta(&id, item_meta(&map));
+            let meta = idx.resolve(item_meta(&map));
+            idx.set_meta(&id, meta);
         }
         let mut candidates: HashSet<String> = idx.members.keys().cloned().collect();
-        candidates.insert(LIST_INBOX.to_string());
-        for list in self.all_lists() {
-            candidates.insert(list.id);
-        }
+        candidates.extend(idx.live_lists.iter().cloned());
+        // `order/inbox` is dead (`spec/inbox-plan.md`): never loaded.
+        candidates.remove(LIST_INBOX);
         for list_id in &candidates {
             let order = self.order_list(list_id);
             let mut raw = Vec::with_capacity(order.len());
@@ -1865,6 +1977,7 @@ impl Doc {
         for list_id in &candidates {
             idx.refresh_open(list_id);
         }
+        idx.refresh_open(LIST_INBOX);
         idx
     }
 
@@ -2038,6 +2151,9 @@ impl Doc {
         if trimmed.is_empty() {
             return Ok(Vec::new());
         }
+        // Inbox is a queue (`spec/inbox-plan.md`): a capture writes no
+        // order entry and the requested index is ignored.
+        let queued = list_id == LIST_INBOX;
         let plan = self.plan_target(list_id, target_index, true, None);
         let raw_pos = plan.raw_pos;
         let items = self.items();
@@ -2046,7 +2162,7 @@ impl Doc {
         let mut pending: Vec<(String, String, String, i64)> = Vec::with_capacity(trimmed.len());
         for (i, text) in trimmed.iter().enumerate() {
             let id = new_id();
-            let placement = new_id();
+            let placement = new_placement(list_id);
             let now = now_millis();
             let map = items.insert_container(&id, LoroMap::new())?;
             map.insert(KEY_ID, id.as_str())?;
@@ -2055,15 +2171,7 @@ impl Doc {
             if let Some(author) = &self.author {
                 map.insert(KEY_CREATED_BY, author.as_str())?;
             }
-            map.insert(
-                KEY_LOCATION,
-                Location {
-                    list_id: list_id.to_string(),
-                    placement_id: placement.clone(),
-                }
-                .encode()
-                .as_str(),
-            )?;
+            write_location(&map, list_id, &placement)?;
             if state != WorkflowState::Backlog {
                 // Direct capture into a non-default open lane: write the
                 // register (and the started_at stamp when the lane is
@@ -2073,16 +2181,18 @@ impl Doc {
                     map.insert(KEY_STARTED_AT, now)?;
                 }
             }
-            let entry = OrderEntry {
-                item_id: id.clone(),
-                placement_id: placement.clone(),
-            }
-            .encode();
-            let at = raw_pos + i;
-            if at >= order.len() {
-                order.push(entry.as_str())?;
-            } else {
-                order.insert(at, entry.as_str())?;
+            if !queued {
+                let entry = OrderEntry {
+                    item_id: id.clone(),
+                    placement_id: placement.clone(),
+                }
+                .encode();
+                let at = raw_pos + i;
+                if at >= order.len() {
+                    order.push(entry.as_str())?;
+                } else {
+                    order.insert(at, entry.as_str())?;
+                }
             }
             pending.push((id.clone(), placement, (*text).to_string(), now));
             ids.push(id);
@@ -2095,11 +2205,16 @@ impl Doc {
                     id,
                     ItemMeta {
                         list_id: list_id.to_string(),
+                        located_in: list_id.to_string(),
                         placement_id: placement.clone(),
                         open: true,
                         created_at: *now,
+                        inbox_at: None,
                     },
                 );
+                if queued {
+                    continue;
+                }
                 let raw = guard.raw_orders.entry(list_id.to_string()).or_default();
                 let at = (raw_pos + i).min(raw.len());
                 raw.insert(
@@ -2112,13 +2227,13 @@ impl Doc {
                 guard.bump_visible(list_id, 1);
             }
             match plan.open_pos {
-                Some(pos) => {
+                Some(pos) if !queued => {
                     for (i, (id, ..)) in pending.iter().enumerate() {
                         guard.splice_open_in(list_id, id, pos.saturating_add(i));
                     }
                     guard.open_by_list.get(list_id).cloned().unwrap_or_default()
                 }
-                None => guard.refresh_open(list_id),
+                _ => guard.refresh_open(list_id),
             }
         };
         for (id, _, text, now) in pending {
@@ -2509,15 +2624,20 @@ impl Doc {
     ) -> Result<(), DocError> {
         self.assert_list_exists(target_list_id)?;
         let map = self.find_item(item_id)?;
-        let (cur_list, is_open) = {
+        let (cur_list, located_in, is_open) = {
             let guard = self.item_index.lock().expect("item index mutex poisoned");
             let m = guard
                 .meta
                 .get(item_id)
                 .ok_or_else(|| DocError::ItemNotFound(item_id.to_string()))?;
-            (m.list_id.clone(), m.open)
+            (m.list_id.clone(), m.located_in.clone(), m.open)
         };
-        if cur_list == target_list_id {
+        if located_in == target_list_id {
+            if target_list_id == LIST_INBOX {
+                // Inbox is a queue with no manual order
+                // (`spec/inbox-plan.md`).
+                return Err(DocError::Invalid("Inbox can't be reordered".into()));
+            }
             self.reorder_in_list(item_id, &map, target_list_id, target_index, is_open)
         } else {
             self.move_across_lists(
@@ -2665,17 +2785,20 @@ impl Doc {
         target_index: usize,
         is_open: bool,
     ) -> Result<(), DocError> {
-        let placement = new_id();
+        let placement = new_placement(target_list_id);
         let created_at = read_i64(map, KEY_CREATED_AT).unwrap_or(0);
-        map.insert(
-            KEY_LOCATION,
-            Location {
-                list_id: target_list_id.to_string(),
-                placement_id: placement.clone(),
-            }
-            .encode()
-            .as_str(),
-        )?;
+        write_location(map, target_list_id, &placement)?;
+        // A deliberate arrival in Inbox goes to the end of the queue
+        // (`spec/inbox-plan.md`): stamp `inbox_at`, write no entry, and
+        // ignore the requested index.
+        let queued = target_list_id == LIST_INBOX;
+        let inbox_at = if queued {
+            let now = now_millis();
+            map.insert(KEY_INBOX_AT, now)?;
+            Some(now)
+        } else {
+            read_i64(map, KEY_INBOX_AT)
+        };
         // The workflow register is list-agnostic and rides along with
         // the item across lists (`spec/data-model.md`); nothing to clear.
         let (plan, src_positions, was_visible) = {
@@ -2687,15 +2810,17 @@ impl Doc {
             )
         };
         let raw_pos = plan.raw_pos;
-        let target_order = self.order_list(target_list_id);
         let entry = OrderEntry {
             item_id: item_id.to_string(),
             placement_id: placement.clone(),
         };
-        if raw_pos >= target_order.len() {
-            target_order.push(entry.encode().as_str())?;
-        } else {
-            target_order.insert(raw_pos, entry.encode().as_str())?;
+        if !queued {
+            let target_order = self.order_list(target_list_id);
+            if raw_pos >= target_order.len() {
+                target_order.push(entry.encode().as_str())?;
+            } else {
+                target_order.insert(raw_pos, entry.encode().as_str())?;
+            }
         }
         // Best-effort cleanup: drop every entry for this item from the
         // source order (canonical + any stale duplicates).
@@ -2710,9 +2835,11 @@ impl Doc {
                 item_id,
                 ItemMeta {
                     list_id: target_list_id.to_string(),
+                    located_in: target_list_id.to_string(),
                     placement_id: placement,
                     open: is_open,
                     created_at,
+                    inbox_at,
                 },
             );
             if let Some(raw) = guard.raw_orders.get_mut(cur_list) {
@@ -2725,28 +2852,30 @@ impl Doc {
             if was_visible && is_open {
                 guard.bump_visible(cur_list, -1);
             }
-            let raw = guard
-                .raw_orders
-                .entry(target_list_id.to_string())
-                .or_default();
-            let at = raw_pos.min(raw.len());
-            raw.insert(at, Some(entry));
-            if is_open {
-                guard.bump_visible(target_list_id, 1);
+            if !queued {
+                let raw = guard
+                    .raw_orders
+                    .entry(target_list_id.to_string())
+                    .or_default();
+                let at = raw_pos.min(raw.len());
+                raw.insert(at, Some(entry));
+                if is_open {
+                    guard.bump_visible(target_list_id, 1);
+                }
             }
             if !is_open {
                 None
             } else {
                 guard.splice_open_out(cur_list, item_id);
                 match plan.open_pos {
-                    Some(pos) => {
+                    Some(pos) if !queued => {
                         guard.splice_open_in(target_list_id, item_id, pos);
                         guard
                             .open_by_list
                             .get(target_list_id)
                             .and_then(|arr| arr.iter().position(|x| x == item_id))
                     }
-                    None => {
+                    _ => {
                         let open = guard.refresh_open(target_list_id);
                         open.iter().position(|x| x == item_id)
                     }
@@ -3297,6 +3426,13 @@ impl Doc {
         map.insert(KEY_NAME, name)?;
         map.insert(KEY_CREATED_AT, now)?;
         self.inner.commit();
+        // A fresh id: no item can be located in it yet, so no orphan
+        // folds back out of Inbox.
+        self.item_index
+            .lock()
+            .expect("item index mutex poisoned")
+            .live_lists
+            .insert(id.clone());
         let index = self
             .visible_list_index(&id)
             .ok_or_else(|| DocError::ListNotFound(id.clone()))?;
@@ -3539,54 +3675,34 @@ impl Doc {
         Ok(())
     }
 
-    /// Refuses for the reserved `inbox` and `events`. Every item locating to
-    /// the deleted list (open, done and binned) is moved to `inbox` with
-    /// a fresh placement, appended to `order/main` in the deleted
-    /// list's resolved order. The abandoned order container remains as
-    /// unreachable history.
-    pub fn delete_list(&self, list_id: &str) -> Result<(), DocError> {
+    /// Delete a user list (`spec/inbox-plan.md` "Mutation contracts").
+    /// Refuses for the reserved `inbox` and `events`. Every item located
+    /// in the list (open, closed and binned) is relocated to Inbox with
+    /// a fresh placement and one shared `inbox_at = now`; with
+    /// [`DeleteListMode::ToBin`] the items not already binned are binned
+    /// too. Workflow registers, stamps and everything else stay. One
+    /// commit, so one undo restores the row and every register. The
+    /// abandoned order container remains as unreachable history.
+    pub fn delete_list(&self, list_id: &str, mode: DeleteListMode) -> Result<(), DocError> {
         if is_reserved_list(list_id) {
             return Err(DocError::CannotDeleteBuiltin(list_id.into()));
         }
         let (idx, _) = self.find_list(list_id)?;
-        let resolved = {
+        let located: Vec<String> = {
             let guard = self.item_index.lock().expect("item index mutex poisoned");
             guard.resolved(list_id)
         };
         let pre_items: Vec<ItemView> = self.iter_items().collect();
         let pre_lists: Vec<ListView> = self.all_lists();
         let pre_settings = self.get_settings();
-        // Deleting a list discards its contents to the bin rather than
-        // dumping them live into Home: every item is relocated to `inbox`
-        // (so it has a real home list if later restored) and, unless it
-        // was already binned, marked binned with a shared timestamp. The
-        // location move keeps `order/main` and restore-target semantics
-        // valid without leaning on orphan fallback.
-        let binned_at = now_millis();
-        let main_order = self.order_list(LIST_INBOX);
-        for item_id in &resolved {
+        let now = now_millis();
+        for item_id in &located {
             let map = self.find_item(item_id)?;
-            let placement = new_id();
-            map.insert(
-                KEY_LOCATION,
-                Location {
-                    list_id: LIST_INBOX.to_string(),
-                    placement_id: placement.clone(),
-                }
-                .encode()
-                .as_str(),
-            )?;
-            if read_i64(&map, KEY_BINNED_AT).is_none() {
-                map.insert(KEY_BINNED_AT, binned_at)?;
+            write_location(&map, LIST_INBOX, "")?;
+            map.insert(KEY_INBOX_AT, now)?;
+            if mode == DeleteListMode::ToBin && read_i64(&map, KEY_BINNED_AT).is_none() {
+                map.insert(KEY_BINNED_AT, now)?;
             }
-            main_order.push(
-                OrderEntry {
-                    item_id: item_id.clone(),
-                    placement_id: placement,
-                }
-                .encode()
-                .as_str(),
-            )?;
         }
         self.lists().delete(idx, 1)?;
         self.inner.commit();
@@ -3594,8 +3710,8 @@ impl Doc {
         // two lists' shadows plus membership.
         self.rebuild_index();
         // Emit the full pre/post state diff: each item picks up an
-        // `ItemLifecycleChanged` (now binned) and `ItemListChanged` (now
-        // `inbox`), plus the `ListRemoved` for the gone list.
+        // `ItemListChanged` (now `inbox`), plus `ItemLifecycleChanged`
+        // when binned, plus the `ListRemoved` for the gone list.
         self.emit_state_diff(&pre_items, &pre_lists, &pre_settings);
         Ok(())
     }
@@ -3636,9 +3752,10 @@ impl Doc {
             /// fallback-tail items, in deterministic tail order.
             append: Vec<OrderEntry>,
         }
-        // Items with a missing/unparseable location get a fresh one
-        // written (main + new placement) plus a matching entry.
-        let mut fix_location: Vec<(String, String)> = Vec::new();
+        // Items located in a list with an empty placement get a fresh
+        // one written plus a matching entry. (A missing or unparseable
+        // location projects into Inbox, which has no entries to repair.)
+        let mut fix_location: Vec<(String, String, String)> = Vec::new();
         let mut plans: HashMap<String, ListPlan> = HashMap::new();
         // Items whose entries the sweep drops, decided off the item maps
         // before the index lock is taken.
@@ -3661,6 +3778,9 @@ impl Doc {
             let guard = self.item_index.lock().expect("item index mutex poisoned");
             let mut lists: HashSet<&String> = guard.raw_orders.keys().collect();
             lists.extend(guard.members.keys());
+            // Inbox is a queue with no order container to repair
+            // (`spec/inbox-plan.md` "`order/inbox`").
+            lists.retain(|l| l.as_str() != LIST_INBOX);
             for list_id in lists {
                 let mut seen = HashSet::new();
                 let mut stale = Vec::new();
@@ -3691,16 +3811,13 @@ impl Doc {
                     .flatten()
                     .filter(|id| !seen.contains(*id) && guard.meta[*id].open)
                     .collect();
-                tail.sort_by(|a, b| {
-                    let (ma, mb) = (&guard.meta[*a], &guard.meta[*b]);
-                    ma.created_at.cmp(&mb.created_at).then_with(|| a.cmp(b))
-                });
+                tail.sort_by(|a, b| guard.tail_cmp(list_id, a, b));
                 let mut append = Vec::new();
                 for id in tail {
                     let m = &guard.meta[id];
                     if m.placement_id.is_empty() {
                         let placement = new_id();
-                        fix_location.push((id.clone(), placement.clone()));
+                        fix_location.push((id.clone(), list_id.clone(), placement.clone()));
                         append.push(OrderEntry {
                             item_id: id.clone(),
                             placement_id: placement,
@@ -3736,12 +3853,12 @@ impl Doc {
             lists.delete(*p, 1)?;
             repairs += 1;
         }
-        for (item_id, placement) in &fix_location {
+        for (item_id, list_id, placement) in &fix_location {
             let map = self.find_item(item_id)?;
             map.insert(
                 KEY_LOCATION,
                 Location {
-                    list_id: LIST_INBOX.to_string(),
+                    list_id: list_id.clone(),
                     placement_id: placement.clone(),
                 }
                 .encode()
@@ -4052,7 +4169,7 @@ impl Doc {
             } else {
                 new_id()
             };
-            let placement = new_id();
+            let placement = new_placement(&target_list_id);
             let state = self.write_item_from_export(
                 &new_item_id,
                 src_item,
@@ -4064,14 +4181,17 @@ impl Doc {
                 },
                 src_item.binned_at,
             )?;
-            self.order_list(&target_list_id).push(
-                OrderEntry {
-                    item_id: new_item_id.clone(),
-                    placement_id: placement,
-                }
-                .encode()
-                .as_str(),
-            )?;
+            // Inbox is a queue: no entry (`spec/inbox-plan.md`).
+            if target_list_id != LIST_INBOX {
+                self.order_list(&target_list_id).push(
+                    OrderEntry {
+                        item_id: new_item_id.clone(),
+                        placement_id: placement,
+                    }
+                    .encode()
+                    .as_str(),
+                )?;
+            }
             let open = src_item.binned_at.is_none() && state.is_open();
             if !src_item.id.is_empty() {
                 item_id_map.insert(src_item.id.clone(), (new_item_id, open));
@@ -4148,7 +4268,7 @@ impl Doc {
         let map = self.items().insert_container(id, LoroMap::new())?;
         map.insert(KEY_ID, id)?;
         map.insert(KEY_TEXT, text)?;
-        map.insert(KEY_LOCATION, location.encode().as_str())?;
+        write_location(&map, &location.list_id, &location.placement_id)?;
         map.insert(KEY_CREATED_AT, src.created_at)?;
         // Attribution survives a round trip; the importer's own id is
         // not substituted, since the import is not the creation.
@@ -4211,6 +4331,11 @@ impl Doc {
         if let Some(t) = binned_at {
             map.insert(KEY_BINNED_AT, t)?;
         }
+        if location.list_id == LIST_INBOX
+            && let Some(t) = src.inbox_at
+        {
+            map.insert(KEY_INBOX_AT, t)?;
+        }
         Ok(state)
     }
 
@@ -4267,11 +4392,19 @@ impl Doc {
         let pre_settings = self.get_settings();
         let raw_pos = self.plan_target(list_id, target_index, true, None).raw_pos;
         let order = self.order_list(list_id);
+        // Into Inbox: a deliberate arrival, so one shared `inbox_at`
+        // and no entries (`spec/inbox-plan.md`).
+        let queued = list_id == LIST_INBOX;
+        let now = now_millis();
         for (i, src) in items.iter().enumerate() {
-            let placement = new_id();
+            let placement = new_placement(list_id);
+            let arrived = ExportItem {
+                inbox_at: queued.then_some(now),
+                ..src.clone()
+            };
             self.write_item_from_export(
                 &src.id,
-                src,
+                &arrived,
                 &src.text,
                 &src.notes,
                 &Location {
@@ -4280,6 +4413,9 @@ impl Doc {
                 },
                 None,
             )?;
+            if queued {
+                continue;
+            }
             let entry = OrderEntry {
                 item_id: src.id.clone(),
                 placement_id: placement,
@@ -4379,7 +4515,21 @@ impl Doc {
 
     pub fn get_item(&self, item_id: &str) -> Option<ItemView> {
         let map = self.find_item(item_id).ok()?;
-        item_view(&map)
+        self.resolved_view(&map)
+    }
+
+    /// [`item_view`] with an orphan's `list_id` resolved to `inbox`
+    /// (`spec/inbox-plan.md` "Membership"), so every view agrees with
+    /// the projection the item sits in.
+    fn resolved_view(&self, map: &LoroMap) -> Option<ItemView> {
+        let mut view = item_view(map)?;
+        if !is_reserved_list(&view.list_id) {
+            let guard = self.item_index.lock().expect("item index mutex poisoned");
+            if !guard.live_lists.contains(&view.list_id) {
+                view.list_id = LIST_INBOX.to_string();
+            }
+        }
+        Some(view)
     }
 
     pub fn get_list_meta(&self, list_id: &str) -> Option<ListView> {
@@ -4879,6 +5029,9 @@ impl Doc {
                         map_dirty.entry(container.clone()).or_default().insert(key);
                         text_deltas.entry(container).or_default().push(delta);
                     }
+                    // `order/inbox` is dead (`spec/inbox-plan.md`): an
+                    // old client's writes there project nothing.
+                    CapturedDiff::Order { list_id, .. } if list_id == LIST_INBOX => {}
                     CapturedDiff::Order { list_id, ops } => {
                         let shadow = shadows.entry(list_id.clone()).or_insert_with(|| {
                             guard.raw_orders.get(&list_id).cloned().unwrap_or_default()
@@ -4956,6 +5109,48 @@ impl Doc {
             return Err(());
         }
 
+        // The live list ids after the frame. An item whose list row
+        // appeared or vanished without its own register changing is an
+        // orphan folding into or out of Inbox (`spec/inbox-plan.md`
+        // "Membership"): rare (a concurrent delete, or undoing one), so
+        // that frame takes the rebuild.
+        let post_live: Option<HashSet<String>> = if lists_dirty {
+            let post: HashSet<String> = self.all_lists().into_iter().map(|l| l.id).collect();
+            let guard = self.item_index.lock().expect("item index mutex poisoned");
+            if post != guard.live_lists {
+                let flipped: HashSet<&String> =
+                    post.symmetric_difference(&guard.live_lists).collect();
+                let stranded = guard.meta.iter().any(|(id, m)| {
+                    flipped.contains(&m.located_in)
+                        && !upserts.contains(id)
+                        && !removals.contains(id)
+                        && !dirty_keys_by_id.contains_key(id)
+                });
+                // A list row coming back (undoing a delete) finds its
+                // abandoned order container still populated; the index
+                // never loaded it, so take the rebuild.
+                let reloaded = post
+                    .difference(&guard.live_lists)
+                    .any(|id| !self.order_list(id).is_empty());
+                if stranded || reloaded {
+                    return Err(());
+                }
+                Some(post)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        // An order container whose list row is gone projects nothing:
+        // drop this frame's ops on it, as `compute_index` never loads it.
+        {
+            let guard = self.item_index.lock().expect("item index mutex poisoned");
+            let live = post_live.as_ref().unwrap_or(&guard.live_lists);
+            shadows.retain(|l, _| is_reserved_list(l) || live.contains(l));
+            active.retain(|l, _| is_reserved_list(l) || live.contains(l));
+        }
+
         // Per-item change plan: old meta from the index, new meta from
         // the post-import doc.
         struct Change {
@@ -4967,6 +5162,11 @@ impl Doc {
         let mut changes = HashMap::<String, Change>::new();
         {
             let guard = self.item_index.lock().expect("item index mutex poisoned");
+            let live = post_live.as_ref().unwrap_or(&guard.live_lists);
+            let resolve = |mut m: ItemMeta| {
+                m.list_id = effective_list(live, &m.located_in);
+                m
+            };
             let items = self.items();
             for id in &upserts {
                 let Some(map) = item_map_of(&items, id) else {
@@ -4992,6 +5192,7 @@ impl Doc {
                         KEY_DONE_AT,
                         KEY_BINNED_AT,
                         KEY_LOCATION,
+                        KEY_INBOX_AT,
                     ]
                     .into_iter()
                     .map(str::to_string)
@@ -5001,7 +5202,7 @@ impl Doc {
                     id.clone(),
                     Change {
                         old,
-                        new: Some(item_meta(&map)),
+                        new: Some(resolve(item_meta(&map))),
                         keys,
                         brand_new,
                     },
@@ -5015,7 +5216,7 @@ impl Doc {
                     id.clone(),
                     Change {
                         old: guard.meta.get(&id).cloned(),
-                        new: Some(item_meta(&map)),
+                        new: Some(resolve(item_meta(&map))),
                         keys,
                         brand_new: false,
                     },
@@ -5056,6 +5257,13 @@ impl Doc {
                     )
                 })
                 .collect();
+            if let Some(live) = post_live {
+                let gone: Vec<String> = guard.live_lists.difference(&live).cloned().collect();
+                for l in gone {
+                    guard.raw_orders.remove(&l);
+                }
+                guard.live_lists = live;
+            }
             for (id, c) in &changes {
                 match &c.new {
                     Some(m) => guard.set_meta(id, m.clone()),
@@ -5075,7 +5283,7 @@ impl Doc {
         // ---- Phase 3: events ----
         let view_of = |id: &str| -> Result<ItemView, ()> {
             let map = item_map_of(&self.items(), id).ok_or(())?;
-            item_view(&map).ok_or(())
+            self.resolved_view(&map).ok_or(())
         };
 
         let mut removals_sorted: Vec<&String> = removals.iter().collect();
@@ -5661,6 +5869,7 @@ impl Doc {
             hash_opt_i64(&mut hasher, i.started_at);
             hash_opt_i64(&mut hasher, i.done_at);
             hash_opt_i64(&mut hasher, i.binned_at);
+            hash_opt_i64(&mut hasher, i.inbox_at);
         }
         // Focus: the curated order fixes logical state (`spec/focus.md`),
         // exactly as each list's resolved order does. Hash the raw
@@ -5938,6 +6147,7 @@ fn export_item(item: ItemView) -> ExportItem {
         started_at: item.started_at,
         done_at: item.done_at,
         binned_at: item.binned_at,
+        inbox_at: item.inbox_at,
     }
 }
 
@@ -5991,9 +6201,8 @@ fn is_reserved_list(list_id: &str) -> bool {
 }
 
 fn seed_builtins(doc: &LoroDoc) -> Result<bool, DocError> {
-    // `LIST_INBOX` is a *reserved id*, not a ListMeta row — items
-    // reference it as the string "inbox" and clients render its label
-    // client-side. Touch the root containers so fresh docs keep the
+    // The reserved lists have no ListMeta row, and Inbox no container
+    // at all (its items carry no location). Touch the root containers so fresh docs keep the
     // same top-level shape; no ops are emitted for untouched roots.
     //
     // Starter content (`WELCOME_ITEM`) is deliberately NOT seeded
@@ -6005,7 +6214,6 @@ fn seed_builtins(doc: &LoroDoc) -> Result<bool, DocError> {
     let _ = doc.get_map(ROOT_ITEMS);
     let _ = doc.get_movable_list(ROOT_LISTS);
     let _ = doc.get_map(ROOT_SETTINGS);
-    let _ = doc.get_movable_list(order_root_name(LIST_INBOX).as_str());
     Ok(false)
 }
 
@@ -6341,18 +6549,21 @@ fn read_string_list(map: &LoroMap, key: &str) -> Vec<String> {
 
 /// Location/lifecycle slice used by the projection index. Items with a
 /// missing or unparseable `location` deterministically project into
-/// `inbox`'s fallback tail (empty placement never matches an entry) so
-/// data is never hidden by a bad register.
+/// `inbox` so data is never hidden by a bad register. `list_id` is
+/// `located_in` here; [`ProjectionIndex::resolve`] folds orphans into
+/// Inbox.
 fn item_meta(map: &LoroMap) -> ItemMeta {
     let (list_id, placement_id) = read_string(map, KEY_LOCATION)
         .and_then(|s| Location::parse(&s))
         .map(|l| (l.list_id, l.placement_id))
         .unwrap_or_else(|| (LIST_INBOX.to_string(), String::new()));
     ItemMeta {
+        located_in: list_id.clone(),
         list_id,
         placement_id,
         open: is_open(map),
         created_at: read_i64(map, KEY_CREATED_AT).unwrap_or(0),
+        inbox_at: read_i64(map, KEY_INBOX_AT),
     }
 }
 
@@ -6466,6 +6677,7 @@ fn item_view(map: &LoroMap) -> Option<ItemView> {
         started_at: read_i64(map, KEY_STARTED_AT),
         done_at: read_i64(map, KEY_DONE_AT),
         binned_at: read_i64(map, KEY_BINNED_AT),
+        inbox_at: read_i64(map, KEY_INBOX_AT),
     })
 }
 
@@ -6925,6 +7137,10 @@ mod tests {
             guard.open_visible_counts, fresh.open_visible_counts,
             "open visible-entry counts out of sync with doc"
         );
+        assert_eq!(
+            guard.live_lists, fresh.live_lists,
+            "live list ids out of sync with doc"
+        );
     }
 
     /// spec/peer-id-plan.md: the `_with_peer` constructors bind the
@@ -7086,7 +7302,9 @@ mod tests {
 
         assert!(doc.items().get(&a).is_some());
         assert!(doc.items().get(&b).is_some());
-        assert_eq!(doc.order_list(LIST_INBOX).len(), 1);
+        // Inbox is a queue: its capture writes no order entry
+        // (`spec/inbox-plan.md`).
+        assert_eq!(doc.order_list(LIST_INBOX).len(), 0);
         assert_eq!(doc.order_list(&other).len(), 1);
         // The v1 root (`items` as a MovableList) is a different
         // container type entirely and stays empty.
@@ -7096,9 +7314,10 @@ mod tests {
     #[test]
     fn reordering_one_list_does_not_touch_other_order_containers() {
         let doc = Doc::new().unwrap();
+        let mine = doc.add_list("Mine").unwrap();
         let other = doc.add_list("Other").unwrap();
-        let a = doc.add_item(LIST_INBOX, "a").unwrap();
-        let _b = doc.add_item(LIST_INBOX, "b").unwrap();
+        let a = doc.add_item(&mine, "a").unwrap();
+        let _b = doc.add_item(&mine, "b").unwrap();
         let o1 = doc.add_item(&other, "o1").unwrap();
         let o2 = doc.add_item(&other, "o2").unwrap();
 
@@ -7110,7 +7329,7 @@ mod tests {
         };
         let vv_before = doc.oplog_vv();
 
-        doc.move_item(&a, LIST_INBOX, 1).unwrap();
+        doc.move_item(&a, &mine, 1).unwrap();
 
         let other_after: Vec<Option<OrderEntry>> = {
             let order = doc.order_list(&other);
@@ -7968,13 +8187,14 @@ mod tests {
     #[test]
     fn hard_delete_removes_order_entries() {
         let doc = Doc::new().unwrap();
-        let a = doc.add_item(LIST_INBOX, "a").unwrap();
-        let b = doc.add_item(LIST_INBOX, "b").unwrap();
+        let l = doc.add_list("L").unwrap();
+        let a = doc.add_item(&l, "a").unwrap();
+        let b = doc.add_item(&l, "b").unwrap();
         doc.set_item_binned(&b, true).unwrap();
-        assert_eq!(doc.order_list(LIST_INBOX).len(), 2);
+        assert_eq!(doc.order_list(&l).len(), 2);
         doc.delete_binned(&b).unwrap();
-        assert_eq!(doc.order_list(LIST_INBOX).len(), 1);
-        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![a]);
+        assert_eq!(doc.order_list(&l).len(), 1);
+        assert_eq!(doc.open_item_ids(&l), vec![a]);
         assert_open_projection_matches_doc(&doc);
     }
 
@@ -7983,7 +8203,7 @@ mod tests {
         let doc = Doc::new().unwrap();
         let mylist = doc.add_list("Errands").unwrap();
         let id = doc.add_item(&mylist, "milk").unwrap();
-        doc.delete_list(&mylist).unwrap();
+        doc.delete_list(&mylist, DeleteListMode::ToBin).unwrap();
         let view = doc.get_item(&id).unwrap();
         assert_eq!(view.list_id, LIST_INBOX);
         assert!(view.is_binned(), "deleting a list bins its items");
@@ -8000,7 +8220,7 @@ mod tests {
         doc.set_item_binned(&binned, true).unwrap();
         let main_existing = doc.add_item(LIST_INBOX, "already here").unwrap();
 
-        doc.delete_list(&mylist).unwrap();
+        doc.delete_list(&mylist, DeleteListMode::ToBin).unwrap();
 
         for id in [&open, &done, &binned] {
             assert_eq!(doc.get_item(id).unwrap().list_id, LIST_INBOX);
@@ -8023,7 +8243,8 @@ mod tests {
     fn delete_main_refused() {
         let doc = Doc::new().unwrap();
         assert!(matches!(
-            doc.delete_list(LIST_INBOX).unwrap_err(),
+            doc.delete_list(LIST_INBOX, DeleteListMode::ToBin)
+                .unwrap_err(),
             DocError::CannotDeleteBuiltin(_)
         ));
     }
@@ -8183,31 +8404,33 @@ mod tests {
 
     #[test]
     fn fingerprint_diverges_when_order_diverges() {
-        let a = Doc::new().unwrap();
-        let b = Doc::new().unwrap();
-        let a1 = a.add_item(LIST_INBOX, "one").unwrap();
-        let a2 = a.add_item(LIST_INBOX, "two").unwrap();
-        let b1 = b.add_item(LIST_INBOX, "one").unwrap();
-        let b2 = b.add_item(LIST_INBOX, "two").unwrap();
+        let dek = Dek::generate();
+        let mut a = Doc::new().unwrap();
+        let l = a.add_list("L").unwrap();
+        let one = a.add_item(&l, "one").unwrap();
+        let two = a.add_item(&l, "two").unwrap();
+        let b = sync_fresh_peer(&mut a, &dek);
+        assert_eq!(a.fingerprint(), b.fingerprint());
 
-        a.move_item(&a1, LIST_INBOX, 1).unwrap();
+        a.move_item(&one, &l, 1).unwrap();
 
-        assert_eq!(a.open_item_ids(LIST_INBOX), vec![a2, a1]);
-        assert_eq!(b.open_item_ids(LIST_INBOX), vec![b1, b2]);
+        assert_eq!(a.open_item_ids(&l), vec![two.clone(), one.clone()]);
+        assert_eq!(b.open_item_ids(&l), vec![one, two]);
         assert_ne!(a.fingerprint(), b.fingerprint());
     }
 
     #[test]
     fn repeated_moves_keep_index_in_sync() {
         let doc = Doc::new().unwrap();
-        let _a = doc.add_item(LIST_INBOX, "a").unwrap();
-        let b = doc.add_item(LIST_INBOX, "b").unwrap();
-        let _c = doc.add_item(LIST_INBOX, "c").unwrap();
+        let l = doc.add_list("L").unwrap();
+        let _a = doc.add_item(&l, "a").unwrap();
+        let b = doc.add_item(&l, "b").unwrap();
+        let _c = doc.add_item(&l, "c").unwrap();
 
         for target in [0, 2, 0, 2, 1, 0, 2, 0, 1, 2] {
-            doc.move_item(&b, LIST_INBOX, target).unwrap();
+            doc.move_item(&b, &l, target).unwrap();
             assert_eq!(
-                doc.open_item_ids(LIST_INBOX).iter().position(|id| id == &b),
+                doc.open_item_ids(&l).iter().position(|id| id == &b),
                 Some(target)
             );
             assert_open_projection_matches_doc(&doc);
@@ -8238,34 +8461,32 @@ mod tests {
     #[test]
     fn cross_list_move_removes_source_entry_best_effort() {
         let doc = Doc::new().unwrap();
+        let l = doc.add_list("L").unwrap();
         let other = doc.add_list("Other").unwrap();
-        let id = doc.add_item(LIST_INBOX, "x").unwrap();
-        assert_eq!(doc.order_list(LIST_INBOX).len(), 1);
+        let id = doc.add_item(&l, "x").unwrap();
+        assert_eq!(doc.order_list(&l).len(), 1);
         doc.move_item(&id, &other, 0).unwrap();
-        assert_eq!(
-            doc.order_list(LIST_INBOX).len(),
-            0,
-            "source order entry cleaned up"
-        );
+        assert_eq!(doc.order_list(&l).len(), 0, "source order entry cleaned up");
         assert_eq!(doc.order_list(&other).len(), 1);
     }
 
     #[test]
     fn open_projection_survives_bulk_archive_then_reorder() {
         let doc = Doc::new().unwrap();
+        let l = doc.add_list("L").unwrap();
         let historical = doc
-            .add_items_at(LIST_INBOX, &["old 1", "old 2", "old 3"], 0)
+            .add_items_at(&l, &["old 1", "old 2", "old 3"], 0)
             .unwrap();
         let historical_refs: Vec<&str> = historical.iter().map(String::as_str).collect();
         doc.set_items_done(&historical_refs, true).unwrap();
 
         let open = doc
-            .add_items_at(LIST_INBOX, &["current 1", "current 2", "current 3"], 0)
+            .add_items_at(&l, &["current 1", "current 2", "current 3"], 0)
             .unwrap();
-        doc.move_item(&open[2], LIST_INBOX, 0).unwrap();
+        doc.move_item(&open[2], &l, 0).unwrap();
 
         assert_eq!(
-            doc.open_item_ids(LIST_INBOX),
+            doc.open_item_ids(&l),
             vec![open[2].clone(), open[0].clone(), open[1].clone()]
         );
         assert_open_projection_matches_doc(&doc);
@@ -8329,7 +8550,7 @@ mod tests {
         let doc = Doc::new().unwrap();
         let mylist = doc.add_list("Errands").unwrap();
         let id = doc.add_item(&mylist, "x").unwrap();
-        doc.delete_list(&mylist).unwrap();
+        doc.delete_list(&mylist, DeleteListMode::ToBin).unwrap();
         // Items are discarded to the bin: gone from every open view,
         // relocated to main, and present in the cross-list bin view.
         assert!(doc.open_item_ids(&mylist).is_empty());
@@ -8415,7 +8636,8 @@ mod tests {
             DocError::CannotMoveBuiltin(_)
         ));
         assert!(matches!(
-            doc.delete_list(LIST_EVENTS).unwrap_err(),
+            doc.delete_list(LIST_EVENTS, DeleteListMode::ToBin)
+                .unwrap_err(),
             DocError::CannotDeleteBuiltin(_)
         ));
         // No list or board view to save.
@@ -8433,7 +8655,7 @@ mod tests {
         let list = doc.add_list("Trip").unwrap();
         let item = doc.add_item(&list, "book flights").unwrap();
         doc.add_item(LIST_EVENTS, "flight out").unwrap();
-        doc.delete_list(&list).unwrap();
+        doc.delete_list(&list, DeleteListMode::ToBin).unwrap();
         let view = doc.get_item(&item).unwrap();
         assert_eq!(view.list_id, LIST_INBOX);
         assert!(view.is_binned());
@@ -8596,16 +8818,17 @@ mod tests {
     fn concurrent_reorder_and_lifecycle_change_converge() {
         let dek = Dek::generate();
         let mut a = Doc::new().unwrap();
+        let l = a.add_list("L").unwrap();
         let ids: Vec<String> = ["a", "b", "c", "d"]
             .iter()
-            .map(|t| a.add_item(LIST_INBOX, t).unwrap())
+            .map(|t| a.add_item(&l, t).unwrap())
             .collect();
         let seed = a.pending_export(&dek).unwrap().unwrap();
         a.mark_persisted();
         let mut b = Doc::empty();
         b.apply_remote(&dek, &seed).unwrap();
 
-        a.move_item(&ids[3], LIST_INBOX, 0).unwrap();
+        a.move_item(&ids[3], &l, 0).unwrap();
         b.set_item_done(&ids[1], true).unwrap();
         let blob_a = a.pending_export(&dek).unwrap().unwrap();
         a.mark_persisted();
@@ -8616,7 +8839,7 @@ mod tests {
 
         assert_eq!(a.fingerprint(), b.fingerprint());
         assert_eq!(
-            a.open_item_ids(LIST_INBOX),
+            a.open_item_ids(&l),
             vec![ids[3].clone(), ids[0].clone(), ids[2].clone()]
         );
         assert!(a.get_item(&ids[1]).unwrap().is_done());
@@ -8629,8 +8852,9 @@ mod tests {
     #[test]
     fn stale_and_duplicate_entries_are_invisible() {
         let doc = Doc::new().unwrap();
-        let a = doc.add_item(LIST_INBOX, "a").unwrap();
-        let b = doc.add_item(LIST_INBOX, "b").unwrap();
+        let l = doc.add_list("L").unwrap();
+        let a = doc.add_item(&l, "a").unwrap();
+        let b = doc.add_item(&l, "b").unwrap();
 
         // Duplicate of a's canonical entry + a stale entry with a bogus
         // placement + an entry for a nonexistent item.
@@ -8638,7 +8862,7 @@ mod tests {
             let guard = doc.item_index.lock().unwrap();
             guard.meta[&a].placement_id.clone()
         };
-        let order = doc.order_list(LIST_INBOX);
+        let order = doc.order_list(&l);
         order
             .push(
                 OrderEntry {
@@ -8663,8 +8887,8 @@ mod tests {
         doc.inner.commit();
         doc.rebuild_index();
 
-        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![a, b]);
-        assert_eq!(doc.order_list(LIST_INBOX).len(), 5);
+        assert_eq!(doc.open_item_ids(&l), vec![a, b]);
+        assert_eq!(doc.order_list(&l).len(), 5);
         assert_open_projection_matches_doc(&doc);
     }
 
@@ -8675,34 +8899,32 @@ mod tests {
     #[test]
     fn missing_entry_falls_back_deterministically_and_reconciles() {
         let doc = Doc::new().unwrap();
-        let a = doc.add_item(LIST_INBOX, "a").unwrap();
-        let b = doc.add_item(LIST_INBOX, "b").unwrap();
-        let c = doc.add_item(LIST_INBOX, "c").unwrap();
+        let l = doc.add_list("L").unwrap();
+        let a = doc.add_item(&l, "a").unwrap();
+        let b = doc.add_item(&l, "b").unwrap();
+        let c = doc.add_item(&l, "c").unwrap();
 
         // Simulate a lost entry: delete b's canonical entry directly.
         let b_pos = {
             let guard = doc.item_index.lock().unwrap();
-            guard.canonical_raw_pos(LIST_INBOX, &b).unwrap()
+            guard.canonical_raw_pos(&l, &b).unwrap()
         };
-        doc.order_list(LIST_INBOX).delete(b_pos, 1).unwrap();
+        doc.order_list(&l).delete(b_pos, 1).unwrap();
         doc.inner.commit();
         doc.rebuild_index();
 
         // b is not hidden: it lands in the fallback tail (after the
         // entry-backed items, created_at/id order).
-        assert_eq!(
-            doc.open_item_ids(LIST_INBOX),
-            vec![a.clone(), c.clone(), b.clone()]
-        );
+        assert_eq!(doc.open_item_ids(&l), vec![a.clone(), c.clone(), b.clone()]);
 
         // Reads must not have mutated anything.
-        assert_eq!(doc.order_list(LIST_INBOX).len(), 2);
+        assert_eq!(doc.order_list(&l).len(), 2);
 
         // Reconcile materializes b's entry; visible order unchanged.
         let repairs = doc.reconcile().unwrap();
         assert!(repairs >= 1, "expected at least one repair");
-        assert_eq!(doc.order_list(LIST_INBOX).len(), 3);
-        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![a, c, b]);
+        assert_eq!(doc.order_list(&l).len(), 3);
+        assert_eq!(doc.open_item_ids(&l), vec![a, c, b]);
         assert_open_projection_matches_doc(&doc);
         // Second run is a no-op.
         assert_eq!(doc.reconcile().unwrap(), 0);
@@ -8711,12 +8933,13 @@ mod tests {
     #[test]
     fn reconcile_removes_stale_and_duplicate_entries() {
         let doc = Doc::new().unwrap();
-        let a = doc.add_item(LIST_INBOX, "a").unwrap();
+        let l = doc.add_list("L").unwrap();
+        let a = doc.add_item(&l, "a").unwrap();
         let a_placement = {
             let guard = doc.item_index.lock().unwrap();
             guard.meta[&a].placement_id.clone()
         };
-        let order = doc.order_list(LIST_INBOX);
+        let order = doc.order_list(&l);
         order
             .push(
                 OrderEntry {
@@ -8730,12 +8953,12 @@ mod tests {
         order.push("ghost:stale").unwrap();
         doc.inner.commit();
         doc.rebuild_index();
-        assert_eq!(doc.order_list(LIST_INBOX).len(), 3);
+        assert_eq!(doc.order_list(&l).len(), 3);
 
         let repairs = doc.reconcile().unwrap();
         assert_eq!(repairs, 2);
-        assert_eq!(doc.order_list(LIST_INBOX).len(), 1);
-        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![a]);
+        assert_eq!(doc.order_list(&l).len(), 1);
+        assert_eq!(doc.open_item_ids(&l), vec![a]);
         assert_eq!(doc.reconcile().unwrap(), 0);
         assert_open_projection_matches_doc(&doc);
     }
@@ -8745,23 +8968,25 @@ mod tests {
     #[test]
     fn reconcile_commits_are_excluded_from_workspace_undo() {
         let doc = Doc::new().unwrap();
-        let a = doc.add_item(LIST_INBOX, "a").unwrap();
+        let l = doc.add_list("L").unwrap();
+        doc.forget_undo();
+        let a = doc.add_item(&l, "a").unwrap();
         // Plant a stale entry outside the undo stack (origin `remote`,
         // as if another device had left it) so the only undoable step
         // is the add.
-        doc.order_list(LIST_INBOX).push("ghost:stale").unwrap();
+        doc.order_list(&l).push("ghost:stale").unwrap();
         doc.inner.commit_with(CommitOptions::new().origin("remote"));
         doc.rebuild_index();
-        assert_eq!(doc.order_list(LIST_INBOX).len(), 2);
+        assert_eq!(doc.order_list(&l).len(), 2);
 
         assert_eq!(doc.reconcile().unwrap(), 1);
-        assert_eq!(doc.order_list(LIST_INBOX).len(), 1);
+        assert_eq!(doc.order_list(&l).len(), 1);
 
         // Were the sweep on the stack, this undo would resurrect the
         // ghost and leave `a` in place.
         assert!(doc.undo().unwrap());
         assert!(doc.get_item(&a).is_none());
-        assert_eq!(doc.order_list(LIST_INBOX).len(), 0);
+        assert_eq!(doc.order_list(&l).len(), 0);
         assert!(!doc.can_undo());
     }
 
@@ -8773,32 +8998,30 @@ mod tests {
     #[test]
     fn reconcile_sweep_removes_old_closed_entries_and_keeps_fast_path() {
         let doc = Doc::new().unwrap();
-        let a = doc.add_item(LIST_INBOX, "a").unwrap();
-        let b = doc.add_item(LIST_INBOX, "b").unwrap();
-        let c = doc.add_item(LIST_INBOX, "c").unwrap();
+        let l = doc.add_list("L").unwrap();
+        let a = doc.add_item(&l, "a").unwrap();
+        let b = doc.add_item(&l, "b").unwrap();
+        let c = doc.add_item(&l, "c").unwrap();
         doc.set_item_done(&b, true).unwrap();
-        assert_eq!(doc.order_list(LIST_INBOX).len(), 3);
+        assert_eq!(doc.order_list(&l).len(), 3);
         assert_open_projection_matches_doc(&doc);
 
         // Cutoff in the past: nothing has been closed long enough. The
         // structural pass never sweeps at all.
         assert_eq!(doc.reconcile_with(Some(0)).unwrap(), 0);
         assert_eq!(doc.reconcile().unwrap(), 0);
-        assert_eq!(doc.order_list(LIST_INBOX).len(), 3);
+        assert_eq!(doc.order_list(&l).len(), 3);
 
         let future = now_millis() + 60_000;
         assert_eq!(doc.reconcile_with(Some(future)).unwrap(), 1);
-        assert_eq!(doc.order_list(LIST_INBOX).len(), 2);
-        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![a.clone(), c.clone()]);
+        assert_eq!(doc.order_list(&l).len(), 2);
+        assert_eq!(doc.open_item_ids(&l), vec![a.clone(), c.clone()]);
         assert_open_projection_matches_doc(&doc);
         {
             let guard = doc.item_index.lock().unwrap();
+            assert!(guard.members[&l].contains(&b), "still located there");
             assert!(
-                guard.members[LIST_INBOX].contains(&b),
-                "still located there"
-            );
-            assert!(
-                guard.tail_is_empty(LIST_INBOX),
+                guard.tail_is_empty(&l),
                 "a swept closed item must not demote the list to the walk path"
             );
         }
@@ -8810,23 +9033,17 @@ mod tests {
         );
 
         doc.set_item_done(&b, false).unwrap();
-        assert_eq!(
-            doc.open_item_ids(LIST_INBOX),
-            vec![a.clone(), c.clone(), b.clone()]
-        );
+        assert_eq!(doc.open_item_ids(&l), vec![a.clone(), c.clone(), b.clone()]);
         assert_open_projection_matches_doc(&doc);
         {
             let guard = doc.item_index.lock().unwrap();
-            assert!(
-                !guard.tail_is_empty(LIST_INBOX),
-                "reopened item sits in the tail"
-            );
+            assert!(!guard.tail_is_empty(&l), "reopened item sits in the tail");
         }
         assert_eq!(doc.reconcile().unwrap(), 1);
-        assert_eq!(doc.order_list(LIST_INBOX).len(), 3);
-        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![a, c, b]);
+        assert_eq!(doc.order_list(&l).len(), 3);
+        assert_eq!(doc.open_item_ids(&l), vec![a, c, b]);
         assert_open_projection_matches_doc(&doc);
-        assert!(doc.item_index.lock().unwrap().tail_is_empty(LIST_INBOX));
+        assert!(doc.item_index.lock().unwrap().tail_is_empty(&l));
     }
 
     /// Binned items age by `binned_at`; a swept item can still be
@@ -8834,22 +9051,23 @@ mod tests {
     #[test]
     fn reconcile_sweep_covers_binned_and_hard_delete_tolerates_it() {
         let doc = Doc::new().unwrap();
-        let a = doc.add_item(LIST_INBOX, "a").unwrap();
-        let b = doc.add_item(LIST_INBOX, "b").unwrap();
+        let l = doc.add_list("L").unwrap();
+        let a = doc.add_item(&l, "a").unwrap();
+        let b = doc.add_item(&l, "b").unwrap();
         doc.set_item_binned(&b, true).unwrap();
         let future = now_millis() + 60_000;
         assert_eq!(doc.reconcile_with(Some(future)).unwrap(), 1);
-        assert_eq!(doc.order_list(LIST_INBOX).len(), 1);
+        assert_eq!(doc.order_list(&l).len(), 1);
         assert_open_projection_matches_doc(&doc);
 
         doc.set_item_binned(&b, false).unwrap();
-        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![a.clone(), b.clone()]);
+        assert_eq!(doc.open_item_ids(&l), vec![a.clone(), b.clone()]);
         assert_open_projection_matches_doc(&doc);
 
         doc.set_item_binned(&b, true).unwrap();
         doc.delete_binned(&b).unwrap();
         assert!(doc.get_item(&b).is_none());
-        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![a]);
+        assert_eq!(doc.open_item_ids(&l), vec![a]);
         assert_open_projection_matches_doc(&doc);
     }
 
@@ -8859,9 +9077,10 @@ mod tests {
     fn concurrent_sweep_and_reopen_converge() {
         let dek = Dek::generate();
         let mut a = Doc::new().unwrap();
-        let x = a.add_item(LIST_INBOX, "x").unwrap();
-        let y = a.add_item(LIST_INBOX, "y").unwrap();
-        let z = a.add_item(LIST_INBOX, "z").unwrap();
+        let l = a.add_list("L").unwrap();
+        let x = a.add_item(&l, "x").unwrap();
+        let y = a.add_item(&l, "y").unwrap();
+        let z = a.add_item(&l, "z").unwrap();
         a.set_item_done(&y, true).unwrap();
         let mut b = sync_fresh_peer(&mut a, &dek);
 
@@ -8870,8 +9089,8 @@ mod tests {
         exchange(&mut a, &mut b, &dek);
 
         let want = vec![x, z, y];
-        assert_eq!(a.open_item_ids(LIST_INBOX), want);
-        assert_eq!(b.open_item_ids(LIST_INBOX), want);
+        assert_eq!(a.open_item_ids(&l), want);
+        assert_eq!(b.open_item_ids(&l), want);
         assert_eq!(a.fingerprint(), b.fingerprint());
         assert_open_projection_matches_doc(&a);
         assert_open_projection_matches_doc(&b);
@@ -8879,7 +9098,7 @@ mod tests {
         // other converges onto it with nothing visible moving.
         assert_eq!(b.reconcile().unwrap(), 1);
         exchange(&mut a, &mut b, &dek);
-        assert_eq!(a.open_item_ids(LIST_INBOX), want);
+        assert_eq!(a.open_item_ids(&l), want);
         assert_eq!(a.fingerprint(), b.fingerprint());
         assert_open_projection_matches_doc(&a);
     }
@@ -9014,7 +9233,7 @@ mod tests {
         let other = doc.add_list("Other").unwrap();
         let id = doc.add_item(&other, "in other").unwrap();
         let _ = doc.drain_events();
-        doc.delete_list(&other).unwrap();
+        doc.delete_list(&other, DeleteListMode::ToBin).unwrap();
         let evs = doc.drain_events();
         // The item is relocated to `inbox` (ItemListChanged) and binned
         // (ItemLifecycleChanged, so it drops out of the open projection),
@@ -9104,12 +9323,13 @@ mod tests {
     fn remote_move_translates_to_item_moved_with_open_index() {
         let dek = Dek::generate();
         let mut a = Doc::new().unwrap();
-        let _first = a.add_item(LIST_INBOX, "first").unwrap();
-        let _second = a.add_item(LIST_INBOX, "second").unwrap();
-        let third = a.add_item(LIST_INBOX, "third").unwrap();
+        let l = a.add_list("L").unwrap();
+        let _first = a.add_item(&l, "first").unwrap();
+        let _second = a.add_item(&l, "second").unwrap();
+        let third = a.add_item(&l, "third").unwrap();
         let mut b = sync_fresh_peer(&mut a, &dek);
 
-        a.move_item(&third, LIST_INBOX, 0).unwrap();
+        a.move_item(&third, &l, 0).unwrap();
         let blob = a.pending_export(&dek).unwrap().unwrap();
         b.apply_remote(&dek, &blob).unwrap();
 
@@ -9122,7 +9342,7 @@ mod tests {
             other => panic!("expected surgical ItemMoved, got {other:?}"),
         }
         assert_open_projection_matches_doc(&b);
-        assert_eq!(b.open_item_ids(LIST_INBOX)[0], third);
+        assert_eq!(b.open_item_ids(&l)[0], third);
         assert_eq!(a.fingerprint(), b.fingerprint());
     }
 
@@ -9219,9 +9439,10 @@ mod tests {
     fn remote_multi_item_move_down_converges_on_consumer() {
         let dek = Dek::generate();
         let mut a = Doc::new().unwrap();
+        let l = a.add_list("L").unwrap();
         let ids: Vec<String> = ["a", "b", "c", "d", "e"]
             .iter()
-            .map(|t| a.add_item(LIST_INBOX, t).unwrap())
+            .map(|t| a.add_item(&l, t).unwrap())
             .collect();
         let mut b = sync_fresh_peer(&mut a, &dek);
 
@@ -9230,8 +9451,8 @@ mod tests {
         // move b to open index 3, then a to open index 2. Final order:
         // [c, d, a, b, e].
         let pre_open = open_state(&b);
-        a.move_item(&ids[1], LIST_INBOX, 3).unwrap();
-        a.move_item(&ids[0], LIST_INBOX, 2).unwrap();
+        a.move_item(&ids[1], &l, 3).unwrap();
+        a.move_item(&ids[0], &l, 2).unwrap();
         let blob = a.pending_export(&dek).unwrap().unwrap();
         b.apply_remote(&dek, &blob).unwrap();
 
@@ -9243,7 +9464,7 @@ mod tests {
             ids[1].clone(),
             ids[4].clone(),
         ];
-        assert_eq!(a.open_item_ids(LIST_INBOX), expected);
+        assert_eq!(a.open_item_ids(&l), expected);
         assert_eq!(a.fingerprint(), b.fingerprint());
         assert_open_projection_matches_doc(&b);
         assert!(
@@ -9252,7 +9473,7 @@ mod tests {
         );
         assert_eq!(
             replay_open_events(&pre_open, &evs)
-                .get(LIST_INBOX)
+                .get(&l)
                 .cloned()
                 .unwrap_or_default(),
             expected,
@@ -9264,17 +9485,18 @@ mod tests {
     fn remote_multi_item_move_up_converges_on_consumer() {
         let dek = Dek::generate();
         let mut a = Doc::new().unwrap();
+        let l = a.add_list("L").unwrap();
         let ids: Vec<String> = ["a", "b", "c", "d", "e"]
             .iter()
-            .map(|t| a.add_item(LIST_INBOX, t).unwrap())
+            .map(|t| a.add_item(&l, t).unwrap())
             .collect();
         let mut b = sync_fresh_peer(&mut a, &dek);
 
         // Select c, d and drag them to the top — `planReorderMoves`
         // emits move c to 0, then d to 1. Final order: [c, d, a, b, e].
         let pre_open = open_state(&b);
-        a.move_item(&ids[2], LIST_INBOX, 0).unwrap();
-        a.move_item(&ids[3], LIST_INBOX, 1).unwrap();
+        a.move_item(&ids[2], &l, 0).unwrap();
+        a.move_item(&ids[3], &l, 1).unwrap();
         let blob = a.pending_export(&dek).unwrap().unwrap();
         b.apply_remote(&dek, &blob).unwrap();
 
@@ -9286,7 +9508,7 @@ mod tests {
             ids[1].clone(),
             ids[4].clone(),
         ];
-        assert_eq!(a.open_item_ids(LIST_INBOX), expected);
+        assert_eq!(a.open_item_ids(&l), expected);
         assert_eq!(a.fingerprint(), b.fingerprint());
         assert_open_projection_matches_doc(&b);
         assert!(
@@ -9295,7 +9517,7 @@ mod tests {
         );
         assert_eq!(
             replay_open_events(&pre_open, &evs)
-                .get(LIST_INBOX)
+                .get(&l)
                 .cloned()
                 .unwrap_or_default(),
             expected,
@@ -9307,17 +9529,18 @@ mod tests {
     fn remote_discontiguous_multi_move_converges_on_consumer() {
         let dek = Dek::generate();
         let mut a = Doc::new().unwrap();
+        let l = a.add_list("L").unwrap();
         let ids: Vec<String> = ["a", "b", "c", "d", "e", "f"]
             .iter()
-            .map(|t| a.add_item(LIST_INBOX, t).unwrap())
+            .map(|t| a.add_item(&l, t).unwrap())
             .collect();
         let mut b = sync_fresh_peer(&mut a, &dek);
 
         // Discontiguous selection {a, c} dragged down to sit before f:
         // move a below e, then c below e. Exercises a non-adjacent widen.
         let pre_open = open_state(&b);
-        a.move_item(&ids[0], LIST_INBOX, 3).unwrap();
-        a.move_item(&ids[2], LIST_INBOX, 4).unwrap();
+        a.move_item(&ids[0], &l, 3).unwrap();
+        a.move_item(&ids[2], &l, 4).unwrap();
         let blob = a.pending_export(&dek).unwrap().unwrap();
         b.apply_remote(&dek, &blob).unwrap();
 
@@ -9330,10 +9553,10 @@ mod tests {
         );
         assert_eq!(
             replay_open_events(&pre_open, &evs)
-                .get(LIST_INBOX)
+                .get(&l)
                 .cloned()
                 .unwrap_or_default(),
-            a.open_item_ids(LIST_INBOX),
+            a.open_item_ids(&l),
             "emitted events interleave on the consumer; got {evs:?}"
         );
     }
@@ -9635,11 +9858,12 @@ mod tests {
     #[test]
     fn add_item_at_inserts_at_target_position() {
         let doc = Doc::new().unwrap();
-        let a = doc.add_item(LIST_INBOX, "a").unwrap();
-        let b = doc.add_item(LIST_INBOX, "b").unwrap();
-        let c = doc.add_item(LIST_INBOX, "c").unwrap();
-        let mid = doc.add_item_at(LIST_INBOX, "mid", 1).unwrap();
-        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![a, mid, b, c]);
+        let l = doc.add_list("L").unwrap();
+        let a = doc.add_item(&l, "a").unwrap();
+        let b = doc.add_item(&l, "b").unwrap();
+        let c = doc.add_item(&l, "c").unwrap();
+        let mid = doc.add_item_at(&l, "mid", 1).unwrap();
+        assert_eq!(doc.open_item_ids(&l), vec![a, mid, b, c]);
     }
 
     #[test]
@@ -9653,25 +9877,27 @@ mod tests {
     #[test]
     fn add_item_at_skips_other_lists_and_non_open_when_counting() {
         let doc = Doc::new().unwrap();
+        let l = doc.add_list("L").unwrap();
         let other = doc.add_list("Other").unwrap();
-        let a = doc.add_item(LIST_INBOX, "a").unwrap();
+        let a = doc.add_item(&l, "a").unwrap();
         let _hidden = doc.add_item(&other, "hidden").unwrap();
-        let b = doc.add_item(LIST_INBOX, "b").unwrap();
-        let done = doc.add_item(LIST_INBOX, "done").unwrap();
+        let b = doc.add_item(&l, "b").unwrap();
+        let done = doc.add_item(&l, "done").unwrap();
         doc.set_item_done(&done, true).unwrap();
         // Position 1 in main's open view should land between a and b
         // regardless of the other-list and done items in between.
-        let mid = doc.add_item_at(LIST_INBOX, "mid", 1).unwrap();
-        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![a, mid, b]);
+        let mid = doc.add_item_at(&l, "mid", 1).unwrap();
+        assert_eq!(doc.open_item_ids(&l), vec![a, mid, b]);
     }
 
     #[test]
     fn add_item_at_emits_item_added_with_open_index() {
         let doc = Doc::new().unwrap();
-        let _a = doc.add_item(LIST_INBOX, "a").unwrap();
-        let _b = doc.add_item(LIST_INBOX, "b").unwrap();
+        let l = doc.add_list("L").unwrap();
+        let _a = doc.add_item(&l, "a").unwrap();
+        let _b = doc.add_item(&l, "b").unwrap();
         let _ = doc.drain_events();
-        let mid = doc.add_item_at(LIST_INBOX, "mid", 1).unwrap();
+        let mid = doc.add_item_at(&l, "mid", 1).unwrap();
         let evs = doc.drain_events();
         assert_eq!(evs.len(), 1);
         match &evs[0] {
@@ -9686,17 +9912,15 @@ mod tests {
     #[test]
     fn local_move_item_emits_destination_open_index() {
         let doc = Doc::new().unwrap();
-        let first = doc.add_item(LIST_INBOX, "first").unwrap();
-        let moved = doc.add_item(LIST_INBOX, "moved").unwrap();
-        let third = doc.add_item(LIST_INBOX, "third").unwrap();
+        let l = doc.add_list("L").unwrap();
+        let first = doc.add_item(&l, "first").unwrap();
+        let moved = doc.add_item(&l, "moved").unwrap();
+        let third = doc.add_item(&l, "third").unwrap();
         let _ = doc.drain_events();
 
-        doc.move_item(&moved, LIST_INBOX, 0).unwrap();
+        doc.move_item(&moved, &l, 0).unwrap();
 
-        assert_eq!(
-            doc.open_item_ids(LIST_INBOX),
-            vec![moved.clone(), first, third]
-        );
+        assert_eq!(doc.open_item_ids(&l), vec![moved.clone(), first, third]);
         let evs = doc.drain_events();
         assert!(
             evs.iter().any(
@@ -9802,12 +10026,13 @@ mod tests {
     #[test]
     fn add_items_at_inserts_in_order() {
         let doc = Doc::new().unwrap();
-        let a = doc.add_item(LIST_INBOX, "a").unwrap();
-        let b = doc.add_item(LIST_INBOX, "b").unwrap();
-        let ids = doc.add_items_at(LIST_INBOX, &["x", "y", "z"], 1).unwrap();
+        let l = doc.add_list("L").unwrap();
+        let a = doc.add_item(&l, "a").unwrap();
+        let b = doc.add_item(&l, "b").unwrap();
+        let ids = doc.add_items_at(&l, &["x", "y", "z"], 1).unwrap();
         assert_eq!(ids.len(), 3);
         assert_eq!(
-            doc.open_item_ids(LIST_INBOX),
+            doc.open_item_ids(&l),
             vec![a, ids[0].clone(), ids[1].clone(), ids[2].clone(), b],
         );
     }
@@ -9826,10 +10051,11 @@ mod tests {
     #[test]
     fn add_items_at_emits_one_event_per_item_with_increasing_open_indices() {
         let doc = Doc::new().unwrap();
-        let _a = doc.add_item(LIST_INBOX, "a").unwrap();
-        let _b = doc.add_item(LIST_INBOX, "b").unwrap();
+        let l = doc.add_list("L").unwrap();
+        let _a = doc.add_item(&l, "a").unwrap();
+        let _b = doc.add_item(&l, "b").unwrap();
         let _ = doc.drain_events();
-        let ids = doc.add_items_at(LIST_INBOX, &["x", "y"], 1).unwrap();
+        let ids = doc.add_items_at(&l, &["x", "y"], 1).unwrap();
         let evs = doc.drain_events();
         let added: Vec<(String, Option<usize>)> = evs
             .iter()
@@ -10136,6 +10362,7 @@ mod tests {
             started_at: None,
             done_at: None,
             binned_at: None,
+            inbox_at: None,
         });
 
         let dst = Doc::new().unwrap();
@@ -10232,6 +10459,7 @@ mod tests {
             started_at: None,
             done_at: None,
             binned_at: None,
+            inbox_at: None,
         });
         export.focus = vec![
             a.clone(),
@@ -11197,8 +11425,9 @@ mod tests {
     #[test]
     fn duplicate_copies_the_fields_and_sits_after_the_original() {
         let doc = Doc::new().unwrap();
-        let a = doc.add_item(LIST_INBOX, "a").unwrap();
-        let b = doc.add_item(LIST_INBOX, "b").unwrap();
+        let l = doc.add_list("L").unwrap();
+        let a = doc.add_item(&l, "a").unwrap();
+        let b = doc.add_item(&l, "b").unwrap();
         doc.set_item_lifecycle(&a, ItemLifecycle::Todo).unwrap();
         doc.set_item_deadline(&a, Some("2026-12-01")).unwrap();
         doc.set_item_when(&a, Some("2026-11-20T09:30")).unwrap();
@@ -11217,7 +11446,7 @@ mod tests {
 
         let copy = doc.duplicate_item(&a).unwrap();
         assert_eq!(
-            doc.open_item_ids(LIST_INBOX),
+            doc.open_item_ids(&l),
             vec![a.clone(), copy.clone(), b.clone()]
         );
         let (from, to) = (doc.get_item(&a).unwrap(), doc.get_item(&copy).unwrap());
@@ -11385,6 +11614,7 @@ mod tests {
                 started_at: None,
                 done_at: None,
                 binned_at: None,
+                inbox_at: None,
             }],
             focus: vec![],
         };
@@ -11514,12 +11744,13 @@ mod tests {
     #[test]
     fn oplog_replay_rebuilds_item_index() {
         let source = Doc::new().unwrap();
-        let id = source.add_item(LIST_INBOX, "replayed").unwrap();
+        let l = source.add_list("L").unwrap();
+        let id = source.add_item(&l, "replayed").unwrap();
         let updates = source.export_updates_after_bytes(&[]).unwrap();
 
         let mut restored = Doc::empty();
         restored.import_oplog_updates(&updates).unwrap();
-        restored.move_item(&id, LIST_INBOX, 0).unwrap();
+        restored.move_item(&id, &l, 0).unwrap();
 
         assert_eq!(restored.get_item(&id).unwrap().text, "replayed");
     }
@@ -11693,13 +11924,14 @@ mod tests {
     #[test]
     fn undo_move_emits_only_the_moved_item() {
         let doc = Doc::new().unwrap();
+        let l = doc.add_list("L").unwrap();
         let texts: Vec<String> = (0..200).map(|i| format!("item {i}")).collect();
         let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
-        let ids = doc.add_items_at(LIST_INBOX, &refs, 0).unwrap();
+        let ids = doc.add_items_at(&l, &refs, 0).unwrap();
         let _ = doc.drain_events();
 
         let moved = ids[199].clone();
-        doc.move_item(&moved, LIST_INBOX, 0).unwrap();
+        doc.move_item(&moved, &l, 0).unwrap();
         let _ = doc.drain_events();
         assert!(doc.undo().unwrap());
 
@@ -11712,7 +11944,7 @@ mod tests {
                 open_index: Some(199),
             } if id == &moved
         ));
-        assert_eq!(doc.open_item_ids(LIST_INBOX), ids);
+        assert_eq!(doc.open_item_ids(&l), ids);
     }
 
     #[test]
@@ -11750,9 +11982,10 @@ mod tests {
     #[test]
     fn plain_stepwise_undo_redo_round_trips_larger_reorder() {
         let doc = Doc::new().unwrap();
+        let l = doc.add_list("L").unwrap();
         let texts: Vec<String> = (0..20).map(|i| format!("item {i}")).collect();
         let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
-        let ids = doc.add_items_at(LIST_INBOX, &text_refs, 0).unwrap();
+        let ids = doc.add_items_at(&l, &text_refs, 0).unwrap();
 
         let moved_ids = vec![ids[5].clone(), ids[6].clone(), ids[7].clone()];
         let remaining: Vec<String> = ids
@@ -11771,25 +12004,25 @@ mod tests {
                     .iter()
                     .position(|cur| cur == id)
                     .expect("moved id must still exist");
-                doc.move_item(id, LIST_INBOX, index).unwrap();
+                doc.move_item(id, &l, index).unwrap();
                 current_ids.remove(current_index);
                 current_ids.insert(index, id.clone());
                 steps += 1;
             }
         }
 
-        let after_move = doc.open_item_ids(LIST_INBOX);
+        let after_move = doc.open_item_ids(&l);
         assert_eq!(after_move, next_ids);
 
         for _ in 0..steps {
             assert!(doc.undo().unwrap());
         }
-        assert_eq!(doc.open_item_ids(LIST_INBOX), ids);
+        assert_eq!(doc.open_item_ids(&l), ids);
 
         for _ in 0..steps {
             assert!(doc.redo().unwrap());
         }
-        assert_eq!(doc.open_item_ids(LIST_INBOX), after_move);
+        assert_eq!(doc.open_item_ids(&l), after_move);
     }
 
     #[test]
@@ -13241,6 +13474,391 @@ mod tests {
         let via_two = apply(&apply("hello", &a_ops), &b_ops);
         let via_one = apply("hello", &compose_utf16_deltas(&a_ops, &b_ops));
         assert_eq!(via_one, via_two);
+    }
+
+    // ---- Inbox as a queue (spec/inbox-plan.md) ----
+
+    /// Write an i64 register straight onto an item map, commit, and
+    /// rebuild: how these tests pin `created_at` / `inbox_at` so the
+    /// queue order doesn't hang on same-millisecond ties.
+    fn poke_i64(doc: &Doc, id: &str, key: &str, value: i64) {
+        doc.find_item(id).unwrap().insert(key, value).unwrap();
+        doc.inner.commit();
+        doc.rebuild_index();
+    }
+
+    /// Three Inbox captures pinned to `created_at` 1000, 2000, 3000.
+    fn inbox_abc(doc: &Doc) -> (String, String, String) {
+        let a = doc.add_item(LIST_INBOX, "a").unwrap();
+        let b = doc.add_item(LIST_INBOX, "b").unwrap();
+        let c = doc.add_item(LIST_INBOX, "c").unwrap();
+        poke_i64(doc, &a, KEY_CREATED_AT, 1000);
+        poke_i64(doc, &b, KEY_CREATED_AT, 2000);
+        poke_i64(doc, &c, KEY_CREATED_AT, 3000);
+        (a, b, c)
+    }
+
+    #[test]
+    fn inbox_capture_writes_no_entry_and_sorts_by_created_at() {
+        let doc = Doc::new().unwrap();
+        let (a, b, c) = inbox_abc(&doc);
+        assert_eq!(doc.order_list(LIST_INBOX).len(), 0);
+        assert_eq!(
+            doc.open_item_ids(LIST_INBOX),
+            vec![a.clone(), b.clone(), c.clone()]
+        );
+        // The order follows `created_at`, not capture order.
+        poke_i64(&doc, &a, KEY_CREATED_AT, 4000);
+        assert_eq!(
+            doc.open_item_ids(LIST_INBOX),
+            vec![b.clone(), c.clone(), a.clone()]
+        );
+        // A requested index is ignored: a fresh capture is the newest.
+        let d = doc.add_item_at(LIST_INBOX, "d", 0).unwrap();
+        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![b, c, a, d.clone()]);
+        assert_eq!(doc.order_list(LIST_INBOX).len(), 0);
+        assert_eq!(doc.get_item(&d).unwrap().inbox_at, None);
+        assert_open_projection_matches_doc(&doc);
+    }
+
+    fn has_location(doc: &Doc, id: &str) -> bool {
+        doc.find_item(id).unwrap().get(KEY_LOCATION).is_some()
+    }
+
+    /// Inbox is the absence of a list: capture, a move in, a list delete
+    /// and an adopt into Inbox leave no `location`; a move out writes it.
+    #[test]
+    fn inbox_items_carry_no_location() {
+        let doc = Doc::new().unwrap();
+        let list = doc.add_list("L").unwrap();
+        let captured = doc.add_item(LIST_INBOX, "captured").unwrap();
+        assert!(!has_location(&doc, &captured));
+
+        let moved = doc.add_item(&list, "moved").unwrap();
+        assert!(has_location(&doc, &moved));
+        doc.move_item(&moved, LIST_INBOX, 0).unwrap();
+        assert!(!has_location(&doc, &moved));
+        assert_open_projection_matches_doc(&doc);
+
+        doc.move_item(&captured, &list, 0).unwrap();
+        assert!(has_location(&doc, &captured));
+        assert_eq!(doc.get_item(&captured).unwrap().list_id, list);
+        assert_open_projection_matches_doc(&doc);
+
+        // Undo puts the location back; redo takes it away again.
+        doc.forget_undo();
+        doc.move_item(&captured, LIST_INBOX, 0).unwrap();
+        assert!(doc.undo().unwrap());
+        assert!(has_location(&doc, &captured));
+        assert_eq!(doc.open_item_ids(&list), vec![captured.clone()]);
+        assert_open_projection_matches_doc(&doc);
+        assert!(doc.redo().unwrap());
+        assert!(!has_location(&doc, &captured));
+        assert_open_projection_matches_doc(&doc);
+
+        let gone = doc.add_list("Gone").unwrap();
+        let in_gone = doc.add_item(&gone, "x").unwrap();
+        doc.delete_list(&gone, DeleteListMode::ToInbox).unwrap();
+        assert!(!has_location(&doc, &in_gone));
+
+        let other = Doc::new().unwrap();
+        let exported = doc.export_items(&[in_gone.as_str()]).unwrap();
+        other.adopt_items(&exported, LIST_INBOX, 0).unwrap();
+        assert!(!has_location(&other, &in_gone));
+        assert_eq!(other.open_item_ids(LIST_INBOX), vec![in_gone]);
+    }
+
+    /// A remote move into Inbox (a key delete) and back out translate
+    /// surgically and keep the index equal to a rebuild.
+    #[test]
+    fn remote_location_delete_moves_into_inbox() {
+        let dek = Dek::generate();
+        let mut a = Doc::new().unwrap();
+        let list = a.add_list("L").unwrap();
+        let x = a.add_item(&list, "x").unwrap();
+        let mut b = sync_fresh_peer(&mut a, &dek);
+        let _ = b.drain_events();
+
+        a.move_item(&x, LIST_INBOX, 0).unwrap();
+        exchange(&mut a, &mut b, &dek);
+        assert_eq!(b.get_item(&x).unwrap().list_id, LIST_INBOX);
+        assert_eq!(b.open_item_ids(LIST_INBOX), vec![x.clone()]);
+        assert!(b.open_item_ids(&list).is_empty());
+        let evs = b.drain_events();
+        assert!(!evs.contains(&AppEvent::FullResync), "{evs:?}");
+        assert!(
+            evs.iter().any(|e| matches!(e,
+                AppEvent::ItemListChanged { id, list_id, .. }
+                    if id == &x && list_id == LIST_INBOX)),
+            "{evs:?}"
+        );
+        assert_open_projection_matches_doc(&b);
+
+        a.move_item(&x, &list, 0).unwrap();
+        exchange(&mut a, &mut b, &dek);
+        assert_eq!(b.open_item_ids(&list), vec![x]);
+        assert!(b.open_item_ids(LIST_INBOX).is_empty());
+        assert_eq!(a.fingerprint(), b.fingerprint());
+        assert_open_projection_matches_doc(&b);
+    }
+
+    #[test]
+    fn move_into_inbox_stamps_inbox_at_and_goes_to_the_end() {
+        let doc = Doc::new().unwrap();
+        let list = doc.add_list("L").unwrap();
+        let (a, b, _) = inbox_abc(&doc);
+        let old = doc.add_item(&list, "old").unwrap();
+        poke_i64(&doc, &old, KEY_CREATED_AT, 1);
+        let _ = doc.drain_events();
+
+        let before = now_millis();
+        doc.move_item(&old, LIST_INBOX, 0).unwrap();
+        let view = doc.get_item(&old).unwrap();
+        assert_eq!(view.list_id, LIST_INBOX);
+        assert!(view.inbox_at.is_some_and(|t| t >= before));
+        let open = doc.open_item_ids(LIST_INBOX);
+        assert_eq!(open.last(), Some(&old), "lands at the end, not index 0");
+        assert_eq!(open[..2], [a, b]);
+        assert_eq!(doc.order_list(LIST_INBOX).len(), 0, "no entry written");
+        assert_eq!(doc.order_list(&list).len(), 0, "source entry removed");
+        let evs = doc.drain_events();
+        assert!(
+            evs.iter().any(|e| matches!(e,
+                AppEvent::ItemListChanged { id, list_id, open_index }
+                    if id == &old && list_id == LIST_INBOX && *open_index == Some(3))),
+            "{evs:?}"
+        );
+        assert_open_projection_matches_doc(&doc);
+
+        // Moving out leaves the stale stamp, which is ignored there.
+        doc.move_item(&old, &list, 0).unwrap();
+        assert!(doc.get_item(&old).unwrap().inbox_at.is_some());
+        assert_eq!(doc.open_item_ids(&list), vec![old]);
+        assert_open_projection_matches_doc(&doc);
+    }
+
+    #[test]
+    fn restore_and_undone_keep_the_queue_position() {
+        let doc = Doc::new().unwrap();
+        let (a, b, c) = inbox_abc(&doc);
+        let want = vec![a, b.clone(), c];
+        doc.set_item_binned(&b, true).unwrap();
+        assert_open_projection_matches_doc(&doc);
+        doc.set_item_binned(&b, false).unwrap();
+        assert_eq!(doc.open_item_ids(LIST_INBOX), want);
+        doc.set_item_done(&b, true).unwrap();
+        doc.set_item_done(&b, false).unwrap();
+        assert_eq!(doc.open_item_ids(LIST_INBOX), want);
+        assert_eq!(doc.get_item(&b).unwrap().inbox_at, None);
+        assert_open_projection_matches_doc(&doc);
+    }
+
+    #[test]
+    fn reorder_within_inbox_is_refused() {
+        let doc = Doc::new().unwrap();
+        let (a, b, c) = inbox_abc(&doc);
+        assert!(matches!(
+            doc.move_item(&a, LIST_INBOX, 2).unwrap_err(),
+            DocError::Invalid(_)
+        ));
+        doc.set_item_done(&c, true).unwrap();
+        assert!(matches!(
+            doc.move_item(&c, LIST_INBOX, 0).unwrap_err(),
+            DocError::Invalid(_)
+        ));
+        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![a, b]);
+        assert_eq!(doc.get_item(&c).unwrap().inbox_at, None);
+    }
+
+    #[test]
+    fn delete_list_to_inbox_relocates_and_undoes_in_one_step() {
+        let doc = Doc::new().unwrap();
+        let list = doc.add_list("Errands").unwrap();
+        let earlier = doc.add_item(LIST_INBOX, "earlier").unwrap();
+        poke_i64(&doc, &earlier, KEY_CREATED_AT, 1000);
+        let o1 = doc.add_item(&list, "o1").unwrap();
+        let o2 = doc.add_item(&list, "o2").unwrap();
+        let done = doc.add_item(&list, "done").unwrap();
+        let binned = doc.add_item(&list, "binned").unwrap();
+        poke_i64(&doc, &o1, KEY_CREATED_AT, 5000);
+        poke_i64(&doc, &o2, KEY_CREATED_AT, 3000);
+        doc.set_item_done(&done, true).unwrap();
+        doc.set_item_binned(&binned, true).unwrap();
+        let binned_at = doc.get_item(&binned).unwrap().binned_at;
+        assert_eq!(doc.open_item_ids(&list), vec![o1.clone(), o2.clone()]);
+
+        doc.delete_list(&list, DeleteListMode::ToInbox).unwrap();
+        assert!(doc.get_list_meta(&list).is_none());
+        // Open items are open in Inbox, behind the earlier capture, in
+        // `(now, created_at)` order: the deleted list's order is lost.
+        assert_eq!(
+            doc.open_item_ids(LIST_INBOX),
+            vec![earlier.clone(), o2.clone(), o1.clone()]
+        );
+        let stamps: HashSet<Option<i64>> = [&o1, &o2, &done, &binned]
+            .iter()
+            .map(|id| doc.get_item(id).unwrap().inbox_at)
+            .collect();
+        assert_eq!(stamps.len(), 1, "one shared inbox_at");
+        assert!(stamps.iter().all(Option::is_some));
+        for id in [&o1, &o2, &done, &binned] {
+            assert_eq!(doc.get_item(id).unwrap().list_id, LIST_INBOX);
+        }
+        assert_eq!(doc.done_item_ids(), vec![done.clone()]);
+        assert!(doc.get_item(&done).unwrap().is_done());
+        assert_eq!(doc.get_item(&binned).unwrap().binned_at, binned_at);
+        assert_eq!(doc.binned_item_ids(), vec![binned.clone()]);
+        assert_open_projection_matches_doc(&doc);
+
+        assert!(doc.undo().unwrap());
+        assert!(doc.get_list_meta(&list).is_some());
+        assert_eq!(doc.open_item_ids(&list), vec![o1.clone(), o2.clone()]);
+        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![earlier]);
+        for id in [&o1, &o2, &done, &binned] {
+            let view = doc.get_item(id).unwrap();
+            assert_eq!(view.list_id, list);
+            assert_eq!(view.inbox_at, None);
+        }
+        assert!(doc.get_item(&done).unwrap().is_done());
+        assert_open_projection_matches_doc(&doc);
+    }
+
+    #[test]
+    fn delete_list_to_bin_bins_and_stamps() {
+        let doc = Doc::new().unwrap();
+        let list = doc.add_list("Errands").unwrap();
+        let open = doc.add_item(&list, "open").unwrap();
+        let done = doc.add_item(&list, "done").unwrap();
+        let binned = doc.add_item(&list, "binned").unwrap();
+        doc.set_item_done(&done, true).unwrap();
+        doc.set_item_binned(&binned, true).unwrap();
+        poke_i64(&doc, &binned, KEY_BINNED_AT, 1);
+
+        doc.delete_list(&list, DeleteListMode::ToBin).unwrap();
+        assert!(doc.open_item_ids(LIST_INBOX).is_empty());
+        for id in [&open, &done, &binned] {
+            let view = doc.get_item(id).unwrap();
+            assert_eq!(view.list_id, LIST_INBOX);
+            assert!(view.is_binned());
+            assert!(view.inbox_at.is_some());
+        }
+        assert_eq!(doc.get_item(&binned).unwrap().binned_at, Some(1));
+        assert!(doc.get_item(&done).unwrap().is_done(), "done-ness kept");
+        assert_open_projection_matches_doc(&doc);
+    }
+
+    /// Device A moves an item into X while device B deletes X: the item
+    /// is an orphan, so it shows in Inbox on both, sorted by the
+    /// `inbox_at` it already had. Undoing the delete on B brings it
+    /// back into X.
+    #[test]
+    fn concurrent_move_into_deleted_list_lands_in_inbox_then_undo_restores() {
+        let dek = Dek::generate();
+        let mut a = Doc::new().unwrap();
+        let x = a.add_list("X").unwrap();
+        let p = a.add_item(LIST_INBOX, "p").unwrap();
+        let i = a.add_item(LIST_INBOX, "i").unwrap();
+        let q = a.add_item(LIST_INBOX, "q").unwrap();
+        poke_i64(&a, &p, KEY_CREATED_AT, 1000);
+        poke_i64(&a, &i, KEY_CREATED_AT, 500);
+        poke_i64(&a, &i, KEY_INBOX_AT, 2000);
+        poke_i64(&a, &q, KEY_CREATED_AT, 3000);
+        let mut b = sync_fresh_peer(&mut a, &dek);
+        assert_eq!(
+            b.open_item_ids(LIST_INBOX),
+            vec![p.clone(), i.clone(), q.clone()]
+        );
+
+        a.move_item(&i, &x, 0).unwrap();
+        b.delete_list(&x, DeleteListMode::ToInbox).unwrap();
+        exchange(&mut a, &mut b, &dek);
+
+        let want = vec![p.clone(), i.clone(), q.clone()];
+        for doc in [&a, &b] {
+            assert!(doc.get_list_meta(&x).is_none());
+            assert_eq!(doc.get_item(&i).unwrap().list_id, LIST_INBOX);
+            assert_eq!(doc.open_item_ids(LIST_INBOX), want);
+            assert!(doc.all_items().iter().any(|v| v.id == i));
+            assert_open_projection_matches_doc(doc);
+        }
+        assert_eq!(a.fingerprint(), b.fingerprint());
+
+        assert!(b.undo().unwrap());
+        exchange(&mut a, &mut b, &dek);
+        for doc in [&a, &b] {
+            assert!(doc.get_list_meta(&x).is_some());
+            assert_eq!(doc.get_item(&i).unwrap().list_id, x);
+            assert_eq!(doc.open_item_ids(&x), vec![i.clone()]);
+            assert_eq!(doc.open_item_ids(LIST_INBOX), vec![p.clone(), q.clone()]);
+            assert_open_projection_matches_doc(doc);
+        }
+        assert_eq!(a.fingerprint(), b.fingerprint());
+    }
+
+    /// Push entries for `ids` (in that order) into the dead
+    /// `order/inbox`, as an old client that still ordered Inbox would.
+    fn plant_inbox_entries(doc: &Doc, ids: &[&String]) {
+        let placements: Vec<String> = {
+            let guard = doc.item_index.lock().unwrap();
+            ids.iter()
+                .map(|id| guard.meta[*id].placement_id.clone())
+                .collect()
+        };
+        let order = doc.order_list(LIST_INBOX);
+        for (id, placement) in ids.iter().zip(placements) {
+            order
+                .push(
+                    OrderEntry {
+                        item_id: (*id).clone(),
+                        placement_id: placement,
+                    }
+                    .encode()
+                    .as_str(),
+                )
+                .unwrap();
+        }
+        doc.inner.commit();
+    }
+
+    #[test]
+    fn populated_order_inbox_is_ignored_locally_and_remotely() {
+        let dek = Dek::generate();
+        let mut a = Doc::new().unwrap();
+        let (x, y, z) = inbox_abc(&a);
+        let mut b = sync_fresh_peer(&mut a, &dek);
+
+        plant_inbox_entries(&a, &[&z, &x, &y]);
+        a.rebuild_index();
+        let want = vec![x.clone(), y.clone(), z.clone()];
+        assert_eq!(a.open_item_ids(LIST_INBOX), want);
+        assert_open_projection_matches_doc(&a);
+
+        let blob = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        b.apply_remote(&dek, &blob).unwrap();
+        let evs = b.drain_events();
+        assert!(!evs.contains(&AppEvent::FullResync), "{evs:?}");
+        assert_eq!(b.open_item_ids(LIST_INBOX), want);
+        assert_open_projection_matches_doc(&b);
+        assert_eq!(a.fingerprint(), b.fingerprint());
+
+        // A fresh load reads the same queue.
+        let loaded = Doc::load(&a.save().unwrap()).unwrap();
+        assert_eq!(loaded.open_item_ids(LIST_INBOX), want);
+    }
+
+    #[test]
+    fn reconcile_leaves_order_inbox_alone() {
+        let doc = Doc::new().unwrap();
+        let (a, b, _) = inbox_abc(&doc);
+        plant_inbox_entries(&doc, &[&b, &a, &a]);
+        doc.order_list(LIST_INBOX).push("ghost:stale").unwrap();
+        doc.inner.commit();
+        doc.rebuild_index();
+        assert_eq!(doc.reconcile().unwrap(), 0);
+        assert_eq!(doc.reconcile_with(Some(now_millis() + 60_000)).unwrap(), 0);
+        assert_eq!(doc.order_list(LIST_INBOX).len(), 4);
+        assert_open_projection_matches_doc(&doc);
     }
 }
 

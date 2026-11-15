@@ -17,6 +17,7 @@ import { createPopoverTooltipGuard } from "./popoverTooltip.ts";
 import { createSyncStatus } from "./syncFacts.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { createArchiveListFlow } from "./ArchiveListDialog.tsx";
+import { createDeleteListFlow } from "./DeleteListDialog.tsx";
 import { SharingDialog } from "./SharingDialog.tsx";
 import type { MemberDirectory } from "./sync/members.ts";
 import { Avatar } from "./Avatar.tsx";
@@ -638,6 +639,23 @@ function DocSection(props: {
         if (isActive(id)) open("inbox");
       },
     });
+  // Delete always asks where the items go (`DeleteListDialog`); the
+  // list's row goes, so hop to this doc's Inbox first when it is on
+  // screen. A non-Home doc counts as shared unless its member list is
+  // loaded and says one, as the cross-workspace move does.
+  const deleteFlow = createDeleteListFlow();
+  const deleteList = (id: string) =>
+    deleteFlow.request({
+      app,
+      listId: id,
+      sharedWith:
+        !props.entry.home && props.members.countOf(docId) !== 1
+          ? (app.state.settings.docName ?? m().nav.untitledDoc)
+          : undefined,
+      before: () => {
+        if (isActive(id)) open("inbox");
+      },
+    });
 
   const navSelection = new DndSelection();
   // Opening any view — by click, keyboard, URL, or the other doc's nav —
@@ -1008,6 +1026,7 @@ function DocSection(props: {
         />
       </Show>
       {archive.dialog()}
+      {deleteFlow.dialog()}
       <Show when={!props.entry.home}>
         <SharingDialog
           open={sharingOpen()}
@@ -1188,6 +1207,12 @@ function DocSection(props: {
                         onSelect={() => archiveList(l().id)}
                       >
                         {m().nav.archiveList}
+                      </ContextMenu.Item>
+                      <ContextMenu.Item
+                        class="context-menu-item"
+                        onSelect={() => deleteList(l().id)}
+                      >
+                        {m().nav.deleteList}
                       </ContextMenu.Item>
                     </ContextMenu.Content>
                   </ContextMenu.Portal>

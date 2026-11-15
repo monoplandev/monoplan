@@ -271,6 +271,8 @@ pub fn set_text(cx: &Ctx, id: &str, text: &str) -> anyhow::Result<()> {
 /// 1-based `pos` among that list's open items, the slot it ends up in;
 /// no `pos` appends, and one past the end clamps to the end. Moving
 /// into `events` makes the item an event; back out, a task again.
+/// Inbox is a queue: a move into it goes to the end whatever `pos`
+/// says, and a reorder within it is refused (`spec/inbox-plan.md`).
 pub fn move_item(cx: &Ctx, id: &str, list: Option<&str>, pos: Option<usize>) -> anyhow::Result<()> {
     let list = match list {
         Some(list) => list.to_string(),
