@@ -1434,7 +1434,7 @@ extension BinEntry {
 enum BinConfirm {
     static func delete(on window: NSWindow?, then confirmed: @escaping () -> Void) {
         ask(
-            String(localized: "Delete this item for good?"),
+            String(localized: "Delete this item permanently?"),
             String(localized: "It is removed from every device and cannot be restored."),
             button: String(localized: "Delete"), on: window, then: confirmed)
     }
@@ -1443,8 +1443,8 @@ enum BinConfirm {
         guard count > 0 else { return }
         ask(
             count == 1
-                ? String(localized: "Delete 1 item for good?")
-                : String(localized: "Delete all \(count) items for good?"),
+                ? String(localized: "Delete 1 item permanently?")
+                : String(localized: "Delete all \(count) items permanently?"),
             String(localized: "They are removed from every device and cannot be restored."),
             button: String(localized: "Empty Bin"), on: window, then: confirmed)
     }

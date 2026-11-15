@@ -1701,7 +1701,7 @@
         }
       }
     },
-    "Delete this item for good?": {
+    "Delete this item permanently?": {
       "localizations": {
         "es": {
           "stringUnit": {
@@ -1721,7 +1721,7 @@
         }
       }
     },
-    "Delete 1 item for good?": {
+    "Delete 1 item permanently?": {
       "localizations": {
         "es": {
           "stringUnit": {
@@ -1731,7 +1731,7 @@
         }
       }
     },
-    "Delete all %lld items for good?": {
+    "Delete all %lld items permanently?": {
       "localizations": {
         "es": {
           "stringUnit": {
