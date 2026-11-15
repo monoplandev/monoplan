@@ -1681,12 +1681,12 @@
         }
       }
     },
-    "Empty Bin…": {
+    "Empty": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Vaciar papelera…"
+            "value": "Vaciar"
           }
         }
       }
@@ -1697,16 +1697,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Vaciar papelera"
-          }
-        }
-      }
-    },
-    "Items in the Bin can be restored until they are deleted.": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Los elementos de la papelera se pueden restaurar hasta que se eliminen."
           }
         }
       }

@@ -1299,61 +1299,71 @@ struct MainWindowView: View {
         .scrollContentBackground(.hidden)
     }
 
-    /// Empty Bin…, asked first: the sidebar row's menu and the Bin's bar.
+    /// Empty, asked first: the sidebar row's menu and the Bin's bar.
     private var emptyBinButton: some View {
-        Button("Empty Bin…") {
+        Button("Empty") {
             BinConfirm.empty(count: model.binned.count, on: NSApp.keyWindow) { model.emptyBin() }
         }
         .disabled(model.binned.isEmpty)
     }
 
     /// The Bin: every workspace's binned items, newest binned first. A
-    /// row has its text, the list it would go back to (and the
-    /// workspace when not Personal's), and when it was binned; its menu
+    /// row has its text and, at its trailing edge, the list it would go
+    /// back to (and the workspace when not Personal's); its menu
     /// restores or deletes it. A bar over the rows empties the lot, as
     /// Finder's Trash has it. Both deletes are for good, so both ask.
-    private var bin: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text("Items in the Bin can be restored until they are deleted.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                Spacer()
-                emptyBinButton
+    /// On macOS 26 the bar is a safe-area bar, as Finder's is: no
+    /// divider, the rows scroll under it behind the system's edge
+    /// effect, so it reads as part of the toolbar. Before that, a
+    /// plain bar over a divider.
+    @ViewBuilder private var bin: some View {
+        if #available(macOS 26, *) {
+            binList.safeAreaBar(edge: .top) { binBar }
+        } else {
+            VStack(spacing: 0) {
+                binBar
+                Divider()
+                binList
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            Divider()
-            List(selection: selection { id in model.binned.first { $0.id == id }?.docId }) {
-                ForEach(model.binned, id: \.binKey) { row in
-                    HStack(alignment: .center, spacing: 8) {
-                        Text(verbatim: row.text)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        let place = [model.binnedListName(row), model.sharedWorkspaceName(row.docId)]
-                            .compactMap { $0 }.joined(separator: " · ")
-                        if !place.isEmpty {
-                            Text(verbatim: place).font(.footnote).foregroundStyle(.tertiary).lineLimit(1)
-                        }
-                        Spacer()
-                        Text(verbatim: Self.stamp(row.binnedAt))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                            .fixedSize()
-                    }
-                    .itemRow()
-                    .binnedMenu(model, workspace: row.docId, id: row.id)
-                    .tag(row.id)
-                }
-                if model.binned.isEmpty {
-                    Text("Nothing here").foregroundStyle(.secondary)
-                }
-            }
-            .listStyle(.inset)
-            .scrollContentBackground(.hidden)
         }
+    }
+
+    /// The Bin's bar, as Finder's Trash has it: its name leading,
+    /// Empty at its trailing edge, small.
+    private var binBar: some View {
+        HStack(spacing: 8) {
+            Text("Bin").fontWeight(.semibold)
+            Spacer()
+            emptyBinButton.controlSize(.small)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+    }
+
+    private var binList: some View {
+        List(selection: selection { id in model.binned.first { $0.id == id }?.docId }) {
+            ForEach(model.binned, id: \.binKey) { row in
+                HStack(alignment: .center, spacing: 8) {
+                    Text(verbatim: row.text)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer()
+                    let place = [model.binnedListName(row), model.sharedWorkspaceName(row.docId)]
+                        .compactMap { $0 }.joined(separator: " · ")
+                    if !place.isEmpty {
+                        Text(verbatim: place).font(.footnote).foregroundStyle(.tertiary).lineLimit(1)
+                    }
+                }
+                .itemRow()
+                .binnedMenu(model, workspace: row.docId, id: row.id)
+                .tag(row.id)
+            }
+            if model.binned.isEmpty {
+                Text("Nothing here").foregroundStyle(.secondary)
+            }
+        }
+        .listStyle(.inset)
+        .scrollContentBackground(.hidden)
     }
 
     /// A Done row's moment (unix ms), as a short date and time.
