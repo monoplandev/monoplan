@@ -251,9 +251,12 @@ states who will see the result.
 - **Delete always bins** (2026-11-16): the user-facing choice is gone. Web,
   iOS, macOS and `list delete` confirm once ("Its open items go to the Bin",
   plus the shared-workspace note) and call `delete_list(ToBin)`, which bins
-  only open items: done and cancelled ones go to Inbox closed, where they show
-  in the Done view with no list. The CLI's `--bin` flag is removed. `ToInbox` stays in core, `api::lists::DeleteMode`, the FFI
-  and the wasm `deleteList(id, toBin)` with no caller, so no binding changed.
+  only open items. Done and cancelled ones stay closed and unbinned; they
+  have no list row (their `location` names the reserved `inbox` bucket), so
+  every surface shows them in Inbox: its board's Done lane, the Done view,
+  and the queue's end if reopened. The CLI's `--bin` flag is removed.
+  `ToInbox` stays in core, `api::lists::DeleteMode`, the FFI and the wasm
+  `deleteList(id, toBin)` with no caller, so no binding changed.
   The surface table above records the original two-choice build.
 - **Archive vs delete:** Delete is offered wherever the list menu is (web nav
   and header, iOS list page, Mac sidebar), so an archived list's header menu
