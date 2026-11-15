@@ -1,4 +1,4 @@
-import { createEffect, createSignal, on, type JSX } from "solid-js";
+import { createSignal, type JSX } from "solid-js";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { useAppI18n } from "./i18n.tsx";
 import type { DocApp } from "./sync/store.ts";
@@ -12,32 +12,12 @@ export type ArchiveTarget = {
   before?: () => void;
 };
 
-/** Archive `listId`, optionally moving its open items to the end of
- *  Inbox's queue first (`spec/inbox-plan.md`). One action batch, so a single
- *  undo walks both back. Archive itself stays the pure ListMeta write
- *  of `spec/data-model.md` "Archived lists"; the move is the user's
- *  explicit choice from the dialog. */
-export function archiveListNow(
-  app: DocApp,
-  listId: string,
-  moveOpenToInbox: boolean,
-): void {
-  app.withActionBatch(() => {
-    if (moveOpenToInbox) {
-      // Inbox is a queue: a move in lands at its end, whatever index.
-      for (const id of [...(app.state.listOpen[listId] ?? [])]) {
-        app.moveItem(id, "inbox", 0);
-      }
-    }
-    app.setListArchived(listId, true);
-  });
-}
-
 /** Archive flow shared by the nav context menu and the view header.
- *  A list with no open items archives at once (non-destructive,
- *  undoable, so no confirmation); one with open items gets the
- *  dialog, whose pre-checked box moves them to Inbox so archiving
- *  never silently hides live work. */
+ *  Archive is the pure ListMeta write of `spec/data-model.md` "Archived
+ *  lists": the list is shelved with its items in place. A list with no
+ *  open items archives at once (non-destructive, undoable, so no
+ *  confirmation); one with open items gets a confirm naming how many
+ *  stay with it, so archiving never silently hides live work. */
 export function createArchiveListFlow(): {
   request: (target: ArchiveTarget) => void;
   dialog: () => JSX.Element;
@@ -46,7 +26,7 @@ export function createArchiveListFlow(): {
   const request = (t: ArchiveTarget) => {
     if ((t.app.state.listOpen[t.listId]?.length ?? 0) === 0) {
       t.before?.();
-      archiveListNow(t.app, t.listId, false);
+      t.app.setListArchived(t.listId, true);
       return;
     }
     setTarget(t);
@@ -64,16 +44,6 @@ export function ArchiveListDialog(props: {
   onClose: () => void;
 }) {
   const { m } = useAppI18n();
-  const [moveOpen, setMoveOpen] = createSignal(true);
-  // Every request starts with the box checked, whatever the last one chose.
-  createEffect(
-    on(
-      () => props.target,
-      (t) => {
-        if (t) setMoveOpen(true);
-      },
-    ),
-  );
   const name = (): string =>
     props.target
       ? (props.target.app.state.listsById[props.target.listId]?.name ?? "")
@@ -86,7 +56,7 @@ export function ArchiveListDialog(props: {
     const t = props.target;
     if (!t) return;
     t.before?.();
-    archiveListNow(t.app, t.listId, moveOpen());
+    t.app.setListArchived(t.listId, true);
   };
   return (
     <ConfirmDialog
@@ -98,14 +68,7 @@ export function ArchiveListDialog(props: {
       confirmLabel={m().nav.archiveList}
       onConfirm={confirm}
     >
-      <label class="confirm-dialog-check">
-        <input
-          type="checkbox"
-          checked={moveOpen()}
-          onChange={(e) => setMoveOpen(e.currentTarget.checked)}
-        />
-        <span>{m().nav.archiveListMoveOpen(openCount())}</span>
-      </label>
+      <p class="confirm-dialog-prompt">{m().nav.archiveListKeepsOpen(openCount())}</p>
     </ConfirmDialog>
   );
 }

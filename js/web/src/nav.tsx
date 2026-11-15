@@ -626,8 +626,8 @@ function DocSection(props: {
   };
   // Archive is non-destructive (globally undoable, trivially reversible
   // via Unarchive), so a list with no open items archives without a
-  // dialog; one with open items asks whether to move them to Inbox
-  // first (`ArchiveListDialog`). Archiving the list currently on screen
+  // dialog; one with open items confirms first, the items staying in
+  // the list (`ArchiveListDialog`). Archiving the list currently on screen
   // would leave a stale view; hop to this doc's Inbox before applying
   // the mutation.
   const archive = createArchiveListFlow();

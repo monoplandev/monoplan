@@ -112,10 +112,10 @@ export type Messages = {
     /** Context-menu / header action that restores an archived list. */
     unarchiveList: string;
     /** Archive confirmation (shown only when the list has open items):
-     *  title with the list name and the pre-checked "move open
-     *  items to Inbox" box. */
+     *  title with the list name and a note that its open items stay
+     *  in the archived list. */
     archiveListTitle: (name: string) => string;
-    archiveListMoveOpen: (n: number) => string;
+    archiveListKeepsOpen: (n: number) => string;
     /** Context-menu / header action that deletes a list
      *  (`spec/inbox-plan.md`); opens the delete dialog. */
     deleteList: string;
@@ -661,10 +661,10 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       archived: "Archivada",
       unarchiveList: "Restaurar",
       archiveListTitle: (name) => `Archivar «${name}»`,
-      archiveListMoveOpen: (n) =>
+      archiveListKeepsOpen: (n) =>
         n === 1
-          ? "¿Mover 1 elemento abierto a la bandeja de entrada?"
-          : `¿Mover ${n} elementos abiertos a la bandeja de entrada?`,
+          ? "Su elemento abierto se queda en la lista archivada."
+          : `Sus ${n} elementos abiertos se quedan en la lista archivada.`,
       deleteList: "Eliminar…",
       deleteListTitle: (name) => `Eliminar «${name}»`,
       deleteListConfirm: "Eliminar",
@@ -1054,8 +1054,10 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       archived: "Archived",
       unarchiveList: "Unarchive",
       archiveListTitle: (name) => `Archive “${name}”`,
-      archiveListMoveOpen: (n) =>
-        n === 1 ? "Move 1 open item to Inbox?" : `Move ${n} open items to Inbox?`,
+      archiveListKeepsOpen: (n) =>
+        n === 1
+          ? "Its open item stays in the archived list."
+          : `Its ${n} open items stay in the archived list.`,
       deleteList: "Delete…",
       deleteListTitle: (name) => `Delete “${name}”`,
       deleteListConfirm: "Delete",

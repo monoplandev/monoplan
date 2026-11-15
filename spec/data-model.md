@@ -399,22 +399,21 @@ without destroying anything. It is a single-register write on the ListMeta row
 Unarchiving deletes the key and the list reappears in the active projection
 exactly as it was.
 
-**Open items at archive time (web, built 2026-10-29).** Archiving a list
-that still holds open items would hide live work behind the archived section,
-so the web client confirms first: a dialog naming the list, with a
-pre-checked "Move N open items to Inbox?" box. Confirming with the box
-checked moves those items (in list order) to the end of Inbox's open
-projection and then archives, as one action batch — a single undo walks both
-back. Unchecked, it archives only. A list with no open items archives at
-once with no dialog, as before. The move is the user's explicit choice in the
-client; the core primitive stays the pure single-register write above, and
-the CLI's `list archive` is unchanged. Items that land in the list
-concurrently (another device moving into it while it is archived) stay open
-in the archived list; that state is legitimate and every surface tolerates
-it — search badges such hits "Archived", Starred and the archived board still
-show them. The bin is deliberately *not* used here: it is the pre-delete
-staging area (`empty_bin` hard-deletes), and routing shelved work through it
-would make a reversible archive one `bin empty` away from loss.
+**Open items at archive time.** Archiving never moves items: open items
+stay open in the archived list (decided 2026-11-16, replacing the web's
+2026-10-29 "Move N open items to Inbox?" checkbox). Moving them into Inbox
+would make unarchive restore an empty list and refill Inbox with work that
+was already sorted. If you want the items somewhere else, move them first,
+or delete the list. Because archiving still hides that work from the
+active nav, the web and iOS confirm first, and only the web skips the
+confirm for a list with no open items. Every surface handles open items in
+an archived list, whether they were there at archive time or landed later
+from another device: search badges such hits "Archived", and Starred and
+the archived board still show them. The bin is deliberately *not* used
+here: it is the pre-delete staging area (`empty_bin` hard-deletes), and
+routing shelved work through it would make a reversible archive one
+`bin empty` away from loss. The CLI's `list archive` archives without
+asking.
 
 **Projections.** `all_lists()` remains the canonical projection: every ListMeta
 row in CRDT order, archived or not — archived lists never disappear from it.
