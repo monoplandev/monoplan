@@ -3,7 +3,9 @@
 // webview. Deliberately a debug screen for now: a sidebar laid out as
 // the web nav is (the lenses
 // Starred, Calendar and Done on top, then one group per open workspace,
-// Personal first, each a collapsible heading over its Inbox and lists),
+// Personal first, each a heading row over its Inbox and lists: the row
+// folds the group, and a shared workspace's has a "…" menu with Share…
+// (`SharingSheet.swift`) and Delete or Leave),
 // and either the open items of the selected list with a tick and a
 // field to add one, or a lens over every workspace: Starred in its
 // curated order, the Calendar (the engine's agenda, by day), Done,
@@ -271,6 +273,16 @@ final class MainWindowModel: ObservableObject {
     }
     /// The last failed read or write, until the next one succeeds.
     @Published private(set) var error: String?
+    /// The account's id; nil while the profile has none (local only).
+    @Published private(set) var accountId: String?
+    /// Whether the account owns each shared workspace, by doc id, from
+    /// its member list (`Engine.workspaceMembers`): a workspace row's
+    /// "…" menu offers Delete to an owner and Leave to anyone else, and
+    /// neither while this is unknown (offline, or still loading), as
+    /// on iOS and the web.
+    @Published private(set) var ownsWorkspace: [String: Bool] = [:]
+    /// Shared workspaces whose role is being asked for now.
+    private var rolesLoading: Set<String> = []
 
     /// Whether the window is open: a closed one reads nothing.
     var visible = false
@@ -465,6 +477,7 @@ final class MainWindowModel: ObservableObject {
 
     private func clear() {
         sections = []
+        ownsWorkspace = [:]
         items = []
         clearLenses()
         clearItem()
@@ -473,6 +486,7 @@ final class MainWindowModel: ObservableObject {
 
     private struct Snapshot {
         var sections: [NavSection]
+        var accountId: String?
         var lens: Lens?
         var workspace: String?
         var list: String
@@ -519,6 +533,7 @@ final class MainWindowModel: ObservableObject {
             var snapshot = Snapshot(
                 sections: sections, lens: lens, workspace: selected,
                 list: shown, items: [])
+            snapshot.accountId = try engine.account()?.accountId
             snapshot.starred = try engine.starred()
             snapshot.binned = try engine.binned()
             switch lens {
@@ -572,6 +587,8 @@ final class MainWindowModel: ObservableObject {
             switch result {
             case .success(let snapshot):
                 self.sections = snapshot.sections
+                self.accountId = snapshot.accountId
+                self.refreshRoles()
                 self.workspace = snapshot.workspace
                 self.list = snapshot.list
                 self.shown = Surface(lens: snapshot.lens, workspace: snapshot.workspace, list: snapshot.list)
@@ -771,6 +788,86 @@ final class MainWindowModel: ObservableObject {
         }
     }
 
+    /// Delete a workspace the account owns (`Engine.deleteWorkspace`):
+    /// gone from every device and every member. `failed` gets why not.
+    func deleteWorkspace(_ docId: String, failed: @escaping (String) -> Void) {
+        guard let calls = engine.calls else {
+            return failed(engineErrorMessage(EngineError.Stopped))
+        }
+        calls.run({ try $0.deleteWorkspace(docId: docId) }) { [weak self] result in
+            switch result {
+            case .success:
+                self?.ownsWorkspace[docId] = nil
+                self?.reload()
+            case .failure(let error): failed(engineErrorMessage(error))
+            }
+        }
+    }
+
+    /// Leave a shared workspace the account does not own
+    /// (`Engine.leaveWorkspace`). The engine forgets it once the
+    /// server's `DocClosed` lands, and the `Changed` that follows
+    /// rereads; the reread here only makes it sooner.
+    func leaveWorkspace(_ docId: String, failed: @escaping (String) -> Void) {
+        sharing({ try $0.leaveWorkspace(docId: docId) }) { [weak self] result in
+            switch result {
+            case .success:
+                self?.ownsWorkspace[docId] = nil
+                self?.reload()
+            case .failure(let error): failed(engineErrorMessage(error))
+            }
+        }
+    }
+
+    /// One of the engine's sharing calls (`Engine.workspaceMembers`,
+    /// `createInvite`, ...). Each is a round trip to the server, so it
+    /// runs on a queue of its own rather than the doc calls' serial
+    /// one: an unreachable server must not hold up a tick. `done` gets
+    /// the result on the main queue.
+    func sharing<T>(
+        _ body: @escaping (Engine) throws -> T,
+        done: @escaping (Result<T, Error>) -> Void
+    ) {
+        guard let engine = engine.calls?.engine else {
+            DispatchQueue.main.async { done(.failure(EngineError.Stopped)) }
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { try body(engine) }
+            DispatchQueue.main.async { done(result) }
+        }
+    }
+
+    /// What a member list says of the account's role on a workspace:
+    /// the Sharing sheet reports each list it loads, so the menu
+    /// follows a change it shows.
+    func noteMembers(_ members: [WorkspaceMember], of docId: String) {
+        guard let me = accountId, !me.isEmpty else { return }
+        ownsWorkspace[docId] = members.first(where: { $0.accountId == me })?.owner ?? false
+    }
+
+    /// Ask for the role on every shared workspace not yet known, and
+    /// forget the ones that have closed. Once per workspace per run of
+    /// the window's model, not per reload: roles only change by
+    /// transfer, which is not built.
+    private func refreshRoles() {
+        guard accountId != nil else {
+            ownsWorkspace = [:]
+            return
+        }
+        let shared = Set(sections.filter { !$0.workspace.home }.map(\.id))
+        for gone in ownsWorkspace.keys where !shared.contains(gone) { ownsWorkspace[gone] = nil }
+        for docId in shared where ownsWorkspace[docId] == nil && !rolesLoading.contains(docId) {
+            rolesLoading.insert(docId)
+            sharing({ try $0.workspaceMembers(docId: docId) }) { [weak self] result in
+                guard let self else { return }
+                rolesLoading.remove(docId)
+                // A failure leaves it unknown; the next reload asks again.
+                if case .success(let members) = result { noteMembers(members, of: docId) }
+            }
+        }
+    }
+
     /// Create a workspace and show it; `failed` gets the reason when
     /// the engine or the server refuses.
     func createWorkspace(name: String, failed: @escaping (String) -> Void) {
@@ -796,6 +893,10 @@ struct MainWindowView: View {
     /// whether a list's row carries its Open count, as the web's "Show
     /// list counts in nav".
     @AppStorage(listCountsKey) private var showListCounts = false
+    /// The workspace whose Sharing sheet is up.
+    @State private var sharing: SharingTarget?
+    /// The workspace row under the pointer: its "…" and chevron show.
+    @State private var hoveredWorkspace: String?
     /// Which of the window's panes this is (`MainSplitViewController`
     /// hosts each apart).
     enum Pane { case sidebar, list }
@@ -859,38 +960,32 @@ struct MainWindowView: View {
                 }
             }
             ForEach(model.sections) { section in
-                Section(isExpanded: Binding(
-                    get: { !model.collapsed.contains(section.id) },
-                    set: { model.setCollapsed(section.id, !$0) }
-                )) {
-                    row(.list(workspace: section.target, list: MainWindowModel.inbox), HStack {
-                        Label { Text("Inbox") } icon: { NavIcon(image: NavArt.inbox) }
-                        Spacer()
-                        count(section.inboxOpen)
-                    })
-                    ForEach(section.userLists) { list in
-                        row(.list(workspace: section.target, list: list.id), HStack {
-                            // The list's emoji as its icon, a folder
-                            // without one, as on iOS: the names line
-                            // up under Inbox's.
-                            Label {
-                                Text(verbatim: list.name).lineLimit(1)
-                            } icon: {
-                                if let icon = list.icon, !icon.isEmpty {
-                                    Text(verbatim: icon)
-                                } else {
-                                    Image(systemName: "folder")
-                                }
-                            }
+                Section {
+                    workspaceRow(section)
+                    if !model.collapsed.contains(section.id) {
+                        row(.list(workspace: section.target, list: MainWindowModel.inbox), HStack {
+                            Label { Text("Inbox") } icon: { NavIcon(image: NavArt.inbox) }
                             Spacer()
-                            if showListCounts { count(Int(list.open)) }
+                            count(section.inboxOpen)
                         })
-                    }
-                } header: {
-                    if section.workspace.home {
-                        Text("Personal")
-                    } else {
-                        Text(verbatim: section.workspace.name ?? section.workspace.docId)
+                        ForEach(section.userLists) { list in
+                            row(.list(workspace: section.target, list: list.id), HStack {
+                                // The list's emoji as its icon, a folder
+                                // without one, as on iOS: the names line
+                                // up under Inbox's.
+                                Label {
+                                    Text(verbatim: list.name).lineLimit(1)
+                                } icon: {
+                                    if let icon = list.icon, !icon.isEmpty {
+                                        Text(verbatim: icon)
+                                    } else {
+                                        Image(systemName: "folder")
+                                    }
+                                }
+                                Spacer()
+                                if showListCounts { count(Int(list.open)) }
+                            })
+                        }
                     }
                 }
             }
@@ -900,6 +995,115 @@ struct MainWindowView: View {
         // (32), which has no such step: the small size, with each row
         // (`navRow`) at the medium's type and 4 pt taller.
         .environment(\.sidebarRowSize, .small)
+        .sheet(item: $sharing) { target in
+            SharingSheet(target: target, model: model)
+        }
+    }
+
+    /// A workspace's heading, a row of its own the size of a list's
+    /// (not the sidebar's section header, whose small type and hover
+    /// chevron are the system's and take no menu): the name (regular,
+    /// muted), then at the trailing edge a shared workspace's "…" menu and the fold
+    /// chevron, both muted and shown only while the pointer is over
+    /// the row, as the system header's chevron. A click anywhere on it
+    /// folds the group. The "…" menu is as the section header's on
+    /// iOS: Share…, then Delete Workspace… to its owner or Leave
+    /// Workspace… to anyone else, neither until the role is known
+    /// (`MainWindowModel.ownsWorkspace`). Right-click opens the same
+    /// menu. Not selectable.
+    private func workspaceRow(_ section: NavSection) -> some View {
+        let folded = model.collapsed.contains(section.id)
+        let name = section.workspace.home
+            ? String(localized: "Personal")
+            : section.workspace.name ?? section.workspace.docId
+        // Hidden by opacity, not removed, so the row's layout holds
+        // and an open menu keeps its anchor when the pointer leaves.
+        let controls = hoveredWorkspace == section.id ? 1.0 : 0.0
+        // One colour for both controls, as a solid system colour: a
+        // borderless menu draws its label in its own tint and ignores
+        // a hierarchical style, so the "…" and the chevron drifted.
+        let muted = Color(nsColor: .tertiaryLabelColor)
+        return HStack(spacing: 2) {
+            Text(verbatim: name).foregroundStyle(.secondary).lineLimit(1)
+            Spacer(minLength: 0)
+            if !section.workspace.home {
+                Menu {
+                    workspaceMenu(section, name: name)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .foregroundStyle(muted)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                // A plain button's menu draws the label as given.
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .opacity(controls)
+                .accessibilityLabel(Text("Workspace Actions"))
+                .help(Text("Workspace Actions"))
+            }
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(muted)
+                .rotationEffect(.degrees(folded ? 0 : 90))
+                .frame(width: 16, height: 20)
+                .opacity(controls)
+                .accessibilityHidden(true)
+        }
+        .font(.body)
+        .imageScale(.medium)
+        .frame(minHeight: 20)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.15)) { model.setCollapsed(section.id, !folded) }
+        }
+        .onHover { inside in
+            if inside {
+                hoveredWorkspace = section.id
+            } else if hoveredWorkspace == section.id {
+                hoveredWorkspace = nil
+            }
+        }
+        .contextMenu {
+            if !section.workspace.home { workspaceMenu(section, name: name) }
+        }
+        .selectionDisabled()
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityAction(named: folded ? Text("Expand") : Text("Collapse")) {
+            model.setCollapsed(section.id, !folded)
+        }
+    }
+
+    @ViewBuilder
+    private func workspaceMenu(_ section: NavSection, name: String) -> some View {
+        let docId = section.id
+        Button("Share…") { sharing = SharingTarget(docId: docId, name: name) }
+        switch model.ownsWorkspace[docId] {
+        case true?:
+            Divider()
+            Button("Delete Workspace…") {
+                WorkspaceConfirm.delete(name: name, on: NSApp.keyWindow) {
+                    model.deleteWorkspace(docId) { error in
+                        WorkspaceConfirm.failed(
+                            String(localized: "Could not delete the workspace"), error, on: NSApp.keyWindow)
+                    }
+                }
+            }
+        case false?:
+            Divider()
+            Button("Leave Workspace…") {
+                WorkspaceConfirm.leave(name: name, on: NSApp.keyWindow) {
+                    model.leaveWorkspace(docId) { error in
+                        WorkspaceConfirm.failed(
+                            String(localized: "Could not leave the workspace"), error, on: NSApp.keyWindow)
+                    }
+                }
+            }
+        case nil:
+            EmptyView()
+        }
     }
 
     /// A starred item's mark on its row, in every list but Starred

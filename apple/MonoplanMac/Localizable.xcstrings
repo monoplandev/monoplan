@@ -1760,6 +1760,386 @@
           }
         }
       }
+    },
+    "Refresh": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actualizar"
+          }
+        }
+      }
+    },
+    "Share “%@”": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compartir «%@»"
+          }
+        }
+      }
+    },
+    "Remove %@": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quitar a %@"
+          }
+        }
+      }
+    },
+    "%@ will stop receiving changes to this workspace. Anything they already synced stays on their devices.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ dejará de recibir los cambios de este espacio de trabajo. Lo que ya haya sincronizado se queda en sus dispositivos."
+          }
+        }
+      }
+    },
+    "OK": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aceptar"
+          }
+        }
+      }
+    },
+    "Remove User…": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quitar usuario…"
+          }
+        }
+      }
+    },
+    "Could not load sharing details": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudieron cargar los datos para compartir"
+          }
+        }
+      }
+    },
+    "Try Again": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reintentar"
+          }
+        }
+      }
+    },
+    "Members (%lld)": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Miembros (%lld)"
+          }
+        }
+      }
+    },
+    "Members": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Miembros"
+          }
+        }
+      }
+    },
+    "Anyone who joins can read everything in this workspace, including its history.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quien se una podrá leer todo lo de este espacio de trabajo, incluido su historial."
+          }
+        }
+      }
+    },
+    "Only the workspace owner can invite people.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Solo el propietario del espacio de trabajo puede invitar a otras personas."
+          }
+        }
+      }
+    },
+    "Join “%@” on Monoplan": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Únete a «%@» en Monoplan"
+          }
+        }
+      }
+    },
+    "Share…": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compartir…"
+          }
+        }
+      }
+    },
+    "Create Invite Link": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Crear enlace de invitación"
+          }
+        }
+      }
+    },
+    "Invite Link": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enlace de invitación"
+          }
+        }
+      }
+    },
+    "Single use, expires %@. It is shown only now, and anyone who has it can join.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "De un solo uso, caduca el %@. Solo se muestra ahora, y cualquiera que lo tenga puede unirse."
+          }
+        }
+      }
+    },
+    "Single use, expires in 7 days.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "De un solo uso, caduca en 7 días."
+          }
+        }
+      }
+    },
+    "Unused Links": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enlaces sin usar"
+          }
+        }
+      }
+    },
+    "Expires %@": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Caduca el %@"
+          }
+        }
+      }
+    },
+    "Could not create the link": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo crear el enlace"
+          }
+        }
+      }
+    },
+    "Could not revoke the link": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo revocar el enlace"
+          }
+        }
+      }
+    },
+    "Could not remove the user": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo quitar al usuario"
+          }
+        }
+      }
+    },
+    "You": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tú"
+          }
+        }
+      }
+    },
+    "Owner": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Propietario"
+          }
+        }
+      }
+    },
+    "Leave “%@”?": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Salir de «%@»?"
+          }
+        }
+      }
+    },
+    "Leave": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Salir"
+          }
+        }
+      }
+    },
+    "Delete “%@”?": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Eliminar «%@»?"
+          }
+        }
+      }
+    },
+    "Type “%@” to confirm": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escribe «%@» para confirmar"
+          }
+        }
+      }
+    },
+    "Workspace Actions": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Acciones del espacio de trabajo"
+          }
+        }
+      }
+    },
+    "Expand": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expandir"
+          }
+        }
+      }
+    },
+    "Collapse": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Contraer"
+          }
+        }
+      }
+    },
+    "Delete Workspace…": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eliminar espacio de trabajo…"
+          }
+        }
+      }
+    },
+    "Leave Workspace…": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Salir del espacio de trabajo…"
+          }
+        }
+      }
+    },
+    "Could not delete the workspace": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo eliminar el espacio de trabajo"
+          }
+        }
+      }
+    },
+    "Could not leave the workspace": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo salir del espacio de trabajo"
+          }
+        }
+      }
+    },
+    "It is removed from your devices and you lose access. The other members keep it; you will need a new invite link to rejoin.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se quita de tus dispositivos y pierdes el acceso. Los demás miembros lo conservan; necesitarás un nuevo enlace de invitación para volver a unirte."
+          }
+        }
+      }
+    },
+    "Its lists and items are removed from every device, and anyone it is shared with loses access. This cannot be undone.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sus listas y elementos se eliminan de todos los dispositivos, y todas las personas con quienes se comparte pierden el acceso. No se puede deshacer."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
