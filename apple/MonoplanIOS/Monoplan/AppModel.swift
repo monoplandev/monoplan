@@ -46,7 +46,8 @@ final class AppModel: ObservableObject {
     /// time: the cheapest proof that remote ops are arriving.
     @Published private(set) var changeCount = 0
     @Published private(set) var lastChangeAt: Date?
-    /// The agenda's day groups (`Engine.agenda`), reread on `Changed`.
+    /// The agenda's day groups (`Engine.agenda`), reread on `Changed`:
+    /// in date order, the days gone by ahead of the `today` group.
     @Published private(set) var agenda: [AgendaGroup] = []
     @Published private(set) var agendaError: String?
     /// The Starred lens (`Engine.starred`): Home's curated order with
@@ -1017,14 +1018,23 @@ final class AppModel: ObservableObject {
     /// builds its rows lazily; a window would save nothing.
     static let agendaDays: UInt32 = 36_500
 
-    /// `Engine.agenda`: every workspace merged, Today first, then each
-    /// non-empty day to the end of what is dated. Workspaces hidden
-    /// from the calendar (the Home doc's setting) are already left out.
-    /// The same read as JSON goes to the widget, which decodes it in
-    /// its own process.
+    /// How far back the agenda reaches: the days gone by that the
+    /// Calendar page shows above Today. Bounded, unlike the future,
+    /// because the past only grows and the whole read is diffed on
+    /// every change.
+    static let agendaPastDays: UInt32 = 365
+
+    /// `Engine.agenda`: every workspace merged, in date order: each
+    /// non-empty day gone by (events that happened, done items on the
+    /// day they were planned for), Today, then each non-empty day to
+    /// the end of what is dated. Workspaces hidden from the calendar
+    /// (the Home doc's setting) are already left out. The read from
+    /// today on goes to the widget as JSON, which decodes it in its
+    /// own process.
     func refreshAgenda() {
         let days = Self.agendaDays
-        read({ (groups: try $0.agenda(days: days), json: try $0.agendaJson(days: days)) }) { [weak self] read, error in
+        let past = Self.agendaPastDays
+        read({ (groups: try $0.agenda(days: days, pastDays: past), json: try $0.agendaJson(days: days)) }) { [weak self] read, error in
             if let read {
                 self?.agenda = read.groups
                 Self.leaveWidgetSnapshot(read.json)

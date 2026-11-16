@@ -36,6 +36,12 @@ pub struct AgendaArgs {
     /// How many days past today to show (Today is always shown).
     #[arg(long, default_value_t = 14)]
     pub days: u32,
+    /// How many days before today to show: the days that have gone by
+    /// (events that happened, done items on the day they were planned
+    /// for). 0, the default, shows none.
+    #[arg(long, default_value_t = 0)]
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub past: u32,
     /// Override the local date used as "today" (`YYYY-MM-DD`).
     #[arg(long)]
     pub today: Option<String>,
@@ -48,6 +54,11 @@ pub struct AgendaArgs {
     #[arg(long)]
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub all: bool,
+}
+
+/// Keeps `past` off the wire when unset, as `all` is.
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 fn tone_label(tone: Tone) -> Option<&'static str> {
@@ -79,9 +90,11 @@ pub struct AgendaDay {
     pub rows: Vec<AgendaRow>,
 }
 
-/// Group dated items by placement day. `today` and `horizon` are
-/// `YYYY-MM-DD`; days after `horizon` are dropped. Today is always the
-/// first group, even when empty; later empty days are skipped.
+/// Group dated items by placement day. `floor`, `today` and `horizon`
+/// are `YYYY-MM-DD`; days before `floor` and after `horizon` are
+/// dropped. Today is always a group, even when empty, and the first
+/// one when `floor` is today; other empty days are skipped. Groups are
+/// in date order, so the days gone by come ahead of Today.
 ///
 /// - Placement day: the earlier of the `when` day and the `deadline`
 ///   day, the deadline clamped up to today, so an overdue deadline lands
@@ -100,14 +113,28 @@ pub struct AgendaDay {
 ///   nothing is owed and past days are not shown. Cancelled and binned
 ///   items never appear: a cancelled slot is something that did not
 ///   happen, so it clutters rather than records.
+/// - Days gone by (`floor` before today): a day before today holds what
+///   has a `when` on it and is settled, an event (it happened) or a
+///   done item (on the day it was planned for), neutral, in the day's
+///   usual order. Nothing else lands there: an Open task with a past
+///   `when` is owed and stays in Today's overdue fold, and a deadline
+///   never places in the past. An event with a past `when` and a
+///   deadline still to come is on both days.
+///
+/// [`build_agenda`] is the agenda from today on (`floor` = today).
 pub fn build_agenda(items: &[ItemView], today: &str, horizon: &str) -> Vec<AgendaDay> {
-    build_agenda_from(&[(None, items)], today, horizon)
+    build_agenda_from(&[(None, items)], today, today, horizon)
 }
 
 /// [`build_agenda`] over several workspaces at once: one placement and
 /// one order across all of them (a stable sort, so equal keys keep
 /// source order), each row tagged with its source.
-pub fn build_agenda_from(sources: &[Source<'_>], today: &str, horizon: &str) -> Vec<AgendaDay> {
+pub fn build_agenda_from(
+    sources: &[Source<'_>],
+    floor: &str,
+    today: &str,
+    horizon: &str,
+) -> Vec<AgendaDay> {
     // (day, fold group, placing raw, created_at, row)
     let mut placed: Vec<(String, u8, String, i64, AgendaRow)> = Vec::new();
     for (doc, items) in sources {
@@ -115,8 +142,27 @@ pub fn build_agenda_from(sources: &[Source<'_>], today: &str, horizon: &str) -> 
             if item.is_binned() || item.is_cancelled() {
                 continue;
             }
-            // Past days are not shown, so a past `when` places nothing on
-            // its own day; a task's lands in Today's overdue fold below.
+            // A day gone by: what happened on it (an event) or was done
+            // for it. The rest of the placement is from today on.
+            if let Some(w) = item.when.as_deref() {
+                let day = &w[..w.len().min(10)];
+                if day < today && day >= floor && (item.is_event() || item.is_done()) {
+                    placed.push((
+                        day.to_string(),
+                        1,
+                        w.to_string(),
+                        item.created_at,
+                        AgendaRow {
+                            item: item.clone(),
+                            placed_by: PlacedBy::When,
+                            tone: Tone::Neutral,
+                            doc: doc.cloned(),
+                        },
+                    ));
+                }
+            }
+            // From today on a past `when` places nothing on its own
+            // day; a task's lands in Today's overdue fold below.
             let when_day = item
                 .when
                 .as_deref()
@@ -218,10 +264,7 @@ pub fn build_agenda_from(sources: &[Source<'_>], today: &str, horizon: &str) -> 
             .then(a.3.cmp(&b.3))
     });
 
-    let mut out = vec![AgendaDay {
-        day: today.to_string(),
-        rows: Vec::new(),
-    }];
+    let mut out: Vec<AgendaDay> = Vec::new();
     for (day, _, _, _, row) in placed {
         match out.last_mut() {
             Some(last) if last.day == day => last.rows.push(row),
@@ -230,6 +273,17 @@ pub fn build_agenda_from(sources: &[Source<'_>], today: &str, horizon: &str) -> 
                 rows: vec![row],
             }),
         }
+    }
+    // Today is always there, in its place among the days.
+    if !out.iter().any(|d| d.day == today) {
+        let at = out.partition_point(|d| d.day.as_str() < today);
+        out.insert(
+            at,
+            AgendaDay {
+                day: today.to_string(),
+                rows: Vec::new(),
+            },
+        );
     }
     out
 }
@@ -263,6 +317,7 @@ pub fn run(cx: &Ctx, args: AgendaArgs, out: &mut dyn Write) -> anyhow::Result<()
         cx,
         &AgendaQuery {
             days: args.days,
+            past_days: args.past,
             today: args.today.as_deref(),
             everywhere: args.all,
         },
@@ -371,6 +426,7 @@ mod tests {
         ];
         let days = build_agenda_from(
             &[(Some(&home), &home_items), (Some(&work), &work_items)],
+            TODAY,
             TODAY,
             HORIZON,
         );
@@ -600,6 +656,66 @@ mod tests {
                 ("2026-09-12", vec!["event"]),
             ]
         );
+    }
+
+    #[test]
+    fn days_gone_by_hold_events_and_done_items_from_the_floor() {
+        let mut gig = item("gig", Some("2026-09-01T19:00"), None, 1);
+        gig.event = true;
+        let mut done = item("done", Some("2026-09-01"), None, 2);
+        done.state = WorkflowState::Done;
+        // Still owed: Today's overdue fold only, not its own day too.
+        let slipped = item("slipped", Some("2026-09-01"), None, 3);
+        // A deadline never places in the past, done or not.
+        let mut done_deadline = item("done-deadline", None, Some("2026-09-02"), 4);
+        done_deadline.state = WorkflowState::Done;
+        // Happened then, and its deadline is still to come: both days.
+        let mut tickets = item("tickets", Some("2026-09-03"), Some("2026-09-10"), 5);
+        tickets.event = true;
+        // Before the floor: dropped.
+        let mut ancient = item("ancient", Some("2026-08-01"), None, 6);
+        ancient.event = true;
+        let mut cancelled = item("cancelled", Some("2026-09-01"), None, 7);
+        cancelled.state = WorkflowState::Cancelled;
+        let mut binned = item("binned", Some("2026-09-01"), None, 8);
+        binned.event = true;
+        binned.binned_at = Some(5);
+        let items = [
+            gig,
+            done,
+            slipped,
+            done_deadline,
+            tickets,
+            ancient,
+            cancelled,
+            binned,
+        ];
+        let days = build_agenda_from(&[(None, &items)], "2026-08-26", TODAY, HORIZON);
+        let by_day: Vec<(&str, Vec<&str>)> =
+            days.iter().map(|d| (d.day.as_str(), ids(d))).collect();
+        assert_eq!(
+            by_day,
+            vec![
+                ("2026-09-01", vec!["done", "gig"]),
+                ("2026-09-03", vec!["tickets"]),
+                (TODAY, vec!["slipped"]),
+                ("2026-09-10", vec!["tickets"]),
+            ]
+        );
+        assert!(
+            days[..2]
+                .iter()
+                .flat_map(|d| &d.rows)
+                .all(|r| r.tone == Tone::Neutral && r.placed_by == PlacedBy::When)
+        );
+        // An empty Today still takes its place after the days gone by,
+        // and no floor means none of them.
+        let days = build_agenda_from(&[(None, &items[..2])], "2026-08-26", TODAY, HORIZON);
+        let order: Vec<&str> = days.iter().map(|d| d.day.as_str()).collect();
+        assert_eq!(order, vec!["2026-09-01", TODAY]);
+        assert!(days[1].rows.is_empty());
+        let days = build_agenda(&items[..2], TODAY, HORIZON);
+        assert_eq!(days.len(), 1);
     }
 
     #[test]

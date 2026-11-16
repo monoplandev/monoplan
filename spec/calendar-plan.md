@@ -59,7 +59,10 @@ and lives on its day in the past: it does not roll over into Today, is not
 rewritten by the clock, and places nothing on the agenda, which renders no
 past days. An event with a past `when` and a deadline is placed by the
 deadline alone. Past days become visible when a calendar view that can
-reach them is built, or when the agenda learns to scroll backwards.
+reach them is built, or when the agenda learns to scroll backwards: the
+CLI and iOS agenda did on 2026-11-16 (`agenda --past N`, `spec/cli.md`
+§Items), where a past event sits on its day, neutral, above Today. The
+web agenda still renders no past days.
 
 Done and binned items keep both fields untouched, as they keep `deadline`
 today. The fields are never cleared by a transition. Restore brings the

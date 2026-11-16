@@ -554,7 +554,7 @@ final class MainWindowModel: ObservableObject {
             case .starred, .bin:
                 break
             case .agenda:
-                snapshot.agenda = try engine.agenda(days: Self.agendaDays)
+                snapshot.agenda = try engine.agenda(days: Self.agendaDays, pastDays: 0)
             case .done:
                 // One read over every workspace, merged and filtered
                 // in Rust; the filter narrowed to the sections just

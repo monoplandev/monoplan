@@ -437,6 +437,7 @@ async fn typed_reads_that_span_workspaces_tag_their_rows() {
                     cx,
                     &AgendaQuery {
                         days: 36_500,
+                        past_days: 0,
                         today: Some("2026-11-14"),
                         everywhere: true,
                     },

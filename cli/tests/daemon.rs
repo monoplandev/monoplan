@@ -225,6 +225,7 @@ async fn watcher_hears_sync_local_and_remote_changes() {
             workspace: None,
             cmd: DocCmd::Agenda(monoplan_cli::commands::agenda::AgendaArgs {
                 days: 0,
+                past: 0,
                 today: None,
                 json: true,
                 all: false,

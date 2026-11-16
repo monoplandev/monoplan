@@ -80,6 +80,9 @@ pub struct AgendaGroup {
 pub struct AgendaQuery<'a> {
     /// How many days past today to show (Today is always shown).
     pub days: u32,
+    /// How many days before today to show: the days gone by, ahead of
+    /// Today in the result. 0 for none.
+    pub past_days: u32,
     /// The local date to use as today (`YYYY-MM-DD`); the clock's
     /// when `None`.
     pub today: Option<&'a str>,
@@ -94,7 +97,9 @@ pub struct AgendaQuery<'a> {
 pub struct Placed {
     /// `YYYY-MM-DD`.
     pub today: String,
-    /// Today first, even when empty; then each non-empty day.
+    /// In date order: each non-empty day gone by (none unless the
+    /// query asks for them), Today, even when empty, then each
+    /// non-empty day ahead.
     pub days: Vec<rules::AgendaDay>,
 }
 
@@ -108,6 +113,10 @@ pub fn place(cx: &Ctx, query: &AgendaQuery) -> anyhow::Result<Placed> {
     let horizon = today
         .checked_add_days(Days::new(u64::from(query.days)))
         .ok_or_else(|| anyhow::anyhow!("--days out of range"))?;
+    let floor = today
+        .checked_sub_days(Days::new(u64::from(query.past_days)))
+        .ok_or_else(|| anyhow::anyhow!("--past out of range"))?;
+    let floor = floor.format("%Y-%m-%d").to_string();
     let today = today.format("%Y-%m-%d").to_string();
     let horizon = horizon.format("%Y-%m-%d").to_string();
 
@@ -126,13 +135,14 @@ pub fn place(cx: &Ctx, query: &AgendaQuery) -> anyhow::Result<Placed> {
         .map(|(c, items)| (*c, items.as_slice()))
         .collect();
     Ok(Placed {
-        days: rules::build_agenda_from(&sources, &today, &horizon),
+        days: rules::build_agenda_from(&sources, &floor, &today, &horizon),
         today,
     })
 }
 
 /// The agenda as rows: Today first (always there), then each
-/// non-empty day up to the horizon.
+/// non-empty day up to the horizon. With `past_days`, the non-empty
+/// days gone by come ahead of Today, oldest first.
 pub fn agenda(cx: &Ctx, query: &AgendaQuery) -> anyhow::Result<Vec<AgendaGroup>> {
     Ok(groups(&place(cx, query)?))
 }

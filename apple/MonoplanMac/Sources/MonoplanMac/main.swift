@@ -149,7 +149,7 @@ final class TrayController: NSObject, NSMenuDelegate {
         calls.run({ engine in
             // Today is the headline; a failed Starred read just leaves
             // the section empty rather than replacing it.
-            (try engine.agenda(days: 0), (try? engine.starred()) ?? [])
+            (try engine.agenda(days: 0, pastDays: 0), (try? engine.starred()) ?? [])
         }) { [weak self] result in
             guard let self else { return }
             switch result {

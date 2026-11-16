@@ -418,6 +418,7 @@ mod tests {
                 workspace: None,
                 cmd: DocCmd::Agenda(AgendaArgs {
                     days: 0,
+                    past: 0,
                     today: None,
                     json: true,
                     all: false,

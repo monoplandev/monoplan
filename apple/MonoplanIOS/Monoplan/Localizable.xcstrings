@@ -1966,7 +1966,6 @@
       }
     },
     "Nothing scheduled" : {
-      "extractionState" : "stale",
       "localizations" : {
         "es" : {
           "stringUnit" : {

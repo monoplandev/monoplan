@@ -1,10 +1,16 @@
 // The Agenda page, pushed from Home (which owns the navigation stack
 // and the item sheet): the engine's agenda projection (`Engine.agenda`,
 // spec/cli.md, with a horizon far enough out to be the whole future,
-// `AppModel.agendaDays`) as sections: Today first (overdue deadlines
+// `AppModel.agendaDays`) as sections: Today (overdue deadlines
 // and tasks whose planned day has passed folded in), then each
 // non-empty day. A row opens the item's sheet
 // (`ItemView`) and its checkbox ticks it, as in the other lenses.
+//
+// The days gone by (`AppModel.agendaPastDays`: events that happened,
+// done items on the day they were planned for) are sections above
+// Today. The page opens with Today's header at the top, so they are
+// reached by scrolling up; Today's section is always there to anchor
+// on, with a line in it when it has no rows.
 
 import MonoplanCore
 import MonoplanMacKit
@@ -12,25 +18,54 @@ import SwiftUI
 
 struct AgendaView: View {
     @EnvironmentObject private var model: AppModel
+    /// Whether the list has been put on Today: once per visit, so a
+    /// reread or a return to the page leaves the scroll where it is.
+    @State private var anchored = false
+
+    /// The id of Today's header, what the list opens on.
+    private static let todayAnchor = "agenda-today"
 
     var body: some View {
         Group {
             if model.agenda.allSatisfy({ $0.rows.isEmpty }) {
                 emptyState
             } else {
-                List {
-                    ForEach(model.agenda, id: \.day) { day in
-                        if !day.rows.isEmpty {
-                            Section(Self.title(for: day)) {
-                                ForEach(day.rows, id: \.key) { row in
-                                    AgendaRowView(row: row)
+                ScrollViewReader { proxy in
+                    List {
+                        ForEach(model.agenda, id: \.day) { day in
+                            if day.today {
+                                Section {
+                                    if day.rows.isEmpty {
+                                        Text("Nothing scheduled")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    ForEach(day.rows, id: \.key) { row in
+                                        AgendaRowView(row: row)
+                                    }
+                                } header: {
+                                    Text(Self.title(for: day)).id(Self.todayAnchor)
+                                }
+                            } else if !day.rows.isEmpty {
+                                Section(Self.title(for: day)) {
+                                    ForEach(day.rows, id: \.key) { row in
+                                        AgendaRowView(row: row)
+                                    }
                                 }
                             }
                         }
                     }
+                    .listStyle(.insetGrouped)
+                    .animation(.default, value: model.agenda)
+                    .onAppear {
+                        guard !anchored else { return }
+                        anchored = true
+                        // After the list's first layout: a scroll asked
+                        // for before it is dropped.
+                        DispatchQueue.main.async {
+                            proxy.scrollTo(Self.todayAnchor, anchor: .top)
+                        }
+                    }
                 }
-                .listStyle(.insetGrouped)
-                .animation(.default, value: model.agenda)
             }
         }
         .navigationTitle("Calendar")

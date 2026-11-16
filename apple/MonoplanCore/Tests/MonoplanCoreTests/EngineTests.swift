@@ -207,7 +207,7 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(starred.map(\.id), [id])
         XCTAssertEqual(starred.first?.docId, home)
         XCTAssertEqual(starred.first?.listName, "Chores")
-        let agenda = try await calls.run { try $0.agenda(days: 36_500) }
+        let agenda = try await calls.run { try $0.agenda(days: 36_500, pastDays: 0) }
         XCTAssertEqual(agenda.first?.today, true)
         let dated = try XCTUnwrap(agenda.first { $0.day == "2030-01-04" })
         XCTAssertEqual(dated.rows.map(\.id), [id])
