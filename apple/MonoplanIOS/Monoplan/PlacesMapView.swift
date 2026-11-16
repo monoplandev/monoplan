@@ -185,8 +185,11 @@ struct PlacesMapView: View {
             .mapControls {}
             .onMapCameraChange(frequency: .onEnd) { centre = $0.region.center }
             // The sheet covers the foot of the map: keep what the
-            // camera frames above it.
-            .safeAreaPadding(.bottom, covered)
+            // camera frames, and the logo and legal link, above it.
+            // Less a little, set by eye on a phone: at `covered` the
+            // logo sits level with the top of the location button, and
+            // this brings it down into the button's row.
+            .safeAreaPadding(.bottom, covered - 23)
             // The map runs to the top of the screen, under the back
             // button.
             .ignoresSafeArea()
