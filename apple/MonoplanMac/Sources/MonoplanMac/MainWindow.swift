@@ -1583,8 +1583,20 @@ struct MainWindowView: View {
             todayJumps: model.todayJumps,
             heading: Self.heading(for:),
             rowHeight: { agendaRowDetailed($0) ? 42 : 24 },
-            row: { row in AnyView(agendaRow(row).itemMenu(model, workspace: row.docId, id: row.id)) },
-            select: { row in model.selectItem(workspace: row?.docId, id: row?.id) })
+            row: { row in AnyView(agendaRow(row)) },
+            select: { row in model.selectItem(workspace: row?.docId, id: row?.id) },
+            // The other lists' `itemMenu`, as the table's own menu.
+            menu: { row in
+                [
+                    .init(title: String(localized: "Duplicate")) {
+                        model.duplicate(workspace: row.docId, id: row.id)
+                    },
+                    nil,
+                    .init(title: String(localized: "Move to Bin")) {
+                        model.bin(workspace: row.docId, id: row.id)
+                    },
+                ]
+            })
             // Under the toolbar, as a list is: the scroll view insets
             // its own content for it.
             .ignoresSafeArea()

@@ -15,7 +15,10 @@
 // The rows are the window's SwiftUI rows, hosted in the cells and
 // rewritten in place; a day's header is a group row. No drag, no
 // multiple selection: a click selects an item, which opens its panel,
-// as in the SwiftUI lists. The selected row has a soft ground, not
+// as in the SwiftUI lists. A right-click anywhere on an item's row
+// selects it too and opens its menu: the menu is the table's, not the
+// hosted content's, which would only take a click on what it draws.
+// The selected row has a soft ground, not
 // the accent colour: the web's, a pale blue in the key window and a
 // grey in any other (`PaneColor.rowSelected`, `RowView`).
 
@@ -37,6 +40,14 @@ struct AgendaTable: NSViewRepresentable {
     let row: (AgendaEntry) -> AnyView
     /// A row was picked; nil for a click on no row.
     let select: (AgendaEntry?) -> Void
+    /// A row's right-click menu, top to bottom; nil is a separator.
+    let menu: (AgendaEntry) -> [RowAction?]
+
+    /// One line of a row's menu.
+    struct RowAction {
+        let title: String
+        let run: () -> Void
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -57,6 +68,7 @@ struct AgendaTable: NSViewRepresentable {
         table.floatsGroupRows = true
         table.dataSource = coordinator
         table.delegate = coordinator
+        table.rowMenu = { [weak coordinator] in coordinator?.menu(forRow: $0) }
 
         let scroll = coordinator.scroll
         scroll.documentView = table
@@ -85,6 +97,33 @@ struct AgendaTable: NSViewRepresentable {
             super.layout()
             onLayout?()
         }
+    }
+
+    /// A table that asks for the menu of the row under a right-click,
+    /// wherever on the row it lands.
+    final class MenuTable: NSTableView {
+        var rowMenu: ((Int) -> NSMenu?)?
+
+        override func menu(for event: NSEvent) -> NSMenu? {
+            let row = row(at: convert(event.locationInWindow, from: nil))
+            return row >= 0 ? rowMenu?(row) : nil
+        }
+    }
+
+    /// A menu line that runs a closure.
+    private final class ActionItem: NSMenuItem {
+        private let run: () -> Void
+
+        init(_ action: RowAction) {
+            run = action.run
+            super.init(title: action.title, action: #selector(fire(_:)), keyEquivalent: "")
+            target = self
+        }
+
+        @available(*, unavailable)
+        required init(coder: NSCoder) { fatalError("not built from a nib") }
+
+        @objc private func fire(_ sender: Any?) { run() }
     }
 
     /// One table row.
@@ -121,7 +160,7 @@ struct AgendaTable: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         var parent: AgendaTable
-        let table = NSTableView()
+        let table = MenuTable()
         let scroll = LayoutScrollView()
 
         private var lines: [Line] = []
@@ -280,6 +319,22 @@ struct AgendaTable: NSViewRepresentable {
             guard !syncing else { return }
             let row = table.selectedRow
             parent.select(row >= 0 ? lines[row].entry : nil)
+        }
+
+        /// An item row's menu, for a right-click on it: the row is
+        /// selected first, as a click would, so the menu is for the
+        /// item whose panel is open.
+        fileprivate func menu(forRow row: Int) -> NSMenu? {
+            guard row < lines.count, let entry = lines[row].entry else { return nil }
+            let actions = parent.menu(entry)
+            guard !actions.isEmpty else { return nil }
+            if table.selectedRow != row {
+                table.selectRowIndexes([row], byExtendingSelection: false)
+            }
+            let menu = NSMenu()
+            menu.autoenablesItems = false
+            menu.items = actions.map { $0.map(ActionItem.init) ?? .separator() }
+            return menu
         }
 
         /// Put the table's selection on the model's item. A reload
