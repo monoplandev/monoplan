@@ -830,6 +830,25 @@ final class MainWindowModel: ObservableObject {
         return [list.icon, list.name].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
     }
 
+    /// The name of the list a Done item is on, for its row: the list,
+    /// without its emoji, then the workspace when it is not Personal's. An item whose
+    /// list row has gone reads as the Inbox's, where it shows.
+    func doneListName(_ row: DoneRow) -> String {
+        let listId = row.item.listId
+        let name: String
+        if listId == Self.events {
+            name = String(localized: "Calendar")
+        } else if listId != Self.inbox,
+            let list = sections.first(where: { $0.target == row.workspace })?
+                .lists.first(where: { $0.id == listId })
+        {
+            name = list.name
+        } else {
+            name = String(localized: "Inbox")
+        }
+        return [name, row.workspaceName].compactMap { $0 }.joined(separator: " · ")
+    }
+
     func add(_ text: String) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -1445,7 +1464,8 @@ struct MainWindowView: View {
     }
 
     /// Done: every workspace's newest Done items, newest first. The
-    /// tick puts a row back; the stamp is when it entered Done.
+    /// tick puts a row back. As the web's Done rows: the tick, when it
+    /// entered Done, the text, and the list it is on at the far edge.
     private var done: some View {
         List(selection: selection { id in model.done.first { $0.item.id == id }?.workspace }) {
             ForEach(model.done) { row in
@@ -1453,19 +1473,21 @@ struct MainWindowView: View {
                     ItemCheckButton(state: row.item.state) {
                         model.setDone(workspace: row.workspace, id: row.item.id, done: $0)
                     }
+                    // As wide as it reads, so the text follows it at
+                    // the same gap on every row.
+                    Text(verbatim: Self.stamp(row.item.lifecycleAt))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .fixedSize()
                     Text(verbatim: row.item.text)
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .foregroundStyle(.secondary)
-                    if let name = row.workspaceName {
-                        Text(verbatim: name).font(.footnote).foregroundStyle(.tertiary).lineLimit(1)
-                    }
                     Spacer()
-                    Text(verbatim: Self.stamp(row.item.lifecycleAt))
+                    Text(verbatim: model.doneListName(row))
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                        .fixedSize()
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
                 .itemRow()
                 .itemMenu(model, workspace: row.workspace, id: row.item.id)
@@ -1550,10 +1572,21 @@ struct MainWindowView: View {
         .scrollContentBackground(.hidden)
     }
 
-    /// A Done row's moment (unix ms), as a short date and time.
-    static func stamp(_ millis: Int64) -> String {
-        Date(timeIntervalSince1970: TimeInterval(millis) / 1000)
-            .formatted(date: .abbreviated, time: .shortened)
+    /// A Done row's moment (unix ms): the time of day for today, the
+    /// day of the week for the six days before it (further back a
+    /// weekday would name the wrong week), then the date, with its year
+    /// once that differs.
+    static func stamp(_ millis: Int64, now: Date = Date(), calendar: Calendar = .current) -> String {
+        let date = Date(timeIntervalSince1970: TimeInterval(millis) / 1000)
+        let days = calendar.dateComponents(
+            [.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)
+        ).day ?? 0
+        if days <= 0 { return date.formatted(date: .omitted, time: .shortened) }
+        if days < 7 { return date.formatted(.dateTime.weekday(.abbreviated)) }
+        if calendar.isDate(date, equalTo: now, toGranularity: .year) {
+            return date.formatted(.dateTime.day().month(.abbreviated))
+        }
+        return date.formatted(.dateTime.day().month(.abbreviated).year())
     }
 
     /// "Today · 14 Nov", "Unscheduled", or the day spelled out

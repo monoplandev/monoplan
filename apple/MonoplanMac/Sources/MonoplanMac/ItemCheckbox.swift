@@ -1,9 +1,12 @@
 // The checkbox an item row leads with, as the iOS app draws it
 // (`MonoplanIOS/Monoplan/ItemCheckbox.swift`): an empty rounded square
-// while the item is open, filled and ticked once Done, crossed when
-// Cancelled (spec/data-model.md "Lifecycle"). `ItemCheckbox` is the
+// while the item is open, ticked once Done, crossed when Cancelled (spec/data-model.md "Lifecycle"). `ItemCheckbox` is the
 // SwiftUI drawing, `ItemCheckButton` the control that ticks and
 // reopens, `ItemCheckArt` the same box as an image for the toolbar.
+// Unlike iOS's filled accent box, a Done box in a row keeps the open
+// box's border and no fill, with the tick in the text colour: a page of
+// Done rows should not be a column of accent colour. The toolbar's one
+// box, on the item's own surface, is still filled.
 
 import AppKit
 import MonoplanCore
@@ -28,14 +31,11 @@ struct ItemCheckbox: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: side * CheckMetrics.radius, style: .continuous)
         ZStack {
+            shape.strokeBorder(.tertiary, lineWidth: CheckMetrics.border)
             if state == .done {
-                shape.fill(.tint)
-                mark(cancelled: false).foregroundStyle(.white)
-            } else {
-                shape.strokeBorder(.tertiary, lineWidth: CheckMetrics.border)
-                if state == .cancelled {
-                    mark(cancelled: true).foregroundStyle(.tertiary)
-                }
+                mark(cancelled: false).foregroundStyle(.primary)
+            } else if state == .cancelled {
+                mark(cancelled: true).foregroundStyle(.tertiary)
             }
         }
         .frame(width: side, height: side)
