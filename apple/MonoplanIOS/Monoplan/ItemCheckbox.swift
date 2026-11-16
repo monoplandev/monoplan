@@ -81,10 +81,19 @@ struct ItemCheckButton: View {
 /// the row opens the item's sheet. The item is the enclosing
 /// `ItemLink`'s; without one the row is inert.
 struct CheckboxRow<Content: View>: View {
+    @EnvironmentObject private var model: AppModel
     @Environment(\.itemRef) private var ref
     @Environment(\.openItem) private var openItem
+    @Environment(\.duplicatesStarred) private var onStarredPage
     let state: ItemState
     @ViewBuilder let content: Content
+
+    /// Whether the row ends in a star: its item is starred, and the
+    /// page is not Starred itself, where every row would carry one.
+    private var showsStar: Bool {
+        guard let ref, !onStarredPage, !state.isClosed else { return false }
+        return model.starred.contains { $0.id == ref.itemId }
+    }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -93,15 +102,44 @@ struct CheckboxRow<Content: View>: View {
             } else {
                 ItemCheckbox(state: state)
             }
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .onTapGesture { if let ref { openItem(ref) } }
-                .accessibilityAddTraits(.isButton)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                content
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if showsStar { StarMark() }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { if let ref { openItem(ref) } }
+            .accessibilityAddTraits(.isButton)
         }
         .modifier(ItemRowMenu(ref: ref, state: state))
         // No dividers between item rows, on any page that lists them.
         .itemListRow()
+    }
+}
+
+/// The mark a starred item's row ends in: the item page's star, filled
+/// (`StarFill` under `StarStroke`), sized with the text. Display only;
+/// the row's menu and the item's page do the starring.
+struct StarMark: View {
+    @ScaledMetric(relativeTo: .body) private var side: CGFloat = 15
+
+    /// The web's `#ffe785`.
+    static let fill = Color(red: 1.0, green: 0.906, blue: 0.522)
+
+    var body: some View {
+        ZStack {
+            Image("StarFill")
+                .resizable()
+                .foregroundStyle(Self.fill)
+            Image("StarStroke")
+                .resizable()
+                .foregroundStyle(Color.primary.opacity(0.7))
+        }
+        .frame(width: side, height: side)
+        // Level with the first line's capitals, as the checkbox is.
+        .alignmentGuide(.firstTextBaseline) { $0[.bottom] - side * 0.1 }
+        .accessibilityElement()
+        .accessibilityLabel("Starred")
     }
 }
 

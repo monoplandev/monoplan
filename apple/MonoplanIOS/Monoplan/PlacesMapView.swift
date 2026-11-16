@@ -344,9 +344,12 @@ struct PlacesMapView: View {
     }
 }
 
-/// One row of the map's list: the item's text, and under it, muted,
-/// where it is: the place's label, how far away when the phone's
-/// location is known, and the workspace when the item is not Personal's.
+/// One row of the map's list: the item's text; under it, muted, where
+/// its date when it has one, said short (`ItemView.shortWhenText`), and
+/// where it is (the place's label, and how far away when the phone's
+/// location is known); and on a third line the list it lives in, with the
+/// workspace after it when that is not Personal, as the other lenses'
+/// rows have them.
 private struct PlacedRowView: View {
     let pin: Pinned
     let from: CLLocation?
@@ -355,24 +358,35 @@ private struct PlacedRowView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(pin.item.text)
                 .itemTextSlot()
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                PinIcon(size: 11)
-                Text(note).lineLimit(1)
+            Text(note)
+                .lineLimit(1)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let home {
+                Text(home)
+                    .lineLimit(1)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
     }
 
     private var note: String {
-        var parts = [pin.place.label]
+        var parts: [String] = []
+        if let when = pin.item.item.when { parts.append(ItemView.shortWhenText(when)) }
+        parts.append(pin.place.label)
         if let from {
             let metres = Measurement(value: pin.metres(from: from), unit: UnitLength.meters)
             parts.append(metres.formatted(.measurement(width: .abbreviated, usage: .road)))
         }
-        if let workspace = pin.item.docName { parts.append(workspace) }
         return parts.joined(separator: " · ")
+    }
+
+    private var home: String? {
+        let list = NoList.display(pin.item.listName, listId: pin.item.item.listId)
+        let parts = [list, pin.item.docName].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }

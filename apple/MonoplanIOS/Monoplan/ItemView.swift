@@ -601,6 +601,29 @@ struct ItemView: View {
         return when.count >= 16 ? "\(name) \(when.dropFirst(11).prefix(5))" : name
     }
 
+    /// A planned date said short, for a row's note: "Today 14:00",
+    /// "Tomorrow", the weekday alone within the week ahead ("Friday
+    /// 14:00"), otherwise the day and month ("13 Feb"), with the year
+    /// once it is not this one.
+    static func shortWhenText(_ when: String, now: Date = Date(), calendar: Calendar = .current) -> String {
+        let day = String(when.prefix(10))
+        var name = day
+        if let date = Agenda.start(of: day, calendar: calendar) {
+            let today = calendar.startOfDay(for: now)
+            let ahead = calendar.dateComponents([.day], from: today, to: calendar.startOfDay(for: date)).day ?? 0
+            switch ahead {
+            case 0: name = String(localized: "Today")
+            case 1: name = String(localized: "Tomorrow")
+            case 2...6: name = date.formatted(.dateTime.weekday(.wide))
+            default:
+                name = calendar.isDate(date, equalTo: now, toGranularity: .year)
+                    ? date.formatted(.dateTime.day().month(.abbreviated))
+                    : date.formatted(.dateTime.day().month(.abbreviated).year())
+            }
+        }
+        return when.count >= 16 ? "\(name) \(when.dropFirst(11).prefix(5))" : name
+    }
+
     /// A `YYYY-MM-DD` spelled out in the local calendar; the raw text if
     /// it does not parse.
     static func dayText(_ day: String, now: Date = Date(), calendar: Calendar = .current) -> String {
@@ -719,15 +742,12 @@ private struct StarButton: View {
     let width: CGFloat
     let action: () -> Void
 
-    /// The web's `#ffe785`.
-    static let fill = Color(red: 1.0, green: 0.906, blue: 0.522)
-
     var body: some View {
         Button(action: action) {
             ZStack {
                 Image("StarFill")
                     .resizable()
-                    .foregroundStyle(starred ? Self.fill : .clear)
+                    .foregroundStyle(starred ? StarMark.fill : .clear)
                 Image("StarStroke")
                     .resizable()
                     .foregroundStyle(Color.primary.opacity(0.7))
