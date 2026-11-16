@@ -1741,16 +1741,6 @@
         }
       }
     },
-    "Delete…": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Eliminar…"
-          }
-        }
-      }
-    },
     "Delete": {
       "localizations": {
         "es": {

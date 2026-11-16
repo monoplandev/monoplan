@@ -662,7 +662,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         n === 1
           ? "Su elemento abierto se queda en la lista archivada."
           : `Sus ${n} elementos abiertos se quedan en la lista archivada.`,
-      deleteList: "Eliminar…",
+      deleteList: "Eliminar",
       deleteListTitle: (name) => `Eliminar «${name}»`,
       deleteListConfirm: "Eliminar",
       deleteListToBin: "Sus elementos abiertos irán a la papelera.",
@@ -1054,7 +1054,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         n === 1
           ? "Its open item stays in the archived list."
           : `Its ${n} open items stay in the archived list.`,
-      deleteList: "Delete…",
+      deleteList: "Delete",
       deleteListTitle: (name) => `Delete “${name}”`,
       deleteListConfirm: "Delete",
       deleteListToBin: "Its open items go to the Bin.",

@@ -882,7 +882,7 @@ struct ListItemsView: View {
                             Label("Archive", systemImage: "archivebox")
                         }
                         Button(role: .destructive) { confirmDelete = true } label: {
-                            Label("Delete List…", systemImage: "trash")
+                            Label("Delete", systemImage: "trash")
                         }
                     } label: {
                         Label("List options", systemImage: "ellipsis")

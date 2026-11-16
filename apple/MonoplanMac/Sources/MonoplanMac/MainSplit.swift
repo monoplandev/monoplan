@@ -531,7 +531,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             let restore = NSMenuItem(
                 title: String(localized: "Restore"), action: #selector(restoreItem(_:)), keyEquivalent: "")
             let delete = NSMenuItem(
-                title: String(localized: "Delete…"), action: #selector(deleteItem(_:)), keyEquivalent: "")
+                title: String(localized: "Delete"), action: #selector(deleteItem(_:)), keyEquivalent: "")
             for row in [restore, delete] { row.target = self }
             menu.items = [restore, .separator(), delete]
             return menu

@@ -7,7 +7,7 @@
 // folds the group, and each has a "…" menu: Export and Import JSON
 // (`WorkspaceJSON.swift`), and on a shared workspace Share…
 // (`SharingSheet.swift`) and Delete or Leave; a list's row has
-// Delete…, its items to the Inbox or the Bin, and the Inbox's row the
+// Delete, its items to the Inbox or the Bin, and the Inbox's row the
 // device's Inbox order, oldest or newest first),
 // and either the open items of the selected list with a tick and a
 // field to add one, or a lens over every workspace: Starred in its
@@ -1471,12 +1471,12 @@ struct MainWindowView: View {
         .pickerStyle(.inline)
     }
 
-    /// A user list's right-click menu: Delete…, which confirms and bins
+    /// A user list's right-click menu: Delete, which confirms and bins
     /// its open items (`ListConfirm`).
     @ViewBuilder
     private func listMenu(_ section: NavSection, _ list: ListInfo) -> some View {
         let target = section.target
-        Button("Delete…") {
+        Button("Delete") {
             let shared = model.hasOtherMembers(section.id)
                 ? section.workspace.name ?? section.workspace.docId : nil
             ListConfirm.delete(name: list.name, sharedWith: shared, on: NSApp.keyWindow) {
@@ -1867,7 +1867,7 @@ private extension View {
         contextMenu {
             Button("Restore") { model.restore(workspace: workspace, id: id) }
             Divider()
-            Button("Delete…") {
+            Button("Delete") {
                 BinConfirm.delete(on: NSApp.keyWindow) { model.deleteBinned(workspace: workspace, id: id) }
             }
         }

@@ -949,17 +949,6 @@
         }
       }
     },
-    "Delete List…" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Eliminar lista…"
-          }
-        }
-      }
-    },
     "Delete this item for good?" : {
       "extractionState" : "stale",
       "localizations" : {
