@@ -102,6 +102,9 @@ private struct Spot: Identifiable {
 
 struct PlacesMapView: View {
     @EnvironmentObject private var model: AppModel
+    /// Home's navigation path, which this page sits on: it empties the
+    /// moment the back button is tapped, before the pop has run.
+    @Binding var homePath: NavigationPath
     @StateObject private var location = LocationSource()
     /// Follows the phone when it may; else frames every marker.
     @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
@@ -223,6 +226,10 @@ struct PlacesMapView: View {
             location.stop()
         }
         .onChange(of: model.changeCount) { model.refreshPlaced() }
+        // The sheet is over the whole screen and cannot slide away
+        // with the page, so it goes down as the pop starts instead of
+        // staying up until the page has gone (`onDisappear`).
+        .onChange(of: homePath.isEmpty) { if homePath.isEmpty { sheetUp = false } }
     }
 
     private var sheet: some View {

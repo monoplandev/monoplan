@@ -437,7 +437,7 @@ struct HomeView: View {
                 case .starred: StarredView()
                 case .agenda: AgendaView()
                 case .map:
-                    PlacesMapView()
+                    PlacesMapView(homePath: $path)
                         .onAppear { mapShown = true }
                         .onDisappear { mapShown = false }
                 case .done: DoneView()
