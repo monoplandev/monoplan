@@ -60,6 +60,25 @@ enum PaneColor {
     /// `--row-divider` (`js/web/src/styles.css`).
     static let rowDivider = dynamic(dark: 0x2a, light: grey(0xf5))
 
+    /// The ground of a selected row in the key window: the web's
+    /// `--dnd-select-bg` (`js/web/src/styles.css`), #dbeafe in light
+    /// and #293a5b in dark.
+    static let rowSelected = rgb(dark: 0x293a5b, light: 0xdbeafe)
+
+    /// The same in a window that is not key: the web's `--bg-active`,
+    /// #e5e7eb in light and #2a2a2e in dark.
+    static let rowSelectedInactive = rgb(dark: 0x2a2a2e, light: 0xe5e7eb)
+
+    /// `0xRRGGBB` for each appearance.
+    private static func rgb(dark: Int, light: Int) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let hex = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+            return NSColor(
+                srgbRed: CGFloat((hex >> 16) & 0xff) / 255, green: CGFloat((hex >> 8) & 0xff) / 255,
+                blue: CGFloat(hex & 0xff) / 255, alpha: 1)
+        }
+    }
+
     private static func grey(_ value: Int) -> NSColor {
         let level = CGFloat(value) / 255
         return NSColor(srgbRed: level, green: level, blue: level, alpha: 1)

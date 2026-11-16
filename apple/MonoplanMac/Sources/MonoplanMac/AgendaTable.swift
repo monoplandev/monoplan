@@ -15,7 +15,9 @@
 // The rows are the window's SwiftUI rows, hosted in the cells and
 // rewritten in place; a day's header is a group row. No drag, no
 // multiple selection: a click selects an item, which opens its panel,
-// as in the SwiftUI lists.
+// as in the SwiftUI lists. The selected row has a soft ground, not
+// the accent colour: the web's, a pale blue in the key window and a
+// grey in any other (`PaneColor.rowSelected`, `RowView`).
 
 import AppKit
 import MonoplanCore
@@ -193,7 +195,7 @@ struct AgendaTable: NSViewRepresentable {
                 self.lines = lines
                 for index in visibleRows() {
                     if let cell = table.view(atColumn: 0, row: index, makeIfNecessary: false) {
-                        fill(cell, lines[index])
+                        fill(cell, lines[index], selected: index == table.selectedRow)
                     }
                 }
             } else {
@@ -238,16 +240,22 @@ struct AgendaTable: NSViewRepresentable {
             } else {
                 cell = tableView.makeView(withIdentifier: HostCell.identifier, owner: nil) ?? HostCell()
             }
-            fill(cell, line)
+            fill(cell, line, selected: row == tableView.selectedRow)
             return cell
         }
 
-        private func fill(_ cell: NSView, _ line: Line) {
+        func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+            tableView.makeView(withIdentifier: RowView.identifier, owner: nil) as? RowView ?? RowView()
+        }
+
+        /// `selected`: the row is the selected one, which has no line
+        /// under it (it would cross the selection's ground).
+        private func fill(_ cell: NSView, _ line: Line, selected: Bool) {
             switch line {
             case .header(_, let title, _):
                 (cell as? HeaderCell)?.label.stringValue = title
             case .item(let row, _, _, let divided):
-                (cell as? HostCell)?.show(parent.row(row), divided: divided)
+                (cell as? HostCell)?.show(parent.row(row), divided: divided && !selected)
             case .nothing:
                 (cell as? HostCell)?.show(
                     AnyView(Text("Nothing today").foregroundStyle(.secondary)
@@ -263,6 +271,12 @@ struct AgendaTable: NSViewRepresentable {
         }
 
         func tableViewSelectionDidChange(_ notification: Notification) {
+            // The line under a row goes with its selection.
+            for index in visibleRows() {
+                if let cell = table.view(atColumn: 0, row: index, makeIfNecessary: false) {
+                    fill(cell, lines[index], selected: index == table.selectedRow)
+                }
+            }
             guard !syncing else { return }
             let row = table.selectedRow
             parent.select(row >= 0 ? lines[row].entry : nil)
@@ -367,8 +381,8 @@ struct AgendaTable: NSViewRepresentable {
     /// A day's header: a group row. The label is not the cell's
     /// `textField`: the table restyles that one itself, and not for
     /// every header at once (new ones came in small, and a selection
-    /// made the ones on screen larger). The font and colour are set
-    /// here, once.
+    /// made the ones on screen larger). The font (the body's size and
+    /// weight) and the colour are set here, once.
     private final class HeaderCell: NSTableCellView {
         static let identifier = NSUserInterfaceItemIdentifier("AgendaHeader")
 
@@ -377,7 +391,7 @@ struct AgendaTable: NSViewRepresentable {
         init() {
             super.init(frame: .zero)
             identifier = Self.identifier
-            label.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+            label.font = .systemFont(ofSize: NSFont.systemFontSize)
             label.textColor = .secondaryLabelColor
             label.lineBreakMode = .byTruncatingTail
             label.translatesAutoresizingMaskIntoConstraints = false
@@ -393,10 +407,54 @@ struct AgendaTable: NSViewRepresentable {
         required init?(coder: NSCoder) { fatalError("not built from a nib") }
     }
 
-    /// A row's SwiftUI content, hosted. On a selected row of the key
-    /// window the table draws the accent colour under it and says so
-    /// (`backgroundStyle`); the content is then drawn as on a dark
-    /// ground, so its text is light.
+    /// A row that draws its own selection in the inset style's rounded
+    /// shape, a pale blue in the key window and a grey in any other
+    /// (`PaneColor.rowSelected`, `rowSelectedInactive`), and is never
+    /// emphasized, so its cells are not told to draw as on the accent
+    /// colour.
+    private final class RowView: NSTableRowView {
+        static let identifier = NSUserInterfaceItemIdentifier("AgendaRowView")
+
+        init() {
+            super.init(frame: .zero)
+            identifier = Self.identifier
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError("not built from a nib") }
+
+        override var isEmphasized: Bool {
+            get { false }
+            set {}
+        }
+
+        override func drawSelection(in dirtyRect: NSRect) {
+            let key = window?.isKeyWindow ?? false
+            (key ? PaneColor.rowSelected : PaneColor.rowSelectedInactive).setFill()
+            NSBezierPath(roundedRect: bounds.insetBy(dx: 10, dy: 0), xRadius: 6, yRadius: 6).fill()
+        }
+
+        /// The selection is drawn again when the window gains or
+        /// loses key.
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            let center = NotificationCenter.default
+            center.removeObserver(self)
+            guard let window else { return }
+            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+                center.addObserver(self, selector: #selector(keyChanged(_:)), name: name, object: window)
+            }
+        }
+
+        @objc private func keyChanged(_ notification: Notification) {
+            if isSelected { needsDisplay = true }
+        }
+
+        deinit { NotificationCenter.default.removeObserver(self) }
+    }
+
+    /// A row's SwiftUI content, hosted. The selection's ground is a
+    /// soft grey (`RowView`), so the content is drawn the same on it.
     private final class HostCell: NSTableCellView {
         static let identifier = NSUserInterfaceItemIdentifier("AgendaRow")
 
@@ -417,10 +475,6 @@ struct AgendaTable: NSViewRepresentable {
         @available(*, unavailable)
         required init?(coder: NSCoder) { fatalError("not built from a nib") }
 
-        override var backgroundStyle: NSView.BackgroundStyle {
-            didSet { if backgroundStyle != oldValue { draw() } }
-        }
-
         func show(_ content: AnyView, divided: Bool) {
             self.content = content
             self.divided = divided
@@ -428,17 +482,16 @@ struct AgendaTable: NSViewRepresentable {
         }
 
         private func draw() {
-            let emphasized = backgroundStyle == .emphasized
-            let row = content
+            let divided = divided
+            host.rootView = AnyView(content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay(alignment: .bottom) {
-                    if divided, !emphasized {
+                    if divided {
                         Rectangle()
                             .fill(Color(nsColor: PaneColor.rowDivider))
                             .frame(height: 1)
                     }
-                }
-            host.rootView = emphasized ? AnyView(row.environment(\.colorScheme, .dark)) : AnyView(row)
+                })
         }
     }
 }
