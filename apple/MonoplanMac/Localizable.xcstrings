@@ -2420,6 +2420,26 @@
           }
         }
       }
+    },
+    "Search lists": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buscar listas"
+          }
+        }
+      }
+    },
+    "No lists match": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ninguna lista coincide"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -698,7 +698,9 @@ final class MainWindowModel: ObservableObject {
     /// `workspace` can be moved to there, in the sidebar's order.
     func otherMoveLists(workspace: String?) -> [PanelListGroup] {
         sections.filter { $0.target != workspace }.map {
-            PanelListGroup(workspace: $0.target, name: workspaceLabel($0.target), lists: moveLists($0))
+            PanelListGroup(
+                workspace: $0.target, name: workspaceLabel($0.target), shared: !$0.workspace.home,
+                lists: moveLists($0))
         }
     }
 
