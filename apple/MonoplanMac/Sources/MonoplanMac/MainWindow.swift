@@ -206,7 +206,8 @@ struct Surface: Equatable {
 /// A Done row: the item, tagged with the workspace it was read from.
 struct DoneRow: Identifiable {
     let item: Item
-    /// What a typed call's `workspace` takes: nil for Home.
+    /// The workspace's doc id, Home's too: a typed call's `workspace`
+    /// takes it.
     let workspace: String?
     /// The workspace's name; nil for Home and an unnamed doc.
     let workspaceName: String?
@@ -259,6 +260,9 @@ final class MainWindowModel: ObservableObject {
     /// The other lenses' rows, each read only while it is the one shown.
     @Published private(set) var agenda: [AgendaGroup] = []
     @Published private(set) var done: [DoneRow] = []
+    /// The Done lens's filter as chosen (`DoneFilter.swift`), kept
+    /// verbatim; what is applied and shown is `doneFilter`.
+    @Published private(set) var doneFilterChoice = DoneFilterStore.load()
     /// The Bin's rows, every workspace's, newest binned first. Always
     /// read: the sidebar shows the Bin only while it has any.
     @Published private(set) var binned: [BinEntry] = []
@@ -515,7 +519,7 @@ final class MainWindowModel: ObservableObject {
     func reload() {
         guard visible, let calls = engine.calls else { return }
         let workspace = workspace, list = list, generation = generation, lens = lens
-        let picked = selected
+        let picked = selected, doneChoice = doneFilterChoice
         let asked = Date()
         var began = asked, ended = asked
         calls.run({ engine -> Snapshot in
@@ -552,15 +556,16 @@ final class MainWindowModel: ObservableObject {
             case .agenda:
                 snapshot.agenda = try engine.agenda(days: Self.agendaDays)
             case .done:
-                // The engine reads Done a workspace at a time: the
-                // newest of each, merged, newest first.
-                let rows = try sections.flatMap { section in
-                    try engine.done(workspace: section.target, limit: UInt32(Self.doneLimit)).map {
-                        DoneRow(item: $0, workspace: section.target, workspaceName: section.workspace.name)
-                    }
+                // One read over every workspace, merged and filtered
+                // in Rust; the filter narrowed to the sections just
+                // read, so the two agree.
+                let filter = Self.effectiveDoneFilter(doneChoice, sections: sections)
+                snapshot.done = try engine.doneEverywhere(filter: filter, limit: UInt32(Self.doneLimit)).map {
+                    entry in
+                    let section = sections.first { $0.id == entry.docId }
+                    return DoneRow(
+                        item: entry.item, workspace: entry.docId, workspaceName: section?.workspace.name)
                 }
-                snapshot.done = Array(
-                    rows.sorted { $0.item.lifecycleAt > $1.item.lifecycleAt }.prefix(Self.doneLimit))
             case nil:
                 snapshot.items = try engine.items(workspace: selected, list: shown, includeDone: false)
             }
@@ -913,14 +918,92 @@ final class MainWindowModel: ObservableObject {
         let listId = row.item.listId
         let name: String
         if listId != Self.inbox,
-            let list = sections.first(where: { $0.target == row.workspace })?
-                .lists.first(where: { $0.id == listId })
+            let list = section(row.workspace)?.lists.first(where: { $0.id == listId })
         {
             name = list.name
         } else {
             name = Self.noListLabel(dated: row.item.when != nil)
         }
         return [name, row.workspaceName].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    // MARK: The Done filter
+
+    /// The Done filter in effect: the choice narrowed to the workspaces
+    /// that are open and the lists on offer, as the web's
+    /// `effectiveDoneFilter` and iOS's `AppModel.doneFilter` have it (a
+    /// list of an unchecked workspace does not empty the page from
+    /// behind a popover that no longer shows it). Before any workspace
+    /// is read the choice stands.
+    var doneFilter: DoneFilter {
+        Self.effectiveDoneFilter(doneFilterChoice, sections: sections)
+    }
+
+    static func effectiveDoneFilter(_ choice: DoneFilter, sections: [NavSection]) -> DoneFilter {
+        guard !sections.isEmpty else { return choice }
+        let docs = choice.docs.filter { doc in sections.contains { $0.id == doc } }
+        let lists = choice.lists.filter { key in
+            guard let section = sections.first(where: { key.hasPrefix($0.id + "/") }),
+                  docs.isEmpty || docs.contains(section.id)
+            else { return false }
+            let listId = key.dropFirst(section.id.count + 1)
+            return listId == inbox || section.lists.contains { $0.id == listId }
+        }
+        return DoneFilter(docs: docs, lists: lists)
+    }
+
+    /// The workspaces the Done filter offers: every open one, Personal
+    /// first.
+    var doneWorkspaceOptions: [DoneWorkspaceOption] {
+        sections.map {
+            DoneWorkspaceOption(docId: $0.id, name: workspaceLabel($0.id), shared: !$0.workspace.home)
+        }
+    }
+
+    /// The lists the Done filter offers: those of the checked
+    /// workspaces, or of every one when none is checked; each
+    /// workspace's Inbox, then its lists in their order, archived ones
+    /// included (their finished items are still on the page).
+    var doneListOptions: [DoneListOption] {
+        let docs = doneFilter.docs
+        return sections
+            .filter { docs.isEmpty || docs.contains($0.id) }
+            .flatMap { section -> [DoneListOption] in
+                let workspace = section.workspace.home ? nil : workspaceLabel(section.id)
+                let inbox = DoneListOption(
+                    docId: section.id, listId: Self.inbox, name: String(localized: "Inbox"),
+                    icon: nil, workspace: workspace, archived: false)
+                return [inbox] + section.lists.filter { $0.id != Self.inbox }.map {
+                    DoneListOption(
+                        docId: section.id, listId: $0.id, name: $0.name,
+                        icon: $0.icon, workspace: workspace, archived: $0.archivedAt != nil)
+                }
+            }
+    }
+
+    /// Check or uncheck a workspace in the Done filter.
+    func toggleDoneWorkspace(_ docId: String) {
+        editDoneFilter { $0.docs.toggle(docId) }
+    }
+
+    /// Check or uncheck a list (`DoneListOption.key`) in the Done filter.
+    func toggleDoneList(_ key: String) {
+        editDoneFilter { $0.lists.toggle(key) }
+    }
+
+    func clearDoneFilter() {
+        editDoneFilter { $0 = DoneFilter(docs: [], lists: []) }
+    }
+
+    /// An edit starts from the filter in effect, so a toggle also drops
+    /// the stale ids (a closed workspace, a deleted list) the choice
+    /// was carrying.
+    private func editDoneFilter(_ edit: (inout DoneFilter) -> Void) {
+        var next = doneFilter
+        edit(&next)
+        doneFilterChoice = next
+        DoneFilterStore.save(next)
+        reload()
     }
 
     /// Where a Calendar row's item lives, for the line under its text:
@@ -1583,7 +1666,8 @@ struct MainWindowView: View {
         .scrollContentBackground(.hidden)
     }
 
-    /// Done: every workspace's newest Done items, newest first. The
+    /// Done: every workspace's newest Done items that the filter
+    /// (`DoneFilter.swift`) admits, newest first. The
     /// tick puts a row back. As the web's Done rows: the tick, when it
     /// entered Done, the text, and the list it is on at the far edge.
     private var done: some View {
@@ -1614,7 +1698,11 @@ struct MainWindowView: View {
                 .tag(row.item.id)
             }
             if model.done.isEmpty {
-                Text("Nothing here").foregroundStyle(.secondary)
+                if model.doneFilter.isEmpty {
+                    Text("Nothing here").foregroundStyle(.secondary)
+                } else {
+                    Text("No finished items match the filter.").foregroundStyle(.secondary)
+                }
             }
         }
         .listStyle(.inset)

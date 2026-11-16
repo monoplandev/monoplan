@@ -145,8 +145,13 @@ General pane's "Show list counts in sidebar" is on (off by default),
 every workspace: Today, then each non-empty day, rows
 with a tick; a tray row for an event opens it), Starred
 (`Engine.starred`, with a tick and a star that takes the row out), Done
-(`Engine.done` per workspace, merged newest first, capped at 200, the
-tick putting a row back), and the selected list's
+(`Engine.doneEverywhere`, every workspace's merged newest first in Rust,
+capped at 200, the tick putting a row back; while it is shown the
+toolbar has a filter button, 2026-11-16, `DoneFilter.swift`: a popover
+of checkboxes for Workspaces and Lists with a search box, the iOS
+sheet's rules and `api::done::DoneFilter`, device-local in
+`UserDefaults`, narrowed by `MainWindowModel.doneFilter`; the button's
+glyph is filled while any check is in effect), and the selected list's
 open items (`Engine.items`) with a tick (`Engine.setDone`) and a field
 that adds one (`Engine.addItem`). Everything shown is read in one turn
 of the call queue, again on every change the engine reports, on a new

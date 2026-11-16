@@ -32,6 +32,9 @@ private extension NSToolbarItem.Identifier {
     /// The list's section, at its trailing edge: search, then new.
     static let search = NSToolbarItem.Identifier("MonoplanSearch")
     static let newItem = NSToolbarItem.Identifier("MonoplanNewItem")
+    /// Before search while Done is shown: its filter's popover
+    /// (`DoneFilter.swift`).
+    static let doneFilter = NSToolbarItem.Identifier("MonoplanDoneFilter")
     /// Over the sidebar, at its trailing edge, while there is no
     /// account. Nothing takes its place once there is one: the
     /// account lives in Settings, New Workspace… in the app menu.
@@ -62,6 +65,8 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     private var renamePopover: NSPopover?
     /// The new-list popover, while it is up.
     private var newListPopover: NSPopover?
+    /// The Done filter's popover, while it is up.
+    private var doneFilterPopover: NSPopover?
     /// Search's overlay (`SearchPanel.swift`).
     private lazy var searchPanel = SearchPanelController(model: model)
 
@@ -74,9 +79,15 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     /// with the panel shut it would draw at the window's edge.
     /// The space between those two keeps each on its own glass:
     /// adjacent buttons would share one.
-    private static let fixedItems: [NSToolbarItem.Identifier] = [
-        .sidebarTrackingSeparator, .title, .flexibleSpace, .search, .space, .newItem,
-    ]
+    private static let fixedItems = listItems(doneFilter: false)
+
+    /// The list's section of the bar. On Done its filter leads the
+    /// buttons at the end, on a glass of its own.
+    private static func listItems(doneFilter: Bool) -> [NSToolbarItem.Identifier] {
+        [.sidebarTrackingSeparator, .title, .flexibleSpace]
+            + (doneFilter ? [.doneFilter, .space] : [])
+            + [.search, .space, .newItem]
+    }
 
     init(model: MainWindowModel) {
         self.model = model
@@ -160,14 +171,16 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
                 toolbar.insertItem(withItemIdentifier: identifier, at: index)
             }
         }
-        let fixed = Self.fixedItems.count + lead.count
-        let wanted = panelItems()
-        let have = toolbar.items.dropFirst(fixed).map(\.itemIdentifier)
+        // The rest: the list's section, then the panel's. Whatever
+        // already matches from the front stays; the tail is rebuilt.
+        let wanted = lead + Self.listItems(doneFilter: model.shown.lens == .done) + panelItems()
+        let have = toolbar.items.map(\.itemIdentifier)
         if have != wanted {
-            while toolbar.items.count > fixed {
+            let kept = zip(have, wanted).prefix { $0 == $1 }.count
+            while toolbar.items.count > kept {
                 toolbar.removeItem(at: toolbar.items.count - 1)
             }
-            for identifier in wanted {
+            for identifier in wanted.dropFirst(kept) {
                 toolbar.insertItem(withItemIdentifier: identifier, at: toolbar.items.count)
             }
         }
@@ -199,6 +212,18 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             view.icon = model.titleIcon
             toolbarItem.label = model.windowTitle
             view.renamable = model.renamableList != nil
+            return
+        }
+        if toolbarItem.itemIdentifier == .doneFilter {
+            // Filled while any check is in effect; the hint says how many.
+            let count = model.doneFilter.count
+            let label = count > 0 ? String(localized: "Filter (\(count) active)") : String(localized: "Filter")
+            toolbarItem.image = NSImage(
+                systemSymbolName: count > 0
+                    ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease",
+                accessibilityDescription: label)
+            toolbarItem.label = label
+            toolbarItem.toolTip = label
             return
         }
         guard let item = model.detail else { return }
@@ -250,7 +275,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        Self.fixedItems + [.panelSeparator, .signIn, .newList, .itemStatus, .itemStar, .itemMore]
+        Self.fixedItems + [.doneFilter, .panelSeparator, .signIn, .newList, .itemStatus, .itemStar, .itemMore]
     }
 
     func toolbar(
@@ -309,6 +334,10 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             item.isBordered = true
             item.target = self
             item.action = #selector(openSearch(_:))
+        case .doneFilter:
+            item.isBordered = true
+            item.target = self
+            item.action = #selector(filterDone(_:))
         case .newItem:
             // Not wired yet: the action does nothing (without one the
             // toolbar would draw the button disabled).
@@ -385,6 +414,24 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         host.sizingOptions = .preferredContentSize
         popover.contentViewController = host
         newListPopover = popover
+        popover.show(relativeTo: item)
+    }
+
+    /// Done's filter: a popover of checkboxes under the button. Each
+    /// check applies at once, so there is nothing to confirm; a click
+    /// outside (or the button again) shuts it.
+    @objc private func filterDone(_ sender: Any?) {
+        if let doneFilterPopover, doneFilterPopover.isShown {
+            doneFilterPopover.performClose(nil)
+            return
+        }
+        guard let item = toolbar.items.first(where: { $0.itemIdentifier == .doneFilter }) else { return }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        let host = NSHostingController(rootView: DoneFilterForm(model: model))
+        host.sizingOptions = .preferredContentSize
+        popover.contentViewController = host
+        doneFilterPopover = popover
         popover.show(relativeTo: item)
     }
 
