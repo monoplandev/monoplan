@@ -144,7 +144,9 @@ pub fn reorder_items(cx: &Ctx, ids: &[String], before: Option<&str>) -> anyhow::
 /// restored first, since a move out of the Bin has no other meaning;
 /// Done rows stay Done (reopening is its own gesture). Ids the
 /// workspace no longer has are skipped. Onto Inbox the rows land at the
-/// end of the queue in the order given, and rows already there stay.
+/// end of the queue and rows already there stay; among themselves they
+/// sort as the queue does (arrival time, then creation), which is not
+/// necessarily the order given.
 pub fn move_items(cx: &Ctx, ids: &[String], list: &str, index: usize) -> anyhow::Result<()> {
     let mut at = index;
     for id in ids {
@@ -480,7 +482,14 @@ mod tests {
         let cx = Ctx::bare(&doc, &docs, &lens);
         let given = [work[1].clone(), inbox[0].clone(), work[0].clone()];
         move_items(&cx, &given, LIST_INBOX, 0).unwrap();
-        assert_eq!(open_texts(&doc, LIST_INBOX), s(&["a", "b", "w2", "w1"]));
+        // The arrivals are behind what was there. Their own order hangs
+        // on whether the two moves share a millisecond (the tiebreak is
+        // creation time), so it is not asserted.
+        let open = open_texts(&doc, LIST_INBOX);
+        assert_eq!(open[..2], s(&["a", "b"]));
+        let mut arrived = open[2..].to_vec();
+        arrived.sort();
+        assert_eq!(arrived, s(&["w1", "w2"]));
     }
 
     #[test]

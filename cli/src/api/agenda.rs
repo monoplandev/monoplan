@@ -55,9 +55,8 @@ pub struct AgendaEntry {
     pub deadline: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub place: Option<Place>,
-    /// Which field placed the row; always set.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub placed_by: Option<AgendaPlacedBy>,
+    /// Which field placed the row.
+    pub placed_by: AgendaPlacedBy,
     pub tone: AgendaTone,
     /// The merged agenda only: the row's workspace. `doc_name` is
     /// absent for Home (never named) and for an unnamed doc.
@@ -71,9 +70,8 @@ pub struct AgendaEntry {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct AgendaGroup {
-    /// `YYYY-MM-DD`. Always set: `None` was the Unscheduled group,
-    /// gone with the `events` list (2026-11-16).
-    pub day: Option<String>,
+    /// `YYYY-MM-DD`.
+    pub day: String,
     pub today: bool,
     pub rows: Vec<AgendaEntry>,
 }
@@ -153,7 +151,7 @@ pub fn groups(placed: &Placed) -> Vec<AgendaGroup> {
         .iter()
         .map(|d| AgendaGroup {
             today: d.day == placed.today,
-            day: Some(d.day.clone()),
+            day: d.day.clone(),
             rows: d
                 .rows
                 .iter()
@@ -169,7 +167,7 @@ pub fn groups(placed: &Placed) -> Vec<AgendaGroup> {
                         duration: r.item.duration,
                         deadline: r.item.deadline.clone(),
                         place: r.item.place.as_ref().map(Place::from),
-                        placed_by: Some(r.placed_by),
+                        placed_by: r.placed_by,
                         tone: r.tone,
                         doc_id,
                         doc_name,

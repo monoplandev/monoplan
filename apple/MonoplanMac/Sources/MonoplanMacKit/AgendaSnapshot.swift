@@ -89,7 +89,7 @@ public enum WidgetAgenda {
     /// after midnight without the app having run. So "the day" is
     /// every dated group up to `date`, not the group the projection
     /// flagged: rows of days that have since passed are still to do.
-    /// Done and cancelled rows and the Unscheduled group are left out.
+    /// Done and cancelled rows are left out.
     public static func lines(
         from days: [AgendaDay], on date: Date, limit: Int, calendar: Calendar = .current
     ) -> (lines: [WidgetLine], todayCount: Int) {
@@ -98,7 +98,7 @@ public enum WidgetAgenda {
         var todayRows: [WidgetRow] = []
         var later: [(day: String, rows: [WidgetRow])] = []
         for group in days {
-            guard let day = group.day else { continue }
+            let day = group.day
             let open = group.rows.filter { $0.state != "done" && $0.state != "cancelled" }
             if day <= today {
                 for row in open {

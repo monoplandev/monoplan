@@ -471,10 +471,7 @@ async fn typed_reads_that_span_workspaces_tag_their_rows() {
     );
     // Dated and in no list: filed under the calendar, not Inbox.
     assert_eq!(starred[0].list_name.as_deref(), Some("Calendar"));
-    let day = agenda
-        .iter()
-        .find(|g| g.day.as_deref() == Some("2030-01-04"))
-        .unwrap();
+    let day = agenda.iter().find(|g| g.day == "2030-01-04").unwrap();
     assert_eq!(
         (day.rows[0].id.as_str(), &day.rows[0].doc_id),
         (id.as_str(), &tag)

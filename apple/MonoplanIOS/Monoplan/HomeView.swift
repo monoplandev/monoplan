@@ -251,8 +251,7 @@ struct HomeView: View {
     /// the agenda's Today group (overdue deadlines and tasks whose
     /// planned day has passed folded in, as on the Calendar page) less
     /// what is ticked, so the section shrinks as it is cleared and is
-    /// not drawn on a clear day. Unscheduled events are not dated, so
-    /// they stay on the Calendar page.
+    /// not drawn on a clear day.
     private var today: [AgendaEntry] {
         (model.agenda.first(where: { $0.today })?.rows ?? []).filter { !$0.isDone }
     }

@@ -1386,8 +1386,8 @@ struct MainWindowView: View {
     }
 
     /// The Calendar: the engine's agenda as it groups it. Today first
-    /// and always there (overdue rows folded in), Unscheduled events
-    /// after it, then each non-empty day. A row has its tick, its clock
+    /// and always there (overdue rows folded in), then each non-empty
+    /// day. A row has its tick, its clock
     /// time when timed, its text, the workspace when it is not
     /// Personal's, and the tone's note.
     private var agenda: some View {
@@ -1596,15 +1596,13 @@ struct MainWindowView: View {
         return date.formatted(.dateTime.day().month(.abbreviated).year())
     }
 
-    /// "Today · 14 Nov", "Unscheduled", or the day spelled out
-    /// ("Friday 20 Nov").
+    /// "Today · 14 Nov" or the day spelled out ("Friday 20 Nov").
     static func heading(for group: AgendaGroup) -> String {
         if group.today {
-            let date = group.day.flatMap { Agenda.start(of: $0) } ?? Date()
+            let date = Agenda.start(of: group.day) ?? Date()
             return String(localized: "Today · \(date.formatted(.dateTime.day().month(.abbreviated)))")
         }
-        guard let text = group.day else { return String(localized: "Unscheduled") }
-        guard let date = Agenda.start(of: text) else { return text }
+        guard let date = Agenda.start(of: group.day) else { return group.day }
         return date.formatted(.dateTime.weekday(.wide).day().month(.abbreviated))
     }
 }

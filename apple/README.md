@@ -142,7 +142,7 @@ first; each a heading that folds its group, the fold kept in
 their open count, the lists theirs when the
 General pane's "Show list counts in sidebar" is on (off by default),
 `Engine.lists` once per workspace), the Calendar (`Engine.agenda` over
-every workspace: Today, Unscheduled, then each non-empty day, rows
+every workspace: Today, then each non-empty day, rows
 with a tick; a tray row for an event opens it), Starred
 (`Engine.starred`, with a tick and a star that takes the row out), Done
 (`Engine.done` per workspace, merged newest first, capped at 200, the

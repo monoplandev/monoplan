@@ -58,15 +58,14 @@ struct AgendaView: View {
         }
     }
 
-    /// "Today 13 Nov" (the date in the weekday's place), "Unscheduled",
-    /// or the day spelled out ("Friday 7 Nov").
+    /// "Today 13 Nov" (the date in the weekday's place) or the day
+    /// spelled out ("Friday 7 Nov").
     static func title(for day: AgendaGroup) -> String {
         if day.today {
-            let date = day.day.flatMap { Agenda.start(of: $0) } ?? Date()
+            let date = Agenda.start(of: day.day) ?? Date()
             return "Today \(date.formatted(.dateTime.day().month(.abbreviated)))"
         }
-        guard let text = day.day else { return "Unscheduled" }
-        guard let date = Agenda.start(of: text) else { return text }
+        guard let date = Agenda.start(of: day.day) else { return day.day }
         return date.formatted(.dateTime.weekday(.wide).day().month(.abbreviated))
     }
 }

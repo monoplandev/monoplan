@@ -7,8 +7,8 @@
 import Foundation
 
 public struct AgendaDay: Decodable, Equatable {
-    /// `YYYY-MM-DD`, or nil for the Unscheduled group.
-    public let day: String?
+    /// `YYYY-MM-DD`.
+    public let day: String
     public let today: Bool
     public let rows: [AgendaRow]
 }
@@ -40,7 +40,7 @@ public struct AgendaRow: Decodable, Equatable {
     public let deadline: String?
     /// The item's place, when it has one.
     public let place: PlaceInfo?
-    public let placedBy: String?
+    public let placedBy: String
     public let tone: String
     /// `--all` only: the row's workspace. `docName` is nil for Home
     /// ("Personal") and for an unnamed doc.

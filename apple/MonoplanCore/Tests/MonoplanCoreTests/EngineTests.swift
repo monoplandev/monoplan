@@ -64,10 +64,12 @@ final class EngineTests: XCTestCase {
             try $0.addItem(workspace: nil, list: "inbox", text: "from swift", top: true)
         }
         var rows = try await calls.run { try $0.items(workspace: nil, list: "inbox", includeDone: false) }
-        XCTAssertEqual(rows.first?.id, id)
-        XCTAssertEqual(rows.first?.text, "from swift")
-        XCTAssertEqual(rows.first?.state, .backlog)
-        XCTAssertNil(rows.first?.doneAt)
+        // Inbox is a queue: a capture lands at the end, behind the
+        // welcome item, whatever `top` says (`spec/inbox-plan.md`).
+        XCTAssertEqual(rows.last?.id, id)
+        XCTAssertEqual(rows.last?.text, "from swift")
+        XCTAssertEqual(rows.last?.state, .backlog)
+        XCTAssertNil(rows.last?.doneAt)
 
         try await calls.run { try $0.setDone(workspace: nil, id: id, done: true) }
         rows = try await calls.run { try $0.items(workspace: nil, list: "inbox", includeDone: false) }
@@ -113,9 +115,9 @@ final class EngineTests: XCTestCase {
         let rows = try await calls.run { try $0.items(workspace: nil, list: "inbox", includeDone: false) }
         await fulfillment(of: [added], timeout: 5)
         let id = try XCTUnwrap(newId)
-        XCTAssertEqual(rows.first?.id, id)
+        XCTAssertEqual(rows.last?.id, id)
         func listed<Row: Identifiable>(_ rows: [Row]) -> [Row.ID] { rows.map(\.id) }
-        XCTAssertEqual(listed(rows).first, id)
+        XCTAssertEqual(listed(rows).last, id)
 
         let failed = expectation(description: "failed")
         calls.run({ try $0.lists(workspace: "nope", filter: .all) }) { result in

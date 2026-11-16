@@ -5,29 +5,30 @@ import MonoplanCore
 final class TrayMenuTests: XCTestCase {
     func entry(
         _ id: String, _ text: String, list: String = "inbox", state: ItemState = .backlog,
-        when: String? = nil, duration: UInt32? = nil, deadline: String? = nil,
+        event: Bool = false, when: String? = nil, duration: UInt32? = nil, deadline: String? = nil,
         tone: AgendaTone = .neutral, docId: String? = nil
     ) -> AgendaEntry {
         AgendaEntry(
-            id: id, text: text, listId: list, state: state, event: list == "events", when: when,
+            id: id, text: text, listId: list, state: state, event: event, when: when,
             duration: duration,
             deadline: deadline, place: nil, placedBy: when == nil ? .deadline : .when, tone: tone,
             docId: docId, docName: nil)
     }
 
     /// What `Engine.agenda(days: 0)` returns on a day with all five
-    /// kinds of row, plus the groups a tray does not show.
+    /// kinds of row, plus a group a tray does not show.
     var sample: [AgendaGroup] {
         [
             AgendaGroup(day: "2026-10-26", today: true, rows: [
                 entry("a", "Overdue report", list: "work", state: .todo, deadline: "2026-10-20", tone: .overdue),
-                entry("b", "Standup", list: "events", when: "2026-10-26T09:00", duration: 15),
-                entry("c", "Dentist", list: "events", when: "2026-10-26T14:30", duration: 60, docId: "doc-2"),
+                entry("b", "Standup", event: true, when: "2026-10-26T09:00", duration: 15),
+                entry("c", "Dentist", list: "errands", event: true, when: "2026-10-26T14:30", duration: 60, docId: "doc-2"),
                 entry("d", "Groceries", state: .done, when: "2026-10-26"),
                 entry("e", "Pay rent", state: .todo, deadline: "2026-10-26", tone: .warning),
             ]),
-            AgendaGroup(day: nil, today: false, rows: [entry("u", "Someday", list: "events")]),
-            AgendaGroup(day: "2026-10-27", today: false, rows: []),
+            AgendaGroup(day: "2026-10-27", today: false, rows: [
+                entry("u", "Tomorrow's thing", when: "2026-10-27"),
+            ]),
         ]
     }
 
@@ -47,7 +48,7 @@ final class TrayMenuTests: XCTestCase {
 
     func testLinesCarryWhereTheItemLives() {
         let lines = TodayMenu.lines(from: sample, now: date(9, 5))
-        XCTAssertEqual(lines.map(\.listId), ["work", "events", "events", "inbox", "inbox"])
+        XCTAssertEqual(lines.map(\.listId), ["work", "inbox", "errands", "inbox", "inbox"])
         XCTAssertEqual(lines.map(\.docId), [nil, nil, "doc-2", nil, nil])
     }
 
@@ -77,7 +78,7 @@ final class TrayMenuTests: XCTestCase {
         XCTAssertEqual(clipped, String(repeating: "b", count: 31) + "…")
         // The time prefix is outside the cap.
         let group = AgendaGroup(day: "2026-10-26", today: true, rows: [
-            entry("x", long, list: "events", when: "2026-10-26T09:00"),
+            entry("x", long, when: "2026-10-26T09:00"),
         ])
         XCTAssertEqual(TodayMenu.lines(from: [group], now: date(8, 0))[0].title, "09:00  " + clipped)
     }

@@ -3,7 +3,7 @@
 // refs (spec/focus.md §FocusRef grammar) and per-doc undo. Two in-memory
 // replicas stand in for Home and one other doc.
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setSystemTime, test } from "bun:test";
 import { createRoot } from "solid-js";
 import { Dek, Doc, Replica } from "@monoplan/core/wasm";
 import type { ReplicaStorage } from "@monoplan/core/wasm";
@@ -455,8 +455,12 @@ describe("cross-doc move", () => {
     const touched: string[] = [];
     const off = layer.onUndoRedo((_outcome, docId) => touched.push(docId));
 
+    // A move into Inbox queues at the end (`spec/inbox-plan.md`). The
+    // clock steps on first, or a move in the same millisecond as `o`'s
+    // capture ties with it and the older `b` sorts ahead.
+    setSystemTime(new Date(Date.now() + 1000));
     layer.moveToDoc([b], OTHER, "inbox", 0);
-    expect(other.state.listOpen["inbox"]).toEqual([b, o]);
+    expect(other.state.listOpen["inbox"]).toEqual([o, b]);
 
     expect(layer.undo()).toBe(true);
     expect(other.getItem(b)).toBeUndefined();
@@ -468,7 +472,7 @@ describe("cross-doc move", () => {
 
     expect(layer.redo()).toBe(true);
     expect(home.getItem(b)).toBeUndefined();
-    expect(other.state.listOpen["inbox"]).toEqual([b, o]);
+    expect(other.state.listOpen["inbox"]).toEqual([o, b]);
     expect(home.state.focusEntries).toEqual([{ docId: OTHER, itemId: b }]);
 
     // And back once more, then on to the steps before the move.
@@ -478,6 +482,7 @@ describe("cross-doc move", () => {
     expect(layer.isFocused(b)).toBe(false);
     off();
     dispose();
+    setSystemTime();
   });
 
   test("a move whose other half lost its history is not undone alone", () => {
