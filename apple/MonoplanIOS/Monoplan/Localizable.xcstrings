@@ -1069,13 +1069,13 @@
         }
       }
     },
-    "due today" : {
+    "Due today" : {
       "extractionState" : "stale",
       "localizations" : {
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "vence hoy"
+            "value" : "Vence hoy"
           }
         }
       }
@@ -2116,13 +2116,13 @@
         }
       }
     },
-    "overdue" : {
+    "Overdue" : {
       "extractionState" : "stale",
       "localizations" : {
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "vencido"
+            "value" : "Vencido"
           }
         }
       }

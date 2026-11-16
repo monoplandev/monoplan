@@ -260,14 +260,19 @@ for the month grid). `groupByDeadline` becomes
   Overdue is Open-only and the agenda renders no past days. A month grid or
   backward agenda, when built, shows them on their day with a "show
   completed" toggle if the noise warrants one.
-- **Overdue** (web): any Open row with a `deadline` day before today goes
+- **Overdue** (web; iOS and macOS since 2026-11-17): any Open row with a `deadline` day before today goes
   to an Overdue section above Today, placed by the deadline whatever `when`
   says (it is owed now). An Open task (not an event) whose `when` span
   ended before today goes there too, placed by its `when` (built
   2026-11-13, `isSlippedTask` in `dayGroups.ts`). Oldest first by the
   raw string of the placing field, then `created_at`, the two kinds
   interleaved. Rendered only when non-empty. The CLI `agenda` still folds
-  these into Today.
+  these into Today, leading it in the overdue tone, and so does the
+  engine's agenda the native apps read: their Calendar lifts those rows
+  out of Today's group into the section (`AgendaTable.swift`,
+  `AgendaCollection.swift`), and opens on the section's header and brings
+  the "Today" button back to it when it is there, since the days gone by
+  sit above it. The macOS tray and the iOS widget keep the fold.
 - **Placement** of every other row: an item is placed on its *placement
   day*, the earlier of its `when` day and its `deadline` day, ignoring a
   `when` whose span is over.

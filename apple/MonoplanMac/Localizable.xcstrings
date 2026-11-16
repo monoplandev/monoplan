@@ -1431,6 +1431,16 @@
         }
       }
     },
+    "Due today": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vence hoy"
+          }
+        }
+      }
+    },
     "due today": {
       "localizations": {
         "es": {
@@ -1497,6 +1507,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "ahora"
+          }
+        }
+      }
+    },
+    "Overdue": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vencido"
           }
         }
       }

@@ -6,6 +6,12 @@
 // put there, on each layout until the pane has settled, and again by
 // the toolbar's "Today".
 //
+// What is overdue (the rows the engine leads Today with, in the overdue
+// tone) has a section of its own right above Today, there only while
+// something is overdue (`spec/calendar-plan.md` "Overdue"). When it is
+// there it is what the table opens on and what "Today" comes back to,
+// so what is owed is never left above the top of the pane.
+//
 // The rows are the window's SwiftUI rows, hosted in the cells and
 // rewritten in place; a day's header is a group row. No drag, no
 // multiple selection: a click selects an item, which opens its panel,
@@ -20,7 +26,7 @@ struct AgendaTable: NSViewRepresentable {
     /// The selected item's id, if one is.
     let selected: String?
     /// The model's count of "Today" presses: a new value scrolls back
-    /// to Today.
+    /// to Today, or to Overdue above it when something is.
     let todayJumps: Int
     let heading: (AgendaGroup) -> String
     /// A row's content height; the table adds 4 pt above and below,
@@ -138,24 +144,42 @@ struct AgendaTable: NSViewRepresentable {
 
         // MARK: Rows
 
-        /// Today always, the other days when they have rows.
+        /// Today always, the other days when they have rows, and
+        /// Overdue above Today when Today's group has overdue rows.
         private func build() -> [Line] {
             var lines: [Line] = []
             var days: Set<String> = []
+            func items(_ rows: [AgendaEntry], day: String) {
+                for (index, row) in rows.enumerated() {
+                    lines.append(.item(
+                        row, day: day, height: parent.rowHeight(row),
+                        divided: index < rows.count - 1))
+                }
+            }
             for group in parent.groups where group.today || !group.rows.isEmpty {
                 guard days.insert(group.day).inserted else { continue }
+                var rows = group.rows
+                if group.today {
+                    let overdue = rows.filter { $0.tone == .overdue }
+                    rows.removeAll { $0.tone == .overdue }
+                    if !overdue.isEmpty {
+                        lines.append(.header(
+                            day: Self.overdueDay, title: String(localized: "Overdue"), today: false))
+                        items(overdue, day: Self.overdueDay)
+                    }
+                }
                 lines.append(.header(day: group.day, title: parent.heading(group), today: group.today))
-                if group.rows.isEmpty {
+                if rows.isEmpty {
                     lines.append(.nothing(day: group.day))
                 }
-                for (index, row) in group.rows.enumerated() {
-                    lines.append(.item(
-                        row, day: group.day, height: parent.rowHeight(row),
-                        divided: index < group.rows.count - 1))
-                }
+                items(rows, day: group.day)
             }
             return lines
         }
+
+        /// The Overdue section's place in a line's key, where a day's
+        /// date is for the others.
+        private static let overdueDay = "overdue"
 
         /// Show the parent's days. The same rows in the same places
         /// are rewritten where they are (a hosted cell built again is
@@ -180,7 +204,7 @@ struct AgendaTable: NSViewRepresentable {
             }
             syncSelection()
 
-            if !opened, todayRow() != nil {
+            if !opened, anchorRow() != nil {
                 opened = true
                 anchoring = true
                 scroll.needsLayout = true
@@ -261,9 +285,12 @@ struct AgendaTable: NSViewRepresentable {
 
         // MARK: Scroll
 
-        private func todayRow() -> Int? {
+        /// The header the table opens on and "Today" comes back to:
+        /// Overdue's when it is there (it sits right above Today's),
+        /// else Today's.
+        private func anchorRow() -> Int? {
             lines.firstIndex {
-                if case .header(_, _, true) = $0 { return true }
+                if case .header(let day, _, let today) = $0 { return today || day == Self.overdueDay }
                 return false
             }
         }
@@ -289,11 +316,12 @@ struct AgendaTable: NSViewRepresentable {
             anchoring = false
         }
 
-        /// Put the top of Today's header at the top of the pane, under
-        /// the toolbar: nothing of the day before shows. Rows have
-        /// fixed heights, so the place is exact.
+        /// Put the top of Today's header (Overdue's, when it is
+        /// there) at the top of the pane, under the toolbar: nothing
+        /// of the day before shows. Rows have fixed heights, so the
+        /// place is exact.
         private func putTodayAtTop(animated: Bool) {
-            guard let row = todayRow() else { return }
+            guard let row = anchorRow() else { return }
             scrollTo(y: table.rect(ofRow: row).minY - scroll.contentInsets.top, animated: animated)
         }
 

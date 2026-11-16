@@ -7,6 +7,11 @@
 // the page sets the offset itself and corrects it on each layout pass
 // until it has appeared.
 //
+// What is overdue (the rows the engine leads Today with, in the overdue
+// tone) has a section of its own right above Today, there only while
+// something is overdue (`spec/calendar-plan.md` "Overdue"). When it is
+// there it is what the page opens on and what "Today" comes back to.
+//
 // The rows are the SwiftUI ones (`AgendaRowView`), hosted in the cells;
 // the headers are the system's list headers.
 
@@ -67,8 +72,14 @@ final class AgendaCollectionController: UICollectionViewController {
     private var entries: [Item: AgendaEntry] = [:]
     /// Each shown day's header.
     private var titles: [String: String] = [:]
-    /// Today's section, the one the page opens on.
-    private var today: String?
+    /// The section the page opens on and "Today" comes back to:
+    /// Overdue's when it is there (it sits right above Today's), else
+    /// Today's.
+    private var anchor: String?
+
+    /// The Overdue section's identifier, where a day's date is for the
+    /// others.
+    private static let overdue = "overdue"
 
     /// The page is still to be put on Today: set by the first rows,
     /// cleared once the page has appeared or a finger is on it. While
@@ -156,31 +167,45 @@ final class AgendaCollectionController: UICollectionViewController {
         var entries: [Item: AgendaEntry] = [:]
         var titles: [String: String] = [:]
         var changed: [Item] = []
-        var today: String?
-        for day in groups where day.today || !day.rows.isEmpty {
-            // A diffable snapshot traps on a repeated identifier.
-            guard titles[day.day] == nil else { continue }
-            titles[day.day] = AgendaView.title(for: day)
-            if day.today { today = day.day }
-            snapshot.appendSections([day.day])
-            if day.rows.isEmpty {
-                snapshot.appendItems([.nothingToday], toSection: day.day)
-            }
-            for row in day.rows {
-                let item = Item.row(day: day.day, key: row.key)
+        var anchor: String?
+        func append(_ rows: [AgendaEntry], to section: String) {
+            for row in rows {
+                let item = Item.row(day: section, key: row.key)
                 guard entries[item] == nil else { continue }
                 entries[item] = row
-                snapshot.appendItems([item], toSection: day.day)
+                snapshot.appendItems([item], toSection: section)
                 // Same row, new content: the cell is told to redraw.
                 if let old = self.entries[item], old != row { changed.append(item) }
             }
+        }
+        for day in groups where day.today || !day.rows.isEmpty {
+            // A diffable snapshot traps on a repeated identifier.
+            guard titles[day.day] == nil else { continue }
+            var rows = day.rows
+            if day.today {
+                anchor = day.day
+                let overdue = rows.filter { $0.tone == .overdue }
+                rows.removeAll { $0.tone == .overdue }
+                if !overdue.isEmpty {
+                    titles[Self.overdue] = String(localized: "Overdue")
+                    anchor = Self.overdue
+                    snapshot.appendSections([Self.overdue])
+                    append(overdue, to: Self.overdue)
+                }
+            }
+            titles[day.day] = AgendaView.title(for: day)
+            snapshot.appendSections([day.day])
+            if rows.isEmpty {
+                snapshot.appendItems([.nothingToday], toSection: day.day)
+            }
+            append(rows, to: day.day)
         }
         snapshot.reconfigureItems(changed)
 
         let first = self.entries.isEmpty && self.titles.isEmpty
         self.entries = entries
         self.titles = titles
-        self.today = today
+        self.anchor = anchor
         dataSource.apply(snapshot, animatingDifferences: !first && view.window != nil)
         // A header that stayed keeps its view; its words may have
         // changed (midnight moves "Today").
@@ -190,7 +215,7 @@ final class AgendaCollectionController: UICollectionViewController {
                 setTitle(of: header, section: indexPath.section)
             }
         }
-        if first, today != nil {
+        if first, anchor != nil {
             anchoring = true
             view.setNeedsLayout()
         }
@@ -224,7 +249,8 @@ final class AgendaCollectionController: UICollectionViewController {
         anchoring = false
     }
 
-    /// The "Today" button: scroll back to Today's header, animated.
+    /// The "Today" button: scroll back to Today's header (Overdue's,
+    /// when it is there), animated.
     func scrollToToday() {
         guard isViewLoaded, let y = todayOffset() else { return }
         anchoring = false
@@ -239,10 +265,11 @@ final class AgendaCollectionController: UICollectionViewController {
         putTodayAtTop()
     }
 
-    /// The offset that has the top of Today's header at the top of the
-    /// page, under the bar, so nothing of the day before shows.
+    /// The offset that has the top of Today's header (Overdue's, when
+    /// it is there) at the top of the page, under the bar, so nothing
+    /// of the day before shows.
     private func todayOffset() -> CGFloat? {
-        guard let today, let section = dataSource.snapshot().indexOfSection(today),
+        guard let anchor, let section = dataSource.snapshot().indexOfSection(anchor),
               let header = collectionView.collectionViewLayout.layoutAttributesForSupplementaryView(
                   ofKind: UICollectionView.elementKindSectionHeader, at: IndexPath(item: 0, section: section)
               )

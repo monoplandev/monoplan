@@ -260,7 +260,8 @@ final class MainWindowModel: ObservableObject {
     /// The other lenses' rows, each read only while it is the one shown.
     @Published private(set) var agenda: [AgendaGroup] = []
     /// Counts the presses of the toolbar's "Today": each one scrolls
-    /// the Calendar back to Today's header (`AgendaTable`).
+    /// the Calendar back to Today's header, or Overdue's above it
+    /// (`AgendaTable`).
     @Published private(set) var todayJumps = 0
     @Published private(set) var done: [DoneRow] = []
     /// The Done lens's filter as chosen (`DoneFilter.swift`), kept
@@ -1564,9 +1565,10 @@ struct MainWindowView: View {
 
     /// The Calendar: the engine's agenda as it groups it. The days
     /// gone by that have rows (events that happened, done items on the
-    /// day they were planned for), then Today, always there (overdue
-    /// rows folded in), then each non-empty day. It opens on Today's
-    /// header, the past above it, and the toolbar's "Today" comes back
+    /// day they were planned for), then Overdue while something is,
+    /// then Today, always there, then each non-empty day. It opens on
+    /// Today's header (Overdue's, when it is there), the past above
+    /// it, and the toolbar's "Today" comes back
     /// there: an AppKit table (`AgendaTable.swift`), which can be put
     /// on a row exactly. A row has its tick, its text with its star right after it,
     /// under that where it lives (the list, the workspace when it is
@@ -1631,8 +1633,8 @@ struct MainWindowView: View {
             }
             Spacer(minLength: 8)
             switch row.tone {
-            case .overdue: Text("overdue").font(.footnote).foregroundStyle(.red).fixedSize()
-            case .warning: Text("due today").font(.footnote).foregroundStyle(.orange).fixedSize()
+            case .overdue: Text("Overdue").font(.footnote).foregroundStyle(.red).fixedSize()
+            case .warning: Text("Due today").font(.footnote).foregroundStyle(.orange).fixedSize()
             case .neutral: EmptyView()
             }
             if TodayMenu.isTimed(row), let when = row.when {

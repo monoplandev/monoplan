@@ -1,16 +1,17 @@
 // The Agenda page, pushed from Home (which owns the navigation stack
 // and the item sheet): the engine's agenda projection (`Engine.agenda`,
 // spec/cli.md, with a horizon far enough out to be the whole future,
-// `AppModel.agendaDays`) as sections: Today (overdue deadlines
-// and tasks whose planned day has passed folded in), then each
-// non-empty day. A row opens the item's sheet
+// `AppModel.agendaDays`) as sections: Overdue while something is
+// (overdue deadlines and tasks whose planned day has passed), Today,
+// then each non-empty day. A row opens the item's sheet
 // (`ItemView`) and its checkbox ticks it, as in the other lenses.
 //
 // The days gone by (`AppModel.agendaPastDays`: events that happened,
 // done items on the day they were planned for) are sections above
-// Today. The page opens with Today's header at the top, so they are
-// reached by scrolling up; Today's section is always there to anchor
-// on, with a line in it when it has no rows. The list is a UIKit
+// Overdue and Today. The page opens with Today's header at the top
+// (Overdue's, when it is there), so they are reached by scrolling up,
+// and the "Today" button comes back to the same place; Today's section
+// is always there to anchor on, with a line in it when it has no rows. The list is a UIKit
 // collection view (`AgendaCollection.swift`), which can be put on
 // Today exactly; a SwiftUI `List` cannot.
 
@@ -22,7 +23,7 @@ struct AgendaView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.openItem) private var openItem
     /// Counts the taps on "Today": each one scrolls the list back to
-    /// Today's header.
+    /// Today's header, or Overdue's above it.
     @State private var todayJumps = 0
 
     var body: some View {
@@ -140,8 +141,8 @@ struct AgendaRowView: View {
 
     private var note: (text: String, color: Color)? {
         switch row.tone {
-        case .overdue: return (String(localized: "overdue"), .red)
-        case .warning: return (String(localized: "due today"), .orange)
+        case .overdue: return (String(localized: "Overdue"), .red)
+        case .warning: return (String(localized: "Due today"), .orange)
         case .neutral: break
         }
         if let minutes = row.duration, minutes > 0 {
