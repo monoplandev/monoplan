@@ -856,6 +856,22 @@ final class MainWindowModel: ObservableObject {
         return [name, row.workspaceName].compactMap { $0 }.joined(separator: " · ")
     }
 
+    /// Where a Calendar row's item lives, for the line under its text:
+    /// the list, without its emoji, then the workspace when it is not
+    /// Personal's. An item with no list and a date lives on the
+    /// Calendar itself, so that says nothing; one there by its deadline
+    /// alone reads as the Inbox's.
+    func agendaListName(_ row: AgendaEntry) -> String? {
+        var name: String?
+        if row.listId != Self.inbox {
+            name = sections.first { $0.workspace.docId == row.docId }?
+                .lists.first { $0.id == row.listId }?.name
+        }
+        if name == nil, row.when == nil { name = Self.noListLabel(dated: false) }
+        let parts = [name, row.docName].compactMap { $0 }.filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     func add(_ text: String) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -1387,9 +1403,12 @@ struct MainWindowView: View {
 
     /// The Calendar: the engine's agenda as it groups it. Today first
     /// and always there (overdue rows folded in), then each non-empty
-    /// day. A row has its tick, its clock
-    /// time when timed, its text, the workspace when it is not
-    /// Personal's, and the tone's note.
+    /// day. A row has its tick, its text with its star right after it,
+    /// under that where it lives (the list, the workspace when it is
+    /// not Personal's) and its place, then at the far edge the tone's
+    /// note and its clock time when timed ("All day" for an event
+    /// with none). A row with that second line
+    /// is taller.
     private var agenda: some View {
         List(selection: selection { id in
             model.agenda.lazy.flatMap(\.rows).first { $0.id == id }?.docId
@@ -1397,7 +1416,7 @@ struct MainWindowView: View {
             ForEach(model.agenda, id: \.day) { group in
                 Section {
                     ForEach(group.rows, id: \.id) { row in
-                        agendaRow(row).itemRow().itemMenu(model, workspace: row.docId, id: row.id).tag(row.id)
+                        agendaRow(row).itemMenu(model, workspace: row.docId, id: row.id).tag(row.id)
                     }
                     if group.rows.isEmpty {
                         Text("Nothing today").foregroundStyle(.secondary)
@@ -1413,29 +1432,56 @@ struct MainWindowView: View {
 
     private func agendaRow(_ row: AgendaEntry) -> some View {
         let done = row.state == .done
+        let listName = model.agendaListName(row)
+        let place = row.place?.label ?? ""
+        let detailed = listName != nil || !place.isEmpty
         return HStack(alignment: .center, spacing: 8) {
-            ItemCheckButton(state: row.state) { model.setDone(workspace: row.docId, id: row.id, done: $0) }
-            if TodayMenu.isTimed(row), let when = row.when {
-                Text(verbatim: String(when.dropFirst(11).prefix(5)))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                    .fixedSize()
+            // The tick sits on the text's line, not the row's middle.
+            HStack(alignment: .rowTitle, spacing: 8) {
+                ItemCheckButton(state: row.state) { model.setDone(workspace: row.docId, id: row.id, done: $0) }
+                VStack(alignment: .leading, spacing: 4) {
+                    // The star follows the text, not the row's far edge.
+                    HStack(alignment: .center, spacing: 6) {
+                        Text(verbatim: row.text)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .foregroundStyle(done ? .secondary : .primary)
+                        if model.starredIds.contains(row.id) { starMark }
+                    }
+                    .alignmentGuide(.rowTitle) { $0[VerticalAlignment.center] }
+                    if detailed {
+                        HStack(alignment: .center, spacing: 8) {
+                            if let listName {
+                                Text(verbatim: listName).lineLimit(1)
+                            }
+                            if !place.isEmpty {
+                                HStack(alignment: .center, spacing: 2) {
+                                    NavIcon(image: NavArt.pin, size: 12).accessibilityHidden(true)
+                                    Text(verbatim: place).lineLimit(1)
+                                }
+                            }
+                        }
+                        .foregroundStyle(.tertiary)
+                    }
+                }
             }
-            Text(verbatim: row.text)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .foregroundStyle(done ? .secondary : .primary)
-            if let name = row.docName {
-                Text(verbatim: name).font(.footnote).foregroundStyle(.tertiary).lineLimit(1)
-            }
-            Spacer()
-            if model.starredIds.contains(row.id) { starMark }
+            Spacer(minLength: 8)
             switch row.tone {
             case .overdue: Text("overdue").font(.footnote).foregroundStyle(.red).fixedSize()
             case .warning: Text("due today").font(.footnote).foregroundStyle(.orange).fixedSize()
             case .neutral: EmptyView()
             }
+            if TodayMenu.isTimed(row), let when = row.when {
+                Text(verbatim: String(when.dropFirst(11).prefix(5)))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .fixedSize()
+            } else if row.event, row.when != nil {
+                // An event with a day and no clock time.
+                Text("All day").foregroundStyle(.secondary).fixedSize()
+            }
         }
+        .itemRow(height: detailed ? 42 : 24)
     }
 
     /// Starred: Home's curated order over every workspace. A row has
@@ -1607,6 +1653,16 @@ struct MainWindowView: View {
     }
 }
 
+private extension VerticalAlignment {
+    /// The middle of a two-line row's first line: what sits beside the
+    /// text (the tick) lines up with it, not with both lines.
+    enum RowTitle: AlignmentID {
+        static func defaultValue(in context: ViewDimensions) -> CGFloat { context[VerticalAlignment.center] }
+    }
+
+    static let rowTitle = VerticalAlignment(RowTitle.self)
+}
+
 private extension View {
     /// A sidebar row's size: see the sidebar's `sidebarRowSize`.
     func navRow() -> some View {
@@ -1617,9 +1673,10 @@ private extension View {
     /// An item row's size, fixed: 32 pt, the web's row height
     /// (`ROW_HEIGHT` in `js/web/src/Workspace.tsx`). The list adds 4 pt
     /// above and below the content. The line between two rows is the
-    /// web's too.
-    func itemRow() -> some View {
-        frame(height: 24)
+    /// web's too. A row with a second line (the Calendar's) passes its
+    /// own height.
+    func itemRow(height: CGFloat = 24) -> some View {
+        frame(height: height)
             .listRowSeparatorTint(Color(nsColor: PaneColor.rowDivider))
     }
 

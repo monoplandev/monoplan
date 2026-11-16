@@ -1661,6 +1661,16 @@
         }
       }
     },
+    "All day": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Todo el día"
+          }
+        }
+      }
+    },
     "All your devices are signed out, and the local copy on this Mac is wiped.": {
       "localizations": {
         "es": {
