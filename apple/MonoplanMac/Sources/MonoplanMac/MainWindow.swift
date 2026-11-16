@@ -686,7 +686,15 @@ final class MainWindowModel: ObservableObject {
     /// The lists an item of `workspace` can be moved to: its Inbox,
     /// then its active lists in the doc's order.
     func moveLists(workspace: String?) -> [PanelList] {
-        moveLists(sections.first { $0.target == workspace })
+        moveLists(section(workspace))
+    }
+
+    /// The section of a workspace named either way a row names one:
+    /// as a typed call takes it (nil for Home), or by its doc id, which
+    /// the Calendar, Starred and Bin rows and the tray give for Home
+    /// too.
+    private func section(_ workspace: String?) -> NavSection? {
+        sections.first { $0.target == workspace || $0.workspace.docId == workspace }
     }
 
     private func moveLists(_ section: NavSection?) -> [PanelList] {
@@ -697,7 +705,8 @@ final class MainWindowModel: ObservableObject {
     /// Every other open workspace with the lists an item of
     /// `workspace` can be moved to there, in the sidebar's order.
     func otherMoveLists(workspace: String?) -> [PanelListGroup] {
-        sections.filter { $0.target != workspace }.map {
+        let own = section(workspace)?.id
+        return sections.filter { $0.id != own }.map {
             PanelListGroup(
                 workspace: $0.target, name: workspaceLabel($0.target), shared: !$0.workspace.home,
                 lists: moveLists($0))
@@ -706,7 +715,7 @@ final class MainWindowModel: ObservableObject {
 
     /// A workspace's name as the sidebar heads it.
     private func workspaceLabel(_ workspace: String?) -> String {
-        guard let found = sections.first(where: { $0.target == workspace })?.workspace, !found.home
+        guard let found = section(workspace)?.workspace, !found.home
         else { return String(localized: "Personal") }
         return found.name ?? found.docId
     }
