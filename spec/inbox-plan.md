@@ -120,11 +120,14 @@ so replicas agree.
 **Reverse order** (newest first) is a **device preference**, not doc state,
 handled like list counts: a web cookie, macOS `UserDefaults`, iOS
 `UserDefaults`. It reverses the display only and never writes anything. Oldest
-first is the default.
+first is the default. The web dropped the preference on 2026-11-17: its Inbox
+is always oldest first.
 
 ### Board view
 
 Inbox keeps its saved view (`WorkspaceSettings.inbox_view`) and its board.
+Not on the web since 2026-11-17: the web Inbox has no display options, renders
+as the flat list only, and ignores `inbox_view` and any older local override.
 Every lane sorts by the same key. Dragging between lanes is a lifecycle change
 only. No drop names a position inside Inbox, and the board does not fold a
 reorder into the commit (`board.md`).
@@ -198,7 +201,7 @@ that only grows.
 |---|---|
 | core / api | contracts above; `api::moves::reorder_items` refuses Inbox; `api::lists::delete` exposes both modes; FFI `Engine.delete_list(workspace, list, mode)` |
 | CLI | `list delete <list> [--bin]`, with a confirm prompt showing the open count, skipped by `--yes`; `mv` into Inbox ignores a position and says so; Inbox output follows the queue order, `--newest` reverses it |
-| web | no drag-reorder inside the Inbox list or Inbox board lanes (lane-to-lane still works); nav drops onto Inbox still move; "Delete list…" in the list menu next to Archive, opening a dialog: "Move N open items to Inbox" (default) / "Bin them", plus a note when the workspace is shared ("Everyone in *Name* will see them"); reverse-order toggle in the Inbox header |
+| web | no drag-reorder inside the Inbox list or Inbox board lanes (lane-to-lane still works); nav drops onto Inbox still move; "Delete list…" in the list menu next to Archive, opening a dialog: "Move N open items to Inbox" (default) / "Bin them", plus a note when the workspace is shared ("Everyone in *Name* will see them"); no display options in the Inbox header (2026-11-17: the reverse-order toggle, board switch and state badges are gone) |
 | iOS | `HomeView` drops `.onMove` for Inbox; delete list in the list page menu with the same two choices; reverse toggle |
 | macOS | sidebar list menu gains Delete; Inbox table never offers row reorder (input to the `mac-dnd-plan.md` v2 spec) |
 

@@ -267,7 +267,6 @@ export type Messages = {
     showState: string;
     /** Inbox display option: show the queue newest first (a device
      *  preference; the queue itself is oldest first). */
-    inboxNewestFirst: string;
     /** Done view header filter (`DoneFilterMenu`): the trigger's name,
      *  its two submenus, the Lists submenu's text box and empty state,
      *  and the item dropping every check. */
@@ -760,7 +759,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         `${count > 1 ? "Se quitarán" : "Se quitará"} de ${source} para todos sus miembros.`,
       displayOptions: "Opciones de visualización",
       showState: "Mostrar estado",
-      inboxNewestFirst: "Más recientes primero",
       filter: "Filtrar",
       filterWorkspaces: "Espacios",
       filterLists: "Listas",
@@ -1151,7 +1149,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         `${count > 1 ? "They" : "It"} will be removed from ${source} for everyone there.`,
       displayOptions: "Display options",
       showState: "Show state",
-      inboxNewestFirst: "Newest first",
       filter: "Filter",
       filterWorkspaces: "Workspaces",
       filterLists: "Lists",

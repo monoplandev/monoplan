@@ -3,7 +3,8 @@
 Board view is a **second lens on an existing list**, not a new container kind.
 Every list (including the reserved `inbox`) can be viewed as a board.
 Inbox's board, like its list, leaves out items that have a date
-(`spec/inbox-plan.md` "Membership"). Archiving
+(`spec/inbox-plan.md` "Membership"). The web does not offer Inbox's board
+(2026-11-17: Inbox there is the flat list only). Archiving
 a list (`spec/data-model.md` "Archived lists") changes nothing here: an
 archived list's board — lanes, order, saved view — remains intact and renders
 normally when the list is opened from the archived section. The board

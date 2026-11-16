@@ -40,7 +40,6 @@ import { Board, type BoardImperative } from "./Board.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { createArchiveListFlow } from "./ArchiveListDialog.tsx";
 import { createDeleteListFlow } from "./DeleteListDialog.tsx";
-import { inboxNewestFirst, setInboxNewestFirst } from "./inboxOrder.ts";
 import { NewDocDialog } from "./NewDocDialog.tsx";
 import { captureInviteFromLocation } from "./invite.ts";
 import { InviteDialog } from "./InviteDialog.tsx";
@@ -451,8 +450,11 @@ export function Workspace(props: {
   };
   const savedView = (listId: string): ViewSpec | null => savedViewIn(viewDocId(), listId);
   // What this client actually renders: local override, else the synced
-  // default, else the built-in flat list.
+  // default, else the built-in flat list. Inbox has no display options
+  // here: it is always the flat list, whatever an older override or a
+  // saved `inbox_view` says.
   const listViewIn = (docId: string, listId: string): ViewSpec =>
+    listId === "inbox" ? LIST_VIEW :
     parseView(viewOverrides()[listKey(docId, listId)]) ??
     savedViewIn(docId, listId) ??
     LIST_VIEW;
@@ -562,7 +564,8 @@ export function Workspace(props: {
   const [showStatePrefs, setShowStatePrefs] = createSignal<Record<string, true>>(
     loadShowStatePrefs(),
   );
-  const showState = (listId: string): boolean => showStatePrefs()[listId] === true;
+  const showState = (listId: string): boolean =>
+    listId !== "inbox" && showStatePrefs()[listId] === true;
   const setShowState = (listId: string, show: boolean) => {
     const map = { ...showStatePrefs() };
     if (show) map[listId] = true;
@@ -776,9 +779,6 @@ export function Workspace(props: {
         if (it) out.push(it);
       }
       overlayLinger(out, v);
-      // Inbox is a queue, oldest first; newest first is a display-only
-      // device preference (`inboxOrder.ts`).
-      if (v.id === "inbox" && inboxNewestFirst()) out.reverse();
       return out;
     }
     if (v.kind === "focus") {
@@ -1031,10 +1031,9 @@ export function Workspace(props: {
     const ids = items().map((i) => i.id);
     let insertIndex = 0;
     if (listId === "inbox" && !isFocus) {
-      // Inbox is a queue: a capture lands at its end, which is the
-      // bottom oldest first and the top newest first, wherever the draft
-      // was asked for.
-      insertIndex = inboxNewestFirst() ? 0 : ids.length;
+      // Inbox is a queue: a capture lands at its end, the bottom,
+      // wherever the draft was asked for.
+      insertIndex = ids.length;
     } else if (at !== undefined) {
       insertIndex = Math.min(Math.max(at, 0), ids.length);
     } else {
@@ -3370,7 +3369,9 @@ export function Workspace(props: {
                 </DropdownMenu>
               )}
             </Show>
-            <Show when={view().kind === "list"}>
+            {/* Inbox has no display options: always the flat queue, oldest
+                first. */}
+            <Show when={view().kind === "list" && currentListId() !== "inbox"}>
               <DisplayOptionsPopover>
                 <SegmentedControl
                   class="theme-segmented"
@@ -3416,21 +3417,6 @@ export function Workspace(props: {
                 {/* Flat list only: badge rows with their lifecycle state.
                     The board shows state as the lane, so the switch
                     yields to the lane rows there. */}
-                <Show when={currentListId() === "inbox"}>
-                  <Switch
-                    class="done-switch"
-                    checked={inboxNewestFirst()}
-                    onChange={setInboxNewestFirst}
-                  >
-                    <Switch.Label class="done-switch-label">
-                      {m().workspace.inboxNewestFirst}
-                    </Switch.Label>
-                    <Switch.Input class="done-switch-input" />
-                    <Switch.Control class="done-switch-control">
-                      <Switch.Thumb class="done-switch-thumb" />
-                    </Switch.Control>
-                  </Switch>
-                </Show>
                 <Show when={boardListId() === null && currentListId()}>
                   {(listId) => (
                     <Switch
