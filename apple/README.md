@@ -423,8 +423,10 @@ deadline when set, place, notes, activity log), read through
 (`spec/cli.md` §Items; decoded by `ItemDetail.parse`), and refetched on
 `Changed` while shown; its checkbox ticks too, and its list field is a
 pull-down `Menu` of the workspace's lists that moves the item
-(`Request.moveItem`, i.e. `item set <id> --list <list>`; same workspace
-only, the engine has no cross-doc move). Its date field
+(`Request.moveItem`, i.e. `item set <id> --list <list>`; since 2026-11-16
+the list editor also offers every other workspace's lists, moved to
+with `Engine.moveItemAcross`, `spec/sharing-plan.md` "Cross-doc
+move"). Its date field
 (`ItemDateField.swift`) hands the whole sheet to an editor
 (`ItemDateEditor`, Done returns to the item): a text box it opens on,
 keyboard up, that reads a typed date ("fri 3pm") with `WhenPhrase` and

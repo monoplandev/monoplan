@@ -109,7 +109,11 @@ struct ItemCaptureView: View {
                 ItemListEditor(
                     itemTitle: nil, lists: listOptions, current: list.listId,
                     workspace: model.sharedWorkspaceName(list.docId),
+                    // Nothing exists yet, so another workspace's list
+                    // just re-aims the capture: nothing moves.
+                    others: model.otherLists(thanDoc: list.docId),
                     pick: { list = $0 },
+                    pickOther: { list = $0 },
                     done: { withAnimation(.easeOut(duration: 0.15)) { pickingList = false } })
                     .transition(.opacity)
             } else {

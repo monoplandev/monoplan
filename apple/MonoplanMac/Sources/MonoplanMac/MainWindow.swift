@@ -686,9 +686,65 @@ final class MainWindowModel: ObservableObject {
     /// The lists an item of `workspace` can be moved to: its Inbox,
     /// then its active lists in the doc's order.
     func moveLists(workspace: String?) -> [PanelList] {
-        let lists = sections.first { $0.target == workspace }?.userLists ?? []
-        return [PanelList(id: Self.inbox, name: String(localized: "Inbox"), icon: nil)]
-            + lists.map { PanelList(id: $0.id, name: $0.name, icon: $0.icon) }
+        moveLists(sections.first { $0.target == workspace })
+    }
+
+    private func moveLists(_ section: NavSection?) -> [PanelList] {
+        [PanelList(id: Self.inbox, name: String(localized: "Inbox"), icon: nil)]
+            + (section?.userLists ?? []).map { PanelList(id: $0.id, name: $0.name, icon: $0.icon) }
+    }
+
+    /// Every other open workspace with the lists an item of
+    /// `workspace` can be moved to there, in the sidebar's order.
+    func otherMoveLists(workspace: String?) -> [PanelListGroup] {
+        sections.filter { $0.target != workspace }.map {
+            PanelListGroup(workspace: $0.target, name: workspaceLabel($0.target), lists: moveLists($0))
+        }
+    }
+
+    /// A workspace's name as the sidebar heads it.
+    private func workspaceLabel(_ workspace: String?) -> String {
+        guard let found = sections.first(where: { $0.target == workspace })?.workspace, !found.home
+        else { return String(localized: "Personal") }
+        return found.name ?? found.docId
+    }
+
+    /// Move an item to a list of another workspace
+    /// (`Engine.moveItemAcross`, spec/sharing-plan.md "Cross-doc
+    /// move"): it keeps its id and its star, and one Undo takes it
+    /// back. Asks first only when the audience changes, as the web
+    /// does: into a workspace with other members, or out of one.
+    /// The panel follows the item to its new workspace.
+    func moveItemAcross(from source: String?, id: String, to target: String?, list: String, on window: NSWindow?) {
+        let exposes = hasOtherMembers(target), removes = hasOtherMembers(source)
+        let move = { [weak self] in
+            guard let self else { return }
+            guard let calls = engine.calls else {
+                error = engineErrorMessage(EngineError.Stopped)
+                return
+            }
+            calls.run({
+                try $0.moveItemAcross(item: ItemRef(workspace: source, id: id), to: target, list: list)
+            }) { [weak self] result in
+                guard let self else { return }
+                if case .failure(let error) = result {
+                    self.error = engineErrorMessage(error)
+                    return
+                }
+                if selected == ItemSelection(workspace: source, id: id) {
+                    let moved = ItemSelection(workspace: target, id: id)
+                    if detailOf == selected { detailOf = moved }
+                    selected = moved
+                }
+                reload()
+            }
+        }
+        guard exposes || removes else { return move() }
+        MoveConfirm.across(
+            to: workspaceLabel(target),
+            exposes: exposes ? .some(target.flatMap { memberCounts[$0] }) : nil,
+            removesFrom: removes ? workspaceLabel(source) : nil,
+            on: window, then: move)
     }
 
     /// Move an item to another list of its own workspace
@@ -1742,6 +1798,42 @@ enum BinConfirm {
             alert.beginSheetModal(for: window) { if $0 == .alertFirstButtonReturn { confirmed() } }
         } else if alert.runModal() == .alertFirstButtonReturn {
             confirmed()
+        }
+    }
+}
+
+/// A move across workspaces that changes who can see the item asks
+/// first, as the web's dialog: into a workspace with other members it
+/// says who will see it, out of one that it goes for everyone there.
+enum MoveConfirm {
+    /// `exposes` is set when the target has other members: how many
+    /// members in all, nil inside when the count is not known.
+    /// `removesFrom` names a source that has other members.
+    static func across(
+        to target: String, exposes: Int??, removesFrom source: String?, on window: NSWindow?,
+        then confirmed: @escaping () -> Void
+    ) {
+        var lines: [String] = []
+        if let exposes {
+            lines.append(
+                exposes.map { String(localized: "This item will be visible to all \($0) members of \(target).") }
+                    ?? String(localized: "This item will be visible to everyone in \(target)."))
+        }
+        if let source {
+            lines.append(String(localized: "It will be removed from \(source) for everyone there."))
+        }
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Move to \(target)?")
+        alert.informativeText = lines.joined(separator: " ")
+        alert.addButton(withTitle: String(localized: "Move"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        let finish = { (response: NSApplication.ModalResponse) in
+            if response == .alertFirstButtonReturn { confirmed() }
+        }
+        if let window {
+            alert.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            finish(alert.runModal())
         }
     }
 }

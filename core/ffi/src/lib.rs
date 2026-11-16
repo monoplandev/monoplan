@@ -1063,6 +1063,22 @@ impl Engine {
         })?)
     }
 
+    /// Move an item to `list` of another workspace (`to`; nil is
+    /// Home), at the end of its open items: the id is kept, a star
+    /// follows it, and Undo takes the whole move back
+    /// (spec/sharing-plan.md "Cross-doc move"). The caller confirms
+    /// first when the audience changes.
+    pub fn move_item_across(
+        &self,
+        item: ItemRef,
+        to: Option<String>,
+        list: String,
+    ) -> Result<(), EngineError> {
+        Ok(self.client.call_blocking(None, move |cx| {
+            api::moves::move_item_across(cx, &item, to.as_deref(), &list)
+        })?)
+    }
+
     /// Reorder Starred: `ids` become one block directly above
     /// `before`, a starred id. Hidden entries keep their place.
     pub fn reorder_starred(

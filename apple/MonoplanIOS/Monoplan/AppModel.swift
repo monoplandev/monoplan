@@ -321,6 +321,71 @@ final class AppModel: ObservableObject {
         write({ try $0.moveItem(workspace: workspace, id: id, list: listId) }, to: ref)
     }
 
+    /// Move an item to a list of another workspace
+    /// (`Engine.moveItemAcross`, spec/sharing-plan.md "Cross-doc
+    /// move"): it keeps its id and its star, and lands at the end of
+    /// the list. `done` gets the item where it now lives, its page
+    /// carried over until the reread lands. The caller has confirmed
+    /// when the audience changes (`moveChangesAudience`).
+    func moveItem(_ ref: ItemRef, across list: ListRef, done: @escaping (ItemRef) -> Void) {
+        let (source, target, id) = (selector(ref.docId), selector(list.docId), ref.itemId)
+        let moved = ItemRef(docId: list.docId, itemId: id, title: ref.title)
+        call({
+            try $0.moveItemAcross(
+                item: MonoplanCore.ItemRef(workspace: source, id: id), to: target, list: list.listId)
+        }) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                if let page = itemDetails[ref.key] {
+                    itemDetails[moved.key] = page
+                    itemDetails[ref.key] = nil
+                }
+                done(moved)
+                wrote(to: moved)
+            case .failure(let error):
+                lastError = "could not move item: \(engineErrorMessage(error))"
+            }
+        }
+    }
+
+    /// What the user is told before an item of `source` moves to a
+    /// list of `target`; nil when the move changes nobody's view of
+    /// it (between the account's own unshared workspaces) and so just
+    /// happens. As the web: into a workspace with other members it
+    /// says who will see the item, out of one that it goes for
+    /// everyone there.
+    func moveChangesAudience(from source: String?, to target: String) -> String? {
+        var lines: [String] = []
+        if hasOtherMembers(target) {
+            let name = workspaceLabel(target)
+            lines.append(
+                memberCounts[target].map { "This item will be visible to all \($0) members of \(name)." }
+                    ?? "This item will be visible to everyone in \(name).")
+        }
+        if let source, hasOtherMembers(source) {
+            lines.append("It will be removed from \(workspaceLabel(source)) for everyone there.")
+        }
+        return lines.isEmpty ? nil : lines.joined(separator: " ")
+    }
+
+    /// A workspace's name as Home heads it.
+    func workspaceLabel(_ docId: String?) -> String {
+        sharedWorkspaceName(docId) ?? "Personal"
+    }
+
+    /// Every other open workspace with the lists an item of `docId`
+    /// (nil: Personal) can be moved to there, Home first.
+    func otherLists(thanDoc docId: String?) -> [ListGroup] {
+        guard let session else { return [] }
+        let own = docId ?? session.primaryDocId
+        return session.docs.filter { $0.docId != own }.map {
+            ListGroup(
+                docId: $0.docId, name: workspaceLabel($0.docId), shared: !$0.home,
+                lists: lists(inDoc: $0.docId))
+        }
+    }
+
     /// A row of a browsed list dragged to a new place, in `onMove`'s
     /// terms: `destination` is the gap it was dropped in, counted in
     /// the order as it was. The rows are reordered here first, so the

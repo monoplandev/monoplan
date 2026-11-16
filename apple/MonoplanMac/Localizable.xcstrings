@@ -2370,6 +2370,56 @@
           }
         }
       }
+    },
+    "Move to %@?": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Mover a %@?"
+          }
+        }
+      }
+    },
+    "Move": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mover"
+          }
+        }
+      }
+    },
+    "This item will be visible to all %lld members of %@.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este elemento será visible para los %lld miembros de %@."
+          }
+        }
+      }
+    },
+    "This item will be visible to everyone in %@.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este elemento será visible para todas las personas de %@."
+          }
+        }
+      }
+    },
+    "It will be removed from %@ for everyone there.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se quitará de %@ para todas las personas de ese espacio."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

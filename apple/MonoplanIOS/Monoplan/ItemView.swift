@@ -147,10 +147,29 @@ struct ItemLink<Label: View>: View {
 
 struct ItemView: View {
     @EnvironmentObject private var model: AppModel
-    let ref: ItemRef
+    /// The item as the sheet was opened on it.
+    private let opened: ItemRef
+    /// Where it lives now, once it has been moved to another
+    /// workspace from this page: the page follows it, the sheet stays.
+    @State private var moved: ItemRef?
+    private var ref: ItemRef { moved ?? opened }
     /// An editor to open straight away: a capture that became this
     /// item on the way to its date or place.
-    var startEditing: Editor? = nil
+    private let startEditing: Editor?
+    /// A list of another workspace was picked and the move changes who
+    /// sees the item: waiting on its confirmation.
+    @State private var crossing: Crossing?
+
+    private struct Crossing {
+        let list: ListRef
+        let workspace: String
+        let note: String
+    }
+
+    init(ref: ItemRef, startEditing: Editor? = nil) {
+        opened = ref
+        self.startEditing = startEditing
+    }
     @Environment(\.dismiss) private var dismiss
     /// The field editor that has the sheet, if one does.
     @State private var editing: Editor?
@@ -191,7 +210,9 @@ struct ItemView: View {
                         ItemListEditor(
                             itemTitle: item.text, lists: listOptions(item), current: item.listId,
                             workspace: workspace,
+                            others: otherListOptions(item),
                             pick: { if $0.listId != item.listId { model.moveItem(ref, toList: $0.listId) } },
+                            pickOther: moveAcross,
                             done: endEditing)
                     case .date: ItemDateEditor(ref: ref, item: item, done: endEditing)
                     case .place: ItemPlaceEditor(ref: ref, item: item, done: endEditing)
@@ -207,6 +228,27 @@ struct ItemView: View {
             if let startEditing, editing == nil { edit(startEditing) }
         }
         .onChange(of: model.changeCount) { model.refreshItem(ref) }
+        .alert(
+            "Move to \(crossing?.workspace ?? "")?",
+            isPresented: Binding(get: { crossing != nil }, set: { if !$0 { crossing = nil } }),
+            presenting: crossing
+        ) { crossing in
+            Button("Move") { model.moveItem(ref, across: crossing.list) { moved = $0 } }
+            Button("Cancel", role: .cancel) {}
+        } message: { crossing in
+            Text(crossing.note)
+        }
+    }
+
+    /// A list of another workspace was picked: the item moves there
+    /// and the page follows it. Asked first only when the move changes
+    /// who sees the item (spec/sharing-plan.md "Cross-doc move").
+    private func moveAcross(_ list: ListRef) {
+        if let note = model.moveChangesAudience(from: ref.docId, to: list.docId) {
+            crossing = Crossing(list: list, workspace: model.workspaceLabel(list.docId), note: note)
+        } else {
+            model.moveItem(ref, across: list) { moved = $0 }
+        }
     }
 
     private var page: some View {
@@ -454,14 +496,24 @@ struct ItemView: View {
     /// so there is always a row to tick.
     private func listOptions(_ item: ItemInfo) -> [ListRef] {
         // For an item with a date, "no list" is the Calendar, not Inbox.
-        let lists = model.lists(inDoc: ref.docId).map { list in
-            guard item.when != nil, list.listId == "inbox" else { return list }
-            return ListRef(
-                docId: list.docId, listId: list.listId, name: NoList.label(dated: true), calendar: true)
-        }
+        let lists = model.lists(inDoc: ref.docId).map { Self.noList($0, dated: item.when != nil) }
         if lists.contains(where: { $0.listId == item.listId }) { return lists }
         let own = ListRef(docId: ref.docId ?? "", listId: item.listId, name: item.listLabel, icon: item.listIcon)
         return lists + [own]
+    }
+
+    /// The other workspaces' rows, "no list" named the same way.
+    private func otherListOptions(_ item: ItemInfo) -> [ListGroup] {
+        model.otherLists(thanDoc: ref.docId).map { group in
+            ListGroup(
+                docId: group.docId, name: group.name, shared: group.shared,
+                lists: group.lists.map { Self.noList($0, dated: item.when != nil) })
+        }
+    }
+
+    private static func noList(_ list: ListRef, dated: Bool) -> ListRef {
+        guard dated, list.listId == "inbox" else { return list }
+        return ListRef(docId: list.docId, listId: list.listId, name: NoList.label(dated: true), calendar: true)
     }
 
     /// The item's list, drawn as a field: full width, a faint fill, a
@@ -469,9 +521,9 @@ struct ItemView: View {
     /// icon and text stay in line with the plain rows under it. A tap
     /// hands the sheet to the list editor (`ItemListEditor`), as the
     /// date and place rows do with theirs; a system menu here covered
-    /// the item it was moving. Lists of other workspaces are not
-    /// offered: the engine has no cross-doc move yet. A binned item
-    /// stays put.
+    /// the item it was moving. The editor offers every other
+    /// workspace's lists under the item's own. A binned item stays
+    /// put.
     private func listField(_ item: ItemInfo) -> some View {
         Button {
             edit(.list)

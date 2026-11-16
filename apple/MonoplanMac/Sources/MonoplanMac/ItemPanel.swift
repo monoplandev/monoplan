@@ -27,11 +27,17 @@ struct ItemPanel: View {
     /// The lists the item can be moved to: its workspace's, Inbox
     /// first.
     let lists: [PanelList]
+    /// Every other open workspace with its lists, offered under the
+    /// item's own: a pick there moves the item across workspaces.
+    let otherLists: [PanelListGroup]
     /// The title was edited: the new one, trimmed, not empty and not
     /// the old one.
     let retitle: (ItemInfo, String) -> Void
     /// Another list was picked for the item: its id.
     let move: (ItemInfo, String) -> Void
+    /// A list of another workspace was picked: the workspace (as a
+    /// typed call takes it, nil being Home) and the list's id.
+    let moveAcross: (ItemInfo, String?, String) -> Void
     /// The account's known places matching the text.
     let knownPlaces: (String, @escaping ([PlaceSuggestion]) -> Void) -> Void
     /// A place was picked for the item, or cleared (nil); `exact` for
@@ -116,15 +122,20 @@ struct ItemPanel: View {
     /// (`ItemView.listField`): full width, a faint fill, outset by its
     /// own padding so its icon and text stay in line with the plain
     /// rows under it. A click opens a menu of the workspace's lists
-    /// with the current one ticked, and a pick moves the item. Lists
-    /// of other workspaces are not offered. A binned item stays put.
+    /// with the current one ticked, then every other workspace's
+    /// under its name, as the web's list picker; a pick moves the
+    /// item, across workspaces when the list is another one's
+    /// (spec/sharing-plan.md "Cross-doc move"). A binned item stays
+    /// put.
     ///
     /// A plain button that pops an `NSMenu`, not a SwiftUI `Menu`: a
     /// `Menu`'s label is the system's to draw, and it does not keep a
     /// box of our own.
     private func listField(_ item: ItemInfo) -> some View {
         Button {
-            ListMenu.pop(listOptions(item), current: item.item.listId) { move(item, $0) }
+            ListMenu.pop(
+                listOptions(item), current: item.item.listId, others: otherOptions(item),
+                pick: { move(item, $0) }, pickAcross: { moveAcross(item, $0, $1) })
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Group {
@@ -171,13 +182,24 @@ struct ItemPanel: View {
     /// there is always a row to tick.
     private func listOptions(_ item: ItemInfo) -> [PanelList] {
         // For an item with a date, "no list" is the Calendar, not Inbox.
-        let lists = lists.map { list in
-            item.item.when != nil && list.id == MainWindowModel.inbox
-                ? PanelList(id: list.id, name: MainWindowModel.noListLabel(dated: true), icon: nil)
-                : list
-        }
+        let lists = lists.map { Self.noList($0, dated: item.item.when != nil) }
         if lists.contains(where: { $0.id == item.item.listId }) { return lists }
         return lists + [PanelList(id: item.item.listId, name: item.listLabel, icon: item.listIcon)]
+    }
+
+    /// The other workspaces' rows, "no list" named the same way.
+    private func otherOptions(_ item: ItemInfo) -> [PanelListGroup] {
+        otherLists.map { group in
+            PanelListGroup(
+                workspace: group.workspace, name: group.name,
+                lists: group.lists.map { Self.noList($0, dated: item.item.when != nil) })
+        }
+    }
+
+    private static func noList(_ list: PanelList, dated: Bool) -> PanelList {
+        dated && list.id == MainWindowModel.inbox
+            ? PanelList(id: list.id, name: MainWindowModel.noListLabel(dated: true), icon: nil)
+            : list
     }
 
     /// The item's timeline as plain sentences: created, and once closed,
@@ -314,26 +336,46 @@ extension ItemInfo {
     }
 }
 
-/// The list field's menu: the lists, the current one ticked.
+/// The list field's menu: the item's workspace's lists, the current
+/// one ticked, then each other workspace's under its name.
 private final class ListMenu: NSObject {
     private let pick: (String) -> Void
+    private let pickAcross: (String?, String) -> Void
+    /// The other workspaces' rows, by the menu item's tag.
+    private var across: [(workspace: String?, list: String)] = []
 
-    private init(pick: @escaping (String) -> Void) {
+    private init(pick: @escaping (String) -> Void, pickAcross: @escaping (String?, String) -> Void) {
         self.pick = pick
+        self.pickAcross = pickAcross
     }
 
     /// Open it at the pointer; `pick` gets the id of a list other
-    /// than the current one. Returns once the menu has shut.
-    static func pop(_ lists: [PanelList], current: String, pick: @escaping (String) -> Void) {
-        let handler = ListMenu(pick: pick)
+    /// than the current one, `pickAcross` another workspace and a
+    /// list of it. Returns once the menu has shut.
+    static func pop(
+        _ lists: [PanelList], current: String, others: [PanelListGroup],
+        pick: @escaping (String) -> Void, pickAcross: @escaping (String?, String) -> Void
+    ) {
+        let handler = ListMenu(pick: pick, pickAcross: pickAcross)
         let menu = NSMenu()
         for list in lists {
-            let title = [list.icon, list.name].compactMap { $0 }.joined(separator: " ")
-            let item = NSMenuItem(title: title, action: #selector(picked(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: title(list), action: #selector(picked(_:)), keyEquivalent: "")
             item.target = handler
             item.representedObject = list.id
             item.state = list.id == current ? .on : .off
             menu.addItem(item)
+        }
+        for group in others {
+            menu.addItem(.separator())
+            menu.addItem(.sectionHeader(title: group.name))
+            for list in group.lists {
+                let item = NSMenuItem(
+                    title: title(list), action: #selector(pickedAcross(_:)), keyEquivalent: "")
+                item.target = handler
+                item.tag = handler.across.count
+                handler.across.append((group.workspace, list.id))
+                menu.addItem(item)
+            }
         }
         let ticked = menu.items.first { $0.state == .on }
         // The ticked row lands under the pointer, as a pop-up button's.
@@ -342,9 +384,19 @@ private final class ListMenu: NSObject {
         withExtendedLifetime(handler) {}
     }
 
+    private static func title(_ list: PanelList) -> String {
+        [list.icon, list.name].compactMap { $0 }.joined(separator: " ")
+    }
+
     @objc private func picked(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String, sender.state != .on else { return }
         pick(id)
+    }
+
+    @objc private func pickedAcross(_ sender: NSMenuItem) {
+        guard across.indices.contains(sender.tag) else { return }
+        let row = across[sender.tag]
+        pickAcross(row.workspace, row.list)
     }
 }
 
@@ -353,6 +405,14 @@ struct PanelList: Identifiable {
     let id: String
     let name: String
     let icon: String?
+}
+
+/// Another workspace's lists, for the list menu: what a typed call's
+/// `workspace` takes (nil is Home) and the name its heading shows.
+struct PanelListGroup {
+    let workspace: String?
+    let name: String
+    let lists: [PanelList]
 }
 
 /// One field of the panel: its icon, its value, and a secondary line

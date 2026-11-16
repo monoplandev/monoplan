@@ -535,8 +535,13 @@ struct ItemPanelPane: View {
                 ItemPanel(
                     item: model.detail, workspaceName: model.sharedWorkspaceName(shown.workspace),
                     lists: model.moveLists(workspace: shown.workspace),
+                    otherLists: model.otherMoveLists(workspace: shown.workspace),
                     retitle: { model.setText(workspace: shown.workspace, item: $0, text: $1) },
                     move: { model.moveItem(workspace: shown.workspace, id: $0.item.id, list: $1) },
+                    moveAcross: {
+                        model.moveItemAcross(
+                            from: shown.workspace, id: $0.item.id, to: $1, list: $2, on: NSApp.keyWindow)
+                    },
                     knownPlaces: { model.knownPlaces(matching: $0, completion: $1) },
                     setPlace: { model.setPlace(workspace: shown.workspace, id: $0.item.id, place: $1, exact: $2) })
             }

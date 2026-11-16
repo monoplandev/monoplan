@@ -232,6 +232,54 @@ pub fn star_items(cx: &Ctx, items: &[ItemRef]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Move one item to `list` of the workspace `to` names (`None`: Home),
+/// at the end of that list's open items: what an item page's list
+/// picker does when the pick is another workspace's list
+/// (`spec/sharing-plan.md` "Cross-doc move"). The id is kept, a Starred
+/// entry follows the item, a binned item lands restored and a closed
+/// one stays closed. The target adopts, Home re-points Starred, then
+/// the source releases, so the loop records one undo step over the
+/// docs involved. A `to` that is the item's own workspace is the plain
+/// move to the end of `list`.
+///
+/// Asking whether the audience changes (into or out of a workspace
+/// with other members) is the client's, before it calls.
+pub fn move_item_across(
+    cx: &Ctx,
+    item: &ItemRef,
+    to: Option<&str>,
+    list: &str,
+) -> anyhow::Result<()> {
+    let (src, src_id) = resolve(cx, item.workspace.as_deref())?;
+    let (dst, dst_id) = resolve(cx, to)?;
+    let index = dst.items_in_list(list, true).len();
+    if src_id == dst_id {
+        anyhow::ensure!(
+            src.get_item(&item.id).is_some(),
+            "item not found: {}",
+            item.id
+        );
+        src.move_item(&item.id, list, index)?;
+        return Ok(());
+    }
+    // A foreign ref names the doc; Home's own are bare.
+    let target = dst_id
+        .filter(|id| Some(*id) != cx.home)
+        .map(|id| id.0.to_string());
+    monoplan_core::move_items_across_docs(
+        src,
+        dst,
+        &[item.id.as_str()],
+        list,
+        index,
+        Some(monoplan_core::FocusRetarget {
+            home: home_doc(cx)?,
+            target_doc_id: target.as_deref(),
+        }),
+    )?;
+    Ok(())
+}
+
 /// The doc `selector` names among the call's workspaces, with its id.
 /// A bare context (no workspaces, tests) has only its own doc, named by
 /// `None`.
@@ -687,6 +735,85 @@ mod tests {
         assert!(h.undo(&tagged).unwrap());
         assert_eq!(open_texts(&home, LIST_INBOX), s(&["h1", "h2"]));
         assert_eq!(open_texts(&work, LIST_INBOX), s(&["w1", "w2"]));
+    }
+
+    #[test]
+    fn an_item_moves_to_another_workspace_with_its_star_and_comes_back_on_undo() {
+        let home = Doc::new().unwrap();
+        let work = Doc::new().unwrap();
+        let home_id = DocId(uuid::Uuid::from_bytes([1; 16]));
+        let work_id = DocId(uuid::Uuid::from_bytes([2; 16]));
+        let h_ids = add(&home, LIST_INBOX, &["h1", "h2"]);
+        let list = work.add_list("Plans").unwrap();
+        add(&work, &list, &["w1"]);
+        let workspaces = [
+            (
+                Candidate {
+                    doc_id: home_id,
+                    name: None,
+                },
+                &home,
+            ),
+            (
+                Candidate {
+                    doc_id: work_id,
+                    name: Some("Work".into()),
+                },
+                &work,
+            ),
+        ];
+        let docs = [&home, &work];
+        let lens = Lens::home(&home);
+        let cx = Ctx {
+            doc: &home,
+            open_docs: &docs,
+            lens: &lens,
+            workspaces: &workspaces,
+            home: Some(home_id),
+        };
+        let tagged = [(home_id, &home), (work_id, &work)];
+        let mut h = History::default();
+        lens.star(&home, &h_ids[0], 0).unwrap();
+
+        let moved = ItemRef {
+            workspace: None,
+            id: h_ids[0].clone(),
+        };
+        let before = h.before(&tagged);
+        move_item_across(&cx, &moved, Some("Work"), &list).unwrap();
+        h.record(before, &tagged);
+        // Appended, under its own id; gone from Home; the star follows.
+        assert_eq!(open_texts(&home, LIST_INBOX), s(&["h2"]));
+        assert_eq!(open_texts(&work, &list), s(&["w1", "h1"]));
+        assert_eq!(work.get_item(&h_ids[0]).unwrap().text, "h1");
+        let entries = home.focus_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].doc_id, Some(work_id.0.to_string()));
+
+        // One step back undoes both halves and the star's re-pointing.
+        assert!(h.undo(&tagged).unwrap());
+        assert_eq!(open_texts(&home, LIST_INBOX), s(&["h1", "h2"]));
+        assert_eq!(open_texts(&work, &list), s(&["w1"]));
+        assert_eq!(home.focus_entries()[0].doc_id, None);
+
+        // Back again by the other workspace's selector, into Home.
+        assert!(h.redo(&tagged).unwrap());
+        let moved = ItemRef {
+            workspace: Some(work_id.0.to_string()),
+            id: h_ids[0].clone(),
+        };
+        move_item_across(&cx, &moved, None, LIST_INBOX).unwrap();
+        assert!(work.get_item(&h_ids[0]).is_none());
+        assert!(home.get_item(&h_ids[0]).is_some());
+        assert_eq!(home.focus_entries()[0].doc_id, None);
+
+        // Its own workspace named as the target is the plain move.
+        let stay = ItemRef {
+            workspace: Some("Work".into()),
+            id: work.items_in_list(&list, true)[0].id.clone(),
+        };
+        move_item_across(&cx, &stay, Some("Work"), LIST_INBOX).unwrap();
+        assert_eq!(open_texts(&work, LIST_INBOX), s(&["w1"]));
     }
 
     #[test]
