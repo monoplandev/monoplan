@@ -53,7 +53,7 @@ struct DoneView: View {
         // Done loads a window at a time, so the count is asked for on
         // its own (`done --count`): every Done item, loaded or not.
         .countedTitle("Done", count: model.doneError == nil ? model.doneTotal : nil) {
-            Image(systemName: "checkmark.circle")
+            CatalogIcon(name: "Done")
         }
         .refreshable { model.refreshDone() }
         .onAppear { model.refreshDone() }

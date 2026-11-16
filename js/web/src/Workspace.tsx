@@ -27,7 +27,7 @@ import archiveSvg from "./icons/archive.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
 import cardStackSvg from "./icons/card-stack.svg?raw";
 import caretRightSvg from "./icons/caret-right.svg?raw";
-import checkSvg from "./icons/check.svg?raw";
+import checkCircledSvg from "./icons/check-circled.svg?raw";
 import crumpledPaperSvg from "./icons/trash.svg?raw";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import starSvg from "./icons/star.svg?raw";
@@ -3869,7 +3869,7 @@ function viewTitle(
 function viewIcon(v: ViewKey): string | null {
   if (v.kind === "focus") return starSvg;
   if (v.kind === "upcoming") return calendarSvg;
-  if (v.kind === "done") return checkSvg;
+  if (v.kind === "done") return checkCircledSvg;
   if (v.kind === "bin") return crumpledPaperSvg;
   if (v.kind === "list" && v.id === "inbox") return archiveSvg;
   return null;

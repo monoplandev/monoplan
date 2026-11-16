@@ -10,7 +10,7 @@ import { matchesName, type SearchResult } from "./search.ts";
 import { useAppI18n } from "./i18n.tsx";
 import archiveSvg from "./icons/archive.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
-import checkSvg from "./icons/check.svg?raw";
+import checkCircledSvg from "./icons/check-circled.svg?raw";
 import crumpledPaperSvg from "./icons/trash.svg?raw";
 import starSvg from "./icons/star.svg?raw";
 import fileSvg from "./icons/file.svg?raw";
@@ -36,7 +36,7 @@ const VIEW_ICONS: Record<ViewResultId, string> = {
   focus: starSvg,
   inbox: archiveSvg,
   upcoming: calendarSvg,
-  done: checkSvg,
+  done: checkCircledSvg,
   bin: crumpledPaperSvg,
 };
 

@@ -30,7 +30,7 @@ import { EmojiPicker } from "./EmojiPicker.tsx";
 import archiveSvg from "./icons/archive.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
 import caretDownSvg from "./icons/caret-down.svg?raw";
-import checkSvg from "./icons/check.svg?raw";
+import checkCircledSvg from "./icons/check-circled.svg?raw";
 import cloudSvg from "./icons/cloud.svg?raw";
 import cloudOffSvg from "./icons/cloud-off.svg?raw";
 import crumpledPaperSvg from "./icons/trash.svg?raw";
@@ -375,7 +375,7 @@ export function Nav(props: {
           tabIndex={-1}
           onClick={() => props.setView({ kind: "done" })}
         >
-          <span class="nav-item-icon" innerHTML={checkSvg} />
+          <span class="nav-item-icon" innerHTML={checkCircledSvg} />
           {m().nav.done}
         </button>
         <Show when={props.binCount > 0}>

@@ -85,7 +85,7 @@ struct ListIcon: View {
 }
 
 /// One of the web's glyphs from the asset catalog (`Inbox` is
-/// `js/web/src/icons/archive.svg`, `Calendar` is `calendar.svg`),
+/// `js/web/src/icons/archive.svg`, `Calendar` is `calendar.svg`, `Done` is `check-circled.svg`),
 /// standing where a symbol would as a label's icon: about a symbol's
 /// side beside body text, growing with Dynamic Type. Takes the
 /// foreground style around it.
@@ -272,7 +272,7 @@ struct HomeView: View {
                         Label("Map", systemImage: "map")
                     }
                     NavigationLink(value: HomePage.done) {
-                        Label("Done", systemImage: "checkmark.circle")
+                        Label { Text("Done") } icon: { CatalogIcon(name: "Done") }
                     }
                     // Only while something is binned; search still
                     // reaches the empty page.
