@@ -970,6 +970,14 @@ impl Engine {
         })?)
     }
 
+    /// Rename a shared workspace (its `doc_id` as `workspace`), for
+    /// every member. Home and a blank name are refused.
+    pub fn rename_workspace(&self, workspace: String, name: String) -> Result<(), EngineError> {
+        Ok(self.client.call_blocking(Some(workspace), move |cx| {
+            api::lists::rename_workspace(cx, &name)
+        })?)
+    }
+
     /// Set a user-created list's emoji, or clear it (nil).
     pub fn set_list_icon(
         &self,

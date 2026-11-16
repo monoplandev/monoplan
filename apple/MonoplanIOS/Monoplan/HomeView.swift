@@ -10,6 +10,7 @@
 // is the account's menu: its email and New Workspace (named in an
 // alert); a shared workspace's section header has a "..." menu with
 // Share… (the Sharing sheet, `SharingView`: members, invite links),
+// Rename… (an alert with the name in a field),
 // then Delete Workspace to its owner, which asks for the name typed
 // back, as the Mac app's does, or Leave Workspace to anyone else
 // (a plain confirm: nothing is destroyed, and an invite undoes it);
@@ -207,6 +208,10 @@ struct HomeView: View {
     @State private var sharing: SharingTarget?
     /// The workspace Leave is asking about.
     @State private var leaving: Deleting?
+    /// The workspace the Rename alert is up for, over what is typed
+    /// in it.
+    @State private var renaming: Deleting?
+    @State private var renameText = ""
     /// Home's Bin row was long-pressed and "Empty Bin…" picked.
     @State private var confirmingEmptyBin = false
 
@@ -328,6 +333,11 @@ struct HomeView: View {
                                 Menu {
                                     Button("Share…", systemImage: "person.crop.circle.badge.plus") {
                                         sharing = SharingTarget(docId: doc.docId, name: shared)
+                                    }
+                                    Button("Rename…", systemImage: "pencil") {
+                                        // An unnamed one reads "Shared"; its field starts empty.
+                                        renameText = doc.name ?? ""
+                                        renaming = Deleting(docId: doc.docId, name: doc.name ?? "")
                                     }
                                     switch model.ownsWorkspace[doc.docId] {
                                     case true?:
@@ -486,6 +496,22 @@ struct HomeView: View {
             .disabled(deleteTyped.trimmingCharacters(in: .whitespacesAndNewlines) != target.name)
         } message: { _ in
             Text("Its lists and items are removed from every device, and anyone it is shared with loses access. This cannot be undone.")
+        }
+        .alert(
+            "Rename Workspace",
+            isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } }),
+            presenting: renaming
+        ) { target in
+            TextField("Name", text: $renameText)
+            Button("Cancel", role: .cancel) {}
+            Button("Rename") {
+                let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard name != target.name else { return }
+                model.renameWorkspace(target.docId, to: name) { error in
+                    if let error { failure = Failure(title: "Could not rename workspace", message: error) }
+                }
+            }
+            .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
         .sheet(item: $sharing) { target in
             SharingView(target: target)

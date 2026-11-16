@@ -871,6 +871,24 @@ final class MainWindowModel: ObservableObject {
         }
     }
 
+    /// Rename a shared workspace (`Engine.renameWorkspace`), for every
+    /// member. A blank or unchanged name writes nothing. `failed` gets
+    /// why not.
+    func renameWorkspace(_ docId: String, name: String, failed: @escaping (String) -> Void) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let current = sections.first { $0.id == docId }?.workspace.name
+        guard !name.isEmpty, name != current else { return }
+        guard let calls = engine.calls else {
+            return failed(engineErrorMessage(EngineError.Stopped))
+        }
+        calls.run({ try $0.renameWorkspace(workspace: docId, name: name) }) { [weak self] result in
+            switch result {
+            case .success: self?.reload()
+            case .failure(let error): failed(engineErrorMessage(error))
+            }
+        }
+    }
+
     /// A workspace as JSON (`Engine.exportJson`), for Export JSON….
     /// `done` gets it, or why not, on the main queue.
     func exportJson(workspace: String?, done: @escaping (Result<String, Error>) -> Void) {
@@ -1119,7 +1137,8 @@ struct MainWindowView: View {
     /// chevron, both muted and shown only while the pointer is over
     /// the row, as the system header's chevron. A click anywhere on it
     /// folds the group. The "…" menu is the web's workspace menu:
-    /// Share… on a shared workspace, Export JSON… and Import JSON… on
+    /// Share… and Rename… (a name field in an alert) on a shared
+    /// workspace, Export JSON… and Import JSON… on
     /// every one (Personal included), then on a shared workspace
     /// Delete Workspace… to its owner or Leave Workspace… to anyone
     /// else, neither until the role is known
@@ -1194,6 +1213,16 @@ struct MainWindowView: View {
         let target = section.target
         if !section.workspace.home {
             Button("Share…") { sharing = SharingTarget(docId: docId, name: name) }
+            Button("Rename…") {
+                // An unnamed workspace shows its id; the field starts empty.
+                let window = NSApp.keyWindow
+                WorkspaceConfirm.rename(name: section.workspace.name ?? "", on: window) { renamed in
+                    model.renameWorkspace(docId, name: renamed) { error in
+                        WorkspaceConfirm.failed(
+                            String(localized: "Could not rename the workspace"), error, on: window)
+                    }
+                }
+            }
             Divider()
         }
         Button("Export JSON…") {

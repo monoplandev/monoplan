@@ -415,6 +415,12 @@ enum WorkspaceConfirm {
         DeleteWorkspacePrompt(name: name).run(on: window, then: confirmed)
     }
 
+    /// Rename…: the name in a field; `renamed` gets what it holds,
+    /// trimmed and non-blank, on Rename.
+    static func rename(name: String, on window: NSWindow?, then renamed: @escaping (String) -> Void) {
+        RenameWorkspacePrompt(name: name).run(on: window, then: renamed)
+    }
+
     static func leave(name: String, on window: NSWindow?, then confirmed: @escaping () -> Void) {
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -478,5 +484,47 @@ private final class DeleteWorkspacePrompt: NSObject, NSTextFieldDelegate {
 
     func controlTextDidChange(_ obj: Notification) {
         alert.buttons[0].isEnabled = matches
+    }
+}
+
+
+/// Rename Workspace's sheet: a standard alert with the name in a
+/// field, selected, Rename enabled while it has a non-blank character.
+/// Return in the field is Rename, Escape is Cancel. Keeps itself alive
+/// until the alert ends (the sheet's handler holds it).
+private final class RenameWorkspacePrompt: NSObject, NSTextFieldDelegate {
+    private let alert = NSAlert()
+    private let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+
+    init(name: String) {
+        super.init()
+        alert.messageText = String(localized: "Rename Workspace")
+        field.stringValue = name
+        field.placeholderString = String(localized: "Name")
+        field.delegate = self
+        alert.accessoryView = field
+        alert.addButton(withTitle: String(localized: "Rename"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        alert.buttons[0].isEnabled = !typed.isEmpty
+    }
+
+    func run(on window: NSWindow?, then renamed: @escaping (String) -> Void) {
+        alert.window.initialFirstResponder = field
+        let finish = { [self] (response: NSApplication.ModalResponse) in
+            if response == .alertFirstButtonReturn && !typed.isEmpty { renamed(typed) }
+        }
+        if let window {
+            alert.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            finish(alert.runModal())
+        }
+    }
+
+    private var typed: String {
+        field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        alert.buttons[0].isEnabled = !typed.isEmpty
     }
 }

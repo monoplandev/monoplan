@@ -921,6 +921,26 @@
         }
       }
     },
+    "Rename": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Renombrar"
+          }
+        }
+      }
+    },
+    "Rename Workspace": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Renombrar espacio de trabajo"
+          }
+        }
+      }
+    },
     "Rename List": {
       "localizations": {
         "es": {
@@ -2127,6 +2147,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "No se pudo eliminar el espacio de trabajo"
+          }
+        }
+      }
+    },
+    "Could not rename the workspace": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo renombrar el espacio de trabajo"
           }
         }
       }

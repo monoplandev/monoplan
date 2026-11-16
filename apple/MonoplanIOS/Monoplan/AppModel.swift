@@ -514,6 +514,22 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Rename a shared workspace, for every member
+    /// (`Engine.renameWorkspace`). `done` gets why not, or nil once it
+    /// is renamed; the session reread retitles its section.
+    func renameWorkspace(_ docId: String, to name: String, done: @escaping (String?) -> Void) {
+        call({ try $0.renameWorkspace(workspace: docId, name: name) }) { [weak self] result in
+            switch result {
+            case .success:
+                self?.loadSession()
+                self?.refreshLenses()
+                done(nil)
+            case .failure(let error):
+                done(engineErrorMessage(error))
+            }
+        }
+    }
+
     /// Delete a workspace the account owns, for every device
     /// (`Engine.deleteWorkspace`). The server refuses one that is not
     /// ours or still has other members; `done` gets why not, or nil

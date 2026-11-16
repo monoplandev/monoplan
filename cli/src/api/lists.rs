@@ -76,6 +76,21 @@ pub fn rename_list(cx: &Ctx, list: &str, name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Rename the workspace the call runs against (`Doc::set_doc_name`):
+/// doc content, so every member sees it and any member may. Home is
+/// never named and a blank name is refused; the core trims. One undo
+/// step, none when the name is unchanged.
+pub fn rename_workspace(cx: &Ctx, name: &str) -> anyhow::Result<()> {
+    let home = cx
+        .workspaces
+        .iter()
+        .any(|(c, d)| Some(c.doc_id) == cx.home && std::ptr::eq(*d, cx.doc));
+    anyhow::ensure!(!home, "the Personal workspace cannot be renamed");
+    anyhow::ensure!(!name.trim().is_empty(), "a workspace needs a name");
+    cx.doc.set_doc_name(Some(name))?;
+    Ok(())
+}
+
 /// Set a user-created list's emoji, or clear it (`None`).
 pub fn set_list_icon(cx: &Ctx, list: &str, icon: Option<&str>) -> anyhow::Result<()> {
     cx.doc.set_list_icon(list, icon.unwrap_or(""))?;
@@ -137,5 +152,56 @@ impl ListNames {
             LIST_EVENTS => Some("Events".to_string()),
             other => self.0.get(other).cloned(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::focus::Lens;
+    use crate::workspace::Candidate;
+    use monoplan_core::DocId;
+
+    #[test]
+    fn rename_workspace_names_a_shared_doc_and_refuses_home_and_blank() {
+        let home = Doc::new().unwrap();
+        let work = Doc::new().unwrap();
+        work.set_doc_name(Some("Work")).unwrap();
+        let home_id = DocId(uuid::Uuid::from_bytes([1; 16]));
+        let work_id = DocId(uuid::Uuid::from_bytes([2; 16]));
+        let workspaces = [
+            (
+                Candidate {
+                    doc_id: home_id,
+                    name: None,
+                },
+                &home,
+            ),
+            (
+                Candidate {
+                    doc_id: work_id,
+                    name: Some("Work".into()),
+                },
+                &work,
+            ),
+        ];
+        let docs = [&home, &work];
+        let lens = Lens::home(&home);
+        let on = |doc| Ctx {
+            doc,
+            open_docs: &docs,
+            lens: &lens,
+            workspaces: &workspaces,
+            home: Some(home_id),
+        };
+
+        rename_workspace(&on(&work), "  Team  ").unwrap();
+        assert_eq!(work.get_settings().doc_name.as_deref(), Some("Team"));
+
+        assert!(rename_workspace(&on(&work), "   ").is_err());
+        assert_eq!(work.get_settings().doc_name.as_deref(), Some("Team"));
+
+        assert!(rename_workspace(&on(&home), "Mine").is_err());
+        assert_eq!(home.get_settings().doc_name, None);
     }
 }
