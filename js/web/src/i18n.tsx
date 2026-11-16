@@ -441,10 +441,11 @@ export type Messages = {
     /** Heading over the calendar's per-doc show / hide toggles. */
     docs: string;
     /** What an Open event's status reads: the one label its four open
-     *  states share in the status controls (`statusLabel`). Also the
-     *  label of the Event box under an item's date. */
+     *  states share in the status controls (`statusLabel`). */
     event: string;
-    /** Tooltip of the Event box: what ticking it changes. */
+    /** Label of the event switch under an item's date. */
+    fixedEvent: string;
+    /** Tooltip of the event switch: what turning it on changes. */
     eventHint: string;
     /** Time-lane label for a row placed on its day by its deadline. */
     due: string;
@@ -856,6 +857,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       emptyToday: "Nada para hoy",
       docs: "Espacios",
       event: "Evento",
+      fixedEvent: "Evento fijo",
       eventHint: "Ocurre en esta fecha: pasa sin más, en lugar de quedar atrasado",
       due: "Vence",
       startsIn: (span) => `en ${span}`,
@@ -1246,6 +1248,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       emptyToday: "Nothing due today",
       docs: "Workspaces",
       event: "Event",
+      fixedEvent: "Fixed event",
       eventHint: "Happens on this date: it goes by instead of going overdue",
       due: "Due",
       startsIn: (span) => `in ${span}`,

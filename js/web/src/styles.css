@@ -3356,25 +3356,25 @@ input.task-check:hover {
   gap: 8px;
 }
 
-/* The Event box under the time row: a plain checkbox and label, inset
-   to the date input's text edge. */
-.task-dialog-event-toggle {
+/* The "Fixed event" switch under the time row: the popovers' switch
+   (`.done-switch`) with the switch leading its label, at the dialog's
+   text size, inset to the date input's text edge. */
+.done-switch.task-dialog-event-toggle {
   display: inline-flex;
-  align-items: center;
+  justify-content: flex-start;
+  align-self: flex-start;
   gap: 8px;
   height: 28px;
-  padding-left: 6px;
-  color: var(--text-muted);
-  cursor: pointer;
-  user-select: none;
+  margin-top: 0;
+  padding: 0 0 0 6px;
+  font-size: inherit;
 }
 
-.task-dialog-event-toggle input {
-  margin: 0;
+.task-dialog-event-toggle .done-switch-label {
   cursor: pointer;
 }
 
-.task-dialog-event-toggle:has(input:checked) {
+.task-dialog-event-toggle[data-checked] {
   color: var(--text);
 }
 

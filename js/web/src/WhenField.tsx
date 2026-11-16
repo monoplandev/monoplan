@@ -39,6 +39,7 @@
 // one-year ceiling.
 
 import { Popover } from "@kobalte/core/popover";
+import { Switch } from "@kobalte/core/switch";
 import { createMemo, createSignal, Show } from "solid-js";
 import { CalendarPicker } from "./CalendarPicker.tsx";
 import { createDateTyping, DateSuggestList } from "./dateTyping.tsx";
@@ -433,14 +434,20 @@ export function WhenField(props: {
         />
         {/* What the date means: something to do (overdue once it has
             passed) or something that happens (it goes by). */}
-        <label class="task-dialog-event-toggle" title={m().upcoming.eventHint}>
-          <input
-            type="checkbox"
-            checked={props.event()}
-            onChange={(e) => props.onEventChange(e.currentTarget.checked)}
-          />
-          <span>{m().upcoming.event}</span>
-        </label>
+        <Switch
+          class="done-switch task-dialog-event-toggle"
+          title={m().upcoming.eventHint}
+          checked={props.event()}
+          onChange={props.onEventChange}
+        >
+          <Switch.Input class="done-switch-input" />
+          <Switch.Control class="done-switch-control">
+            <Switch.Thumb class="done-switch-thumb" />
+          </Switch.Control>
+          <Switch.Label class="done-switch-label">
+            {m().upcoming.fixedEvent}
+          </Switch.Label>
+        </Switch>
       </Show>
     </>
   );
