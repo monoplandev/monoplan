@@ -268,16 +268,21 @@ struct ItemView: View {
     /// The page's navigation bar. At the left, the close button in the
     /// corner on its own glass (where the editors have their cross),
     /// then the checkbox and the workflow state beside it as one glass
-    /// control with two halves:
-    /// the checkbox ticks and reopens, the label opens a menu of the
-    /// states (the web dialog's status badge). A binned item just says
+    /// control with two halves and a hairline between them, as the
+    /// Mac's segmented status control has (UIKit has no segmented
+    /// control whose segments are a button and a menu, so the line is
+    /// drawn here): the checkbox ticks and reopens, the label opens a
+    /// menu of the states (the web dialog's status badge). A binned item just says
     /// so (the bin masks the state; Restore is the way out), and one
     /// that has not loaded shows an inert box. At the right, the star
     /// and the more menu.
-    /// The gap between the status control's checkbox and its label,
-    /// small because the bar puts a few points of its own around the
-    /// menu.
-    private static let checkGap: CGFloat = 3
+    /// The space each side of the status control's hairline, less on
+    /// the label's side because the bar puts a few points of its own
+    /// around the menu.
+    private static let checkGap: CGFloat = 9
+    private static let stateGap: CGFloat = 6
+    /// The hairline's height: about the label's line.
+    private static let statusDividerHeight: CGFloat = 18
 
     @ToolbarContentBuilder
     private var bar: some ToolbarContent {
@@ -285,8 +290,13 @@ struct ItemView: View {
         ToolbarSpacer(.fixed, placement: .topBarLeading)
         if let item, item.binnedAt == nil {
             ToolbarItem(placement: .topBarLeading) {
-                HStack(spacing: Self.checkGap) {
+                HStack(spacing: 0) {
                     ItemCheckButton(ref: ref, state: item.state)
+                    Divider()
+                        .frame(height: Self.statusDividerHeight)
+                        .padding(.leading, Self.checkGap)
+                        .padding(.trailing, Self.stateGap)
+                        .accessibilityHidden(true)
                     stateMenu(item)
                 }
                 .padding(.horizontal, 6)
