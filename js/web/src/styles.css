@@ -2954,10 +2954,35 @@ input.task-check:hover {
   height: 13px;
 }
 
-.task-dialog-list:hover,
-.task-dialog-list[data-expanded] {
+.task-dialog-list:hover {
   background: var(--bg-hover);
   color: var(--text);
+}
+
+/* The trigger while the picker is open: the same pill as a filter box
+   (ListPicker.tsx), at the trigger's widest so it does not jump with
+   the placeholder's length. The side pane's rule below gives it the
+   row instead. */
+.task-dialog-list-search {
+  width: 16em;
+  cursor: text;
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.task-dialog-list-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.task-dialog-list-search input:focus {
+  outline: none;
 }
 
 .task-dialog-list-value {
@@ -4587,13 +4612,16 @@ input.task-check:hover {
   z-index: 130;
 }
 
-.list-picker .palette__search input {
-  padding: 9px 10px;
-  font-size: 14px;
-}
-
 .list-picker .palette__results {
   max-height: 260px;
+}
+
+/* The move-to-list panel is rows only (its filter box is the trigger),
+   so the rows take the top inset the search box used to give. The time
+   picker sets its own. */
+.list-picker:not(.time-picker) .palette__results {
+  padding-top: 4px;
+  padding-bottom: 4px;
 }
 
 .list-picker .palette__item {

@@ -1,8 +1,10 @@
 // The task dialog's move-to-list control: FindPalette's shape at popover
-// scale. Kobalte's Combobox makes the trigger *be* the filter input, which
-// loses the plain "this item lives in X" reading of the header, so this is
-// hand-rolled — a text trigger that opens a filter box above a keyboard-
-// driven listbox, sharing the palette's row anatomy and CSS.
+// scale. At rest it is a text trigger with the plain "this item lives in
+// X" reading; a click turns the trigger itself into the filter box (the
+// Mac panel's list field does the same, `ListField.swift`) and drops a
+// keyboard-driven listbox under it, sharing the palette's row anatomy and
+// CSS. Hand-rolled rather than Kobalte's Combobox, whose trigger is always
+// the input and never the plain reading.
 //
 // It differs from FindPalette in three deliberate ways, all of them policy
 // rather than machinery: an empty query lists every option (the palette
@@ -29,6 +31,7 @@ import archiveSvg from "./icons/archive.svg?raw";
 import caretSortSvg from "./icons/caret-sort.svg?raw";
 import checkSvg from "./icons/check.svg?raw";
 import fileSvg from "./icons/file.svg?raw";
+import searchSvg from "./icons/magnifying-glass.svg?raw";
 import usersSvg from "./icons/users.svg?raw";
 import { useAppI18n } from "./i18n.tsx";
 import { matchesName } from "./search.ts";
@@ -63,10 +66,13 @@ export type ListOption = {
 export const listGlyph = (id: string, calendar?: boolean): string =>
   id === "inbox" ? (calendar ? calendarSvg : archiveSvg) : fileSvg;
 
-/** Gap between the trigger and the panel, and the minimum breathing room
- *  kept against every viewport edge. */
+/** Gap between the filter box and the panel, and the minimum breathing
+ *  room kept against every viewport edge. */
 const GUTTER = 4;
 const MARGIN = 8;
+/** The panel is at least this wide, and as wide as the filter box when
+ *  that is wider (the side pane's). */
+const MIN_WIDTH = 248;
 
 const isForeign = (o: ListOption): boolean => o.foreign === true;
 
@@ -142,10 +148,11 @@ export function ListPicker(props: {
     lastMouse = { x: e.screenX, y: e.screenY };
     if (selectedIndex() !== index) setSelectedIndex(index);
   }
-  // Viewport coordinates for the portaled panel, seeded from the trigger
-  // at open (so it never paints at 0,0) and refined once its height is
+  // Viewport coordinates and width for the portaled panel, seeded from
+  // the trigger at open (so it never paints at 0,0) and refined once the
+  // filter box has taken the trigger's place and the panel's height is
   // measurable.
-  const [pos, setPos] = createSignal({ left: 0, top: 0 });
+  const [pos, setPos] = createSignal({ left: 0, top: 0, width: MIN_WIDTH });
 
   const selected = createMemo<ListOption | null>(
     () => props.options().find((o) => !isForeign(o) && o.id === props.value()) ?? null,
@@ -165,6 +172,7 @@ export function ListPicker(props: {
     );
 
   let triggerRef: HTMLButtonElement | undefined;
+  let searchRef: HTMLLabelElement | undefined;
   let panelRef: HTMLDivElement | undefined;
   let inputRef: HTMLInputElement | undefined;
   let listRef: HTMLDivElement | undefined;
@@ -174,14 +182,18 @@ export function ListPicker(props: {
     el?.scrollIntoView({ block: "nearest" });
   };
 
-  // Anchor the panel under the trigger. Portaled to <body> rather than
+  // Anchor the panel under the filter box. Portaled to <body> rather than
   // positioned inside the header, because .task-dialog is a scroll
-  // container and would clip it — which also means the trigger can move
+  // container and would clip it — which also means the box can move
   // under us, hence the scroll / resize repositioning below.
   const place = () => {
     const panel = panelRef;
-    const anchor = triggerRef?.getBoundingClientRect();
+    const anchor = searchRef?.getBoundingClientRect();
     if (!panel || !anchor) return;
+    const width = Math.max(MIN_WIDTH, Math.round(anchor.width));
+    // Written before measuring: the rows' wrapping, and so the panel's
+    // height, follow the width.
+    panel.style.width = `${width}px`;
     const below = anchor.bottom + GUTTER;
     const fitsBelow = below + panel.offsetHeight <= window.innerHeight - MARGIN;
     const top = fitsBelow
@@ -191,7 +203,7 @@ export function ListPicker(props: {
       anchor.left,
       window.innerWidth - panel.offsetWidth - MARGIN,
     );
-    setPos({ top, left: Math.max(MARGIN, left) });
+    setPos({ top, left: Math.max(MARGIN, left), width });
   };
 
   const close = (restoreFocus = true) => {
@@ -216,8 +228,18 @@ export function ListPicker(props: {
     const at = props.options().findIndex((o) => !isForeign(o) && o.id === props.value());
     setSelectedIndex(at === -1 ? 0 : at);
     const anchor = triggerRef?.getBoundingClientRect();
-    if (anchor) setPos({ left: anchor.left, top: anchor.bottom + GUTTER });
+    if (anchor) {
+      setPos({
+        left: anchor.left,
+        top: anchor.bottom + GUTTER,
+        width: Math.max(MIN_WIDTH, Math.round(anchor.width)),
+      });
+    }
     setOpen(true);
+    // Straight away, not only in the frame below: the trigger that had
+    // the focus is hidden now, and the task dialog's focus trap would
+    // otherwise find the focus on nothing.
+    inputRef?.focus();
   };
 
   // Land focus in the filter box on open, and correct the seeded position
@@ -250,7 +272,7 @@ export function ListPicker(props: {
     };
     const onPointerDown = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (panelRef?.contains(target) || triggerRef?.contains(target)) return;
+      if (panelRef?.contains(target) || searchRef?.contains(target)) return;
       // Focus goes wherever the click lands, so don't yank it back.
       close(false);
     };
@@ -309,7 +331,9 @@ export function ListPicker(props: {
         aria-haspopup="listbox"
         aria-expanded={open()}
         aria-controls={open() ? listboxId : undefined}
-        data-expanded={open() ? "" : undefined}
+        // Kept mounted under the filter box that stands in for it, so
+        // closing has a trigger to hand the focus back to.
+        style={{ display: open() ? "none" : undefined }}
         onClick={toggle}
       >
         {/* Same glyph rules as the option rows below, so the trigger reads
@@ -358,41 +382,63 @@ export function ListPicker(props: {
         />
       </button>
       <Show when={open()}>
+        {/* The trigger as a filter box: same pill, a magnifier where the
+            list's glyph was. Inside the task dialog, so its focus trap
+            leaves the caret here. */}
+        <label ref={searchRef} class="task-dialog-list task-dialog-list-search">
+          <span
+            class="task-dialog-list-icon"
+            aria-hidden="true"
+            innerHTML={searchSvg}
+          />
+          <input
+            ref={inputRef}
+            type="text"
+            role="combobox"
+            autocomplete="off"
+            aria-expanded="true"
+            aria-controls={listboxId}
+            aria-autocomplete="list"
+            aria-activedescendant={
+              items().length ? optionId(selectedIndex()) : undefined
+            }
+            placeholder={searchLabel()}
+            aria-label={searchLabel()}
+            value={query()}
+            onInput={(e) => {
+              setQuery(e.currentTarget.value);
+              // Filtering invalidates the old cursor position; the
+              // best match is now the top row.
+              setSelectedIndex(0);
+              scrollSelectedIntoView(0);
+            }}
+            onKeyDown={onInputKeyDown}
+            // Tabbing on shuts the picker; a press on a row never takes
+            // the focus (the panel's mousedown below), so this is only
+            // ever the caret really leaving.
+            onBlur={(e) => {
+              const to = e.relatedTarget as Node | null;
+              if (to && panelRef?.contains(to)) return;
+              if (open()) close(false);
+            }}
+          />
+        </label>
         <Portal>
           {/* data-kb-top-layer exempts the panel from the task dialog's
-              focus trap and its aria-hide-outside sweep — without it
-              Kobalte pulls focus straight back out of the filter box. */}
+              aria-hide-outside sweep. */}
           <div
             ref={panelRef}
             class="list-picker palette"
             data-kb-top-layer
-            style={{ left: `${pos().left}px`, top: `${pos().top}px` }}
+            style={{
+              left: `${pos().left}px`,
+              top: `${pos().top}px`,
+              width: `${pos().width}px`,
+            }}
+            // Keeps the caret in the filter box through a click on a row
+            // or a drag of the scrollbar.
+            onMouseDown={(e) => e.preventDefault()}
           >
-            <div class="palette__search">
-              <input
-                ref={inputRef}
-                type="text"
-                role="combobox"
-                autocomplete="off"
-                aria-expanded="true"
-                aria-controls={listboxId}
-                aria-autocomplete="list"
-                aria-activedescendant={
-                  items().length ? optionId(selectedIndex()) : undefined
-                }
-                placeholder={searchLabel()}
-                aria-label={searchLabel()}
-                value={query()}
-                onInput={(e) => {
-                  setQuery(e.currentTarget.value);
-                  // Filtering invalidates the old cursor position; the
-                  // best match is now the top row.
-                  setSelectedIndex(0);
-                  scrollSelectedIntoView(0);
-                }}
-                onKeyDown={onInputKeyDown}
-              />
-            </div>
             <div
               ref={listRef}
               id={listboxId}
