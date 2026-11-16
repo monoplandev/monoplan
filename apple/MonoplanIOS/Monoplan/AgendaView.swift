@@ -82,7 +82,7 @@ struct AgendaView: View {
 }
 
 /// One agenda row, laid out as the other lenses' rows are: the
-/// checkbox, the text with its place under it when it has one and then
+/// checkbox, the text (its star right after it when starred) with its place under it when it has one and then
 /// the workspace when the row is not Personal's, and on the right the time when timed with a note under
 /// it for the tone (overdue in red, due today in orange) or the
 /// duration. The checkbox ticks; the rest of the row opens the sheet.
@@ -91,12 +91,17 @@ struct AgendaRowView: View {
 
     var body: some View {
         ItemLink(ItemRef(docId: row.docId, itemId: row.id, title: row.text)) {
-            CheckboxRow(state: row.state) {
+            CheckboxRow(state: row.state, trailingStar: false) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(row.text)
-                            .itemTextSlot()
-                            .foregroundStyle(row.isDone ? .secondary : .primary)
+                        // The star sits by the text, not past the
+                        // time on the right.
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(row.text)
+                                .itemTextSlot()
+                                .foregroundStyle(row.isDone ? .secondary : .primary)
+                            RowStar(state: row.state)
+                        }
                         if let place = row.place {
                             // The item page's place glyph, then the label.
                             HStack(alignment: .firstTextBaseline, spacing: 4) {

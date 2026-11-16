@@ -81,19 +81,13 @@ struct ItemCheckButton: View {
 /// the row opens the item's sheet. The item is the enclosing
 /// `ItemLink`'s; without one the row is inert.
 struct CheckboxRow<Content: View>: View {
-    @EnvironmentObject private var model: AppModel
     @Environment(\.itemRef) private var ref
     @Environment(\.openItem) private var openItem
-    @Environment(\.duplicatesStarred) private var onStarredPage
     let state: ItemState
+    /// False where the content places the star itself (`RowStar`), as
+    /// the agenda row does beside its text.
+    var trailingStar = true
     @ViewBuilder let content: Content
-
-    /// Whether the row ends in a star: its item is starred, and the
-    /// page is not Starred itself, where every row would carry one.
-    private var showsStar: Bool {
-        guard let ref, !onStarredPage, !state.isClosed else { return false }
-        return model.starred.contains { $0.id == ref.itemId }
-    }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -105,7 +99,7 @@ struct CheckboxRow<Content: View>: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 content
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if showsStar { StarMark() }
+                if trailingStar { RowStar(state: state) }
             }
             .contentShape(Rectangle())
             .onTapGesture { if let ref { openItem(ref) } }
@@ -117,7 +111,26 @@ struct CheckboxRow<Content: View>: View {
     }
 }
 
-/// The mark a starred item's row ends in: the item page's star, filled
+/// A row's star, drawn when its item (the enclosing `ItemLink`'s) is
+/// starred, and the page is not Starred itself, where every row would
+/// carry one. `CheckboxRow` ends in it unless the content places it.
+struct RowStar: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.itemRef) private var ref
+    @Environment(\.duplicatesStarred) private var onStarredPage
+    let state: ItemState
+
+    private var shown: Bool {
+        guard let ref, !onStarredPage, !state.isClosed else { return false }
+        return model.starred.contains { $0.id == ref.itemId }
+    }
+
+    var body: some View {
+        if shown { StarMark() }
+    }
+}
+
+/// The mark a starred item's row carries: the item page's star, filled
 /// (`StarFill` under `StarStroke`), sized with the text. Display only;
 /// the row's menu and the item's page do the starring.
 struct StarMark: View {

@@ -1521,16 +1521,6 @@
         }
       }
     },
-    "overdue": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "vencido"
-          }
-        }
-      }
-    },
     "profile in use by another process": {
       "localizations": {
         "es": {

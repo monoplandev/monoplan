@@ -41,7 +41,11 @@ final class TrayMenuTests: XCTestCase {
         XCTAssertEqual(lines.map(\.title), [
             "Overdue report", "09:00  Standup", "14:30  Dentist", "Groceries", "Pay rent",
         ])
-        XCTAssertEqual(lines.map(\.note), ["overdue", "now", "in 5h 25m", nil, "due today"])
+        // An overdue row's note is the day it was due.
+        let due = Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 20))!
+        XCTAssertEqual(lines.map(\.note), [
+            due.formatted(.dateTime.day().month(.abbreviated)), "now", "in 5h 25m", nil, "due today",
+        ])
         XCTAssertEqual(lines.map(\.done), [false, false, false, true, false])
         XCTAssertEqual(lines.map(\.overdue), [true, false, false, false, false])
     }

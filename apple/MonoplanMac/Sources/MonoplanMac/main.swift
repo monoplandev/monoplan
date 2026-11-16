@@ -185,21 +185,30 @@ final class TrayController: NSObject, NSMenuDelegate {
         }
         menu.removeAllItems()
 
-        let header = NSMenuItem(title: String(localized: "Today · \(Self.headerFormatter.string(from: Date()))"), action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
+        let todayHeader = String(localized: "Today · \(Self.headerFormatter.string(from: Date()))")
 
         switch engineController.state {
         case .connecting(let reason):
+            addDisabled(todayHeader)
             addDisabled(String(localized: "Not running · \(reason)"))
         case .connected:
             let noteTab = Self.noteTabLocation(for: lines + starred)
+            // Overdue is its own section above Today, there only while
+            // something is overdue.
+            let overdue = fetchError == nil ? lines.filter(\.overdue) : []
+            let today = lines.filter { !$0.overdue }
+            if !overdue.isEmpty {
+                addDisabled(String(localized: "Overdue"))
+                for line in overdue { menu.addItem(rowItem(line, noteTab: noteTab)) }
+                menu.addItem(.separator())
+            }
+            addDisabled(todayHeader)
             if let fetchError {
                 addDisabled(fetchError)
-            } else if lines.isEmpty {
+            } else if today.isEmpty {
                 addDisabled(String(localized: "Nothing today"))
             } else {
-                for line in lines { menu.addItem(rowItem(line, noteTab: noteTab)) }
+                for line in today { menu.addItem(rowItem(line, noteTab: noteTab)) }
             }
             menu.addItem(.separator())
             addDisabled(String(localized: "Starred"))
@@ -283,7 +292,7 @@ final class TrayController: NSObject, NSMenuDelegate {
             title.append(NSAttributedString(
                 string: "\t\(note)",
                 attributes: [
-                    .foregroundColor: line.overdue ? NSColor.systemRed : NSColor.secondaryLabelColor,
+                    .foregroundColor: NSColor.secondaryLabelColor,
                     .font: Self.noteFont,
                 ]
             ))

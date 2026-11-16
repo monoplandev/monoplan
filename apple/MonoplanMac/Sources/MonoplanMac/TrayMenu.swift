@@ -11,11 +11,12 @@ import MonoplanMacKit
 struct MenuLine: Equatable {
     let id: String
     let title: String
-    /// Dimmed trailing note: "in 2h 15m", "now", "due today", "overdue".
+    /// Dimmed trailing note: "in 2h 15m", "now", "due today", or the
+    /// day an overdue row was due ("20 Oct").
     let note: String?
     let done: Bool
     /// The row is past its deadline, or a task past its planned day:
-    /// the note is drawn in red.
+    /// it goes in the menu's Overdue section, above Today.
     let overdue: Bool
     /// Where the item lives, which is what a click opens the window
     /// on: its list, in its workspace (nil for Home's).
@@ -55,7 +56,9 @@ enum TodayMenu {
 
     static func note(for row: AgendaEntry, now: Date, calendar: Calendar) -> String? {
         switch row.tone {
-        case .overdue: return String(localized: "overdue")
+        // The day it was due; the Overdue header already says it is
+        // late. Nothing for one due earlier today.
+        case .overdue: return MainWindowView.overdueDay(row, now: now, calendar: calendar)
         case .warning: return String(localized: "due today")
         case .neutral: break
         }
