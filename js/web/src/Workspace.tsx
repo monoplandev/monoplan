@@ -560,6 +560,24 @@ export function Workspace(props: {
     delete map[listKey(viewDocId(), listId)];
     putViewOverrides(map);
   };
+  // The calendar's workspace filter, read off the synced hidden set:
+  // nothing hidden is no filter (nothing checked); otherwise the checked
+  // workspaces are the open ones that are not hidden.
+  const calendarCheckedDocs = (): string[] => {
+    const hidden = docs.calendarHiddenDocs();
+    const open = docs.docs().map((d) => d.docId);
+    if (!open.some((id) => hidden.includes(id))) return [];
+    return open.filter((id) => !hidden.includes(id));
+  };
+  // Write a checked set back as hidden docs: none checked (or all of
+  // them) hides nothing.
+  const setCalendarCheckedDocs = (checked: string[]) => {
+    const hidden = docs.calendarHiddenDocs();
+    for (const d of docs.docs()) {
+      const hide = checked.length > 0 && !checked.includes(d.docId);
+      if (hide !== hidden.includes(d.docId)) home.setCalendarDocHidden(d.docId, hide);
+    }
+  };
   // Client-local per-list "show state" flag for the flat list view.
   const [showStatePrefs, setShowStatePrefs] = createSignal<Record<string, true>>(
     loadShowStatePrefs(),
@@ -3544,35 +3562,25 @@ export function Workspace(props: {
                 </Tooltip.Portal>
               </Tooltip>
             </Show>
-            {/* The calendar merges every doc; each can be hidden here. A
-                synced personal pref on the Home doc
-                (`spec/sharing-plan.md`). Only offered once there is more
-                than one doc. */}
+            {/* The calendar merges every doc; the Done view's filter menu
+                narrows it by workspace, with the same reading: none
+                checked is every workspace. Behind it is the synced
+                hidden set on the Home doc (`spec/sharing-plan.md`), so
+                the checked workspaces are the ones not hidden, once any
+                is hidden. Only offered once there is more than one doc. */}
             <Show when={view().kind === "upcoming" && docs.docs().length > 1}>
-              <DisplayOptionsPopover>
-                <div class="lane-row lane-row-heading">
-                  <span class="lane-row-name">{m().upcoming.docs}</span>
-                </div>
-                <For each={docs.docs()}>
-                  {(d) => (
-                    <Switch
-                      class="done-switch"
-                      checked={!docs.calendarHiddenDocs().includes(d.docId)}
-                      onChange={(checked) =>
-                        home.setCalendarDocHidden(d.docId, !checked)
-                      }
-                    >
-                      <Switch.Label class="done-switch-label">
-                        {docLabel(d.docId)}
-                      </Switch.Label>
-                      <Switch.Input class="done-switch-input" />
-                      <Switch.Control class="done-switch-control">
-                        <Switch.Thumb class="done-switch-thumb" />
-                      </Switch.Control>
-                    </Switch>
-                  )}
-                </For>
-              </DisplayOptionsPopover>
+              <DoneFilterMenu
+                workspaces={docs.docs().map((d) => ({
+                  docId: d.docId,
+                  label: docLabel(d.docId),
+                  shared: !d.home,
+                }))}
+                docChecked={(id) => calendarCheckedDocs().includes(id)}
+                toggleDoc={(id) => setCalendarCheckedDocs(toggled(calendarCheckedDocs(), id))}
+                docCount={calendarCheckedDocs().length}
+                filtered={docs.docs().some((d) => docs.calendarHiddenDocs().includes(d.docId))}
+                clear={() => setCalendarCheckedDocs([])}
+              />
             </Show>
             {/* Add on the list, focus and upcoming views. The calendar is
                 the home of events (`spec/events-plan.md`) but not a

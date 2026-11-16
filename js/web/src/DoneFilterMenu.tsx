@@ -3,6 +3,9 @@
 // check is in effect the trigger also shows how many there are. The state
 // and its semantics live in `doneFilter.ts`; this is the surface.
 //
+// The calendar uses the same menu with the workspace facet alone (no
+// `lists`): its checkboxes then sit in the menu itself, not a submenu.
+//
 // The Lists submenu leads with a text box that narrows the rows. Archived
 // lists are left out until the box has a query (or they are checked), and
 // carry an Archived badge when shown (`shownDoneLists`). A text
@@ -32,25 +35,50 @@ export function DoneFilterMenu(props: {
    *  move palette. The Workspaces submenu is only offered when there is
    *  more than one. */
   workspaces: { docId: string; label: string; shared: boolean }[];
-  /** The lists on offer (those of the checked workspaces). */
-  lists: DoneListOption[];
+  /** The lists on offer (those of the checked workspaces). Absent ≡ no
+   *  list facet: the menu is the workspace checkboxes. */
+  lists?: DoneListOption[];
   docChecked: (docId: string) => boolean;
   toggleDoc: (docId: string) => void;
-  listChecked: (key: string) => boolean;
-  toggleList: (key: string) => void;
+  listChecked?: (key: string) => boolean;
+  toggleList?: (key: string) => void;
   /** How many checks are in effect, per facet (0 ≡ unfiltered). */
   docCount: number;
-  listCount: number;
+  listCount?: number;
+  /** A filter is in effect although nothing is checked (the calendar
+   *  with every workspace hidden): keeps the trigger lit and Clear on
+   *  offer. */
+  filtered?: boolean;
   clear: () => void;
 }) {
   const { m } = useAppI18n();
   const guard = createPopoverTooltipGuard();
   const [query, setQuery] = createSignal("");
   let inputEl: HTMLInputElement | undefined;
-  const count = () => props.docCount + props.listCount;
-  const active = () => count() > 0;
+  const listCount = () => props.listCount ?? 0;
+  const listChecked = (key: string) => props.listChecked?.(key) ?? false;
+  const count = () => props.docCount + listCount();
+  const workspaceRows = () => (
+    <For each={props.workspaces}>
+      {(w) => (
+        <DropdownMenu.CheckboxItem
+          class="dropdown-menu-item done-filter-item"
+          closeOnSelect={false}
+          checked={props.docChecked(w.docId)}
+          onChange={() => props.toggleDoc(w.docId)}
+        >
+          <CheckBox />
+          <span class="done-filter-item-name">{w.label}</span>
+          <Show when={w.shared}>
+            <SharedGlyph />
+          </Show>
+        </DropdownMenu.CheckboxItem>
+      )}
+    </For>
+  );
+  const active = () => count() > 0 || props.filtered === true;
   const shownLists = createMemo(() =>
-    shownDoneLists(props.lists, query().trim(), props.listChecked, matchesName),
+    shownDoneLists(props.lists ?? [], query().trim(), listChecked, matchesName),
   );
   return (
     <DropdownMenu {...guard.popover} placement="bottom-end" gutter={6}>
@@ -63,7 +91,7 @@ export function DoneFilterMenu(props: {
           data-filtered={active() ? "" : undefined}
         >
           <span class="done-filter-trigger-icon" aria-hidden="true" innerHTML={filterSvg} />
-          <Show when={active()}>
+          <Show when={count() > 0}>
             <span class="done-filter-trigger-count">{count()}</span>
           </Show>
         </Tooltip.Trigger>
@@ -76,7 +104,8 @@ export function DoneFilterMenu(props: {
       </Tooltip>
       <DropdownMenu.Portal>
         <DropdownMenu.Content {...guard.content} class="dropdown-menu-content">
-          <Show when={props.workspaces.length > 1}>
+          <Show when={props.lists === undefined}>{workspaceRows()}</Show>
+          <Show when={props.lists !== undefined && props.workspaces.length > 1}>
             <DropdownMenu.Sub gutter={4}>
               <DropdownMenu.SubTrigger class="dropdown-menu-item">
                 <span>{m().workspace.filterWorkspaces}</span>
@@ -84,26 +113,12 @@ export function DoneFilterMenu(props: {
               </DropdownMenu.SubTrigger>
               <DropdownMenu.Portal>
                 <DropdownMenu.SubContent class="dropdown-menu-content done-filter-sub">
-                  <For each={props.workspaces}>
-                    {(w) => (
-                      <DropdownMenu.CheckboxItem
-                        class="dropdown-menu-item done-filter-item"
-                        closeOnSelect={false}
-                        checked={props.docChecked(w.docId)}
-                        onChange={() => props.toggleDoc(w.docId)}
-                      >
-                        <CheckBox />
-                        <span class="done-filter-item-name">{w.label}</span>
-                        <Show when={w.shared}>
-                          <SharedGlyph />
-                        </Show>
-                      </DropdownMenu.CheckboxItem>
-                    )}
-                  </For>
+                  {workspaceRows()}
                 </DropdownMenu.SubContent>
               </DropdownMenu.Portal>
             </DropdownMenu.Sub>
           </Show>
+          <Show when={props.lists !== undefined}>
           <DropdownMenu.Sub
             gutter={4}
             onOpenChange={(open) => {
@@ -112,7 +127,7 @@ export function DoneFilterMenu(props: {
           >
             <DropdownMenu.SubTrigger class="dropdown-menu-item">
               <span>{m().workspace.filterLists}</span>
-              <SubTriggerTail count={props.listCount} />
+              <SubTriggerTail count={listCount()} />
             </DropdownMenu.SubTrigger>
             <DropdownMenu.Portal>
               <DropdownMenu.SubContent class="dropdown-menu-content done-filter-sub">
@@ -143,8 +158,8 @@ export function DoneFilterMenu(props: {
                       <DropdownMenu.CheckboxItem
                         class="dropdown-menu-item done-filter-item"
                         closeOnSelect={false}
-                        checked={props.listChecked(l.key)}
-                        onChange={() => props.toggleList(l.key)}
+                        checked={listChecked(l.key)}
+                        onChange={() => props.toggleList?.(l.key)}
                         onPointerMove={(e: PointerEvent) => {
                           if (document.activeElement === inputEl) e.preventDefault();
                         }}
@@ -177,6 +192,7 @@ export function DoneFilterMenu(props: {
               </DropdownMenu.SubContent>
             </DropdownMenu.Portal>
           </DropdownMenu.Sub>
+          </Show>
           <Show when={active()}>
             <DropdownMenu.Separator class="dropdown-menu-separator" />
             <DropdownMenu.Item class="dropdown-menu-item" onSelect={() => props.clear()}>

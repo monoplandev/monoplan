@@ -438,7 +438,6 @@ export type Messages = {
     /** Upcoming view's Today group when nothing is due today. */
     emptyToday: string;
     /** Heading over the calendar's per-doc show / hide toggles. */
-    docs: string;
     /** What an Open event's status reads: the one label its four open
      *  states share in the status controls (`statusLabel`). */
     event: string;
@@ -853,7 +852,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     upcoming: {
       emptyToday: "Nada para hoy",
-      docs: "Espacios",
       event: "Evento",
       fixedEvent: "Evento fijo",
       eventHint: "Ocurre en esta fecha: pasa sin más, en lugar de quedar atrasado",
@@ -1243,7 +1241,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     upcoming: {
       emptyToday: "Nothing due today",
-      docs: "Workspaces",
       event: "Event",
       fixedEvent: "Fixed event",
       eventHint: "Happens on this date: it goes by instead of going overdue",
