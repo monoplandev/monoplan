@@ -35,6 +35,8 @@ private extension NSToolbarItem.Identifier {
     /// Before search while Done is shown: its filter's popover
     /// (`DoneFilter.swift`).
     static let doneFilter = NSToolbarItem.Identifier("MonoplanDoneFilter")
+    /// The Calendar's "Today": scrolls back to Today's header.
+    static let today = NSToolbarItem.Identifier("MonoplanToday")
     /// Over the sidebar, at its trailing edge, while there is no
     /// account. Nothing takes its place once there is one: the
     /// account lives in Settings, New Workspace… in the app menu.
@@ -79,14 +81,19 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     /// with the panel shut it would draw at the window's edge.
     /// The space between those two keeps each on its own glass:
     /// adjacent buttons would share one.
-    private static let fixedItems = listItems(doneFilter: false)
+    private static let fixedItems = listItems(lens: nil)
 
     /// The list's section of the bar. On Done its filter leads the
-    /// buttons at the end, on a glass of its own.
-    private static func listItems(doneFilter: Bool) -> [NSToolbarItem.Identifier] {
-        [.sidebarTrackingSeparator, .title, .flexibleSpace]
-            + (doneFilter ? [.doneFilter, .space] : [])
-            + [.search, .space, .newItem]
+    /// buttons at the end, on a glass of its own; on the Calendar
+    /// "Today" does.
+    private static func listItems(lens: Lens?) -> [NSToolbarItem.Identifier] {
+        let own: [NSToolbarItem.Identifier]
+        switch lens {
+        case .done: own = [.doneFilter, .space]
+        case .agenda: own = [.today, .space]
+        default: own = []
+        }
+        return [.sidebarTrackingSeparator, .title, .flexibleSpace] + own + [.search, .space, .newItem]
     }
 
     init(model: MainWindowModel) {
@@ -173,7 +180,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         }
         // The rest: the list's section, then the panel's. Whatever
         // already matches from the front stays; the tail is rebuilt.
-        let wanted = lead + Self.listItems(doneFilter: model.shown.lens == .done) + panelItems()
+        let wanted = lead + Self.listItems(lens: model.shown.lens) + panelItems()
         let have = toolbar.items.map(\.itemIdentifier)
         if have != wanted {
             let kept = zip(have, wanted).prefix { $0 == $1 }.count
@@ -275,7 +282,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        Self.fixedItems + [.doneFilter, .panelSeparator, .signIn, .newList, .itemStatus, .itemStar, .itemMore]
+        Self.fixedItems + [.doneFilter, .today, .panelSeparator, .signIn, .newList, .itemStatus, .itemStar, .itemMore]
     }
 
     func toolbar(
@@ -338,6 +345,13 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             item.isBordered = true
             item.target = self
             item.action = #selector(filterDone(_:))
+        case .today:
+            let label = String(localized: "Today")
+            item.title = label
+            item.label = label
+            item.isBordered = true
+            item.target = self
+            item.action = #selector(jumpToToday(_:))
         case .newItem:
             // Not wired yet: the action does nothing (without one the
             // toolbar would draw the button disabled).
@@ -366,6 +380,10 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         }
         update(item)
         return item
+    }
+
+    @objc private func jumpToToday(_ sender: Any?) {
+        model.jumpToToday()
     }
 
     @objc private func signIn(_ sender: Any?) {

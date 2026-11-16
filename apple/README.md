@@ -142,8 +142,11 @@ first; each a heading that folds its group, the fold kept in
 their open count, the lists theirs when the
 General pane's "Show list counts in sidebar" is on (off by default),
 `Engine.lists` once per workspace), the Calendar (`Engine.agenda` over
-every workspace: Today, then each non-empty day, rows
-with a tick; a tray row for an event opens it), Starred
+every workspace: the days gone by a year back, Today, then each
+non-empty day, rows with a tick; it opens on Today's header and the
+toolbar's "Today" comes back to it, in an AppKit table,
+`AgendaTable.swift`, 2026-11-17, because a SwiftUI `List` cannot be
+opened part-way down reliably; a tray row for an event opens it), Starred
 (`Engine.starred`, with a tick and a star that takes the row out), Done
 (`Engine.doneEverywhere`, every workspace's merged newest first in Rust,
 capped at 200, the tick putting a row back; while it is shown the

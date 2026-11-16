@@ -259,6 +259,9 @@ final class MainWindowModel: ObservableObject {
     private(set) var starredIds: Set<String> = []
     /// The other lenses' rows, each read only while it is the one shown.
     @Published private(set) var agenda: [AgendaGroup] = []
+    /// Counts the presses of the toolbar's "Today": each one scrolls
+    /// the Calendar back to Today's header (`AgendaTable`).
+    @Published private(set) var todayJumps = 0
     @Published private(set) var done: [DoneRow] = []
     /// The Done lens's filter as chosen (`DoneFilter.swift`), kept
     /// verbatim; what is applied and shown is `doneFilter`.
@@ -319,6 +322,9 @@ final class MainWindowModel: ObservableObject {
     static let timing = ProcessInfo.processInfo.environment["MONOPLAN_TIMING"] != nil
     /// Far enough out to be the whole future, as on iOS.
     static let agendaDays: UInt32 = 36_500
+    /// How far back the Calendar reaches: the days gone by above
+    /// Today, a year of them, as on iOS (`AppModel.agendaPastDays`).
+    static let agendaPastDays: UInt32 = 365
     /// How many Done rows the lens shows, newest first.
     static let doneLimit = 200
 
@@ -408,6 +414,11 @@ final class MainWindowModel: ObservableObject {
         clearItem()
         generation += 1
         reload()
+    }
+
+    /// The toolbar's "Today": the Calendar scrolls back to Today.
+    func jumpToToday() {
+        todayJumps += 1
     }
 
     /// Select a row's item, opening its panel; nil closes it.
@@ -554,7 +565,7 @@ final class MainWindowModel: ObservableObject {
             case .starred, .bin:
                 break
             case .agenda:
-                snapshot.agenda = try engine.agenda(days: Self.agendaDays, pastDays: 0)
+                snapshot.agenda = try engine.agenda(days: Self.agendaDays, pastDays: Self.agendaPastDays)
             case .done:
                 // One read over every workspace, merged and filtered
                 // in Rust; the filter narrowed to the sections just
@@ -1551,40 +1562,43 @@ struct MainWindowView: View {
         }
     }
 
-    /// The Calendar: the engine's agenda as it groups it. Today first
-    /// and always there (overdue rows folded in), then each non-empty
-    /// day. A row has its tick, its text with its star right after it,
+    /// The Calendar: the engine's agenda as it groups it. The days
+    /// gone by that have rows (events that happened, done items on the
+    /// day they were planned for), then Today, always there (overdue
+    /// rows folded in), then each non-empty day. It opens on Today's
+    /// header, the past above it, and the toolbar's "Today" comes back
+    /// there: an AppKit table (`AgendaTable.swift`), which can be put
+    /// on a row exactly. A row has its tick, its text with its star right after it,
     /// under that where it lives (the list, the workspace when it is
     /// not Personal's) and its place, then at the far edge the tone's
     /// note and its clock time when timed ("All day" for an event
     /// with none). A row with that second line
     /// is taller.
     private var agenda: some View {
-        List(selection: selection { id in
-            model.agenda.lazy.flatMap(\.rows).first { $0.id == id }?.docId
-        }) {
-            ForEach(model.agenda, id: \.day) { group in
-                Section {
-                    ForEach(group.rows, id: \.id) { row in
-                        agendaRow(row).itemMenu(model, workspace: row.docId, id: row.id).tag(row.id)
-                    }
-                    if group.rows.isEmpty {
-                        Text("Nothing today").foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text(verbatim: Self.heading(for: group))
-                }
-            }
-        }
-        .listStyle(.inset)
-        .scrollContentBackground(.hidden)
+        AgendaTable(
+            groups: model.agenda,
+            selected: model.selected?.id,
+            todayJumps: model.todayJumps,
+            heading: Self.heading(for:),
+            rowHeight: { agendaRowDetailed($0) ? 42 : 24 },
+            row: { row in AnyView(agendaRow(row).itemMenu(model, workspace: row.docId, id: row.id)) },
+            select: { row in model.selectItem(workspace: row?.docId, id: row?.id) })
+            // Under the toolbar, as a list is: the scroll view insets
+            // its own content for it.
+            .ignoresSafeArea()
+    }
+
+    /// Whether a Calendar row has its second line (where it lives, its
+    /// place): such a row is taller.
+    private func agendaRowDetailed(_ row: AgendaEntry) -> Bool {
+        model.agendaListName(row) != nil || !(row.place?.label ?? "").isEmpty
     }
 
     private func agendaRow(_ row: AgendaEntry) -> some View {
         let done = row.state == .done
         let listName = model.agendaListName(row)
         let place = row.place?.label ?? ""
-        let detailed = listName != nil || !place.isEmpty
+        let detailed = agendaRowDetailed(row)
         return HStack(alignment: .center, spacing: 8) {
             // The tick sits on the text's line, not the row's middle.
             HStack(alignment: .rowTitle, spacing: 8) {

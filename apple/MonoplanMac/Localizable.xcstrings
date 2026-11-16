@@ -1311,6 +1311,16 @@
         }
       }
     },
+    "Today": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hoy"
+          }
+        }
+      }
+    },
     "Today · %@": {
       "localizations": {
         "es": {
