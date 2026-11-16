@@ -46,7 +46,7 @@ One child `LoroMap` under `items`, keyed by `ItemId`.
 | `deadline` | string? | optional **date-only** deadline, a floating local calendar date in `YYYY-MM-DD` format (no time, no timezone, not unix millis). Absent ≡ no deadline; clearing deletes the key. Values that are not a well-formed `YYYY-MM-DD` calendar date are rejected by the mutation. Means "owed by": past it the item is overdue. |
 | `when` | string? | optional **planned date**, shape-discriminated: `YYYY-MM-DD` (all-day, 10 chars) or `YYYY-MM-DDTHH:MM` (timed, 16 chars, `HH` 00–23, `MM` 00–59). Floating wall-clock, no seconds, no zone; an RFC 9557 `[Zone]` suffix is reserved and rejected for now. Absent ≡ unset; clearing deletes the key. One register so date and time cannot tear under concurrent edit; sorts by plain string compare (all-day leads its day). Means "happens on" or "act on". Fixed: never rewritten or rolled over by the clock, and never red past its day. A past `when` has gone by like an event: there is no "slipped" state (decided 2026-09-30, `calendar-plan.md`). Independent of `deadline`. See `calendar-plan.md`. |
 | `when_suggested` | string? | optional **pending date suggestion** (2026-11-13), `when`-shaped and validated the same. A date a client read out of the title as it was typed, resolved at that moment and held until the user answers: yes moves it into `when` (`accept_item_when_suggestion`, one commit), no deletes the key, so a declined suggestion leaves nothing behind. Never a plan by itself: the web shows it only in the task surface, on an open item with no `when`. `set_item_when(Some)` deletes it in the same commit. Independent of `when` at the register level, so a concurrent suggestion beside a set `when` is harmless and ignored. See `spec/calendar-plan.md`, "Typed date phrases". |
-| `event` | bool? | optional **event flag** (2026-11-16, `events-plan.md`): `true` says the `when` is when the item happens, not when to do it. Effective only beside a `when` (`is_event` needs both; a flag left without a date by concurrent edits is inert). An event is in no list's Open projection and its past `when` is never overdue; `location`, lifecycle and every other register are untouched. Absent ≡ not an event; clearing deletes the key, and `set_item_when(None)` deletes it in the same commit. |
+| `event` | bool? | optional **event flag** (2026-11-16, `events-plan.md`): `true` says the `when` is when the item happens, not when to do it, so a passed `when` has gone by instead of being overdue. Effective only beside a `when` (`is_event` needs both; a flag left without a date by concurrent edits is inert). Where the item shows, `location`, lifecycle and every other register are untouched. Absent ≡ not an event; clearing deletes the key, and `set_item_when(None)` deletes it in the same commit. |
 | `duration` | i64? | optional **length in whole minutes**, `1..=525600` (one year of days). A length rather than an end so that moving `when` on one device and setting the length on another can never produce an item that ends before it starts; the end is derived (`when` + `duration`). Read by the shape of `when`: minutes from a timed start, whole days (`ceil(minutes / 1440)`, the last day being that many minus one past the start) beside an all-day one, ignored beside an absent one; the register is never cross-checked against `when` (no invalid state under concurrent edit). Absent ≡ unset; clearing deletes the key. Written by `set_item_when` too: a timed `when` on an item with no duration defaults it to 60 minutes in the same commit, and clearing `when` deletes it; timed → all-day keeps it. Out-of-range values read as unset. See `calendar-plan.md`. |
 | `place` | value? | optional **atomic place register** — a plain `LoroValue` map `{label, lat?, lon?, address?, ref?}` set whole (the `lifecycle` pattern as a map), so a label and its coordinates can never be torn apart by concurrent edits. `label` is required (trimmed, 1..=200 chars); `lat` / `lon` are WGS84 decimal degrees and come as a pair or not at all; `address` is display-only; `ref` is an opaque provider hint. Absent ≡ unset; clearing deletes the key. Canonicalised and validated by `set_item_place`; a malformed value from another writer reads as unset. Shared by events ("where it happens") and tasks ("where it can be done"). See `place-plan.md`. |
 | `created_at` | i64 | unix millis (client clock) |
@@ -333,8 +333,7 @@ Every mutation below forms **one Loro commit** (one undo step, one op group).
   so it lands at the end of the queue (ties by `created_at`; the list's manual
   order is lost). `ToInbox` (the default) leaves every lifecycle alone, so
   open items land open in Inbox and closed ones show in Done located in Inbox;
-  `ToBin` also bins the open items, with the same `now`, except events
-  (`events-plan.md`: they are not open work and stay on the calendar). Other
+  `ToBin` also bins the open items, with the same `now`. Other
   registers and Starred refs are untouched. The ListMeta row is deleted in the
   same commit, so one undo restores the row and every register. The abandoned
   `order/<list-id>` container remains as unreachable history (root containers
@@ -461,8 +460,13 @@ Monoplan has one reserved list, the primary capture list.
 
 There was a second, `events` (2026-10-02 to 2026-11-16), the home of
 events. It is gone: an event is now a flag on the item (`event`,
-`events-plan.md`). An item still located in `events` in an old doc reads
-as flagged and projects into Inbox, so nothing migrates.
+`events-plan.md`). An item still located in `events` in an old doc is an
+orphan and projects into Inbox; it is not read as an event.
+
+Inbox's Open projection leaves out items that have a `when`
+(`inbox-plan.md` "Membership"): `ItemView::is_listed` is `is_open`, minus
+a dated item of Inbox. It is what list rows, counts and every
+`open_index` are over. User lists show every open item.
 
 The bin is *not* a list; it's the `binned_at` mask on items.
 
@@ -577,9 +581,9 @@ history rides it — and its ids are the doc's real ids.
   string, well-formed or not — the mapping is by the file's own ids. A missing
   `listId`, or one naming a list the file doesn't carry, routes to `inbox`
   (the `delete_list` orphan rule); the file's `inbox` row and any row
-  flagged `builtin` collapse onto the local `inbox`. A file from before
-  the `event` register may carry an `events` row and items naming it:
-  those import into Inbox with the flag set.
+  flagged `builtin` collapse onto the local `inbox` (a file from before
+  the `event` register may carry a builtin `events` row: its items import
+  into Inbox as ordinary items).
 - **Concurrent imports of the same file** on two offline peers converge: the
   item inserts collapse to one item per id (the loser's order entry goes
   stale), and the duplicate ListMeta rows fall under the one-visible-list

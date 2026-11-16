@@ -132,8 +132,8 @@ pub struct Item {
     /// Pending date suggestion (`when`-shaped), when one is unanswered.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub when_suggested: Option<String>,
-    /// An event (`spec/events-plan.md`): flagged and dated. It shows on
-    /// the agenda and in no list.
+    /// An event (`spec/events-plan.md`): flagged and dated. Its date
+    /// goes by instead of going overdue.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub event: bool,
     /// Duration in whole minutes, when set.
@@ -168,8 +168,8 @@ impl From<&ItemView> for Item {
 }
 
 /// The items of `list` in order, binned ones left out; closed ones
-/// (`Done`, `Cancelled`) only with `include_done`. Open events are
-/// left out too: no list shows one, the agenda does. The core views, for
+/// (`Done`, `Cancelled`) only with `include_done`. Inbox leaves its
+/// dated items out too: the agenda shows those. The core views, for
 /// a caller that renders more than the row carries; [`items`] is the
 /// rows.
 pub fn item_views(cx: &Ctx, list: &str, include_done: bool) -> Vec<ItemView> {

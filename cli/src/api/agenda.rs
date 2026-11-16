@@ -41,8 +41,8 @@ pub struct AgendaEntry {
     pub text: String,
     pub list_id: String,
     pub state: ItemState,
-    /// An event (`spec/events-plan.md`): the agenda is its home, not
-    /// its list.
+    /// An event (`spec/events-plan.md`): its date goes by instead of
+    /// going overdue.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub event: bool,
     /// `YYYY-MM-DD` (all-day) or `YYYY-MM-DDTHH:MM` (timed, floating).

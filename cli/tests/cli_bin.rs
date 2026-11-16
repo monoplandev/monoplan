@@ -543,7 +543,8 @@ async fn workspace_flag_selects_a_second_doc() {
     assert_eq!(rows.as_array().map(Vec::len), Some(1), "{json}");
     assert_eq!(rows[0]["id"], home_item, "{json}");
     assert_eq!(rows[0]["doc_id"], signup.primary_doc_id, "{json}");
-    assert_eq!(rows[0]["list_name"], "Inbox", "{json}");
+    // Dated and in no list: filed under the calendar, not Inbox.
+    assert_eq!(rows[0]["list_name"], "Calendar", "{json}");
     assert!(rows[0].get("doc_name").is_none(), "{json}");
     let text = ok(monoplan(dir, &["starred", "--all"]).await);
     assert!(text.contains("in home  [Personal]"), "{text}");

@@ -91,7 +91,7 @@ export function Upcoming(props: {
   selection: DndSelection;
   /** Display label for a list id in the row's doc (Inbox is localized,
    *  others by name). */
-  listLabel: (listId: string, docId?: string) => string;
+  listLabel: (listId: string, docId?: string, dated?: boolean) => string;
   /** The agenda merges every workspace, so a row from a shared one
    *  (anything but Home) names it under the title with the shared
    *  people glyph; null for Home rows, which carry no marker. */

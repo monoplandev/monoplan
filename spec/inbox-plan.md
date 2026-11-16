@@ -39,6 +39,24 @@ An item is **in Inbox** when its `location` list id is any of:
 2. missing or unparseable (already true today: `item_meta` in `core/src/doc.rs`);
 3. **new:** a list id with no ListMeta row in `lists` (an *orphan*).
 
+**Shown in Inbox** is narrower (decided and built 2026-11-16, later the
+same day): Inbox's Open projection leaves out items that have a `when`.
+Inbox is what has no list and no date. A dated item with no list, task or
+event, shows on the calendar instead; an Open task among them goes to the
+calendar's Overdue once its day passes, so nothing is lost by dating it.
+The item is still located in Inbox: it is listed there again the moment
+its date is cleared, at its place in the queue, and every other surface
+(Done, Bin, search, Starred, the item's list field) labels it
+**"Calendar"**, not "Inbox": the no-list bucket has two names, chosen by
+whether the item has a date. That is a label only. The id stays `inbox`
+in the core, URLs and every API, "Calendar" is never a list or a move
+target of its own. Move targets follow the same naming, in every
+workspace offered: the item dialog's list picker and the move palette
+call each workspace's no-list option "Calendar" when what is being moved
+has a date. The palette does so only when every selected row is dated; a
+mixed selection says "Inbox". User lists are unaffected: they show every open item, dated or
+not. See "As built".
+
 Archived lists still have their row, so their items are not orphans. (When
 this was written `events` was a second reserved list; it is gone since
 2026-11-16 and an item still located there is an orphan like any other,
@@ -274,3 +292,25 @@ states who will see the result.
   the web (the draft row opens at the queue's end) and iOS (scroll to the new
   bottom row). The dialogs offer "Move N open items to Inbox" / "Bin them"
   and name a shared workspace (non-Home, member count not known to be one).
+- **Dated items are not shown** (2026-11-16, with the `event` register,
+  `events-plan.md`). `ItemMeta` carries `dated`, and `listed()` (open, and
+  not a dated item of Inbox) is what `open_members` / `open_by_list` are
+  over; only Inbox differs from plain open-ness, and Inbox has no order
+  entries, so no ordered list ever has a hidden open row. `ItemView::
+  is_listed` is the same rule for clients. `ItemWhenChanged` gained
+  `open_index`: `None` when a date arrives (consumers drop an Inbox item
+  from the Open array), the queue position when a cleared date brings it
+  back. A move reports the same through `ItemListChanged.open_index`
+  (`None` moving a dated item into Inbox, the position moving it out to a
+  list). Remote and undo frames translate to the same events. The web
+  opens such an item over the calendar from Find, links and "Show in";
+  the Mac tray does the same.
+- **"Calendar" as the label of a dated item with no list** (2026-11-16).
+  Clients and the typed API name the bucket by the item's date: the web's
+  `listLabel(listId, docId, dated)` and `findResultListLabel`, the item
+  dialog's list picker (its `inbox` option reads "Calendar", with the
+  calendar glyph, while the item has a date), `api::lists::no_list_label`
+  behind `ListNames::of_item` (starred, places, find, `done`), `NoList.
+  label` on iOS and `MainWindowModel.noListLabel` on the Mac. `BinEntry`
+  carries `when` for it. Closed and binned items are labelled the same
+  way.

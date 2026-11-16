@@ -24,6 +24,7 @@ import {
   Show,
 } from "solid-js";
 import { Portal } from "solid-js/web";
+import calendarSvg from "./icons/calendar.svg?raw";
 import archiveSvg from "./icons/archive.svg?raw";
 import caretSortSvg from "./icons/caret-sort.svg?raw";
 import checkSvg from "./icons/check.svg?raw";
@@ -51,13 +52,16 @@ export type ListOption = {
   /** The list is in a doc other than the one being worked in: picking
    *  it is a move between workspaces. */
   foreign?: boolean;
+  /** The `inbox` option under its other name: for an item with a date,
+   *  "no list" is the calendar (`spec/inbox-plan.md` "Membership"). */
+  calendar?: boolean;
 };
 
-/** Fallback glyph for a list with no chosen emoji: the nav's own marks
- *  for the reserved lists (Inbox's archive box, the calendar for Events),
- *  the default file glyph otherwise. */
-export const listGlyph = (id: string): string =>
-  id === "inbox" ? archiveSvg : fileSvg;
+/** Fallback glyph for a list with no chosen emoji: the nav's own mark
+ *  for the reserved list (Inbox's archive box, or the calendar when the
+ *  option stands for it), the default file glyph otherwise. */
+export const listGlyph = (id: string, calendar?: boolean): string =>
+  id === "inbox" ? (calendar ? calendarSvg : archiveSvg) : fileSvg;
 
 /** Gap between the trigger and the panel, and the minimum breathing room
  *  kept against every viewport edge. */
@@ -319,7 +323,7 @@ export function ListPicker(props: {
                 <span
                   class="task-dialog-list-icon"
                   aria-hidden="true"
-                  innerHTML={listGlyph(opt().id)}
+                  innerHTML={listGlyph(opt().id, opt().calendar)}
                 />
               }
             >
@@ -418,7 +422,7 @@ export function ListPicker(props: {
                         <span
                           class="palette__item-icon"
                           aria-hidden="true"
-                          innerHTML={listGlyph(opt.id)}
+                          innerHTML={listGlyph(opt.id, opt.calendar)}
                         />
                       }
                     >

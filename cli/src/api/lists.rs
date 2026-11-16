@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use monoplan_core::{DeleteListMode, Doc, LIST_INBOX};
+use monoplan_core::{DeleteListMode, Doc, ItemView, LIST_INBOX};
 use serde::Serialize;
 
 use super::Ctx;
@@ -31,8 +31,7 @@ pub struct ListInfo {
     pub icon: Option<String>,
     pub archived_at: Option<i64>,
     pub created_at: i64,
-    /// How many Open items the list holds (not closed, not binned, not
-    /// an event).
+    /// How many Open items the list holds (not closed, not binned).
     pub open: u32,
 }
 
@@ -130,6 +129,14 @@ pub fn delete_list(cx: &Ctx, list: &str, mode: DeleteMode) -> anyhow::Result<()>
     Ok(())
 }
 
+/// What an item with no list is filed under, by whether it has a
+/// date: Inbox holds only undated items, a dated one lives on the
+/// calendar (`spec/inbox-plan.md` "Membership"). A label only: the list
+/// id is `inbox` either way.
+pub(crate) fn no_list_label(dated: bool) -> &'static str {
+    if dated { "Calendar" } else { "Inbox" }
+}
+
 /// A doc's list names by id, for the rows that name the list their
 /// item is in.
 pub(crate) struct ListNames(HashMap<String, String>);
@@ -144,12 +151,12 @@ impl ListNames {
         )
     }
 
-    /// The name of `list_id`; `None` when the list is gone. Inbox has
-    /// no `ListMeta` row (`all_lists` skips it), so it is named here
-    /// as the clients label it.
-    pub(crate) fn get(&self, list_id: &str) -> Option<String> {
-        match list_id {
-            LIST_INBOX => Some("Inbox".to_string()),
+    /// The name of the list `item` is in; `None` when the list is
+    /// gone. An item with no list has no `ListMeta` row to name, so it
+    /// is named here as the clients label it ([`no_list_label`]).
+    pub(crate) fn of_item(&self, item: &ItemView) -> Option<String> {
+        match item.list_id.as_str() {
+            LIST_INBOX => Some(no_list_label(item.when.is_some()).to_string()),
             other => self.0.get(other).cloned(),
         }
     }
@@ -161,6 +168,22 @@ mod tests {
     use crate::commands::focus::Lens;
     use crate::workspace::Candidate;
     use monoplan_core::DocId;
+
+    #[test]
+    fn an_item_with_no_list_is_named_by_whether_it_has_a_date() {
+        let doc = Doc::new().unwrap();
+        let list = doc.add_list("Trip").unwrap();
+        let plain = doc.add_item(LIST_INBOX, "buy tickets").unwrap();
+        let dated = doc.add_item(LIST_INBOX, "gig").unwrap();
+        let filed = doc.add_item(&list, "flight").unwrap();
+        doc.set_item_when(&dated, Some("2026-12-01")).unwrap();
+        doc.set_item_when(&filed, Some("2026-12-01")).unwrap();
+        let names = ListNames::of(&doc);
+        let name = |id: &str| names.of_item(&doc.get_item(id).unwrap());
+        assert_eq!(name(&plain).as_deref(), Some("Inbox"));
+        assert_eq!(name(&dated).as_deref(), Some("Calendar"));
+        assert_eq!(name(&filed).as_deref(), Some("Trip"));
+    }
 
     #[test]
     fn rename_workspace_names_a_shared_doc_and_refuses_home_and_blank() {

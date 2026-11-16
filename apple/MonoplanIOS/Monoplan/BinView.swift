@@ -26,7 +26,8 @@ struct BinView: View {
                     Button { openItem(item.ref) } label: {
                         BinnedRowView(
                             item: item,
-                            listName: model.listName(item.listId, inDoc: item.docId),
+                            listName: model.listName(
+                                item.listId, inDoc: item.docId, dated: item.when != nil),
                             workspace: model.sharedWorkspaceName(item.docId))
                     }
                     .swipeActions(edge: .leading) {

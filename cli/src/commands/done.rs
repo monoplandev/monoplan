@@ -18,7 +18,7 @@ use monoplan_core::{ItemView, LIST_INBOX};
 use serde::{Deserialize, Serialize};
 
 use super::items::{date_tags, row_box, write_json};
-use crate::api::{self, Ctx};
+use crate::api::{self, Ctx, lists::no_list_label};
 
 /// Rows shown when neither `-n` nor `--since` bounds the list.
 const DEFAULT_LIMIT: usize = 20;
@@ -134,10 +134,10 @@ pub fn run(cx: &Ctx, args: DoneArgs, out: &mut dyn Write) -> anyhow::Result<()> 
             writeln!(out, "{}  {}", day.format("%Y-%m-%d"), day.weekday())?;
             current = Some(day);
         }
-        // Inbox has no `ListMeta` row, so it is named here, as
-        // `starred --all` names it.
+        // An item with no list has no `ListMeta` row, so it is named
+        // here, as `starred --all` names it.
         let list = match item.list_id.as_str() {
-            LIST_INBOX => "Inbox",
+            LIST_INBOX => no_list_label(item.when.is_some()),
             other => lists.get(other).map_or(other, String::as_str),
         };
         writeln!(

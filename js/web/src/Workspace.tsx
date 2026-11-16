@@ -101,7 +101,7 @@ import {
   isCancelled,
   isClosed,
   isClosedState,
-  isEvent,
+  isInboxDated,
   isOpen,
   OPEN_STATES,
   type DocApp,
@@ -884,9 +884,14 @@ export function Workspace(props: {
   // stored name, looked up in the item's doc (`docId`, else the
   // view's). Used by Done- and Bin-view rows to badge each item with its
   // origin list.
-  const listLabel = (listId: string, docId?: string): string =>
+  // An item with no list is in Inbox, unless it has a date (`dated`):
+  // then it lives on the calendar and that is what its label says
+  // (`spec/inbox-plan.md` "Membership"). The id is `inbox` either way.
+  const listLabel = (listId: string, docId?: string, dated?: boolean): string =>
     listId === "inbox"
-      ? m().nav.inbox
+      ? dated
+        ? m().nav.upcoming
+        : m().nav.inbox
       : (docs.listOf(docId ?? viewDocId(), listId)?.name ?? listId);
 
   // Item attribution (`spec/sharing-plan.md` §Attribution), shown in the
@@ -999,8 +1004,8 @@ export function Workspace(props: {
   };
 
   // The calendar's Add: a new event (`spec/events-plan.md`) with no
-  // list, all-day on today until the user picks otherwise. Unticking the
-  // Event box makes it an Inbox task with that date.
+  // list, all-day on today until the user picks otherwise. With a date
+  // and no list it shows here and not in Inbox, event or task.
   const newEventTarget = () => ({
     listId: "inbox",
     docId: docs.homeDocId,
@@ -1615,11 +1620,21 @@ export function Workspace(props: {
   // people glyph, whichever workspace is being worked in (`own`);
   // Personal's go unsaid, as everywhere. A list outside `own` is
   // `foreign`: picking it is a move between workspaces.
-  const listOptionsOf = (docId: string, own: string): ListOption[] => {
+  // `dated`: what is being moved has a date, so each workspace's "no
+  // list" is its calendar, not its Inbox (`spec/inbox-plan.md`
+  // "Membership"): the option keeps the `inbox` id under that name.
+  const listOptionsOf = (docId: string, own: string, dated = false): ListOption[] => {
     const workspace = docId === docs.homeDocId ? undefined : docLabel(docId);
     const foreign = docId !== own;
     return [
-      { id: "inbox", name: m().nav.inbox, docId, workspace, foreign },
+      {
+        id: "inbox",
+        name: dated ? m().nav.upcoming : m().nav.inbox,
+        calendar: dated,
+        docId,
+        workspace,
+        foreign,
+      },
       ...activeListsOf(docId).map((l) => ({
         id: l.id,
         name: l.name,
@@ -1631,14 +1646,18 @@ export function Workspace(props: {
     ];
   };
   /** Every other workspace's destinations, in nav order. */
-  const otherListOptions = (own: string): ListOption[] =>
+  const otherListOptions = (own: string, dated = false): ListOption[] =>
     docs
       .docs()
       .filter((d) => d.docId !== own)
-      .flatMap((d) => listOptionsOf(d.docId, own));
+      .flatMap((d) => listOptionsOf(d.docId, own, dated));
   const moveListOptions = createMemo<ListOption[]>(() => {
     const own = moveDocId();
-    return [...listOptionsOf(own, own), ...otherListOptions(own)];
+    // Calendar only when every row being moved has a date; a mixed
+    // block would land some rows in Inbox, so it says Inbox.
+    const ids = moveIds() ?? [];
+    const dated = ids.length > 0 && ids.every((id) => !!docs.getItem(id)?.when);
+    return [...listOptionsOf(own, own, dated), ...otherListOptions(own, dated)];
   });
 
   // A move between workspaces (`spec/sharing-plan.md` "Cross-doc move")
@@ -2439,10 +2458,11 @@ export function Workspace(props: {
       setView(docs.listView(r.docId ?? docs.homeDocId, r.id));
       return;
     }
-    // An Open event's home is the calendar, which has no row to select
-    // (and no day for a past one): open it there, as its link does.
+    // A dated item with no list has no row in Inbox: its home is the
+    // calendar, which has no row to select for a past one, so open it
+    // there, as its link does.
     const picked = docs.getItem(r.id);
-    if (picked && isEvent(picked) && isOpen(picked)) {
+    if (picked && isInboxDated(picked) && isOpen(picked)) {
       openItemFromUrl(r.id);
       return;
     }
@@ -2487,8 +2507,9 @@ export function Workspace(props: {
       return;
     }
     const it = docs.getItem(id);
-    // An event's home is the calendar: go there with the item open.
-    if (it && isEvent(it)) {
+    // A dated item with no list lives on the calendar: go there with
+    // the item open.
+    if (it && isInboxDated(it)) {
       batch(() => {
         if (view().kind !== "upcoming") setView({ kind: "upcoming" });
         setOpenItemId(id);
@@ -2513,15 +2534,15 @@ export function Workspace(props: {
   // (Enter, row open, a link, a click into the pane).
 
   // The view that shows `it`: Bin if binned, Done if closed (done or
-  // cancelled), else its home: the calendar for an event, its list
-  // otherwise. A stale list id falls back to Inbox; archived lists still
+  // cancelled), else its home: the calendar for a dated item with no
+  // list, its list otherwise. A stale list id falls back to Inbox; archived lists still
   // render.
   const viewForItem = (it: ItemView): ViewKey =>
     isBinned(it)
       ? { kind: "bin" }
       : isClosed(it)
         ? { kind: "done" }
-        : isEvent(it)
+        : isInboxDated(it)
           ? { kind: "upcoming" }
           : docs.listView(it.docId, homeListId(it.docId, it.listId));
 

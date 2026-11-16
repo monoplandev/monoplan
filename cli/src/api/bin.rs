@@ -12,6 +12,10 @@ pub struct BinEntry {
     pub id: String,
     pub text: String,
     pub list_id: String,
+    /// Planned date, when set: an item with no list reads as the
+    /// calendar's rather than Inbox's when it has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when: Option<String>,
     /// Unix millis the item was binned.
     pub binned_at: i64,
     /// The row's workspace, on the read that spans them
@@ -28,6 +32,7 @@ fn entries(doc: &monoplan_core::Doc, doc_id: Option<String>) -> Vec<BinEntry> {
             id: i.id,
             text: i.text,
             list_id: i.list_id,
+            when: i.when,
             doc_id: doc_id.clone(),
         })
         .collect()

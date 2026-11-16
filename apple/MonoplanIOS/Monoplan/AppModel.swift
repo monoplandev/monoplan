@@ -432,9 +432,11 @@ final class AppModel: ObservableObject {
     }
 
     /// The name of a list in any open workspace, for a row that names
-    /// the list its item is in.
-    func listName(_ listId: String, inDoc docId: String?) -> String? {
-        (listsByDoc[docId ?? session?.primaryDocId ?? ""] ?? []).names[listId]
+    /// the list its item is in. `dated` is whether that item has a
+    /// date: with no list it then reads as the Calendar's.
+    func listName(_ listId: String, inDoc docId: String?, dated: Bool = false) -> String? {
+        if listId == "inbox" { return NoList.label(dated: dated) }
+        return (listsByDoc[docId ?? session?.primaryDocId ?? ""] ?? []).names[listId]
     }
 
     /// Set or clear (nil) an item's planned date, with what to do to

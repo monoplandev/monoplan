@@ -117,9 +117,9 @@ export interface ItemView {
    *  item is open. */
   whenSuggested?: string;
   /** An event (`spec/events-plan.md`): flagged and dated. It happens
-   *  rather than being done, so it shows on the calendar and in no
-   *  list, and a past `when` is never overdue. The core sends the
-   *  effective value: a flag without a `when` reads absent. */
+   *  rather than being done, so a past `when` has gone by instead of
+   *  being overdue. The core sends the effective value: a flag without
+   *  a `when` reads absent. */
   event?: boolean;
   /** Optional duration in whole minutes. Only meaningful beside a timed
    *  `when`; views ignore it otherwise. Absent means unset. */
@@ -195,11 +195,16 @@ export const isBinned = (it: ItemView): boolean => it.binnedAt != null;
 export const isOpen = (it: ItemView): boolean =>
   !isBinned(it) && !isClosedState(it.state);
 /** An event (`spec/events-plan.md`): its date is when it happens, not
- *  when to do it. It keeps its list but no list view shows it. */
+ *  when to do it. */
 export const isEvent = (it: ItemView): boolean => it.event === true;
-/** In its list's Open projection (`listOpen`): open and not an event.
- *  What a list view, a board and a list count are over. */
-export const isListed = (it: ItemView): boolean => isOpen(it) && !isEvent(it);
+/** A dated item with no list: Inbox holds only what has no list and no
+ *  date (`spec/inbox-plan.md`), so this one has no row there and lives
+ *  on the calendar. */
+export const isInboxDated = (it: ItemView): boolean =>
+  it.listId === "inbox" && !!it.when;
+/** In its list's Open projection (`listOpen`): open, and not a dated
+ *  Inbox item. What a list view, a board and a list count are over. */
+export const isListed = (it: ItemView): boolean => isOpen(it) && !isInboxDated(it);
 /** What a status picker offers on an event: its open states collapse
  *  into one choice (labelled "Event", standing in as `backlog`, which is
  *  what reopening writes), beside the two closed states. */
@@ -462,9 +467,9 @@ export interface DocApp extends DocItemActions {
   /** The user's "yes": the pending suggestion becomes the `when`, one
    *  undo step. No-op when none is pending. */
   acceptItemWhenSuggestion(id: string): void;
-  /** Mark a dated item an event, or a task again
-   *  (`spec/events-plan.md`). No-op without a `when`, or when the item
-   *  already is what is asked. */
+  /** Mark a dated item an event (its date goes by) or a task again (its
+   *  date goes overdue), `spec/events-plan.md`. No-op without a `when`,
+   *  or when the item already is what is asked. */
   setItemEvent(id: string, event: boolean): void;
   /** Set (whole minutes, 1..=525600) or clear (`null`) an item's duration.
    *  Clearing `when` clears it in the core as well. */
@@ -956,9 +961,9 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
       case "itemLifecycleChanged": {
         const prev = state.itemsById[ev.id];
         if (!prev) break;
-        // An event is in no Open array: its lifecycle changes touch
-        // only the register below.
-        const listed = !isEvent(prev);
+        // A dated Inbox item is in no Open array: its lifecycle changes
+        // touch only the register below.
+        const listed = !isInboxDated(prev);
         const wasOpen = isOpen(prev);
         const wasBinned = isBinned(prev);
         const nextState = parseWorkflowState(ev.state);
@@ -989,7 +994,17 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
         // workflow flip (wasOpen && nowOpen) leaves the item in place —
         // its lane is recomputed from the updated register state below.
         if (listed && wasOpen && !nowOpen) removeOpen(prev.listId, ev.id);
-        if (listed && !wasOpen && nowOpen) insertOpen(prev.listId, ev.id, ev.openIndex);
+        // An entry carries its position. `wasOpen` can already be true
+        // here when a date change in the same frame was applied first
+        // (an undo), so an open row missing from its array enters too.
+        if (
+          listed &&
+          nowOpen &&
+          (!wasOpen ||
+            (ev.openIndex != null && !state.listOpen[prev.listId]?.includes(ev.id)))
+        ) {
+          insertOpen(prev.listId, ev.id, ev.openIndex);
+        }
         setState("itemsById", ev.id, {
           state: nextState,
           lifecycleAt,
@@ -1007,8 +1022,18 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
         break;
       }
       case "itemWhenChanged": {
-        if (state.itemsById[ev.id]) {
-          setState("itemsById", ev.id, "when", ev.when ?? undefined);
+        const prev = state.itemsById[ev.id];
+        if (!prev) break;
+        // A date takes an Inbox item out of Inbox's Open array; clearing
+        // it brings the item back at `openIndex`.
+        const was = isListed(prev);
+        setState("itemsById", ev.id, "when", ev.when ?? undefined);
+        const now = isListed(prev);
+        if (was && !now) {
+          removeOpen(prev.listId, ev.id);
+          dropRecentDone(ev.id);
+        } else if (now && ev.openIndex != null) {
+          insertOpen(prev.listId, ev.id, ev.openIndex);
         }
         break;
       }
@@ -1019,15 +1044,9 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
         break;
       }
       case "itemEventChanged": {
-        const prev = state.itemsById[ev.id];
-        if (!prev) break;
-        // Becoming an event leaves the list's Open array; an open item
-        // that stops being one re-enters it at `openIndex`.
-        if (isListed(prev)) removeOpen(prev.listId, ev.id);
-        const event = ev.event === true;
-        setState("itemsById", ev.id, "event", event ? true : undefined);
-        if (!event && isOpen(prev)) insertOpen(prev.listId, ev.id, ev.openIndex);
-        dropRecentDone(ev.id);
+        if (state.itemsById[ev.id]) {
+          setState("itemsById", ev.id, "event", ev.event === true ? true : undefined);
+        }
         break;
       }
       case "itemDurationChanged": {
@@ -1050,12 +1069,12 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
       case "itemListChanged": {
         const prev = state.itemsById[ev.id];
         if (!prev) break;
-        // Lifecycle is untouched by this event — membership in the Open
-        // projection carries over, only the owning list changes.
-        const open = isListed(prev);
-        if (open) removeOpen(prev.listId, ev.id);
+        // Lifecycle is untouched by this event. Membership in the Open
+        // projection carries over with the owning list, except across
+        // Inbox for a dated item, which has a row in a list only.
+        if (isListed(prev)) removeOpen(prev.listId, ev.id);
         setState("itemsById", ev.id, "listId", ev.listId ?? "");
-        if (open) insertOpen(ev.listId ?? "", ev.id, ev.openIndex);
+        if (isListed(prev)) insertOpen(ev.listId ?? "", ev.id, ev.openIndex);
         dropRecentDone(ev.id);
         break;
       }

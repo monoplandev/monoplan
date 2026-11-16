@@ -821,8 +821,8 @@ impl Engine {
         })?)
     }
 
-    /// Mark an item an event (it needs a date: it then shows on the
-    /// agenda and in no list, and never goes overdue), or a task again.
+    /// Mark an item an event (it needs a date: the date then goes by
+    /// instead of going overdue), or a task again.
     pub fn set_event(
         &self,
         workspace: Option<String>,

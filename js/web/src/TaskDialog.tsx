@@ -309,12 +309,26 @@ export function TaskDialog(props: {
   // home list is itself archived, it is appended so the picker still
   // renders the current list's name (and moving *out* to an active list
   // remains possible).
+  // New-item mode's planned-date buffer: nothing exists to write to
+  // until the capture commits, so picks are held here and applied after
+  // creation. Declared ahead of the list options, which name "no list"
+  // by whether there is a date.
+  const [newWhen, setNewWhen] = createSignal<string | null>(null);
   const listOptions = createMemo<ListOption[]>(() => {
     // A shared workspace's lists carry its name, this doc's included;
     // Personal's go unsaid.
     const workspace = props.docLabel?.() ?? undefined;
+    // "No list" is Inbox for an undated item and the calendar for a
+    // dated one (`spec/inbox-plan.md` "Membership"): same id, the name
+    // of where the item will show.
+    const dated = (item() ? item()?.when : newWhen()) != null;
     const opts: ListOption[] = [
-      { id: "inbox", name: m().nav.inbox, workspace },
+      {
+        id: "inbox",
+        name: dated ? m().nav.upcoming : m().nav.inbox,
+        calendar: dated,
+        workspace,
+      },
       ...props.lists().map((l) => ({ id: l.id, name: l.name, icon: l.icon, workspace })),
     ];
     const currentId = item()?.listId;
@@ -324,7 +338,11 @@ export function TaskDialog(props: {
         opts.push({ id: current.id, name: current.name, icon: current.icon, workspace });
       }
     }
-    return [...opts, ...(props.otherLists?.() ?? [])];
+    // The other workspaces' "no list" options follow the same naming.
+    const others = (props.otherLists?.() ?? []).map((o) =>
+      dated && o.id === "inbox" ? { ...o, name: m().nav.upcoming, calendar: true } : o,
+    );
+    return [...opts, ...others];
   });
   const moveItemToList = (targetId: string, currentListId: string) => {
     const id = props.itemId();
@@ -406,8 +424,6 @@ export function TaskDialog(props: {
   // New-item mode's deadline buffer: nothing exists to write to until the
   // capture commits, so picks are held here and applied after creation.
   const [newDeadline, setNewDeadline] = createSignal<string | null>(null);
-  // New-item mode's planned-date buffer, same deal.
-  const [newWhen, setNewWhen] = createSignal<string | null>(null);
   // New-item mode's Event box, applied after `newWhen` (an event needs
   // its date).
   const [newEvent, setNewEvent] = createSignal(false);

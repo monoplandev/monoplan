@@ -84,8 +84,9 @@ because the clock never writes. Ticking is that action.
 **Events are a flag beside `when`, not a kind** (decided and built
 2026-11-16, `events-plan.md`; from 2026-10-02 until then they were items
 of a reserved `events` list). The rejection of a kind stands: the flag
-says what the date means and changes two things only, where the item
-shows (this calendar, no list) and what a past `when` means (it went by).
+says what the date means and changes one thing, what a past `when` means
+(it went by). Where a dated item shows is Inbox's rule, not the flag's:
+one with no list is here and not in Inbox (`inbox-plan.md`).
 Its row keeps a checkbox nothing asks it to tick, and the close-action
 objection lapsed on 2026-09-30 when a past `when` stopped needing a
 decision.
@@ -316,8 +317,9 @@ for the month grid). `groupByDeadline` becomes
   selection as on a list. ⌘↑ / ⌘↓ (reorder) does nothing here.
   Drag-to-reschedule is deferred (see below).
 - **Capture** (web): the Add button on this view opens the task dialog on
-  a new event: `when` prefilled to today and the Event box under it
-  ticked. Unticking the box makes it an Inbox task with that date.
+  a new event: no list, `when` prefilled to today and the Event box under
+  it ticked. Unticking the box makes it a task with that date, still
+  shown here and not in Inbox (`inbox-plan.md` "Membership").
 - **Events** (`events-plan.md`): an event's row is a task's row.
   Everything above applies to events unchanged. An event always has a
   `when`, so there is no Unscheduled section (there was one while events

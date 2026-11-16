@@ -410,11 +410,11 @@ pub struct SetArgs {
     #[arg(long, group = "field", value_name = "DATE|-")]
     #[serde(default)]
     pub when_suggested: Option<String>,
-    /// Make the item an event: it happens on its date instead of being done, so it shows on the agenda and in no list, and never goes overdue. Needs a date (--when in the same call counts).
+    /// Make the item an event: it happens on its date instead of being done, so it goes by when the date passes and never goes overdue. Needs a date (--when in the same call counts).
     #[arg(long, group = "field", conflicts_with = "task")]
     #[serde(default)]
     pub event: bool,
-    /// Make an event a task again: back in its list, overdue once its date passes.
+    /// Make an event a task again: overdue once its date passes.
     #[arg(long, group = "field")]
     #[serde(default)]
     pub task: bool,

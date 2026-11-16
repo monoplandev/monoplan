@@ -308,7 +308,7 @@ impl Doc {
     }
 
     /// Mark an item as an event (`true`, needs a `when`) or as a task
-    /// again (`false`). An event shows on the calendar and in no list.
+    /// again (`false`). An event's past date goes by; a task's is overdue.
     #[wasm_bindgen(js_name = setItemEvent)]
     pub fn set_item_event(&self, item_id: &str, event: bool) -> Result<(), JsError> {
         self.inner.set_item_event(item_id, event).map_err(js_err)
@@ -1928,7 +1928,7 @@ impl Replica {
     }
 
     /// Mark an item as an event (`true`, needs a `when`) or as a task
-    /// again (`false`). An event shows on the calendar and in no list.
+    /// again (`false`). An event's past date goes by; a task's is overdue.
     #[wasm_bindgen(js_name = setItemEvent)]
     pub fn set_item_event(&self, item_id: &str, event: bool) -> Result<(), JsError> {
         self.doc().set_item_event(item_id, event).map_err(js_err)
@@ -2480,9 +2480,9 @@ impl From<CoreEvent> for ReplicaEvent {
 /// - `itemNotesChanged` — id, notes
 /// - `itemNotesDelta` — id, delta (JSON array of `{retain}` / `{insert}` / `{delete}`, UTF-16 units; only for items with a `subscribeNotes` subscription)
 /// - `itemDeadlineChanged` — id, deadline? (undefined = no deadline)
-/// - `itemWhenChanged` — id, when? (undefined = unset; `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`)
+/// - `itemWhenChanged` — id, when? (undefined = unset; `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`), openIndex? (a dated Inbox item is in no Open array: drop it when a date arrives; set when a cleared date brings it back, splice it in there)
 /// - `itemWhenSuggestedChanged` — id, whenSuggested? (undefined = none pending; same shape as `when`)
-/// - `itemEventChanged` — id, event (true = an event: in no list's Open array), openIndex? (set when an open item stopped being an event: splice it back in there)
+/// - `itemEventChanged` — id, event
 /// - `itemDurationChanged` — id, duration? (undefined = unset; whole minutes)
 /// - `itemPlaceChanged` — id, place? (undefined = unset; JSON text of `{label, lat?, lon?, address?, ref?}`)
 /// - `itemLifecycleChanged` — id, state, lifecycleAt, startedAt?, doneAt?, binnedAt?, openIndex?
@@ -2813,10 +2813,15 @@ impl From<CoreAppEvent> for AppEventJs {
                 deadline,
                 ..blank
             },
-            CoreAppEvent::ItemWhenChanged { id, when } => AppEventJs {
+            CoreAppEvent::ItemWhenChanged {
+                id,
+                when,
+                open_index,
+            } => AppEventJs {
                 kind: "itemWhenChanged",
                 id,
                 when,
+                open_index,
                 ..blank
             },
             CoreAppEvent::ItemWhenSuggestedChanged { id, when_suggested } => AppEventJs {
@@ -2825,15 +2830,10 @@ impl From<CoreAppEvent> for AppEventJs {
                 when_suggested,
                 ..blank
             },
-            CoreAppEvent::ItemEventChanged {
-                id,
-                event,
-                open_index,
-            } => AppEventJs {
+            CoreAppEvent::ItemEventChanged { id, event } => AppEventJs {
                 kind: "itemEventChanged",
                 id,
                 event: Some(event),
-                open_index,
                 ..blank
             },
             CoreAppEvent::ItemDurationChanged { id, duration } => AppEventJs {

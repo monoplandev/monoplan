@@ -55,6 +55,9 @@ struct ListRef: Hashable {
     let name: String
     /// The list's emoji, when it has one.
     var icon: String? = nil
+    /// The `inbox` row under its other name: for an item with a date,
+    /// "no list" is the Calendar (spec/inbox-plan.md "Membership").
+    var calendar = false
 
     var key: String { "\(docId)/\(listId)" }
 }
@@ -65,13 +68,15 @@ struct ListRef: Hashable {
 struct ListIcon: View {
     let listId: String
     let emoji: String?
+    /// Inbox standing for the Calendar (a dated item with no list).
+    var calendar = false
 
     var body: some View {
         if let emoji, !emoji.isEmpty {
             Text(emoji)
         } else {
             if listId == "inbox" {
-                CatalogIcon(name: "Inbox")
+                CatalogIcon(name: calendar ? "Calendar" : "Inbox")
             } else {
                 Image(systemName: "folder")
             }

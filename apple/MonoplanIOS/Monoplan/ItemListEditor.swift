@@ -45,7 +45,9 @@ struct ItemListEditor: View {
             done()
         } label: {
             HStack(spacing: 6) {
-                FieldRow(text: list.name) { ListIcon(listId: list.listId, emoji: list.icon) }
+                FieldRow(text: list.name) {
+                    ListIcon(listId: list.listId, emoji: list.icon, calendar: list.calendar)
+                }
                 Spacer(minLength: 8)
                 SharedWorkspaceBadge(name: workspace)
                 if ticked {

@@ -131,7 +131,7 @@ struct ItemPanel: View {
                     if let emoji = item.listIcon {
                         Text(verbatim: emoji)
                     } else {
-                        Self.listIcon(item.item.listId)
+                        Self.listIcon(item.item.listId, dated: item.item.when != nil)
                     }
                 }
                 .foregroundStyle(.secondary)
@@ -164,6 +164,12 @@ struct ItemPanel: View {
     /// when it is not among them (archived, or the calendar's), so
     /// there is always a row to tick.
     private func listOptions(_ item: ItemInfo) -> [PanelList] {
+        // For an item with a date, "no list" is the Calendar, not Inbox.
+        let lists = lists.map { list in
+            item.item.when != nil && list.id == MainWindowModel.inbox
+                ? PanelList(id: list.id, name: MainWindowModel.noListLabel(dated: true), icon: nil)
+                : list
+        }
         if lists.contains(where: { $0.id == item.item.listId }) { return lists }
         return lists + [PanelList(id: item.item.listId, name: item.listLabel, icon: item.listIcon)]
     }
@@ -217,11 +223,12 @@ struct ItemPanel: View {
     static let eventStates: [ItemState] = [.backlog, .done, .cancelled]
 
     /// A list's glyph when it has no emoji: the sidebar's for the
-    /// Inbox, a bullet list for any other.
+    /// Inbox (the Calendar's when the item has a date and so lives
+    /// there), a bullet list for any other.
     @ViewBuilder
-    private static func listIcon(_ listId: String) -> some View {
+    private static func listIcon(_ listId: String, dated: Bool) -> some View {
         switch listId {
-        case MainWindowModel.inbox: PanelGlyph(image: NavArt.inbox)
+        case MainWindowModel.inbox: PanelGlyph(image: dated ? NavArt.calendar : NavArt.inbox)
         default: Image(systemName: "list.bullet")
         }
     }
@@ -284,7 +291,7 @@ extension ItemInfo {
     var listLabel: String {
         if let listName { return listName }
         switch item.listId {
-        case MainWindowModel.inbox: return String(localized: "Inbox")
+        case MainWindowModel.inbox: return MainWindowModel.noListLabel(dated: item.when != nil)
         default: return item.listId
         }
     }

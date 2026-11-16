@@ -100,14 +100,17 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     /// Bring the window forward, on a list when one is given (a tray
     /// row: the item's list in its workspace, nil being Home's), with
-    /// the item's panel open when the row names one. An event's home
-    /// is the Calendar, whatever its list (spec/events-plan.md).
-    func show(list: String? = nil, workspace: String? = nil, item: String? = nil, event: Bool = false) {
+    /// the item's panel open when the row names one. A dated item with
+    /// no list has no row in Inbox, so it opens over the Calendar
+    /// (spec/inbox-plan.md).
+    func show(
+        list: String? = nil, workspace: String? = nil, item: String? = nil, onCalendar: Bool = false
+    ) {
         onVisibility(true)
         model.visible = true
         syncSignedIn()
         if let list {
-            if event {
+            if onCalendar {
                 model.select(lens: .agenda)
             } else {
                 model.select(workspace: workspace, list: list)
@@ -819,10 +822,18 @@ final class MainWindowModel: ObservableObject {
         }
     }
 
+    /// What an item with no list is filed under, by whether it has a
+    /// date: Inbox holds only undated items, a dated one lives on the
+    /// Calendar (spec/inbox-plan.md "Membership"). A label only: the
+    /// list id is `inbox` either way.
+    static func noListLabel(dated: Bool) -> String {
+        dated ? String(localized: "Calendar") : String(localized: "Inbox")
+    }
+
     /// The name of the list a binned item would go back to, for its
     /// row; nil when that list is not known.
     func binnedListName(_ entry: BinEntry) -> String? {
-        if entry.listId == Self.inbox { return String(localized: "Inbox") }
+        if entry.listId == Self.inbox { return Self.noListLabel(dated: entry.when != nil) }
         let section = sections.first { $0.workspace.docId == entry.docId }
         guard let list = section?.lists.first(where: { $0.id == entry.listId }) else { return nil }
         return [list.icon, list.name].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
@@ -840,7 +851,7 @@ final class MainWindowModel: ObservableObject {
         {
             name = list.name
         } else {
-            name = String(localized: "Inbox")
+            name = Self.noListLabel(dated: row.item.when != nil)
         }
         return [name, row.workspaceName].compactMap { $0 }.joined(separator: " · ")
     }

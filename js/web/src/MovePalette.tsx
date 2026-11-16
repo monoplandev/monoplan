@@ -215,7 +215,7 @@ export function MovePalette(props: {
                       <span
                         class="palette__item-icon"
                         aria-hidden="true"
-                        innerHTML={listGlyph(opt.id)}
+                        innerHTML={listGlyph(opt.id, opt.calendar)}
                       />
                     }
                   >

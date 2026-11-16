@@ -7,6 +7,14 @@ import Foundation
 import MonoplanCore
 import MonoplanMacKit
 
+/// What an item with no list is filed under, by whether it has a
+/// date: Inbox holds only undated items, a dated one lives on the
+/// Calendar (spec/inbox-plan.md "Membership"). A label only: the list
+/// id is `inbox` either way.
+enum NoList {
+    static func label(dated: Bool) -> String { dated ? "Calendar" : "Inbox" }
+}
+
 extension Array where Element == ListInfo {
     /// The lists a workspace's index shows: active ones, in the doc's
     /// order, without the reserved id (which has no `ListMeta` row of
@@ -143,8 +151,8 @@ extension ItemInfo {
     var deadline: String? { item.deadline }
     var when: String? { item.when }
     var whenSuggested: String? { item.whenSuggested }
-    /// An event (spec/events-plan.md): it happens on its date, shows
-    /// on the Calendar and in no list, and never goes overdue.
+    /// An event (spec/events-plan.md): it happens on its date, so
+    /// the date goes by instead of going overdue.
     var event: Bool { item.event }
     /// Whole minutes, when set.
     var duration: Int? { item.duration.map(Int.init) }
@@ -161,7 +169,8 @@ extension ItemInfo {
 
     /// The list's display name: the doc's, else the reserved label.
     var listLabel: String {
-        listName ?? [ListInfo]().names[listId] ?? listId
+        if let listName { return listName }
+        return listId == "inbox" ? NoList.label(dated: when != nil) : listId
     }
 
     /// When the item was closed, while it is: the completion stamp for

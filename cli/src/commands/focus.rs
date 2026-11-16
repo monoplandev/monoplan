@@ -235,7 +235,7 @@ pub fn resolve_all<'a>(
         let list_name = list_names
             .entry(tag.doc_id)
             .or_insert_with(|| ListNames::of(doc))
-            .get(&item.list_id);
+            .of_item(&item);
         rows.push(StarredRow {
             doc: tag,
             item,

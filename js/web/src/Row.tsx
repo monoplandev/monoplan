@@ -100,7 +100,7 @@ export function Row(props: {
   showList?: () => boolean;
   /** Resolves a list id (in the item's doc) to its display label (see
    *  Workspace `listLabel`). */
-  listLabel?: (listId: string, docId?: string) => string;
+  listLabel?: (listId: string, docId?: string, dated?: boolean) => string;
   /** Whether a doc id is a shared workspace (anything but Home). The
    *  origin-list badge then leads with the people glyph, the same mark
    *  the nav and agenda use for a shared workspace. */
@@ -124,7 +124,8 @@ export function Row(props: {
   const originList = createMemo(() => {
     const k = props.viewKind;
     return (k === "focus" || k === "done" || k === "bin") && props.showList?.()
-      ? (props.listLabel?.(props.item().listId, props.item().docId) || null)
+      ? (props.listLabel?.(props.item().listId, props.item().docId, !!props.item().when) ||
+        null)
       : null;
   });
   // Lifecycle-state badge text for the flat list view, when the list's

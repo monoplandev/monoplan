@@ -134,13 +134,16 @@ export function createFindState(docs: DocsLayer) {
  *  themselves get no label. Returns "" when there's nothing to show. */
 export function findResultListLabel(
   docs: DocsLayer,
-  builtin: { inbox: string },
+  builtin: { inbox: string; upcoming: string },
   item: FindResult,
 ): string {
   if (item.kind !== "item") return "";
   const listId = item.listId;
   if (!listId) return "";
-  if (listId === "inbox") return builtin.inbox;
+  // No list and a date: it lives on the calendar, not in Inbox.
+  if (listId === "inbox") {
+    return docs.getItem(item.id)?.when ? builtin.upcoming : builtin.inbox;
+  }
   return docs.listOf(item.docId ?? docs.homeDocId, listId)?.name ?? "";
 }
 

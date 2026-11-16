@@ -22,6 +22,7 @@ import {
   isClosed,
   isClosedState,
   isEvent,
+  isInboxDated,
   isOpen,
   EVENT_STATES,
   statusValue,
@@ -63,7 +64,7 @@ export function ItemContextMenu(props: {
   onMoveToList?: (ids: readonly string[]) => void;
   /** Resolves a list id (in the item's doc) to its display label (see
    *  Workspace `listLabel`). */
-  listLabel?: (listId: string, docId?: string) => string;
+  listLabel?: (listId: string, docId?: string, dated?: boolean) => string;
   /** Mirrors the menu's open state to the host, which can't read it off
    *  its own trigger (`Row.tsx` overrides Kobalte's `data-expanded` with
    *  the row's inline-edit state). The row keeps its "…" button showing
@@ -87,10 +88,11 @@ export function ItemContextMenu(props: {
   const inFocusView = (): boolean =>
     props.viewKind === "focus" && !isDraftId(props.item().id);
   // "Show in <list>" where the row is away from its home list: the Focus
-  // lens, and the agenda's task rows (an event's home is the agenda).
+  // lens, and the agenda's rows that have a list (a dated item with
+  // none lives on the agenda).
   const canShowInList = (): boolean =>
     inFocusView() ||
-    (props.viewKind === "upcoming" && !isEvent(props.item()));
+    (props.viewKind === "upcoming" && !isInboxDated(props.item()));
 
   // If the right-clicked row is already in the multi-select, act on the
   // whole selection; otherwise act on this row alone. The onOpenChange
@@ -333,11 +335,11 @@ export function ItemContextMenu(props: {
             >
               <span>
                 {m().focus.showInList(
-                  // An event's home is the calendar, whatever its list.
-                  isEvent(props.item())
-                    ? m().nav.upcoming
-                    : (props.listLabel?.(props.item().listId, props.item().docId) ??
-                      props.item().listId),
+                  props.listLabel?.(
+                    props.item().listId,
+                    props.item().docId,
+                    !!props.item().when,
+                  ) ?? props.item().listId,
                 )}
               </span>
             </ContextMenu.Item>

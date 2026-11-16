@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use monoplan_core::{ItemLifecycle, LIST_INBOX, ListView, SearchKind};
 use serde::Serialize;
 
-use super::{Ctx, doc_tag};
+use super::{Ctx, doc_tag, lists::no_list_label};
 
 /// What a hit is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -114,7 +114,12 @@ pub fn find(cx: &Ctx, query: &str, limit: usize) -> anyhow::Result<Vec<FindHit>>
             };
             let list_name = match r.list_id.as_deref() {
                 None => None,
-                Some(LIST_INBOX) => Some("Inbox".to_string()),
+                // No list: Inbox, or the calendar for a dated item.
+                Some(LIST_INBOX) => {
+                    let dated = r.kind == SearchKind::Item
+                        && doc.get_item(&r.id).is_some_and(|i| i.when.is_some());
+                    Some(no_list_label(dated).to_string())
+                }
                 Some(_) => list.map(|l| l.name.clone()),
             };
             out.push(FindHit {

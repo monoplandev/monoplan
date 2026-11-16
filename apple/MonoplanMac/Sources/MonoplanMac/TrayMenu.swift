@@ -21,8 +21,9 @@ struct MenuLine: Equatable {
     /// on: its list, in its workspace (nil for Home's).
     let listId: String
     let docId: String?
-    /// An event: a click opens the Calendar, its home, not its list.
-    var event = false
+    /// A dated item with no list has no row in Inbox
+    /// (spec/inbox-plan.md): a click opens the Calendar instead.
+    var onCalendar = false
 }
 
 enum TodayMenu {
@@ -44,7 +45,7 @@ enum TodayMenu {
                 overdue: row.tone == .overdue,
                 listId: row.listId,
                 docId: row.docId,
-                event: row.event
+                onCalendar: row.listId == MainWindowModel.inbox && row.when != nil
             )
         }
     }

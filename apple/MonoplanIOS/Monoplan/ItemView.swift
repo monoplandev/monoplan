@@ -453,7 +453,12 @@ struct ItemView: View {
     /// own list when it is not among them (archived, or the calendar's),
     /// so there is always a row to tick.
     private func listOptions(_ item: ItemInfo) -> [ListRef] {
-        let lists = model.lists(inDoc: ref.docId)
+        // For an item with a date, "no list" is the Calendar, not Inbox.
+        let lists = model.lists(inDoc: ref.docId).map { list in
+            guard item.when != nil, list.listId == "inbox" else { return list }
+            return ListRef(
+                docId: list.docId, listId: list.listId, name: NoList.label(dated: true), calendar: true)
+        }
         if lists.contains(where: { $0.listId == item.listId }) { return lists }
         let own = ListRef(docId: ref.docId ?? "", listId: item.listId, name: item.listLabel, icon: item.listIcon)
         return lists + [own]
@@ -472,7 +477,9 @@ struct ItemView: View {
             edit(.list)
         } label: {
             HStack(spacing: 6) {
-                FieldRow(text: item.listLabel) { ListIcon(listId: item.listId, emoji: item.listIcon) }
+                FieldRow(text: item.listLabel) {
+                    ListIcon(listId: item.listId, emoji: item.listIcon, calendar: item.when != nil)
+                }
                 Spacer(minLength: 8)
                 SharedWorkspaceBadge(name: workspace)
                 Image(systemName: "chevron.up.chevron.down")

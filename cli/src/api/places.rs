@@ -78,7 +78,7 @@ pub fn placed_item_views<'a>(cx: &Ctx<'a>, query: &str, limit: usize) -> Vec<Pla
             if !item.is_open() || !placed {
                 continue;
             }
-            let list_name = names.get(&item.list_id);
+            let list_name = names.of_item(&item);
             rows.push((tag, item, list_name));
         }
     }

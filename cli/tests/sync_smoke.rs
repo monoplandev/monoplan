@@ -561,7 +561,7 @@ async fn events_converge_across_devices() {
     )
     .await;
 
-    // A: a dated item marked as an event, beside an ordinary task.
+    // A: a dated Inbox item marked as an event, beside an undated task.
     let engine_a = Engine::open_with_profile(profile_a, true).await.unwrap();
     let gig = engine_a.doc().add_item(LIST_INBOX, "gig").unwrap();
     let task = engine_a.doc().add_item(LIST_INBOX, "buy tickets").unwrap();
@@ -573,7 +573,8 @@ async fn events_converge_across_devices() {
     let fp_added = engine_a.doc().fingerprint();
     engine_a.flush().await.unwrap();
 
-    // B pulls on open: the event is on its agenda day and in no list.
+    // B pulls on open: the event is on its agenda day, and Inbox holds
+    // only what has no date.
     let engine_b = Engine::open_with_profile(profile_b, true).await.unwrap();
     assert!(engine_b.is_online());
     assert_eq!(engine_b.doc().fingerprint(), fp_added);
@@ -587,7 +588,7 @@ async fn events_converge_across_devices() {
     assert!(days[1].rows[0].item.is_event());
     assert_eq!(engine_b.doc().open_item_ids(LIST_INBOX), vec![task.clone()]);
 
-    // B makes the gig a task again: back in Inbox, date intact.
+    // B makes the gig a task again: date intact, so still not in Inbox.
     engine_b.doc().set_item_event(&gig, false).unwrap();
     let fp_task = engine_b.doc().fingerprint();
     engine_b.flush().await.unwrap();
@@ -601,8 +602,14 @@ async fn events_converge_across_devices() {
     assert_eq!(a_gig.when.as_deref(), Some("2026-09-12T19:00"));
     assert_eq!(
         engine_a2.doc().open_item_ids(LIST_INBOX),
-        vec![gig.clone(), task]
+        vec![task.clone()]
     );
     assert_eq!(engine_a2.doc().fingerprint(), fp_task);
+    // Clearing the date is what brings it back.
+    engine_a2.doc().set_item_when(&gig, None).unwrap();
+    assert_eq!(
+        engine_a2.doc().open_item_ids(LIST_INBOX),
+        vec![gig.clone(), task]
+    );
     engine_a2.flush().await.unwrap();
 }

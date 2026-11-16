@@ -30,8 +30,8 @@ pub enum AppEvent {
     /// New item appeared (local add or remote insert), or backfill on
     /// initial attach. `open_index` is the position within the *Open*
     /// projection of `list_id` (the four open workflow states;
-    /// Done/binned and events excluded) — `None` when the item is not
-    /// in it. UI
+    /// Done/binned excluded, and for Inbox dated items too) — `None`
+    /// when the item is not in it. UI
     /// layers that keep per-list Open arrays splice at `open_index`.
     /// There is no global item order in the v2+ schema, so there is no
     /// doc-wide index.
@@ -64,8 +64,7 @@ pub enum AppEvent {
         when: Option<String>,
         /// Pending date suggestion (`when`-shaped) or `None`.
         when_suggested: Option<String>,
-        /// The item is an event (flagged and dated). An event is in no
-        /// Open projection, so `open_index` is `None` beside `true`.
+        /// The item is an event (flagged and dated).
         event: bool,
         /// Duration in whole minutes, or `None`.
         duration: Option<u32>,
@@ -116,10 +115,16 @@ pub enum AppEvent {
     },
     /// Item's planned date changed. The payload is the raw value after
     /// the write (`YYYY-MM-DD` all-day or `YYYY-MM-DDTHH:MM` timed) —
-    /// `None` when cleared. Floating; format locally.
+    /// `None` when cleared. Floating; format locally. A dated item of
+    /// Inbox is not in Inbox's Open projection (`spec/inbox-plan.md`),
+    /// so on an Inbox item consumers drop it from the Open array when a
+    /// date arrives and, when the date goes, splice it back in at
+    /// `open_index`. `open_index` is `None` when the change brought the
+    /// item into no projection.
     ItemWhenChanged {
         id: String,
         when: Option<String>,
+        open_index: Option<usize>,
     },
     /// Item's pending date suggestion changed: written by a client that
     /// read a date phrase in the title, or cleared (`None`) by the
@@ -131,14 +136,10 @@ pub enum AppEvent {
     /// Item became or stopped being an event (`spec/events-plan.md`):
     /// the `event` flag was written, or the `when` beside a set flag
     /// came or went. `event` is the effective value after the change.
-    /// An event is in no list's Open projection, so consumers drop the
-    /// item from its list's Open array and, when `open_index` is `Some`
-    /// (an open item that stopped being an event), splice it back in
-    /// there.
+    /// Where the item shows is unaffected.
     ItemEventChanged {
         id: String,
         event: bool,
-        open_index: Option<usize>,
     },
     /// Item's duration changed. The payload is the value in whole
     /// minutes after the write — `None` when cleared (including the

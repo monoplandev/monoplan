@@ -432,8 +432,7 @@ export function WhenField(props: {
           onDurationChange={props.onDurationChange}
         />
         {/* What the date means: something to do (overdue once it has
-            passed) or something that happens (it goes by, and shows on
-            the calendar instead of in its list). */}
+            passed) or something that happens (it goes by). */}
         <label class="task-dialog-event-toggle" title={m().upcoming.eventHint}>
           <input
             type="checkbox"

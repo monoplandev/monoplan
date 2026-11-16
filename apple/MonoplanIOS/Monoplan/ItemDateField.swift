@@ -389,7 +389,7 @@ struct ItemDateEditor: View {
                 )) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Event")
-                        Text("Shows on the Calendar, not in its list, and never goes overdue.")
+                        Text("Goes by when its day passes, instead of going overdue.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }

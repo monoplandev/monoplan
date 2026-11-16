@@ -274,7 +274,8 @@ final class TrayController: NSObject, NSMenuDelegate {
     private func rowItem(_ line: MenuLine, noteTab: CGFloat) -> NSMenuItem {
         let item = NSMenuItem(title: "", action: #selector(openItem(_:)), keyEquivalent: "")
         item.target = self
-        item.representedObject = RowTarget(itemId: line.id, listId: line.listId, docId: line.docId, event: line.event)
+        item.representedObject = RowTarget(
+            itemId: line.id, listId: line.listId, docId: line.docId, onCalendar: line.onCalendar)
         var titleAttributes: [NSAttributedString.Key: Any] = [.font: Self.titleFont]
         if line.done { titleAttributes[.foregroundColor] = NSColor.secondaryLabelColor }
         let title = NSMutableAttributedString(string: Self.displayTitle(line), attributes: titleAttributes)
@@ -415,7 +416,8 @@ final class TrayController: NSObject, NSMenuDelegate {
     @objc private func openItem(_ sender: NSMenuItem) {
         guard let target = sender.representedObject as? RowTarget else { return }
         mainWindow.show(
-            list: target.listId, workspace: target.docId, item: target.itemId, event: target.event)
+            list: target.listId, workspace: target.docId, item: target.itemId,
+            onCalendar: target.onCalendar)
     }
 
     /// Quitting ends the engine too (`applicationShouldTerminate`), which
@@ -437,13 +439,13 @@ private final class RowTarget: NSObject {
     let itemId: String
     let listId: String
     let docId: String?
-    let event: Bool
+    let onCalendar: Bool
 
-    init(itemId: String, listId: String, docId: String?, event: Bool) {
+    init(itemId: String, listId: String, docId: String?, onCalendar: Bool) {
         self.itemId = itemId
         self.listId = listId
         self.docId = docId
-        self.event = event
+        self.onCalendar = onCalendar
     }
 }
 
