@@ -1601,7 +1601,9 @@ struct MainWindowView: View {
         let listName = model.agendaListName(row)
         let place = row.place?.label ?? ""
         let detailed = agendaRowDetailed(row)
-        return HStack(alignment: .center, spacing: 8) {
+        // The date and time sit on the text's line too, not the middle
+        // of a two-line row.
+        return HStack(alignment: .rowTitle, spacing: 8) {
             // The tick sits on the text's line, not the row's middle.
             HStack(alignment: .rowTitle, spacing: 8) {
                 ItemCheckButton(state: row.state) { model.setDone(workspace: row.docId, id: row.id, done: $0) }
@@ -1633,7 +1635,12 @@ struct MainWindowView: View {
             }
             Spacer(minLength: 8)
             switch row.tone {
-            case .overdue: Text("Overdue").font(.footnote).foregroundStyle(.red).fixedSize()
+            case .overdue:
+                // The day it was scheduled for, as the other stamps are
+                // set; the Overdue header already says it is late.
+                if let day = Self.overdueDay(row) {
+                    Text(verbatim: day).foregroundStyle(.secondary).monospacedDigit().fixedSize()
+                }
             case .warning: Text("Due today").font(.footnote).foregroundStyle(.orange).fixedSize()
             case .neutral: EmptyView()
             }
@@ -1794,6 +1801,20 @@ struct MainWindowView: View {
         }
         .listStyle(.inset)
         .scrollContentBackground(.hidden)
+    }
+
+    /// An overdue Calendar row's scheduled day (of the field that placed
+    /// it), with its year once that differs. Nil for one scheduled
+    /// earlier today: its time alone says when.
+    static func overdueDay(_ row: AgendaEntry, now: Date = Date(), calendar: Calendar = .current) -> String? {
+        guard let scheduled = row.placedBy == .deadline ? row.deadline : row.when,
+              let date = Agenda.start(of: scheduled, calendar: calendar),
+              !calendar.isDate(date, inSameDayAs: now)
+        else { return nil }
+        if calendar.isDate(date, equalTo: now, toGranularity: .year) {
+            return date.formatted(.dateTime.day().month(.abbreviated))
+        }
+        return date.formatted(.dateTime.day().month(.abbreviated).year())
     }
 
     /// A Done row's moment (unix ms): the time of day for today, the
