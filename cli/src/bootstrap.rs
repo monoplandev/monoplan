@@ -41,13 +41,16 @@ pub async fn open_or_init() -> anyhow::Result<Profile> {
 /// handed its path).
 pub async fn open_or_init_at(dir: PathBuf) -> anyhow::Result<Profile> {
     if let Some(profile) = Profile::active_at(dir.clone()) {
-        return Ok(profile);
+        if !profile.orphaned() {
+            return Ok(profile);
+        }
+        discard_if_orphaned(&profile).await?;
     }
     let profile = Profile::create_at(dir)?;
     // Hold the profile while it is written, so a second first command
     // racing this one waits here and finds it, and no auto-spawned
     // daemon boots a half-written one. Nothing can be hosting it yet
-    // (no `secrets.toml`), so this never has to stop anything.
+    // (no profile marker), so this never has to stop anything.
     let claim = crate::client::claim(&profile.dir).await?;
     if profile.exists() {
         return Ok(profile);
@@ -59,6 +62,24 @@ pub async fn open_or_init_at(dir: PathBuf) -> anyhow::Result<Profile> {
         profile.dir.display()
     );
     Ok(profile)
+}
+
+/// A keychain-backed profile whose keys stayed on another device (a
+/// restore, a migration to a new phone) is ciphertext nothing here can
+/// open: purge it, so the caller starts fresh and an account's data
+/// comes back at sign-in. Checked under the claim, which also stops
+/// anything hosting it.
+async fn discard_if_orphaned(profile: &Profile) -> anyhow::Result<()> {
+    let claim = crate::client::claim(&profile.dir).await?;
+    if profile.orphaned() {
+        profile.purge()?;
+        eprintln!(
+            "discarded the workspace in {}: its keys are not in this device's keychain",
+            profile.dir.display()
+        );
+    }
+    drop(claim);
+    Ok(())
 }
 
 /// Write a fresh local-only workspace into `profile`: seed snapshot,
@@ -110,4 +131,44 @@ pub fn local_only_doc(profile: &Profile) -> anyhow::Result<Option<(DocId, Dek)>>
     let account = storage.read_account()?;
     let dek = crate::keystore::dek_for_doc(&secrets, account.primary_doc_id)?;
     Ok(Some((account.primary_doc_id, dek)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{ConfigError, Vault};
+    use std::sync::Arc;
+
+    /// A keychain that holds nothing and keeps nothing: every device
+    /// but the one a profile was written on.
+    struct EmptyVault;
+
+    impl Vault for EmptyVault {
+        fn get(&self, _: &str) -> Result<Option<Vec<u8>>, ConfigError> {
+            Ok(None)
+        }
+        fn set(&self, _: &str, _: &[u8]) -> Result<(), ConfigError> {
+            Ok(())
+        }
+        fn delete(&self, _: &str) -> Result<(), ConfigError> {
+            Ok(())
+        }
+    }
+
+    /// An orphaned profile (`Profile::orphaned`) is purged under the
+    /// claim, leaving the dir ready for a fresh bootstrap.
+    #[tokio::test]
+    async fn orphaned_profile_is_discarded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("profile");
+        let profile = Profile::with_vault(dir.clone(), Arc::new(EmptyVault));
+        std::fs::create_dir_all(&dir).unwrap();
+        init_local(&profile).unwrap();
+        assert!(profile.orphaned());
+        assert!(profile.db_path().exists());
+
+        discard_if_orphaned(&profile).await.unwrap();
+        assert!(!profile.exists());
+        assert!(!profile.db_path().exists());
+    }
 }

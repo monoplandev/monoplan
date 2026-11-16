@@ -1,19 +1,18 @@
 // swift-tools-version:5.9
 //
-// MonoplanMac — the macOS menubar app. The app *runs the engine*
-// in-process (`Engine` from MonoplanCore, the same Rust loop as
-// `monoplan daemon`; spec/daemon-plan.md, amended 2026-10-27) and its
-// tray and window reach it through the typed calls
-// (spec/swift-bindings-plan.md, phase 4); the socket is for the CLI.
-// Run `bun run build:apple` once before building: MonoplanCore wraps a
-// prebuilt XCFramework.
+// MonoplanMac — the macOS menubar app's package half. The app itself
+// is built by `Monoplan.xcodeproj` beside this file (apple/README.md),
+// whose one target compiles `Sources/MonoplanMac` and links
+// `MonoplanMacKit` from here and MonoplanCore; run it from the repo
+// root with `bun run mac`.
 //
 // Two targets: `MonoplanMacKit` (Foundation-only helpers with no
-// MonoplanCore dependency) and the `MonoplanMac` executable (status item, menu, window, settings). Run
-// from the repo root with `bun run mac`; `swift test --package-path
-// apple/MonoplanMac` runs both test targets. `MonoplanMacTests` covers
-// the executable's pure code (the tray's rows) and so links
-// MonoplanCore: it needs `build:apple` run first.
+// MonoplanCore dependency) and the `MonoplanMac` executable over the
+// app's sources. The executable is here for tests only, nothing ships
+// from it: `MonoplanMacTests` covers the app's pure code (the tray's
+// rows) and needs a module to import. `swift test --package-path
+// apple/MonoplanMac` runs both test targets; the second links
+// MonoplanCore, so it needs `bun run build:apple` run first.
 //
 // `MonoplanMacKit` is also a product: the iOS app and its widget
 // (`apple/MonoplanIOS`) consume it for `ProfileLocation`, `WhenPhrase`

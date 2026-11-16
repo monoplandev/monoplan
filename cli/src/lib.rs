@@ -10,6 +10,8 @@ pub mod commands;
 pub mod config;
 pub mod daemon;
 pub mod ipc;
+#[cfg(target_vendor = "apple")]
+pub mod keychain;
 pub mod keystore;
 pub mod net;
 pub mod peer;

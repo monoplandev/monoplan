@@ -158,11 +158,23 @@ Single account per install. One dir under XDG paths (`~/.local/share/monoplan/` 
 - `engine.lock` — flock held by the running daemon (never unlinked; see `spec/peer-id-plan.md` for the rules). `peer-<n>.lock` — the peer-id slot leases.
 - `engine.sock` — the daemon's Unix socket (mode 0600; falls back to a hash-named socket in the temp dir when the profile path is too long for `sun_path`). `engine.log` — stderr of a detached daemon, or an app's in-process host's log in its own profile; at each engine start a file over 1 MiB is cut back to its last 256 KiB.
 - `config.toml` — `{ server_url }`. Written by signup/login/recover; absent on a local-only workspace, which has no server to name. Operator-editable.
-- `secrets.toml` — optional `device_token` plus one `[docs."<doc_id>"] dek_hex = "…"` table per doc this install can open, in cleartext. The DEK is a doc key (`encryption.md`): login/recover store one entry per membership (the primary's unwrapped with the password or recovery KEK, the rest with the primary's DEK — the Home DEK); a local-only workspace holds its one minted doc; `monoplan auth password` re-wraps only the primary entry, since every other server-side wrap is under the Home DEK. Its presence is the "profile exists" marker (`Profile::active`), and the token the "has an account" one (`Secrets::has_account`): server-backed verbs fail with `ConfigError::NoAccount` without it.
+- `secrets.toml` — optional `device_token` plus one `[docs."<doc_id>"] dek_hex = "…"` table per doc this install can open, in cleartext (mode 0600). The DEK is a doc key (`encryption.md`): login/recover store one entry per membership (the primary's unwrapped with the password or recovery KEK, the rest with the primary's DEK — the Home DEK); a local-only workspace holds its one minted doc; `monoplan auth password` re-wraps only the primary entry, since every other server-side wrap is under the Home DEK. Its presence is the "profile exists" marker (`Profile::active`), and the token the "has an account" one (`Secrets::has_account`): server-backed verbs fail with `ConfigError::NoAccount` without it. This is the **file store**: the CLI, and an Apple build that cannot use the keychain.
+- `keychain.toml` — the **keychain store**'s marker, in place of `secrets.toml`: `id` (the keychain item's account name, a random uuid minted with the profile) and `has_account`. Nothing secret. It is the "profile exists" marker there.
 
-Secrets in OS keychain (`security` on macOS, `libsecret` on linux):
-- `monoplan:<account_id>:token` — device auth token
-- `monoplan:<account_id>:dek` — DEK (only when "stay logged in" is chosen; otherwise re-derived from password each session)
+### Secret stores (built 2026-11-16)
+
+The same `Secrets` TOML lives in one of two places, chosen per process (`cli/src/config.rs`):
+
+- **File** (default): `secrets.toml` above. The key sits beside the ciphertext it opens, so the local encryption adds nothing over file permissions and disk encryption. The CLI is still here; `security` / `libsecret` for it are not built (an unsigned binary gets the legacy macOS keychain, whose per-item ACL prompts on every rebuild).
+- **Keychain** (the iOS and macOS apps, after `monoplan-ffi::use_keychain` at launch): one generic-password item per profile in the data protection keychain (`cli/src/keychain.rs`), service `app.monoplan.profile`, account = the marker's `id`, `AfterFirstUnlockThisDeviceOnly`, not synchronizable, in the app's default access group. So the keys are in no backup, not in iCloud Keychain, never restored onto another device, readable by a background sync once the device has been unlocked since boot, and unreadable by the widget or any other app. What this buys: a copy of the profile dir is ciphertext without a key. What it does not: code running as the user while the engine is up still reaches the plaintext through the engine.
+
+Rules:
+
+- **Availability.** The data protection keychain needs an application identifier, which only a build signed with a provisioning profile has. Every iOS build does. The Mac's default build is signed that way since 2026-11-16 (`apple/README.md` "Signing"); an ad-hoc Mac build (`MONOPLAN_SIGN=adhoc`) is not: `use_keychain` returns false and that process stays on the file store. The probe is a delete of an absent item, not a read: on macOS an unentitled read answers "no such item" like an entitled one and only writes and deletes fail with `errSecMissingEntitlement` (measured 2026-11-16).
+- **Migration.** Under the keychain store a `secrets.toml` is moved on its first read: keychain item, then marker, then the file is removed, so a crash in between repeats the move.
+- **Keys left behind.** A profile dir that arrives on another device (a restore, a migration to a new phone) has its marker and no item. When the keychain answers "no such item", `bootstrap::open_or_init_at` (the apps' `ensure_local_workspace`) purges the dir and bootstraps a fresh local-only workspace; the user signs in again. A keychain that cannot answer (locked before first unlock) is an error, never grounds to purge.
+- **The other direction.** A file-store process that finds `keychain.toml` and no `secrets.toml` (an ad-hoc Mac build opening a profile a provisioned build wrote) fails with `ConfigError::KeychainUnavailable` and changes nothing.
+- **Sign-out** deletes the item with the dir (`Profile::purge`).
 
 Recovery code is **never** persisted by the client — shown once at signup, user records it themselves.
 

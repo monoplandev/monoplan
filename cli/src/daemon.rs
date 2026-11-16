@@ -1327,7 +1327,7 @@ impl Host {
         let Some((profile, server_url)) = self.engine.connect_params() else {
             return;
         };
-        let profile = Profile::new(profile.dir.clone());
+        let profile = profile.clone();
         let server_url = server_url.to_string();
         self.connecting = Some(tokio::spawn(async move {
             match tokio::time::timeout(CONNECT_TIMEOUT, handshake(&profile, &server_url)).await {

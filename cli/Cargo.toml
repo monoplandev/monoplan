@@ -47,6 +47,12 @@ libc = "0.2"
 # feature on (`spec/swift-bindings-plan.md`).
 uniffi = { version = "0.32", optional = true }
 
+# The keychain as the apps' secret store (`src/keychain.rs`); already
+# in the tree through reqwest's platform verifier. `OSX_10_15` is the
+# data protection keychain on macOS.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+security-framework = { version = "3.7", features = ["OSX_10_15"] }
+
 [features]
 uniffi = ["dep:uniffi"]
 

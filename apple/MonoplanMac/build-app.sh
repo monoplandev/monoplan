@@ -1,30 +1,40 @@
 #!/usr/bin/env bash
 #
-# Build Monoplan.app, the menubar app bundle, from the SwiftPM package.
-# This is the only way the app gets its icon: AppKit reads an app icon
-# from the bundle's Info.plist and Assets.car, so a bare `swift run`
-# binary shows the generic executable icon in Finder, Login Items,
-# Force Quit and so on.
+# Build Monoplan.app, the menubar app, from Monoplan.xcodeproj and leave
+# a copy at a stable path:
 #
 #   apple/MonoplanMac/.build/Monoplan.app     (gitignored with .build/)
 #
-# The icon is the Icon Composer document `apple/icon.icon`. actool
-# compiles it straight from that file (no asset catalog needed) into
-# Assets.car (the layered icon macOS 26 renders) plus icon.icns (the
-# flat fallback for macOS 14 and 15), and emits the two Info.plist keys
-# that name them.
+# The project does the bundling (Info.plist, the icon from
+# apple/icon.icon, the String Catalog, the sandbox entitlements,
+# signing). This script adds what Xcode does not know: the version from
+# Cargo.toml, the commit for the Settings Build row, the XCFramework
+# when it is missing, and the strings check.
+#
+# Signing. By default the build is signed for development by the
+# project's team with a provisioning profile Xcode manages
+# (-allowProvisioningUpdates and -allowProvisioningDeviceRegistration:
+# the first build registers the bundle id
+# and this Mac with the team, and needs that team's account signed in
+# under Xcode > Settings > Accounts). That is the build that keeps the
+# profile's keys in the keychain (spec/cli.md "Secret stores").
+#
+#   MONOPLAN_SIGN=adhoc   "Sign to Run Locally": no team, no account, no
+#                         profile. Runs on this Mac, sandboxed, with the
+#                         keys in secrets.toml; cannot open a profile a
+#                         team-signed build moved into the keychain, so
+#                         give it MONOPLAN_APP_DATA_DIR=dev.
+#   DEVELOPMENT_TEAM=<id> another team's id, for a checkout that is not
+#                         the project's own.
 #
 # Usage: apple/MonoplanMac/build-app.sh [-c debug|release]  (default debug)
 # Run from anywhere: `bun run mac` builds this and launches the binary
-# inside the bundle, so dev runs carry the icon too and stderr stays
-# attached.
+# inside the bundle, so stderr stays attached.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PKG="$ROOT/apple/MonoplanMac"
-ICON="$ROOT/apple/icon.icon"
-STRINGS="$PKG/Localizable.xcstrings"
 
 CONFIG=debug
 while [ $# -gt 0 ]; do
@@ -33,13 +43,18 @@ while [ $# -gt 0 ]; do
     *) echo "usage: $0 [-c debug|release]" >&2; exit 2 ;;
   esac
 done
+case "$CONFIG" in
+  debug) XCCONFIG=Debug ;;
+  release) XCCONFIG=Release ;;
+  *) echo "usage: $0 [-c debug|release]" >&2; exit 2 ;;
+esac
 
-# actool and xcstringstool ship with full Xcode, not the Command Line Tools.
+# xcodebuild ships with full Xcode, not the Command Line Tools.
 if ! xcrun --find actool >/dev/null 2>&1; then
   if [ -d /Applications/Xcode.app ]; then
     export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
   else
-    echo "error: actool needs full Xcode (found only Command Line Tools)." >&2
+    echo "error: building the app needs full Xcode (found only Command Line Tools)." >&2
     exit 1
   fi
 fi
@@ -67,89 +82,54 @@ fi
 # The String Catalog is the one source of UI text in both languages
 # (apple/README.md "Localisation"). check-strings.ts refuses a source
 # string that is missing from it or has no Spanish, before anything
-# slow runs.
+# slow runs. Not a build phase: Xcode's script sandbox and PATH do not
+# suit bun, so a build started from Xcode skips it.
 echo ">> check-strings"
 bun "$PKG/check-strings.ts"
 
-echo ">> swift build ($CONFIG)"
-swift build --package-path "$PKG" -c "$CONFIG" --product MonoplanMac
-BIN="$(swift build --package-path "$PKG" -c "$CONFIG" --show-bin-path)/MonoplanMac"
+SIGNING=()
+case "${MONOPLAN_SIGN:-team}" in
+  adhoc) SIGNING=(CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= CODE_SIGN_ENTITLEMENTS=Monoplan-adhoc.entitlements) ;;
+  team)
+    # The second flag lets the first build register this Mac with the
+    # team; without it xcodebuild stops at "device isn't registered".
+    SIGNING=(-allowProvisioningUpdates -allowProvisioningDeviceRegistration)
+    if [ -n "${DEVELOPMENT_TEAM:-}" ]; then SIGNING+=("DEVELOPMENT_TEAM=$DEVELOPMENT_TEAM"); fi
+    ;;
+  *) echo "error: MONOPLAN_SIGN is 'team' (default) or 'adhoc'" >&2; exit 2 ;;
+esac
 
-APP="$PKG/.build/Monoplan.app"
-CONTENTS="$APP/Contents"
-rm -rf "$APP"
-mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
-# SwiftPM stamps the binary as built against the deployment target's
-# SDK (14.0), not the one it was compiled with. AppKit reads that stamp
-# to pick the window chrome: under 26 it draws the old title bar,
-# sidebar and traffic lights while laying the toolbar out for the new
-# ones, so the bar sits a few points off its panes and nothing is glass.
-# Restamp with the real SDK; the minimum system stays 14.0. Before
-# signing, which this invalidates.
-xcrun vtool -set-build-version macos 14.0 "$(xcrun --show-sdk-version)" -replace \
-  -output "$CONTENTS/MacOS/MonoplanMac" "$BIN"
-
-# SwiftPM cannot put the catalog in Bundle.main, so compile it here:
-# xcstringstool emits one <lang>.lproj/Localizable.strings per
-# translated language. The source language gets an empty en.lproj so
-# the bundle lists two localizations, which is what makes macOS offer
-# the app in System Settings › Language & Region › Applications.
-echo ">> xcstringstool $STRINGS"
-xcrun xcstringstool compile "$STRINGS" --output-directory "$CONTENTS/Resources"
-mkdir -p "$CONTENTS/Resources/en.lproj"
-
-echo ">> actool $ICON"
-PARTIAL="$(mktemp -t monoplan-icon-plist)"
-# actool reports on stdout even when it fails; keep it quiet on success
-# and show everything on failure.
-if ! ACTOOL_OUT="$(xcrun actool "$ICON" \
-  --compile "$CONTENTS/Resources" \
-  --platform macosx \
-  --minimum-deployment-target 14.0 \
-  --app-icon icon \
-  --output-partial-info-plist "$PARTIAL" \
-  --output-format human-readable-text \
-  --notices --warnings --errors 2>&1)"; then
-  echo "$ACTOOL_OUT" >&2
+DERIVED="$PKG/.build/xcode"
+LOG="$DERIVED/build.log"
+mkdir -p "$DERIVED"
+echo ">> xcodebuild ($XCCONFIG, ${MONOPLAN_SIGN:-team} signing)"
+# xcodebuild narrates every step; keep the log and show it on failure.
+if ! xcodebuild \
+  -project "$PKG/Monoplan.xcodeproj" -scheme Monoplan -configuration "$XCCONFIG" \
+  -derivedDataPath "$DERIVED" \
+  "MARKETING_VERSION=$VERSION" "CURRENT_PROJECT_VERSION=$BUILD_NUMBER" \
+  "MONOPLAN_GIT_COMMIT=$GIT_COMMIT" \
+  "${SIGNING[@]}" build >"$LOG" 2>&1; then
+  grep -E "error:|BUILD FAILED" "$LOG" >&2 || tail -40 "$LOG" >&2
+  echo "error: xcodebuild failed; full log in $LOG" >&2
+  if [ "${MONOPLAN_SIGN:-team}" = team ]; then
+    echo "       if this is a signing error, MONOPLAN_SIGN=adhoc builds without a team (see the header)" >&2
+  fi
   exit 1
 fi
 
-cat > "$CONTENTS/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleDevelopmentRegion</key><string>en</string>
-  <key>CFBundleExecutable</key><string>MonoplanMac</string>
-  <key>CFBundleIdentifier</key><string>app.monoplan.mac</string>
-  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-  <key>CFBundleName</key><string>Monoplan</string>
-  <key>CFBundleDisplayName</key><string>Monoplan</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>$VERSION</string>
-  <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
-  <key>MonoplanGitCommit</key><string>$GIT_COMMIT</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
-  <key>LSUIElement</key><true/>
-  <key>NSHighResolutionCapable</key><true/>
-  <key>NSHumanReadableCopyright</key><string>Monoplan</string>
-</dict>
-</plist>
-PLIST
-# Merge CFBundleIconFile / CFBundleIconName from actool rather than
-# hard-coding them, so a renamed .icon only changes the --app-icon above.
-/usr/libexec/PlistBuddy -c "Merge $PARTIAL" "$CONTENTS/Info.plist" >/dev/null
-rm -f "$PARTIAL"
-printf 'APPL????' > "$CONTENTS/PkgInfo"
+# The stable path the bun scripts and install-app.sh use. ditto keeps
+# the signature, resource forks and permissions.
+APP="$PKG/.build/Monoplan.app"
+rm -rf "$APP"
+ditto "$DERIVED/Build/Products/$XCCONFIG/Monoplan.app" "$APP"
 
-# Moves an unsandboxed build's profile into the container on the first
-# sandboxed launch (see the file).
-cp "$PKG/container-migration.plist" "$CONTENTS/Resources/container-migration.plist"
-
-# Ad-hoc signatures: unsigned bundles are refused by Login Items and get
-# a fresh TCC identity every build. The entitlements turn on the App
-# Sandbox in every configuration, so dev runs hit the same walls the
-# store build will.
-codesign --force --sign - --entitlements "$PKG/Monoplan.entitlements" "$APP" >/dev/null
+# A team-signed build is only worth the name if it came out
+# provisioned: the keychain needs the application identifier a profile
+# carries, and Xcode signs a Mac app without one whenever nothing in
+# its entitlements demands it.
+if [ "${MONOPLAN_SIGN:-team}" = team ] && [ ! -f "$APP/Contents/embedded.provisionprofile" ]; then
+  echo "warning: signed without a provisioning profile; this build will keep its keys in secrets.toml" >&2
+fi
 
 echo ">> $APP"

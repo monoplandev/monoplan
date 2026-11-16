@@ -609,7 +609,7 @@ impl Engine {
     pub(crate) fn memberships_params(&self) -> Option<(Profile, String)> {
         self.server_url
             .as_deref()
-            .map(|url| (Profile::new(self.profile.dir.clone()), url.to_string()))
+            .map(|url| (self.profile.clone(), url.to_string()))
     }
 
     /// Open every membership in `memberships` this engine does not hold

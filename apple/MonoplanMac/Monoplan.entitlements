@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  The Mac app's entitlements, signed in by build-app.sh. The App Sandbox
+  The Mac app's entitlements, signed in by the Xcode target
+  (automatic signing adds the application and team identifiers). The App Sandbox
   (required on the Mac App Store) with outgoing network only: the sync
   server over HTTPS / WebSocket and MapKit's tiles. Everything the app
   writes on its own is the profile under Application Support, which the
@@ -17,5 +18,18 @@
 	<true/>
 	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
+	<!--
+	  The keychain group the profile's keys live in (spec/cli.md "Secret
+	  stores"), which is also what makes this a provisioned build: a
+	  Mac app with no restricted entitlement is signed with the
+	  certificate alone, gets no provisioning profile and so no
+	  application identifier, and the data protection keychain refuses
+	  it. Not in Monoplan-adhoc.entitlements: without a profile to
+	  authorise it, macOS kills the app at launch.
+	-->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)app.monoplan.mac</string>
+	</array>
 </dict>
 </plist>

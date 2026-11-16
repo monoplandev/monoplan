@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The keys Xcode cannot generate from build settings; the rest of the
+  app's Info.plist comes from the target's INFOPLIST_KEY_* settings
+  (GENERATE_INFOPLIST_FILE merges the two). MONOPLAN_GIT_COMMIT is
+  passed by build-app.sh and is empty in a build started from Xcode;
+  Settings hides its Build row then.
+-->
+<plist version="1.0">
+<dict>
+	<key>MonoplanGitCommit</key>
+	<string>$(MONOPLAN_GIT_COMMIT)</string>
+</dict>
+</plist>

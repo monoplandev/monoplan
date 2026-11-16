@@ -56,6 +56,15 @@ final class EngineController {
 
     init(location: ProfileLocation) {
         self.location = location
+        // The profile's keys go in the keychain, not in a file beside
+        // the data they open (spec/cli.md "Local state"). Before any
+        // other call into the core, which reads the store this picks.
+        // A profile still on secrets.toml is moved on its first read;
+        // every iOS build has the
+        // application identifier it needs, so false here is a fault.
+        if !MonoplanCore.useKeychain() {
+            NSLog("MonoplanIOS: keychain unavailable; keys stay in secrets.toml")
+        }
     }
 
     /// Start the engine, and keep one running from here on.

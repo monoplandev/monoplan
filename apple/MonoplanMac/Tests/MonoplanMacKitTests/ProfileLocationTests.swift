@@ -33,4 +33,19 @@ final class ProfileLocationTests: XCTestCase {
         try "device_token = \"tok\"\n\n[docs.abc]\ndek = \"00\"\n".write(to: secrets, atomically: true, encoding: .utf8)
         XCTAssertTrue(location.hasAccount)
     }
+
+    /// A keychain-backed profile is `keychain.toml`, which says whether
+    /// there is an account; the token is not in the dir.
+    func testProfileAndAccountFromKeychainMarker() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("monoplan-loc-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let location = ProfileLocation(dir: dir)
+        let marker = dir.appendingPathComponent("keychain.toml")
+        try "id = \"0193\"\nhas_account = false\n".write(to: marker, atomically: true, encoding: .utf8)
+        XCTAssertTrue(location.hasProfile)
+        XCTAssertFalse(location.hasAccount)
+        try "id = \"0193\"\nhas_account = true\n".write(to: marker, atomically: true, encoding: .utf8)
+        XCTAssertTrue(location.hasAccount)
+    }
 }

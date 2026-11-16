@@ -31,9 +31,9 @@ commands. Reasons, in order:
    live doc per peer id. A resident owner is the cleanest way to
    satisfy it; the slot pool becomes the contention path, not the norm.
 3. **Key containment.** The DEK is unlocked once into daemon memory.
-   Clients never see it. (The cleartext `secrets.toml` stays for now;
-   moving it behind the keychain is a separate step the daemon makes
-   possible.)
+   Clients never see it. (The CLI's cleartext `secrets.toml` stays for
+   now; the Apple apps keep theirs in the keychain since 2026-11-16,
+   `spec/cli.md` §Secret stores.)
 4. **Mixed mode is a hazard, not a convenience.** A one-shot process
    writing WAL rows beside a live daemon does not corrupt anything (the
    flock pool prevents the peer-id collision) but the daemon's

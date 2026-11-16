@@ -55,7 +55,7 @@ use monoplan_cli::api::{
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum EngineError {
-    /// No `secrets.toml` in the profile dir: nothing to run.
+    /// No profile in the profile dir: nothing to run.
     #[error("not logged in")]
     NotLoggedIn,
     /// Something else holds `engine.lock`: another copy of the app, or
@@ -145,6 +145,19 @@ pub fn ensure_local_workspace(profile_dir: String) -> Result<(), EngineError> {
         .map_err(|e| EngineError::Failed {
             message: format!("{e:#}"),
         })
+}
+
+/// Keep the profile's DEKs and device token in the keychain rather
+/// than in `secrets.toml` (`monoplan_cli::config::use_keychain`,
+/// `spec/cli.md` §Local state): this device only, readable after the
+/// first unlock. The app calls it once at launch, before anything else
+/// here; a profile still on the file is moved on its first read. False
+/// when this build cannot use the keychain (no application identifier:
+/// an ad-hoc signed Mac build, a test host), and the profile then
+/// stays on the file.
+#[uniffi::export]
+pub fn use_keychain() -> bool {
+    monoplan_cli::config::use_keychain()
 }
 
 /// What the profile holds, for the app's menus and sheets: nothing,

@@ -169,6 +169,7 @@ launch" (on by default) opens it with the app.
 ```sh
 bun run build:apple                                   # once, and after core changes: the XCFramework the app links
 bun run mac                                           # build Monoplan.app (debug) and run the binary inside it
+MONOPLAN_SIGN=adhoc bun run mac                       # the same without a signing team (keys stay in secrets.toml; see Signing)
 bun run mac:app                                       # build Monoplan.app (release) and `open` it
 bun run mac:install                                   # build release, quit a running Monoplan, install to /Applications (`-d ~/Applications`, `--no-open`) and launch
 swift test --package-path apple/MonoplanMac           # Kit and tray-row tests, no engine started
@@ -177,7 +178,7 @@ MONOPLAN_MAC_DEBUG=1 bun run mac                      # log state and rows to st
 ```
 
 The app is sandboxed in every build (`Monoplan.entitlements`: App
-Sandbox plus outgoing network, signed in by `build-app.sh`), so its
+Sandbox plus outgoing network, signed in by the Xcode target), so its
 Application Support is the container's:
 `~/Library/Containers/app.monoplan.mac/Data/Library/Application Support/app.monoplan.mac`
 is the profile. A relative `MONOPLAN_APP_DATA_DIR` lands beside it; an
@@ -185,6 +186,16 @@ absolute one outside the container is refused by the sandbox. On the
 first sandboxed launch `container-migration.plist` moves a profile an
 earlier unsandboxed build left at `~/Library/Application Support/app.monoplan.mac`
 into the container.
+
+The profile's keys (the DEKs and the device token) belong in the
+keychain, not in `secrets.toml` beside the data (`spec/cli.md` "Secret
+stores"): both apps call `MonoplanCore.useKeychain()` when their
+`EngineController` is made, and a profile still on the file is moved
+on its first read. That needs a build signed with a provisioning
+profile, which every iOS build is and the Mac's default build is (see
+Signing, below). An ad-hoc Mac build has no application identifier, so
+`useKeychain()` is false, one `NSLog` line says so and its keys stay
+in `secrets.toml`.
 
 The in-app engine logs to `engine.log` in the profile dir (the
 container path above by default; `RUST_LOG`
@@ -194,22 +205,60 @@ Sync row and in `monoplan daemon status` ("offline; never synced
 (connect failed: …)"). The app's own `NSLog` lines go to the unified
 log: `log show --predicate 'process == "MonoplanMac"' --last 1h`.
 
-`apple/MonoplanMac/build-app.sh` lays out `apple/MonoplanMac/.build/Monoplan.app`
-(gitignored): the SwiftPM binary (which links MonoplanCore; the script
-runs `build-xcframework.sh` when the XCFramework is missing), an
-Info.plist (`app.monoplan.mac`,
-`LSUIElement`, version from the workspace `Cargo.toml`), the container
-migration plist, an ad-hoc signature carrying the sandbox entitlements,
-and the app icon. The icon is the Icon Composer document
-`apple/icon.icon`; `actool` compiles it straight from that file into
-`Assets.car` (the layered icon macOS 26 renders) and `icon.icns` (the
-flat fallback for macOS 14 and 15). Edit the icon in Icon Composer and
-rebuild; the iOS project references the same document (below), nothing
-else does. `bun run mac` runs the binary
-*inside* the bundle rather than `swift run`, so dev runs show the icon
-in Finder, Login Items and Force Quit while stderr stays on the
-terminal. The menu bar glyph is separate: a template image drawn in
-`main.swift`.
+The app is built by `apple/MonoplanMac/Monoplan.xcodeproj` (since
+2026-11-16; before that `build-app.sh` assembled the bundle by hand
+around a `swift build` binary). One target, `Monoplan`, in the iOS
+project's shape: its sources are the file-system-synchronized folder
+`Sources/MonoplanMac` (a new Swift file needs no project edit), and it
+links `MonoplanCore` and `MonoplanMacKit` from the two local packages.
+The target carries what the script used to write: the Info.plist
+(`app.monoplan.mac`, `LSUIElement`; generated from build settings,
+plus `Info.plist` for the one key that cannot be), the sandbox
+entitlements, the container migration plist, the String Catalog and
+the app icon. The executable inside `Monoplan.app` is still
+`MonoplanMac`, so the process name, Login Items and log predicates are
+unchanged. The icon is the Icon Composer document `apple/icon.icon`,
+compiled into `Assets.car` (the layered icon macOS 26 renders) and
+`icon.icns` (the flat fallback for macOS 14 and 15). Edit the icon in
+Icon Composer and rebuild; the iOS project references the same
+document (below), nothing else does. The menu bar glyph is separate: a
+template image drawn in `main.swift`.
+
+`apple/MonoplanMac/build-app.sh` wraps `xcodebuild` for the command
+line: it passes the version from the workspace `Cargo.toml` and the
+commit for the Settings Build row, runs `build-xcframework.sh` when
+the XCFramework is missing, runs `check-strings.ts`, and copies the
+product to `apple/MonoplanMac/.build/Monoplan.app` (gitignored; derived
+data is `.build/xcode`, with `build.log` beside it). `bun run mac`
+runs the binary inside that bundle, so stderr stays on the terminal. A
+build started from Xcode skips the version, the commit (Settings hides
+the Build row) and the strings check.
+
+`Package.swift` still declares the `MonoplanMac` executable over the
+same sources, for `swift test` only: `MonoplanMacTests` covers the
+tray's rows and needs a module to import. Nothing ships from it.
+
+**Signing.** The target signs automatically for the project's team
+(`DEVELOPMENT_TEAM` in the project; the environment variable overrides
+it in `build-app.sh`). The first build needs that team's account under
+Xcode › Settings › Accounts: Xcode, or `xcodebuild
+-allowProvisioningUpdates` from the script, registers `app.monoplan.mac`
+and this Mac with the team and makes the development profile, which it
+renews on its own. The profile is there because `Monoplan.entitlements`
+claims a keychain access group: a Mac app with no restricted
+entitlement is signed with the certificate alone, no profile, and
+would be refused by the keychain like an ad-hoc build (found
+2026-11-16; `build-app.sh` warns when a team build comes out without
+`embedded.provisionprofile`). A build signed that way has an application
+identifier, so it keeps its keys in the keychain, and its identity is
+stable across rebuilds (Login Items and privacy grants stop being
+asked again). `MONOPLAN_SIGN=adhoc` builds "Sign to Run Locally"
+instead: no team, account or profile, still sandboxed, keys in
+`secrets.toml`, and `Monoplan-adhoc.entitlements` (the same minus the
+keychain group, which macOS kills an unprovisioned app for claiming). The two cannot share a profile once the signed build
+has moved the keys: the ad-hoc one fails with a message and changes
+nothing, so run it on `MONOPLAN_APP_DATA_DIR=dev`. App Store and
+Developer ID distribution (archive, notarisation) are not set up.
 
 No account is needed: with no profile the app seeds the CLI's
 local-only workspace (`monoplan-ffi::ensure_local_workspace`) and
@@ -253,12 +302,13 @@ goes through `String(localized:)`, with `\(…)` interpolations as `%@` /
 `%lld` in the key. A ternary of literals or a `String` variable does not
 localize, so wrap those.
 
-SwiftPM cannot put the catalog in `Bundle.main`, so `build-app.sh`
-compiles it with `xcstringstool` into `Contents/Resources/es.lproj/
-Localizable.strings` and adds an empty `en.lproj`; two localizations is
-what makes System Settings › Language & Region › Applications offer the
-app. A bare `swift run` has no catalog and shows the English keys. In
-`swift test` the lookups miss too, so the Kit tests keep asserting the
+The catalog is a resource of the Xcode target, which compiles it into
+`Contents/Resources/es.lproj/Localizable.strings`; a build phase adds
+an empty `en.lproj`, because two localizations is what makes System
+Settings › Language & Region › Applications offer the app. The target
+sets `SWIFT_EMIT_LOC_STRINGS = NO`, so Xcode never rewrites the
+catalog from the sources: `check-strings.ts` is the gate. In `swift
+test` the lookups miss (no bundle), so the tests keep asserting the
 English text.
 
 `check-strings.ts` (run by `build-app.sh` and by `bun run check:strings`)

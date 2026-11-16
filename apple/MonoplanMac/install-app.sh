@@ -58,7 +58,7 @@ if pgrep -xq MonoplanMac; then
   fi
 fi
 
-# ditto preserves the ad-hoc signature, resource forks and permissions;
+# ditto preserves the signature, resource forks and permissions;
 # stage next to the destination and rename so a failed copy never
 # leaves a half-written bundle at the install path.
 STAGE="$DEST_DIR/.Monoplan.app.installing"

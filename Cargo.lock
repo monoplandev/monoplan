@@ -1960,6 +1960,7 @@ dependencies = [
  "reqwest",
  "rmp-serde",
  "rusqlite",
+ "security-framework",
  "serde",
  "serde_json",
  "tempfile",
