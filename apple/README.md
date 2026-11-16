@@ -491,7 +491,11 @@ horizon is a century, so the whole future in one fetch, no paging), every
 group as a section: Today, then each non-empty
 day, with the row's time, its workspace under the text when it is not
 Personal's, and the duration or overdue / due-today tone; read-only
-markup, nothing tappable yet. **Home** (`HomeView.swift`,
+markup, nothing tappable yet. The days gone by are sections above Today
+and the page opens on Today's header: the list is a UIKit collection
+view (`AgendaCollection.swift`, 2026-11-17: the SwiftUI rows hosted in
+its cells), because a SwiftUI `List` cannot be opened part-way down
+reliably. **Home** (`HomeView.swift`,
 2026-11-13) is the root and the index: first a section with Starred, Agenda, Map, Done and Bin, then a section per open workspace (`Engine.workspaces`,
 Personal first), each with its Inbox and then its active lists
 (the typed `Engine.lists(workspace:filter: .all)`,
