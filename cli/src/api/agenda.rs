@@ -41,6 +41,10 @@ pub struct AgendaEntry {
     pub text: String,
     pub list_id: String,
     pub state: ItemState,
+    /// An event (`spec/events-plan.md`): the agenda is its home, not
+    /// its list.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub event: bool,
     /// `YYYY-MM-DD` (all-day) or `YYYY-MM-DDTHH:MM` (timed, floating).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub when: Option<String>,
@@ -51,7 +55,7 @@ pub struct AgendaEntry {
     pub deadline: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub place: Option<Place>,
-    /// Absent on an Unscheduled row: no field placed it.
+    /// Which field placed the row; always set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub placed_by: Option<AgendaPlacedBy>,
     pub tone: AgendaTone,
@@ -63,12 +67,12 @@ pub struct AgendaEntry {
     pub doc_name: Option<String>,
 }
 
-/// One day's rows, or the Unscheduled group; the `agenda --json`
-/// element.
+/// One day's rows; the `agenda --json` element.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct AgendaGroup {
-    /// `YYYY-MM-DD`, or `None` (JSON `null`) for the Unscheduled group.
+    /// `YYYY-MM-DD`. Always set: `None` was the Unscheduled group,
+    /// gone with the `events` list (2026-11-16).
     pub day: Option<String>,
     pub today: bool,
     pub rows: Vec<AgendaEntry>,
@@ -94,8 +98,6 @@ pub struct Placed {
     pub today: String,
     /// Today first, even when empty; then each non-empty day.
     pub days: Vec<rules::AgendaDay>,
-    /// Open events with no date at all, oldest first.
-    pub unscheduled: Vec<(Option<Candidate>, ItemView)>,
 }
 
 /// Place the items the query covers.
@@ -127,17 +129,12 @@ pub fn place(cx: &Ctx, query: &AgendaQuery) -> anyhow::Result<Placed> {
         .collect();
     Ok(Placed {
         days: rules::build_agenda_from(&sources, &today, &horizon),
-        unscheduled: rules::unscheduled_from(&sources)
-            .into_iter()
-            .map(|(doc, item)| (doc, item.clone()))
-            .collect(),
         today,
     })
 }
 
-/// The agenda as rows: Today first (always there), the Unscheduled
-/// group after it when there is one, then each non-empty day up to the
-/// horizon.
+/// The agenda as rows: Today first (always there), then each
+/// non-empty day up to the horizon.
 pub fn agenda(cx: &Ctx, query: &AgendaQuery) -> anyhow::Result<Vec<AgendaGroup>> {
     Ok(groups(&place(cx, query)?))
 }
@@ -151,7 +148,7 @@ pub fn agenda_json(cx: &Ctx, query: &AgendaQuery) -> anyhow::Result<String> {
 
 /// [`Placed`] shaped into rows.
 pub fn groups(placed: &Placed) -> Vec<AgendaGroup> {
-    let mut out: Vec<AgendaGroup> = placed
+    placed
         .days
         .iter()
         .map(|d| AgendaGroup {
@@ -167,6 +164,7 @@ pub fn groups(placed: &Placed) -> Vec<AgendaGroup> {
                         text: r.item.text.clone(),
                         list_id: r.item.list_id.clone(),
                         state: r.item.state.into(),
+                        event: r.item.event,
                         when: r.item.when.clone(),
                         duration: r.item.duration,
                         deadline: r.item.deadline.clone(),
@@ -179,37 +177,5 @@ pub fn groups(placed: &Placed) -> Vec<AgendaGroup> {
                 })
                 .collect(),
         })
-        .collect();
-    if !placed.unscheduled.is_empty() {
-        // After Today, which the placement always puts first.
-        out.insert(
-            1,
-            AgendaGroup {
-                day: None,
-                today: false,
-                rows: placed
-                    .unscheduled
-                    .iter()
-                    .map(|(doc, item)| {
-                        let (doc_id, doc_name) = doc_tag(doc.as_ref());
-                        AgendaEntry {
-                            id: item.id.clone(),
-                            text: item.text.clone(),
-                            list_id: item.list_id.clone(),
-                            state: item.state.into(),
-                            when: None,
-                            duration: None,
-                            deadline: None,
-                            place: item.place.as_ref().map(Place::from),
-                            placed_by: None,
-                            tone: AgendaTone::Neutral,
-                            doc_id,
-                            doc_name,
-                        }
-                    })
-                    .collect(),
-            },
-        );
-    }
-    out
+        .collect()
 }

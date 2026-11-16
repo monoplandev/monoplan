@@ -96,9 +96,6 @@ export type Messages = {
   };
   nav: {
     inbox: string;
-    /** The reserved `events` list (`spec/events-plan.md`). Never a nav
-     *  entry: it labels events as a move destination and an origin list. */
-    events: string;
     focus: string;
     /** The Upcoming view: every open item with a deadline, by day. */
     upcoming: string;
@@ -443,11 +440,12 @@ export type Messages = {
     emptyToday: string;
     /** Heading over the calendar's per-doc show / hide toggles. */
     docs: string;
-    /** Header of the group holding events with no date. */
-    unscheduled: string;
     /** What an Open event's status reads: the one label its four open
-     *  states share in the status controls (`statusLabel`). */
+     *  states share in the status controls (`statusLabel`). Also the
+     *  label of the Event box under an item's date. */
     event: string;
+    /** Tooltip of the Event box: what ticking it changes. */
+    eventHint: string;
     /** Time-lane label for a row placed on its day by its deadline. */
     due: string;
     /** Beside a timed row later today: how long until it starts,
@@ -652,7 +650,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     nav: {
       inbox: "Bandeja de entrada",
-      events: "Calendario",
       focus: "Destacados",
       upcoming: "Calendario",
       done: "Hecho",
@@ -858,8 +855,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     upcoming: {
       emptyToday: "Nada para hoy",
       docs: "Espacios",
-      unscheduled: "Sin fecha",
       event: "Evento",
+      eventHint: "Ocurre en esta fecha: se muestra en el calendario, no en su lista, y nunca queda atrasado",
       due: "Vence",
       startsIn: (span) => `en ${span}`,
       spanDay: (day) => `Día ${day}`,
@@ -1045,7 +1042,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     nav: {
       inbox: "Inbox",
-      events: "Calendar",
       focus: "Starred",
       upcoming: "Calendar",
       done: "Done",
@@ -1249,8 +1245,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     upcoming: {
       emptyToday: "Nothing due today",
       docs: "Workspaces",
-      unscheduled: "Unscheduled",
       event: "Event",
+      eventHint: "Happens on this date: shown on the calendar, not in its list, and never overdue",
       due: "Due",
       startsIn: (span) => `in ${span}`,
       spanDay: (day) => `Day ${day}`,

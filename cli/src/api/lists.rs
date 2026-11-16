@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use monoplan_core::{DeleteListMode, Doc, LIST_EVENTS, LIST_INBOX};
+use monoplan_core::{DeleteListMode, Doc, LIST_INBOX};
 use serde::Serialize;
 
 use super::Ctx;
@@ -31,7 +31,8 @@ pub struct ListInfo {
     pub icon: Option<String>,
     pub archived_at: Option<i64>,
     pub created_at: i64,
-    /// How many Open items the list holds (not closed, not binned).
+    /// How many Open items the list holds (not closed, not binned, not
+    /// an event).
     pub open: u32,
 }
 
@@ -40,7 +41,7 @@ pub struct ListInfo {
 pub fn lists(cx: &Ctx, filter: ListFilter) -> anyhow::Result<Vec<ListInfo>> {
     let mut open = HashMap::<String, u32>::new();
     for item in cx.doc.all_items() {
-        if item.is_open() {
+        if item.is_listed() {
             *open.entry(item.list_id).or_insert(0) += 1;
         }
     }
@@ -143,13 +144,12 @@ impl ListNames {
         )
     }
 
-    /// The name of `list_id`; `None` when the list is gone. The
-    /// reserved lists have no `ListMeta` row (`all_lists` skips them),
-    /// so they are named here as the clients label them.
+    /// The name of `list_id`; `None` when the list is gone. Inbox has
+    /// no `ListMeta` row (`all_lists` skips it), so it is named here
+    /// as the clients label it.
     pub(crate) fn get(&self, list_id: &str) -> Option<String> {
         match list_id {
             LIST_INBOX => Some("Inbox".to_string()),
-            LIST_EVENTS => Some("Events".to_string()),
             other => self.0.get(other).cloned(),
         }
     }

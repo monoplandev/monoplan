@@ -424,7 +424,7 @@ struct ItemView: View {
     /// underneath, and picking it changes nothing, so a state the item
     /// brought in from a list is kept.
     private func stateMenu(_ item: ItemInfo) -> some View {
-        let event = item.listId == "events"
+        let event = item.event
         let picked: ItemState = event && !item.state.isClosed ? .backlog : item.state
         return Menu {
             Picker("Status", selection: Binding(

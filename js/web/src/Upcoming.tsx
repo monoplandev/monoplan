@@ -18,8 +18,6 @@
 // looks like a task row: the checkbox is there for anyone who wants the
 // record, but nothing asks for it, the event just goes by. No row carries
 // its list label; the context menu and task surface name it.
-// Events with no date sit in an Unscheduled section between Overdue and
-// Today so they are never out of sight.
 //
 // Selection and keys: the agenda is a listbox in the list view's sense
 // (click selects, the side pane follows, Enter / double-click opens, the
@@ -257,9 +255,8 @@ export function Upcoming(props: {
   // and Tomorrow lead with their name ("Today - Sat 24 Sept") so the eye
   // lands on them without the other days changing shape as they
   // approach. Overdue has no day: its rows each carry their own date.
-  // Unscheduled has no day at all.
   const dayHeading = (g: DayGroup): string => {
-    if (g.urgency === "overdue" || g.urgency === "unscheduled") return g.label;
+    if (g.urgency === "overdue") return g.label;
     const [y, mo, d] = g.key.split("-").map(Number);
     if (!y || !mo || !d) return g.label;
     const date = new Intl.DateTimeFormat(locale(), {

@@ -190,11 +190,10 @@ struct ItemPanel: View {
 
     // MARK: Formatting
 
-    /// The workflow state's name. An event (an item of the reserved
-    /// `events` list) has no lanes, so its open states all read
-    /// "Event" (spec/events-plan.md).
+    /// The workflow state's name. An event has no lanes, so its open
+    /// states all read "Event" (spec/events-plan.md).
     static func statusLabel(_ item: ItemInfo) -> String {
-        statusLabel(item.item.state, event: item.item.listId == MainWindowModel.events)
+        statusLabel(item.item.state, event: item.item.event)
     }
 
     static func statusLabel(_ state: ItemState, event: Bool) -> String {
@@ -217,13 +216,12 @@ struct ItemPanel: View {
     static let taskStates: [ItemState] = [.backlog, .todo, .inProgress, .review, .done, .cancelled]
     static let eventStates: [ItemState] = [.backlog, .done, .cancelled]
 
-    /// A list's glyph when it has no emoji: the sidebar's for the Inbox
-    /// and the calendar's own list, a bullet list for any other.
+    /// A list's glyph when it has no emoji: the sidebar's for the
+    /// Inbox, a bullet list for any other.
     @ViewBuilder
     private static func listIcon(_ listId: String) -> some View {
         switch listId {
         case MainWindowModel.inbox: PanelGlyph(image: NavArt.inbox)
-        case MainWindowModel.events: PanelGlyph(image: NavArt.calendar)
         default: Image(systemName: "list.bullet")
         }
     }
@@ -287,7 +285,6 @@ extension ItemInfo {
         if let listName { return listName }
         switch item.listId {
         case MainWindowModel.inbox: return String(localized: "Inbox")
-        case MainWindowModel.events: return String(localized: "Calendar")
         default: return item.listId
         }
     }

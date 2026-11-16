@@ -42,7 +42,6 @@ import {
   formatDialogStamp,
   formatElapsed,
   nowMs,
-  todayStamp,
   whenTime,
 } from "./format.tsx";
 import { applySuggestionChange, raisedDate, titleDate } from "./whenSuggest.ts";
@@ -73,7 +72,7 @@ import {
   isClosedState,
   isDone,
   EVENT_STATES,
-  LIST_EVENTS,
+  isEvent,
   WORKFLOW_STATES,
   type DocApp,
   type ItemView,
@@ -104,8 +103,11 @@ export type NewItemTarget = {
   /** Log an already-completed item: created open, marked done on commit. */
   done?: boolean;
   /** Planned date the capture opens with (the calendar's Add prefills
-   *  today so a new event is never out of sight). */
+   *  today). */
   when?: string;
+  /** Open with the Event box ticked (the calendar's Add): the capture
+   *  becomes an event (`spec/events-plan.md`) while it keeps a date. */
+  event?: boolean;
   /** Whether the capture opens pinned to Focus (a Focus-lens draft). */
   focus?: boolean;
   /** List-view draft mirror. The owner's inline draft row is the
@@ -313,7 +315,6 @@ export function TaskDialog(props: {
     const workspace = props.docLabel?.() ?? undefined;
     const opts: ListOption[] = [
       { id: "inbox", name: m().nav.inbox, workspace },
-      { id: LIST_EVENTS, name: m().nav.events, workspace },
       ...props.lists().map((l) => ({ id: l.id, name: l.name, icon: l.icon, workspace })),
     ];
     const currentId = item()?.listId;
@@ -330,12 +331,6 @@ export function TaskDialog(props: {
     if (!id || targetId === currentListId) return;
     const idx = props.app.state.listOpen[targetId]?.length ?? 0;
     props.app.moveItem(id, targetId, idx);
-    // An Open event with no date has only the Unscheduled section to sit
-    // in: offer the date straight away.
-    const it = item();
-    if (targetId === LIST_EVENTS && it && !it.when && !isClosed(it) && !isBinned(it)) {
-      props.setWhenOpen(true);
-    }
   };
 
   // Re-target a new-item capture at a different list. The insert index is
@@ -344,13 +339,9 @@ export function TaskDialog(props: {
   const setNewItemList = (targetId: string) => {
     const nw = newItemTarget();
     if (!nw || targetId === nw.listId) return;
-    // An event has no lane, and should not start life unscheduled: it
-    // files as Backlog, on today unless a date is already picked.
-    const toEvents = targetId === LIST_EVENTS;
-    if (toEvents && newWhen() === null) setNewWhen(todayStamp(nowMs()));
     props.setNewItem?.({
       listId: targetId,
-      state: toEvents ? "backlog" : nw.state,
+      state: nw.state,
       done: nw.done,
       // A draft capture stays one (row phase: the row keeps mirroring
       // and settles it; pane phase: the caret stays the user's). The
@@ -374,14 +365,14 @@ export function TaskDialog(props: {
       if (id) props.onMoveAcross?.(id, docId, targetId);
       return;
     }
-    const toEvents = targetId === LIST_EVENTS;
     props.setNewItem?.({
       listId: targetId,
       docId,
-      state: toEvents ? "backlog" : nw.state,
+      state: nw.state,
       done: nw.done,
       draft: nw.draft,
-      when: newWhen() ?? (toEvents ? todayStamp(nowMs()) : undefined),
+      when: newWhen() ?? undefined,
+      event: newEvent() || undefined,
       focus: newFocus() || undefined,
     });
   };
@@ -417,6 +408,9 @@ export function TaskDialog(props: {
   const [newDeadline, setNewDeadline] = createSignal<string | null>(null);
   // New-item mode's planned-date buffer, same deal.
   const [newWhen, setNewWhen] = createSignal<string | null>(null);
+  // New-item mode's Event box, applied after `newWhen` (an event needs
+  // its date).
+  const [newEvent, setNewEvent] = createSignal(false);
   // New-item mode's duration buffer, applied after `newWhen`.
   const [newDuration, setNewDuration] = createSignal<number | null>(null);
   // New-item mode's place buffer, same deal.
@@ -806,6 +800,7 @@ export function TaskDialog(props: {
     setNotes(n);
     setNewDeadline(null);
     setNewWhen(id ? null : (nw?.when ?? null));
+    setNewEvent(id ? false : (nw?.event ?? false));
     setNewDuration(null);
     setNewPlace(null);
     setNewFocus(id ? false : (nw?.focus ?? false));
@@ -908,6 +903,7 @@ export function TaskDialog(props: {
       const w = newWhen();
       if (w) props.app.setItemWhen(id, w);
       else if (suggested && !nw.done) props.app.setItemWhenSuggested(id, suggested.when);
+      if (w && newEvent()) props.app.setItemEvent(id, true);
       const dur = newDuration();
       if (w && dur) props.app.setItemDuration(id, dur);
       const pl = newPlace();
@@ -944,6 +940,7 @@ export function TaskDialog(props: {
       subscribeNotes(id, notes());
       setNewDeadline(null);
       setNewWhen(null);
+      setNewEvent(false);
       setNewDuration(null);
       setNewPlace(null);
       setNewFocus(false);
@@ -1228,10 +1225,13 @@ export function TaskDialog(props: {
     return nw?.done ? "done" : (nw?.state ?? "backlog");
   };
   const vListId = () => item()?.listId ?? newItemTarget()?.listId ?? null;
-  // An event (`spec/events-plan.md`): filed under the reserved `events`
-  // list. The header is a task's, with the lifecycle badge's open ladder
-  // collapsed to one choice: Event / Done / Cancelled.
-  const vEvent = () => vListId() === LIST_EVENTS;
+  // An event (`spec/events-plan.md`): a dated item with the Event box
+  // ticked. The header is a task's, with the lifecycle badge's open
+  // ladder collapsed to one choice: Event / Done / Cancelled.
+  const vEvent = () => {
+    const it = item();
+    return it ? isEvent(it) : newEvent() && newWhen() !== null;
+  };
   const vPinned = () => (item() ? focused() : newFocus());
   const vWhen = () => (item() ? (item()?.when ?? null) : newWhen());
   const vDuration = () =>
@@ -1294,6 +1294,11 @@ export function TaskDialog(props: {
     if (item()) toggleFocus();
     else setNewFocus((v) => !v);
   };
+  const onEventChange = (event: boolean) => {
+    const it = item();
+    if (it) props.app.setItemEvent(it.id, event);
+    else setNewEvent(event);
+  };
   const onWhenChange = (value: string | null) => {
     const it = item();
     if (it) {
@@ -1301,9 +1306,10 @@ export function TaskDialog(props: {
       return;
     }
     setNewWhen(value);
-    // Mirror the core's `set_item_when`: no date, no length; a timed
-    // date on a buffer with no length takes the default hour, so the
-    // end field shows before the item exists.
+    // Mirror the core's `set_item_when`: no date, no length and no
+    // event; a timed date on a buffer with no length takes the default
+    // hour, so the end field shows before the item exists.
+    if (!value) setNewEvent(false);
     if (!value) setNewDuration(null);
     else if (whenTime(value) && newDuration() == null)
       setNewDuration(DEFAULT_DURATION_MINUTES);
@@ -1605,6 +1611,8 @@ export function TaskDialog(props: {
                   muted={muted}
                   onChange={onWhenChange}
                   onDurationChange={onDurationChange}
+                  event={vEvent}
+                  onEventChange={onEventChange}
                   open={props.whenOpen}
                   setOpen={props.setWhenOpen}
                 />

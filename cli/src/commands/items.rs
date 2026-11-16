@@ -393,7 +393,7 @@ pub struct SetArgs {
     /// New item text.
     #[arg(long, group = "field")]
     pub text: Option<String>,
-    /// Move to this list (`events` makes the item an event; moving it back out makes it a task again, dates intact).
+    /// Move to this list.
     #[arg(long, group = "field", value_name = "LIST")]
     pub list: Option<String>,
     /// 1-based position among the list's open items: with --list, where the item lands there; alone, a reorder within its own list. Past the end clamps to the end. Inbox keeps arrival order: a move into it goes to the end, and it can't be reordered.
@@ -410,6 +410,14 @@ pub struct SetArgs {
     #[arg(long, group = "field", value_name = "DATE|-")]
     #[serde(default)]
     pub when_suggested: Option<String>,
+    /// Make the item an event: it happens on its date instead of being done, so it shows on the agenda and in no list, and never goes overdue. Needs a date (--when in the same call counts).
+    #[arg(long, group = "field", conflicts_with = "task")]
+    #[serde(default)]
+    pub event: bool,
+    /// Make an event a task again: back in its list, overdue once its date passes.
+    #[arg(long, group = "field")]
+    #[serde(default)]
+    pub task: bool,
     /// Duration: minutes, or `1h30m` / `2h` / `45m` / `3d` / `1d2h`; `-` clears.
     #[arg(long, group = "field", value_name = "LEN|-")]
     pub duration: Option<String>,
@@ -470,6 +478,9 @@ pub fn set(cx: &Ctx, args: SetArgs, out: &mut dyn Write) -> anyhow::Result<()> {
     }
     if let Some(suggested) = &args.when_suggested {
         write::set_when_suggested(cx, id, clear_or(suggested))?;
+    }
+    if args.event || args.task {
+        write::set_event(cx, id, args.event)?;
     }
     if let Some(duration) = duration {
         write::set_duration(cx, id, duration)?;
@@ -612,6 +623,8 @@ mod tests {
             lifecycle: None,
             when: None,
             when_suggested: None,
+            event: false,
+            task: false,
             duration: None,
             deadline: None,
             place: None,
@@ -1038,6 +1051,7 @@ mod tests {
             deadline: None,
             when: Some("2026-10-06".into()),
             when_suggested: None,
+            event: false,
             duration: None,
             place: None,
             created_at: 0,

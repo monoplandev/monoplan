@@ -3331,6 +3331,28 @@ input.task-check:hover {
   gap: 8px;
 }
 
+/* The Event box under the time row: a plain checkbox and label, inset
+   to the date input's text edge. */
+.task-dialog-event-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding-left: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.task-dialog-event-toggle input {
+  margin: 0;
+  cursor: pointer;
+}
+
+.task-dialog-event-toggle:has(input:checked) {
+  color: var(--text);
+}
+
 /* The ✕ inset at the start field's right edge (rendered only while a
    time is set): the date input's ✕ again, revealed on hover / focus. */
 .time-picker-clear {

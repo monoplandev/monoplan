@@ -46,6 +46,7 @@ One child `LoroMap` under `items`, keyed by `ItemId`.
 | `deadline` | string? | optional **date-only** deadline, a floating local calendar date in `YYYY-MM-DD` format (no time, no timezone, not unix millis). Absent ≡ no deadline; clearing deletes the key. Values that are not a well-formed `YYYY-MM-DD` calendar date are rejected by the mutation. Means "owed by": past it the item is overdue. |
 | `when` | string? | optional **planned date**, shape-discriminated: `YYYY-MM-DD` (all-day, 10 chars) or `YYYY-MM-DDTHH:MM` (timed, 16 chars, `HH` 00–23, `MM` 00–59). Floating wall-clock, no seconds, no zone; an RFC 9557 `[Zone]` suffix is reserved and rejected for now. Absent ≡ unset; clearing deletes the key. One register so date and time cannot tear under concurrent edit; sorts by plain string compare (all-day leads its day). Means "happens on" or "act on". Fixed: never rewritten or rolled over by the clock, and never red past its day. A past `when` has gone by like an event: there is no "slipped" state (decided 2026-09-30, `calendar-plan.md`). Independent of `deadline`. See `calendar-plan.md`. |
 | `when_suggested` | string? | optional **pending date suggestion** (2026-11-13), `when`-shaped and validated the same. A date a client read out of the title as it was typed, resolved at that moment and held until the user answers: yes moves it into `when` (`accept_item_when_suggestion`, one commit), no deletes the key, so a declined suggestion leaves nothing behind. Never a plan by itself: the web shows it only in the task surface, on an open item with no `when`. `set_item_when(Some)` deletes it in the same commit. Independent of `when` at the register level, so a concurrent suggestion beside a set `when` is harmless and ignored. See `spec/calendar-plan.md`, "Typed date phrases". |
+| `event` | bool? | optional **event flag** (2026-11-16, `events-plan.md`): `true` says the `when` is when the item happens, not when to do it. Effective only beside a `when` (`is_event` needs both; a flag left without a date by concurrent edits is inert). An event is in no list's Open projection and its past `when` is never overdue; `location`, lifecycle and every other register are untouched. Absent ≡ not an event; clearing deletes the key, and `set_item_when(None)` deletes it in the same commit. |
 | `duration` | i64? | optional **length in whole minutes**, `1..=525600` (one year of days). A length rather than an end so that moving `when` on one device and setting the length on another can never produce an item that ends before it starts; the end is derived (`when` + `duration`). Read by the shape of `when`: minutes from a timed start, whole days (`ceil(minutes / 1440)`, the last day being that many minus one past the start) beside an all-day one, ignored beside an absent one; the register is never cross-checked against `when` (no invalid state under concurrent edit). Absent ≡ unset; clearing deletes the key. Written by `set_item_when` too: a timed `when` on an item with no duration defaults it to 60 minutes in the same commit, and clearing `when` deletes it; timed → all-day keeps it. Out-of-range values read as unset. See `calendar-plan.md`. |
 | `place` | value? | optional **atomic place register** — a plain `LoroValue` map `{label, lat?, lon?, address?, ref?}` set whole (the `lifecycle` pattern as a map), so a label and its coordinates can never be torn apart by concurrent edits. `label` is required (trimmed, 1..=200 chars); `lat` / `lon` are WGS84 decimal degrees and come as a pair or not at all; `address` is display-only; `ref` is an opaque provider hint. Absent ≡ unset; clearing deletes the key. Canonicalised and validated by `set_item_place`; a malformed value from another writer reads as unset. Shared by events ("where it happens") and tasks ("where it can be done"). See `place-plan.md`. |
 | `created_at` | i64 | unix millis (client clock) |
@@ -55,7 +56,7 @@ One child `LoroMap` under `items`, keyed by `ItemId`.
 
 Item type is implicit (currently always text). Add an `item_type` field when
 other kinds appear. Events are deliberately not a kind: an event is an
-ordinary item located in the reserved list `events` (`events-plan.md`).
+ordinary item with a `when` and the `event` flag (`events-plan.md`).
 
 ### Lifecycle
 
@@ -162,7 +163,7 @@ All three are single **encoded scalar strings**. Rationale (vs a structured
 `placement_id` can never be torn apart by concurrent edits — there are no
 independently-mergeable sub-fields to conflict. It is also smaller on the wire
 and trivially comparable. The separator `:` is reserved: ids are uuid-v7 hex
-(`[0-9a-f]{32}`) or one of the literals `inbox` and `events`, so it can
+(`[0-9a-f]{32}`) or the literal `inbox`, so it can
 never appear inside a component. Parsing splits on the **first** `:`. (A bare `FocusRef` has no `:` and
 is a local-doc item id; the emitter writes only this form today — see
 `spec/focus.md`.)
@@ -326,13 +327,14 @@ Every mutation below forms **one Loro commit** (one undo step, one op group).
 - **Hard delete** — delete the item's key from `items`; best-effort remove
   its entries from its located order container. Entries elsewhere are
   invisible anyway (item lookup fails) and left to reconciliation.
-- **Delete list** `delete_list(list_id, mode)` — refuses for `inbox` and
-  `events`. Every item located in the list (open, done *and* binned) is
+- **Delete list** `delete_list(list_id, mode)` — refuses for `inbox`.
+  Every item located in the list (open, done *and* binned) is
   relocated to Inbox (its `location` deleted) with one shared `inbox_at = now`,
   so it lands at the end of the queue (ties by `created_at`; the list's manual
   order is lost). `ToInbox` (the default) leaves every lifecycle alone, so
   open items land open in Inbox and closed ones show in Done located in Inbox;
-  `ToBin` also bins the items not already binned, with the same `now`. Other
+  `ToBin` also bins the open items, with the same `now`, except events
+  (`events-plan.md`: they are not open work and stay on the calendar). Other
   registers and Starred refs are untouched. The ListMeta row is deleted in the
   same commit, so one undo restores the row and every register. The abandoned
   `order/<list-id>` container remains as unreachable history (root containers
@@ -423,8 +425,7 @@ absent — the main nav, capture/move destinations, keyboard nav) and the
 Archived lists stay searchable, their boards stay intact, and items locating to
 them keep rendering the list's name.
 
-**`set_list_archived(list_id, archived)`** — refuses for the reserved `inbox`
-and `events`.
+**`set_list_archived(list_id, archived)`** — refuses for the reserved `inbox`.
 Archiving an active list writes `archived_at = now`; unarchiving deletes the
 key. Re-applying the current state is a no-op: no commit, no event. One commit
 otherwise; emits `ListArchivedChanged { id, archived_at }`. `ListAdded` also
@@ -449,8 +450,7 @@ Whether the nav shows an open-item count (all Open states) beside each list is a
 
 ## Built-in lists
 
-Monoplan has two reserved lists: the primary capture list, and the home
-of events.
+Monoplan has one reserved list, the primary capture list.
 
 - `inbox` — rendered as "Inbox". This id is reserved and addressable by items,
   but it is not stored as a `ListMeta` row in the `lists` MovableList. It is
@@ -459,19 +459,10 @@ of events.
   built-in) and it is non-renamable, non-movable, and non-deletable — there is
   no display-name override. Doc-level settings for it live in `settings`.
 
-- `events`: rendered as "Calendar" (`events-plan.md`, built 2026-10-02).
-  Same shape as `inbox`: no `ListMeta` row, order container
-  `order/events`, client-defined label, non-renamable, non-movable,
-  non-archivable, non-deletable. One difference: no list view or board
-  projects it, so it has no saved default view (`set_default_view`
-  refuses it) and `order/events` is maintained but never read by a view.
-  Its items are **events**: they surface only on the calendar, never as
-  open work in a list. "Is an event" is `location.list_id == "events"` and nothing
-  else (`ItemView::is_event`); moving an item in or out is the whole
-  conversion. The core does not require an event to carry a `when`
-  (independent registers; see `events-plan.md` "Why no invariant").
-  Additive within v4: an events-unaware client shows events on its agenda
-  as ordinary rows and never lists them under a list.
+There was a second, `events` (2026-10-02 to 2026-11-16), the home of
+events. It is gone: an event is now a flag on the item (`event`,
+`events-plan.md`). An item still located in `events` in an old doc reads
+as flagged and projects into Inbox, so nothing migrates.
 
 The bin is *not* a list; it's the `binned_at` mask on items.
 
@@ -529,13 +520,13 @@ All mutations go through Loro APIs internally; the core exposes typed helpers:
 - `add_list(name) -> ListId`
 - `rename_list(list_id, name)`
 - `set_list_archived(list_id, archived)` — archives (`true`) or unarchives
-  (`false`) a user list; refuses for `inbox` and `events`. Metadata-only: performs **no**
+  (`false`) a user list; refuses for `inbox`. Metadata-only: performs **no**
   item, order, lifecycle, or Focus mutations. No-op (no commit, no event) when
   the list is already in the requested state. See "Archived lists" above.
 - `set_doc_name(name)` — `Some(name)` (trimmed, non-empty) names the doc, `None` / blank un-names it (key deleted). One commit; a no-op when unchanged. Emits `SettingsChanged`.
 - `set_calendar_doc_hidden(doc_id, hidden)` — the personal cross-doc preference (Home doc only; the core does not enforce which doc). One commit, a no-op when already in the requested state, and emits `SettingsChanged`. It rejects a blank id with `Invalid` and does not validate the id otherwise (the core holds no doc registry).
-- `set_default_view(list_id, view)` — saves (`Some`) or clears (`None`) a list's default view as one encoded register; accepts the reserved `inbox`, whose value lands in `settings.inbox_view` and reports via `SettingsChanged` rather than `ListDefaultViewChanged`; refuses the reserved `events` (`Invalid`: it has no list or board view). One commit; a no-op when unchanged. See `spec/board.md`.
-- `delete_list(list_id, mode)` — `mode` is `DeleteListMode::ToInbox` or `ToBin`; refuses for `inbox` and `events`; see "Delete list" contract above. Exposed by every client (`spec/inbox-plan.md`).
+- `set_default_view(list_id, view)` — saves (`Some`) or clears (`None`) a list's default view as one encoded register; accepts the reserved `inbox`, whose value lands in `settings.inbox_view` and reports via `SettingsChanged` rather than `ListDefaultViewChanged`. One commit; a no-op when unchanged. See `spec/board.md`.
+- `delete_list(list_id, mode)` — `mode` is `DeleteListMode::ToInbox` or `ToBin`; refuses for `inbox`; see "Delete list" contract above. Exposed by every client (`spec/inbox-plan.md`).
 - `empty_bin()` — hard-deletes all `Binned` items.
 - `delete_binned(item_id)` — hard-deletes one `Binned` item.
 - `export_items(item_ids)` / `adopt_items(items, list_id, target_index)` /
@@ -585,8 +576,10 @@ history rides it — and its ids are the doc's real ids.
   idempotent. Within one file an item's `listId` may still name a list by any
   string, well-formed or not — the mapping is by the file's own ids. A missing
   `listId`, or one naming a list the file doesn't carry, routes to `inbox`
-  (the `delete_list` orphan rule); the file's `inbox` / `events` rows and any
-  row flagged `builtin` collapse onto the local reserved lists.
+  (the `delete_list` orphan rule); the file's `inbox` row and any row
+  flagged `builtin` collapse onto the local `inbox`. A file from before
+  the `event` register may carry an `events` row and items naming it:
+  those import into Inbox with the flag set.
 - **Concurrent imports of the same file** on two offline peers converge: the
   item inserts collapse to one item per id (the loser's order entry goes
   stale), and the duplicate ListMeta rows fall under the one-visible-list

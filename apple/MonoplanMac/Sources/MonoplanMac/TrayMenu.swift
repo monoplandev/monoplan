@@ -21,12 +21,14 @@ struct MenuLine: Equatable {
     /// on: its list, in its workspace (nil for Home's).
     let listId: String
     let docId: String?
+    /// An event: a click opens the Calendar, its home, not its list.
+    var event = false
 }
 
 enum TodayMenu {
     /// Today's rows as menu lines, in the order the engine placed them.
-    /// Only the Today group is shown; other groups (Unscheduled, later
-    /// days) are not a tray's business.
+    /// Only the Today group is shown; later days are not a tray's
+    /// business.
     static func lines(from groups: [AgendaGroup], now: Date, calendar: Calendar = .current) -> [MenuLine] {
         guard let today = groups.first(where: { $0.today }) else { return [] }
         return today.rows.map { row in
@@ -41,7 +43,8 @@ enum TodayMenu {
                 done: row.state == .done,
                 overdue: row.tone == .overdue,
                 listId: row.listId,
-                docId: row.docId
+                docId: row.docId,
+                event: row.event
             )
         }
     }

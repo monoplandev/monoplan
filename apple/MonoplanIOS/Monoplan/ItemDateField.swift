@@ -131,20 +131,29 @@ struct ItemDateEditor: View {
     struct Original: Equatable {
         let when: String?
         let duration: Int?
+        let event: Bool
+    }
+
+    private var current: Original {
+        Original(when: item.when, duration: item.duration, event: item.event)
     }
 
     init(ref: ItemRef, item: ItemInfo, done: @escaping () -> Void) {
         self.ref = ref
         self.item = item
         self.done = done
-        _original = State(initialValue: Original(when: item.when, duration: item.duration))
+        _original = State(
+            initialValue: Original(when: item.when, duration: item.duration, event: item.event))
     }
 
     private func cancel() {
-        if Original(when: item.when, duration: item.duration) != original {
+        if current != original {
             model.setWhen(
                 ref, when: original.when,
                 duration: original.duration.map { .minutes(minutes: UInt32(clamping: $0)) } ?? .clear)
+            // After the date: an event needs one, and clearing the
+            // date took the flag with it.
+            if original.when != nil { model.setEvent(ref, event: original.event) }
         }
         done()
     }
@@ -371,6 +380,21 @@ struct ItemDateEditor: View {
                     }
                     .frame(minHeight: 36)
                 }
+                Divider()
+                // What the date means: something to do by then, or
+                // something that happens then (spec/events-plan.md).
+                Toggle(isOn: Binding(
+                    get: { item.event },
+                    set: { model.setEvent(ref, event: $0) }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Event")
+                        Text("Shows on the Calendar, not in its list, and never goes overdue.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(minHeight: 36)
                 Divider()
                 Button("Clear date", role: .destructive, action: clearDate)
                 .frame(minHeight: 36)

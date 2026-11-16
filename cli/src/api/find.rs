@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use monoplan_core::{ItemLifecycle, LIST_EVENTS, LIST_INBOX, ListView, SearchKind};
+use monoplan_core::{ItemLifecycle, LIST_INBOX, ListView, SearchKind};
 use serde::Serialize;
 
 use super::{Ctx, doc_tag};
@@ -115,7 +115,6 @@ pub fn find(cx: &Ctx, query: &str, limit: usize) -> anyhow::Result<Vec<FindHit>>
             let list_name = match r.list_id.as_deref() {
                 None => None,
                 Some(LIST_INBOX) => Some("Inbox".to_string()),
-                Some(LIST_EVENTS) => Some("Events".to_string()),
                 Some(_) => list.map(|l| l.name.clone()),
             };
             out.push(FindHit {

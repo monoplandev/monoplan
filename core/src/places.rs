@@ -302,6 +302,7 @@ mod tests {
             deadline: None,
             when: None,
             when_suggested: None,
+            event: false,
             duration: None,
             place,
             created_at,

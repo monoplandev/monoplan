@@ -73,6 +73,10 @@ export function WhenField(props: {
   muted: () => boolean;
   onChange: (value: string | null) => void;
   onDurationChange: (minutes: number | null) => void;
+  /** The item is an event (`spec/events-plan.md`): it happens on this
+   *  date rather than being done by it. */
+  event: () => boolean;
+  onEventChange: (event: boolean) => void;
   open: () => boolean;
   setOpen: (v: boolean) => void;
 }) {
@@ -427,6 +431,17 @@ export function WhenField(props: {
           duration={props.duration}
           onDurationChange={props.onDurationChange}
         />
+        {/* What the date means: something to do (overdue once it has
+            passed) or something that happens (it goes by, and shows on
+            the calendar instead of in its list). */}
+        <label class="task-dialog-event-toggle" title={m().upcoming.eventHint}>
+          <input
+            type="checkbox"
+            checked={props.event()}
+            onChange={(e) => props.onEventChange(e.currentTarget.checked)}
+          />
+          <span>{m().upcoming.event}</span>
+        </label>
       </Show>
     </>
   );

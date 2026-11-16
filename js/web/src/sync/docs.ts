@@ -249,7 +249,7 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
     return undefined;
   };
   const docIdOfList = (listId: string): string | undefined => {
-    if (listId === "inbox" || listId === "events") return homeDocId;
+    if (listId === "inbox") return homeDocId;
     for (const d of docs()) {
       if (d.app.state.listsById[listId]) return d.docId;
     }
@@ -432,6 +432,9 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
     acceptItemWhenSuggestion(id) {
       forItem(id, (app) => app.acceptItemWhenSuggestion(id));
     },
+    setItemEvent(id, event) {
+      forItem(id, (app) => app.setItemEvent(id, event));
+    },
     setItemDuration(id, minutes) {
       forItem(id, (app) => app.setItemDuration(id, minutes));
     },
@@ -506,7 +509,7 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
     moveItem(id, listId, indexInList) {
       forItem(id, (app) => {
         const known =
-          listId === "inbox" || listId === "events" || app.state.listsById[listId];
+          listId === "inbox" || app.state.listsById[listId];
         if (known) app.moveItem(id, listId, indexInList);
       });
     },
@@ -609,7 +612,7 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
     const target = byId.get(targetDocId);
     if (!target) return [];
     const known =
-      listId === "inbox" || listId === "events" || target.state.listsById[listId];
+      listId === "inbox" || target.state.listsById[listId];
     if (!known) return [];
     // An id the target already holds is either not a cross-doc move or
     // a twin left by two devices moving one item apart; neither moves.

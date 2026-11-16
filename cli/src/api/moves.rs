@@ -401,7 +401,7 @@ mod tests {
     fn open_texts(doc: &Doc, list: &str) -> Vec<String> {
         doc.items_in_list(list, false)
             .into_iter()
-            .filter(|i| i.is_open())
+            .filter(|i| i.is_listed())
             .map(|i| i.text)
             .collect()
     }

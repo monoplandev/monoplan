@@ -10,7 +10,6 @@ import type { ItemView } from "../src/sync/store.ts";
 
 const LABELS = {
   overdue: "Overdue",
-  unscheduled: "Unscheduled",
   today: "Today",
   tomorrow: "Tomorrow",
 };
@@ -234,23 +233,24 @@ describe("groupByDay", () => {
   });
 });
 
-// `spec/events-plan.md`: an event is an item located in `events`.
+// `spec/events-plan.md`: an event is a dated item with the `event` flag.
 describe("groupByDay: events", () => {
   const event = (
     id: string,
     dates: { when?: string; deadline?: string },
     extra: Partial<ItemView> = {},
-  ) => item(id, dates, { listId: "events", ...extra });
+  ) => item(id, dates, { event: true, ...extra });
 
   test("events place by the same rules as tasks", () => {
     const groups = groupByDay(
       [
         event("gig", { when: "2026-09-12T19:00" }),
         // A deadline on an event is legitimate and places it as usual.
-        event("tickets", { deadline: "2026-09-10" }),
-        event("owed", { deadline: "2026-09-01" }),
-        // Went by: nothing to place, and not unscheduled either.
+        event("tickets", { when: "2026-09-12", deadline: "2026-09-10" }),
+        event("owed", { when: "2026-09-12", deadline: "2026-09-01" }),
+        // Went by: nothing to place. A task in the same spot is overdue.
         event("past", { when: "2026-09-01" }),
+        item("slipped", { when: "2026-09-02" }),
         event("done", { when: "2026-09-12" }, { state: "done" }),
         event("cancelled", { when: "2026-09-12" }, { state: "cancelled" }),
       ],
@@ -259,49 +259,11 @@ describe("groupByDay: events", () => {
       "en",
     );
     expect(groups.map((g) => [g.key, ids(g)])).toEqual([
-      ["overdue", ["owed"]],
+      ["overdue", ["owed", "slipped"]],
       [TODAY, []],
       ["2026-09-10", ["tickets"]],
       ["2026-09-12", ["done", "cancelled", "gig"]],
     ]);
-  });
-
-  test("Unscheduled holds Open undated events, oldest first, between Overdue and Today", () => {
-    const groups = groupByDay(
-      [
-        item("over", { deadline: "2026-09-01" }),
-        event("older", {}),
-        event("newer", {}),
-        // An undated task is just a task: its list shows it.
-        item("task", {}),
-        event("done", {}, { state: "done" }),
-        event("cancelled", {}, { state: "cancelled" }),
-        event("binned", {}, { binnedAt: 1 }),
-      ],
-      TODAY,
-      LABELS,
-      "en",
-    );
-    expect(groups.map((g) => [g.key, g.urgency, ids(g)])).toEqual([
-      ["overdue", "overdue", ["over"]],
-      ["unscheduled", "unscheduled", ["older", "newer"]],
-      [TODAY, "today", []],
-    ]);
-    expect(groups[1]!.label).toBe("Unscheduled");
-    expect(groups[1]!.rows.map((r) => [r.placedBy, r.tone])).toEqual([
-      ["none", "neutral"],
-      ["none", "neutral"],
-    ]);
-  });
-
-  test("no Unscheduled group when every event has a date", () => {
-    const groups = groupByDay(
-      [event("gig", { when: "2026-09-12" })],
-      TODAY,
-      LABELS,
-      "en",
-    );
-    expect(groups.map((g) => g.key)).toEqual([TODAY, "2026-09-12"]);
   });
 });
 
@@ -366,7 +328,7 @@ describe("groupByDay: multi-day spans", () => {
   test("an event's span that ended before today places nothing; a single day carries no span", () => {
     const groups = groupByDay(
       [
-        item("over", { when: "2026-09-05" }, { duration: 3 * 1440, listId: "events" }),
+        item("over", { when: "2026-09-05" }, { duration: 3 * 1440, event: true }),
         item("single", { when: TODAY }, { duration: 60 }),
       ],
       TODAY,
@@ -417,7 +379,7 @@ describe("attentionBadge", () => {
     const badge = attentionBadge(
       [
         item("running", { when: "2026-09-08" }, { duration: 3 * 1440 }),
-        item("ended", { when: "2026-09-07" }, { duration: 2 * 1440, listId: "events" }),
+        item("ended", { when: "2026-09-07" }, { duration: 2 * 1440, event: true }),
         item("ahead", { when: "2026-09-10" }, { duration: 2 * 1440 }),
       ],
       TODAY,
@@ -471,25 +433,19 @@ describe("attentionBadge", () => {
     expect(badge).toEqual({ count: 0, tone: "neutral" });
   });
 
-  test("unscheduled events count at neutral tone; dated and past ones follow the usual rules", () => {
+  test("an event's past `when` counts for nothing; one on today counts once", () => {
     const event = (id: string, dates: { when?: string; deadline?: string }) =>
-      item(id, dates, { listId: "events" });
+      item(id, dates, { event: true });
     expect(
       attentionBadge(
         [
-          event("unscheduled", {}),
           event("past", { when: "2026-09-01" }),
           event("future", { when: "2026-09-12" }),
+          event("on-today", { when: TODAY }),
           item("undated-task", {}),
         ],
         TODAY,
       ),
     ).toEqual({ count: 1, tone: "neutral" });
-    expect(
-      attentionBadge(
-        [event("unscheduled", {}), event("on-today", { when: TODAY })],
-        TODAY,
-      ),
-    ).toEqual({ count: 2, tone: "neutral" });
   });
 });

@@ -29,9 +29,9 @@
 //! cross-list moves are harmless and cleaned by [`Doc::reconcile`].
 //!
 //! Binned is a lifecycle & items keep their location. Two well-known
-//! list ids are *reserved*: [`LIST_INBOX`] and [`LIST_EVENTS`]. They have
-//! **no ListMeta row** and clients render them with hardcoded labels
-//! ("Inbox", "Calendar"). Inbox is the absence of a list
+//! One well-known
+//! list id is *reserved*: [`LIST_INBOX`]. It has **no ListMeta row** and
+//! clients render it with a hardcoded label ("Inbox"). Inbox is the absence of a list
 //! (`spec/inbox-plan.md`): its items carry no `location`, it has no order
 //! container, and it sorts by arrival; `inbox` is only the id the API
 //! names that bucket by. `events` is a real location with an order
@@ -74,11 +74,11 @@ pub const INBOX_NAME: &str = "Inbox";
 /// literal: user-list content is user-authored plain text, not
 /// localized.
 pub const WELCOME_ITEM: &str = "👋 Welcome to Monoplan";
-/// Reserved home of events (`spec/events-plan.md`): an item located here
-/// is an event. Same shape as `inbox` (no ListMeta row), but no list or
-/// board view projects it.
-pub const LIST_EVENTS: &str = "events";
-pub const EVENTS_NAME: &str = "Calendar";
+/// The reserved list id events lived in before the `event` register
+/// (2026-10-02 to 2026-11-16, `spec/events-plan.md`). No longer a list:
+/// an item still located here reads as flagged (see [`event_flag`]) and,
+/// having no ListMeta row, projects into Inbox like any orphan.
+const LEGACY_EVENTS_LIST: &str = "events";
 
 const ROOT_ITEMS: &str = "items";
 const ROOT_LISTS: &str = "lists";
@@ -151,6 +151,13 @@ const KEY_WHEN: &str = "when";
 /// so "no" is simply absence. See `set_item_when_suggested` and
 /// `spec/calendar-plan.md` ("Typed date phrases").
 const KEY_WHEN_SUGGESTED: &str = "when_suggested";
+/// Optional event flag: `true` marks the item's `when` as something that
+/// happens rather than something to do (`spec/events-plan.md`). Absent ≡
+/// not an event; the mutation deletes the key when cleared. Effective
+/// only beside a `when` (see [`is_event`]): the two are independent
+/// registers, so a flag left without a date by concurrent edits is
+/// inert rather than invalid.
+const KEY_EVENT: &str = "event";
 /// Optional duration in whole minutes (`1..=MAX_DURATION_MINUTES`), a
 /// length rather than an end so that moving `when` on one device and
 /// setting the length on another can never produce an item that ends
@@ -579,6 +586,10 @@ pub struct ItemView {
     /// Pending date suggestion, `when`-shaped; `None` ≡ none pending.
     /// Meaningful only while `when` is unset.
     pub when_suggested: Option<String>,
+    /// The item is an event (`spec/events-plan.md`): its `event` flag is
+    /// set **and** it has a `when`. The effective value, never the bare
+    /// register: a flag without a date reads `false`.
+    pub event: bool,
     /// Optional duration in whole minutes, `1..=MAX_DURATION_MINUTES`.
     /// `None` ≡ unset. Only meaningful beside a timed `when`.
     pub duration: Option<u32>,
@@ -617,15 +628,21 @@ impl ItemView {
     pub fn is_binned(&self) -> bool {
         self.binned_at.is_some()
     }
-    /// Located in the reserved `events` list (`spec/events-plan.md`).
-    /// The whole definition of an event: there is no item kind.
+    /// An event (`spec/events-plan.md`): flagged and dated. It happens
+    /// rather than being done, so it surfaces on the calendar and in no
+    /// list, and a past `when` is never overdue.
     pub fn is_event(&self) -> bool {
-        self.list_id == LIST_EVENTS
+        self.event
     }
-    /// Open (visible in a per-list view): one of the four open workflow
-    /// states and not binned.
+    /// Open: one of the four open workflow states and not binned.
     pub fn is_open(&self) -> bool {
         !self.is_binned() && self.state.is_open()
+    }
+    /// In its list's Open projection: open and not an event. This, not
+    /// [`is_open`](Self::is_open), is what a per-list view, a list count
+    /// and every `open_index` are over.
+    pub fn is_listed(&self) -> bool {
+        self.is_open() && !self.event
     }
     /// Resolved lifecycle: `Binned` while the mask is present, else the
     /// workflow register's state.
@@ -915,6 +932,10 @@ pub struct ExportItem {
     /// Pending date suggestion (`when`-shaped). Skipped when absent.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub when_suggested: Option<String>,
+    /// The item is an event (`spec/events-plan.md`). Skipped when false
+    /// so older dumps stay byte-identical.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub event: bool,
     /// Duration in whole minutes. Skipped when unset so older dumps stay
     /// byte-identical.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -948,7 +969,7 @@ pub struct ExportItem {
 /// entry is the canonical one for it. Encoded as a single scalar string
 /// (`"<list_id>:<placement_id>"`) so both halves are written in one
 /// register op — no independently-mergeable sub-fields to conflict.
-/// `:` is reserved: ids are uuid-v7 hex or the literal `events`. Inbox
+/// `:` is reserved: ids are uuid-v7 hex. Inbox
 /// writes no location; an older doc's `inbox:<placement>` still parses
 /// and reads as Inbox.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1011,6 +1032,14 @@ fn new_placement(list_id: &str) -> String {
 /// Write where an item is: `"<list_id>:<placement>"` for a list, or for
 /// Inbox no `location` at all (the key deleted when present).
 fn write_location(map: &LoroMap, list_id: &str, placement: &str) -> Result<(), DocError> {
+    // An item leaving the legacy `events` list keeps being an event:
+    // the location that said so is about to go, so write the register.
+    if read_string(map, KEY_LOCATION)
+        .and_then(|s| Location::parse(&s))
+        .is_some_and(|l| l.list_id == LEGACY_EVENTS_LIST)
+    {
+        map.insert(KEY_EVENT, true)?;
+    }
     if list_id == LIST_INBOX {
         if map.get(KEY_LOCATION).is_some() {
             map.delete(KEY_LOCATION)?;
@@ -1142,7 +1171,11 @@ struct ItemMeta {
     /// The list id the `location` register names, verbatim.
     located_in: String,
     placement_id: String,
+    /// Lifecycle-open (not closed, not binned). Focus reads this.
     open: bool,
+    /// An effective event ([`is_event`]). Ordering treats it as it does
+    /// a closed item: it keeps its entry and is in no Open projection.
+    event: bool,
     created_at: i64,
     /// The `inbox_at` register: Inbox's queue key while the item is in
     /// Inbox, ignored elsewhere.
@@ -1150,6 +1183,13 @@ struct ItemMeta {
 }
 
 impl ItemMeta {
+    /// In its list's Open projection: open and not an event. Every
+    /// ordering structure (`open_members`, `open_by_list`,
+    /// `open_visible_counts`) is over this, not `open`.
+    fn listed(&self) -> bool {
+        self.open && !self.event
+    }
+
     /// Inbox's queue sort key (`spec/inbox-plan.md` "Order"):
     /// `(inbox_at ?? created_at, created_at)`, then the id.
     fn queue_key(&self) -> (i64, i64) {
@@ -1318,7 +1358,7 @@ impl ProjectionIndex {
     fn refresh_open(&mut self, list_id: &str) -> Vec<String> {
         let (open, visible) = {
             let (ids, seen) = self.visible_ids(list_id);
-            let is_open = |id: &str| self.meta.get(id).is_some_and(|m| m.open);
+            let is_open = |id: &str| self.meta.get(id).is_some_and(|m| m.listed());
             let mut open: Vec<String> = ids
                 .into_iter()
                 .filter(|id| is_open(id))
@@ -1493,7 +1533,7 @@ impl ProjectionIndex {
             if old.list_id != meta.list_id {
                 Self::unset_member(&mut self.members, &old.list_id, id);
             }
-            if old.open && (!meta.open || old.list_id != meta.list_id) {
+            if old.listed() && (!meta.listed() || old.list_id != meta.list_id) {
                 Self::unset_member(&mut self.open_members, &old.list_id, id);
             }
         }
@@ -1501,7 +1541,7 @@ impl ProjectionIndex {
             .entry(meta.list_id.clone())
             .or_default()
             .insert(id.to_string());
-        if meta.open {
+        if meta.listed() {
             self.open_members
                 .entry(meta.list_id.clone())
                 .or_default()
@@ -1510,15 +1550,17 @@ impl ProjectionIndex {
         self.meta.insert(id.to_string(), meta);
     }
 
-    /// Flip the open flag of an item already in the index, keeping
-    /// `open_members` in step. Returns `(list_id, was_open)`.
-    fn set_open(&mut self, id: &str, open: bool) -> Option<(String, bool)> {
+    /// Set the open and event flags of an item already in the index,
+    /// keeping `open_members` in step. Returns `(list_id, was_listed)`.
+    fn set_flags(&mut self, id: &str, open: bool, event: bool) -> Option<(String, bool)> {
         let (list_id, was_open) = {
             let m = self.meta.get_mut(id)?;
-            let was = m.open;
+            let was = m.listed();
             m.open = open;
+            m.event = event;
             (m.list_id.clone(), was)
         };
+        let open = open && !event;
         if open && !was_open {
             self.open_members
                 .entry(list_id.clone())
@@ -1542,7 +1584,7 @@ impl ProjectionIndex {
     fn remove_item(&mut self, id: &str) {
         if let Some(old) = self.meta.remove(id) {
             Self::unset_member(&mut self.members, &old.list_id, id);
-            if old.open {
+            if old.listed() {
                 Self::unset_member(&mut self.open_members, &old.list_id, id);
             }
         }
@@ -2120,6 +2162,9 @@ impl Doc {
             // the original's then replaces.
             self.set_item_when(&copy, Some(when))?;
         }
+        if item.event {
+            self.set_item_event(&copy, true)?;
+        }
         if item.duration.is_some() {
             self.set_item_duration(&copy, item.duration)?;
         }
@@ -2209,6 +2254,7 @@ impl Doc {
                         located_in: list_id.to_string(),
                         placement_id: placement.clone(),
                         open: true,
+                        event: false,
                         created_at: *now,
                         inbox_at: None,
                     },
@@ -2254,6 +2300,7 @@ impl Doc {
                 deadline: None,
                 when: None,
                 when_suggested: None,
+                event: false,
                 duration: None,
                 place: None,
                 open_index,
@@ -2464,6 +2511,7 @@ impl Doc {
             None => None,
         };
         let map = self.find_item(item_id)?;
+        let was_event = is_event(&map);
         // `Some(Some(n))`: duration written; `Some(None)`: cleared.
         let mut duration_change: Option<Option<u32>> = None;
         let mut suggestion_cleared = false;
@@ -2486,6 +2534,11 @@ impl Doc {
                     let _ = map.delete(KEY_DURATION);
                     duration_change = Some(None);
                 }
+                // The event flag goes with the date, so it cannot come
+                // back on the next date set (`spec/events-plan.md`).
+                if map.get(KEY_EVENT).is_some() {
+                    let _ = map.delete(KEY_EVENT);
+                }
             }
         }
         self.inner.commit();
@@ -2493,6 +2546,12 @@ impl Doc {
             id: item_id.to_string(),
             when: normalized,
         });
+        // A `when` coming or going beside a set flag flips the effective
+        // event (the flag left by a concurrent edit, or a legacy
+        // `events` location).
+        if was_event != is_event(&map) {
+            self.emit_event_changed(item_id, &map);
+        }
         if let Some(duration) = duration_change {
             self.push_event(AppEvent::ItemDurationChanged {
                 id: item_id.to_string(),
@@ -2506,6 +2565,60 @@ impl Doc {
             });
         }
         Ok(())
+    }
+
+    /// Mark an item as an event, or as a task again
+    /// (`spec/events-plan.md`). An event happens rather than being done:
+    /// it surfaces on the calendar and in no list's Open projection, and
+    /// its past `when` is never overdue. `true` needs a `when` (`Invalid`
+    /// without one: the flag is a property of the date); `false` deletes
+    /// the key. One Loro commit; a write that would change nothing makes
+    /// none. The item keeps its list, lifecycle and every other register.
+    pub fn set_item_event(&self, item_id: &str, event: bool) -> Result<(), DocError> {
+        let map = self.find_item(item_id)?;
+        if event_flag(&map) == event {
+            return Ok(());
+        }
+        let was_event = is_event(&map);
+        let mut legacy = false;
+        if event {
+            if read_string(&map, KEY_WHEN).is_none_or(|s| s.is_empty()) {
+                return Err(DocError::Invalid("an event needs a date".into()));
+            }
+            map.insert(KEY_EVENT, true)?;
+        } else {
+            let _ = map.delete(KEY_EVENT);
+            // A legacy `events` location is the flag too: drop it, which
+            // leaves the item where it already projects, in Inbox.
+            if read_string(&map, KEY_LOCATION)
+                .and_then(|s| Location::parse(&s))
+                .is_some_and(|l| l.list_id == LEGACY_EVENTS_LIST)
+            {
+                map.delete(KEY_LOCATION)?;
+                legacy = true;
+            }
+        }
+        self.inner.commit();
+        if legacy {
+            // The index still names the dropped location; rare, so
+            // rebuild rather than patch.
+            self.rebuild_index();
+        }
+        if was_event != is_event(&map) {
+            self.emit_event_changed(item_id, &map);
+        }
+        Ok(())
+    }
+
+    /// Bring the index in step with an item's effective event flag and
+    /// report it.
+    fn emit_event_changed(&self, item_id: &str, map: &LoroMap) {
+        let open_index = self.sync_item_openness(item_id, map);
+        self.push_event(AppEvent::ItemEventChanged {
+            id: item_id.to_string(),
+            event: is_event(map),
+            open_index,
+        });
     }
 
     /// Set or clear an item's pending date suggestion: a `when`-shaped
@@ -2631,7 +2744,7 @@ impl Doc {
                 .meta
                 .get(item_id)
                 .ok_or_else(|| DocError::ItemNotFound(item_id.to_string()))?;
-            (m.list_id.clone(), m.located_in.clone(), m.open)
+            (m.list_id.clone(), m.located_in.clone(), m.listed())
         };
         if located_in == target_list_id {
             if target_list_id == LIST_INBOX {
@@ -2838,7 +2951,8 @@ impl Doc {
                     list_id: target_list_id.to_string(),
                     located_in: target_list_id.to_string(),
                     placement_id: placement,
-                    open: is_open,
+                    open: crate::doc::is_open(map),
+                    event: is_event(map),
                     created_at,
                     inbox_at,
                 },
@@ -3262,14 +3376,15 @@ impl Doc {
             .collect()
     }
 
-    /// Refresh the index after an item's lifecycle changed.
-    /// Returns the item's open index within its list (`None` when
-    /// hidden). Hiding is an O(open) splice; a restore recomputes the
+    /// Refresh the index after an item's lifecycle or event flag
+    /// changed. Returns the item's open index within its list (`None`
+    /// when hidden: closed, binned or an event). Hiding is an O(open) splice; a restore recomputes the
     /// list's projection to find the re-entry position.
     fn sync_item_openness(&self, item_id: &str, map: &LoroMap) -> Option<usize> {
-        let open_now = is_open(map);
+        let (open, event) = (is_open(map), is_event(map));
+        let open_now = open && !event;
         let mut guard = self.item_index.lock().expect("item index mutex poisoned");
-        let (list_id, was_open) = guard.set_open(item_id, open_now)?;
+        let (list_id, was_open) = guard.set_flags(item_id, open, event)?;
         if !open_now {
             // Its entry (if any) stays put but stops counting as an
             // open visible entry.
@@ -3355,7 +3470,7 @@ impl Doc {
                 per_item.push((
                     (*item_id).to_string(),
                     m.list_id.clone(),
-                    m.open && guard.canonical_raw_pos(&m.list_id, item_id).is_some(),
+                    m.listed() && guard.canonical_raw_pos(&m.list_id, item_id).is_some(),
                 ));
             }
             for positions in acc.values_mut() {
@@ -3567,18 +3682,11 @@ impl Doc {
     /// `ListDefaultViewChanged`. No-op when the value is unchanged, so
     /// re-saving the same view emits no phantom event. Never an undo step
     /// (`VIEW_ORIGIN`).
-    /// Refuses for the reserved `events`: it has no list or board view to
-    /// save (`spec/events-plan.md`).
     pub fn set_default_view(
         &self,
         list_id: &str,
         view: Option<DefaultView>,
     ) -> Result<(), DocError> {
-        if list_id == LIST_EVENTS {
-            return Err(DocError::Invalid(
-                "the events list has no list or board view".into(),
-            ));
-        }
         if list_id == LIST_INBOX {
             let settings = self.settings_map();
             if read_default_view(&settings, KEY_INBOX_VIEW) == view {
@@ -3701,7 +3809,8 @@ impl Doc {
             let map = self.find_item(item_id)?;
             write_location(&map, LIST_INBOX, "")?;
             map.insert(KEY_INBOX_AT, now)?;
-            if mode == DeleteListMode::ToBin && is_open(&map) {
+            // Events are not open work: they stay on the calendar.
+            if mode == DeleteListMode::ToBin && is_open(&map) && !is_event(&map) {
                 map.insert(KEY_BINNED_AT, now)?;
             }
         }
@@ -3810,7 +3919,7 @@ impl Doc {
                     .get(list_id)
                     .into_iter()
                     .flatten()
-                    .filter(|id| !seen.contains(*id) && guard.meta[*id].open)
+                    .filter(|id| !seen.contains(*id) && guard.meta[*id].listed())
                     .collect();
                 tail.sort_by(|a, b| guard.tail_cmp(list_id, a, b));
                 let mut append = Vec::new();
@@ -3982,23 +4091,6 @@ impl Doc {
             created_at: None,
             builtin: true,
         });
-        // The reserved `events` row rides only when something locates to
-        // it, so dumps from accounts with no events stay byte-identical.
-        let has_events = {
-            let guard = self.item_index.lock().expect("item index mutex poisoned");
-            guard.members.contains_key(LIST_EVENTS)
-        };
-        if has_events {
-            lists.push(ExportList {
-                id: LIST_EVENTS.to_string(),
-                name: EVENTS_NAME.to_string(),
-                icon: None,
-                view: None,
-                archived_at: None,
-                created_at: None,
-                builtin: true,
-            });
-        }
         lists.extend(self.all_lists().into_iter().map(|list| ExportList {
             id: list.id,
             name: list.name,
@@ -4070,15 +4162,17 @@ impl Doc {
 
         let mut id_map: HashMap<String, String> = HashMap::new();
         id_map.insert(LIST_INBOX.to_string(), LIST_INBOX.to_string());
-        id_map.insert(LIST_EVENTS.to_string(), LIST_EVENTS.to_string());
+        // A dump from before the `event` register: the `events` list is
+        // Inbox now, and its items carry the flag instead.
+        id_map.insert(LEGACY_EVENTS_LIST.to_string(), LIST_INBOX.to_string());
 
         let lists = self.lists();
         let mut lists_added: usize = 0;
         let mut lists_existing: usize = 0;
         for src_list in &export.lists {
-            // Reserved ids map onto themselves (seeded above); any other
-            // row flagged builtin collapses into the local `inbox`.
-            if src_list.id == LIST_EVENTS {
+            // Reserved ids are seeded above; any other row flagged
+            // builtin collapses into the local `inbox`.
+            if src_list.id == LEGACY_EVENTS_LIST {
                 continue;
             }
             if src_list.builtin || src_list.id == LIST_INBOX {
@@ -4310,6 +4404,11 @@ impl Doc {
             .and_then(|w| parse_when(w).ok())
         {
             map.insert(KEY_WHEN_SUGGESTED, value.as_str())?;
+        }
+        // `list_id: "events"` is how a dump from before the register
+        // marked an event.
+        if src.event || src.list_id == LEGACY_EVENTS_LIST {
+            map.insert(KEY_EVENT, true)?;
         }
         // Same leniency for an out-of-range duration.
         if let Some(n) = src
@@ -5190,6 +5289,7 @@ impl Doc {
                         KEY_DEADLINE,
                         KEY_WHEN,
                         KEY_WHEN_SUGGESTED,
+                        KEY_EVENT,
                         KEY_DURATION,
                         KEY_PLACE,
                         KEY_LIFECYCLE,
@@ -5357,8 +5457,42 @@ impl Doc {
                 // its order, so the per-list walk emits nothing for it —
                 // surface the lifecycle here. Hidden↔open transitions are
                 // emitted by the walk / hidden paths instead.
-                let was_open = c.old.as_ref().is_some_and(|o| o.open);
-                if new.open
+                // The effective event flag, read off the metas rather
+                // than the keys: a `when` write flips it too. An item
+                // that ends up outside its list's Open projection is
+                // told here, with no index. One that enters it by no
+                // longer being an event is told by the per-list walk,
+                // which knows its position; any lifecycle change riding
+                // the same frame is reported first, with no index, so
+                // the walk's event is the one that places the row.
+                let was_listed = c.old.as_ref().is_some_and(ItemMeta::listed);
+                let was_event = c.old.as_ref().is_some_and(|o| o.event);
+                if was_event != new.event && !new.listed() {
+                    self.push_event(AppEvent::ItemEventChanged {
+                        id: id.clone(),
+                        event: new.event,
+                        open_index: None,
+                    });
+                }
+                if was_event
+                    && new.listed()
+                    && (has(KEY_LIFECYCLE)
+                        || has(KEY_STARTED_AT)
+                        || has(KEY_DONE_AT)
+                        || has(KEY_BINNED_AT))
+                {
+                    self.push_event(AppEvent::ItemLifecycleChanged {
+                        id: id.clone(),
+                        state: view.state,
+                        lifecycle_at: view.lifecycle_at,
+                        started_at: view.started_at,
+                        done_at: view.done_at,
+                        binned_at: view.binned_at,
+                        open_index: None,
+                    });
+                }
+                let was_open = was_listed;
+                if new.listed()
                     && was_open
                     && (has(KEY_LIFECYCLE)
                         || has(KEY_STARTED_AT)
@@ -5380,7 +5514,7 @@ impl Doc {
                 }
             }
             let left_list = c.old.as_ref().is_some_and(|o| o.list_id != new.list_id);
-            if new.open {
+            if new.listed() {
                 // Live cross-list movers get their leave-signal *before*
                 // any per-list walk: the consumer removes the item from
                 // the source array now (appending it to the target), so
@@ -5413,6 +5547,7 @@ impl Doc {
                     deadline: view.deadline,
                     when: view.when,
                     when_suggested: view.when_suggested,
+                    event: view.event,
                     duration: view.duration,
                     place: view.place,
                     open_index: None,
@@ -5458,7 +5593,7 @@ impl Doc {
             for (i, id) in post.iter().enumerate() {
                 let Some(c) = changes.get(id) else { continue };
                 let Some(new) = &c.new else { continue };
-                if !new.open || new.list_id != *list {
+                if !new.listed() || new.list_id != *list {
                     continue;
                 }
                 if c.brand_new {
@@ -5480,6 +5615,7 @@ impl Doc {
                             deadline: view.deadline,
                             when: view.when,
                             when_suggested: view.when_suggested,
+                            event: view.event,
                             duration: view.duration,
                             place: view.place,
                             open_index: Some(i),
@@ -5492,8 +5628,21 @@ impl Doc {
                 // `ItemListChanged` already appended them to this list
                 // on the consumer, so an `ItemMoved` candidate
                 // repositions them like any other id.
-                let shown = c.old.as_ref().is_some_and(|o| !o.open);
-                if shown && (c.keys.contains(KEY_LIFECYCLE) || c.keys.contains(KEY_BINNED_AT)) {
+                let shown = c.old.as_ref().is_some_and(|o| !o.listed());
+                let unflagged = c.old.as_ref().is_some_and(|o| o.event);
+                if shown && unflagged {
+                    // An open item that stopped being an event.
+                    insert_type.insert(
+                        id,
+                        AppEvent::ItemEventChanged {
+                            id: id.clone(),
+                            event: false,
+                            open_index: Some(i),
+                        },
+                    );
+                } else if shown
+                    && (c.keys.contains(KEY_LIFECYCLE) || c.keys.contains(KEY_BINNED_AT))
+                {
                     let view = view_of(id)?;
                     insert_type.insert(
                         id,
@@ -5736,7 +5885,7 @@ impl Doc {
         // yields each open item's position in its list's open projection.
         let mut open_counters = HashMap::<String, usize>::new();
         for item in self.iter_items() {
-            let open_index = if item.is_open() {
+            let open_index = if item.is_listed() {
                 let counter = open_counters.entry(item.list_id.clone()).or_insert(0);
                 let i = *counter;
                 *counter += 1;
@@ -5759,6 +5908,7 @@ impl Doc {
                 deadline: item.deadline,
                 when: item.when,
                 when_suggested: item.when_suggested,
+                event: item.event,
                 duration: item.duration,
                 place: item.place,
                 open_index,
@@ -5868,6 +6018,7 @@ impl Doc {
             hash_opt_str(&mut hasher, i.deadline.as_deref());
             hash_opt_str(&mut hasher, i.when.as_deref());
             hash_opt_str(&mut hasher, i.when_suggested.as_deref());
+            hasher.update([u8::from(i.event)]);
             hash_opt_i64(&mut hasher, i.duration.map(i64::from));
             hash_opt_place(&mut hasher, i.place.as_ref());
             hasher.update(i.created_at.to_be_bytes());
@@ -6145,6 +6296,7 @@ fn export_item(item: ItemView) -> ExportItem {
         deadline: item.deadline,
         when: item.when,
         when_suggested: item.when_suggested,
+        event: item.event,
         duration: item.duration,
         place: item.place,
         created_at: item.created_at,
@@ -6202,7 +6354,7 @@ fn assert_unique_item_ids(item_ids: &[&str]) -> Result<(), DocError> {
 
 /// The reserved list ids: addressable by items, never a ListMeta row.
 fn is_reserved_list(list_id: &str) -> bool {
-    list_id == LIST_INBOX || list_id == LIST_EVENTS
+    list_id == LIST_INBOX
 }
 
 fn seed_builtins(doc: &LoroDoc) -> Result<bool, DocError> {
@@ -6567,6 +6719,7 @@ fn item_meta(map: &LoroMap) -> ItemMeta {
         list_id,
         placement_id,
         open: is_open(map),
+        event: is_event(map),
         created_at: read_i64(map, KEY_CREATED_AT).unwrap_or(0),
         inbox_at: read_i64(map, KEY_INBOX_AT),
     }
@@ -6675,6 +6828,7 @@ fn item_view(map: &LoroMap) -> Option<ItemView> {
         deadline: read_string(map, KEY_DEADLINE).filter(|s| !s.is_empty()),
         when: read_string(map, KEY_WHEN).filter(|s| !s.is_empty()),
         when_suggested: read_string(map, KEY_WHEN_SUGGESTED).filter(|s| !s.is_empty()),
+        event: is_event(map),
         duration: read_duration(map),
         place: read_place(map),
         created_at: read_i64(map, KEY_CREATED_AT)?,
@@ -6825,6 +6979,27 @@ fn is_open(map: &LoroMap) -> bool {
     read_i64(map, KEY_BINNED_AT).is_none() && workflow_of(map).0.is_open()
 }
 
+/// The item carries the event flag: the `event` register is `true`, or
+/// the item is still located in the legacy `events` list (the encoding
+/// before 2026-11-16, read here so old docs need no migration).
+fn event_flag(map: &LoroMap) -> bool {
+    let flagged = map
+        .get(KEY_EVENT)
+        .and_then(|v| v.as_value().cloned())
+        .and_then(|v| v.into_bool().ok())
+        .unwrap_or(false);
+    flagged
+        || read_string(map, KEY_LOCATION)
+            .and_then(|s| Location::parse(&s))
+            .is_some_and(|l| l.list_id == LEGACY_EVENTS_LIST)
+}
+
+/// The item is an event: flagged **and** dated. The one definition
+/// behind `ItemView::event` and the projection.
+fn is_event(map: &LoroMap) -> bool {
+    event_flag(map) && read_string(map, KEY_WHEN).is_some_and(|s| !s.is_empty())
+}
+
 fn hash_str(hasher: &mut Sha256, s: &str) {
     hasher.update((s.len() as u32).to_be_bytes());
     hasher.update(s.as_bytes());
@@ -6916,7 +7091,7 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
     let mut open_counters = HashMap::<&str, usize>::new();
     let mut open_pos = HashMap::<&str, usize>::with_capacity(post.len());
     for it in post {
-        if it.is_open() {
+        if it.is_listed() {
             let counter = open_counters.entry(it.list_id.as_str()).or_insert(0);
             open_pos.insert(it.id.as_str(), *counter);
             *counter += 1;
@@ -6947,6 +7122,7 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                     deadline: post_it.deadline.clone(),
                     when: post_it.when.clone(),
                     when_suggested: post_it.when_suggested.clone(),
+                    event: post_it.event,
                     duration: post_it.duration,
                     place: post_it.place.clone(),
                     open_index,
@@ -7008,6 +7184,13 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                         started_at: post_it.started_at,
                         done_at: post_it.done_at,
                         binned_at: post_it.binned_at,
+                        open_index,
+                    });
+                }
+                if pre_it.event != post_it.event {
+                    out.push(AppEvent::ItemEventChanged {
+                        id: post_it.id.clone(),
+                        event: post_it.event,
                         open_index,
                     });
                 }
@@ -8591,133 +8774,324 @@ mod tests {
         assert!(export.lists[1].created_at.is_some());
     }
 
-    // ---------- reserved `events` list (`spec/events-plan.md`) ----------
+    // ---------- the `event` register (`spec/events-plan.md`) ----------
 
-    #[test]
-    fn events_list_takes_items_without_a_list_meta_row() {
-        let doc = Doc::new().unwrap();
-        // Add straight into `events`, with no `when`: the core holds no
-        // "an event must be scheduled" invariant.
-        let added = doc.add_item(LIST_EVENTS, "dinner, date tbc").unwrap();
-        let view = doc.get_item(&added).unwrap();
-        assert!(view.is_event());
-        assert_eq!(view.when, None);
-        assert!(view.is_open());
-
-        // Moving is converting, in both directions; dates ride along.
-        let task = doc.add_item(LIST_INBOX, "dentist").unwrap();
-        doc.set_item_when(&task, Some("2026-10-09T09:30")).unwrap();
-        assert!(!doc.get_item(&task).unwrap().is_event());
-        doc.move_item(&task, LIST_EVENTS, 0).unwrap();
-        let moved = doc.get_item(&task).unwrap();
-        assert!(moved.is_event());
-        assert_eq!(moved.when.as_deref(), Some("2026-10-09T09:30"));
-        assert_eq!(doc.open_item_ids(LIST_EVENTS), vec![task.clone(), added]);
-        doc.move_item(&task, LIST_INBOX, 0).unwrap();
-        let back = doc.get_item(&task).unwrap();
-        assert!(!back.is_event());
-        assert_eq!(back.when.as_deref(), Some("2026-10-09T09:30"));
-
-        assert!(doc.all_lists().is_empty(), "no ListMeta row is minted");
-    }
-
-    #[test]
-    fn events_list_refuses_list_mutations() {
-        let doc = Doc::new().unwrap();
-        doc.add_item(LIST_EVENTS, "gig").unwrap();
-        assert!(matches!(
-            doc.rename_list(LIST_EVENTS, "Calendar").unwrap_err(),
-            DocError::CannotRenameBuiltin(id) if id == LIST_EVENTS
-        ));
-        assert!(matches!(
-            doc.set_list_icon(LIST_EVENTS, "📅").unwrap_err(),
-            DocError::CannotRenameBuiltin(_)
-        ));
-        assert!(matches!(
-            doc.set_list_archived(LIST_EVENTS, true).unwrap_err(),
-            DocError::CannotDeleteBuiltin(_)
-        ));
-        assert!(matches!(
-            doc.move_list(LIST_EVENTS, 0).unwrap_err(),
-            DocError::CannotMoveBuiltin(_)
-        ));
-        assert!(matches!(
-            doc.delete_list(LIST_EVENTS, DeleteListMode::ToBin)
-                .unwrap_err(),
-            DocError::CannotDeleteBuiltin(_)
-        ));
-        // No list or board view to save.
-        assert!(matches!(
-            doc.set_default_view(LIST_EVENTS, Some(DefaultView::BOARD))
-                .unwrap_err(),
-            DocError::Invalid(_)
-        ));
-        assert_eq!(doc.open_item_ids(LIST_EVENTS).len(), 1);
-    }
-
-    #[test]
-    fn delete_list_relocates_to_inbox_not_events() {
+    /// A dated item in a user list, plus two neighbours.
+    fn doc_with_dated_item() -> (Doc, String, [String; 3]) {
         let doc = Doc::new().unwrap();
         let list = doc.add_list("Trip").unwrap();
-        let item = doc.add_item(&list, "book flights").unwrap();
-        doc.add_item(LIST_EVENTS, "flight out").unwrap();
-        doc.delete_list(&list, DeleteListMode::ToBin).unwrap();
-        let view = doc.get_item(&item).unwrap();
-        assert_eq!(view.list_id, LIST_INBOX);
-        assert!(view.is_binned());
-        assert_eq!(doc.open_item_ids(LIST_EVENTS).len(), 1);
+        let a = doc.add_item(&list, "pack").unwrap();
+        let b = doc.add_item(&list, "flight out").unwrap();
+        let c = doc.add_item(&list, "book hotel").unwrap();
+        doc.set_item_when(&b, Some("2026-12-01T09:30")).unwrap();
+        let _ = doc.drain_events();
+        (doc, list, [a, b, c])
     }
 
     #[test]
-    fn json_export_emits_events_row_only_when_populated() {
-        let doc = Doc::new().unwrap();
-        doc.add_item(LIST_INBOX, "task").unwrap();
-        let export = doc.export_json();
-        assert!(export.lists.iter().all(|l| l.id != LIST_EVENTS));
-
-        let event = doc.add_item(LIST_EVENTS, "gig").unwrap();
-        doc.set_item_when(&event, Some("2026-10-09")).unwrap();
-        let export = doc.export_json();
+    fn event_flag_takes_the_item_out_of_its_list_and_back() {
+        let (doc, list, [a, b, c]) = doc_with_dated_item();
+        doc.set_item_event(&b, true).unwrap();
+        let view = doc.get_item(&b).unwrap();
+        assert!(view.is_event());
+        assert!(view.is_open(), "lifecycle is untouched");
+        assert!(!view.is_listed());
+        assert_eq!(view.list_id, list, "the item keeps its list");
+        assert_eq!(doc.open_item_ids(&list), vec![a.clone(), c.clone()]);
         assert_eq!(
-            export.lists[1],
-            ExportList {
-                id: LIST_EVENTS.to_string(),
-                name: EVENTS_NAME.to_string(),
-                icon: None,
-                view: None,
-                archived_at: None,
-                created_at: None,
-                builtin: true,
-            }
+            doc.drain_events(),
+            vec![AppEvent::ItemEventChanged {
+                id: b.clone(),
+                event: true,
+                open_index: None,
+            }]
         );
-        let exported = export.items.iter().find(|i| i.text == "gig").unwrap();
-        assert_eq!(exported.list_id, LIST_EVENTS);
+        assert_open_projection_matches_doc(&doc);
 
-        // Round trip: the event lands in the local `events`, the task in
-        // the local `inbox`, and no user list is minted for either.
+        // Re-applying is a no-op: no commit, no event.
+        doc.set_item_event(&b, true).unwrap();
+        assert!(doc.drain_events().is_empty());
+
+        // Back to a task: it re-enters where its order entry still is.
+        doc.set_item_event(&b, false).unwrap();
+        assert!(!doc.get_item(&b).unwrap().is_event());
+        assert_eq!(doc.open_item_ids(&list), vec![a, b.clone(), c]);
+        assert_eq!(
+            doc.drain_events(),
+            vec![AppEvent::ItemEventChanged {
+                id: b,
+                event: false,
+                open_index: Some(1),
+            }]
+        );
+        assert_open_projection_matches_doc(&doc);
+    }
+
+    #[test]
+    fn event_flag_needs_a_date() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "dinner, date tbc").unwrap();
+        assert!(matches!(
+            doc.set_item_event(&id, true).unwrap_err(),
+            DocError::Invalid(_)
+        ));
+        assert!(!doc.get_item(&id).unwrap().is_event());
+        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![id]);
+    }
+
+    #[test]
+    fn clearing_the_date_clears_the_event_flag() {
+        let (doc, list, [a, b, c]) = doc_with_dated_item();
+        doc.set_item_event(&b, true).unwrap();
+        let _ = doc.drain_events();
+        doc.set_item_when(&b, None).unwrap();
+        assert!(!doc.get_item(&b).unwrap().is_event());
+        assert_eq!(doc.open_item_ids(&list), vec![a, b.clone(), c]);
+        let evs = doc.drain_events();
+        assert!(
+            evs.contains(&AppEvent::ItemEventChanged {
+                id: b.clone(),
+                event: false,
+                open_index: Some(1),
+            }),
+            "events: {evs:?}"
+        );
+        // The flag went with the date: a new date makes a task.
+        doc.set_item_when(&b, Some("2026-12-02")).unwrap();
+        assert!(!doc.get_item(&b).unwrap().is_event());
+        assert_open_projection_matches_doc(&doc);
+    }
+
+    #[test]
+    fn event_flag_without_a_date_is_inert_after_concurrent_edits() {
+        let dek = Dek::generate();
+        let mut a = Doc::new().unwrap();
+        let id = a.add_item(LIST_INBOX, "dentist").unwrap();
+        a.set_item_when(&id, Some("2026-12-01")).unwrap();
+        let mut b = sync_fresh_peer(&mut a, &dek);
+
+        // A clears the date while B marks it an event.
+        a.set_item_when(&id, None).unwrap();
+        b.set_item_event(&id, true).unwrap();
+        let from_a = a.pending_export(&dek).unwrap().unwrap();
+        let from_b = b.pending_export(&dek).unwrap().unwrap();
+        a.apply_remote(&dek, &from_b).unwrap();
+        b.apply_remote(&dek, &from_a).unwrap();
+
+        for doc in [&a, &b] {
+            let view = doc.get_item(&id).unwrap();
+            assert!(!view.is_event(), "a flag with no date is no event");
+            assert_eq!(doc.open_item_ids(LIST_INBOX), vec![id.clone()]);
+            assert_open_projection_matches_doc(doc);
+        }
+        assert_eq!(a.fingerprint(), b.fingerprint());
+    }
+
+    #[test]
+    fn remote_event_flag_translates_to_surgical_events() {
+        let dek = Dek::generate();
+        let mut a = Doc::new().unwrap();
+        let l = a.add_list("L").unwrap();
+        let first = a.add_item(&l, "first").unwrap();
+        let second = a.add_item(&l, "second").unwrap();
+        let third = a.add_item(&l, "third").unwrap();
+        a.set_item_when(&second, Some("2026-12-01")).unwrap();
+        let mut b = sync_fresh_peer(&mut a, &dek);
+
+        let pre = open_state(&b);
+        a.set_item_event(&second, true).unwrap();
+        let blob = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        b.apply_remote(&dek, &blob).unwrap();
+        let evs = b.drain_events();
+        assert_eq!(
+            evs,
+            vec![AppEvent::ItemEventChanged {
+                id: second.clone(),
+                event: true,
+                open_index: None,
+            }]
+        );
+        assert_eq!(replay_open_events(&pre, &evs), open_state(&b));
+        assert_eq!(b.open_item_ids(&l), vec![first.clone(), third.clone()]);
+        assert_open_projection_matches_doc(&b);
+
+        a.set_item_event(&second, false).unwrap();
+        let blob = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        b.apply_remote(&dek, &blob).unwrap();
+        assert_eq!(
+            b.drain_events(),
+            vec![AppEvent::ItemEventChanged {
+                id: second.clone(),
+                event: false,
+                open_index: Some(1),
+            }]
+        );
+        assert_eq!(
+            b.open_item_ids(&l),
+            vec![first.clone(), second.clone(), third.clone()]
+        );
+        assert_open_projection_matches_doc(&b);
+
+        // Clearing the date remotely un-flags and re-lists in one frame.
+        a.set_item_event(&second, true).unwrap();
+        let blob = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        b.apply_remote(&dek, &blob).unwrap();
+        let _ = b.drain_events();
+        a.set_item_when(&second, None).unwrap();
+        let blob = a.pending_export(&dek).unwrap().unwrap();
+        b.apply_remote(&dek, &blob).unwrap();
+        let evs = b.drain_events();
+        assert!(
+            evs.contains(&AppEvent::ItemEventChanged {
+                id: second.clone(),
+                event: false,
+                open_index: Some(1),
+            }),
+            "events: {evs:?}"
+        );
+        assert_eq!(b.open_item_ids(&l), vec![first, second, third]);
+        assert_open_projection_matches_doc(&b);
+        assert_eq!(a.fingerprint(), b.fingerprint());
+    }
+
+    #[test]
+    fn event_flag_undo_restores_the_list_row() {
+        let (doc, list, [a, b, c]) = doc_with_dated_item();
+        doc.set_item_event(&b, true).unwrap();
+        assert_eq!(doc.open_item_ids(&list), vec![a.clone(), c.clone()]);
+        assert!(doc.undo().unwrap());
+        assert!(!doc.get_item(&b).unwrap().is_event());
+        assert_eq!(
+            doc.open_item_ids(&list),
+            vec![a.clone(), b.clone(), c.clone()]
+        );
+        assert_open_projection_matches_doc(&doc);
+        assert!(doc.redo().unwrap());
+        assert!(doc.get_item(&b).unwrap().is_event());
+        assert_eq!(doc.open_item_ids(&list), vec![a, c]);
+        assert_open_projection_matches_doc(&doc);
+    }
+
+    #[test]
+    fn an_event_stays_focusable_and_survives_a_list_delete() {
+        let (doc, list, [a, b, _c]) = doc_with_dated_item();
+        doc.set_item_event(&b, true).unwrap();
+        doc.add_to_focus(&b, 0).unwrap();
+        assert_eq!(doc.focus_view().len(), 1);
+
+        // Deleting its list bins open work, not events.
+        doc.delete_list(&list, DeleteListMode::ToBin).unwrap();
+        assert!(doc.get_item(&a).unwrap().is_binned());
+        let event = doc.get_item(&b).unwrap();
+        assert!(!event.is_binned());
+        assert!(event.is_event());
+        assert_eq!(event.list_id, LIST_INBOX);
+        assert!(doc.open_item_ids(LIST_INBOX).is_empty(), "not in Inbox");
+        assert_open_projection_matches_doc(&doc);
+    }
+
+    #[test]
+    fn done_event_closes_like_any_item() {
+        let (doc, list, [a, b, c]) = doc_with_dated_item();
+        doc.set_item_event(&b, true).unwrap();
+        doc.set_item_done(&b, true).unwrap();
+        assert!(doc.done_item_ids().contains(&b));
+        doc.set_item_done(&b, false).unwrap();
+        // Reopened, still an event, still out of the list.
+        assert_eq!(doc.open_item_ids(&list), vec![a, c]);
+        assert_open_projection_matches_doc(&doc);
+    }
+
+    /// Rewrite an item's location to the legacy `events` list, as a doc
+    /// from before the register holds it.
+    fn locate_in_legacy_events(doc: &Doc, id: &str) {
+        let map = item_map_of(&doc.items(), id).unwrap();
+        map.insert(KEY_LOCATION, "events:0123456789abcdef0123456789abcdef")
+            .unwrap();
+        doc.inner.commit();
+        doc.rebuild_index();
+        let _ = doc.drain_events();
+    }
+
+    #[test]
+    fn legacy_events_location_reads_as_the_flag() {
+        let doc = Doc::new().unwrap();
+        let list = doc.add_list("Trip").unwrap();
+        let dated = doc.add_item(LIST_INBOX, "gig").unwrap();
+        doc.set_item_when(&dated, Some("2026-12-01")).unwrap();
+        let undated = doc.add_item(LIST_INBOX, "dinner, date tbc").unwrap();
+        locate_in_legacy_events(&doc, &dated);
+        locate_in_legacy_events(&doc, &undated);
+
+        // Dated: an event, out of every list. Undated: an Inbox task.
+        let view = doc.get_item(&dated).unwrap();
+        assert!(view.is_event());
+        assert_eq!(doc.open_item_ids(LIST_INBOX), vec![undated.clone()]);
+        assert!(!doc.get_item(&undated).unwrap().is_event());
+
+        // A move keeps it an event: the register is written as the
+        // location that implied it goes.
+        doc.move_item(&dated, &list, 0).unwrap();
+        let moved = doc.get_item(&dated).unwrap();
+        assert!(moved.is_event());
+        assert_eq!(moved.list_id, list);
+        assert!(doc.open_item_ids(&list).is_empty());
+
+        // Turning the flag off on a legacy item leaves a task in Inbox.
+        let other = doc.add_item(LIST_INBOX, "show").unwrap();
+        doc.set_item_when(&other, Some("2026-12-03")).unwrap();
+        locate_in_legacy_events(&doc, &other);
+        doc.set_item_event(&other, false).unwrap();
+        let task = doc.get_item(&other).unwrap();
+        assert!(!task.is_event());
+        assert_eq!(task.list_id, LIST_INBOX);
+        assert!(doc.open_item_ids(LIST_INBOX).contains(&other));
+        assert_open_projection_matches_doc(&doc);
+    }
+
+    #[test]
+    fn json_export_round_trips_the_event_flag() {
+        let (doc, _list, [_a, b, _c]) = doc_with_dated_item();
+        doc.set_item_event(&b, true).unwrap();
+        let export = doc.export_json();
+        let exported = export.items.iter().find(|i| i.id == b).unwrap();
+        assert!(exported.event);
+        let json = serde_json::to_string(&export).unwrap();
+        assert_eq!(json.matches("\"event\":true").count(), 1);
+        assert!(!json.contains("\"event\":false"), "skipped when false");
+
+        let restored = Doc::new().unwrap();
+        restored.import_json(&export).unwrap();
+        let events: Vec<ItemView> = restored
+            .all_items()
+            .into_iter()
+            .filter(ItemView::is_event)
+            .collect();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].text, "flight out");
+    }
+
+    #[test]
+    fn import_json_reads_a_legacy_events_list_as_the_flag() {
+        // A dump from before the register: the item names the `events`
+        // list, with or without its builtin row.
+        let source = Doc::new().unwrap();
+        let id = source.add_item(LIST_INBOX, "gig").unwrap();
+        source.set_item_when(&id, Some("2026-10-09")).unwrap();
+        let mut export = source.export_json();
+        export.items[0].list_id = "events".to_string();
         let restored = Doc::new().unwrap();
         let summary = restored.import_json(&export).unwrap();
         assert_eq!(summary.lists_added, 0);
         assert!(restored.all_lists().is_empty());
-        let events = restored.items_in_list(LIST_EVENTS, false);
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].text, "gig");
-        assert_eq!(events[0].when.as_deref(), Some("2026-10-09"));
-        assert_eq!(restored.items_in_list(LIST_INBOX, false).len(), 1);
-    }
-
-    #[test]
-    fn import_json_accepts_events_items_without_the_builtin_row() {
-        // A hand-edited or trimmed export: the item names `events` but no
-        // list row does. The literal is reserved, so it still resolves.
-        let source = Doc::new().unwrap();
-        source.add_item(LIST_EVENTS, "gig").unwrap();
-        let mut export = source.export_json();
-        export.lists.retain(|l| l.id != LIST_EVENTS);
-        let restored = Doc::new().unwrap();
-        restored.import_json(&export).unwrap();
-        assert_eq!(restored.items_in_list(LIST_EVENTS, false).len(), 1);
-        assert!(restored.items_in_list(LIST_INBOX, false).is_empty());
+        let items = restored.all_items();
+        assert_eq!(items.len(), 1);
+        assert!(items[0].is_event());
+        assert_eq!(items[0].list_id, LIST_INBOX);
+        assert!(restored.open_item_ids(LIST_INBOX).is_empty());
     }
 
     #[test]
@@ -9424,6 +9798,12 @@ mod tests {
                     // lifecycle re-entries are handled by the caller
                     // passing docs whose lists are stable. For pure
                     // reorder/move tests this arm only hides.
+                    if open_index.is_none() {
+                        remove_everywhere(&mut open, id);
+                    }
+                }
+                AppEvent::ItemEventChanged { id, open_index, .. } => {
+                    // As a lifecycle event: this arm only hides.
                     if open_index.is_none() {
                         remove_everywhere(&mut open, id);
                     }
@@ -10396,6 +10776,7 @@ mod tests {
             deadline: None,
             when: None,
             when_suggested: None,
+            event: false,
             duration: None,
             place: None,
             created_at: 1,
@@ -10493,6 +10874,7 @@ mod tests {
             deadline: None,
             when: None,
             when_suggested: None,
+            event: false,
             duration: None,
             place: None,
             created_at: 1,
@@ -11648,6 +12030,7 @@ mod tests {
                 deadline: None,
                 when: None,
                 when_suggested: None,
+                event: false,
                 duration: None,
                 place: None,
                 created_at: 1_700_000_000_000,

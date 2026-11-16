@@ -431,7 +431,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     /// item holds underneath, and picking it changes nothing, so a
     /// state the item brought in from a list is kept.
     private func popStateMenu(_ item: ItemInfo, under control: NSSegmentedControl) {
-        let event = item.item.listId == MainWindowModel.events
+        let event = item.item.event
         let picked: ItemState = event && !item.item.state.isClosed ? .backlog : item.item.state
         let menu = NSMenu()
         for state in event ? ItemPanel.eventStates : ItemPanel.taskStates {

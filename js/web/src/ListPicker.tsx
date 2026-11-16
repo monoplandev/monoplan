@@ -25,14 +25,12 @@ import {
 } from "solid-js";
 import { Portal } from "solid-js/web";
 import archiveSvg from "./icons/archive.svg?raw";
-import calendarSvg from "./icons/calendar.svg?raw";
 import caretSortSvg from "./icons/caret-sort.svg?raw";
 import checkSvg from "./icons/check.svg?raw";
 import fileSvg from "./icons/file.svg?raw";
 import usersSvg from "./icons/users.svg?raw";
 import { useAppI18n } from "./i18n.tsx";
 import { matchesName } from "./search.ts";
-import { LIST_EVENTS } from "./sync/store.ts";
 
 /** One entry in the move-to-list picker: the reserved `inbox` and
  *  `events` lists plus every user list. `icon` is a list's chosen emoji
@@ -59,7 +57,7 @@ export type ListOption = {
  *  for the reserved lists (Inbox's archive box, the calendar for Events),
  *  the default file glyph otherwise. */
 export const listGlyph = (id: string): string =>
-  id === "inbox" ? archiveSvg : id === LIST_EVENTS ? calendarSvg : fileSvg;
+  id === "inbox" ? archiveSvg : fileSvg;
 
 /** Gap between the trigger and the panel, and the minimum breathing room
  *  kept against every viewport edge. */

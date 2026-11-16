@@ -444,6 +444,12 @@ final class AppModel: ObservableObject {
         write({ try $0.setWhen(workspace: workspace, id: id, when: when, duration: duration) }, to: ref)
     }
 
+    /// Mark a dated item an event, or a task again (`Engine.setEvent`).
+    func setEvent(_ ref: ItemRef, event: Bool) {
+        let (workspace, id) = (selector(ref.docId), ref.itemId)
+        write({ try $0.setEvent(workspace: workspace, id: id, event: event) }, to: ref)
+    }
+
     /// Set or clear (nil) an item's duration in minutes.
     func setDuration(_ ref: ItemRef, minutes: Int?) {
         let (workspace, id) = (selector(ref.docId), ref.itemId)

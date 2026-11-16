@@ -227,8 +227,8 @@ describe("docs layer", () => {
     other.setDone(b, true);
     expect(layer.doneItems().map((it) => it.id).sort()).toEqual([a, b].sort());
 
-    const e1 = home.addItem("events", "home event");
-    const e2 = other.addItem("events", "other event");
+    const e1 = home.addItem("inbox", "home event");
+    const e2 = other.addItem("inbox", "other event");
     expect(layer.calendarItems().map((it) => it.id)).toContain(e2);
     home.setCalendarDocHidden(OTHER, true);
     expect(layer.calendarHiddenDocs()).toEqual([OTHER]);

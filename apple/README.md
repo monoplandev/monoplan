@@ -477,7 +477,7 @@ engine's merged agenda (`Request.agenda(days: AppModel.agendaDays, all: true)`, 
 `agenda --all --json`, `spec/cli.md` §Items: every open workspace in
 one placement, the Home doc's hidden-from-calendar docs left out; the
 horizon is a century, so the whole future in one fetch, no paging), every
-group as a section: Today, Unscheduled events, then each non-empty
+group as a section: Today, then each non-empty
 day, with the row's time, its workspace under the text when it is not
 Personal's, and the duration or overdue / due-today tone; read-only
 markup, nothing tappable yet. **Home** (`HomeView.swift`,

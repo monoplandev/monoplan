@@ -39,9 +39,9 @@ routing and the address bar is rewritten to the view on screen.
 for a month-grid lens, and an underscore day anchor on the agenda and
 grid (`upcoming_2026-07-13`, `calendar_2026-07`); a day is not an id,
 so the two agenda anchors never collide.
-The reserved `events` list (`events-plan.md`) has no token of its own:
-`#list_events` is accepted as an alias and canonicalised to `#upcoming`,
-its home.
+`#list_events` (the token of the reserved `events` list, removed
+2026-11-16, `events-plan.md`) is still accepted as an alias and
+canonicalised to `#upcoming`, where events show.
 Anything else is ignored: the client keeps whatever it was showing.
 There is no `#home`: a bare URL (no fragment) restores the last view
 from local prefs, as before URLs existed.

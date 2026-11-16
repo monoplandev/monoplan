@@ -132,6 +132,10 @@ pub struct Item {
     /// Pending date suggestion (`when`-shaped), when one is unanswered.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub when_suggested: Option<String>,
+    /// An event (`spec/events-plan.md`): flagged and dated. It shows on
+    /// the agenda and in no list.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub event: bool,
     /// Duration in whole minutes, when set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<u32>,
@@ -156,6 +160,7 @@ impl From<&ItemView> for Item {
             deadline: item.deadline.clone(),
             when: item.when.clone(),
             when_suggested: item.when_suggested.clone(),
+            event: item.event,
             duration: item.duration,
             place: item.place.as_ref().map(Place::from),
         }
@@ -163,14 +168,13 @@ impl From<&ItemView> for Item {
 }
 
 /// The items of `list` in order, binned ones left out; closed ones
-/// (`Done`, `Cancelled`) only with `include_done`. The core views, for
+/// (`Done`, `Cancelled`) only with `include_done`. Open events are
+/// left out too: no list shows one, the agenda does. The core views, for
 /// a caller that renders more than the row carries; [`items`] is the
 /// rows.
 pub fn item_views(cx: &Ctx, list: &str, include_done: bool) -> Vec<ItemView> {
     let mut items = cx.doc.items_in_list(list, false);
-    if !include_done {
-        items.retain(|i| !i.is_closed());
-    }
+    items.retain(|i| i.is_listed() || (include_done && i.is_closed()));
     items
 }
 
@@ -295,6 +299,12 @@ pub fn set_when(cx: &Ctx, id: &str, when: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Mark the item an event (it needs a date), or a task again.
+pub fn set_event(cx: &Ctx, id: &str, event: bool) -> anyhow::Result<()> {
+    cx.doc.set_item_event(id, event)?;
+    Ok(())
+}
+
 /// Raise a date suggestion (`when`-shaped) on the item, or dismiss the
 /// pending one (`None`). Setting `when` to the same value accepts it.
 pub fn set_when_suggested(cx: &Ctx, id: &str, when: Option<&str>) -> anyhow::Result<()> {
@@ -411,7 +421,7 @@ mod tests {
             .collect();
         // Unset optionals that the old row skipped are absent; the
         // three stamps are always there, null when unset.
-        for k in ["created_by", "deadline", "when_suggested"] {
+        for k in ["created_by", "deadline", "when_suggested", "event"] {
             assert!(!keys.contains(&k), "{k} should be absent: {json}");
         }
         assert_eq!(json["state"], "done");

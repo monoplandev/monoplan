@@ -2,8 +2,8 @@
 // and the item sheet): the engine's agenda projection (`Engine.agenda`,
 // spec/cli.md, with a horizon far enough out to be the whole future,
 // `AppModel.agendaDays`) as sections: Today first (overdue deadlines
-// and tasks whose planned day has passed folded in), Unscheduled
-// events, then each non-empty day. A row opens the item's sheet
+// and tasks whose planned day has passed folded in), then each
+// non-empty day. A row opens the item's sheet
 // (`ItemView`) and its checkbox ticks it, as in the other lenses.
 
 import MonoplanCore

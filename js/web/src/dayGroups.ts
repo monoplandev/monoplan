@@ -11,9 +11,8 @@
 // outlives the tick or the cross, "owed by" does not): they keep their
 // slot on that day, never in Overdue and never placed by deadline. Binned
 // items never appear. Events
-// (`spec/events-plan.md`) place by the same rules; an Open event with no
-// date at all has no day, and no list view to fall back on, so it gets an
-// Unscheduled group between Overdue and Today. A `when` that runs for
+// (`spec/events-plan.md`) place by the same rules; an event always has a
+// `when`, so it always has a day. A `when` that runs for
 // days (`duration` beside it, `spec/calendar-plan.md` "Field:
 // `duration`") puts the item on every day it covers, from today onward,
 // so a span that started yesterday is still on today's page. Pure so it
@@ -38,8 +37,8 @@ export type DayTone = "overdue" | "warning" | "neutral";
 
 export interface DayRow {
   item: ItemView;
-  /** Which field put the row on this day; `none` in Unscheduled. */
-  placedBy: "when" | "deadline" | "none";
+  /** Which field put the row on this day. */
+  placedBy: "when" | "deadline";
   tone: DayTone;
   /** Set on every row of a `when` that covers more than one day: which
    *  day of the span this row is (1-based) and how many there are. The
@@ -70,31 +69,22 @@ export function whenSpan(
 
 /** Group key of the Overdue group, which has no day of its own. */
 export const OVERDUE_KEY = "overdue";
-/** Group key of the Unscheduled group: Open events with no date. */
-export const UNSCHEDULED_KEY = "unscheduled";
 
 export interface DayGroup {
-  /** Group key: the `YYYY-MM-DD` stamp of the day, `OVERDUE_KEY`, or
-   *  `UNSCHEDULED_KEY`. */
+  /** Group key: the `YYYY-MM-DD` stamp of the day, or `OVERDUE_KEY`. */
   key: string;
   label: string;
-  urgency: "overdue" | "unscheduled" | "today" | "future";
+  urgency: "overdue" | "today" | "future";
   rows: DayRow[];
 }
 
 export interface DayGroupLabels {
   overdue: string;
-  unscheduled: string;
   today: string;
   tomorrow: string;
 }
 
-/** An Open event with neither a `when` nor a `deadline`. A past `when` is
- *  not unscheduled: it went by. */
-const isUnscheduledEvent = (it: ItemView): boolean =>
-  isEvent(it) && isOpen(it) && !it.when && !it.deadline;
-
-/** An Open task (anything outside the events list) whose `when` is over:
+/** An Open task (anything not marked an event) whose `when` is over:
  *  its whole span ended before `today`. Planned, not done, so it is
  *  overdue. An event in the same position simply went by. */
 export const isSlippedTask = (it: ItemView, today: string): boolean =>
@@ -106,9 +96,8 @@ export const isSlippedTask = (it: ItemView, today: string): boolean =>
 /** Bucket `items` by placement day. `today` is the local `YYYY-MM-DD`
  *  stamp everything is judged against. An Overdue group leads when any
  *  deadline is past or any Open task's `when` is over, oldest first by
- *  the date that put the row there, then `createdAt`. An Unscheduled
- *  group follows when any Open event has no date, oldest first. Today is
- *  always present after them, empty if nothing is due, so the surface
+ *  the date that put the row there, then `createdAt`. Today is always
+ *  present after it, empty if nothing is due, so the surface
  *  anchors on the current day.
  *
  *  Within a day, rows order by the raw string of the placing field
@@ -128,12 +117,7 @@ export function groupByDay(
 ): DayGroup[] {
   const placed: { day: string; raw: string; row: DayRow }[] = [];
   const overdueRows: { raw: string; row: DayRow }[] = [];
-  const unscheduled: ItemView[] = [];
   for (const it of items) {
-    if (isUnscheduledEvent(it)) {
-      unscheduled.push(it);
-      continue;
-    }
     if (isBinned(it) || (!it.when && !it.deadline)) continue;
     // Past days are not rendered here, so a `when` that is over places
     // nothing, done or not. A span still running is placed from today:
@@ -221,21 +205,6 @@ export function groupByDay(
       rows: overdueRows.map((p) => p.row),
     });
   }
-  if (unscheduled.length > 0) {
-    unscheduled.sort(
-      (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
-    );
-    out.push({
-      key: UNSCHEDULED_KEY,
-      label: labels.unscheduled,
-      urgency: "unscheduled",
-      rows: unscheduled.map((item) => ({
-        item,
-        placedBy: "none",
-        tone: "neutral",
-      })),
-    });
-  }
   out.push({ key: today, label: labels.today, urgency: "today", rows: [] });
   for (const p of placed) {
     const last = out[out.length - 1]!;
@@ -268,9 +237,7 @@ export interface AttentionBadge {
  *  span covering it included. Tone is the most urgent counted: overdue,
  *  else warning (a deadline today), else neutral. An event's past `when`
  *  has gone by and counts for nothing; future days are the view's
- *  business, not the
- *  badge's. Unscheduled events count too, at neutral tone: the calendar
- *  is the only place they show. */
+ *  business, not the badge's. */
 export function attentionBadge(
   items: Iterable<ItemView>,
   today: string,
@@ -288,8 +255,6 @@ export function attentionBadge(
       count++;
       warning = true;
     } else if (it.when && coversToday(it.when, it.duration, today)) {
-      count++;
-    } else if (isUnscheduledEvent(it)) {
       count++;
     }
   }

@@ -333,8 +333,11 @@ export function ItemContextMenu(props: {
             >
               <span>
                 {m().focus.showInList(
-                  props.listLabel?.(props.item().listId, props.item().docId) ??
-                    props.item().listId,
+                  // An event's home is the calendar, whatever its list.
+                  isEvent(props.item())
+                    ? m().nav.upcoming
+                    : (props.listLabel?.(props.item().listId, props.item().docId) ??
+                      props.item().listId),
                 )}
               </span>
             </ContextMenu.Item>

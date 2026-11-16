@@ -6,7 +6,6 @@
 
 import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js";
 import type { DocsLayer } from "./sync/docs.ts";
-import { LIST_EVENTS } from "./sync/store.ts";
 import { matchesName, type SearchResult } from "./search.ts";
 import { useAppI18n } from "./i18n.tsx";
 import archiveSvg from "./icons/archive.svg?raw";
@@ -135,14 +134,13 @@ export function createFindState(docs: DocsLayer) {
  *  themselves get no label. Returns "" when there's nothing to show. */
 export function findResultListLabel(
   docs: DocsLayer,
-  builtin: { inbox: string; events: string },
+  builtin: { inbox: string },
   item: FindResult,
 ): string {
   if (item.kind !== "item") return "";
   const listId = item.listId;
   if (!listId) return "";
   if (listId === "inbox") return builtin.inbox;
-  if (listId === LIST_EVENTS) return builtin.events;
   return docs.listOf(item.docId ?? docs.homeDocId, listId)?.name ?? "";
 }
 

@@ -100,13 +100,18 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     /// Bring the window forward, on a list when one is given (a tray
     /// row: the item's list in its workspace, nil being Home's), with
-    /// the item's panel open when the row names one.
-    func show(list: String? = nil, workspace: String? = nil, item: String? = nil) {
+    /// the item's panel open when the row names one. An event's home
+    /// is the Calendar, whatever its list (spec/events-plan.md).
+    func show(list: String? = nil, workspace: String? = nil, item: String? = nil, event: Bool = false) {
         onVisibility(true)
         model.visible = true
         syncSignedIn()
         if let list {
-            model.select(workspace: workspace, list: list)
+            if event {
+                model.select(lens: .agenda)
+            } else {
+                model.select(workspace: workspace, list: list)
+            }
             if let item { model.selectItem(workspace: workspace, id: item) }
         } else {
             model.reload()
@@ -175,12 +180,10 @@ struct NavSection: Identifiable {
     var target: String? { workspace.home ? nil : workspace.docId }
 
     /// The lists shown under Inbox: active ones, in the
-    /// doc's order, without the reserved ids (which have no `ListMeta`
-    /// row of their own).
+    /// doc's order, without the reserved id (which has no `ListMeta`
+    /// row of its own).
     var userLists: [ListInfo] {
-        lists.filter {
-            $0.archivedAt == nil && $0.id != MainWindowModel.inbox && $0.id != MainWindowModel.events
-        }
+        lists.filter { $0.archivedAt == nil && $0.id != MainWindowModel.inbox }
     }
 }
 
@@ -305,7 +308,6 @@ final class MainWindowModel: ObservableObject {
 
     private static let collapsedKey = "MonoplanNavCollapsed"
     static let inbox = "inbox"
-    static let events = "events"
     /// `MONOPLAN_TIMING=1` logs each reload's timings to stderr.
     static let timing = ProcessInfo.processInfo.environment["MONOPLAN_TIMING"] != nil
     /// Far enough out to be the whole future, as on iOS.
@@ -453,9 +455,6 @@ final class MainWindowModel: ObservableObject {
     }
 
     func select(workspace: String?, list: String) {
-        // Events surface only on the Calendar (spec/events-plan.md):
-        // a tray row for one opens it rather than a bare list.
-        if list == Self.events { return select(lens: .agenda) }
         reveal = true
         if lens == nil, workspace == self.workspace, list == self.list {
             reload()
@@ -747,7 +746,7 @@ final class MainWindowModel: ObservableObject {
     /// user-created list (the reserved ones and the lenses cannot).
     var renamableList: (workspace: String?, list: String, name: String)? {
         let workspace = shown.workspace, list = shown.list
-        guard shown.lens == nil, list != Self.inbox, list != Self.events,
+        guard shown.lens == nil, list != Self.inbox,
               let found = sections.first(where: { $0.target == workspace })?.lists
                 .first(where: { $0.id == list })
         else { return nil }
@@ -824,7 +823,6 @@ final class MainWindowModel: ObservableObject {
     /// row; nil when that list is not known.
     func binnedListName(_ entry: BinEntry) -> String? {
         if entry.listId == Self.inbox { return String(localized: "Inbox") }
-        if entry.listId == Self.events { return String(localized: "Calendar") }
         let section = sections.first { $0.workspace.docId == entry.docId }
         guard let list = section?.lists.first(where: { $0.id == entry.listId }) else { return nil }
         return [list.icon, list.name].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
@@ -836,9 +834,7 @@ final class MainWindowModel: ObservableObject {
     func doneListName(_ row: DoneRow) -> String {
         let listId = row.item.listId
         let name: String
-        if listId == Self.events {
-            name = String(localized: "Calendar")
-        } else if listId != Self.inbox,
+        if listId != Self.inbox,
             let list = sections.first(where: { $0.target == row.workspace })?
                 .lists.first(where: { $0.id == listId })
         {

@@ -39,8 +39,10 @@ An item is **in Inbox** when its `location` list id is any of:
 2. missing or unparseable (already true today: `item_meta` in `core/src/doc.rs`);
 3. **new:** a list id with no ListMeta row in `lists` (an *orphan*).
 
-Archived lists still have their row, so their items are not orphans. `events`
-is reserved and never missing, so events are never orphans. Nothing else about
+Archived lists still have their row, so their items are not orphans. (When
+this was written `events` was a second reserved list; it is gone since
+2026-11-16 and an item still located there is an orphan like any other,
+`events-plan.md`.) Nothing else about
 `location` changes: an Inbox item still carries `inbox:<placement>`, and the
 placement id is still minted on every move in (that keeps the location codec
 and the cross-list move path uniform), but no order entry ever matches it.
@@ -133,7 +135,7 @@ Each change below is still **one Loro commit**.
   with the same list and a different index, `reorder_items`, and
   `plan_reorder` callers.
 - **Delete list** `delete_list(list_id, mode)`, where `mode` is `ToInbox`
-  (default) or `ToBin`. It refuses for `inbox` and `events`. For every item
+  (default) or `ToBin`. It refuses for `inbox`. For every item
   located in the list (open, closed, binned):
   - `location = inbox:<fresh placement>`
   - `inbox_at = now` (shared)

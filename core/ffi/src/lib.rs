@@ -821,6 +821,19 @@ impl Engine {
         })?)
     }
 
+    /// Mark an item an event (it needs a date: it then shows on the
+    /// agenda and in no list, and never goes overdue), or a task again.
+    pub fn set_event(
+        &self,
+        workspace: Option<String>,
+        id: String,
+        event: bool,
+    ) -> Result<(), EngineError> {
+        Ok(self
+            .client
+            .call_blocking(workspace, move |cx| api::items::set_event(cx, &id, event))?)
+    }
+
     /// Set an item's duration in whole minutes, or clear it (nil).
     pub fn set_duration(
         &self,

@@ -793,7 +793,7 @@ struct ListItemsView: View {
 
     /// Only a user-created list can be renamed, given an emoji or
     /// archived.
-    private var editable: Bool { list.listId != "inbox" && list.listId != "events" }
+    private var editable: Bool { list.listId != "inbox" }
 
     private var isInbox: Bool { list.listId == "inbox" }
 

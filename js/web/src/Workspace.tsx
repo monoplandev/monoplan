@@ -103,7 +103,6 @@ import {
   isClosedState,
   isEvent,
   isOpen,
-  LIST_EVENTS,
   OPEN_STATES,
   type DocApp,
   type ItemView,
@@ -321,7 +320,6 @@ export function Workspace(props: {
       });
       return [
         option("inbox", m().nav.inbox),
-        option(LIST_EVENTS, m().nav.events),
         ...d.app.state.listsOrder.flatMap((id) => {
           const l = d.app.state.listsById[id];
           return l ? [option(l.id, l.name, l.archivedAt != null)] : [];
@@ -393,11 +391,6 @@ export function Workspace(props: {
   // showing. The surface clears them as it closes.
   const [itemWhenOpen, setItemWhenOpen] = createSignal(false);
   const [itemDeadlineOpen, setItemDeadlineOpen] = createSignal(false);
-  const openItemWhen = (id: string) =>
-    batch(() => {
-      setOpenItemId(id);
-      setItemWhenOpen(true);
-    });
   const openItemDeadline = (id: string) =>
     batch(() => {
       setOpenItemId(id);
@@ -767,7 +760,6 @@ export function Workspace(props: {
       todayStamp(nowMs()),
       {
         overdue: m().deadline.overdue,
-        unscheduled: m().upcoming.unscheduled,
         today: m().deadline.today,
         tomorrow: m().deadline.tomorrow,
       },
@@ -888,16 +880,14 @@ export function Workspace(props: {
   });
 
   // Display label for any list id, matching the header/nav rules: the
-  // reserved `inbox` and `events` carry localized built-in labels, others
-  // use the stored name, looked up in the item's doc (`docId`, else the
+  // reserved `inbox` carries a localized built-in label, others use the
+  // stored name, looked up in the item's doc (`docId`, else the
   // view's). Used by Done- and Bin-view rows to badge each item with its
   // origin list.
   const listLabel = (listId: string, docId?: string): string =>
     listId === "inbox"
       ? m().nav.inbox
-      : listId === LIST_EVENTS
-        ? m().nav.events
-        : (docs.listOf(docId ?? viewDocId(), listId)?.name ?? listId);
+      : (docs.listOf(docId ?? viewDocId(), listId)?.name ?? listId);
 
   // Item attribution (`spec/sharing-plan.md` §Attribution), shown in the
   // item dialog's "Created …" line for every stamped item on a shared
@@ -925,11 +915,9 @@ export function Workspace(props: {
   };
 
   // The list an item is filed under in its doc, for writes that need a
-  // real home: a reserved list or a ListMeta row that still exists, else
-  // that doc's inbox.
+  // real home: a ListMeta row that still exists, else that doc's inbox.
   const homeListId = (docId: string, listId: string | undefined): string =>
-    listId !== undefined &&
-    (listId === LIST_EVENTS || docs.listOf(docId, listId) !== undefined)
+    listId !== undefined && docs.listOf(docId, listId) !== undefined
       ? listId
       : "inbox";
 
@@ -1010,13 +998,15 @@ export function Workspace(props: {
     });
   };
 
-  // The calendar's Add: a new event in Home's events list, all-day on
-  // today until the user picks otherwise.
+  // The calendar's Add: a new event (`spec/events-plan.md`) with no
+  // list, all-day on today until the user picks otherwise. Unticking the
+  // Event box makes it an Inbox task with that date.
   const newEventTarget = () => ({
-    listId: LIST_EVENTS,
+    listId: "inbox",
     docId: docs.homeDocId,
     state: "backlog" as const,
     when: todayStamp(nowMs()),
+    event: true,
   });
 
   // Start a draft row: pseudo-item at `at`, or (the shortcut path) just
@@ -1630,7 +1620,6 @@ export function Workspace(props: {
     const foreign = docId !== own;
     return [
       { id: "inbox", name: m().nav.inbox, docId, workspace, foreign },
-      { id: LIST_EVENTS, name: m().nav.events, docId, workspace, foreign },
       ...activeListsOf(docId).map((l) => ({
         id: l.id,
         name: l.name,
@@ -1776,13 +1765,6 @@ export function Workspace(props: {
       const stillHere = ids.some((id) => after.has(id));
       if (!stillHere) selectSurvivor(sel, survivorAfter(beforeIds, moved));
     }
-    // One item made an event with no date: open it on its date popover,
-    // as Set date… does, rather than leave it in Unscheduled unasked. A
-    // block just moves; its undated rows land in Unscheduled.
-    if (targetListId === LIST_EVENTS && ids.length === 1) {
-      const it = mApp.getItem(ids[0]!);
-      if (it && isOpen(it) && !it.when) openItemWhen(it.id);
-    }
   };
 
   // m: open the move palette on the current selection.
@@ -1814,6 +1796,7 @@ export function Workspace(props: {
       notes?: string;
       deadline?: string;
       when?: string;
+      event?: boolean;
       duration?: number;
       place?: Place;
     },
@@ -1821,6 +1804,7 @@ export function Workspace(props: {
     if (src.notes) target.setItemNotes(id, src.notes);
     if (src.deadline) target.setItemDeadline(id, src.deadline);
     if (src.when) target.setItemWhen(id, src.when);
+    if (src.when && src.event) target.setItemEvent(id, true);
     if (src.when && src.duration) target.setItemDuration(id, src.duration);
     if (src.place) target.setItemPlace(id, src.place);
   };
@@ -1844,6 +1828,7 @@ export function Workspace(props: {
         notes: string;
         deadline: string | undefined;
         when: string | undefined;
+        event: boolean | undefined;
         duration: number | undefined;
         place: Place | undefined;
         state: WorkflowState;
@@ -1864,6 +1849,7 @@ export function Workspace(props: {
           notes: it.notes,
           deadline: it.deadline,
           when: it.when,
+          event: it.event,
           duration: it.duration,
           place: it.place,
           state: it.state,
@@ -1923,6 +1909,7 @@ export function Workspace(props: {
       notes: string;
       deadline: string | undefined;
       when: string | undefined;
+      event: boolean | undefined;
       duration: number | undefined;
       place: Place | undefined;
       state: WorkflowState;
@@ -1937,6 +1924,7 @@ export function Workspace(props: {
         notes: it.notes,
         deadline: it.deadline,
         when: it.when,
+        event: it.event,
         duration: it.duration,
         place: it.place,
         state: it.state,
@@ -3156,9 +3144,7 @@ export function Workspace(props: {
           if (!target) return;
           confirmingCrossDoc([id], docId, () => {
             const at = target.state.listOpen[listId]?.length ?? 0;
-            if (docs.moveToDoc([id], docId, listId, at).length === 0) return;
-            const it = target.getItem(id);
-            if (listId === LIST_EVENTS && it && isOpen(it) && !it.when) openItemWhen(id);
+            docs.moveToDoc([id], docId, listId, at);
           });
         }}
         // Only a shared workspace is named in the list picker: Personal

@@ -12,12 +12,12 @@
 
 use std::time::Duration;
 
-use monoplan_cli::commands::agenda::{build_agenda, unscheduled_events};
+use monoplan_cli::commands::agenda::build_agenda;
 use monoplan_cli::commands::export::{deliver, render};
 use monoplan_cli::config::{Config, Profile, Secrets};
 use monoplan_cli::storage::{Account, Identity};
 use monoplan_cli::sync::Engine;
-use monoplan_core::{Dek, Doc, LIST_EVENTS, LIST_INBOX, NotesDeltaOp};
+use monoplan_core::{Dek, Doc, LIST_INBOX, NotesDeltaOp};
 use monoplan_server::sync::queries;
 use uuid::Uuid;
 
@@ -561,19 +561,19 @@ async fn events_converge_across_devices() {
     )
     .await;
 
-    // A: a dated event and an undated one, straight into `events`.
+    // A: a dated item marked as an event, beside an ordinary task.
     let engine_a = Engine::open_with_profile(profile_a, true).await.unwrap();
-    let gig = engine_a.doc().add_item(LIST_EVENTS, "gig").unwrap();
-    let dinner = engine_a.doc().add_item(LIST_EVENTS, "dinner").unwrap();
+    let gig = engine_a.doc().add_item(LIST_INBOX, "gig").unwrap();
+    let task = engine_a.doc().add_item(LIST_INBOX, "buy tickets").unwrap();
     engine_a
         .doc()
         .set_item_when(&gig, Some("2026-09-12T19:00"))
         .unwrap();
+    engine_a.doc().set_item_event(&gig, true).unwrap();
     let fp_added = engine_a.doc().fingerprint();
     engine_a.flush().await.unwrap();
 
-    // B pulls on open: the dated event is on its agenda day, the undated
-    // one is Unscheduled, and neither is in any list view.
+    // B pulls on open: the event is on its agenda day and in no list.
     let engine_b = Engine::open_with_profile(profile_b, true).await.unwrap();
     assert!(engine_b.is_online());
     assert_eq!(engine_b.doc().fingerprint(), fp_added);
@@ -585,32 +585,24 @@ async fn events_converge_across_devices() {
         .collect();
     assert_eq!(placed, vec![("2026-09-12", gig.as_str())]);
     assert!(days[1].rows[0].item.is_event());
-    let unscheduled: Vec<&str> = unscheduled_events(&items)
-        .iter()
-        .map(|i| i.id.as_str())
-        .collect();
-    assert_eq!(unscheduled, vec![dinner.as_str()]);
-    assert!(
-        engine_b
-            .doc()
-            .items_in_list(LIST_INBOX, false)
-            .iter()
-            .all(|i| i.id != gig && i.id != dinner)
-    );
+    assert_eq!(engine_b.doc().open_item_ids(LIST_INBOX), vec![task.clone()]);
 
-    // B moves the gig out of `events`: an ordinary inbox item, date intact.
-    engine_b.doc().move_item(&gig, LIST_INBOX, 0).unwrap();
-    let fp_moved = engine_b.doc().fingerprint();
+    // B makes the gig a task again: back in Inbox, date intact.
+    engine_b.doc().set_item_event(&gig, false).unwrap();
+    let fp_task = engine_b.doc().fingerprint();
     engine_b.flush().await.unwrap();
 
     let engine_a2 = Engine::open_with_profile(reopen_profile(tmp_a.path()), true)
         .await
         .unwrap();
     let a_gig = engine_a2.doc().get_item(&gig).unwrap();
-    assert!(!a_gig.is_event(), "A observes B's move");
+    assert!(!a_gig.is_event(), "A observes B's change");
     assert_eq!(a_gig.list_id, LIST_INBOX);
     assert_eq!(a_gig.when.as_deref(), Some("2026-09-12T19:00"));
-    assert!(engine_a2.doc().get_item(&dinner).unwrap().is_event());
-    assert_eq!(engine_a2.doc().fingerprint(), fp_moved);
+    assert_eq!(
+        engine_a2.doc().open_item_ids(LIST_INBOX),
+        vec![gig.clone(), task]
+    );
+    assert_eq!(engine_a2.doc().fingerprint(), fp_task);
     engine_a2.flush().await.unwrap();
 }

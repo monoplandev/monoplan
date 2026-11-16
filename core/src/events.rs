@@ -30,7 +30,8 @@ pub enum AppEvent {
     /// New item appeared (local add or remote insert), or backfill on
     /// initial attach. `open_index` is the position within the *Open*
     /// projection of `list_id` (the four open workflow states;
-    /// Done/binned excluded) — `None` when the item is not open. UI
+    /// Done/binned and events excluded) — `None` when the item is not
+    /// in it. UI
     /// layers that keep per-list Open arrays splice at `open_index`.
     /// There is no global item order in the v2+ schema, so there is no
     /// doc-wide index.
@@ -63,6 +64,9 @@ pub enum AppEvent {
         when: Option<String>,
         /// Pending date suggestion (`when`-shaped) or `None`.
         when_suggested: Option<String>,
+        /// The item is an event (flagged and dated). An event is in no
+        /// Open projection, so `open_index` is `None` beside `true`.
+        event: bool,
         /// Duration in whole minutes, or `None`.
         duration: Option<u32>,
         /// Place, or `None`.
@@ -123,6 +127,18 @@ pub enum AppEvent {
     ItemWhenSuggestedChanged {
         id: String,
         when_suggested: Option<String>,
+    },
+    /// Item became or stopped being an event (`spec/events-plan.md`):
+    /// the `event` flag was written, or the `when` beside a set flag
+    /// came or went. `event` is the effective value after the change.
+    /// An event is in no list's Open projection, so consumers drop the
+    /// item from its list's Open array and, when `open_index` is `Some`
+    /// (an open item that stopped being an event), splice it back in
+    /// there.
+    ItemEventChanged {
+        id: String,
+        event: bool,
+        open_index: Option<usize>,
     },
     /// Item's duration changed. The payload is the value in whole
     /// minutes after the write — `None` when cleared (including the

@@ -14,7 +14,7 @@ use std::io::Write;
 
 use chrono::{DateTime, Datelike, Days, Local, NaiveDate, TimeZone};
 use clap::Parser;
-use monoplan_core::{ItemView, LIST_EVENTS, LIST_INBOX};
+use monoplan_core::{ItemView, LIST_INBOX};
 use serde::{Deserialize, Serialize};
 
 use super::items::{date_tags, row_box, write_json};
@@ -134,11 +134,10 @@ pub fn run(cx: &Ctx, args: DoneArgs, out: &mut dyn Write) -> anyhow::Result<()> 
             writeln!(out, "{}  {}", day.format("%Y-%m-%d"), day.weekday())?;
             current = Some(day);
         }
-        // The reserved lists have no `ListMeta` row, so they are named
-        // here, as `starred --all` names them.
+        // Inbox has no `ListMeta` row, so it is named here, as
+        // `starred --all` names it.
         let list = match item.list_id.as_str() {
             LIST_INBOX => "Inbox",
-            LIST_EVENTS => "Events",
             other => lists.get(other).map_or(other, String::as_str),
         };
         writeln!(
@@ -179,6 +178,7 @@ mod tests {
             deadline: None,
             when: None,
             when_suggested: None,
+            event: false,
             duration: None,
             place: None,
             created_at: 0,

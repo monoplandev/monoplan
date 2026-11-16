@@ -9,17 +9,16 @@ import MonoplanMacKit
 
 extension Array where Element == ListInfo {
     /// The lists a workspace's index shows: active ones, in the doc's
-    /// order, without the reserved ids (which have no `ListMeta` row of
-    /// their own; a row carrying one is not a second Inbox).
+    /// order, without the reserved id (which has no `ListMeta` row of
+    /// its own; a row carrying it is not a second Inbox).
     var userLists: [ListInfo] {
-        filter { $0.archivedAt == nil && $0.id != "inbox" && $0.id != "events" }
+        filter { $0.archivedAt == nil && $0.id != "inbox" }
     }
 
-    /// List id → display name. Reserved ids first, so a user-created
-    /// list can never shadow them and an empty read still names Inbox
-    /// and Calendar.
+    /// List id → display name. The reserved id first, so a user-created
+    /// list can never shadow it and an empty read still names Inbox.
     var names: [String: String] {
-        var names = ["inbox": "Inbox", "events": "Calendar"]
+        var names = ["inbox": "Inbox"]
         for row in self where names[row.id] == nil {
             names[row.id] = row.name
         }
@@ -144,6 +143,9 @@ extension ItemInfo {
     var deadline: String? { item.deadline }
     var when: String? { item.when }
     var whenSuggested: String? { item.whenSuggested }
+    /// An event (spec/events-plan.md): it happens on its date, shows
+    /// on the Calendar and in no list, and never goes overdue.
+    var event: Bool { item.event }
     /// Whole minutes, when set.
     var duration: Int? { item.duration.map(Int.init) }
     var place: Place? { item.place }

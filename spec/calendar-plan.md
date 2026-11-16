@@ -43,14 +43,14 @@ is visible at a glance and Today reads as today's plan. The section exists
 only while something is overdue.
 
 **A task's past `when` is overdue** (decided 2026-11-13). An Open item
-outside the `events` list whose `when` is over (its whole span ended
+that is not an event (`events-plan.md`) whose `when` is over (its whole span ended
 before today) joins the Overdue section, placed by its `when`, overdue
 tone, whether or not it has a deadline still ahead: the placement day is
 the earlier of the two dates and that one is behind us. If its deadline is
 overdue as well, the deadline places the row, as for any overdue deadline.
 Nothing is written: the `when` keeps its value, and the row leaves Overdue
 when the task is ticked, cancelled, re-planned, or has its `when` cleared.
-Moving the item into `events` takes it out too, since an event goes by.
+Marking the item an event takes it out too, since an event goes by.
 
 **An event's past `when` is not judged and not surfaced** (decided
 2026-09-30 for every item, replacing an earlier rule that listed it under
@@ -81,12 +81,14 @@ and rejected: it would be a second item kind touching the board, Focus,
 Overdue, repeat-on-done and the CLI, and would still need a close action
 because the clock never writes. Ticking is that action.
 
-**Events get a reserved list, not a kind** (decided and built 2026-10-02,
-`events-plan.md`). The rejection of a kind stands. An item
-located in the reserved list `events` surfaces only on this calendar, with
-a checkbox nothing asks it to tick; nothing about the item itself differs, and the
-close-action objection lapsed on 2026-09-30 when a past `when` stopped
-needing a decision.
+**Events are a flag beside `when`, not a kind** (decided and built
+2026-11-16, `events-plan.md`; from 2026-10-02 until then they were items
+of a reserved `events` list). The rejection of a kind stands: the flag
+says what the date means and changes two things only, where the item
+shows (this calendar, no list) and what a past `when` means (it went by).
+Its row keeps a checkbox nothing asks it to tick, and the close-action
+objection lapsed on 2026-09-30 when a past `when` stopped needing a
+decision.
 
 `when` and `deadline` are independent. Neither derives from the other and
 neither is required by the other.
@@ -314,13 +316,12 @@ for the month grid). `groupByDeadline` becomes
   selection as on a list. ⌘↑ / ⌘↓ (reorder) does nothing here.
   Drag-to-reschedule is deferred (see below).
 - **Capture** (web): the Add button on this view opens the task dialog on
-  a new event, `when` prefilled to today; the dialog's list picker
-  re-files it as a task.
-- **Events** (`events-plan.md`): an event's row is a task's row with no
-  list label. Open events with neither date
-  sit in an **Unscheduled** section between Overdue and Today, oldest
-  first, rendered only when non-empty, and the nav badge counts them at
-  neutral tone. Everything else above applies to events unchanged.
+  a new event: `when` prefilled to today and the Event box under it
+  ticked. Unticking the box makes it an Inbox task with that date.
+- **Events** (`events-plan.md`): an event's row is a task's row.
+  Everything above applies to events unchanged. An event always has a
+  `when`, so there is no Unscheduled section (there was one while events
+  were a list, removed 2026-11-16).
 
 ## Task surface and rows
 

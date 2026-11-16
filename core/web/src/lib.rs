@@ -307,6 +307,13 @@ impl Doc {
             .map_err(js_err)
     }
 
+    /// Mark an item as an event (`true`, needs a `when`) or as a task
+    /// again (`false`). An event shows on the calendar and in no list.
+    #[wasm_bindgen(js_name = setItemEvent)]
+    pub fn set_item_event(&self, item_id: &str, event: bool) -> Result<(), JsError> {
+        self.inner.set_item_event(item_id, event).map_err(js_err)
+    }
+
     /// Accept an item's pending date suggestion: it becomes the `when`
     /// and is cleared, in one commit. False when none was pending.
     #[wasm_bindgen(js_name = acceptItemWhenSuggestion)]
@@ -1920,6 +1927,13 @@ impl Replica {
             .map_err(js_err)
     }
 
+    /// Mark an item as an event (`true`, needs a `when`) or as a task
+    /// again (`false`). An event shows on the calendar and in no list.
+    #[wasm_bindgen(js_name = setItemEvent)]
+    pub fn set_item_event(&self, item_id: &str, event: bool) -> Result<(), JsError> {
+        self.doc().set_item_event(item_id, event).map_err(js_err)
+    }
+
     /// Accept an item's pending date suggestion: it becomes the `when`
     /// and is cleared, in one commit. False when none was pending.
     #[wasm_bindgen(js_name = acceptItemWhenSuggestion)]
@@ -2459,7 +2473,7 @@ impl From<CoreEvent> for ReplicaEvent {
 ///
 /// Variant → fields:
 /// - `fullResync` — no fields; rematerialize current state once
-/// - `itemAdded` — id, listId, text, notes, createdAt, createdBy?, state, lifecycleAt, startedAt?, doneAt?, binnedAt?, deadline?, when?, whenSuggested?, duration?, place?, openIndex?
+/// - `itemAdded` — id, listId, text, notes, createdAt, createdBy?, state, lifecycleAt, startedAt?, doneAt?, binnedAt?, deadline?, when?, whenSuggested?, event?, duration?, place?, openIndex?
 /// - `itemRemoved` — id
 /// - `itemMoved` — id, openIndex?
 /// - `itemTextChanged` — id, text
@@ -2468,6 +2482,7 @@ impl From<CoreEvent> for ReplicaEvent {
 /// - `itemDeadlineChanged` — id, deadline? (undefined = no deadline)
 /// - `itemWhenChanged` — id, when? (undefined = unset; `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`)
 /// - `itemWhenSuggestedChanged` — id, whenSuggested? (undefined = none pending; same shape as `when`)
+/// - `itemEventChanged` — id, event (true = an event: in no list's Open array), openIndex? (set when an open item stopped being an event: splice it back in there)
 /// - `itemDurationChanged` — id, duration? (undefined = unset; whole minutes)
 /// - `itemPlaceChanged` — id, place? (undefined = unset; JSON text of `{label, lat?, lon?, address?, ref?}`)
 /// - `itemLifecycleChanged` — id, state, lifecycleAt, startedAt?, doneAt?, binnedAt?, openIndex?
@@ -2516,6 +2531,9 @@ pub struct AppEventJs {
     /// Pending date suggestion (`itemAdded` / `itemWhenSuggestedChanged`);
     /// `None` means none pending.
     when_suggested: Option<String>,
+    /// The item is an event (`itemAdded` / `itemEventChanged`); `None`
+    /// on events that don't carry it.
+    event: Option<bool>,
     /// Duration in whole minutes (`itemAdded` / `itemDurationChanged`);
     /// `None` means unset.
     duration: Option<u32>,
@@ -2654,6 +2672,10 @@ impl AppEventJs {
     pub fn when_suggested(&self) -> Option<String> {
         self.when_suggested.clone()
     }
+    #[wasm_bindgen(getter, js_name = event)]
+    pub fn event(&self) -> Option<bool> {
+        self.event
+    }
     #[wasm_bindgen(getter, js_name = duration)]
     pub fn duration(&self) -> Option<u32> {
         self.duration
@@ -2692,6 +2714,7 @@ impl From<CoreAppEvent> for AppEventJs {
             deadline: None,
             when: None,
             when_suggested: None,
+            event: None,
             duration: None,
             place: None,
             created_at: None,
@@ -2729,6 +2752,7 @@ impl From<CoreAppEvent> for AppEventJs {
                 deadline,
                 when,
                 when_suggested,
+                event,
                 duration,
                 place,
                 open_index,
@@ -2748,6 +2772,7 @@ impl From<CoreAppEvent> for AppEventJs {
                 deadline,
                 when,
                 when_suggested,
+                event: Some(event),
                 duration,
                 place: place.as_ref().map(place_json),
                 open_index,
@@ -2798,6 +2823,17 @@ impl From<CoreAppEvent> for AppEventJs {
                 kind: "itemWhenSuggestedChanged",
                 id,
                 when_suggested,
+                ..blank
+            },
+            CoreAppEvent::ItemEventChanged {
+                id,
+                event,
+                open_index,
+            } => AppEventJs {
+                kind: "itemEventChanged",
+                id,
+                event: Some(event),
+                open_index,
                 ..blank
             },
             CoreAppEvent::ItemDurationChanged { id, duration } => AppEventJs {
@@ -3011,6 +3047,9 @@ fn item_to_json(it: &monoplan_core::ItemView) -> String {
     if let Some(w) = &it.when_suggested {
         s.push_str(",\"whenSuggested\":");
         s.push_str(&json_string(w));
+    }
+    if it.event {
+        s.push_str(",\"event\":true");
     }
     if let Some(n) = it.duration {
         s.push_str(&format!(",\"duration\":{n}"));

@@ -9,7 +9,8 @@ final class TrayMenuTests: XCTestCase {
         tone: AgendaTone = .neutral, docId: String? = nil
     ) -> AgendaEntry {
         AgendaEntry(
-            id: id, text: text, listId: list, state: state, when: when, duration: duration,
+            id: id, text: text, listId: list, state: state, event: list == "events", when: when,
+            duration: duration,
             deadline: deadline, place: nil, placedBy: when == nil ? .deadline : .when, tone: tone,
             docId: docId, docName: nil)
     }
