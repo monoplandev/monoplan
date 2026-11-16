@@ -221,7 +221,7 @@ struct AgendaTable: NSViewRepresentable {
         private func fill(_ cell: NSView, _ line: Line) {
             switch line {
             case .header(_, let title, _):
-                (cell as? HeaderCell)?.textField?.stringValue = title
+                (cell as? HeaderCell)?.label.stringValue = title
             case .item(let row, _, _, let divided):
                 (cell as? HostCell)?.show(parent.row(row), divided: divided)
             case .nothing:
@@ -336,19 +336,24 @@ struct AgendaTable: NSViewRepresentable {
         }
     }
 
-    /// A day's header: a group row, drawn by the table as its own
-    /// group rows are.
+    /// A day's header: a group row. The label is not the cell's
+    /// `textField`: the table restyles that one itself, and not for
+    /// every header at once (new ones came in small, and a selection
+    /// made the ones on screen larger). The font and colour are set
+    /// here, once.
     private final class HeaderCell: NSTableCellView {
         static let identifier = NSUserInterfaceItemIdentifier("AgendaHeader")
+
+        let label = NSTextField(labelWithString: "")
 
         init() {
             super.init(frame: .zero)
             identifier = Self.identifier
-            let label = NSTextField(labelWithString: "")
+            label.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+            label.textColor = .secondaryLabelColor
             label.lineBreakMode = .byTruncatingTail
             label.translatesAutoresizingMaskIntoConstraints = false
             addSubview(label)
-            textField = label
             NSLayoutConstraint.activate([
                 label.leadingAnchor.constraint(equalTo: leadingAnchor),
                 label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
