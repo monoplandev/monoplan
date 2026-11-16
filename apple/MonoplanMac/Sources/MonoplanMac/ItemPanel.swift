@@ -136,11 +136,17 @@ struct ItemPanel: View {
                 }
                 .foregroundStyle(.secondary)
                 .frame(width: 20)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(verbatim: item.listLabel)
-                    if let workspaceName {
-                        Text(verbatim: workspaceName).font(.footnote).foregroundStyle(.secondary)
+                Text(verbatim: item.listLabel).lineLimit(1)
+                // A shared workspace's name after the list's, as on
+                // iOS (`SharedWorkspaceBadge`): the shared glyph, then
+                // the name in the same font, muted. First to truncate.
+                if let workspaceName {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        PanelGlyph(image: NavArt.shared, size: 13).accessibilityHidden(true)
+                        Text(verbatim: workspaceName).lineLimit(1)
                     }
+                    .foregroundStyle(.secondary)
+                    .layoutPriority(-1)
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.up.chevron.down")
