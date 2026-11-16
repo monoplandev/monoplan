@@ -311,10 +311,14 @@ catalog from the sources: `check-strings.ts` is the gate. In `swift
 test` the lookups miss (no bundle), so the tests keep asserting the
 English text.
 
-`check-strings.ts` (run by `build-app.sh` and by `bun run check:strings`)
-scans `Sources/` for the call sites above and fails when a string is
-missing from the catalog, a catalog entry is no longer used, a Spanish
-translation is missing, or its placeholders differ from the English.
+`check-strings.ts` (run by `build-app.sh` as `check-strings.ts mac`, and
+by `bun run check:strings` for every catalog: `mac`, `ios`, `widget`)
+scans a target's sources for the call sites above, and for the SwiftUI
+modifiers that take a literal (`.navigationTitle`, `.alert`,
+`.confirmationDialog`, `.accessibilityLabel`, ...; the lists are at the
+top of the script). It fails when a string is missing from the catalog,
+a catalog entry is no longer used, a Spanish translation is missing, or
+its placeholders differ from the English.
 Adding a string means adding the key and its Spanish to the catalog in
 the same change; the build will not let it drift.
 
@@ -501,14 +505,24 @@ to half): the items nearest first, from the phone's location
 (`LocationSource`, when-in-use, used on the device only) or else the
 middle of the map, with a search field; a marker narrows the list to
 its spot, and a row pushes the item's page inside the sheet. Home's
-bottom bar is hidden while it is up. **Done** (`DoneView.swift`) is the
-Personal workspace's Done items across every list, newest first, in a
-section per day ticked (`Engine.done(workspace:limit:)`,
-grouped by `DoneDay.days`), each row with its list name. It is a window,
+bottom bar is hidden while it is up. **Done** (`DoneView.swift`) is
+every open workspace's Done items across every list, newest first, in a
+section per day ticked (`Engine.doneEverywhere(filter:limit:)`, one read
+merged in Rust, grouped by `DoneDay.days`), each row with its list name
+and, when not Personal's, its workspace. It is a window,
 not the history: 50 rows to start, doubled each time the end of the
 list scrolls into sight (`AppModel.loadMoreDone`), and a `Changed`
-refetches only the window reached; read-only. The title's count is
-the whole history's, read on its own (`Engine.doneCount`). **Bin** (`BinView.swift`, 2026-11-14) is every open
+refetches only the window reached; read-only. The bar's filter button
+(2026-11-16, `DoneFilterView.swift`) opens a sheet of checkmarks, the
+web Done view's filter (`js/web/src/doneFilter.ts`): Workspaces (when
+more than one is open) and Lists (those of the checked workspaces, with
+a search box; archived lists held back until searched for or checked),
+the two ANDed and an empty facet filtering nothing. The choice is
+device-local (`UserDefaults`), narrowed to what is open and exists
+(`AppModel.doneFilter`) and applied in Rust (`api::done::DoneFilter`),
+so the window and the count are the filtered ones; the button shows how
+many checks are in effect. The title's count is
+every item the filter admits, read on its own (`Engine.doneCountEverywhere`). **Bin** (`BinView.swift`, 2026-11-14) is every open
 workspace's binned items, newest binned first (`Engine.binned`, one
 read merged in Rust; read with the other lenses, and Home shows its Bin row only while
 something is binned; search reaches the page either way),
@@ -537,3 +551,41 @@ reads the UI needs are on the FFI as typed calls, the ones that span
 workspaces merged in Rust (`monoplan_cli::api`); what remains of the
 cross-doc layer the web client keeps in `js/web/src/sync/docs.ts`
 (moving an item between workspaces) is not on the FFI yet.
+
+### Localisation
+
+As on the Mac (see "Localisation" under MonoplanMac): the app follows
+the system language, English keys with a Spanish translation for every
+UI string (2026-11-16), and `check-strings.ts` is the gate (`bun run
+check:strings`, or `bun run check:strings ios widget`). Xcode does not
+run it, so run it after touching UI text.
+
+- Two catalogs, because a string is looked up in the bundle of the
+  code that asks: `Monoplan/Localizable.xcstrings` for the app and
+  `MonoplanWidget/Localizable.xcstrings` for the widget extension. Both
+  sit in the synchronized folders, so they are target resources with no
+  project edit. The Kit has no UI strings; one added there would need a
+  key in every catalog that links it.
+- Both targets set `SWIFT_EMIT_LOC_STRINGS = NO`, so a build in Xcode
+  never rewrites a catalog from the sources.
+- `InfoPlist.xcstrings` in each folder carries the Info.plist strings
+  (the location permission text; the widget's display name) in English
+  and Spanish. Because it has an explicit English entry it also gives
+  each bundle its `en.lproj`, which the string catalog alone does not
+  (English is the keys). Without one the bundle would offer Spanish
+  only, and a phone set to English with Spanish second would get
+  Spanish.
+- SwiftUI literals localize by themselves. What does not, and is
+  wrapped in `String(localized:)`: a ternary of literals, anything
+  returned as a `String` (state labels, date words, error lines), and
+  a literal passed to a `String` parameter of our own views
+  (`FieldRow(text:)`, `EditBubble(what:)`, `editorHeader(title:)`,
+  `countedTitle`, `Failure(title:)`). The checker cannot see an
+  unwrapped one of the last kind: there is no call name to look for.
+- Dates and durations go through `formatted(...)`, so they follow the
+  locale; the words around them ("Today", "%@ at %@", "Due %@") are
+  catalog keys.
+- Not translated: text the engine supplies, which is English from Rust
+  (error messages, an offline reason). The one engine label that is
+  mapped is the name of "no list" ("Inbox" / "Calendar"), by
+  `NoList.display` in `TypedRows.swift`.

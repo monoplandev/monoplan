@@ -77,7 +77,7 @@ struct EmojiKeyboardField: UIViewRepresentable {
             let bar = UIToolbar()
             var items: [UIBarButtonItem] = []
             if canRemove {
-                items.append(UIBarButtonItem(title: "Remove Emoji", primaryAction: UIAction { [weak self] _ in
+                items.append(UIBarButtonItem(title: String(localized: "Remove Emoji"), primaryAction: UIAction { [weak self] _ in
                     self?.finish(pick: .some(nil))
                 }))
             }

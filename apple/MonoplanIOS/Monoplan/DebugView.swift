@@ -61,9 +61,9 @@ struct DebugView: View {
     private var syncSection: some View {
         Section("Sync") {
             if let sync = model.sync {
-                LabeledContent("Online", value: sync.online ? "yes" : "no")
-                LabeledContent("Pending local work", value: sync.pending ? "yes" : "no")
-                LabeledContent("Local only", value: sync.localOnly ? "yes" : "no")
+                LabeledContent("Online", value: sync.online ? String(localized: "yes") : String(localized: "no"))
+                LabeledContent("Pending local work", value: sync.pending ? String(localized: "yes") : String(localized: "no"))
+                LabeledContent("Local only", value: sync.localOnly ? String(localized: "yes") : String(localized: "no"))
                 if let reason = sync.offlineReason {
                     LabeledContent("Offline reason", value: reason)
                 }
@@ -85,11 +85,11 @@ struct DebugView: View {
         Section("Engine") {
             // The engine is this process: its build id is the app's.
             if model.sync != nil {
-                LabeledContent("Serving", value: "yes")
+                LabeledContent("Serving", value: String(localized: "yes"))
                 LabeledContent("Build", value: MonoplanCore.buildId())
                 LabeledContent("PID", value: "\(ProcessInfo.processInfo.processIdentifier)")
             } else {
-                LabeledContent("Serving", value: "no")
+                LabeledContent("Serving", value: String(localized: "no"))
             }
             LabeledContent("Profile") {
                 Text(model.location.dir.path)
@@ -123,7 +123,7 @@ struct DebugView: View {
                     .font(.footnote)
                 LabeledContent("Open docs", value: "\(session.docs.count)")
                 ForEach(session.docs, id: \.docId) { doc in
-                    LabeledContent(doc.name ?? "Personal") {
+                    LabeledContent(doc.name ?? String(localized: "Personal")) {
                         Text(doc.docId).font(.caption2.monospaced())
                     }
                 }

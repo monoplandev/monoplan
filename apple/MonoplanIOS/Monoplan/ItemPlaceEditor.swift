@@ -40,12 +40,12 @@ struct ItemPlaceEditor: View {
                 if !typed.isEmpty {
                     Section {
                         Button(action: useTyped) {
-                            PlaceRow(title: "Use \u{201C}\(typed)\u{201D}", subtitle: nil, systemImage: "character.cursor.ibeam")
+                            PlaceRow(title: String(localized: "Use “\(typed)”"), subtitle: nil, systemImage: "character.cursor.ibeam")
                         }
                     }
                 }
                 if !known.isEmpty {
-                    Section(typed.isEmpty ? "Recent" : "Your places") {
+                    Section(typed.isEmpty ? String(localized: "Recent") : String(localized: "Your places")) {
                         ForEach(known, id: \.self) { row in
                             Button {
                                 // As it is: a known place is already whole.
@@ -76,7 +76,7 @@ struct ItemPlaceEditor: View {
             .buttonStyle(.plain)
             .scrollDismissesKeyboard(.interactively)
         }
-        .editorHeader(title: "Place", itemTitle: item.text, cancel: done, done: useTyped)
+        .editorHeader(title: String(localized: "Place"), itemTitle: item.text, cancel: done, done: useTyped)
         .onAppear {
             focused = true
             loadKnown()

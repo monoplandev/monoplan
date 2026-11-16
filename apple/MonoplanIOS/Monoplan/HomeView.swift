@@ -239,7 +239,7 @@ struct HomeView: View {
 
     private var emptyBinTitle: String {
         let count = model.binned.count
-        return count == 1 ? "Delete 1 item for good?" : "Delete all \(count) items for good?"
+        return count == 1 ? String(localized: "Delete 1 item for good?") : String(localized: "Delete all \(count) items for good?")
     }
 
     /// How many of today's rows Home shows before "Show all" (which
@@ -313,7 +313,7 @@ struct HomeView: View {
                     Section {
                         // The Inbox's Open items, counted; nothing is
                         // drawn for an empty one.
-                        row(ListRef(docId: doc.docId, listId: "inbox", name: "Inbox"), count: model.inboxCount(doc.docId) ?? 0)
+                        row(ListRef(docId: doc.docId, listId: "inbox", name: String(localized: "Inbox")), count: model.inboxCount(doc.docId) ?? 0)
                         ForEach((model.listsByDoc[doc.docId] ?? []).userLists) { list in
                             // Counted only when Settings says so
                             // (the web's "Show list counts in nav").
@@ -370,7 +370,7 @@ struct HomeView: View {
                                 }
                             }
                         } else {
-                            Text(doc.name ?? "Personal")
+                            Text(doc.name ?? String(localized: "Personal"))
                         }
                     }
                 }
@@ -477,7 +477,7 @@ struct HomeView: View {
             Button("Create") {
                 let name = workspaceName.trimmingCharacters(in: .whitespacesAndNewlines)
                 model.createWorkspace(name: name) { error in
-                    if let error { failure = Failure(title: "Could not create workspace", message: error) }
+                    if let error { failure = Failure(title: String(localized: "Could not create workspace"), message: error) }
                 }
             }
             .disabled(workspaceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -494,7 +494,7 @@ struct HomeView: View {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) {
                 model.deleteWorkspace(target.docId) { error in
-                    if let error { failure = Failure(title: "Could not delete workspace", message: error) }
+                    if let error { failure = Failure(title: String(localized: "Could not delete workspace"), message: error) }
                 }
             }
             .disabled(deleteTyped.trimmingCharacters(in: .whitespacesAndNewlines) != target.name)
@@ -512,7 +512,7 @@ struct HomeView: View {
                 let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard name != target.name else { return }
                 model.renameWorkspace(target.docId, to: name) { error in
-                    if let error { failure = Failure(title: "Could not rename workspace", message: error) }
+                    if let error { failure = Failure(title: String(localized: "Could not rename workspace"), message: error) }
                 }
             }
             .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -529,7 +529,7 @@ struct HomeView: View {
             Button("Cancel", role: .cancel) {}
             Button("Leave", role: .destructive) {
                 model.leaveWorkspace(target.docId) { error in
-                    if let error { failure = Failure(title: "Could not leave workspace", message: error) }
+                    if let error { failure = Failure(title: String(localized: "Could not leave workspace"), message: error) }
                 }
             }
         } message: { _ in
@@ -581,7 +581,7 @@ struct HomeView: View {
             if let list {
                 path.append(list)
             } else {
-                failure = Failure(title: "Could not create list", message: error ?? "")
+                failure = Failure(title: String(localized: "Could not create list"), message: error ?? "")
             }
         }
     }
@@ -626,7 +626,7 @@ private struct NewListPopover: View {
     private var docs: [(id: String, name: String, shared: Bool)] {
         (model.session?.docs ?? []).map {
             let shared = model.sharedWorkspaceName($0.docId)
-            return ($0.docId, shared ?? $0.name ?? "Personal", shared != nil)
+            return ($0.docId, shared ?? $0.name ?? String(localized: "Personal"), shared != nil)
         }
     }
 

@@ -51,7 +51,7 @@ struct BinView: View {
             }
         }
         .navigationTitle("Bin")
-        .countedTitle("Bin", count: model.binLoaded && model.binError == nil ? model.binned.count : nil) {
+        .countedTitle(String(localized: "Bin"), count: model.binLoaded && model.binError == nil ? model.binned.count : nil) {
             Image(systemName: "trash")
         }
         .toolbar {
@@ -85,7 +85,7 @@ struct BinView: View {
 
     private var emptyTitle: String {
         let count = model.binned.count
-        return count == 1 ? "Delete 1 item for good?" : "Delete all \(count) items for good?"
+        return count == 1 ? String(localized: "Delete 1 item for good?") : String(localized: "Delete all \(count) items for good?")
     }
 
     private func restoreButton(_ item: BinEntry) -> some View {

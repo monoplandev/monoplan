@@ -62,7 +62,7 @@ struct BottomBar: View {
             }
             .buttonStyle(.plain)
             .glass(in: Circle())
-            .accessibilityLabel(active ? "Cancel search" : "Add")
+            .accessibilityLabel(active ? String(localized: "Cancel search") : String(localized: "Add"))
             .animation(.default, value: active)
         }
         .padding(.horizontal, 16)

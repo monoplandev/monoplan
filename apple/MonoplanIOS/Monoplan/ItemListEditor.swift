@@ -96,7 +96,7 @@ struct ItemListEditor: View {
             .scrollBounceBehavior(.basedOnSize)
             .scrollDismissesKeyboard(.immediately)
         }
-        .editorHeader(title: "List", itemTitle: itemTitle, cancel: done, done: done)
+        .editorHeader(title: String(localized: "List"), itemTitle: itemTitle, cancel: done, done: done)
     }
 
     /// The place editor's box. Not focused on arrival: the keyboard

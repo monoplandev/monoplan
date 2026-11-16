@@ -152,9 +152,9 @@ struct ItemCaptureView: View {
                     // The item's own rows, empty. Their buttons create
                     // the item and open the editor on it, so they wait
                     // for a title.
-                    fieldRow("calendar", "Date", what: "date", opens: .date)
+                    fieldRow("calendar", String(localized: "Date"), what: String(localized: "date"), opens: .date)
                     Divider()
-                    fieldRow("Place", what: "place", opens: .place) { PinIcon() }
+                    fieldRow(String(localized: "Place"), what: String(localized: "place"), opens: .place) { PinIcon() }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -166,7 +166,7 @@ struct ItemCaptureView: View {
         .toolbar {
             SheetCloseItem { dismiss() }
             ToolbarSpacer(.fixed, placement: .topBarLeading)
-            SheetStatusLabel(state: .backlog, text: "New item")
+            SheetStatusLabel(state: .backlog, text: String(localized: "New item"))
         }
         .onAppear { focused = true }
     }

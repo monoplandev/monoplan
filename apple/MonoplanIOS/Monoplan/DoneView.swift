@@ -1,6 +1,9 @@
 // The Done page, pushed from Home (which owns the navigation stack):
-// what got finished in the Personal workspace, newest first, a section
-// per day ticked (`Engine.done`, spec/cli.md §Items).
+// what got finished in every open workspace, newest first, a section
+// per day ticked (`Engine.doneEverywhere`), each row naming its list
+// and, when not Personal's, its workspace. The bar's filter button
+// narrows it to chosen workspaces and lists (`DoneFilterView.swift`),
+// and shows how many checks are in effect.
 // A window that grows on scroll rather than the whole history: the
 // trailing spinner row asks for more as it comes into sight. A row's
 // checkbox reopens the item; the row opens its sheet.
@@ -10,8 +13,10 @@ import SwiftUI
 
 struct DoneView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var filtering = false
 
     var body: some View {
+        let filterCount = model.doneFilter.count
         Group {
             if model.doneDays.isEmpty {
                 emptyState
@@ -19,12 +24,13 @@ struct DoneView: View {
                 List {
                     ForEach(model.doneDays) { day in
                         Section(Self.title(for: day.day)) {
-                            ForEach(day.rows) { item in
-                                ItemLink(ItemRef(docId: nil, itemId: item.id, title: item.text)) {
+                            ForEach(day.rows, id: \.key) { row in
+                                ItemLink(row.ref) {
                                     DoneRowView(
-                                        item: item,
+                                        item: row.item,
                                         listName: model.listName(
-                                            item.listId, inDoc: nil, dated: item.when != nil))
+                                            row.item.listId, inDoc: row.docId, dated: row.item.when != nil),
+                                        workspace: model.sharedWorkspaceName(row.docId))
                                 }
                             }
                         }
@@ -51,10 +57,29 @@ struct DoneView: View {
         }
         .navigationTitle("Done")
         // Done loads a window at a time, so the count is asked for on
-        // its own (`done --count`): every Done item, loaded or not.
-        .countedTitle("Done", count: model.doneError == nil ? model.doneTotal : nil) {
+        // its own: every Done item the filter admits, loaded or not.
+        .countedTitle(String(localized: "Done"), count: model.doneError == nil ? model.doneTotal : nil) {
             CatalogIcon(name: "Done")
         }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { filtering = true } label: {
+                    // The count rides beside the glyph while any check
+                    // is in effect, as the web's trigger has it.
+                    HStack(spacing: 4) {
+                        Image(systemName: "line.3.horizontal.decrease")
+                        if filterCount > 0 {
+                            Text(verbatim: "\(filterCount)").monospacedDigit()
+                        }
+                    }
+                    .fontWeight(filterCount > 0 ? .semibold : .regular)
+                    .foregroundStyle(filterCount > 0 ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                }
+                .accessibilityLabel("Filter")
+                .accessibilityValue(filterCount > 0 ? String(localized: "\(filterCount) active") : "")
+            }
+        }
+        .sheet(isPresented: $filtering) { DoneFilterView() }
         .refreshable { model.refreshDone() }
         .onAppear { model.refreshDone() }
     }
@@ -69,6 +94,14 @@ struct DoneView: View {
                 )
             } else if model.sync == nil, case .connecting(let why) = model.engineState {
                 ContentUnavailableView("Done", systemImage: "checkmark.circle", description: Text(why))
+            } else if !model.doneFilter.isEmpty {
+                ContentUnavailableView {
+                    Label("Nothing done here", systemImage: "line.3.horizontal.decrease")
+                } description: {
+                    Text("No finished items match the filter.")
+                } actions: {
+                    Button("Clear Filters") { model.clearDoneFilter() }
+                }
             } else {
                 ContentUnavailableView(
                     "Nothing done yet",
@@ -82,10 +115,10 @@ struct DoneView: View {
     /// "Today", "Yesterday", or the day spelled out ("Friday 7 Nov"),
     /// with the year once it is not this one.
     static func title(for day: Date, calendar: Calendar = .current, now: Date = Date()) -> String {
-        if calendar.isDate(day, inSameDayAs: now) { return "Today" }
+        if calendar.isDate(day, inSameDayAs: now) { return String(localized: "Today") }
         if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
            calendar.isDate(day, inSameDayAs: yesterday) {
-            return "Yesterday"
+            return String(localized: "Yesterday")
         }
         if calendar.isDate(day, equalTo: now, toGranularity: .year) {
             return day.formatted(.dateTime.weekday(.wide).day().month(.abbreviated))
@@ -96,10 +129,11 @@ struct DoneView: View {
 
 /// One finished item: the time it was ticked (the section header
 /// already says the day) leading its text on one line, with the list it
-/// lives in underneath.
+/// lives in underneath and, when that is not Personal's, its workspace.
 struct DoneRowView: View {
     let item: Item
     let listName: String?
+    var workspace: String? = nil
 
     var body: some View {
         CheckboxRow(state: item.state) {
@@ -118,8 +152,8 @@ struct DoneRowView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
-                if let listName {
-                    Text(listName)
+                if let note {
+                    Text(note)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -129,6 +163,11 @@ struct DoneRowView: View {
             // reads as part of the tick.
             .padding(.leading, -6)
         }
+    }
+
+    private var note: String? {
+        let parts = [listName, workspace].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     private var doneAt: Date {

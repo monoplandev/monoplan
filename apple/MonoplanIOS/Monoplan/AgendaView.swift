@@ -63,7 +63,7 @@ struct AgendaView: View {
     static func title(for day: AgendaGroup) -> String {
         if day.today {
             let date = Agenda.start(of: day.day) ?? Date()
-            return "Today \(date.formatted(.dateTime.day().month(.abbreviated)))"
+            return String(localized: "Today \(date.formatted(.dateTime.day().month(.abbreviated)))")
         }
         guard let date = Agenda.start(of: day.day) else { return day.day }
         return date.formatted(.dateTime.weekday(.wide).day().month(.abbreviated))
@@ -130,15 +130,15 @@ struct AgendaRowView: View {
 
     private var note: (text: String, color: Color)? {
         switch row.tone {
-        case .overdue: return ("overdue", .red)
-        case .warning: return ("due today", .orange)
+        case .overdue: return (String(localized: "overdue"), .red)
+        case .warning: return (String(localized: "due today"), .orange)
         case .neutral: break
         }
         if let minutes = row.duration, minutes > 0 {
             return (Self.span(Int(minutes)), .secondary)
         }
         if row.placedBy == .deadline, let deadline = row.deadline, !row.isTimed {
-            return ("due \(deadline)", .secondary)
+            return (String(localized: "due \(deadline)"), .secondary)
         }
         return nil
     }
@@ -148,8 +148,11 @@ struct AgendaRowView: View {
         let days = minutes / 1440
         let hours = (minutes % 1440) / 60
         let mins = minutes % 60
-        if days > 0 { return hours > 0 ? "\(days)d \(hours)h" : "\(days)d" }
-        if hours > 0 { return mins > 0 ? "\(hours)h \(mins)m" : "\(hours)h" }
-        return "\(mins)m"
+        let d = String(localized: "\(days)d")
+        let h = String(localized: "\(hours)h")
+        let m = String(localized: "\(mins)m")
+        if days > 0 { return hours > 0 ? "\(d) \(h)" : d }
+        if hours > 0 { return mins > 0 ? "\(h) \(m)" : h }
+        return m
     }
 }

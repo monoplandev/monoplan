@@ -12,7 +12,16 @@ import MonoplanMacKit
 /// Calendar (spec/inbox-plan.md "Membership"). A label only: the list
 /// id is `inbox` either way.
 enum NoList {
-    static func label(dated: Bool) -> String { dated ? "Calendar" : "Inbox" }
+    static func label(dated: Bool) -> String { dated ? String(localized: "Calendar") : String(localized: "Inbox") }
+
+    /// A list name the engine supplied, for display. The engine names
+    /// "no list" in English ("Inbox", or "Calendar" for a dated item:
+    /// `no_list_label` in cli/src/api/lists.rs); here it is said in the
+    /// app's language. Any other list's name is the user's own.
+    static func display(_ name: String?, listId: String?) -> String? {
+        guard listId == "inbox", let name else { return name }
+        return label(dated: name == "Calendar")
+    }
 }
 
 extension Array where Element == ListInfo {
@@ -26,7 +35,7 @@ extension Array where Element == ListInfo {
     /// List id → display name. The reserved id first, so a user-created
     /// list can never shadow it and an empty read still names Inbox.
     var names: [String: String] {
-        var names = ["inbox": "Inbox"]
+        var names = ["inbox": String(localized: "Inbox")]
         for row in self where names[row.id] == nil {
             names[row.id] = row.name
         }
@@ -40,12 +49,12 @@ extension ItemState {
 
     var label: String {
         switch self {
-        case .backlog: return "Backlog"
-        case .todo: return "To do"
-        case .inProgress: return "In progress"
-        case .review: return "Review"
-        case .done: return "Done"
-        case .cancelled: return "Cancelled"
+        case .backlog: return String(localized: "Backlog")
+        case .todo: return String(localized: "To do")
+        case .inProgress: return String(localized: "In progress")
+        case .review: return String(localized: "Review")
+        case .done: return String(localized: "Done")
+        case .cancelled: return String(localized: "Cancelled")
         }
     }
 }
@@ -84,16 +93,16 @@ extension SyncState {
     /// One line for any state: "Syncing…", "Synced · 2m ago", or the
     /// offline notice (`SyncStatus::offline_notice` in cli/src/ipc.rs).
     func line(now: Date = Date()) -> String {
-        if localOnly { return "Local workspace · not synced" }
+        if localOnly { return String(localized: "Local workspace · not synced") }
         switch level {
         case .syncing:
-            return "Syncing…"
+            return String(localized: "Syncing…")
         case .synced:
-            if let at = lastSyncedAt { return "Synced · \(Self.ago(since: at, now: now)) ago" }
-            return "Synced"
+            if let at = lastSyncedAt { return String(localized: "Synced · \(Self.ago(since: at, now: now)) ago") }
+            return String(localized: "Synced")
         case .offline:
-            var line = "Offline · never synced"
-            if let at = lastSyncedAt { line = "Offline · last synced \(Self.ago(since: at, now: now)) ago" }
+            var line = String(localized: "Offline · never synced")
+            if let at = lastSyncedAt { line = String(localized: "Offline · last synced \(Self.ago(since: at, now: now)) ago") }
             if let offlineReason { line += " · \(offlineReason)" }
             return line
         }
@@ -102,10 +111,10 @@ extension SyncState {
     /// `12s`, `3m`, `2h`, `5d`: the CLI's `ago` (cli/src/ipc.rs).
     static func ago(since millis: Int64, now: Date) -> String {
         let secs = max(0, Int(now.timeIntervalSince1970) - Int(millis / 1000))
-        if secs < 60 { return "\(secs)s" }
-        if secs < 3600 { return "\(secs / 60)m" }
-        if secs < 86_400 { return "\(secs / 3600)h" }
-        return "\(secs / 86_400)d"
+        if secs < 60 { return String(localized: "\(secs)s") }
+        if secs < 3600 { return String(localized: "\(secs / 60)m") }
+        if secs < 86_400 { return String(localized: "\(secs / 3600)h") }
+        return String(localized: "\(secs / 86_400)d")
     }
 }
 
@@ -121,6 +130,12 @@ extension BinEntry {
     /// The row's identity across workspaces.
     var key: String { "\(docId ?? "")/\(id)" }
     var ref: ItemRef { ItemRef(docId: docId, itemId: id, title: text) }
+}
+
+extension DoneEntry {
+    /// The row's identity across workspaces.
+    var key: String { "\(docId ?? "")/\(item.id)" }
+    var ref: ItemRef { ItemRef(docId: docId, itemId: item.id, title: item.text) }
 }
 
 extension FindHit {
@@ -169,8 +184,8 @@ extension ItemInfo {
 
     /// The list's display name: the doc's, else the reserved label.
     var listLabel: String {
-        if let listName { return listName }
-        return listId == "inbox" ? NoList.label(dated: when != nil) : listId
+        if listId == "inbox" { return NoList.label(dated: when != nil) }
+        return listName ?? listId
     }
 
     /// When the item was closed, while it is: the completion stamp for
@@ -189,19 +204,19 @@ extension ItemInfo {
 struct DoneDay: Equatable, Identifiable {
     /// Local midnight opening the day.
     let day: Date
-    let rows: [Item]
+    let rows: [DoneEntry]
 
     var id: Date { day }
 
     /// Consecutive rows sharing the local day each was ticked become
     /// one group; the input order (newest first) is kept, so the days
     /// come out newest first.
-    static func days(from rows: [Item], calendar: Calendar = .current) -> [DoneDay] {
+    static func days(from rows: [DoneEntry], calendar: Calendar = .current) -> [DoneDay] {
         var out: [DoneDay] = []
         var day: Date?
-        var group: [Item] = []
+        var group: [DoneEntry] = []
         for row in rows {
-            let at = Date(timeIntervalSince1970: TimeInterval(row.lifecycleAt) / 1000)
+            let at = Date(timeIntervalSince1970: TimeInterval(row.item.lifecycleAt) / 1000)
             let start = calendar.startOfDay(for: at)
             if start != day {
                 if let day { out.append(DoneDay(day: day, rows: group)) }

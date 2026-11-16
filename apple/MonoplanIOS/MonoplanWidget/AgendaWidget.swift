@@ -88,7 +88,7 @@ struct AgendaWidgetView: View {
             if let days = entry.days {
                 content(WidgetAgenda.lines(from: days, on: entry.date, limit: limit))
             } else {
-                note("Open Monoplan to load your agenda.")
+                note(String(localized: "Open Monoplan to load your agenda."))
             }
             Spacer(minLength: 0)
         }
@@ -98,7 +98,7 @@ struct AgendaWidgetView: View {
     @ViewBuilder
     private func content(_ agenda: (lines: [WidgetLine], todayCount: Int)) -> some View {
         if agenda.todayCount == 0 {
-            note(agenda.lines.isEmpty ? "Nothing scheduled." : "Nothing today.")
+            note(agenda.lines.isEmpty ? String(localized: "Nothing scheduled.") : String(localized: "Nothing today."))
         }
         ForEach(agenda.lines) { line in
             switch line {
@@ -129,7 +129,7 @@ struct AgendaWidgetView: View {
     /// "Tomorrow", or the day spelled out ("Fri 7 Nov").
     static func heading(_ day: String, now: Date = Date(), calendar: Calendar = .current) -> String {
         guard let date = Agenda.start(of: day, calendar: calendar) else { return day }
-        if calendar.isDateInTomorrow(date) { return "Tomorrow" }
+        if calendar.isDateInTomorrow(date) { return String(localized: "Tomorrow") }
         return date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
     }
 }

@@ -41,16 +41,16 @@ struct SearchView: View {
 
     private var builtIns: [BuiltIn] {
         var all = [
-            BuiltIn(title: "Starred", systemImage: nil, pick: .page(.starred)),
-            BuiltIn(title: "Calendar", systemImage: nil, pick: .page(.agenda), catalog: "Calendar"),
-            BuiltIn(title: "Map", systemImage: "map", pick: .page(.map)),
-            BuiltIn(title: "Done", systemImage: nil, pick: .page(.done), catalog: "Done"),
-            BuiltIn(title: "Bin", systemImage: "trash", pick: .page(.bin)),
+            BuiltIn(title: String(localized: "Starred"), systemImage: nil, pick: .page(.starred)),
+            BuiltIn(title: String(localized: "Calendar"), systemImage: nil, pick: .page(.agenda), catalog: "Calendar"),
+            BuiltIn(title: String(localized: "Map"), systemImage: "map", pick: .page(.map)),
+            BuiltIn(title: String(localized: "Done"), systemImage: nil, pick: .page(.done), catalog: "Done"),
+            BuiltIn(title: String(localized: "Bin"), systemImage: "trash", pick: .page(.bin)),
         ]
         if let home = model.session?.primaryDocId {
             all.append(BuiltIn(
-                title: "Inbox", systemImage: nil,
-                pick: .list(ListRef(docId: home, listId: "inbox", name: "Inbox")),
+                title: String(localized: "Inbox"), systemImage: nil,
+                pick: .list(ListRef(docId: home, listId: "inbox", name: String(localized: "Inbox"))),
                 catalog: "Inbox"
             ))
         }
@@ -115,7 +115,7 @@ struct SearchView: View {
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.primary)
                         Spacer(minLength: 8)
-                        Text(count == 1 ? "1 result" : "\(count) results")
+                        Text(count == 1 ? String(localized: "1 result") : String(localized: "\(count) results"))
                             .font(.subheadline.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -184,9 +184,9 @@ private struct SearchHitRow: View {
     }
 
     private var note: String {
-        var parts = [hit.listName, hit.docName].compactMap { $0 }
-        if binned { parts.append("Bin") }
-        if hit.archived { parts.append("Archived") }
+        var parts = [NoList.display(hit.listName, listId: hit.listId), hit.docName].compactMap { $0 }
+        if binned { parts.append(String(localized: "Bin")) }
+        if hit.archived { parts.append(String(localized: "Archived")) }
         return parts.joined(separator: " · ")
     }
 }

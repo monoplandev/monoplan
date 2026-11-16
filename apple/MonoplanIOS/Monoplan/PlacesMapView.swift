@@ -251,6 +251,16 @@ struct PlacesMapView: View {
     }
 
     private var list: some View {
+        // The field sits above the list, not over it (a top inset): the
+        // field has no surface of its own, so rows scrolled under an
+        // inset show through and above it.
+        VStack(spacing: 0) {
+            searchField
+            rowList
+        }
+    }
+
+    private var rowList: some View {
         List {
             if let spot, let picked = spots.first(where: { $0.id == spot }) {
                 HStack {
@@ -279,7 +289,6 @@ struct PlacesMapView: View {
         }
         .listStyle(.plain)
         .animation(.default, value: rows)
-        .safeAreaInset(edge: .top, spacing: 0) { searchField }
     }
 
     private var searchField: some View {

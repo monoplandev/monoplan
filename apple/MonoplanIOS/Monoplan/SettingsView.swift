@@ -96,7 +96,7 @@ struct SettingsView: View {
     }
 
     private static func format(millis: Int64?) -> String {
-        guard let millis else { return "never" }
+        guard let millis else { return String(localized: "never") }
         return Date(timeIntervalSince1970: Double(millis) / 1000)
             .formatted(date: .abbreviated, time: .standard)
     }

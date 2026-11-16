@@ -2440,6 +2440,16 @@
           }
         }
       }
+    },
+    "Remove user?": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Quitar usuario?"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

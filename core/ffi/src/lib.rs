@@ -34,6 +34,7 @@ use monoplan_cli::api::{
     self,
     agenda::{AgendaGroup, AgendaQuery},
     bin::BinEntry,
+    done::{DoneEntry, DoneFilter},
     find::FindHit,
     items::{Item, ItemInfo, ItemState, Place},
     json::ImportCounts,
@@ -1201,6 +1202,27 @@ impl Engine {
         Ok(self
             .client
             .call_blocking(None, |cx| api::places::placed_items(cx, "", 0))?)
+    }
+
+    /// Done across every workspace that `filter` admits (an empty
+    /// facet admits all): the newest `limit` rows, newest first, each
+    /// tagged with its workspace. A full `limit` back means there may
+    /// be more.
+    pub fn done_everywhere(
+        &self,
+        filter: DoneFilter,
+        limit: u32,
+    ) -> Result<Vec<DoneEntry>, EngineError> {
+        Ok(self.client.call_blocking(None, move |cx| {
+            api::done::done_everywhere(cx, &filter, Some(limit as usize))
+        })?)
+    }
+
+    /// How many rows `done_everywhere` would return with no limit.
+    pub fn done_count_everywhere(&self, filter: DoneFilter) -> Result<u32, EngineError> {
+        Ok(self.client.call_blocking(None, move |cx| {
+            api::done::done_count_everywhere(cx, &filter)
+        })?)
     }
 
     // Back to one workspace.

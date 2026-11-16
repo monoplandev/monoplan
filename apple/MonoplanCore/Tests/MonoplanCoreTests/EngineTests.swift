@@ -241,6 +241,14 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(done.map(\.id), [copy])
         let doneCount = try await calls.run { try $0.doneCount(workspace: nil) }
         XCTAssertEqual(doneCount, 1)
+        let everywhere = try await calls.run {
+            try $0.doneEverywhere(filter: DoneFilter(docs: [], lists: []), limit: 50)
+        }
+        XCTAssertEqual(everywhere.map(\.item.id), [copy])
+        XCTAssertEqual(everywhere.first?.docId, home)
+        let elsewhere = DoneFilter(docs: [], lists: ["\(home)/inbox"])
+        let filtered = try await calls.run { try $0.doneCountEverywhere(filter: elsewhere) }
+        XCTAssertEqual(filtered, 0)
 
         try await calls.run { try $0.setBinned(workspace: nil, id: other, binned: true) }
         try await calls.run { try $0.setBinned(workspace: nil, id: copy, binned: true) }

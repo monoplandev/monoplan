@@ -169,7 +169,7 @@ struct SharingView: View {
                     UIPasteboard.general.string = issued.link
                     copied = true
                 } label: {
-                    Label(copied ? "Copied" : "Copy Link", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    Label(copied ? String(localized: "Copied") : String(localized: "Copy Link"), systemImage: copied ? "checkmark" : "doc.on.doc")
                 }
             } else {
                 Button {
@@ -249,7 +249,7 @@ struct SharingView: View {
             if members == nil {
                 loadError = error.localizedDescription
             } else {
-                failure = Failure(title: "Could not load sharing details", message: error.localizedDescription)
+                failure = Failure(title: String(localized: "Could not load sharing details"), message: error.localizedDescription)
             }
         }
     }
@@ -264,7 +264,7 @@ struct SharingView: View {
                 issued = try await ask { try $0.createInvite(docId: docId) }
                 invites = (try? await ask { try $0.pendingInvites(docId: docId) }) ?? invites
             } catch {
-                failure = Failure(title: "Could not create the link", message: error.localizedDescription)
+                failure = Failure(title: String(localized: "Could not create the link"), message: error.localizedDescription)
             }
         }
     }
@@ -283,7 +283,7 @@ struct SharingView: View {
                     copied = false
                 }
             } catch {
-                failure = Failure(title: "Could not revoke the link", message: error.localizedDescription)
+                failure = Failure(title: String(localized: "Could not revoke the link"), message: error.localizedDescription)
             }
         }
     }
@@ -295,7 +295,7 @@ struct SharingView: View {
                 try await ask { try $0.removeMember(docId: docId, accountId: member.accountId) }
                 members?.removeAll { $0.accountId == member.accountId }
             } catch {
-                failure = Failure(title: "Could not remove the user", message: error.localizedDescription)
+                failure = Failure(title: String(localized: "Could not remove the user"), message: error.localizedDescription)
                 // Whatever the server now thinks is the truth.
                 await load()
             }
@@ -320,8 +320,8 @@ private struct MemberRow: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 8)
-            if isMe { Tag(text: "You") }
-            if member.owner { Tag(text: "Owner") }
+            if isMe { Tag(text: String(localized: "You")) }
+            if member.owner { Tag(text: String(localized: "Owner")) }
         }
         .accessibilityElement(children: .combine)
     }

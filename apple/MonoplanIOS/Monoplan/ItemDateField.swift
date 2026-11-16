@@ -45,23 +45,23 @@ struct ItemDateField: View {
                 if let when = item.when {
                     FieldRow("calendar", text: ItemView.rowWhenText(when), note: ItemView.lengthText(item))
                 } else {
-                    FieldRow("calendar", text: "Date", empty: true)
+                    FieldRow("calendar", text: String(localized: "Date"), empty: true)
                 }
                 if item.when != nil {
                     Spacer(minLength: 8)
-                    EditBubble(what: "date", action: edit)
+                    EditBubble(what: String(localized: "date"), action: edit)
                         .disabled(item.binnedAt != nil)
                 }
             }
         }
         .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
         .addsOnTap(
-            item.when == nil && item.pendingSuggestion == nil && item.binnedAt == nil, what: "date", action: edit)
+            item.when == nil && item.pendingSuggestion == nil && item.binnedAt == nil, what: String(localized: "date"), action: edit)
     }
 
     @ViewBuilder
     private func suggestion(_ suggested: String) -> some View {
-        let label = "Suggested: \(ItemView.whenText(suggested))"
+        let label = String(localized: "Suggested: \(ItemView.whenText(suggested))")
         // `FieldRow`'s anatomy, in orange.
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Image(systemName: "calendar").frame(width: 24)
@@ -71,8 +71,8 @@ struct ItemDateField: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
         Spacer(minLength: 8)
-        answerBubble("checkmark", "Use suggested date") { answer(suggested, true) }
-        answerBubble("xmark", "Dismiss suggestion") { answer(suggested, false) }
+        answerBubble("checkmark", String(localized: "Use suggested date")) { answer(suggested, true) }
+        answerBubble("xmark", String(localized: "Dismiss suggestion")) { answer(suggested, false) }
     }
 
     /// One answer, drawn as the row's edit button is (`EditBubble`).
@@ -164,7 +164,7 @@ struct ItemDateEditor: View {
         }
         .scrollBounceBehavior(.basedOnSize)
         .scrollDismissesKeyboard(.interactively)
-        .editorHeader(title: "Date", itemTitle: item.text, cancel: cancel, done: finish)
+        .editorHeader(title: String(localized: "Date"), itemTitle: item.text, cancel: cancel, done: finish)
         .onAppear {
             // No date: start typing. A date: show it, keyboard down.
             query = shown
@@ -226,7 +226,7 @@ struct ItemDateEditor: View {
     static func offers(typed: String, current: String?, today: String, tomorrow: String) -> [Offer] {
         let time = current.map { $0.count >= 16 ? String($0.dropFirst(10).prefix(6)) : "" } ?? ""
         let word = typed.lowercased()
-        var offers = [("Today", today), ("Tomorrow", tomorrow)]
+        var offers = [(String(localized: "Today"), today), (String(localized: "Tomorrow"), tomorrow)]
             .filter { word.isEmpty ? current == nil : $0.0.lowercased().hasPrefix(word) }
             .map { Offer(when: $0.1 + time, name: $0.0) }
         if let phrase = WhenPhrase.find(in: typed) {
@@ -357,8 +357,8 @@ struct ItemDateEditor: View {
                     // Start and end, as the web's time row: the end is
                     // start + the stored length.
                     HStack(spacing: 12) {
-                        timeBox("clock", "Start", time(on: when))
-                        timeBox("arrow.right", "End", end(of: when), note: Self.endDayNote(when, item.duration))
+                        timeBox("clock", String(localized: "Start"), time(on: when))
+                        timeBox("arrow.right", String(localized: "End"), end(of: when), note: Self.endDayNote(when, item.duration))
                     }
                     .frame(minHeight: 36)
                     Button("Clear time") {
@@ -605,9 +605,9 @@ struct ItemDateEditor: View {
     }
 
     static func lengthLabel(_ value: Int, timed: Bool) -> String {
-        if timed { return value > 0 ? AgendaRowView.span(value) : "None" }
+        if timed { return value > 0 ? AgendaRowView.span(value) : String(localized: "None") }
         let days = value / 1440
-        return days == 1 ? "1 day" : "\(days) days"
+        return days == 1 ? String(localized: "1 day") : String(localized: "\(days) days")
     }
 }
 

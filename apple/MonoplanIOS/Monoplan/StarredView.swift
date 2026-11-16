@@ -33,7 +33,7 @@ struct StarredView: View {
             }
         }
         .navigationTitle("Starred")
-        .countedTitle("Starred", count: model.starredError == nil ? model.starred.count : nil) {
+        .countedTitle(String(localized: "Starred"), count: model.starredError == nil ? model.starred.count : nil) {
             StarIcon(size: 19)
         }
         .refreshable { model.refreshStarred() }
@@ -81,7 +81,7 @@ struct StarredRowView: View {
     }
 
     private var note: String? {
-        let parts = [row.listName, row.docName].compactMap { $0 }
+        let parts = [NoList.display(row.listName, listId: row.listId), row.docName].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }

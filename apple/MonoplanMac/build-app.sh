@@ -85,7 +85,7 @@ fi
 # slow runs. Not a build phase: Xcode's script sandbox and PATH do not
 # suit bun, so a build started from Xcode skips it.
 echo ">> check-strings"
-bun "$PKG/check-strings.ts"
+bun "$PKG/check-strings.ts" mac
 
 SIGNING=()
 case "${MONOPLAN_SIGN:-team}" in

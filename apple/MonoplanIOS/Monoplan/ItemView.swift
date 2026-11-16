@@ -345,7 +345,7 @@ struct ItemView: View {
                 .fixedSize()
             }
         } else {
-            SheetStatusLabel(state: item?.state ?? .backlog, text: item == nil ? "" : "Binned")
+            SheetStatusLabel(state: item?.state ?? .backlog, text: item == nil ? "" : String(localized: "Binned"))
         }
         // Only an Open item can be starred (spec/focus.md): a closed
         // or binned one has no star to show or set.
@@ -422,7 +422,7 @@ struct ItemView: View {
                     }
                 })
             if let deadline = item.deadline {
-                FieldRow("timer", text: "Due \(Self.dayText(deadline))")
+                FieldRow("timer", text: String(localized: "Due \(Self.dayText(deadline))"))
             }
             Divider()
             // As the date: a row with the round button that opens the
@@ -432,16 +432,16 @@ struct ItemView: View {
                 if let place = item.place {
                     FieldRow(text: place.label, note: place.address) { PinIcon() }
                 } else {
-                    FieldRow(text: "Place", empty: true) { PinIcon() }
+                    FieldRow(text: String(localized: "Place"), empty: true) { PinIcon() }
                 }
                 if item.place != nil {
                     Spacer(minLength: 8)
-                    EditBubble(what: "place") { edit(.place) }
+                    EditBubble(what: String(localized: "place")) { edit(.place) }
                         .disabled(item.binnedAt != nil)
                 }
             }
             .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-            .addsOnTap(item.place == nil && item.binnedAt == nil, what: "place") { edit(.place) }
+            .addsOnTap(item.place == nil && item.binnedAt == nil, what: String(localized: "place")) { edit(.place) }
             if let place = item.place, let lat = place.lat, let lon = place.lon {
                 PlaceMapCard(label: place.label, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
             }
@@ -457,7 +457,7 @@ struct ItemView: View {
     private static let eventStates: [ItemState] = [.backlog, .done, .cancelled]
 
     private static func statusLabel(_ state: ItemState, event: Bool) -> String {
-        event && !state.isClosed ? "Event" : state.label
+        event && !state.isClosed ? String(localized: "Event") : state.label
     }
 
     /// The state label as a pull-down menu: the current state ticked, a
@@ -561,7 +561,9 @@ struct ItemView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Created \(Self.stamp(item.createdAt))")
             if let closedAt = item.closedAt {
-                Text("\(item.state == .done ? "Completed" : "Cancelled") \(Self.stamp(closedAt))")
+                Text(item.state == .done
+                    ? String(localized: "Completed \(Self.stamp(closedAt))")
+                    : String(localized: "Cancelled \(Self.stamp(closedAt))"))
                 if let took = Self.elapsed(from: item.createdAt, to: closedAt) {
                     Text("Took \(took)")
                 }
@@ -578,7 +580,7 @@ struct ItemView: View {
     static func whenText(_ when: String) -> String {
         let day = dayText(String(when.prefix(10)))
         guard when.count >= 16 else { return day }
-        return "\(day) at \(when.dropFirst(11).prefix(5))"
+        return String(localized: "\(day) at \(String(when.dropFirst(11).prefix(5)))")
     }
 
     /// A planned date for the item's row: today and tomorrow by name
@@ -589,11 +591,11 @@ struct ItemView: View {
         var name = dayText(day, now: now, calendar: calendar)
         if let date = Agenda.start(of: day, calendar: calendar) {
             if calendar.isDate(date, inSameDayAs: now) {
-                name = "Today"
+                name = String(localized: "Today")
             } else if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now),
                 calendar.isDate(date, inSameDayAs: tomorrow)
             {
-                name = "Tomorrow"
+                name = String(localized: "Tomorrow")
             }
         }
         return when.count >= 16 ? "\(name) \(when.dropFirst(11).prefix(5))" : name
@@ -616,7 +618,7 @@ struct ItemView: View {
         guard let minutes = item.duration, minutes > 0 else { return nil }
         if item.isTimed { return AgendaRowView.span(minutes) }
         let days = (minutes + 1439) / 1440
-        return days >= 2 ? "\(days) days" : nil
+        return days >= 2 ? String(localized: "\(days) days") : nil
     }
 
     /// An instant for the activity log: the time alone today, otherwise
@@ -624,7 +626,7 @@ struct ItemView: View {
     static func stamp(_ millis: Int64, now: Date = Date(), calendar: Calendar = .current) -> String {
         let date = Date(timeIntervalSince1970: Double(millis) / 1000)
         if calendar.isDate(date, inSameDayAs: now) {
-            return "today \(date.formatted(date: .omitted, time: .shortened))"
+            return String(localized: "today \(date.formatted(date: .omitted, time: .shortened))")
         }
         return date.formatted(date: .abbreviated, time: .shortened)
     }
@@ -701,7 +703,7 @@ struct ItemTitleEditor: View {
         }
         .scrollBounceBehavior(.basedOnSize)
         .scrollDismissesKeyboard(.interactively)
-        .editorHeader(title: "Title", canFinish: !trimmed.isEmpty, cancel: done, done: commit)
+        .editorHeader(title: String(localized: "Title"), canFinish: !trimmed.isEmpty, cancel: done, done: commit)
         .onAppear { focused = true }
     }
 }
@@ -735,7 +737,7 @@ private struct StarButton: View {
             .contentShape(Rectangle())
         }
         .sensoryFeedback(.selection, trigger: starred)
-        .accessibilityLabel(starred ? "Unstar" : "Star")
+        .accessibilityLabel(starred ? String(localized: "Unstar") : String(localized: "Star"))
     }
 }
 

@@ -35,7 +35,7 @@ struct Session: Equatable {
 
 final class AppModel: ObservableObject {
     /// Running with the engine's current sync state, or why not yet.
-    @Published private(set) var engineState: EngineState = .connecting("starting")
+    @Published private(set) var engineState: EngineState = .connecting(String(localized: "starting"))
     /// Identity, server and open workspaces; nil without an engine.
     @Published private(set) var session: Session?
     /// The profile on disk carries a device token.
@@ -70,9 +70,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var memberCounts: [String: Int] = [:]
     /// Shared workspaces whose role is being asked for now.
     private var rolesLoading: Set<String> = []
-    /// The Done lens (`Engine.done`): the Personal
-    /// workspace's newest `doneLimit` Done items, grouped by the day
-    /// each was ticked. A window, never the whole history: the view
+    /// The Done lens (`Engine.doneEverywhere`): every open workspace's
+    /// newest `doneLimit` Done items that `doneFilter` admits, grouped
+    /// by the day each was ticked. A window, never the whole history: the view
     /// grows it as the end scrolls into sight (`loadMoreDone`), and a
     /// `Changed` refetches only as far as has been scrolled.
     @Published private(set) var doneDays: [DoneDay] = []
@@ -81,9 +81,14 @@ final class AppModel: ObservableObject {
     /// back: a full window means there may be more.
     @Published private(set) var doneLoadedLimit = 0
     private var doneCount = 0
-    /// How many Done items there are in all (`Engine.doneCount`), loaded or
-    /// not; nil until first read.
+    /// How many Done items the filter admits in all
+    /// (`Engine.doneCountEverywhere`), loaded or not; nil until first read.
     @Published private(set) var doneTotal: Int?
+    /// The Done page's filter as chosen (`DoneFilterView.swift`), kept
+    /// verbatim; what is applied and shown is `doneFilter`.
+    @Published private(set) var doneFilterChoice = DoneFilterStore.load()
+    /// The filter the rows on screen were fetched with.
+    private var doneFetchedFilter: DoneFilter?
     private var doneLimit = AppModel.donePage
     static let donePage = 50
     /// The bin (`Engine.binned`): every open workspace's, newest binned
@@ -145,12 +150,6 @@ final class AppModel: ObservableObject {
     var sync: SyncState? {
         if case .connected(let sync) = engineState { return sync }
         return nil
-    }
-
-    /// The Personal workspace's list names, for the rows of the lenses
-    /// that are its alone (Done).
-    var listNames: [String: String] {
-        (listsByDoc[session?.primaryDocId ?? ""] ?? []).names
     }
 
     /// A new engine, or the running one's sync state moved (it went
@@ -267,7 +266,7 @@ final class AppModel: ObservableObject {
                 if let whenSuggested { setWhenSuggested(ref, when: whenSuggested) }
                 done?(ref, nil)
             case .failure(let error):
-                let failure = "could not add item: \(engineErrorMessage(error))"
+                let failure = String(localized: "could not add item: \(engineErrorMessage(error))")
                 lastError = failure
                 done?(nil, failure)
             }
@@ -287,7 +286,7 @@ final class AppModel: ObservableObject {
             switch result {
             case .success: self?.wrote(to: ref)
             case .failure(let error):
-                self?.lastError = "could not update item: \(engineErrorMessage(error))"
+                self?.lastError = String(localized: "could not update item: \(engineErrorMessage(error))")
             }
         }
     }
@@ -344,7 +343,7 @@ final class AppModel: ObservableObject {
                 done(moved)
                 wrote(to: moved)
             case .failure(let error):
-                lastError = "could not move item: \(engineErrorMessage(error))"
+                lastError = String(localized: "could not move item: \(engineErrorMessage(error))")
             }
         }
     }
@@ -360,18 +359,18 @@ final class AppModel: ObservableObject {
         if hasOtherMembers(target) {
             let name = workspaceLabel(target)
             lines.append(
-                memberCounts[target].map { "This item will be visible to all \($0) members of \(name)." }
-                    ?? "This item will be visible to everyone in \(name).")
+                memberCounts[target].map { String(localized: "This item will be visible to all \($0) members of \(name).") }
+                    ?? String(localized: "This item will be visible to everyone in \(name)."))
         }
         if let source, hasOtherMembers(source) {
-            lines.append("It will be removed from \(workspaceLabel(source)) for everyone there.")
+            lines.append(String(localized: "It will be removed from \(workspaceLabel(source)) for everyone there."))
         }
         return lines.isEmpty ? nil : lines.joined(separator: " ")
     }
 
     /// A workspace's name as Home heads it.
     func workspaceLabel(_ docId: String?) -> String {
-        sharedWorkspaceName(docId) ?? "Personal"
+        sharedWorkspaceName(docId) ?? String(localized: "Personal")
     }
 
     /// Every other open workspace with the lists an item of `docId`
@@ -406,7 +405,7 @@ final class AppModel: ObservableObject {
         call({ try $0.reorderItem(workspace: workspace, id: id, pos: pos) }) { [weak self] result in
             guard let self else { return }
             if case .failure(let error) = result {
-                lastError = "could not move item: \(engineErrorMessage(error))"
+                lastError = String(localized: "could not move item: \(engineErrorMessage(error))")
             }
             refreshList(list)
         }
@@ -429,7 +428,7 @@ final class AppModel: ObservableObject {
         call({ try $0.moveStarred(id: id, after: after) }) { [weak self] result in
             guard let self else { return }
             if case .failure(let error) = result {
-                lastError = "could not move item: \(engineErrorMessage(error))"
+                lastError = String(localized: "could not move item: \(engineErrorMessage(error))")
             }
             refreshStarred()
         }
@@ -480,7 +479,7 @@ final class AppModel: ObservableObject {
                 switch result {
                 case .success: refreshLenses()
                 case .failure(let error):
-                    lastError = "could not empty the bin: \(engineErrorMessage(error))"
+                    lastError = String(localized: "could not empty the bin: \(engineErrorMessage(error))")
                 }
             }
         }
@@ -545,7 +544,7 @@ final class AppModel: ObservableObject {
     /// its active lists in the doc's order.
     func lists(inDoc docId: String?) -> [ListRef] {
         guard let docId = docId ?? session?.primaryDocId else { return [] }
-        return [ListRef(docId: docId, listId: "inbox", name: "Inbox")]
+        return [ListRef(docId: docId, listId: "inbox", name: String(localized: "Inbox"))]
             + (listsByDoc[docId] ?? []).userLists.map {
                 ListRef(docId: docId, listId: $0.id, name: $0.name, icon: $0.icon)
             }
@@ -564,7 +563,7 @@ final class AppModel: ObservableObject {
                 refreshListRows()
                 done(ListRef(docId: docId, listId: id, name: name), nil)
             case .failure(let error):
-                let failure = "could not add list: \(engineErrorMessage(error))"
+                let failure = String(localized: "could not add list: \(engineErrorMessage(error))")
                 lastError = failure
                 done(nil, failure)
             }
@@ -748,7 +747,7 @@ final class AppModel: ObservableObject {
                 refreshLenses()
                 done?(nil)
             case .failure(let error):
-                let failure = "could not update list: \(engineErrorMessage(error))"
+                let failure = String(localized: "could not update list: \(engineErrorMessage(error))")
                 lastError = failure
                 done?(failure)
             }
@@ -761,7 +760,7 @@ final class AppModel: ObservableObject {
             switch result {
             case .success: self?.wrote(to: ref)
             case .failure(let error):
-                self?.lastError = "could not update item: \(engineErrorMessage(error))"
+                self?.lastError = String(localized: "could not update item: \(engineErrorMessage(error))")
             }
         }
     }
@@ -812,7 +811,7 @@ final class AppModel: ObservableObject {
         guard let session, let docId, docId != session.primaryDocId,
               let doc = session.docs.first(where: { $0.docId == docId })
         else { return nil }
-        return doc.name ?? "Shared"
+        return doc.name ?? String(localized: "Shared")
     }
 
     /// A typed call's `workspace` for a doc: nil for the Personal
@@ -841,7 +840,7 @@ final class AppModel: ObservableObject {
         for doc in session.docs {
             // Each Inbox's Open items, for the count on its Home row:
             // read as a browsed list, so a write of ours rereads it too.
-            refreshList(ListRef(docId: doc.docId, listId: "inbox", name: "Inbox"))
+            refreshList(ListRef(docId: doc.docId, listId: "inbox", name: String(localized: "Inbox")))
         }
     }
 
@@ -852,7 +851,11 @@ final class AppModel: ObservableObject {
         for doc in session?.docs ?? [] {
             let workspace = selector(doc.docId)
             read({ try $0.lists(workspace: workspace, filter: .all) }) { [weak self] rows, _ in
-                if let rows { self?.listsByDoc[doc.docId] = rows }
+                guard let self else { return }
+                if let rows { listsByDoc[doc.docId] = rows }
+                // A list or workspace the Done filter named is gone
+                // (or back): the rows on screen answer another filter.
+                if let fetched = doneFetchedFilter, fetched != doneFilter { refreshDone() }
             }
         }
     }
@@ -876,13 +879,16 @@ final class AppModel: ObservableObject {
     /// The loaded window came back full, so older items may follow.
     var doneHasMore: Bool { doneLoadedLimit > 0 && doneCount >= doneLoadedLimit }
 
-    /// `Engine.done` and `Engine.doneCount`. A reply for a window that
-    /// has since grown is dropped: the larger read is already on its
+    /// `Engine.doneEverywhere` and `Engine.doneCountEverywhere`. A
+    /// reply for a window that has since grown, or for a filter that
+    /// has since changed, is dropped: the newer read is already on its
     /// way.
     func refreshDone() {
         let limit = doneLimit
-        read({ try $0.done(workspace: nil, limit: UInt32(limit)) }) { [weak self] rows, error in
-            guard let self, limit == doneLimit else { return }
+        let filter = doneFilter
+        doneFetchedFilter = filter
+        read({ try $0.doneEverywhere(filter: filter, limit: UInt32(limit)) }) { [weak self] rows, error in
+            guard let self, limit == doneLimit, filter == doneFetchedFilter else { return }
             if let rows {
                 doneDays = DoneDay.days(from: rows)
                 doneCount = rows.count
@@ -890,9 +896,91 @@ final class AppModel: ObservableObject {
             }
             doneError = error
         }
-        read({ try $0.doneCount(workspace: nil) }) { [weak self] total, _ in
-            if let total { self?.doneTotal = Int(total) }
+        read({ try $0.doneCountEverywhere(filter: filter) }) { [weak self] total, _ in
+            guard let self, filter == doneFetchedFilter else { return }
+            if let total { doneTotal = Int(total) }
         }
+    }
+
+    /// The Done filter in effect: the choice narrowed to the workspaces
+    /// that are open and the lists on offer, as the web's
+    /// `effectiveDoneFilter` has it (a list of an unchecked workspace
+    /// does not empty the page from behind a sheet that no longer shows
+    /// it). An id is dropped only once it is known gone: before the
+    /// session and a workspace's lists are read the choice stands, so a
+    /// launch does not show the unfiltered page first.
+    var doneFilter: DoneFilter {
+        guard let session else { return doneFilterChoice }
+        let open = session.docs.map(\.docId)
+        let docs = doneFilterChoice.docs.filter { open.contains($0) }
+        let lists = doneFilterChoice.lists.filter { key in
+            guard let docId = open.first(where: { key.hasPrefix($0 + "/") }),
+                  docs.isEmpty || docs.contains(docId)
+            else { return false }
+            guard let rows = listsByDoc[docId] else { return true }
+            let listId = key.dropFirst(docId.count + 1)
+            return listId == "inbox" || rows.contains { $0.id == listId }
+        }
+        return DoneFilter(docs: docs, lists: lists)
+    }
+
+    /// The workspaces the Done filter offers: every open one, Personal
+    /// first.
+    var doneWorkspaceOptions: [DoneWorkspaceOption] {
+        (session?.docs ?? []).map {
+            DoneWorkspaceOption(
+                docId: $0.docId,
+                name: $0.home ? String(localized: "Personal") : $0.name ?? String(localized: "Shared"),
+                shared: !$0.home)
+        }
+    }
+
+    /// The lists the Done filter offers: those of the checked
+    /// workspaces, or of every one when none is checked; each
+    /// workspace's Inbox, then its lists in their order, archived ones
+    /// included (their finished items are still on the page).
+    var doneListOptions: [DoneListOption] {
+        let docs = doneFilter.docs
+        return (session?.docs ?? [])
+            .filter { docs.isEmpty || docs.contains($0.docId) }
+            .flatMap { doc -> [DoneListOption] in
+                let workspace = sharedWorkspaceName(doc.docId)
+                let inbox = DoneListOption(
+                    docId: doc.docId, listId: "inbox", name: String(localized: "Inbox"),
+                    icon: nil, workspace: workspace, archived: false)
+                return [inbox] + (listsByDoc[doc.docId] ?? []).filter { $0.id != "inbox" }.map {
+                    DoneListOption(
+                        docId: doc.docId, listId: $0.id, name: $0.name,
+                        icon: $0.icon, workspace: workspace, archived: $0.archivedAt != nil)
+                }
+            }
+    }
+
+    /// Check or uncheck a workspace in the Done filter.
+    func toggleDoneWorkspace(_ docId: String) {
+        editDoneFilter { $0.docs.toggle(docId) }
+    }
+
+    /// Check or uncheck a list (`DoneListOption.key`) in the Done filter.
+    func toggleDoneList(_ key: String) {
+        editDoneFilter { $0.lists.toggle(key) }
+    }
+
+    func clearDoneFilter() {
+        editDoneFilter { $0 = DoneFilter(docs: [], lists: []) }
+    }
+
+    /// An edit starts from the filter in effect, so a toggle also drops
+    /// the stale ids (a closed workspace, a deleted list) the choice
+    /// was carrying. The window starts over: what was scrolled to
+    /// belonged to the filter before.
+    private func editDoneFilter(_ edit: (inout DoneFilter) -> Void) {
+        var next = doneFilter
+        edit(&next)
+        doneFilterChoice = next
+        DoneFilterStore.save(next)
+        doneLimit = AppModel.donePage
+        refreshDone()
     }
 
     /// The end of the Done list scrolled into sight: double the window

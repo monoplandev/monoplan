@@ -50,7 +50,7 @@ final class EngineController {
     var onState: ((EngineState) -> Void)?
     /// A doc changed: read again what is on screen. Main queue.
     var onChanged: (() -> Void)?
-    private(set) var state: EngineState = .connecting("starting") {
+    private(set) var state: EngineState = .connecting(String(localized: "starting")) {
         didSet { if state != oldValue { onState?(state) } }
     }
 
@@ -103,7 +103,7 @@ final class EngineController {
             return
         }
         starting = true
-        if case .connected = state { state = .connecting("starting") }
+        if case .connected = state { state = .connecting(String(localized: "starting")) }
         let dir = location.dir.path
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = Result {
@@ -129,12 +129,12 @@ final class EngineController {
             NSLog("MonoplanIOS: engine running on %@", location.dir.path)
             observe(started)
         case .failure(EngineError.NotLoggedIn):
-            retry(showing: "not signed in")
+            retry(showing: String(localized: "not signed in"))
         case .failure(EngineError.Busy):
-            retry(showing: "profile in use")
+            retry(showing: String(localized: "profile in use"))
         case .failure(let e):
             NSLog("MonoplanIOS: engine failed: %@", engineErrorMessage(e))
-            retry(showing: "engine failed: \(engineErrorMessage(e))")
+            retry(showing: String(localized: "engine failed: \(engineErrorMessage(e))"))
         }
     }
 
@@ -154,10 +154,10 @@ final class EngineController {
                 },
                 onStopped: { [weak self] in
                     guard let self, self.engine === engine else { return }
-                    engineGone(reason: "engine stopped")
+                    engineGone(reason: String(localized: "engine stopped"))
                 })
         } catch {
-            engineGone(reason: "engine stopped")
+            engineGone(reason: String(localized: "engine stopped"))
         }
     }
 
@@ -217,7 +217,7 @@ final class EngineController {
     /// logout`). The next engine then finds no profile, and its start
     /// seeds a fresh local-only workspace.
     func signOut(completion: @escaping (Error?) -> Void) {
-        let running = beginAccountWork("signing out")
+        let running = beginAccountWork(String(localized: "signing out"))
         let dir = location.dir.path
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             running?.shutdown()
@@ -237,7 +237,7 @@ final class EngineController {
     /// profile. On success the profile is wiped and the next engine
     /// seeds a fresh local-only workspace.
     func deleteAccount(password: String, completion: @escaping (Error?) -> Void) {
-        let running = beginAccountWork("deleting the account")
+        let running = beginAccountWork(String(localized: "deleting the account"))
         let dir = location.dir.path
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             running?.shutdown()
@@ -258,7 +258,7 @@ final class EngineController {
     /// again), which the macOS edition avoids; on success the profile
     /// is rewritten and the next engine starts on the account's.
     func signIn(_ creds: SignInCredentials, completion: @escaping (Error?) -> Void) {
-        let running = beginAccountWork("signing in")
+        let running = beginAccountWork(String(localized: "signing in"))
         let dir = location.dir.path
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             running?.shutdown()
@@ -284,7 +284,7 @@ final class EngineController {
     /// history on its first connect; after a failure it starts on the
     /// untouched local-only workspace again.
     func signUp(_ creds: SignInCredentials, completion: @escaping (Result<SignupOutcome, Error>) -> Void) {
-        let running = beginAccountWork("signing in")
+        let running = beginAccountWork(String(localized: "signing in"))
         let dir = location.dir.path
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             running?.shutdown()
@@ -313,9 +313,9 @@ struct SignInCredentials {
 /// itself by reflection.
 func engineErrorMessage(_ error: Error) -> String {
     switch error {
-    case EngineError.NotLoggedIn: return "no profile to run"
-    case EngineError.Busy: return "profile in use"
-    case EngineError.Stopped: return "the engine has stopped"
+    case EngineError.NotLoggedIn: return String(localized: "no profile to run")
+    case EngineError.Busy: return String(localized: "profile in use")
+    case EngineError.Stopped: return String(localized: "the engine has stopped")
     case EngineError.Failed(let message): return message
     default: return error.localizedDescription
     }

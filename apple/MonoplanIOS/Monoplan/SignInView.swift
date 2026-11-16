@@ -42,7 +42,7 @@ struct SignInView: View {
         !model.signingIn && !email.isEmpty && passwordOK && (!selfHosted || !serverText.isEmpty)
     }
 
-    private var title: String { mode == .signIn ? "Sign In" : "Create Account" }
+    private var title: String { mode == .signIn ? String(localized: "Sign In") : String(localized: "Create Account") }
 
     var body: some View {
         NavigationStack {
@@ -89,8 +89,8 @@ struct SignInView: View {
                 }
             }
             Section {
-                Picker(mode == .signIn ? "Signing in with" : "Signing up with", selection: $selfHosted) {
-                    Text("monoplan.app").tag(false)
+                Picker(mode == .signIn ? String(localized: "Signing in with") : String(localized: "Signing up with"), selection: $selfHosted) {
+                    Text(verbatim: "monoplan.app").tag(false)
                     Text("Self-hosted server").tag(true)
                 }
                 if selfHosted {
@@ -185,7 +185,7 @@ struct RecoveryCodeView: View {
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(code)
-                Button(copied ? "Copied" : "Copy") {
+                Button(copied ? String(localized: "Copied") : String(localized: "Copy")) {
                     UIPasteboard.general.string = code
                     copied = true
                 }

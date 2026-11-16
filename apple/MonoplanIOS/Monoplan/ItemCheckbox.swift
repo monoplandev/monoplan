@@ -45,9 +45,9 @@ struct ItemCheckbox: View {
 
     private var label: String {
         switch state {
-        case .done: return "Done"
-        case .cancelled: return "Cancelled"
-        default: return "Not done"
+        case .done: return String(localized: "Done")
+        case .cancelled: return String(localized: "Cancelled")
+        default: return String(localized: "Not done")
         }
     }
 }
@@ -72,7 +72,7 @@ struct ItemCheckButton: View {
                 .padding(-10)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(state == .cancelled ? "Reopen" : closed ? "Mark not done" : "Mark done")
+        .accessibilityLabel(state == .cancelled ? String(localized: "Reopen") : closed ? String(localized: "Mark not done") : String(localized: "Mark done"))
     }
 }
 
@@ -154,7 +154,7 @@ struct ItemRowMenu: ViewModifier {
             model.setDone(ref, done: !closed)
         } label: {
             if closed {
-                Label(state == .cancelled ? "Reopen" : "Mark not done", systemImage: "arrow.uturn.backward")
+                Label(state == .cancelled ? String(localized: "Reopen") : String(localized: "Mark not done"), systemImage: "arrow.uturn.backward")
             } else {
                 Label("Mark done", systemImage: "checkmark")
             }
@@ -166,7 +166,7 @@ struct ItemRowMenu: ViewModifier {
             Button {
                 model.setStarred(ref, starred: !starred)
             } label: {
-                Label(starred ? "Unstar" : "Star", systemImage: starred ? "star.slash" : "star")
+                Label(starred ? String(localized: "Unstar") : String(localized: "Star"), systemImage: starred ? "star.slash" : "star")
             }
         }
         Button {
