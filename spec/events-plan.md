@@ -123,12 +123,12 @@ has no list and no date" is the simpler thing to explain.
 
 - **Recurrence.** Unsolved, as before: an event is never ticked and the
   clock never writes, so repeat-on-done does not fit.
-- **Past days.** Past events are invisible on the web agenda until a
-  month grid or a backward agenda exists there. The CLI (`agenda --past
-  N`) and the iOS Calendar page (a year back, above Today) show them
-  since 2026-11-16 (`spec/cli.md` §Items), the Mac window's Calendar
-  since 2026-11-17. Both open on Today's header and have a "Today"
-  button that comes back to it.
+- **Past days.** Built everywhere: the CLI (`agenda --past N`) and the
+  iOS Calendar page (a year back, above Today) show past events since
+  2026-11-16 (`spec/cli.md` §Items), the Mac window's Calendar and the
+  web agenda since 2026-11-17. The apps open on Today's header
+  (Overdue's when something is overdue, on the Mac and the web). Each
+  has a "Today" button that comes back to it.
 - **A passed event in a user list** stays an open row there. Muting it,
   or folding passed events away, is a view decision not made yet.
 - **macOS toggle**, with date editing in the Mac window.

@@ -683,6 +683,14 @@ body {
   height: 14px;
 }
 
+/* A worded button among the header's icon buttons (the calendar's
+   "Today"): same height and states, as wide as its label. */
+.header-text-button {
+  width: auto;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
 .icon-button:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text);

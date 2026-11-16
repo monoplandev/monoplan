@@ -5,7 +5,12 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { attentionBadge, groupByDay, whenSpan } from "../src/dayGroups.ts";
+import {
+  agendaItems,
+  attentionBadge,
+  groupByDay,
+  whenSpan,
+} from "../src/dayGroups.ts";
 import type { ItemView } from "../src/sync/store.ts";
 
 const LABELS = {
@@ -447,5 +452,95 @@ describe("attentionBadge", () => {
         TODAY,
       ),
     ).toEqual({ count: 1, tone: "neutral" });
+  });
+});
+
+describe("groupByDay with a floor (the days gone by)", () => {
+  const FLOOR = "2026-08-01";
+  const shape = (groups: ReturnType<typeof groupByDay>) =>
+    groups.map((g) => [g.key, g.urgency, ids(g)]);
+
+  test("past days hold events and closed items, ahead of Overdue and Today", () => {
+    const groups = groupByDay(
+      [
+        item("event", { when: "2026-09-02T10:00" }, { event: true }),
+        item("done", { when: "2026-09-02" }, { state: "done" }),
+        item("older", { when: "2026-08-20" }, { event: true }),
+        item("slipped", { when: "2026-09-03" }),
+        item("late", { deadline: "2026-09-04" }),
+        item("done-deadline", { deadline: "2026-09-04" }, { state: "done" }),
+        item("before-floor", { when: "2026-07-31" }, { event: true }),
+        item("ahead", { when: "2026-09-10" }),
+      ],
+      TODAY,
+      LABELS,
+      "en",
+      FLOOR,
+    );
+    expect(shape(groups)).toEqual([
+      ["2026-08-20", "past", ["older"]],
+      ["2026-09-02", "past", ["done", "event"]],
+      ["overdue", "overdue", ["slipped", "late"]],
+      [TODAY, "today", []],
+      ["2026-09-10", "future", ["ahead"]],
+    ]);
+    expect(groups.every((g) => g.rows.every((r) => g.urgency !== "past" || r.tone === "neutral"))).toBe(true);
+  });
+
+  test("no floor, no past days", () => {
+    const groups = groupByDay(
+      [item("event", { when: "2026-09-02" }, { event: true })],
+      TODAY,
+      LABELS,
+      "en",
+    );
+    expect(shape(groups)).toEqual([[TODAY, "today", []]]);
+  });
+
+  test("a span running through today is on its past days and from today on", () => {
+    const groups = groupByDay(
+      [item("trip", { when: "2026-09-08" }, { event: true, duration: 3 * 1440 })],
+      TODAY,
+      LABELS,
+      "en",
+      FLOOR,
+    );
+    expect(shape(groups)).toEqual([
+      ["2026-09-08", "past", ["trip"]],
+      [TODAY, "today", ["trip"]],
+      ["2026-09-10", "future", ["trip"]],
+    ]);
+    expect(groups.map((g) => g.rows[0]!.span)).toEqual([
+      { day: 1, total: 3 },
+      { day: 2, total: 3 },
+      { day: 3, total: 3 },
+    ]);
+    // One item, counted where it is now, not on the day gone by.
+    expect(agendaItems(groups).map((r) => [r.item.id, r.group])).toEqual([
+      ["trip", TODAY],
+    ]);
+  });
+
+  test("an event that went by with a deadline ahead is on both days", () => {
+    const groups = groupByDay(
+      [
+        item("both", { when: "2026-09-02", deadline: "2026-09-12" }, { event: true }),
+        item("gone", { when: "2026-09-01" }, { event: true }),
+      ],
+      TODAY,
+      LABELS,
+      "en",
+      FLOOR,
+    );
+    expect(shape(groups)).toEqual([
+      ["2026-09-01", "past", ["gone"]],
+      ["2026-09-02", "past", ["both"]],
+      [TODAY, "today", []],
+      ["2026-09-12", "future", ["both"]],
+    ]);
+    expect(agendaItems(groups).map((r) => [r.item.id, r.group])).toEqual([
+      ["gone", "2026-09-01"],
+      ["both", "2026-09-12"],
+    ]);
   });
 });

@@ -49,8 +49,14 @@ import type { FindResult } from "./findResults.tsx";
 import { laneLabel, useAppI18n } from "./i18n.tsx";
 import { closedLogLine, readClip, toClipItem, writeClip, type ClipItem } from "./itemClip.ts";
 import { ListIconPicker } from "./ListIconPicker.tsx";
-import { attentionBadge, groupByDay, type DayGroup } from "./dayGroups.ts";
-import { nowMs, todayStamp } from "./format.tsx";
+import {
+  AGENDA_PAST_DAYS,
+  agendaItems,
+  attentionBadge,
+  groupByDay,
+  type DayGroup,
+} from "./dayGroups.ts";
+import { addDaysToStamp, nowMs, todayStamp } from "./format.tsx";
 import { applySuggestionChange } from "./whenSuggest.ts";
 import { restoreCapturedPositions } from "./linger.ts";
 import { createPopoverTooltipGuard } from "./popoverTooltip.ts";
@@ -775,18 +781,20 @@ export function Workspace(props: {
   // `Upcoming` so the same rows, in the same order, feed `items()` below:
   // the selection-scoped shortcuts filter by what is on screen and pick
   // the survivor after a removal from that order.
-  const upcomingGroups = createMemo((): DayGroup[] =>
-    groupByDay(
+  const upcomingGroups = createMemo((): DayGroup[] => {
+    const today = todayStamp(nowMs());
+    return groupByDay(
       docs.calendarItems(),
-      todayStamp(nowMs()),
+      today,
       {
         overdue: m().deadline.overdue,
         today: m().deadline.today,
         tomorrow: m().deadline.tomorrow,
       },
       locale(),
-    ),
-  );
+      addDaysToStamp(today, -AGENDA_PAST_DAYS),
+    );
+  });
   const items = createMemo((): ItemView[] => {
     const v = view();
     if (v.kind === "list") {
@@ -821,18 +829,9 @@ export function Workspace(props: {
     // the flat listbox; its rows in agenda order are what the list
     // selection runs over there, so they are the view's rows here too.
     if (v.kind === "upcoming") {
-      // Each item once, at its first row: a multi-day span repeats its
+      // Each item once (`agendaItems`): a multi-day span repeats its
       // item down the days it covers, and the selection is by id.
-      const seen = new Set<string>();
-      const out: ItemView[] = [];
-      for (const g of upcomingGroups()) {
-        for (const r of g.rows) {
-          if (seen.has(r.item.id)) continue;
-          seen.add(r.item.id);
-          out.push(r.item);
-        }
-      }
-      return out;
+      return agendaItems(upcomingGroups()).map((r) => r.item);
     }
     // The Bin spans every doc: a binned row must stay reachable.
     return docs.binnedItems();
@@ -3561,6 +3560,21 @@ export function Workspace(props: {
                   </Tooltip.Content>
                 </Tooltip.Portal>
               </Tooltip>
+            </Show>
+            {/* The calendar's "Today": back to where the view opens
+                (Overdue's header, else Today's), as the Mac toolbar's. */}
+            <Show when={view().kind === "upcoming"}>
+              <button
+                type="button"
+                class="icon-button header-text-button"
+                tabIndex={-1}
+                onClick={() => {
+                  upcomingHandle?.scrollToToday();
+                  upcomingHandle?.focus();
+                }}
+              >
+                {m().deadline.today}
+              </button>
             </Show>
             {/* The calendar merges every doc; the Done view's filter menu
                 narrows it by workspace, with the same reading: none

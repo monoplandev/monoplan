@@ -15,8 +15,16 @@
 // `when`, so it always has a day. A `when` that runs for
 // days (`duration` beside it, `spec/calendar-plan.md` "Field:
 // `duration`") puts the item on every day it covers, from today onward,
-// so a span that started yesterday is still on today's page. Pure so it
-// can be unit-tested without a DOM (`test/dayGroups.test.ts`).
+// so a span that started yesterday is still on today's page.
+//
+// With a `floor` the days gone by are grouped too, back to that day and
+// ahead of Overdue and Today, oldest first, as `agenda --past N` and the
+// Mac and iOS Calendar do (`spec/cli.md` §Items): a past day holds what
+// has a `when` on it and is settled, an event (it happened) or a closed
+// item (on the day it was planned for), neutral. An Open task with a
+// past `when` is in Overdue only, and a deadline never places in the
+// past. Pure so it can be unit-tested without a DOM
+// (`test/dayGroups.test.ts`).
 
 import {
   addDaysToStamp,
@@ -67,6 +75,10 @@ export function whenSpan(
   };
 }
 
+/** How far back the Upcoming view reads: a year of days gone by, as the
+ *  Mac and iOS Calendar do (`agendaPastDays`). */
+export const AGENDA_PAST_DAYS = 365;
+
 /** Group key of the Overdue group, which has no day of its own. */
 export const OVERDUE_KEY = "overdue";
 
@@ -74,7 +86,9 @@ export interface DayGroup {
   /** Group key: the `YYYY-MM-DD` stamp of the day, or `OVERDUE_KEY`. */
   key: string;
   label: string;
-  urgency: "overdue" | "today" | "future";
+  /** `past`: a day before today, there only when the grouping was given
+   *  a floor. */
+  urgency: "past" | "overdue" | "today" | "future";
   rows: DayRow[];
 }
 
@@ -108,21 +122,29 @@ export const isSlippedTask = (it: ItemView, today: string): boolean =>
  *  day of the span from today onward (`span` on every copy), so the
  *  same id can occur more than once down the groups; a flat reading of
  *  the rows dedupes by id. A row placed by its deadline is never
- *  repeated: the deadline is one day. */
+ *  repeated: the deadline is one day.
+ *
+ *  `floor` (a `YYYY-MM-DD` stamp before `today`) adds the days gone by
+ *  from that day on, each non-empty one a `past` group ahead of Overdue
+ *  and Today, oldest first: events and closed items on the days their
+ *  `when` covered. An item can then sit on a past day and again from
+ *  today on (a span still running, or an event that went by with a
+ *  deadline ahead). Without it no past day is grouped. */
 export function groupByDay(
   items: Iterable<ItemView>,
   today: string,
   labels: DayGroupLabels,
   locale: string,
+  floor?: string,
 ): DayGroup[] {
+  const yesterday = addDaysToStamp(today, -1);
   const placed: { day: string; raw: string; row: DayRow }[] = [];
   const overdueRows: { raw: string; row: DayRow }[] = [];
   for (const it of items) {
     if (isBinned(it) || (!it.when && !it.deadline)) continue;
-    // Past days are not rendered here, so a `when` that is over places
-    // nothing, done or not. A span still running is placed from today:
-    // `wDay` is its first day on the page, the start or today, whichever
-    // is later.
+    // From today on, a `when` that is over places nothing, done or not.
+    // A span still running is placed from today: `wDay` is its first day
+    // there, the start or today, whichever is later.
     const span = it.when ? whenSpan(it.when, it.duration) : null;
     const wDay =
       span && span.end >= today
@@ -131,11 +153,11 @@ export function groupByDay(
           : today
         : null;
     const dDay = it.deadline ?? null;
-    // Every day of the span from `wDay` to its end, each row carrying its
+    // Every day of the span from `from` to `to`, each row carrying its
     // position in the span when there is more than one day.
-    const placeWhen = (tone: DayTone) => {
+    const placeWhen = (tone: DayTone, from: string, to: string) => {
       const first = span!.start;
-      for (let day = wDay!; day <= span!.end; day = addDaysToStamp(day, 1)) {
+      for (let day = from; day <= to; day = addDaysToStamp(day, 1)) {
         const row: DayRow = { item: it, placedBy: "when", tone };
         if (span!.total > 1) {
           // Days since the start, +1 for the 1-based label.
@@ -146,12 +168,21 @@ export function groupByDay(
         placed.push({ day, raw: it.when!, row });
       }
     };
+    // The days gone by: what happened on them (an event) or was settled
+    // for them (ticked or crossed), on each day the `when` covered before
+    // today and not before the floor. The rest of the placement is from
+    // today on.
+    if (floor && span && span.start < today && (isEvent(it) || isClosed(it))) {
+      const from = span.start >= floor ? span.start : floor;
+      const to = span.end < yesterday ? span.end : yesterday;
+      if (from <= to) placeWhen("neutral", from, to);
+    }
     if (isClosed(it)) {
       // A ticked or crossed item stays put on its `when` day, unjudged:
       // the day still records what happened, or what was called off. Its
       // deadline is settled and places nothing; Overdue is Open-only.
       if (wDay === null) continue;
-      placeWhen("neutral");
+      placeWhen("neutral", wDay, span!.end);
       continue;
     }
     // An overdue deadline is owed now whatever `when` says: it leaves the
@@ -179,7 +210,7 @@ export function groupByDay(
     // tie: it is the "happens on" date and renders first.
     const tone: DayTone = dDay === today ? "warning" : "neutral";
     if (wDay && (!dDay || wDay <= dDay)) {
-      placeWhen(tone);
+      placeWhen(tone, wDay, span!.end);
     } else {
       placed.push({
         day: dDay!,
@@ -196,7 +227,32 @@ export function groupByDay(
   overdueRows.sort(byRawThenCreated);
   placed.sort((a, b) => a.day.localeCompare(b.day) || byRawThenCreated(a, b));
 
-  const out: DayGroup[] = [];
+  // The days gone by, then Overdue, then Today and the days ahead.
+  const past: DayGroup[] = [];
+  const ahead: DayGroup[] = [
+    { key: today, label: labels.today, urgency: "today", rows: [] },
+  ];
+  for (const p of placed) {
+    const gone = p.day < today;
+    const into = gone ? past : ahead;
+    const last = into[into.length - 1];
+    if (last?.key === p.day) {
+      last.rows.push(p.row);
+      continue;
+    }
+    // Day labels reuse the deadline badge's Tomorrow / weekday / compact
+    // date rules, judged against today; a day gone by is its date.
+    const info = formatDeadlineBadge(p.day, today, labels, locale, {
+      pastAsDate: true,
+    });
+    into.push({
+      key: p.day,
+      label: info?.label ?? p.day,
+      urgency: gone ? "past" : "future",
+      rows: [p.row],
+    });
+  }
+  const out = past;
   if (overdueRows.length > 0) {
     out.push({
       key: OVERDUE_KEY,
@@ -205,22 +261,33 @@ export function groupByDay(
       rows: overdueRows.map((p) => p.row),
     });
   }
-  out.push({ key: today, label: labels.today, urgency: "today", rows: [] });
-  for (const p of placed) {
-    const last = out[out.length - 1]!;
-    if (last.key === p.day) {
-      last.rows.push(p.row);
-      continue;
+  out.push(...ahead);
+  return out;
+}
+
+/** Every item on the agenda once, in display order, with the key of the
+ *  group its row is in: what the selection runs over. An item on more
+ *  than one day (a multi-day span, or a past day and a day ahead) counts
+ *  at its first row from Overdue on, and at its first past row only when
+ *  it has none there: a span that began yesterday is one of today's
+ *  rows, not yesterday's. */
+export function agendaItems(
+  groups: readonly DayGroup[],
+): { item: ItemView; group: string }[] {
+  const current = new Set<string>();
+  for (const g of groups) {
+    if (g.urgency === "past") continue;
+    for (const r of g.rows) current.add(r.item.id);
+  }
+  const seen = new Set<string>();
+  const out: { item: ItemView; group: string }[] = [];
+  for (const g of groups) {
+    for (const r of g.rows) {
+      const id = r.item.id;
+      if (seen.has(id) || (g.urgency === "past" && current.has(id))) continue;
+      seen.add(id);
+      out.push({ item: r.item, group: g.key });
     }
-    // Day labels reuse the deadline badge's Tomorrow / weekday / compact
-    // date rules, judged against today.
-    const info = formatDeadlineBadge(p.day, today, labels, locale);
-    out.push({
-      key: p.day,
-      label: info?.label ?? p.day,
-      urgency: "future",
-      rows: [p.row],
-    });
   }
   return out;
 }

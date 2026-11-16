@@ -62,7 +62,11 @@ deadline alone. Past days become visible when a calendar view that can
 reach them is built, or when the agenda learns to scroll backwards: the
 CLI and iOS agenda did on 2026-11-16 (`agenda --past N`, `spec/cli.md`
 §Items), where a past event sits on its day, neutral, above Today. The
-web agenda still renders no past days.
+web agenda did on 2026-11-17 (`groupByDay`'s `floor`, a year back): the
+same past days above Overdue and Today, the view opening scrolled to
+Overdue's header, or Today's when nothing is overdue. The web keeps its
+own two differences there: a cancelled item stays on its day as a done
+one does, and a multi-day `when` is on every past day it covered.
 
 Done and binned items keep both fields untouched, as they keep `deadline`
 today. The fields are never cleared by a transition. Restore brings the
@@ -256,10 +260,11 @@ for the month grid). `groupByDeadline` becomes
   Binned items never appear.
 - **Closed rows** place by `when` only, on that day, neutral tone, in the
   same within-day order as everything else, so ticking never moves a row.
-  Their deadline places nothing and badges muted. A done item whose `when` is past drops out:
-  Overdue is Open-only and the agenda renders no past days. A month grid or
-  backward agenda, when built, shows them on their day with a "show
-  completed" toggle if the noise warrants one.
+  Their deadline places nothing and badges muted. A done item whose `when` is past is not in
+  Overdue (Open-only) or on any day from today on: it is on its day in
+  the past, above Today, on every client that reads past days (the web
+  since 2026-11-17). A "show completed" toggle comes if the noise
+  warrants one.
 - **Overdue** (web; iOS and macOS since 2026-11-17): any Open row with a `deadline` day before today goes
   to an Overdue section above Today, placed by the deadline whatever `when`
   says (it is owed now). An Open task (not an event) whose `when` span

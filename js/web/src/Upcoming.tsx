@@ -26,10 +26,21 @@
 // host group headers. So it runs the Workspace's `DndSelection` over the
 // rows of every day concatenated, and answers the same keys through the
 // shared `applySelectionKeyAction`, which makes ↑ / ↓ cross day boundaries
-// for free. Nothing is virtualised: the agenda is bounded to overdue plus
-// today onward. Drag-to-reschedule is deferred (`spec/calendar-plan.md`).
+// for free. Nothing is virtualised. Drag-to-reschedule is deferred
+// (`spec/calendar-plan.md`).
+//
+// The days gone by (a year of them, `AGENDA_PAST_DAYS`: events that
+// happened, items settled on the day they were planned for) sit above,
+// as on the Mac and iOS Calendar. The view opens scrolled so Overdue's
+// header (Today's when nothing is overdue) is at the top of the pane,
+// and the past is a scroll up away. It is put there again on every
+// change to the rows until the user scrolls or picks something (the
+// docs can still be loading when the view mounts); from then on a change
+// keeps what is at the top of the pane where it is, so rows arriving in
+// a past day do not move the page.
 
 import {
+  createComputed,
   createEffect,
   createMemo,
   createSignal,
@@ -41,7 +52,7 @@ import {
 import { ContextMenu } from "@kobalte/core/context-menu";
 import { ItemContextMenu } from "./ItemContextMenu.tsx";
 import { RowMenuButton } from "./Row.tsx";
-import type { DayGroup, DayRow } from "./dayGroups.ts";
+import { agendaItems, type DayGroup, type DayRow } from "./dayGroups.ts";
 import {
   applySelectionKeyAction,
   mapDndKeyEvent,
@@ -76,6 +87,9 @@ export interface UpcomingImperative {
   focus(): void;
   /** Bring a row into view, if it is on the agenda. */
   scrollToKey(id: string): void;
+  /** The header's "Today": scroll back to where the view opens,
+   *  Overdue's header or Today's when nothing is overdue. */
+  scrollToToday(): void;
 }
 
 const isMac =
@@ -111,22 +125,11 @@ export function Upcoming(props: {
   let hostEl!: HTMLDivElement;
 
   // The selection's order is every day's rows in display order, each id
-  // once: a multi-day span repeats its item on each day it covers
-  // (`DayRow.span`), and selecting any of those rows selects the item,
-  // so every copy lights. Fresh array per change: `updateOrder` is
-  // identity-guarded.
-  const order = createMemo<string[]>(() => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const g of props.groups) {
-      for (const r of g.rows) {
-        if (seen.has(r.item.id)) continue;
-        seen.add(r.item.id);
-        out.push(r.item.id);
-      }
-    }
-    return out;
-  });
+  // once (`agendaItems`): a multi-day span repeats its item on each day
+  // it covers (`DayRow.span`), and selecting any of those rows selects
+  // the item. Fresh array per change: `updateOrder` is identity-guarded.
+  const flat = createMemo(() => agendaItems(props.groups));
+  const order = createMemo<string[]>(() => flat().map((r) => r.item.id));
   createEffect(() => props.selection.updateOrder(order()));
 
   // Selected set as a signal so only rows whose membership flips re-render
@@ -139,22 +142,17 @@ export function Upcoming(props: {
   });
 
   // Which copy of a multi-day span draws the selection: the one the
-  // pointer picked, else the span's earliest day on the page. The
+  // pointer picked, else the item's place in the order (its earliest
+  // day from today on, or in the past when it is only there). The
   // selection itself is by item id (one item, however many days it
   // covers), so this is chrome only; a copy is lit when its item is
   // selected and it is that item's chosen day.
   const [pickedDay, setPickedDay] = createSignal<Map<string, string>>(
     new Map(),
   );
-  const firstDayOf = createMemo(() => {
-    const out = new Map<string, string>();
-    for (const g of props.groups) {
-      for (const r of g.rows) {
-        if (!out.has(r.item.id)) out.set(r.item.id, g.key);
-      }
-    }
-    return out;
-  });
+  const firstDayOf = createMemo(
+    () => new Map(flat().map((r) => [r.item.id, r.group])),
+  );
   const litDay = (id: string): string | undefined =>
     pickedDay().get(id) ?? firstDayOf().get(id);
   // A pointer pick only lives while its item stays selected; keyboard
@@ -168,16 +166,89 @@ export function Upcoming(props: {
     setPickedDay(next);
   });
 
-  // The first row carrying the id in DOM order: a span's earliest day.
+  // Opening on Overdue / Today, and holding the page still under a
+  // change (see the header comment).
+  let anchoring = true;
+  const offsetOf = (el: Element): number =>
+    el.getBoundingClientRect().top - hostEl.getBoundingClientRect().top;
+  // Overdue comes first in the DOM when it is there.
+  const anchorEl = () =>
+    hostEl.querySelector('[data-urgency="overdue"], [data-urgency="today"]');
+  const putAnchorAtTop = () => {
+    const el = anchorEl();
+    // Not past the end: a page shorter than the pane from Today on
+    // rests on its last row (the browser clamps).
+    if (el) hostEl.scrollTop += offsetOf(el);
+    put = hostEl.scrollTop;
+  };
+  // A press is the user's scroll: it does not re-arm the opening hold.
+  const scrollToToday = () => {
+    release();
+    const el = anchorEl();
+    if (!el) return;
+    hostEl.scrollTo({
+      top: hostEl.scrollTop + offsetOf(el),
+      behavior: "smooth",
+    });
+  };
+  // Where the opening scroll left the pane: a scroll to anywhere else
+  // is the user's (the scrollbar, Page Down), and ends it.
+  let put = 0;
+  const release = () => {
+    anchoring = false;
+  };
+  const onScroll = () => {
+    if (anchoring && Math.abs(hostEl.scrollTop - put) > 1) release();
+  };
+  // The row (or day header) at the top of the pane and where it sits,
+  // read before a change reaches the DOM and put back after it.
+  let held: { selector: string; offset: number } | null = null;
+  const topRow = (): typeof held => {
+    const box = hostEl.getBoundingClientRect();
+    const at = document.elementFromPoint(box.left + 24, box.top + 2);
+    if (!at || !hostEl.contains(at)) return null;
+    const row = at.closest<HTMLElement>("[data-key]");
+    const day = at.closest<HTMLElement>("[data-group]");
+    if (!day || !hostEl.contains(day)) return null;
+    const selector = row
+      ? `[data-key="${CSS.escape(row.dataset.key!)}"][data-day="${CSS.escape(row.dataset.day!)}"]`
+      : `[data-group="${CSS.escape(day.dataset.group!)}"]`;
+    return { selector, offset: offsetOf(row ?? day) };
+  };
+  // A computed runs ahead of the render effects that patch the rows in,
+  // so the DOM read here is still the old one.
+  createComputed(() => {
+    void props.groups;
+    held = anchoring || !hostEl?.isConnected ? null : topRow();
+  });
+  createEffect(() => {
+    void props.groups;
+    if (anchoring) {
+      putAnchorAtTop();
+      return;
+    }
+    const el = held && hostEl.querySelector(held.selector);
+    if (!el) return;
+    const moved = offsetOf(el) - held!.offset;
+    if (Math.abs(moved) >= 1) hostEl.scrollTop += moved;
+  });
+
+  // The copy that draws the selection (`litDay`), else the first row
+  // carrying the id in DOM order.
   const scrollToKey = (id: string) => {
-    hostEl
-      .querySelector(`[data-key="${CSS.escape(id)}"]`)
-      ?.scrollIntoView({ block: "nearest" });
+    release();
+    const key = `[data-key="${CSS.escape(id)}"]`;
+    const day = litDay(id);
+    const el =
+      (day && hostEl.querySelector(`${key}[data-day="${CSS.escape(day)}"]`)) ||
+      hostEl.querySelector(key);
+    el?.scrollIntoView({ block: "nearest" });
   };
 
   props.ref?.({
     focus: () => hostEl.focus({ preventScroll: true }),
     scrollToKey,
+    scrollToToday,
   });
 
   // Autofocus on entry, as the list's Dnd does, so the keys act here
@@ -202,10 +273,33 @@ export function Upcoming(props: {
   // Keys land on the host (rows are not focusable), so they bubble up from
   // nothing else. ⌘/Ctrl+↑/↓ reorders a list; the agenda is ordered by
   // date, so it is left alone here.
+  // With nothing selected ↓ starts at the top of Overdue / Today, not a
+  // year back, and ↑ at the last row above it.
   const onKeyDown = (e: KeyboardEvent) => {
     const action = mapDndKeyEvent(e);
     if (action.type === "ignore" || action.type === "move-selection") return;
     e.preventDefault();
+    release();
+    if (
+      (action.type === "navigate" || action.type === "extend") &&
+      !props.selection.hasSelection()
+    ) {
+      const rows = flat();
+      const past = new Set<string>();
+      for (const g of props.groups) if (g.urgency === "past") past.add(g.key);
+      const first = rows.findIndex((r) => !past.has(r.group));
+      const at =
+        action.direction === "down"
+          ? first
+          : first > 0
+            ? first - 1
+            : rows.length - 1;
+      const id = rows[at]?.item.id;
+      if (id === undefined) return;
+      props.selection.selectOnly(id);
+      scrollToKey(id);
+      return;
+    }
     const target = applySelectionKeyAction(props.selection, action, order(), {
       multi: true,
     });
@@ -259,12 +353,14 @@ export function Upcoming(props: {
     if (g.urgency === "overdue") return g.label;
     const [y, mo, d] = g.key.split("-").map(Number);
     if (!y || !mo || !d) return g.label;
+    const today = todayStamp(nowMs());
+    // The year once it is not this one: the past reaches a year back.
     const date = new Intl.DateTimeFormat(locale(), {
       weekday: "short",
       day: "numeric",
       month: "short",
+      year: g.key.slice(0, 4) === today.slice(0, 4) ? undefined : "numeric",
     }).format(new Date(y, mo - 1, d));
-    const today = todayStamp(nowMs());
     if (g.key === today) return `${m().deadline.today} - ${date}`;
     if (g.key === addDaysToStamp(today, 1)) {
       return `${m().deadline.tomorrow} - ${date}`;
@@ -346,6 +442,10 @@ export function Upcoming(props: {
       onKeyDown={onKeyDown}
       onClick={onClick}
       onDblClick={onDblClick}
+      onScroll={onScroll}
+      onWheel={release}
+      onTouchMove={release}
+      onPointerDown={release}
     >
       <For each={props.groups}>
         {(g) => (
@@ -354,6 +454,7 @@ export function Upcoming(props: {
             role="group"
             aria-label={dayHeading(g)}
             data-urgency={g.urgency}
+            data-group={g.key}
           >
             <header class="upcoming-day-header">
               <h2 class="upcoming-day-label">{dayHeading(g)}</h2>
