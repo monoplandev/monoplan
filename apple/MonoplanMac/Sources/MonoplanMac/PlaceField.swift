@@ -1,17 +1,21 @@
-// The item panel's place row (`place`, spec/place-plan.md), edited in
-// place. Unset, it is a text field that reads as the muted "Place" row
-// until clicked. Typing drops a list under it, as the iOS place editor
+// The item panel's place row (`place`, spec/place-plan.md), and its
+// lookup: the list row's way of working (`ListField.swift`) without
+// its box, so it reads as one of the panel's plain rows. At rest it is
+// the place's label on one line (cut with an ellipsis when it
+// is longer; the panel puts the address under the map), or a muted
+// "Place" when there is none. A click turns the row into a search
+// box and drops a list under it, floating over the panel's rows, as
+// the iOS place editor
 // (apple/MonoplanIOS/Monoplan/ItemPlaceEditor.swift) lists them: the
 // typed text as a bare label, the account's known places that match
 // (from the engine, nothing leaves the device), then Apple's search
 // results from three characters on (MapKit; the query goes to Apple,
-// as the web's goes to Photon). A click on a row writes it at once.
-// Return takes the highlighted row, else the typed text; the arrow
-// keys move the highlight; Escape leaves the place as it was. The
-// list floats over the panel's rows rather than pushing them down.
-//
-// Set, the row shows the place; a click on it searches for another,
-// and the cross beside it clears it.
+// as the web's goes to Photon). Over a set place, until something is
+// typed, the list's first row is "Remove place", which takes it off
+// the item. A click on a row writes it at once. Return takes the
+// highlighted row, else the typed text; the arrow keys move the
+// highlight; Escape, or the caret leaving the box, shuts it with the
+// place as it was.
 
 import MapKit
 import MonoplanCore
@@ -26,11 +30,13 @@ struct PlaceField: View {
     let set: (Place?, _ exact: Bool) -> Void
 
     @State private var query = ""
-    /// Searching for another place over a set one.
-    @State private var replacing = false
+    /// The search box is open.
+    @State private var picking = false
+    /// The search box has had the caret since it opened: only then is
+    /// the caret leaving it a reason to shut.
+    @State private var armed = false
     @State private var known: [PlaceSuggestion] = []
     @State private var highlight: Int?
-    @State private var hovering = false
     @StateObject private var search = MacPlaceSearch()
     @FocusState private var focused: Bool
 
@@ -38,26 +44,26 @@ struct PlaceField: View {
 
     var body: some View {
         Group {
-            if let place, !replacing {
-                shown(place)
-            } else {
-                // The list floats over the rows under the field: an
+            if picking {
+                // The list floats over the rows under the box: an
                 // overlay takes no room. It hangs from a zero-height
-                // strip on the field's bottom edge, so it grows
+                // strip on the box's bottom edge, so it grows
                 // downwards at its own height. The panel puts the field
                 // above its later rows (`zIndex`) so the list draws,
                 // and takes clicks, over them.
-                field.overlay(alignment: .bottomLeading) {
+                searchBox.overlay(alignment: .bottomLeading) {
                     Color.clear
                         .frame(height: 0)
                         .overlay(alignment: .topLeading) {
-                            if focused || !typed.isEmpty, !candidates.isEmpty {
+                            if !candidates.isEmpty {
                                 dropdown
                                     .fixedSize(horizontal: false, vertical: true)
                                     .padding(.top, 6)
                             }
                         }
                 }
+            } else {
+                shown
             }
         }
         .onChange(of: query) {
@@ -67,54 +73,45 @@ struct PlaceField: View {
         }
         .onChange(of: focused) {
             if focused {
+                armed = true
                 loadKnown()
-            } else if typed.isEmpty {
-                replacing = false
+            } else if armed {
+                finish()
             }
         }
     }
 
     // MARK: Rows
 
-    /// The set place: its label and address, the cross on hover.
-    private func shown(_ place: Place) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            PanelGlyph(image: NavArt.pin)
-                .foregroundStyle(.secondary)
-                .frame(width: 20)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: place.label)
-                if let address = place.address {
-                    Text(verbatim: address).font(.footnote).foregroundStyle(.secondary)
-                }
+    /// The place at rest: its label on one line, or a muted "Place".
+    private var shown: some View {
+        Button {
+            picking = true
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                PanelGlyph(image: NavArt.pin)
+                    .foregroundStyle(place == nil ? .tertiary : .secondary)
+                    .frame(width: 20)
+                Text(verbatim: place?.label ?? String(localized: "Place"))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(place == nil ? .tertiary : .primary)
             }
+            // The whole row takes the click, not just its text.
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .onTapGesture {
-                replacing = true
-                focused = true
-            }
-            .accessibilityAddTraits(.isButton)
-            .accessibilityHint(Text("Searches for another place"))
-            Button {
-                set(nil, false)
-            } label: {
-                Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
-            }
-            .buttonStyle(.plain)
-            .opacity(hovering ? 1 : 0)
-            .help(String(localized: "Clear place"))
-            .accessibilityLabel(Text("Clear place"))
         }
-        .onHover { hovering = $0 }
+        .buttonStyle(.plain)
+        .help(place?.label ?? "")
+        .accessibilityHint(Text("Searches for another place"))
     }
 
-    private var field: some View {
+    private var searchBox: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            PanelGlyph(image: NavArt.pin)
-                .foregroundStyle(focused ? .secondary : .tertiary)
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
                 .frame(width: 20)
-            TextField(place?.label ?? String(localized: "Place"), text: $query)
+            TextField("Search places", text: $query)
                 .textFieldStyle(.plain)
                 .autocorrectionDisabled()
                 .focused($focused)
@@ -123,11 +120,13 @@ struct PlaceField: View {
                 .onKeyPress(.downArrow) { step(1) }
                 .onKeyPress(.upArrow) { step(-1) }
         }
-        // A new one opens with the caret in it.
-        .onAppear { if replacing { focused = true } }
+        // The caret, a turn after the box appears: asked for while the
+        // field is still being installed, the window hands the caret to
+        // its first field instead (the item's title).
+        .onAppear { DispatchQueue.main.async { focused = true } }
     }
 
-    /// The candidates, in a box under the field, lined up with its text.
+    /// The candidates, in a box under the search box and as wide.
     private var dropdown: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(candidates.enumerated()), id: \.offset) { index, candidate in
@@ -150,13 +149,14 @@ struct PlaceField: View {
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(.separator))
         .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
-        .padding(.leading, 30)
     }
 
     // MARK: Candidates
 
     private var candidates: [Candidate] {
         var rows: [Candidate] = []
+        // Over a set place the list opens on the way to take it off.
+        if place != nil, typed.isEmpty { rows.append(.remove) }
         if !typed.isEmpty { rows.append(.typed(typed)) }
         rows += known.map(Candidate.known)
         rows += search.results.map(Candidate.result)
@@ -169,7 +169,7 @@ struct PlaceField: View {
         let kind = rows[index].kind
         guard index == 0 || rows[index - 1].kind != kind else { return nil }
         switch kind {
-        case .typed: return nil
+        case .remove, .typed: return nil
         case .known: return typed.isEmpty ? String(localized: "Recent") : String(localized: "Your places")
         case .result: return String(localized: "Search")
         }
@@ -195,6 +195,8 @@ struct PlaceField: View {
 
     private func pick(_ candidate: Candidate) {
         switch candidate {
+        case .remove:
+            set(nil, false)
         case .typed(let label):
             // The engine takes a known place of exactly that label
             // whole (what `item set --place <label>` does).
@@ -207,11 +209,12 @@ struct PlaceField: View {
         finish()
     }
 
-    /// Back to the row as it was: no text, no list.
+    /// Back to the field as it was: no text, no list.
     private func finish() {
         query = ""
         highlight = nil
-        replacing = false
+        picking = false
+        armed = false
         focused = false
     }
 
@@ -225,14 +228,17 @@ struct PlaceField: View {
 }
 
 private enum Candidate {
+    /// Take the set place off the item.
+    case remove
     case typed(String)
     case known(PlaceSuggestion)
     case result(MKLocalSearchCompletion)
 
-    enum Kind { case typed, known, result }
+    enum Kind { case remove, typed, known, result }
 
     var kind: Kind {
         switch self {
+        case .remove: .remove
         case .typed: .typed
         case .known: .known
         case .result: .result
@@ -278,6 +284,7 @@ private struct CandidateRow: View {
     @ViewBuilder
     private var icon: some View {
         switch candidate {
+        case .remove: Image(systemName: "xmark")
         case .typed: Image(systemName: "character.cursor.ibeam")
         case .known: Image(systemName: "clock")
         case .result: PanelGlyph(image: NavArt.pin, size: 13)
@@ -287,6 +294,7 @@ private struct CandidateRow: View {
     @ViewBuilder
     private var title: some View {
         switch candidate {
+        case .remove: Text("Remove place").lineLimit(1)
         case .typed(let label): Text("Use “\(label)”").lineLimit(1)
         case .known(let row): Text(verbatim: row.place.label).lineLimit(1)
         case .result(let result): Text(verbatim: result.title).lineLimit(1)
@@ -295,7 +303,7 @@ private struct CandidateRow: View {
 
     private var subtitle: String? {
         switch candidate {
-        case .typed: nil
+        case .remove, .typed: nil
         case .known(let row): row.place.address
         case .result(let result): result.subtitle
         }

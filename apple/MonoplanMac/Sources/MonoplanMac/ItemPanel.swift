@@ -79,8 +79,8 @@ struct ItemPanel: View {
         .frame(maxHeight: .infinity)
     }
 
-    /// List, planned date, deadline (only when set) and place. The date
-    /// and place rows are always there, muted when empty.
+    /// List, a rule, planned date, its time under it when timed,
+    /// deadline (only when set), a rule, then the place. The date and place rows are always there, muted when empty.
     private func fields(_ item: ItemInfo) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             ListField(
@@ -92,9 +92,19 @@ struct ItemPanel: View {
             // Its list floats over every row under it, the place
             // field's included.
             .zIndex(2)
+            // The list, the date rows and the place are set apart: a
+            // rule between each, with 16 pt on each side of it as
+            // between the panel's sections (the stack's 12 and 4 more).
+            PanelRule().padding(.vertical, 4)
             if let when = item.item.when {
-                PanelField(text: Self.whenText(when), note: Self.lengthText(item)) {
+                // A timed date has its time on a line of its own under
+                // the day, and how long it runs goes with the time.
+                let time = Self.timeText(when)
+                PanelField(text: Self.dayText(String(when.prefix(10))), note: time == nil ? Self.lengthText(item) : nil) {
                     PanelGlyph(image: NavArt.calendar)
+                }
+                if let time {
+                    PanelField(text: time, note: Self.lengthText(item)) { Image(systemName: "clock") }
                 }
             } else {
                 PanelField(text: String(localized: "Date"), empty: true) { PanelGlyph(image: NavArt.calendar) }
@@ -102,18 +112,28 @@ struct ItemPanel: View {
             if let deadline = item.item.deadline {
                 PanelField(text: String(localized: "Due \(Self.dayText(deadline))")) { Image(systemName: "timer") }
             }
+            PanelRule().padding(.vertical, 4)
             if item.item.binnedAt == nil {
                 PlaceField(place: item.item.place, knownPlaces: knownPlaces) { setPlace(item, $0, $1) }
                     .id(item.item.id)
                     // Its list floats over the map card under it.
                     .zIndex(1)
             } else if let place = item.item.place {
-                PanelField(text: place.label, note: place.address) { PanelGlyph(image: NavArt.pin) }
+                PanelField(text: place.label) { PanelGlyph(image: NavArt.pin) }
             } else {
                 PanelField(text: String(localized: "Place"), empty: true) { PanelGlyph(image: NavArt.pin) }
             }
             if let place = item.item.place, let lat = place.lat, let lon = place.lon {
                 PlaceMapCard(label: place.label, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
+            }
+            // The address whole, under the map (under the place's row
+            // when it has no map): every line of it, never cut short.
+            if let address = item.item.place?.address, !address.isEmpty {
+                Text(verbatim: address)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
         }
     }
@@ -211,12 +231,9 @@ struct ItemPanel: View {
         }
     }
 
-    /// A planned date: "Saturday 12 Sep" (with the year once it is not
-    /// this one), and "at 14:00" after it when timed.
-    static func whenText(_ when: String) -> String {
-        let day = dayText(String(when.prefix(10)))
-        guard when.count >= 16 else { return day }
-        return String(localized: "\(day) at \(String(when.dropFirst(11).prefix(5)))")
+    /// A planned date's clock time, "14:00"; nil when it has none.
+    static func timeText(_ when: String) -> String? {
+        when.count >= 16 ? String(when.dropFirst(11).prefix(5)) : nil
     }
 
     /// A `YYYY-MM-DD` spelled out in the local calendar; the raw text if

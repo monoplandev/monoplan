@@ -1,16 +1,6 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "%@ at %@": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ a las %@"
-          }
-        }
-      }
-    },
     "%lld days": {
       "localizations": {
         "es": {
@@ -2201,6 +2191,16 @@
         }
       }
     },
+    "Search places": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buscar lugares"
+          }
+        }
+      }
+    },
     "Searches for another place": {
       "localizations": {
         "es": {
@@ -2211,7 +2211,7 @@
         }
       }
     },
-    "Clear place": {
+    "Remove place": {
       "localizations": {
         "es": {
           "stringUnit": {
