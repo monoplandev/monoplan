@@ -620,7 +620,8 @@ struct ItemPanelPane: View {
                     },
                     knownPlaces: { model.knownPlaces(matching: $0, completion: $1) },
                     setPlace: { model.setPlace(workspace: shown.workspace, id: $0.item.id, place: $1, exact: $2) },
-                    setWhen: { model.setWhen(workspace: shown.workspace, id: $0.item.id, when: $1, duration: $2) })
+                    setWhen: { model.setWhen(workspace: shown.workspace, id: $0.item.id, when: $1, duration: $2) },
+                    setDuration: { model.setDuration(workspace: shown.workspace, id: $0.item.id, minutes: $1) })
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

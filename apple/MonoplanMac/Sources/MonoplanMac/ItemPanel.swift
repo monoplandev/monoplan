@@ -11,8 +11,8 @@
 // window's bar and on the system's glass, as the iOS page's navigation
 // bar (`MainSplit.swift`).
 // The list row moves the item (`ListField.swift`); the planned date
-// (`DateField.swift`) and the place (`PlaceField.swift`) are edited in
-// place. No other
+// (`DateField.swift`), its times (`TimeField.swift`) and the place
+// (`PlaceField.swift`) are edited in place. No other
 // field editors, no state menu, no bin: those come with the views
 // shared with iOS.
 
@@ -48,6 +48,8 @@ struct ItemPanel: View {
     /// A date was picked for the item, or cleared (nil), with what
     /// becomes of its duration.
     let setWhen: (ItemInfo, String?, DurationChange) -> Void
+    /// The item's length was set, in minutes, or taken off (nil).
+    let setDuration: (ItemInfo, Int?) -> Void
 
     var body: some View {
         Group {
@@ -120,12 +122,45 @@ struct ItemPanel: View {
             } else {
                 PanelField(text: String(localized: "Date"), empty: true) { PanelGlyph(image: NavArt.calendar) }
             }
-            // A timed date has its times on a row of their own under
-            // the day, in two columns: when it starts, then when it
-            // ends (a muted "End" while it has no length).
-            if let time = item.item.when.flatMap(Self.timeText) {
+            // The times, on a row of their own under the day, in two
+            // columns: when it starts ("All day" while it has no
+            // time), then, once it has a start, when it ends (a muted
+            // "End" while it has no length).
+            if let when = item.item.when, item.item.binnedAt == nil {
+                let start = TimeOffers.minutes(of: when)
                 // Each box is outset by its inset, so 4 pt shows
                 // between the two.
+                HStack(spacing: PanelBox.inset * 2 + 4) {
+                    TimeField(
+                        value: start, placeholder: String(localized: "All day"),
+                        label: String(localized: "Start time"), systemImage: "clock",
+                        clearLabel: String(localized: "Clear time")
+                    ) {
+                        setTime(item, $0)
+                    }
+                    if let start {
+                        let length = max(0, item.item.duration.map(Int.init) ?? 0)
+                        // A retyped end stays on the day it lands on.
+                        let offset = (start + length) / TimeOffers.day
+                        TimeField(
+                            value: length > 0 ? (start + length) % TimeOffers.day : nil,
+                            placeholder: String(localized: "End"),
+                            label: String(localized: "End time"), systemImage: "arrow.right",
+                            after: start,
+                            hint: {
+                                TodayMenu.span(
+                                    TimeInterval(TimeOffers.duration(from: start, to: $0, dayOffset: offset) * 60))
+                            }
+                        ) {
+                            guard let end = $0 else { return }
+                            setDuration(item, TimeOffers.duration(from: start, to: end, dayOffset: offset))
+                        }
+                    }
+                }
+                .id(item.item.id)
+                // Their lists float over the rows under them.
+                .zIndex(1.5)
+            } else if let time = item.item.when.flatMap(Self.timeText) {
                 HStack(spacing: PanelBox.inset * 2 + 4) {
                     PanelField(text: time) { Image(systemName: "clock") }
                     let end = Self.endTimeText(item)
@@ -163,6 +198,24 @@ struct ItemPanel: View {
                     .padding(.top, 4)
             }
         }
+    }
+
+    /// A start time picked for the item's day, or taken off (nil: the
+    /// date is all-day again; the length is kept, so a time put back
+    /// brings the end back with it). A time put on an all-day span of
+    /// whole days would end a day late (Tue to Thu as three days is 72
+    /// hours, so from Tue 09:00 it would end Fri 09:00): that length is
+    /// reshaped to end on the same last day, an hour after the start.
+    private func setTime(_ item: ItemInfo, _ minutes: Int?) {
+        guard let when = item.item.when else { return }
+        let day = String(when.prefix(10))
+        guard let minutes else { return setWhen(item, day, .keep) }
+        var change = DurationChange.keep
+        if when.count < 16, let length = item.item.duration.map(Int.init),
+           length >= 2 * TimeOffers.day, length % TimeOffers.day == 0 {
+            change = .minutes(minutes: UInt32(length - TimeOffers.day + 60))
+        }
+        setWhen(item, "\(day)T\(TimeOffers.text(minutes))", change)
     }
 
     @ViewBuilder

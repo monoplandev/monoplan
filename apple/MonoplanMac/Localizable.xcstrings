@@ -2580,6 +2580,46 @@
           }
         }
       }
+    },
+    "Clear time": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quitar hora"
+          }
+        }
+      }
+    },
+    "Start time": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hora de inicio"
+          }
+        }
+      }
+    },
+    "End time": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hora de fin"
+          }
+        }
+      }
+    },
+    "No time in that yet": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ahí aún no hay una hora"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

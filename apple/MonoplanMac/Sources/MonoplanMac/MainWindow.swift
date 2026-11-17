@@ -794,6 +794,12 @@ final class MainWindowModel: ObservableObject {
         write { try $0.setWhen(workspace: workspace, id: id, when: when, duration: duration) }
     }
 
+    /// Set an item's length in whole minutes, or clear it (nil)
+    /// (`Engine.setDuration`).
+    func setDuration(workspace: String?, id: String, minutes: Int?) {
+        write { try $0.setDuration(workspace: workspace, id: id, minutes: minutes.map { UInt32(clamping: $0) }) }
+    }
+
     /// The account's known places matching `query` (all when empty),
     /// most recently used first, as the iOS place editor offers them.
     /// Nothing comes back on failure.
