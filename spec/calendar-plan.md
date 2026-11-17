@@ -42,12 +42,26 @@ An overdue deadline moves the row to an Overdue section above Today
 is visible at a glance and Today reads as today's plan. The section exists
 only while something is overdue.
 
+**The two dates place independently** (decided 2026-11-17, replacing
+"one row on the earlier of the two days"). The `when` is the item's date
+record and puts it on its day. The deadline is a special kind of date on
+the calendar: a row of its own on the day it is owed, marked as a
+deadline (timer glyph and "Due" in the web's time lane), beside whatever
+row the `when` gives the item. So an item planned for Saturday and due
+on the 31st is on both days. There is one row per item per group, though:
+where the deadline falls on a day the `when` already covers, that row
+stands for both and carries a "Due" mark; with both dates behind it the
+item is in Overdue once, by its deadline. Before this an item with both
+dates was on the calendar once, and whichever date came later was
+nowhere on it. The deadline is also a menu-only register on the task
+surface since the same day (see "Task surface and rows").
+
 **A task's past `when` is overdue** (decided 2026-11-13). An Open item
 that is not an event (`events-plan.md`) whose `when` is over (its whole span ended
 before today) joins the Overdue section, placed by its `when`, overdue
-tone, whether or not it has a deadline still ahead: the placement day is
-the earlier of the two dates and that one is behind us. If its deadline is
-overdue as well, the deadline places the row, as for any overdue deadline.
+tone, whether or not it has a deadline still ahead (that one keeps its
+own row on its day). If its deadline is overdue as well, the deadline
+places the one row, as for any overdue deadline.
 Nothing is written: the `when` keeps its value, and the row leaves Overdue
 when the task is ticked, cancelled, re-planned, or has its `when` cleared.
 Marking the item an event takes it out too, since an event goes by.
@@ -267,7 +281,8 @@ for the month grid). `groupByDeadline` becomes
   warrants one.
 - **Overdue** (web; iOS and macOS since 2026-11-17): any Open row with a `deadline` day before today goes
   to an Overdue section above Today, placed by the deadline whatever `when`
-  says (it is owed now). An Open task (not an event) whose `when` span
+  says (it is owed now; a `when` of today or later still has its own row
+  on its day). An Open task (not an event) whose `when` span
   ended before today goes there too, placed by its `when` (built
   2026-11-13, `isSlippedTask` in `dayGroups.ts`). Oldest first by the
   raw string of the placing field, then `created_at`, the two kinds
@@ -278,9 +293,17 @@ for the month grid). `groupByDeadline` becomes
   `AgendaCollection.swift`), and opens on the section's header and brings
   the "Today" button back to it when it is there, since the days gone by
   sit above it. The macOS tray and the iOS widget keep the fold.
-- **Placement** of every other row: an item is placed on its *placement
-  day*, the earlier of its `when` day and its `deadline` day, ignoring a
-  `when` whose span is over.
+- **Placement** of every other row (changed 2026-11-17, see "The two
+  dates place independently"): the `when` places the item on its day,
+  ignoring one whose span is over, and the deadline places a row of its
+  own on its day (`placedBy: "deadline"`), unless the `when` covers that
+  day, where the one row is the `when`'s (`isDueRow` in `dayGroups.ts`).
+  The CLI and engine agenda apply the same rule per day
+  (`build_agenda_from`): where both land on one day, Today's overdue
+  fold included, the row is the `when`'s, toned by the more urgent of
+  the two, or the deadline's when both dates are behind us. A deadline's
+  own row shows no clock on the native calendars, whatever time the item
+  is planned for on its other day.
 - **Spans** (web, built 2026-10-29): a `when` with a `duration` covers
   `whenSpan` days (`dayGroups.ts`: whole days beside an all-day start,
   the clock end beside a timed one, so 23:00 + 2h is two days). A row
@@ -296,13 +319,18 @@ for the month grid). `groupByDeadline` becomes
   last ("until 03:00", since 2026-11-13). A span already under
   way starts on Today with its count intact. A row placed by its
   deadline, or sent to Overdue, is one row: the deadline is one day. The
-  same id therefore appears down several days; the selection order and
-  the view's flat item list keep each id once, at its first row. A
-  selected span draws its highlight on one copy only: the one the pointer
-  picked, else its earliest day on the page. The CLI `agenda` still places on
+  same id therefore appears down several days (a span's, and the days of
+  a date and a deadline); the selection order and the view's flat item
+  list keep each id once, at its first row. A selected item on several
+  days draws its highlight on one row only: the one the pointer picked,
+  else its earliest day on the page. Plain ↑ / ↓ step row by row (since
+  2026-11-17), so each of an item's rows is a stop and the highlight moves
+  to it; shift-ranges stay by item. The CLI `agenda` still places on
   the start day only.
-- **Tone** of a row is the most urgent of: overdue (deadline day < today,
-  or a task's `when` over), today-warning (deadline day = today), neutral.
+- **Tone** is per row: a deadline's row is overdue (deadline day < today)
+  or today-warning (deadline day = today); a `when`'s row is overdue (a
+  task's `when` over) or today-warning (it carries a deadline that is
+  today); otherwise neutral.
 - **Within a day**, order by the raw string of the field that placed the row,
   then `created_at`.
 - **Badges**: the placing date is carried by the day header and not repeated,
@@ -373,6 +401,19 @@ for the month grid). `groupByDeadline` becomes
   Neither register has a surface outside the task dialog / side panel (the
   standalone Deadline calendar modal was dropped 2026-10-08; its "Set
   deadline…" now opens the item on the deadline popover, as Set date… does).
+- **The deadline is a menu-only register** (web, decided 2026-11-17). An
+  item without one shows no deadline control: "Set deadline…" is in the
+  row context menu (one Open row) and in the task surface's "…" menu, and
+  opens the item on its deadline band with the calendar showing. Once set,
+  the band sits under the date and time section, where it is changed and
+  removed; the row menu's entry then reads "Remove deadline". The "+" chip
+  that sat beside the list picker for this is gone, and so is the
+  new-item capture's deadline buffer: a capture has no row or "…" menu
+  yet, so a deadline is added once the item exists. The band's input is
+  the planned-date input without the time (same day): typed into, with
+  the suggestion list above the calendar (Today / Tomorrow while unset),
+  Enter on emptied text removing it; typed times are not read. The native apps show
+  a set deadline and have no way to set one yet.
 - `WhenBadge` beside `DeadlineBadge` on list rows and board cards. When both
   are set, `when` renders first. Muted on done/binned items as deadline is.
 - Row context menus gain the same quick actions for When (Today, Tomorrow,

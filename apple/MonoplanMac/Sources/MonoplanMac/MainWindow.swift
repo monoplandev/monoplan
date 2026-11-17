@@ -1682,6 +1682,12 @@ struct MainWindowView: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                     .fixedSize()
+            } else if row.placedBy == .deadline {
+                // A deadline's own row. One still ahead says so here;
+                // today's and a late one are toned above.
+                if row.tone == .neutral, let deadline = row.deadline {
+                    Text("Due \(ItemPanel.dayText(deadline))").foregroundStyle(.secondary).fixedSize()
+                }
             } else if row.event, row.when != nil {
                 // An event with a day and no clock time.
                 Text("All day").foregroundStyle(.secondary).fixedSize()

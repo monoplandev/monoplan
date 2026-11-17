@@ -10,6 +10,11 @@
 // ("All day", "Due" on a deadline, or the planned date on a task that
 // slipped into Overdue, which has no day header to say it); the place is
 // a muted line under the title.
+// A deadline is a special kind of date here: its own row on the day it
+// is owed, a timer glyph and "Due" in the time lane, beside whatever row
+// the item's `when` gives it on another day. Where both fall on one day
+// the `when` row stands for both and carries the "Due" mark after its
+// title.
 // Rows tick off in place and stay where they are on their `when` day once
 // done or cancelled, muted (tick or cross), so the day still records what
 // happened and what was called off.
@@ -52,7 +57,12 @@ import {
 import { ContextMenu } from "@kobalte/core/context-menu";
 import { ItemContextMenu } from "./ItemContextMenu.tsx";
 import { RowMenuButton } from "./Row.tsx";
-import { agendaItems, type DayGroup, type DayRow } from "./dayGroups.ts";
+import {
+  agendaItems,
+  isDueRow,
+  type DayGroup,
+  type DayRow,
+} from "./dayGroups.ts";
 import {
   applySelectionKeyAction,
   mapDndKeyEvent,
@@ -73,6 +83,7 @@ import {
 import { useAppI18n } from "./i18n.tsx";
 import mapPinSvg from "./icons/map-pin.svg?raw";
 import starFilledSvg from "./icons/star-filled.svg?raw";
+import timerSvg from "./icons/timer.svg?raw";
 import usersSvg from "./icons/users.svg?raw";
 import {
   isCancelled,
@@ -119,6 +130,9 @@ export function Upcoming(props: {
   copyBlock: (sourceIds: readonly string[]) => void;
   onReveal?: (id: string, where: "list" | "focus") => void;
   onMoveToList?: (ids: readonly string[]) => void;
+  /** Open the item on its deadline band, calendar showing: the row
+   *  menu's "Set deadline…". */
+  onSetDeadline?: (id: string) => void;
 }) {
   const { m, locale } = useAppI18n();
 
@@ -141,12 +155,13 @@ export function Upcoming(props: {
     return props.selection.getSelectedKeySet();
   });
 
-  // Which copy of a multi-day span draws the selection: the one the
-  // pointer picked, else the item's place in the order (its earliest
-  // day from today on, or in the past when it is only there). The
-  // selection itself is by item id (one item, however many days it
-  // covers), so this is chrome only; a copy is lit when its item is
-  // selected and it is that item's chosen day.
+  // Which row of an item on several days (a multi-day span, a date and
+  // a deadline) draws the selection: the one the pointer picked, else
+  // the item's place in the order (its earliest day from today on, or
+  // in the past when it is only there). The selection itself is by item
+  // id (one item, however many rows it has), so this is chrome only; a
+  // row is lit when its item is selected and it is on that item's chosen
+  // day.
   const [pickedDay, setPickedDay] = createSignal<Map<string, string>>(
     new Map(),
   );
@@ -155,8 +170,15 @@ export function Upcoming(props: {
   );
   const litDay = (id: string): string | undefined =>
     pickedDay().get(id) ?? firstDayOf().get(id);
-  // A pointer pick only lives while its item stays selected; keyboard
-  // and other paths fall back to the first copy.
+  // Every row on the page in display order, an item's several rows
+  // included: what plain ↑ / ↓ step through.
+  const pageRows = createMemo(() =>
+    props.groups.flatMap((g) =>
+      g.rows.map((r) => ({ id: r.item.id, day: g.key })),
+    ),
+  );
+  // A picked row only lives while its item stays selected; other paths
+  // fall back to the first copy.
   createEffect(() => {
     const sel = selectedSet();
     const picked = pickedDay();
@@ -299,6 +321,28 @@ export function Upcoming(props: {
       props.selection.selectOnly(id);
       scrollToKey(id);
       return;
+    }
+    // Plain ↑ / ↓ go row by row, so an item's second row (its deadline,
+    // a later day of its span) is a stop like any other: the selection
+    // is by item id, which alone would step straight past it. Shift
+    // ranges stay by item.
+    if (action.type === "navigate") {
+      const down = action.direction === "down";
+      const from = down
+        ? props.selection.getSelectionBottom()
+        : props.selection.getSelectionTop();
+      const rows = pageRows();
+      const fromId = from === null ? null : String(from);
+      const day = fromId === null ? undefined : litDay(fromId);
+      let at = rows.findIndex((r) => r.id === fromId && r.day === day);
+      if (at < 0) at = rows.findIndex((r) => r.id === fromId);
+      const next = at < 0 ? undefined : rows[at + (down ? 1 : -1)];
+      if (next) {
+        props.selection.selectOnly(next.id);
+        setPickedDay(new Map([[next.id, next.day]]));
+        scrollToKey(next.id);
+      }
+      if (at >= 0) return;
     }
     const target = applySelectionKeyAction(props.selection, action, order(), {
       multi: true,
@@ -470,7 +514,7 @@ export function Upcoming(props: {
                   const selected = createMemo(
                     () =>
                       selectedSet().has(r.item.id) &&
-                      (!r.span || litDay(r.item.id) === g.key),
+                      litDay(r.item.id) === g.key,
                   );
                   // Keeps the "…" button showing while its menu is up
                   // (`.upcoming-row[data-menu-open]`), as list rows do.
@@ -490,6 +534,7 @@ export function Upcoming(props: {
                     onOpen={props.onOpen}
                     onReveal={props.onReveal}
                     onMoveToList={props.onMoveToList}
+                    onSetDeadline={props.onSetDeadline}
                     listLabel={props.listLabel}
                     onMenuOpenChange={setMenuOpen}
                   >
@@ -501,6 +546,7 @@ export function Upcoming(props: {
                     data-menu-open={menuOpen() ? "" : undefined}
                     aria-selected={selected() ? "true" : "false"}
                     data-tone={r.tone}
+                    data-placed={r.placedBy}
                     // `data-done`, not `data-closed`: the menu trigger
                     // sets its own `data-closed` while the menu is shut.
                     data-done={isClosed(r.item) ? "" : undefined}
@@ -521,7 +567,16 @@ export function Upcoming(props: {
                         }
                       />
                     </span>
-                    <span class="upcoming-row-time">{timeLabel(r)}</span>
+                    <span class="upcoming-row-time">
+                      <Show when={r.placedBy === "deadline"}>
+                        <span
+                          class="upcoming-row-due-icon"
+                          aria-hidden="true"
+                          innerHTML={timerSvg}
+                        />
+                      </Show>
+                      {timeLabel(r)}
+                    </span>
                     <span class="upcoming-row-body">
                       <span class="upcoming-row-title">
                         <span class="upcoming-row-text">{r.item.text}</span>
@@ -586,6 +641,18 @@ export function Upcoming(props: {
                       </Show>
                     </span>
                     <span class="upcoming-row-meta">
+                      {/* The item's deadline is this day too: the one
+                          row says so. */}
+                      <Show when={isDueRow(r, g.key)}>
+                        <span class="upcoming-row-due">
+                          <span
+                            class="upcoming-row-due-icon"
+                            aria-hidden="true"
+                            innerHTML={timerSvg}
+                          />
+                          {m().upcoming.due}
+                        </span>
+                      </Show>
                       <Show when={startsIn(r)}>
                         {(label) => (
                           <span class="upcoming-row-soon">{label()}</span>

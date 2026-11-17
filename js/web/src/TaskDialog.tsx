@@ -33,8 +33,6 @@ import { WhenField } from "./WhenField.tsx";
 import { ListPicker, type ListOption } from "./ListPicker.tsx";
 import checkSvg from "./icons/check.svg?raw";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
-import plusSvg from "./icons/plus.svg?raw";
-import timerSvg from "./icons/timer.svg?raw";
 import starFilledSvg from "./icons/star-filled.svg?raw";
 import {
   DEFAULT_DURATION_MINUTES,
@@ -69,6 +67,7 @@ import {
   isBinned,
   isCancelled,
   isClosed,
+  isOpen,
   isClosedState,
   isDone,
   EVENT_STATES,
@@ -421,17 +420,16 @@ export function TaskDialog(props: {
 
   const [text, setText] = createSignal("");
   const [notes, setNotes] = createSignal("");
-  // New-item mode's deadline buffer: nothing exists to write to until the
+  // New-item mode's buffers: nothing exists to write to until the
   // capture commits, so picks are held here and applied after creation.
-  const [newDeadline, setNewDeadline] = createSignal<string | null>(null);
-  // New-item mode's Event box, applied after `newWhen` (an event needs
-  // its date).
+  // (No deadline among them: one is set from an existing item's menu.)
+  // The Event box is applied after `newWhen` (an event needs its date).
   const [newEvent, setNewEvent] = createSignal(false);
   // New-item mode's duration buffer, applied after `newWhen`.
   const [newDuration, setNewDuration] = createSignal<number | null>(null);
   // New-item mode's place buffer, same deal.
   const [newPlace, setNewPlace] = createSignal<Place | null>(null);
-  // New-item mode's pin-to-Focus buffer, same deal as `newDeadline`.
+  // New-item mode's pin-to-Focus buffer, same deal.
   const [newFocus, setNewFocus] = createSignal(false);
   // The title and notes editors are contenteditable (not textareas) so that
   // http(s) URLs render as clickable anchors, matching the row quick-entry
@@ -814,7 +812,6 @@ export function TaskDialog(props: {
     syncedText = t;
     markAsked(t);
     setNotes(n);
-    setNewDeadline(null);
     setNewWhen(id ? null : (nw?.when ?? null));
     setNewEvent(id ? false : (nw?.event ?? false));
     setNewDuration(null);
@@ -914,8 +911,6 @@ export function TaskDialog(props: {
       if (nw.create && nw.state !== "backlog") props.app.setLifecycle(id, nw.state);
       const n = notes();
       if (n) props.app.setItemNotes(id, n);
-      const d = newDeadline();
-      if (d) props.app.setItemDeadline(id, d);
       const w = newWhen();
       if (w) props.app.setItemWhen(id, w);
       else if (suggested && !nw.done) props.app.setItemWhenSuggested(id, suggested.when);
@@ -954,8 +949,7 @@ export function TaskDialog(props: {
       loadedId = id;
       syncedText = text().trim();
       subscribeNotes(id, notes());
-      setNewDeadline(null);
-      setNewWhen(null);
+        setNewWhen(null);
       setNewEvent(false);
       setNewDuration(null);
       setNewPlace(null);
@@ -1252,8 +1246,8 @@ export function TaskDialog(props: {
   const vWhen = () => (item() ? (item()?.when ?? null) : newWhen());
   const vDuration = () =>
     item() ? (item()?.duration ?? null) : newDuration();
-  const vDeadline = () =>
-    item() ? (item()?.deadline ?? null) : newDeadline();
+  // A capture has no deadline: it is set from an existing item's menu.
+  const vDeadline = () => item()?.deadline ?? null;
   const vPlace = () => (item() ? (item()?.place ?? null) : newPlace());
   // Closed / Binned: date fields render muted and the pin toggle hides
   // (neither can hold a Focus ref, spec/focus.md).
@@ -1265,27 +1259,29 @@ export function TaskDialog(props: {
   // task surface's own layout rule): it shows while it holds a value or
   // is being filled, "being filled" meaning its popover is open, which is
   // already the caller's state (a row menu's "Set deadline…" opens the
-  // item onto it). Until set it sits behind the "+" chip in the badge row.
+  // item onto it). Until set it is a menu entry only: the row's context
+  // menu and this surface's "…" menu.
   const deadlineShown = () => vDeadline() !== null || props.deadlineOpen();
   // A band folded back without a value leaves focus on a detached input;
-  // put it on the "+" trigger it came from instead. Only when the fold
-  // actually took the focus: the band also hides when the pane moves to an
-  // item without a deadline (arrowing along a board), and focus is the
+  // put it on the "…" menu trigger instead. Only when the fold actually
+  // took the focus: the band also hides when the pane moves to an item
+  // without a deadline (arrowing along a board), and focus is the
   // board's then, not ours to take.
-  let moreRef: HTMLButtonElement | undefined;
-  let morePick: (() => void) | null = null;
-  const refocusChip = (shown: () => boolean, chip: () => HTMLButtonElement | undefined) =>
-    createEffect(
-      on(shown, (now, before) => {
-        if (!before || now) return;
-        queueMicrotask(() => {
-          const active = document.activeElement;
-          if (active && active !== document.body && active.isConnected) return;
-          chip()?.focus();
-        });
-      }),
-    );
-  refocusChip(deadlineShown, () => moreRef);
+  let menuRef: HTMLButtonElement | undefined;
+  // A "…" menu pick that opens a popover, held until the menu has
+  // reported closed: opened while the menu is still closing, the menu's
+  // dismiss handling takes the new popover down with it.
+  let menuPick: (() => void) | null = null;
+  createEffect(
+    on(deadlineShown, (now, before) => {
+      if (!before || now) return;
+      queueMicrotask(() => {
+        const active = document.activeElement;
+        if (active && active !== document.body && active.isConnected) return;
+        menuRef?.focus();
+      });
+    }),
+  );
   const setDoneFlag = (done: boolean) => {
     const it = item();
     if (it) props.app.setDone(it.id, done);
@@ -1367,7 +1363,6 @@ export function TaskDialog(props: {
   const onDeadlineChange = (stamp: string | null) => {
     const it = item();
     if (it) props.app.setItemDeadline(it.id, stamp);
-    else setNewDeadline(stamp);
   };
   const onPlaceChange = (place: Place | null) => {
     const it = item();
@@ -1428,12 +1423,20 @@ export function TaskDialog(props: {
           <Show when={!muted()}>
             <PinToggle pinned={vPinned} onToggle={onPinToggle} />
           </Show>
-          {/* Item menu (link, reveal, bin / restore / delete): only once
-              the item exists. */}
+          {/* Item menu (link, reveal, deadline, bin / restore / delete):
+              only once the item exists. */}
           <Show when={item()}>
             {(it) => (
-              <DropdownMenu>
+              <DropdownMenu
+                onOpenChange={(open) => {
+                  if (open || !menuPick) return;
+                  const run = menuPick;
+                  menuPick = null;
+                  setTimeout(run, 0);
+                }}
+              >
                 <DropdownMenu.Trigger
+                  ref={(el) => (menuRef = el)}
                   class="icon-button"
                   aria-label={m().common.menu}
                   innerHTML={dotsHorizontalSvg}
@@ -1465,6 +1468,21 @@ export function TaskDialog(props: {
                           listOptions().find((o) => o.id === it().listId)?.name ??
                             it().listId,
                         )}
+                      </DropdownMenu.Item>
+                    </Show>
+                    {/* The deadline's one way in from this surface: a
+                        pick opens its band under the dates, popover
+                        showing. Gone once the band is there (the band
+                        edits and removes it). Open items only, as on
+                        the row menu. */}
+                    <Show when={isOpen(it()) && !deadlineShown()}>
+                      <DropdownMenu.Item
+                        class="dropdown-menu-item"
+                        onSelect={() => {
+                          menuPick = () => props.setDeadlineOpen(true);
+                        }}
+                      >
+                        {m().deadline.setDate}
                       </DropdownMenu.Item>
                     </Show>
                     <Show when={!isBinned(it())}>
@@ -1559,8 +1577,8 @@ export function TaskDialog(props: {
             />
           </section>
 
-          {/* Badge row: the move-to-list picker, then the "more" menu
-              (the pin toggle lives in the header). */}
+          {/* Badge row: the move-to-list picker (the pin toggle lives
+              in the header). */}
           <section class="task-dialog-section task-dialog-badges">
             <ListPicker
               options={listOptions}
@@ -1568,48 +1586,6 @@ export function TaskDialog(props: {
               workspace={props.docLabel}
               onChange={onListChange}
             />
-            {/* "+" menu with the register the item does not carry yet
-                (the deadline), gone once it is set. A pick opens the
-                deadline band below the row. The glyph is a plus, not an
-                ellipsis: the header's ellipsis is the item's action menu,
-                and this one adds a field. */}
-            <Show when={!deadlineShown()}>
-              <DropdownMenu
-                // A pick opens the band under the row and its popover.
-                // Done while the menu is still closing, its dismiss
-                // handling takes the new popover down with it, so the
-                // pick is held until the menu has reported closed.
-                onOpenChange={(open) => {
-                  if (open || !morePick) return;
-                  const run = morePick;
-                  morePick = null;
-                  setTimeout(run, 0);
-                }}
-              >
-                <DropdownMenu.Trigger
-                  ref={(el) => (moreRef = el)}
-                  class="task-dialog-add-chip"
-                  aria-label={m().deadline.add}
-                  title={m().deadline.add}
-                  innerHTML={plusSvg}
-                />
-                <DropdownMenu.Portal>
-                  <DropdownMenu.Content class="dropdown-menu-content task-dialog-menu-content">
-                    <DropdownMenu.Item
-                      class="dropdown-menu-item"
-                      onSelect={() => {
-                        morePick = () => props.setDeadlineOpen(true);
-                      }}
-                    >
-                      <span class="dropdown-menu-item-lead">
-                        <span class="dropdown-menu-item-icon" aria-hidden="true" innerHTML={timerSvg} />
-                        {m().deadline.add}
-                      </span>
-                    </DropdownMenu.Item>
-                  </DropdownMenu.Content>
-                </DropdownMenu.Portal>
-              </DropdownMenu>
-            </Show>
           </section>
 
           {/* Date section: the planned date between the badges and the

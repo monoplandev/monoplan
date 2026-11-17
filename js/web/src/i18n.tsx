@@ -354,8 +354,6 @@ export type Messages = {
   deadline: {
     /** Section label / accessible name for the deadline control. */
     label: string;
-    /** Task-dialog "+" menu row that reveals the deadline band. */
-    add: string;
     /** Task-dialog deadline input placeholder when no deadline is set. */
     unset: string;
     /** Badge label when the deadline is before today. */
@@ -368,7 +366,8 @@ export type Messages = {
     clear: string;
     /** Context-menu action that removes the deadline. */
     remove: string;
-    /** Context-menu action that opens the calendar to pick a date. */
+    /** Menu action (row context menu, the task surface's "…" menu) that
+     *  opens the item on its deadline band, calendar showing. */
     setDate: string;
     /** Accessible label for the calendar's previous-month button. */
     prevMonth: string;
@@ -811,7 +810,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     deadline: {
       label: "Fecha límite",
-      add: "Añadir fecha límite",
       unset: "Fecha límite",
       overdue: "Vencido",
       today: "Hoy",
@@ -1200,7 +1198,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     deadline: {
       label: "Deadline",
-      add: "Add deadline",
       unset: "Deadline",
       overdue: "Overdue",
       today: "Today",

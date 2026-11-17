@@ -150,11 +150,13 @@ struct AgendaRowView: View {
         case .warning: return (String(localized: "Due today"), .orange)
         case .neutral: break
         }
+        // A deadline's own row says what it is; the length belongs to
+        // the `when`'s row.
+        if row.placedBy == .deadline {
+            return row.deadline.map { (String(localized: "due \($0)"), .secondary) }
+        }
         if let minutes = row.duration, minutes > 0 {
             return (Self.span(Int(minutes)), .secondary)
-        }
-        if row.placedBy == .deadline, let deadline = row.deadline, !row.isTimed {
-            return (String(localized: "due \(deadline)"), .secondary)
         }
         return nil
     }

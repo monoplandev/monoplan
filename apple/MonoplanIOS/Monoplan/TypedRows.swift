@@ -122,8 +122,10 @@ extension AgendaEntry {
     /// The row's identity within its day, across workspaces.
     var key: String { "\(docId ?? "")/\(id)" }
     var isDone: Bool { state == .done }
-    /// `when` carries a clock time, not only a day.
-    var isTimed: Bool { (when?.count ?? 0) >= 16 }
+    /// The row shows a clock time: its `when` carries one, and the row is
+    /// the `when`'s. A deadline's own row is a day, whatever time the
+    /// item is planned for on another.
+    var isTimed: Bool { placedBy == .when && (when?.count ?? 0) >= 16 }
 }
 
 extension BinEntry {

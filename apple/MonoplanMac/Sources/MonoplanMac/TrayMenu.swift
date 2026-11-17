@@ -51,8 +51,12 @@ enum TodayMenu {
         }
     }
 
-    /// `when` carries a clock time, not only a day.
-    static func isTimed(_ row: AgendaEntry) -> Bool { (row.when?.count ?? 0) >= 16 }
+    /// The row shows a clock time: its `when` carries one, and the row is
+    /// the `when`'s. A deadline's own row is a day, whatever time the
+    /// item is planned for on another.
+    static func isTimed(_ row: AgendaEntry) -> Bool {
+        row.placedBy == .when && (row.when?.count ?? 0) >= 16
+    }
 
     static func note(for row: AgendaEntry, now: Date, calendar: Calendar) -> String? {
         switch row.tone {

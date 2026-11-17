@@ -1,13 +1,17 @@
 // Day grouping behind the Upcoming view (`spec/calendar-plan.md`
-// "Agenda"): every Open item carrying a `when` or a `deadline`, placed
-// once on the earlier of the two days. An overdue deadline leads in an
-// Overdue group so what is owed is visible at a glance and Today reads as
-// today's plan; the group only exists while something is overdue. A
-// task whose `when` has passed while it is still Open joins that group
-// too (it was planned and did not happen, so it is still to do). An
-// event's past `when` has gone by: it places nothing, and an event with
-// only that is not selected for this view. Closed items (done or
-// cancelled) keep their calendar day via `when` only ("happens on"
+// "Agenda"): every Open item carrying a `when` or a `deadline`. The two
+// dates place independently: the `when` puts the item on its day, and
+// the deadline puts a row of its own on the day it is owed (`placedBy:
+// "deadline"`, the special kind of date), so an item with both is on the
+// calendar twice. One row per item per group, though: a deadline on a
+// day the `when` already covers rides on that row. An overdue deadline
+// leads in an Overdue group so what is owed is visible at a glance and
+// Today reads as today's plan; the group only exists while something is
+// overdue. A task whose `when` has passed while it is still Open joins
+// that group too (it was planned and did not happen, so it is still to
+// do). An event's past `when` has gone by: it places nothing, and an
+// event with only that is not selected for this view. Closed items (done
+// or cancelled) keep their calendar day via `when` only ("happens on"
 // outlives the tick or the cross, "owed by" does not): they keep their
 // slot on that day, never in Overdue and never placed by deadline. Binned
 // items never appear. Events
@@ -119,10 +123,13 @@ export const isSlippedTask = (it: ItemView, today: string): boolean =>
  *  move it.
  *
  *  A row placed by a `when` that covers several days is repeated on each
- *  day of the span from today onward (`span` on every copy), so the
- *  same id can occur more than once down the groups; a flat reading of
- *  the rows dedupes by id. A row placed by its deadline is never
- *  repeated: the deadline is one day.
+ *  day of the span from today onward (`span` on every copy), and an item
+ *  with both dates has its deadline row besides, so the same id can
+ *  occur more than once down the groups; a flat reading of the rows
+ *  dedupes by id. The deadline is one day, and never a second row in a
+ *  group the item is already in: on a day its `when` covers, that row is
+ *  the one (`isDueRow`), and with both dates behind it the deadline row
+ *  is the one in Overdue.
  *
  *  `floor` (a `YYYY-MM-DD` stamp before `today`) adds the days gone by
  *  from that day on, each non-empty one a `past` group ahead of Overdue
@@ -155,10 +162,16 @@ export function groupByDay(
     const dDay = it.deadline ?? null;
     // Every day of the span from `from` to `to`, each row carrying its
     // position in the span when there is more than one day.
-    const placeWhen = (tone: DayTone, from: string, to: string) => {
+    // `dueDay`: the deadline's day when it is today, whose row reads as
+    // due (warning) for carrying the deadline too.
+    const placeWhen = (from: string, to: string, dueDay?: string) => {
       const first = span!.start;
       for (let day = from; day <= to; day = addDaysToStamp(day, 1)) {
-        const row: DayRow = { item: it, placedBy: "when", tone };
+        const row: DayRow = {
+          item: it,
+          placedBy: "when",
+          tone: day === dueDay ? "warning" : "neutral",
+        };
         if (span!.total > 1) {
           // Days since the start, +1 for the 1-based label.
           let n = 1;
@@ -175,47 +188,49 @@ export function groupByDay(
     if (floor && span && span.start < today && (isEvent(it) || isClosed(it))) {
       const from = span.start >= floor ? span.start : floor;
       const to = span.end < yesterday ? span.end : yesterday;
-      if (from <= to) placeWhen("neutral", from, to);
+      if (from <= to) placeWhen(from, to);
     }
     if (isClosed(it)) {
       // A ticked or crossed item stays put on its `when` day, unjudged:
       // the day still records what happened, or what was called off. Its
       // deadline is settled and places nothing; Overdue is Open-only.
       if (wDay === null) continue;
-      placeWhen("neutral", wDay, span!.end);
+      placeWhen(wDay, span!.end);
       continue;
     }
-    // An overdue deadline is owed now whatever `when` says: it leaves the
-    // day ladder for the Overdue group (red).
-    if (dDay !== null && dDay < today) {
-      overdueRows.push({
-        raw: dDay,
-        row: { item: it, placedBy: "deadline", tone: "overdue" },
-      });
-      continue;
-    }
-    // A task planned for a day that has passed is still to do: Overdue,
-    // by its `when`, even with a deadline still ahead (the earlier of
-    // the two dates places a row, and that one is behind us).
-    if (isSlippedTask(it, today)) {
+    // The two dates place independently from here: the `when` row(s),
+    // then the deadline's own row unless the item already has one in
+    // that group.
+    const deadlineOverdue = dDay !== null && dDay < today;
+    if (wDay !== null) {
+      placeWhen(wDay, span!.end, dDay === today ? today : undefined);
+    } else if (isSlippedTask(it, today) && !deadlineOverdue) {
+      // A task planned for a day that has passed is still to do: Overdue,
+      // by its `when`. With the deadline behind it as well the deadline
+      // row below is the one: it is what is owed.
       overdueRows.push({
         raw: it.when!,
         row: { item: it, placedBy: "when", tone: "overdue" },
       });
-      continue;
     }
-    // Only a past `when`, on an event: over, nothing to place.
-    if (wDay === null && dDay === null) continue;
-    // What is left is today or later: place on the earlier. `when` wins a
-    // tie: it is the "happens on" date and renders first.
-    const tone: DayTone = dDay === today ? "warning" : "neutral";
-    if (wDay && (!dDay || wDay <= dDay)) {
-      placeWhen(tone, wDay, span!.end);
-    } else {
+    if (dDay === null) continue;
+    if (deadlineOverdue) {
+      // Owed now: the Overdue group (red), whatever `when` says.
+      overdueRows.push({
+        raw: dDay,
+        row: { item: it, placedBy: "deadline", tone: "overdue" },
+      });
+    } else if (wDay === null || dDay < wDay || dDay > span!.end) {
+      // Its own row on its day: the special kind of date. On a day the
+      // `when` covers, that row carries it instead (`isDueRow`).
       placed.push({
-        day: dDay!,
-        raw: dDay!,
-        row: { item: it, placedBy: "deadline", tone },
+        day: dDay,
+        raw: dDay,
+        row: {
+          item: it,
+          placedBy: "deadline",
+          tone: dDay === today ? "warning" : "neutral",
+        },
       });
     }
   }
@@ -265,9 +280,16 @@ export function groupByDay(
   return out;
 }
 
+/** A `when` row on the day its item's deadline falls: the one row
+ *  stands for both dates there, so the surface marks it as due. `day` is
+ *  the row's group key. */
+export const isDueRow = (row: DayRow, day: string): boolean =>
+  row.placedBy === "when" && isOpen(row.item) && row.item.deadline === day;
+
 /** Every item on the agenda once, in display order, with the key of the
  *  group its row is in: what the selection runs over. An item on more
- *  than one day (a multi-day span, or a past day and a day ahead) counts
+ *  than one day (a multi-day span, a date and a deadline, or a past day
+ *  and a day ahead) counts
  *  at its first row from Overdue on, and at its first past row only when
  *  it has none there: a span that began yesterday is one of today's
  *  rows, not yesterday's. */

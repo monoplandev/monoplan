@@ -3758,6 +3758,7 @@ export function Workspace(props: {
                         onOpen={(id) => setOpenItemId(id)}
                         onReveal={revealItemIn}
                         onMoveToList={openMovePalette}
+                        onSetDeadline={openItemDeadline}
                         openOnTap={openOnTap}
                       />
                     );
@@ -3775,6 +3776,7 @@ export function Workspace(props: {
               onOpen={(id) => setOpenItemId(id)}
               onReveal={revealItemIn}
               onMoveToList={openMovePalette}
+              onSetDeadline={openItemDeadline}
               openOnTap={openOnTap}
               duplicateBlock={duplicateBlock}
               copyBlock={copyRows}
@@ -3805,6 +3807,7 @@ export function Workspace(props: {
             copyBlock={copyRows}
             onReveal={revealItemIn}
             onMoveToList={openMovePalette}
+            onSetDeadline={openItemDeadline}
           />
         </Show>
       </main>

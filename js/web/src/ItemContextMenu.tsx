@@ -62,6 +62,9 @@ export function ItemContextMenu(props: {
   /** Open the workspace's move palette on the target set, the menu twin
    *  of the `m` shortcut. */
   onMoveToList?: (ids: readonly string[]) => void;
+  /** Open the item on its deadline band, calendar showing: the row
+   *  menu's "Set deadline…". */
+  onSetDeadline?: (id: string) => void;
   /** Resolves a list id (in the item's doc) to its display label (see
    *  Workspace `listLabel`). */
   listLabel?: (listId: string, docId?: string, dated?: boolean) => string;
@@ -215,7 +218,23 @@ export function ItemContextMenu(props: {
   const onCopyLink = () => {
     void navigator.clipboard.writeText(targetIds().map(itemUrl).join("\n"));
   };
+  // The deadline is a menu-only register (`spec/calendar-plan.md`): one
+  // open item at a time, set from here (the item opens on its deadline
+  // band, calendar showing) and removed from here once it has one.
+  const canSetDeadline = (): boolean =>
+    !!props.onSetDeadline &&
+    isOpen(props.item()) &&
+    !isDraftId(props.item().id) &&
+    targetIds().length === 1;
+  // Held until the menu has reported closed: a popover opened while the
+  // menu is still closing is taken down by the menu's dismiss handling.
+  let closedPick: (() => void) | null = null;
   const onOpenChange = (open: boolean) => {
+    if (!open && closedPick) {
+      const run = closedPick;
+      closedPick = null;
+      setTimeout(run, 0);
+    }
     // Register the menu in the shared overlay count so the workspace's
     // document-level shortcuts (Enter → open dialog, x → done, …) go inert
     // while it's open — otherwise pressing Enter to pick a menu item also
@@ -351,6 +370,31 @@ export function ItemContextMenu(props: {
             >
               <span>{m().focus.showInFocus}</span>
             </ContextMenu.Item>
+          </Show>
+          <Show when={canSetDeadline()}>
+            <Show
+              when={props.item().deadline}
+              fallback={
+                <ContextMenu.Item
+                  class="context-menu-item"
+                  onSelect={() => {
+                    const id = props.item().id;
+                    closedPick = () => props.onSetDeadline?.(id);
+                  }}
+                >
+                  <span>{m().deadline.setDate}</span>
+                </ContextMenu.Item>
+              }
+            >
+              <ContextMenu.Item
+                class="context-menu-item"
+                onSelect={() =>
+                  props.app.setItemDeadline(props.item().id, null)
+                }
+              >
+                <span>{m().deadline.remove}</span>
+              </ContextMenu.Item>
+            </Show>
           </Show>
           <Show when={props.onMoveToList}>
             <ContextMenu.Item

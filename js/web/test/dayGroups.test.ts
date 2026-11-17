@@ -1,7 +1,9 @@
 // Day bucketing behind the Upcoming view (`spec/calendar-plan.md`
 // "Agenda"): overdue deadlines and tasks whose `when` has passed in a
-// leading Overdue group, events' past whens dropped, placement on the earlier of `when` / `deadline`, tone
-// precedence, within-day ordering, and done rows kept on their `when` day.
+// leading Overdue group, events' past whens dropped, the `when` and the
+// `deadline` each placing a row of their own (one row per item per
+// group), tone, within-day ordering, and done rows kept on their `when`
+// day.
 
 import { describe, expect, test } from "bun:test";
 
@@ -9,6 +11,7 @@ import {
   agendaItems,
   attentionBadge,
   groupByDay,
+  isDueRow,
   whenSpan,
 } from "../src/dayGroups.ts";
 import type { ItemView } from "../src/sync/store.ts";
@@ -44,7 +47,7 @@ function item(
 const ids = (g: { rows: { item: ItemView }[] }) => g.rows.map((r) => r.item.id);
 
 describe("groupByDay", () => {
-  test("places on the earlier field; overdue deadlines and slipped tasks go to Overdue", () => {
+  test("each date places its own row; overdue deadlines and slipped tasks go to Overdue", () => {
     const groups = groupByDay(
       [
         item("past-when", { when: "2026-09-01" }),
@@ -64,6 +67,9 @@ describe("groupByDay", () => {
       [TODAY, "today", ["due-today"]],
       ["2026-09-11", "future", ["dl-first"]],
       ["2026-09-12", "future", ["both"]],
+      ["2026-09-15", "future", ["dl-first"]],
+      ["2026-09-20", "future", ["both-late"]],
+      ["2026-09-30", "future", ["both"]],
     ]);
     expect(groups[0]!.label).toBe("Overdue");
     expect(groups[0]!.rows.map((r) => [r.placedBy, r.tone])).toEqual([
@@ -74,8 +80,14 @@ describe("groupByDay", () => {
     expect(groups[1]!.rows.map((r) => r.tone)).toEqual(["warning"]);
     expect(groups[2]!.rows[0]!.placedBy).toBe("deadline");
     expect(groups[2]!.rows[0]!.tone).toBe("neutral");
-    expect(groups[3]!.rows[0]!.placedBy).toBe("when");
     expect(groups[2]!.label).toBe("Fri");
+    // The date row and the deadline row of one item, on their own days.
+    expect(groups.slice(3).map((g) => [g.rows[0]!.placedBy, g.rows[0]!.tone])).toEqual([
+      ["when", "neutral"],
+      ["when", "neutral"],
+      ["when", "neutral"],
+      ["deadline", "neutral"],
+    ]);
   });
 
   test("within a day, all-day leads timed, then createdAt", () => {
@@ -110,6 +122,8 @@ describe("groupByDay", () => {
     expect(groups.map((g) => [g.key, ids(g)])).toEqual([
       ["overdue", ["over-old", "over-past-when", "past-when", "over-b", "over-a"]],
       [TODAY, ["own"]],
+      // Owed since August, and still on the day it is planned for.
+      ["2026-09-30", ["over-old"]],
     ]);
     // Both dates past: the deadline places the row, it is what is owed.
     expect(groups[0]!.rows.map((r) => [r.placedBy, r.tone])).toEqual([
@@ -142,9 +156,12 @@ describe("groupByDay", () => {
         "overdue",
         ["past-due-today", "past-due-later", "span-over", "past-when", "past-timed"],
       ],
-      [TODAY, ["running"]],
+      // A deadline still to come keeps its own row on its day.
+      [TODAY, ["running", "past-due-today"]],
       ["2026-09-10", ["running"]],
+      ["2026-09-20", ["past-due-later"]],
     ]);
+    expect(groups[1]!.rows[1]).toMatchObject({ placedBy: "deadline", tone: "warning" });
     for (const row of groups[0]!.rows) {
       expect(row).toMatchObject({ placedBy: "when", tone: "overdue" });
       expect(row.span).toBeUndefined();
@@ -250,7 +267,7 @@ describe("groupByDay: events", () => {
     const groups = groupByDay(
       [
         event("gig", { when: "2026-09-12T19:00" }),
-        // A deadline on an event is legitimate and places it as usual.
+        // A deadline on an event is legitimate: its own row, as usual.
         event("tickets", { when: "2026-09-12", deadline: "2026-09-10" }),
         event("owed", { when: "2026-09-12", deadline: "2026-09-01" }),
         // Went by: nothing to place. A task in the same spot is overdue.
@@ -267,7 +284,7 @@ describe("groupByDay: events", () => {
       ["overdue", ["owed", "slipped"]],
       [TODAY, []],
       ["2026-09-10", ["tickets"]],
-      ["2026-09-12", ["done", "cancelled", "gig"]],
+      ["2026-09-12", ["tickets", "owed", "done", "cancelled", "gig"]],
     ]);
   });
 });
@@ -361,7 +378,7 @@ describe("groupByDay: multi-day spans", () => {
     ]);
   });
 
-  test("a deadline that places the row ahead of its when is one day only; an overdue one wins outright", () => {
+  test("a deadline is one day beside the span; an overdue one is in Overdue besides", () => {
     const groups = groupByDay(
       [
         item("dl-first", { when: "2026-09-12", deadline: "2026-09-11" }, { duration: 3 * 1440 }),
@@ -374,7 +391,47 @@ describe("groupByDay: multi-day spans", () => {
     expect(groups.map((g) => [g.key, ids(g)])).toEqual([
       ["overdue", ["owed"]],
       [TODAY, []],
-      ["2026-09-11", ["dl-first"]],
+      ["2026-09-10", ["owed"]],
+      ["2026-09-11", ["owed", "dl-first"]],
+      ["2026-09-12", ["owed", "dl-first"]],
+      ["2026-09-13", ["dl-first"]],
+      ["2026-09-14", ["dl-first"]],
+    ]);
+    expect(groups[3]!.rows[1]).toMatchObject({ placedBy: "deadline" });
+    expect(groups[3]!.rows[1]!.span).toBeUndefined();
+  });
+
+  test("a deadline on a day the when covers rides on that row", () => {
+    const groups = groupByDay(
+      [
+        item("same-day", { when: "2026-09-12T10:00", deadline: "2026-09-12" }),
+        item("in-span", { when: "2026-09-14", deadline: "2026-09-15" }, { duration: 3 * 1440 }),
+        item("today", { when: `${TODAY}T10:00`, deadline: TODAY }),
+        item("done", { when: "2026-09-12", deadline: "2026-09-12" }, { state: "done" }),
+      ],
+      TODAY,
+      LABELS,
+      "en",
+    );
+    // One row per item per day, all of them the `when`'s.
+    expect(groups.map((g) => [g.key, ids(g)])).toEqual([
+      [TODAY, ["today"]],
+      ["2026-09-12", ["done", "same-day"]],
+      ["2026-09-14", ["in-span"]],
+      ["2026-09-15", ["in-span"]],
+      ["2026-09-16", ["in-span"]],
+    ]);
+    for (const g of groups) {
+      for (const r of g.rows) expect(r.placedBy).toBe("when");
+    }
+    // The row on the deadline's day says so; due today is the warning.
+    const due = groups.flatMap((g) =>
+      g.rows.filter((r) => isDueRow(r, g.key)).map((r) => [g.key, r.item.id, r.tone]),
+    );
+    expect(due).toEqual([
+      [TODAY, "today", "warning"],
+      ["2026-09-12", "same-day", "neutral"],
+      ["2026-09-15", "in-span", "neutral"],
     ]);
   });
 });
