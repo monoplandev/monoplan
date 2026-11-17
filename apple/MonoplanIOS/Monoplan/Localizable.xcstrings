@@ -777,6 +777,17 @@
         }
       }
     },
+    "could not update items: %@" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "no se pudieron actualizar los elementos: %@"
+          }
+        }
+      }
+    },
     "could not update list: %@" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -989,6 +1000,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "eliminando la cuenta"
+          }
+        }
+      }
+    },
+    "Deselect All" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deseleccionar todo"
           }
         }
       }
@@ -1679,6 +1701,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Mover"
+          }
+        }
+      }
+    },
+    "Move the selected items to the Bin?" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "¿Mover los elementos seleccionados a la papelera?"
           }
         }
       }
@@ -2489,6 +2522,39 @@
         }
       }
     },
+    "Select" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seleccionar"
+          }
+        }
+      }
+    },
+    "Select All" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seleccionar todo"
+          }
+        }
+      }
+    },
+    "Select Items" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seleccionar elementos"
+          }
+        }
+      }
+    },
     "Self-hosted server" : {
       "localizations" : {
         "es" : {
@@ -2920,6 +2986,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Se eliminan de todos los dispositivos y no se pueden restaurar."
+          }
+        }
+      }
+    },
+    "They can be restored from the Bin." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se pueden restaurar desde la papelera."
           }
         }
       }

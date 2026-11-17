@@ -453,6 +453,45 @@ final class AppModel: ObservableObject {
         write({ try $0.setBinned(workspace: workspace, id: id, binned: binned) }, to: ref)
     }
 
+    /// Move a list page's selected rows, in the order given, to the end
+    /// of another list of their workspace (`Engine.moveItems`): one
+    /// call, so one undo step.
+    func moveItems(_ ids: [String], inDoc docId: String?, toList listId: String) {
+        let workspace = selector(docId)
+        // No position is past this: the core clamps to the list's end.
+        writeMany { try $0.moveItems(workspace: workspace, ids: ids, list: listId, index: .max) }
+    }
+
+    /// Move a selection to the bin (`Engine.setBinnedMany`), as one
+    /// undo step.
+    func binItems(_ refs: [ItemRef]) {
+        let items = refs.map { MonoplanCore.ItemRef(workspace: selector($0.docId), id: $0.itemId) }
+        writeMany { try $0.setBinnedMany(items: items, binned: true) }
+    }
+
+    /// Star a selection, on top of Starred in the order given
+    /// (`Engine.starItems`); rows already starred stay where they are.
+    func starItems(_ refs: [ItemRef]) {
+        let items = refs.map { MonoplanCore.ItemRef(workspace: selector($0.docId), id: $0.itemId) }
+        writeMany { try $0.starItems(items: items) }
+    }
+
+    /// A write to several items, then everything that lists items
+    /// reread.
+    private func writeMany(_ body: @escaping (MonoplanCore.Engine) throws -> Void) {
+        call(body) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                refreshLenses()
+                refreshListRows()
+                for list in browsedLists.values { refreshList(list) }
+            case .failure(let error):
+                lastError = String(localized: "could not update items: \(engineErrorMessage(error))")
+            }
+        }
+    }
+
     /// Copy an item beside itself in its own list
     /// (`Engine.duplicateItem`), then reread as `setDone` does. The
     /// copy's id is not needed: the reread shows it. `star` also stars

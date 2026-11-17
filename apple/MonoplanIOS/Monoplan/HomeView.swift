@@ -33,6 +33,13 @@
 // An Inbox's page has its own "..." menu: oldest or newest first, a
 // preference of this device's. The Inbox is a queue in arrival order
 // (spec/inbox-plan.md), so its rows are never dragged to a new place.
+// A row of a list's page swiped left is selected, and the page is then
+// selecting (the system's edit mode; "Select Items" in the "..." menu
+// starts it with nothing picked): a tap picks or drops a row, two
+// fingers dragged down pick a run, and the bottom bar gives way to a
+// toolbar that moves the picked rows to another list of the workspace,
+// stars them, or bins them (asked first), each as one undo step. Done
+// at the top right, or any of those, ends it.
 // Archived lists and the reserved `events` list (calendar-only,
 // spec/events-plan.md) are left out.
 
@@ -198,6 +205,9 @@ struct HomeView: View {
     @State private var showSignIn = false
     /// The Map page is up: its sheet stands where the bottom bar does.
     @State private var mapShown = false
+    /// The list page is selecting rows: its toolbar stands where the
+    /// bottom bar does.
+    @State private var selectingItems = false
     /// The new-list popover is up.
     @State private var showNewList = false
     /// An action of Home's that failed; shown in an alert.
@@ -432,7 +442,7 @@ struct HomeView: View {
                 }
             }
             .navigationDestination(for: ListRef.self) { list in
-                ListItemsView(list: list)
+                ListItemsView(list: list, selecting: $selectingItems)
                     .onAppear { shownList = list }
                     .onDisappear { if shownList == list { shownList = nil } }
             }
@@ -564,7 +574,7 @@ struct HomeView: View {
             path.append(captured.list)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !mapShown {
+            if !mapShown && !selectingItems {
                 BottomBar(query: $query, searching: $searching, captureList: shownList)
             }
         }
@@ -771,7 +781,16 @@ struct ListItemsView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     let list: ListRef
+    /// The page is selecting rows (the list's edit mode). Home's, so
+    /// its bottom bar can make way for the selection's toolbar.
+    @Binding var selecting: Bool
 
+    /// The ids of the rows picked while selecting.
+    @State private var selection: Set<String> = []
+    /// The list picker is up, for where the picked rows move to.
+    @State private var pickingList = false
+    /// "Move to Bin" for the picked rows is waiting on its confirmation.
+    @State private var confirmingBin = false
     /// The rename alert is up, over what is typed in it.
     @State private var renaming = false
     @State private var renameText = ""
@@ -819,6 +838,26 @@ struct ListItemsView: View {
         model.showedCaptured()
     }
 
+    /// The picked rows, in the order shown.
+    private var picked: [ItemRef] {
+        shown(model.listItems[list.key] ?? []).filter { selection.contains($0.id) }
+            .map { ItemRef(docId: list.docId, itemId: $0.id, title: $0.text) }
+    }
+
+    /// Start selecting, with this row picked (nil: none yet).
+    private func select(_ id: String?) {
+        withAnimation { selecting = true }
+        guard let id else { return }
+        selection = [id]
+        // Again once the list is in edit mode, in case entering it
+        // dropped what was picked before it.
+        DispatchQueue.main.async { selection.insert(id) }
+    }
+
+    private func endSelecting() {
+        withAnimation { selecting = false }
+    }
+
     var body: some View {
         Group {
             if let loaded = model.listItems[list.key], !loaded.isEmpty {
@@ -827,16 +866,30 @@ struct ListItemsView: View {
                     // A long press and drag moves a row: the list parts
                     // to show where it will land (`onMove`), and the
                     // drop is the list's order from then on. Not in an
-                    // Inbox, whose order is arrival.
-                    List {
+                    // Inbox, whose order is arrival, nor while
+                    // selecting, where every row would grow a handle.
+                    List(selection: $selection) {
                         ForEach(items) { item in
                             ItemLink(ItemRef(docId: list.docId, itemId: item.id, title: item.text)) {
                                 ItemRowView(item: item)
                             }
+                            // While selecting, a tap anywhere on the
+                            // row is the list's: it picks the row
+                            // rather than ticking or opening it.
+                            .allowsHitTesting(!selecting)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button {
+                                    select(item.id)
+                                } label: {
+                                    Label("Select", systemImage: "checkmark.circle")
+                                }
+                                .tint(.accentColor)
+                            }
                         }
-                        .onMove(perform: isInbox ? nil : { model.reorderItem(in: list, from: $0, to: $1) })
+                        .onMove(perform: isInbox || selecting ? nil : { model.reorderItem(in: list, from: $0, to: $1) })
                     }
                     .listStyle(.plain)
+                    .environment(\.editMode, .constant(selecting ? .active : .inactive))
                     .animation(.default, value: items)
                     // A capture into this list: bring its item into
                     // view once the reread has it.
@@ -858,10 +911,15 @@ struct ListItemsView: View {
         ) {
             ListIcon(listId: list.listId, emoji: current.icon)
         }
+        .navigationBarBackButtonHidden(selecting)
         .toolbar {
-            if editable {
+            if selecting {
+                selectionToolbar
+            } else if editable {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        selectItemsButton
+                        Divider()
                         Button {
                             renameText = current.name
                             renaming = true
@@ -891,6 +949,7 @@ struct ListItemsView: View {
             } else if isInbox {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        selectItemsButton
                         Picker("Order", selection: $inboxNewestFirst) {
                             Label("Oldest First", systemImage: "arrow.down").tag(false)
                             Label("Newest First", systemImage: "arrow.up").tag(true)
@@ -963,9 +1022,91 @@ struct ListItemsView: View {
         } message: {
             Text(archiveError ?? "")
         }
+        .confirmationDialog(
+            "Move the selected items to the Bin?", isPresented: $confirmingBin, titleVisibility: .visible
+        ) {
+            Button("Move to Bin", role: .destructive) {
+                model.binItems(picked)
+                endSelecting()
+            }
+        } message: {
+            Text("They can be restored from the Bin.")
+        }
+        // Where the picked rows go: the item page's list editor, over
+        // this workspace's lists.
+        .sheet(isPresented: $pickingList) {
+            NavigationStack {
+                ItemListEditor(
+                    itemTitle: nil, lists: model.lists(inDoc: list.docId), current: list.listId,
+                    workspace: model.sharedWorkspaceName(list.docId),
+                    pick: { target in
+                        guard target.listId != list.listId else { return }
+                        model.moveItems(picked.map(\.itemId), inDoc: list.docId, toList: target.listId)
+                        endSelecting()
+                    },
+                    done: { pickingList = false })
+            }
+            .environmentObject(model)
+        }
         .refreshable { model.refreshList(list) }
         .onAppear { model.refreshList(list) }
         .onChange(of: model.changeCount) { model.refreshList(list) }
+        // Nothing stays picked once selecting is over, and a page that
+        // goes away gives Home its bottom bar back.
+        .onChange(of: selecting) { if !selecting { selection = [] } }
+        .onDisappear { selecting = false }
+    }
+
+    /// The "..." menus' way into selecting, for anyone who does not
+    /// find the swipe.
+    private var selectItemsButton: some View {
+        Button {
+            select(nil)
+        } label: {
+            Label("Select Items", systemImage: "checkmark.circle")
+        }
+        .disabled(model.listItems[list.key]?.isEmpty ?? true)
+    }
+
+    /// The bars while selecting: pick every row (or none) and Done at
+    /// the top, and at the foot what is done to the picked rows.
+    @ToolbarContentBuilder
+    private var selectionToolbar: some ToolbarContent {
+        let all = Set((model.listItems[list.key] ?? []).map(\.id))
+        let allPicked = !all.isEmpty && selection.isSuperset(of: all)
+        ToolbarItem(placement: .topBarLeading) {
+            Button(allPicked ? String(localized: "Deselect All") : String(localized: "Select All")) {
+                selection = allPicked ? [] : all
+            }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button("Done", systemImage: "checkmark", role: .confirm) { endSelecting() }
+        }
+        // One group in the middle of the bar: the three share a
+        // surface rather than standing apart.
+        ToolbarSpacer(.flexible, placement: .bottomBar)
+        ToolbarItemGroup(placement: .bottomBar) {
+            Button {
+                pickingList = true
+            } label: {
+                Label("Move", systemImage: "folder")
+            }
+            .disabled(selection.isEmpty)
+            Button {
+                model.starItems(picked)
+                endSelecting()
+            } label: {
+                Label("Star", systemImage: "star")
+            }
+            .disabled(selection.isEmpty)
+            Button(role: .destructive) {
+                confirmingBin = true
+            } label: {
+                Label("Move to Bin", systemImage: "trash")
+            }
+            .disabled(selection.isEmpty)
+        }
+        ToolbarSpacer(.flexible, placement: .bottomBar)
     }
 
     private func deleteList() {
