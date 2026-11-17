@@ -32,7 +32,8 @@ private extension NSToolbarItem.Identifier {
     /// The separator tracking the sidebar's edge (the system's own
     /// wants a sidebar item).
     static let sidebarSeparator = NSToolbarItem.Identifier("MonoplanSidebarSeparator")
-    /// The list's section, at its trailing edge: search, then new.
+    /// Over the sidebar, before New List, once there is an account;
+    /// the list's section has new alone at its trailing edge.
     static let search = NSToolbarItem.Identifier("MonoplanSearch")
     static let newItem = NSToolbarItem.Identifier("MonoplanNewItem")
     /// Before search while Done is shown: its filter's popover
@@ -79,15 +80,14 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     static let panelWidth = (min: 240.0, max: 520.0)
 
     /// The toolbar with the panel shut: the title's section after the
-    /// sidebar's separator, with search and new at its end. The
+    /// sidebar's separator, with new at its end. The
     /// panel's separator is there only with the panel (`panelItems`):
     /// with the panel shut it would draw at the window's edge.
-    /// The space between those two keeps each on its own glass:
-    /// adjacent buttons would share one.
     private static let fixedItems = listItems(lens: nil)
 
     /// The list's section of the bar. On Done its filter leads the
-    /// buttons at the end, on a glass of its own; on the Calendar
+    /// button at the end, on a glass of its own (the space between
+    /// them: adjacent buttons would share one); on the Calendar
     /// "Today" does.
     private static func listItems(lens: Lens?) -> [NSToolbarItem.Identifier] {
         let own: [NSToolbarItem.Identifier]
@@ -96,7 +96,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         case .agenda: own = [.today, .space]
         default: own = []
         }
-        return [.sidebarSeparator, .title, .flexibleSpace] + own + [.search, .space, .newItem]
+        return [.sidebarSeparator, .title, .flexibleSpace] + own + [.newItem]
     }
 
     init(model: MainWindowModel) {
@@ -176,9 +176,11 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             syncing = false
         }
         // Over the sidebar, before its separator: Sign In without an
-        // account, New List with one; the space before it pushes it to
-        // the sidebar's trailing edge.
-        let lead: [NSToolbarItem.Identifier] = [.flexibleSpace, signedIn ? .newList : .signIn]
+        // account, search then New List with one (side by side, on
+        // one glass: the sidebar is too narrow at its least for a
+        // space between); the space before pushes them to the
+        // sidebar's trailing edge.
+        let lead: [NSToolbarItem.Identifier] = [.flexibleSpace] + (signedIn ? [.search, .newList] : [.signIn])
         let leading = toolbar.items.firstIndex { $0.itemIdentifier == .sidebarSeparator } ?? 0
         if toolbar.items.prefix(leading).map(\.itemIdentifier) != lead {
             for _ in 0..<leading { toolbar.removeItem(at: 0) }
@@ -290,7 +292,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        Self.fixedItems + [.doneFilter, .today, .panelSeparator, .signIn, .newList, .itemStatus, .itemStar, .itemMore]
+        Self.fixedItems + [.doneFilter, .today, .panelSeparator, .signIn, .search, .newList, .itemStatus, .itemStar, .itemMore]
     }
 
     func toolbar(
