@@ -57,7 +57,7 @@ struct ItemPanel: View {
                                 .id(item.item.id)
                         } else {
                             Text(verbatim: item.item.text)
-                                .font(.title2.weight(.semibold))
+                                .font(.title2.weight(.medium))
                                 .foregroundStyle(.secondary)
                                 .textSelection(.enabled)
                         }
@@ -80,9 +80,12 @@ struct ItemPanel: View {
     }
 
     /// List, a rule, planned date, its time under it when timed,
-    /// deadline (only when set), a rule, then the place. The date and place rows are always there, muted when empty.
+    /// deadline (only when set), a rule, then the place. The date and
+    /// place rows are always there, muted when empty. Each row is a
+    /// box (`panelBox`): the list's is always filled, the others' only
+    /// under the pointer.
     private func fields(_ item: ItemInfo) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 4) {
             ListField(
                 item: item, workspaceName: workspaceName,
                 lists: listOptions(item), others: otherOptions(item),
@@ -93,18 +96,27 @@ struct ItemPanel: View {
             // field's included.
             .zIndex(2)
             // The list, the date rows and the place are set apart: a
-            // rule between each, with 16 pt on each side of it as
-            // between the panel's sections (the stack's 12 and 4 more).
+            // rule between each, with 16 pt between it and a row's
+            // text (the stack's 4, 4 more, and the 8 inside a box).
             PanelRule().padding(.vertical, 4)
             if let when = item.item.when {
-                // A timed date has its time on a line of its own under
-                // the day, and how long it runs goes with the time.
+                // A timed date has its times on a row of their own
+                // under the day, in two columns: when it starts, then
+                // when it ends (a muted "End" while it has no length).
                 let time = Self.timeText(when)
                 PanelField(text: Self.dayText(String(when.prefix(10))), note: time == nil ? Self.lengthText(item) : nil) {
                     PanelGlyph(image: NavArt.calendar)
                 }
                 if let time {
-                    PanelField(text: time, note: Self.lengthText(item)) { Image(systemName: "clock") }
+                    // Each box is outset by its inset, so 4 pt shows
+                    // between the two.
+                    HStack(spacing: PanelBox.inset * 2 + 4) {
+                        PanelField(text: time) { Image(systemName: "clock") }
+                        let end = Self.endTimeText(item)
+                        PanelField(text: end ?? String(localized: "End"), empty: end == nil) {
+                            Image(systemName: "arrow.right")
+                        }
+                    }
                 }
             } else {
                 PanelField(text: String(localized: "Date"), empty: true) { PanelGlyph(image: NavArt.calendar) }
@@ -125,6 +137,7 @@ struct ItemPanel: View {
             }
             if let place = item.item.place, let lat = place.lat, let lon = place.lon {
                 PlaceMapCard(label: place.label, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
+                    .padding(.top, 4)
             }
             // The address whole, under the map (under the place's row
             // when it has no map): every line of it, never cut short.
@@ -134,6 +147,7 @@ struct ItemPanel: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
+                    .padding(.top, 4)
             }
         }
     }
@@ -236,6 +250,18 @@ struct ItemPanel: View {
         when.count >= 16 ? String(when.dropFirst(11).prefix(5)) : nil
     }
 
+    /// When a timed date ends, "15:30": its start and its length, on
+    /// the clock alone (an end past midnight is the next day's time).
+    /// Nil without a time or a length.
+    static func endTimeText(_ item: ItemInfo) -> String? {
+        guard let when = item.item.when, let start = timeText(when),
+              let minutes = item.item.duration.map(Int.init), minutes > 0,
+              let hour = Int(start.prefix(2)), let minute = Int(start.suffix(2))
+        else { return nil }
+        let end = (hour * 60 + minute + minutes) % 1440
+        return String(format: "%02d:%02d", end / 60, end % 60)
+    }
+
     /// A `YYYY-MM-DD` spelled out in the local calendar; the raw text if
     /// it does not parse.
     static func dayText(_ day: String, now: Date = Date(), calendar: Calendar = .current) -> String {
@@ -320,8 +346,6 @@ struct PanelListGroup {
     let lists: [PanelList]
 }
 
-/// One field of the panel: its icon, its value, and a secondary line
-/// under it when there is one. `empty` mutes a field that is unset.
 /// One of `NavArt`'s glyphs as a panel row's icon, where a symbol
 /// would be: an image's baseline is its bottom edge, so it is lowered
 /// to sit on the text's baseline the way a symbol does.
@@ -335,6 +359,9 @@ struct PanelGlyph: View {
     }
 }
 
+/// One field of the panel, in the panel's box (`panelBox`): its icon,
+/// its value, and a muted note at the trailing edge when there is one.
+/// `empty` mutes a field that is unset.
 private struct PanelField<Icon: View>: View {
     let text: String
     var note: String? = nil
@@ -346,15 +373,49 @@ private struct PanelField<Icon: View>: View {
             icon
                 .foregroundStyle(empty ? .tertiary : .secondary)
                 .frame(width: 20)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: text)
-                    .foregroundStyle(empty ? .tertiary : .primary)
-                    .textSelection(.enabled)
-                if let note {
-                    Text(verbatim: note).font(.footnote).foregroundStyle(.secondary)
-                }
+            Text(verbatim: text)
+                .lineLimit(1)
+                .foregroundStyle(empty ? .tertiary : .primary)
+                .textSelection(.enabled)
+            if let note {
+                Spacer(minLength: 8)
+                Text(verbatim: note).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
             }
         }
+        .panelBox(filled: false)
+    }
+}
+
+/// The box every field of the panel sits in: full width, its icon and
+/// text inset, outset by that inset so they stay in line with the
+/// title over them and the notes under. Its faint fill shows always
+/// when `filled` (the list's, a search box), else only under the
+/// pointer.
+enum PanelBox {
+    static let inset: CGFloat = 8
+    static let height: CGFloat = 32
+    static let radius: CGFloat = 8
+}
+
+private struct PanelBoxModifier: ViewModifier {
+    let filled: Bool
+    @State private var hovered = false
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: PanelBox.radius, style: .continuous)
+        content
+            .padding(.horizontal, PanelBox.inset)
+            .frame(maxWidth: .infinity, minHeight: PanelBox.height, alignment: .leading)
+            .background(.quaternary.opacity(filled || hovered ? 0.5 : 0), in: shape)
+            .contentShape(shape)
+            .onHover { hovered = $0 }
+            .padding(.horizontal, -PanelBox.inset)
+    }
+}
+
+extension View {
+    func panelBox(filled: Bool = true) -> some View {
+        modifier(PanelBoxModifier(filled: filled))
     }
 }
 
@@ -431,7 +492,7 @@ private struct PanelTitle: View {
                 .opacity(focused ? 0 : 1)
             field
         }
-        .font(.title2.weight(.semibold))
+        .font(.title2.weight(.medium))
     }
 
     private var ink: Color { closed ? .secondary : .primary }

@@ -401,6 +401,16 @@
         }
       }
     },
+    "End": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fin"
+          }
+        }
+      }
+    },
     "Enter Full Screen": {
       "localizations": {
         "es": {

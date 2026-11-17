@@ -1,7 +1,7 @@
 // The item panel's list row, and its picker. At rest it is the item's
 // list drawn as a field, as on the iOS page (`ItemView.listField`):
-// full width, a faint fill, outset by its own padding so its icon and
-// text stay in line with the plain rows under it. A click turns the
+// full width, a faint fill, the panel's box (`panelBox`); the date
+// and place rows under it have the fill only under the pointer. A click turns the
 // field into a search box and drops the lists under it, floating over
 // the panel's rows as the place field's list does (`PlaceField.swift`):
 // one run of rows, the item's workspace's lists with the current one
@@ -42,8 +42,6 @@ struct ListField: View {
     /// The search box has had the caret since it opened: only then is
     /// the caret leaving it a reason to shut.
     @State private var armed = false
-
-    static let inset: CGFloat = 8
 
     /// One row: a list, the workspace it is in when that is another
     /// than the item's, and the workspace's name when it is shared.
@@ -98,7 +96,6 @@ struct ListField: View {
                 shown
             }
         }
-        .padding(.horizontal, -Self.inset)
         .onChange(of: query) { highlight = nil }
         .onChange(of: focused) {
             if focused {
@@ -136,7 +133,7 @@ struct ListField: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            .boxed()
+            .panelBox()
         }
         .buttonStyle(.plain)
         .disabled(item.item.binnedAt != nil)
@@ -157,7 +154,7 @@ struct ListField: View {
                 .onKeyPress(.downArrow) { step(1) }
                 .onKeyPress(.upArrow) { step(-1) }
         }
-        .boxed()
+        .panelBox()
         // The caret, a turn after the box appears: asked for while the
         // field is still being installed, the window hands the caret to
         // its first field instead (the item's title).
@@ -317,15 +314,5 @@ private struct WorkspaceTag: View {
         }
         .foregroundStyle(highlighted ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary))
         .layoutPriority(-1)
-    }
-}
-
-private extension View {
-    /// The list field's box, at rest and as a search box.
-    func boxed() -> some View {
-        padding(.horizontal, ListField.inset)
-            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }

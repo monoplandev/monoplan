@@ -1,6 +1,7 @@
 // The item panel's place row (`place`, spec/place-plan.md), and its
-// lookup: the list row's way of working (`ListField.swift`) without
-// its box, so it reads as one of the panel's plain rows. At rest it is
+// lookup: the list row's way of working (`ListField.swift`), in the
+// same box (`panelBox`), filled only under the pointer and as a
+// search box. At rest it is
 // the place's label on one line (cut with an ellipsis when it
 // is longer; the panel puts the address under the map), or a muted
 // "Place" when there is none. A click turns the row into a search
@@ -97,9 +98,8 @@ struct PlaceField: View {
                     .truncationMode(.tail)
                     .foregroundStyle(place == nil ? .tertiary : .primary)
             }
-            // The whole row takes the click, not just its text.
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            // The whole box takes the click, not just its text.
+            .panelBox(filled: false)
         }
         .buttonStyle(.plain)
         .help(place?.label ?? "")
@@ -120,6 +120,7 @@ struct PlaceField: View {
                 .onKeyPress(.downArrow) { step(1) }
                 .onKeyPress(.upArrow) { step(-1) }
         }
+        .panelBox()
         // The caret, a turn after the box appears: asked for while the
         // field is still being installed, the window hands the caret to
         // its first field instead (the item's title).
