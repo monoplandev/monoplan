@@ -20,10 +20,11 @@
 // done or cancelled, muted (tick or cross), so the day still records what
 // happened and what was called off.
 //
-// Events (`spec/events-plan.md`) live here and nowhere else. An event row
-// looks like a task row: the checkbox is there for anyone who wants the
-// record, but nothing asks for it, the event just goes by. No row carries
-// its list label; the context menu and task surface name it.
+// Events (`spec/events-plan.md`): an open event's row has a dot where a
+// task has its checkbox, since nothing asks for the tick and the event
+// just goes by. One marked done or cancelled (from the task surface or
+// the row's menu) shows the box, ticked or crossed. No row carries its
+// list label; the context menu and task surface name it.
 //
 // Selection and keys: the agenda is a listbox in the list view's sense
 // (click selects, the side pane follows, Enter / double-click opens, the
@@ -558,16 +559,32 @@ export function Upcoming(props: {
                         moves it to the row's right edge, kept even
                         when empty so the times line up down the day. */}
                     <span class="upcoming-row-check">
-                      <input
-                        type="checkbox"
-                        class="task-check"
-                        checked={isClosed(r.item)}
-                        data-cancelled={isCancelled(r.item) ? "" : undefined}
-                        aria-label={m().workspace.markDone}
-                        onChange={(e) =>
-                          props.app.setDone(r.item.id, e.currentTarget.checked)
+                      {/* An open event on its day has no box: nothing
+                          asks for the tick, so a dot holds the slot.
+                          Once it is done or cancelled the box is back,
+                          ticked or crossed, and unticks as usual. A
+                          deadline's own row is owed, so it keeps it. */}
+                      <Show
+                        when={
+                          !isEvent(r.item) ||
+                          r.placedBy !== "when" ||
+                          isClosed(r.item)
                         }
-                      />
+                        fallback={
+                          <span class="upcoming-row-event-dot" aria-hidden="true" />
+                        }
+                      >
+                        <input
+                          type="checkbox"
+                          class="task-check"
+                          checked={isClosed(r.item)}
+                          data-cancelled={isCancelled(r.item) ? "" : undefined}
+                          aria-label={m().workspace.markDone}
+                          onChange={(e) =>
+                            props.app.setDone(r.item.id, e.currentTarget.checked)
+                          }
+                        />
+                      </Show>
                     </span>
                     <span class="upcoming-row-time">
                       <Show when={r.placedBy === "deadline"}>

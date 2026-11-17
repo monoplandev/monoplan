@@ -127,6 +127,12 @@ extension AgendaEntry {
     /// item is planned for on another.
     var isTimed: Bool { placedBy == .when && (when?.count ?? 0) >= 16 }
 
+    /// Whether the row leads with a checkbox. An open event on its day
+    /// does not (spec/events-plan.md): nothing asks for the tick. One
+    /// marked done or cancelled shows it, ticked or crossed, and a
+    /// deadline's own row is owed, so it keeps it.
+    var showsCheck: Bool { !event || placedBy != .when || state.isClosed }
+
     /// The quick moves the row's menu offers (`ItemRowMenu`): an
     /// overdue row goes to today or tomorrow, a row on today to
     /// tomorrow, and any other row nowhere. Only an open row placed by

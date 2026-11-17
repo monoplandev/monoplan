@@ -90,11 +90,16 @@ struct CheckboxRow<Content: View>: View {
     /// The date moves the row's menu offers (`AgendaEntry.quickMoves`);
     /// none on a row that is not the calendar's.
     var moves: [WhenMove] = []
+    /// False on the calendar's row for an open event
+    /// (`AgendaEntry.showsCheck`): a dot holds the box's place.
+    var check = true
     @ViewBuilder let content: Content
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            if let ref {
+            if !check {
+                EventDot()
+            } else if let ref {
                 ItemCheckButton(ref: ref, state: state)
             } else {
                 ItemCheckbox(state: state)
@@ -111,6 +116,25 @@ struct CheckboxRow<Content: View>: View {
         .modifier(ItemRowMenu(ref: ref, state: state, moves: moves))
         // No dividers between item rows, on any page that lists them.
         .itemListRow()
+    }
+}
+
+/// What an open event's calendar row leads with instead of a checkbox
+/// (spec/events-plan.md): nothing asks for the tick, so a dot holds the
+/// box's place and keeps the texts in one column. Display only; the
+/// row's menu and the item's page still mark it done.
+struct EventDot: View {
+    /// `ItemCheckbox`'s side and nudge, so the dot sits where the box's
+    /// middle would.
+    @ScaledMetric(relativeTo: .body) private var side: CGFloat = 20
+
+    var body: some View {
+        Circle()
+            .fill(.tertiary)
+            .frame(width: side * 0.3, height: side * 0.3)
+            .frame(width: side, height: side)
+            .alignmentGuide(.firstTextBaseline) { $0[.bottom] - side * 0.2 - 1.5 }
+            .accessibilityHidden(true)
     }
 }
 

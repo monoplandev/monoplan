@@ -50,6 +50,22 @@ struct ItemCheckbox: View {
     }
 }
 
+/// What an open event's Calendar row leads with instead of a checkbox:
+/// a dot in the box's place, so the texts stay in one column. Display
+/// only; the item's panel still marks it done.
+struct EventDot: View {
+    @ScaledMetric(relativeTo: .body) private var side: CGFloat = CheckMetrics.side
+
+    var body: some View {
+        Circle()
+            .fill(.tertiary)
+            .frame(width: side * 0.33, height: side * 0.33)
+            .frame(width: side, height: side)
+            .alignmentGuide(.firstTextBaseline) { $0[.bottom] - side * 0.2 - CheckMetrics.nudge }
+            .accessibilityHidden(true)
+    }
+}
+
 /// The checkbox as a control: a click ticks an open item and reopens a
 /// closed one (`toggle` gets the new "done").
 struct ItemCheckButton: View {

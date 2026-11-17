@@ -1662,7 +1662,15 @@ struct MainWindowView: View {
         return HStack(alignment: .rowTitle, spacing: 8) {
             // The tick sits on the text's line, not the row's middle.
             HStack(alignment: .rowTitle, spacing: 8) {
-                ItemCheckButton(state: row.state) { model.setDone(workspace: row.docId, id: row.id, done: $0) }
+                // An open event on its day has a dot for a checkbox
+                // (spec/events-plan.md): nothing asks for the tick. Done
+                // or cancelled, the box is back, ticked or crossed. A
+                // deadline's own row is owed, so it keeps it.
+                if !row.event || row.placedBy != .when || row.state.isClosed {
+                    ItemCheckButton(state: row.state) { model.setDone(workspace: row.docId, id: row.id, done: $0) }
+                } else {
+                    EventDot()
+                }
                 VStack(alignment: .leading, spacing: 4) {
                     // The star follows the text, not the row's far edge.
                     HStack(alignment: .center, spacing: 6) {

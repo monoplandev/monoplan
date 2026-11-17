@@ -519,6 +519,25 @@ body {
   align-items: center;
 }
 
+/* An open event has no checkbox: a dot holds the box's 15px slot so the
+   titles stay in one column. */
+.upcoming-row-event-dot {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.upcoming-row-event-dot::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--border-input);
+}
+
 /* Time lane: a fixed column at the row's right edge (`order` moves it
    past the body and meta), wide enough for the longest 12-hour form
    ("12:30 PM") and right-aligned, so the times line up down the day
@@ -1313,6 +1332,11 @@ input.task-check:hover {
 
   input.task-check:hover {
     border-color: transparent;
+  }
+
+  /* The slot follows the box's 18px here. */
+  .upcoming-row-event-dot {
+    width: 18px;
   }
 
   /* Optical nudge against the row's first text line; the dialog header

@@ -108,7 +108,10 @@ of a reserved `events` list). The rejection of a kind stands: the flag
 says what the date means and changes one thing, what a past `when` means
 (it went by). Where a dated item shows is Inbox's rule, not the flag's:
 one with no list is here and not in Inbox (`inbox-plan.md`).
-Its row keeps a checkbox nothing asks it to tick, and the close-action
+Its calendar row has no checkbox while it is open (2026-11-17, web, iOS,
+macOS): a dot holds the box's place, and the box shows, ticked or
+crossed, once the event is done or cancelled from the item surface or
+the row's menu (`events-plan.md`). The close-action
 objection lapsed on 2026-09-30 when a past `when` stopped needing a
 decision.
 
@@ -386,8 +389,9 @@ for the month grid). `groupByDeadline` becomes
   a new event: no list, `when` prefilled to today and the Event box under
   it ticked. Unticking the box makes it a task with that date, still
   shown here and not in Inbox (`inbox-plan.md` "Membership").
-- **Events** (`events-plan.md`): an event's row is a task's row.
-  Everything above applies to events unchanged. An event always has a
+- **Events** (`events-plan.md`): an event's row is a task's row, except
+  that while open it leads with a dot, not a checkbox (2026-11-17).
+  Everything else above applies to events unchanged. An event always has a
   `when`, so there is no Unscheduled section (there was one while events
   were a list, removed 2026-11-16).
 

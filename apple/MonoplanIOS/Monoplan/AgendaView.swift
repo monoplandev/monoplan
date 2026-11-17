@@ -86,12 +86,13 @@ struct AgendaView: View {
 /// the workspace when the row is not Personal's, and on the right the time when timed with a note under
 /// it for the tone (overdue in red, due today in orange) or the
 /// duration. The checkbox ticks; the rest of the row opens the sheet.
+/// An open event has a dot for a checkbox (`AgendaEntry.showsCheck`).
 struct AgendaRowView: View {
     let row: AgendaEntry
 
     var body: some View {
         ItemLink(ItemRef(docId: row.docId, itemId: row.id, title: row.text)) {
-            CheckboxRow(state: row.state, trailingStar: false, moves: row.quickMoves) {
+            CheckboxRow(state: row.state, trailingStar: false, moves: row.quickMoves, check: row.showsCheck) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
                         // The star sits by the text, not past the
