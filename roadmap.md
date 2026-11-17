@@ -42,11 +42,6 @@ per call (negligible vs crypto + IDB). Before committing, verify wasm-bindgen's 
 signature actually yields an owned copy, not another view. Cross-ref: `spec/local-storage.md`
 §"Web boot + the bytes-copy gotcha".
 
-## Native clients
-
-- UniFFI bridge for iOS / Android over the existing `core` crate.
-- Password-derivation flow exposed over the same bindings.
-
 ## Testing
 
 - E2E gaps vs. `spec/testing.md`:
