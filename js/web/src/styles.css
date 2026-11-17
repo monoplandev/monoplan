@@ -3661,6 +3661,17 @@ input.task-check:hover {
   outline-offset: 2px;
 }
 
+/* The address line under the label: smaller and muted, starting at the
+   pin's left edge (6px) rather than indented past it to the label,
+   wrapping when long. */
+.task-dialog-place-address {
+  padding: 7px 6px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
 /* No face of its own: the rest of the row, reading as the text field it
    turns into on click. */
 .task-dialog-place-edit {

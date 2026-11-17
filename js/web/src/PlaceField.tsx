@@ -518,6 +518,11 @@ export function PlaceField(props: {
           </Popover.Portal>
         </Popover>
       </div>
+      {/* The formatted address of a looked-up place, under the label
+          while the link face shows (an edit hides it with the label). */}
+      <Show when={linked()?.address}>
+        {(a) => <div class="task-dialog-place-address">{a()}</div>}
+      </Show>
     </div>
   );
 }
