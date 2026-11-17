@@ -111,6 +111,17 @@ export const isSlippedTask = (it: ItemView, today: string): boolean =>
   !!it.when &&
   whenSpan(it.when, it.duration).end < today;
 
+/** Where a row sits among its day's rows (`spec/calendar-plan.md`
+ *  "Within a day"): all-day events lead (0), they are the day's
+ *  backdrop; then what has a clock time, tasks and events alike (1);
+ *  then what is for the day at no particular time, an untimed task or a
+ *  deadline's row (2). Mirrors `day_band` in the CLI's `agenda.rs`. */
+export const dayBand = (row: DayRow): 0 | 1 | 2 => {
+  if (row.placedBy !== "when") return 2;
+  if ((row.item.when?.length ?? 0) > 10) return 1;
+  return isEvent(row.item) ? 0 : 2;
+};
+
 /** Bucket `items` by placement day. `today` is the local `YYYY-MM-DD`
  *  stamp everything is judged against. An Overdue group leads when any
  *  deadline is past or any Open task's `when` is over, oldest first by
@@ -118,9 +129,10 @@ export const isSlippedTask = (it: ItemView, today: string): boolean =>
  *  present after it, empty if nothing is due, so the surface
  *  anchors on the current day.
  *
- *  Within a day, rows order by the raw string of the placing field
- *  (all-day ahead of timed), then `createdAt`; ticking a row does not
- *  move it.
+ *  Within a day, rows order in three bands (`dayBand`): all-day events,
+ *  timed rows by the clock, then untimed tasks and deadline rows. Inside
+ *  a band, the raw string of the placing field, then `createdAt`;
+ *  ticking a row does not move it. Overdue has no bands.
  *
  *  A row placed by a `when` that covers several days is repeated on each
  *  day of the span from today onward (`span` on every copy), and an item
@@ -240,7 +252,12 @@ export function groupByDay(
   ) =>
     a.raw.localeCompare(b.raw) || a.row.item.createdAt - b.row.item.createdAt;
   overdueRows.sort(byRawThenCreated);
-  placed.sort((a, b) => a.day.localeCompare(b.day) || byRawThenCreated(a, b));
+  placed.sort(
+    (a, b) =>
+      a.day.localeCompare(b.day) ||
+      dayBand(a.row) - dayBand(b.row) ||
+      byRawThenCreated(a, b),
+  );
 
   // The days gone by, then Overdue, then Today and the days ahead.
   const past: DayGroup[] = [];

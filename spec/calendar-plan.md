@@ -134,10 +134,14 @@ Fixed     = DateTime "[" IanaZone "]"           ; RFC 9557, e.g. 2026-07-13T14:0
   suffix, is rejected with `Invalid`. Input is trimmed before validation, as
   `parse_deadline` does; the stored value is the normalised form.
 - **All-day** ≡ 10-character value. There is no default time. On the day,
-  an all-day `when` is owed all day and sorts ahead of every timed row.
+  an all-day `when` is owed all day. Where it sorts depends on what it
+  is: an all-day event leads the day, an untimed task follows the timed
+  rows (see "Within a day" under "Agenda").
 - **End time** is not stored; see "Field: `duration`" below.
-- **Sort key** is the raw string. `2026-07-13` < `2026-07-13T09:00` <
-  `2026-07-13T14:00`, so untimed rows lead their day with no special casing.
+- **Sort key** inside a band is the raw string: `2026-07-13T09:00` <
+  `2026-07-13T14:00`. Until 2026-11-17 it was the whole within-day order
+  (`2026-07-13` < `2026-07-13T09:00`, so untimed rows led their day); the
+  bands of "Within a day" now come first.
 - **Day key** is the first ten characters, shared with `deadline`. Every
   bucketing and comparison between the two fields runs on the day key.
 - **Floating**: a `when` renders as the same wall-clock value on every device
@@ -331,8 +335,27 @@ for the month grid). `groupByDeadline` becomes
   or today-warning (deadline day = today); a `when`'s row is overdue (a
   task's `when` over) or today-warning (it carries a deadline that is
   today); otherwise neutral.
-- **Within a day**, order by the raw string of the field that placed the row,
-  then `created_at`.
+- **Within a day**, three bands (changed 2026-11-17; `day_band` in
+  `cli/src/commands/agenda.rs`, `dayBand` in `dayGroups.ts`):
+  1. **All-day events**: a row placed by a 10-character `when` on an
+     item with the event flag. A birthday or a conference is the day's
+     backdrop, so it leads, as on every calendar.
+  2. **Timed rows**: placed by a 16-character `when`, tasks and events
+     alike, in clock order. The day's fixed points.
+  3. **Untimed tasks**: a row placed by a 10-character `when` on a
+     task, and every row placed by a deadline. For the day at no
+     particular time, so they come after what has one.
+
+  Inside a band, the raw string of the field that placed the row, then
+  `created_at`. A timed span's later days stay in the timed band and
+  lead it (their raw string is an earlier day's). The band is the row's
+  own (shape of `when`, event flag, placing field), never the lifecycle,
+  so ticking still does not move a row. Why: a surface that cuts from
+  the bottom (the widgets, the tray) keeps the timed rows, and as the
+  day's timed events go by the untimed tasks are what is left. Overdue
+  (and the CLI's overdue fold in Today) has no bands: it is by date.
+  Every surface shares the one order: the web sorts in `groupByDay`, the
+  CLI, tray, widgets and the Apple apps read `build_agenda_from`.
 - **Badges**: the placing date is carried by the day header and not repeated,
   except in Overdue, where the deadline shows its actual date (existing
   `pastAsDate` rule). A task there by its `when` shows the planned day

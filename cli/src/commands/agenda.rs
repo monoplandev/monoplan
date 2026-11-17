@@ -112,8 +112,11 @@ pub struct AgendaDay {
 ///   `when` over on the `when`'s), warning (deadline = today), else
 ///   neutral.
 /// - Within a day: overdue rows (oldest first, by the date that made
-///   them overdue), then the day's own rows by the raw string of the placing field (all-day ahead of
-///   timed), then `created_at`. Ticking a row does not move it.
+///   them overdue), then the day's own rows in three bands
+///   ([`day_band`]): all-day events, timed rows by the clock, then
+///   untimed tasks and deadline rows. Inside a band, the raw string of
+///   the placing field, then `created_at`. Ticking a row does not move
+///   it.
 /// - Done items place by `when` only, on that day (today or later),
 ///   neutral. A done item with no `when`, or a past `when`, is dropped:
 ///   nothing is owed and past days are not shown. Cancelled and binned
@@ -141,8 +144,8 @@ pub fn build_agenda_from(
     today: &str,
     horizon: &str,
 ) -> Vec<AgendaDay> {
-    // (day, fold group, placing raw, created_at, row)
-    let mut placed: Vec<(String, u8, String, i64, AgendaRow)> = Vec::new();
+    // (day, fold group, day band, placing raw, created_at, row)
+    let mut placed: Vec<(String, u8, u8, String, i64, AgendaRow)> = Vec::new();
     for (doc, items) in sources {
         for item in *items {
             if item.is_binned() || item.is_cancelled() {
@@ -156,6 +159,7 @@ pub fn build_agenda_from(
                     placed.push((
                         day.to_string(),
                         1,
+                        day_band(item, PlacedBy::When),
                         w.to_string(),
                         item.created_at,
                         AgendaRow {
@@ -237,10 +241,16 @@ pub fn build_agenda_from(
                 }
                 // Today's fold: overdue rows lead (by their own date),
                 // then today's own rows, done or not.
-                let group = if tone == Tone::Overdue { 0 } else { 1 };
+                // The fold is by date alone: no bands in it.
+                let (group, band) = if tone == Tone::Overdue {
+                    (0, 0)
+                } else {
+                    (1, day_band(item, placed_by))
+                };
                 placed.push((
                     day.to_string(),
                     group,
+                    band,
                     raw.to_string(),
                     item.created_at,
                     AgendaRow {
@@ -258,10 +268,11 @@ pub fn build_agenda_from(
             .then(a.1.cmp(&b.1))
             .then(a.2.cmp(&b.2))
             .then(a.3.cmp(&b.3))
+            .then(a.4.cmp(&b.4))
     });
 
     let mut out: Vec<AgendaDay> = Vec::new();
-    for (day, _, _, _, row) in placed {
+    for (day, _, _, _, _, row) in placed {
         match out.last_mut() {
             Some(last) if last.day == day => last.rows.push(row),
             _ => out.push(AgendaDay {
@@ -282,6 +293,19 @@ pub fn build_agenda_from(
         );
     }
     out
+}
+
+/// Where a row sits among its day's own rows (`spec/calendar-plan.md`
+/// "Within a day"): all-day events lead (0), they are the day's
+/// backdrop; then what has a clock time, tasks and events alike (1);
+/// then what is for the day at no particular time, an untimed task or
+/// a deadline's row (2). Mirrors `dayBand` in the web's `dayGroups.ts`.
+fn day_band(item: &ItemView, placed_by: PlacedBy) -> u8 {
+    match (placed_by, item.when.as_deref()) {
+        (PlacedBy::When, Some(w)) if w.len() > 10 => 1,
+        (PlacedBy::When, _) if item.is_event() => 0,
+        _ => 2,
+    }
 }
 
 /// The last day a `when` covers, as `YYYY-MM-DD`: its start day, pushed
@@ -533,17 +557,36 @@ mod tests {
     }
 
     #[test]
-    fn within_day_all_day_leads_timed_then_created_at() {
+    fn within_day_all_day_events_then_timed_then_untimed() {
+        let mut birthday = item("birthday", Some("2026-09-12"), None, 8);
+        birthday.event = true;
+        let mut gig09 = item("gig09", Some("2026-09-12T09:00"), None, 7);
+        gig09.event = true;
+        let mut done_task = item("done-task", Some("2026-09-12"), None, 10);
+        done_task.state = WorkflowState::Done;
         let items = [
             item("t14", Some("2026-09-12T14:00"), None, 1),
-            item("allday-late", Some("2026-09-12"), None, 9),
-            item("allday-early", Some("2026-09-12"), None, 2),
-            item("t09", Some("2026-09-12T09:00"), None, 3),
+            item("task-late", Some("2026-09-12"), None, 9),
+            item("task-early", Some("2026-09-12"), None, 2),
+            item("due", None, Some("2026-09-12"), 3),
+            birthday,
+            gig09,
+            done_task,
         ];
         let days = build_agenda(&items, TODAY, HORIZON);
+        // Inside the last band: raw string (one day here), then
+        // `created_at`.
         assert_eq!(
             ids(&days[1]),
-            vec!["allday-early", "allday-late", "t09", "t14"]
+            vec![
+                "birthday",
+                "gig09",
+                "t14",
+                "task-early",
+                "due",
+                "task-late",
+                "done-task"
+            ]
         );
     }
 
@@ -565,8 +608,8 @@ mod tests {
                 "past-old",
                 "past-new",
                 "over-new",
-                "own-allday",
-                "own-timed"
+                "own-timed",
+                "own-allday"
             ]
         );
     }
@@ -666,7 +709,7 @@ mod tests {
         assert_eq!(
             by_day,
             vec![
-                (TODAY, vec!["done-today", "done-early", "open-today"]),
+                (TODAY, vec!["done-early", "open-today", "done-today"]),
                 ("2026-09-10", vec!["done-both", "future"]),
             ]
         );
@@ -737,7 +780,7 @@ mod tests {
         assert_eq!(
             by_day,
             vec![
-                ("2026-09-01", vec!["done", "gig"]),
+                ("2026-09-01", vec!["gig", "done"]),
                 ("2026-09-03", vec!["tickets"]),
                 (TODAY, vec!["slipped"]),
                 ("2026-09-10", vec!["tickets"]),

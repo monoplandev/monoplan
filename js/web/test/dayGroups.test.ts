@@ -90,19 +90,31 @@ describe("groupByDay", () => {
     ]);
   });
 
-  test("within a day, all-day leads timed, then createdAt", () => {
+  test("within a day: all-day events, then timed, then untimed tasks and deadlines", () => {
     const groups = groupByDay(
       [
+        item("task-a", { when: "2026-09-12" }),
         item("t14", { when: "2026-09-12T14:00" }),
-        item("allday-a", { when: "2026-09-12" }),
-        item("t09", { when: "2026-09-12T09:00" }),
-        item("allday-b", { when: "2026-09-12" }),
+        item("due", { deadline: "2026-09-12" }),
+        item("birthday", { when: "2026-09-12" }, { event: true }),
+        item("gig09", { when: "2026-09-12T09:00" }, { event: true }),
+        item("task-b", { when: "2026-09-12" }),
+        item("done-task", { when: "2026-09-12" }, { state: "done" }),
       ],
       TODAY,
       LABELS,
       "en",
     );
-    expect(ids(groups[1]!)).toEqual(["allday-a", "allday-b", "t09", "t14"]);
+    // Inside the last band: raw string (all the same day), then createdAt.
+    expect(ids(groups[1]!)).toEqual([
+      "birthday",
+      "gig09",
+      "t14",
+      "task-a",
+      "due",
+      "task-b",
+      "done-task",
+    ]);
   });
 
   test("Overdue orders deadlines and slipped whens together, oldest first, then createdAt", () => {
@@ -168,7 +180,7 @@ describe("groupByDay", () => {
     }
   });
 
-  test("Today holds only its own rows, all-day ahead of timed", () => {
+  test("Today holds only its own rows, timed ahead of untimed tasks", () => {
     const groups = groupByDay(
       [
         item("own-timed", { when: "2026-09-09T10:00" }),
@@ -183,7 +195,7 @@ describe("groupByDay", () => {
       "en",
     );
     expect(ids(groups[0]!)).toEqual(["over-old", "past-old", "past-new", "over-new"]);
-    expect(ids(groups[1]!)).toEqual(["own-allday", "own-timed"]);
+    expect(ids(groups[1]!)).toEqual(["own-timed", "own-allday"]);
   });
 
   test("closed rows keep their when day and slot; binned never show", () => {
@@ -223,7 +235,7 @@ describe("groupByDay", () => {
       "en",
     );
     expect(groups.map((g) => [g.key, ids(g)])).toEqual([
-      [TODAY, ["done-today", "open-today", "done-early"]],
+      [TODAY, ["done-early", "done-today", "open-today"]],
       ["2026-09-10", ["future", "done-both", "cancelled"]],
     ]);
     expect(groups[1]!.label).toBe("Tomorrow");
@@ -373,8 +385,8 @@ describe("groupByDay: multi-day spans", () => {
       "en",
     );
     expect(groups.map((g) => [g.key, ids(g)])).toEqual([
-      [TODAY, ["done-conf", "late"]],
-      ["2026-09-10", ["done-conf", "late"]],
+      [TODAY, ["late", "done-conf"]],
+      ["2026-09-10", ["late", "done-conf"]],
     ]);
   });
 
@@ -416,7 +428,7 @@ describe("groupByDay: multi-day spans", () => {
     // One row per item per day, all of them the `when`'s.
     expect(groups.map((g) => [g.key, ids(g)])).toEqual([
       [TODAY, ["today"]],
-      ["2026-09-12", ["done", "same-day"]],
+      ["2026-09-12", ["same-day", "done"]],
       ["2026-09-14", ["in-span"]],
       ["2026-09-15", ["in-span"]],
       ["2026-09-16", ["in-span"]],
@@ -536,7 +548,7 @@ describe("groupByDay with a floor (the days gone by)", () => {
     );
     expect(shape(groups)).toEqual([
       ["2026-08-20", "past", ["older"]],
-      ["2026-09-02", "past", ["done", "event"]],
+      ["2026-09-02", "past", ["event", "done"]],
       ["overdue", "overdue", ["slipped", "late"]],
       [TODAY, "today", []],
       ["2026-09-10", "future", ["ahead"]],

@@ -506,13 +506,13 @@ async fn workspace_flag_selects_a_second_doc() {
     let days: serde_json::Value = serde_json::from_str(&json).unwrap();
     let rows = &days[1]["rows"];
     assert_eq!(rows.as_array().map(Vec::len), Some(2), "{json}");
-    // All-day Home row ahead of the timed Work one.
-    assert_eq!(rows[0]["id"], home_item, "{json}");
-    assert_eq!(rows[0]["doc_id"], signup.primary_doc_id, "{json}");
-    assert!(rows[0].get("doc_name").is_none(), "{json}");
-    assert_eq!(rows[1]["id"], work_item, "{json}");
-    assert_eq!(rows[1]["doc_id"], work_id, "{json}");
-    assert_eq!(rows[1]["doc_name"], "Work", "{json}");
+    // The timed Work row ahead of the untimed Home task.
+    assert_eq!(rows[0]["id"], work_item, "{json}");
+    assert_eq!(rows[0]["doc_id"], work_id, "{json}");
+    assert_eq!(rows[0]["doc_name"], "Work", "{json}");
+    assert_eq!(rows[1]["id"], home_item, "{json}");
+    assert_eq!(rows[1]["doc_id"], signup.primary_doc_id, "{json}");
+    assert!(rows[1].get("doc_name").is_none(), "{json}");
     let text = ok(monoplan(
         dir,
         &["agenda", "--all", "--today", "2030-01-01", "--days", "3"],

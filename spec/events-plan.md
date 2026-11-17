@@ -4,7 +4,10 @@
 the same day.** An event is a dated item with the `event` flag set. The
 flag says what the date means: the item happens then, instead of being
 done by then. So when the day passes an event goes by, where a task goes
-overdue. That is all the flag changes.
+overdue. That is all the flag changes, with one consequence for order
+(2026-11-17): within a day an all-day event leads and an untimed task
+follows the timed rows (`calendar-plan.md` "Within a day"), since a day
+something happens on frames the day and a task for the day fits around it.
 
 Where a dated item shows is a separate rule and does not look at the
 flag: Inbox holds only what has no list and no date (`inbox-plan.md`
