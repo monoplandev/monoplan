@@ -31,6 +31,7 @@ import { PlaceField } from "./PlaceField.tsx";
 import type { PlaceSuggestion } from "./placeSuggest.ts";
 import { WhenField } from "./WhenField.tsx";
 import { ListPicker, type ListOption } from "./ListPicker.tsx";
+import { AssigneeField, type Assignment } from "./AssigneeField.tsx";
 import checkSvg from "./icons/check.svg?raw";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import starFilledSvg from "./icons/star-filled.svg?raw";
@@ -148,6 +149,12 @@ export function TaskDialog(props: {
    *  list, or null to show nothing (Home, unstamped items). Resolved by
    *  the workspace (`spec/sharing-plan.md` §Attribution). */
   creatorOf?: (item: ItemView) => { accountId: string; email: string | null } | null;
+  /** Who the item is assigned to and who it could be, or null to offer
+   *  no assignment (Home, a workspace of one). The band shows once the
+   *  item has an assignee; until then "Assign" in the "…" menu opens it.
+   *  Existing items only: a capture has no "…" menu. Resolved by the
+   *  workspace (`spec/sharing-plan.md` §Assignment). */
+  assignmentOf?: (item: ItemView) => Assignment | null;
   /** The open item's id, or null when closed. */
   itemId: () => string | null;
   setItemId: (id: string | null) => void;
@@ -794,6 +801,7 @@ export function TaskDialog(props: {
     untrack(settle);
     unsubscribeNotes();
     loadedId = key;
+    setAssignOpen(false);
     // Closed: the editors unmount; forgetting the target means reopening
     // the same item re-pushes its content into fresh editors. The date /
     // deadline popovers' open state is the caller's and outlives the
@@ -1262,6 +1270,19 @@ export function TaskDialog(props: {
   // item onto it). Until set it is a menu entry only: the row's context
   // menu and this surface's "…" menu.
   const deadlineShown = () => vDeadline() !== null || props.deadlineOpen();
+  // The assignee band follows the same rule (`spec/sharing-plan.md`
+  // §Assignment): shown while the item has an assignee or the "…"
+  // menu's "Assign" is being answered (its member menu is open). Its
+  // open state is the surface's own, since nothing outside opens it.
+  const [assignOpen, setAssignOpen] = createSignal(false);
+  const assignment = () => {
+    const it = item();
+    return it ? (props.assignmentOf?.(it) ?? null) : null;
+  };
+  const assigneeShown = () => {
+    const a = assignment();
+    return a !== null && (a.assignee !== null || assignOpen());
+  };
   // A band folded back without a value leaves focus on a detached input;
   // put it on the "…" menu trigger instead. Only when the fold actually
   // took the focus: the band also hides when the pane moves to an item
@@ -1273,8 +1294,8 @@ export function TaskDialog(props: {
   // dismiss handling takes the new popover down with it.
   let menuPick: (() => void) | null = null;
   createEffect(
-    on(deadlineShown, (now, before) => {
-      if (!before || now) return;
+    on([deadlineShown, assigneeShown], (now, before) => {
+      if (!before || !before.some((was, i) => was && !now[i])) return;
       queueMicrotask(() => {
         const active = document.activeElement;
         if (active && active !== document.body && active.isConnected) return;
@@ -1485,6 +1506,16 @@ export function TaskDialog(props: {
                         {m().deadline.setDate}
                       </DropdownMenu.Item>
                     </Show>
+                    <Show when={!isBinned(it()) && assignment() !== null && !assigneeShown()}>
+                      <DropdownMenu.Item
+                        class="dropdown-menu-item"
+                        onSelect={() => {
+                          menuPick = () => setAssignOpen(true);
+                        }}
+                      >
+                        {m().workspace.assign}
+                      </DropdownMenu.Item>
+                    </Show>
                     <Show when={!isBinned(it())}>
                       <DropdownMenu.Item
                         class="dropdown-menu-item"
@@ -1629,6 +1660,25 @@ export function TaskDialog(props: {
                 setOpen={props.setDeadlineOpen}
               />
             </section>
+          </Show>
+
+          {/* Assignee section under the deadline: who the item is
+              assigned to, on a shared workspace. Reached from the "…"
+              menu until it holds someone. */}
+          <Show when={assigneeShown() && assignment()}>
+            {(a) => (
+              <section class="task-dialog-section task-dialog-assignee-section">
+                <AssigneeField
+                  assignment={a}
+                  onChange={(who) => {
+                    const it = item();
+                    if (it) props.app.setItemAssignee(it.id, who);
+                  }}
+                  open={assignOpen}
+                  setOpen={setAssignOpen}
+                />
+              </section>
+            )}
           </Show>
 
           {/* Place section under the deadline, always present: a typed

@@ -847,6 +847,19 @@ impl Engine {
         })?)
     }
 
+    /// Assign an item to one member of its workspace by account id
+    /// (`workspace_members`), or unassign it (nil).
+    pub fn set_assignee(
+        &self,
+        workspace: Option<String>,
+        id: String,
+        assignee: Option<String>,
+    ) -> Result<(), EngineError> {
+        Ok(self.client.call_blocking(workspace, move |cx| {
+            api::items::set_assignee(cx, &id, assignee.as_deref())
+        })?)
+    }
+
     /// Set an item's deadline (`YYYY-MM-DD`), or clear it (nil).
     pub fn set_deadline(
         &self,

@@ -302,6 +302,11 @@ final class MainWindowModel: ObservableObject {
     /// same member list: Delete's confirm on a list says who will see
     /// the items it sends to the Inbox.
     @Published private(set) var memberCounts: [String: Int] = [:]
+    /// Each shared workspace's members, by doc id, from the same member
+    /// list: who an item there can be assigned to, and the email an
+    /// assignee's account id shows as (spec/sharing-plan.md
+    /// "Assignment"). Absent while the list is not known.
+    @Published private(set) var members: [String: [WorkspaceMember]] = [:]
     /// Shared workspaces whose role is being asked for now.
     private var rolesLoading: Set<String> = []
 
@@ -794,6 +799,21 @@ final class MainWindowModel: ObservableObject {
         write { try $0.setWhen(workspace: workspace, id: id, when: when, duration: duration) }
     }
 
+    /// Assign an item to one member of its workspace by account id, or
+    /// unassign it (nil) (`Engine.setAssignee`).
+    func setAssignee(workspace: String?, id: String, assignee: String?) {
+        write { try $0.setAssignee(workspace: workspace, id: id, assignee: assignee) }
+    }
+
+    /// What the item panel's assignee row offers for an item of
+    /// `workspace` (spec/sharing-plan.md "Assignment"): nil for Home,
+    /// where there is no row; otherwise whether the workspace has
+    /// anyone else in it, and its members when the list is known.
+    func assignment(workspace: String?) -> PanelAssignment? {
+        guard let workspace, sharedWorkspaceName(workspace) != nil else { return nil }
+        return PanelAssignment(others: hasOtherMembers(workspace), members: members[workspace])
+    }
+
     /// Mark a dated item an event, or a task again (`Engine.setEvent`).
     func setEvent(workspace: String?, id: String, event: Bool) {
         write { try $0.setEvent(workspace: workspace, id: id, event: event) }
@@ -1171,6 +1191,7 @@ final class MainWindowModel: ObservableObject {
         guard let me = accountId, !me.isEmpty else { return }
         ownsWorkspace[docId] = members.first(where: { $0.accountId == me })?.owner ?? false
         memberCounts[docId] = members.count
+        self.members[docId] = members.sorted { $0.email < $1.email }
     }
 
     /// Whether a workspace has members besides the account: false for
@@ -1192,11 +1213,13 @@ final class MainWindowModel: ObservableObject {
         guard accountId != nil else {
             ownsWorkspace = [:]
             memberCounts = [:]
+            members = [:]
             return
         }
         let shared = Set(sections.filter { !$0.workspace.home }.map(\.id))
         for gone in ownsWorkspace.keys where !shared.contains(gone) { ownsWorkspace[gone] = nil }
         for gone in memberCounts.keys where !shared.contains(gone) { memberCounts[gone] = nil }
+        for gone in members.keys where !shared.contains(gone) { members[gone] = nil }
         for docId in shared where ownsWorkspace[docId] == nil && !rolesLoading.contains(docId) {
             rolesLoading.insert(docId)
             sharing({ try $0.workspaceMembers(docId: docId) }) { [weak self] result in

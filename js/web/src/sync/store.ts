@@ -132,6 +132,11 @@ export interface ItemView {
    *  on everything from before the register existed. Rendered as an
    *  avatar on shared docs only (`spec/sharing-plan.md` §Attribution). */
   createdBy?: string;
+  /** Account id of the one member the item is assigned to
+   *  (`spec/sharing-plan.md` §Assignment). Absent means unassigned.
+   *  Not checked against the member list: an id the directory cannot
+   *  resolve is a former member. Shown on shared docs only. */
+  assignee?: string;
   /** Reflection stamp: first entry into In Progress, if any. */
   startedAt?: number;
   /** Reflection stamp: last entry into Done, if any. View sorts use
@@ -315,6 +320,7 @@ export interface DocItemActions {
   editItemText(id: string, text: string): void;
   setItemNotes(id: string, notes: string): void;
   setItemDeadline(id: string, deadline: string | null): void;
+  setItemAssignee(id: string, assignee: string | null): void;
   setItemWhen(id: string, when: string | null): void;
   setItemWhenSuggested(id: string, when: string | null): void;
   acceptItemWhenSuggestion(id: string): void;
@@ -457,6 +463,9 @@ export interface DocApp extends DocItemActions {
    *  The value is a floating local calendar date; a malformed string is
    *  rejected by the core. */
   setItemDeadline(id: string, deadline: string | null): void;
+  /** Assign the item to one member by account id, or unassign it
+   *  (`null`). Writing the assignee it already has is a no-op. */
+  setItemAssignee(id: string, assignee: string | null): void;
   /** Set (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`) or clear (`null`) an
    *  item's planned date. Floating; malformed values are rejected by the
    *  core. */
@@ -901,6 +910,7 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
           place: parsePlaceJson(ev.place),
           createdAt: Number(ev.createdAt ?? 0),
           createdBy: ev.createdBy ?? undefined,
+          assignee: ev.assignee ?? undefined,
           startedAt: ev.startedAt != null ? Number(ev.startedAt) : undefined,
           doneAt: ev.doneAt != null ? Number(ev.doneAt) : undefined,
           binnedAt: ev.binnedAt != null ? Number(ev.binnedAt) : undefined,
@@ -1018,6 +1028,12 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
       case "itemDeadlineChanged": {
         if (state.itemsById[ev.id]) {
           setState("itemsById", ev.id, "deadline", ev.deadline ?? undefined);
+        }
+        break;
+      }
+      case "itemAssigneeChanged": {
+        if (state.itemsById[ev.id]) {
+          setState("itemsById", ev.id, "assignee", ev.assignee ?? undefined);
         }
         break;
       }
@@ -1514,6 +1530,9 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
     },
     setItemDeadline(id, deadline) {
       mutate(() => replica.setItemDeadline(id, deadline ?? undefined));
+    },
+    setItemAssignee(id, assignee) {
+      mutate(() => replica.setItemAssignee(id, assignee ?? undefined));
     },
     setItemWhen(id, when) {
       mutate(() => replica.setItemWhen(id, when ?? undefined));

@@ -61,6 +61,16 @@
         }
       }
     },
+    "A former member": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un antiguo miembro"
+          }
+        }
+      }
+    },
     "About Monoplan": {
       "localizations": {
         "es": {
@@ -97,6 +107,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Apariencia"
+          }
+        }
+      }
+    },
+    "Assign": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Asignar"
+          }
+        }
+      }
+    },
+    "Assigned": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Asignado"
+          }
+        }
+      }
+    },
+    "Assignee": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Responsable"
           }
         }
       }
@@ -1337,6 +1377,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tardó %@"
+          }
+        }
+      }
+    },
+    "Unassigned": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sin asignar"
           }
         }
       }

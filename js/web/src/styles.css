@@ -2945,7 +2945,8 @@ input.task-check:hover {
    same fix as .device-menu-content in Settings. The lifecycle status menu
    is portaled the same way and needs the same lift. */
 .task-dialog-menu-content,
-.task-dialog-lifecycle-menu {
+.task-dialog-lifecycle-menu,
+.task-dialog-assignee-menu {
   z-index: 110;
 }
 
@@ -3341,6 +3342,66 @@ input.task-check:hover {
 
 .task-panel .task-dialog-badges .task-dialog-list-caret {
   margin-left: auto;
+}
+
+/* Assignee band (AssigneeField.tsx): a row of its own in the manner of
+   the date fields, the person's disc then their email, the whole row
+   the menu's trigger. Empty (the "…" menu's "Assign" being answered) it
+   reads "Assign" in the muted tone. */
+.task-dialog-assignee {
+  appearance: none;
+  -webkit-appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  box-sizing: border-box;
+  min-width: 0;
+  margin: 0;
+  padding: 2px 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.task-dialog-assignee:hover,
+.task-dialog-assignee[data-expanded] {
+  background: var(--bg-hover);
+}
+
+.task-dialog-assignee:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 1px;
+}
+
+.task-dialog-assignee[data-empty] {
+  color: var(--text-muted);
+}
+
+.task-dialog-assignee-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-dialog-assignee-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-dialog-assignee-item .task-dialog-lifecycle-check {
+  margin-left: auto;
+}
+
+.task-dialog-assignee-you {
+  color: var(--text-muted);
 }
 
 .task-dialog-list svg,

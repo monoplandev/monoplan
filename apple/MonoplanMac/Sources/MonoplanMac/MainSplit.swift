@@ -624,6 +624,8 @@ struct ItemPanelPane: View {
                     setPlace: { model.setPlace(workspace: shown.workspace, id: $0.item.id, place: $1, exact: $2) },
                     setWhen: { model.setWhen(workspace: shown.workspace, id: $0.item.id, when: $1, duration: $2) },
                     setEvent: { model.setEvent(workspace: shown.workspace, id: $0.item.id, event: $1) },
+                    assignment: model.assignment(workspace: shown.workspace),
+                    setAssignee: { model.setAssignee(workspace: shown.workspace, id: $0.item.id, assignee: $1) },
                     setDuration: { model.setDuration(workspace: shown.workspace, id: $0.item.id, minutes: $1) })
             }
         }

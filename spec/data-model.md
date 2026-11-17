@@ -51,6 +51,7 @@ One child `LoroMap` under `items`, keyed by `ItemId`.
 | `place` | value? | optional **atomic place register** — a plain `LoroValue` map `{label, lat?, lon?, address?, ref?}` set whole (the `lifecycle` pattern as a map), so a label and its coordinates can never be torn apart by concurrent edits. `label` is required (trimmed, 1..=200 chars); `lat` / `lon` are WGS84 decimal degrees and come as a pair or not at all; `address` is display-only; `ref` is an opaque provider hint. Absent ≡ unset; clearing deletes the key. Canonicalised and validated by `set_item_place`; a malformed value from another writer reads as unset. Shared by events ("where it happens") and tasks ("where it can be done"). See `place-plan.md`. |
 | `created_at` | i64 | unix millis (client clock) |
 | `created_by` | string? | optional **attribution**: the account id of whoever created the item. Written at creation iff the writing `Doc` has an author (`Doc::set_author`, set once at boot by hosts that know their account: the web client from the session, the CLI from the profile; anonymous and local-only writers set none). Never rewritten: edits, moves and lifecycle changes leave it alone, and import carries the exported value rather than the importer's id. Absent ≡ unattributed (pre-register items, anonymous writers). Rendered as an avatar in the item dialog's creation line on **shared docs only** (`sharing-plan.md` §Attribution). |
+| `assignee` | string? | optional **assignment** (2026-11-17, `sharing-plan.md` "Assignment"): the account id of the one member the item is assigned to. A plain LWW string register, so two members assigning at once resolve to one of them. Absent ≡ unassigned; clearing deletes the key. `set_item_assignee` trims and rejects an empty id or one over 128 bytes, and is a no-op (no commit) when the value is already held. Self-asserted and unchecked like `created_by`: the core has no member list, so an id that is no longer a member stays as written and clients render it as a former member. Carried by duplicate and by export / import; a cross-doc move keeps it only when the assignee is the mover (`adopt_items`). |
 | `started_at` | i64? | **reflection stamp**: set (write-once) the first time the item enters In Progress; never cleared. Feeds analytics (created → started); no view reads it. |
 | `done_at` | i64? | **reflection stamp**: set each time the item enters Done; never cleared, so it survives later binning and un-doing. Feeds analytics (started → done); view sorts use the register's `at`, not this. |
 
@@ -555,7 +556,7 @@ The wire format for updates is whatever Loro emits — opaque bytes from the ser
 `export_json()` is the **semantic portability dump**: settings, every list
 (reserved rows flagged `builtin`), every item with its lifecycle register,
 reflection stamps, `deadline` / `when` / `duration` / `place` / `created_by`
-when set, and the Focus refs in order. It is not a CRDT backup — no Loro
+/ `assignee` when set, and the Focus refs in order. It is not a CRDT backup — no Loro
 history rides it — and its ids are the doc's real ids.
 
 `import_json()` is **additive and idempotent by id** (built 2026-10-28):

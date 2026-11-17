@@ -20,6 +20,11 @@ export interface MemberDirectory {
    *  member removed before this session loaded the list). Reactive: a
    *  read inside a memo re-runs when the list lands. */
   emailOf(docId: string, accountId: string): string | undefined;
+  /** Every known member of `docId` as account id + email, ordered by
+   *  email: who an item there can be assigned to
+   *  (`spec/sharing-plan.md` §Assignment). Empty while nothing is known.
+   *  Reactive. */
+  listOf(docId: string): ReadonlyArray<{ accountId: string; email: string }>;
   /** Role of `accountId` on `docId` as of the last fetched list, or
    *  undefined while the list is not loaded or the account is not in
    *  it. Decides Delete (owner) versus Leave (member) in the nav's
@@ -79,6 +84,11 @@ export function createMemberDirectory(fetchMembers: FetchMembers = defaultFetch)
   return {
     emailOf(docId, accountId) {
       return byDoc()[docId]?.[accountId];
+    },
+    listOf(docId) {
+      return Object.entries(byDoc()[docId] ?? {})
+        .map(([accountId, email]) => ({ accountId, email }))
+        .sort((a, b) => a.email.localeCompare(b.email) || a.accountId.localeCompare(b.accountId));
     },
     roleOf(docId, accountId) {
       return roles()[docId]?.[accountId];

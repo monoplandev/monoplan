@@ -86,6 +86,8 @@ export function Board(props: {
   /** Row context-menu jump to the item's other appearance (the Focus
    *  lens). Forwarded to each card. */
   onReveal?: (id: string, where: "list" | "focus") => void;
+  /** Resolves an item's assignee for its card's avatar (see `Row`). */
+  assigneeOf?: (item: ItemView) => { accountId: string; email: string | null } | null;
   /** Row context-menu move-to-list (opens the workspace's move palette).
    *  Forwarded to each card. */
   onMoveToList?: (ids: readonly string[]) => void;
@@ -658,6 +660,7 @@ export function Board(props: {
             autofocus={i() === 0}
             onOpen={props.onOpen}
             onReveal={props.onReveal}
+            assigneeOf={props.assigneeOf}
             onMoveToList={props.onMoveToList}
             openOnTap={props.openOnTap}
             duplicateBlock={props.duplicateBlock}
@@ -683,6 +686,7 @@ export function Board(props: {
           registerHandle={registerHandle}
           onOpen={props.onOpen}
           onReveal={props.onReveal}
+          assigneeOf={props.assigneeOf}
           onMoveToList={props.onMoveToList}
           openOnTap={props.openOnTap}
           duplicateBlock={props.duplicateBlock}
@@ -707,6 +711,8 @@ function BoardColumn(props: {
   onAddItem: () => void;
   onOpen: (id: string) => void;
   onReveal?: (id: string, where: "list" | "focus") => void;
+  /** Resolves an item's assignee for its card's avatar (see `Row`). */
+  assigneeOf?: (item: ItemView) => { accountId: string; email: string | null } | null;
   onMoveToList?: (ids: readonly string[]) => void;
   openOnTap: () => boolean;
   duplicateBlock: (sourceIds: readonly string[]) => void;
@@ -789,6 +795,7 @@ function BoardColumn(props: {
               copyBlock={props.copyBlock}
               onOpen={props.onOpen}
               onReveal={props.onReveal}
+              assigneeOf={props.assigneeOf}
               onMoveToList={props.onMoveToList}
               openOnTap={props.openOnTap}
               deadlineInFooter

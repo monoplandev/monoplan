@@ -223,6 +223,14 @@ export type Messages = {
     createdStamp: (when: string) => string;
     /** Joins the creation stamp to the creator's avatar: "Created 5:49 PM by ●". */
     createdBy: string;
+    /** The task dialog's assignee control (`AssigneeField`): its
+     *  accessible name, the trigger's reading while unassigned, the
+     *  menu's "no one" row, and the tooltip naming the assignee (also
+     *  the row avatar's). */
+    assignee: string;
+    assign: string;
+    unassigned: string;
+    assignedTo: (who: string) => string;
     activity: string;
     activityCompleted: (when: string) => string;
     activityElapsed: (span: string) => string;
@@ -733,6 +741,10 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       reopen: "Reabrir",
       createdStamp: (when) => `Creado ${when}`,
       createdBy: "por",
+      assignee: "Responsable",
+      assign: "Asignar",
+      unassigned: "Sin asignar",
+      assignedTo: (who) => `Asignado a ${who}`,
       activity: "Actividad",
       activityCompleted: (when) => `Completado ${when}`,
       activityElapsed: (span) => `Tiempo transcurrido: ${span}`,
@@ -1121,6 +1133,10 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       reopen: "Reopen",
       createdStamp: (when) => `Created ${when}`,
       createdBy: "by",
+      assignee: "Assignee",
+      assign: "Assign",
+      unassigned: "Unassigned",
+      assignedTo: (who) => `Assigned to ${who}`,
       activity: "Activity",
       activityCompleted: (when) => `Completed ${when}`,
       activityElapsed: (span) => `${span} elapsed`,

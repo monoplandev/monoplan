@@ -299,6 +299,7 @@ mod tests {
             state: WorkflowState::Backlog,
             lifecycle_at: created_at,
             created_by: None,
+            assignee: None,
             deadline: None,
             when: None,
             when_suggested: None,

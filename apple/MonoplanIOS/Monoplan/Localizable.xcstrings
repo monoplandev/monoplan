@@ -173,6 +173,16 @@
         }
       }
     },
+    "A former member" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Un antiguo miembro"
+          }
+        }
+      }
+    },
     "Account" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -265,6 +275,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Archivada"
+          }
+        }
+      }
+    },
+    "Assign" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asignar"
+          }
+        }
+      }
+    },
+    "Assigned" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asignado"
+          }
+        }
+      }
+    },
+    "Assignee" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Responsable"
+          }
+        }
+      }
+    },
+    "Assigns the item to a member" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asigna el elemento a un miembro"
           }
         }
       }
@@ -3167,6 +3217,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Escribe una fecha: viernes 15:00"
+          }
+        }
+      }
+    },
+    "Unassigned" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sin asignar"
           }
         }
       }

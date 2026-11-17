@@ -423,6 +423,9 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
     setItemDeadline(id, deadline) {
       forItem(id, (app) => app.setItemDeadline(id, deadline));
     },
+    setItemAssignee(id, assignee) {
+      forItem(id, (app) => app.setItemAssignee(id, assignee));
+    },
     setItemWhen(id, when) {
       forItem(id, (app) => app.setItemWhen(id, when));
     },

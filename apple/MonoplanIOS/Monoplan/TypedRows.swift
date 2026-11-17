@@ -199,6 +199,8 @@ extension ItemInfo {
     var doneAt: Int64? { item.doneAt }
     var binnedAt: Int64? { item.binnedAt }
     var deadline: String? { item.deadline }
+    /// Account id of the member the item is assigned to, when it is.
+    var assignee: String? { item.assignee }
     var when: String? { item.when }
     var whenSuggested: String? { item.whenSuggested }
     /// An event (spec/events-plan.md): it happens on its date, so

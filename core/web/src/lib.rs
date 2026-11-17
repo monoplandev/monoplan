@@ -270,6 +270,19 @@ impl Doc {
             .map_err(js_err)
     }
 
+    /// Assign an item to one member by account id (`Some`) or unassign
+    /// it (`None`). The id is not checked against the member list.
+    #[wasm_bindgen(js_name = setItemAssignee)]
+    pub fn set_item_assignee(
+        &self,
+        item_id: &str,
+        assignee: Option<String>,
+    ) -> Result<(), JsError> {
+        self.inner
+            .set_item_assignee(item_id, assignee.as_deref())
+            .map_err(js_err)
+    }
+
     /// Set (`Some`) or clear (`None`) an item's date-only deadline. The
     /// value must be a `YYYY-MM-DD` calendar date or the call rejects.
     #[wasm_bindgen(js_name = setItemDeadline)]
@@ -1890,6 +1903,19 @@ impl Replica {
             .map_err(js_err)
     }
 
+    /// Assign an item to one member by account id (`Some`) or unassign
+    /// it (`None`). The id is not checked against the member list.
+    #[wasm_bindgen(js_name = setItemAssignee)]
+    pub fn set_item_assignee(
+        &self,
+        item_id: &str,
+        assignee: Option<String>,
+    ) -> Result<(), JsError> {
+        self.doc()
+            .set_item_assignee(item_id, assignee.as_deref())
+            .map_err(js_err)
+    }
+
     /// Set (`Some`) or clear (`None`) an item's date-only deadline. The
     /// value must be a `YYYY-MM-DD` calendar date or the call rejects.
     #[wasm_bindgen(js_name = setItemDeadline)]
@@ -2473,13 +2499,14 @@ impl From<CoreEvent> for ReplicaEvent {
 ///
 /// Variant → fields:
 /// - `fullResync` — no fields; rematerialize current state once
-/// - `itemAdded` — id, listId, text, notes, createdAt, createdBy?, state, lifecycleAt, startedAt?, doneAt?, binnedAt?, deadline?, when?, whenSuggested?, event?, duration?, place?, openIndex?
+/// - `itemAdded` — id, listId, text, notes, createdAt, createdBy?, assignee?, state, lifecycleAt, startedAt?, doneAt?, binnedAt?, deadline?, when?, whenSuggested?, event?, duration?, place?, openIndex?
 /// - `itemRemoved` — id
 /// - `itemMoved` — id, openIndex?
 /// - `itemTextChanged` — id, text
 /// - `itemNotesChanged` — id, notes
 /// - `itemNotesDelta` — id, delta (JSON array of `{retain}` / `{insert}` / `{delete}`, UTF-16 units; only for items with a `subscribeNotes` subscription)
 /// - `itemDeadlineChanged` — id, deadline? (undefined = no deadline)
+/// - `itemAssigneeChanged` — id, assignee? (undefined = unassigned)
 /// - `itemWhenChanged` — id, when? (undefined = unset; `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`), openIndex? (a dated Inbox item is in no Open array: drop it when a date arrives; set when a cleared date brings it back, splice it in there)
 /// - `itemWhenSuggestedChanged` — id, whenSuggested? (undefined = none pending; same shape as `when`)
 /// - `itemEventChanged` — id, event
@@ -2543,6 +2570,9 @@ pub struct AppEventJs {
     created_at: Option<i64>,
     /// Creator's account id (`itemAdded`), when stamped.
     created_by: Option<String>,
+    /// Assignee's account id (`itemAdded` / `itemAssigneeChanged`);
+    /// `None` means unassigned.
+    assignee: Option<String>,
     /// Reflection stamp: last entry into Done, if any.
     done_at: Option<i64>,
     binned_at: Option<i64>,
@@ -2611,6 +2641,10 @@ impl AppEventJs {
     #[wasm_bindgen(getter, js_name = createdBy)]
     pub fn created_by(&self) -> Option<String> {
         self.created_by.clone()
+    }
+    #[wasm_bindgen(getter, js_name = assignee)]
+    pub fn assignee(&self) -> Option<String> {
+        self.assignee.clone()
     }
     #[wasm_bindgen(getter, js_name = doneAt)]
     pub fn done_at(&self) -> Option<i64> {
@@ -2719,6 +2753,7 @@ impl From<CoreAppEvent> for AppEventJs {
             place: None,
             created_at: None,
             created_by: None,
+            assignee: None,
             done_at: None,
             binned_at: None,
             archived_at: None,
@@ -2744,6 +2779,7 @@ impl From<CoreAppEvent> for AppEventJs {
                 notes,
                 created_at,
                 created_by,
+                assignee,
                 state,
                 lifecycle_at,
                 started_at,
@@ -2764,6 +2800,7 @@ impl From<CoreAppEvent> for AppEventJs {
                 notes: Some(notes),
                 created_at: Some(created_at),
                 created_by,
+                assignee,
                 state: Some(state.name()),
                 lifecycle_at: Some(lifecycle_at),
                 started_at,
@@ -2811,6 +2848,12 @@ impl From<CoreAppEvent> for AppEventJs {
                 kind: "itemDeadlineChanged",
                 id,
                 deadline,
+                ..blank
+            },
+            CoreAppEvent::ItemAssigneeChanged { id, assignee } => AppEventJs {
+                kind: "itemAssigneeChanged",
+                id,
+                assignee,
                 ..blank
             },
             CoreAppEvent::ItemWhenChanged {
@@ -3028,6 +3071,10 @@ fn item_to_json(it: &monoplan_core::ItemView) -> String {
     }
     if let Some(a) = &it.created_by {
         s.push_str(",\"createdBy\":");
+        s.push_str(&json_string(a));
+    }
+    if let Some(a) = &it.assignee {
+        s.push_str(",\"assignee\":");
         s.push_str(&json_string(a));
     }
     if let Some(t) = it.done_at {

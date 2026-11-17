@@ -70,6 +70,11 @@ final class AppModel: ObservableObject {
     /// same member list: Delete List's confirm says who will see the
     /// items it sends to the Inbox.
     @Published private(set) var memberCounts: [String: Int] = [:]
+    /// Each shared workspace's members, by doc id, from the same member
+    /// list: who an item there can be assigned to, and the email an
+    /// assignee's account id shows as (spec/sharing-plan.md
+    /// "Assignment"). Absent while the list is not known.
+    @Published private(set) var members: [String: [WorkspaceMember]] = [:]
     /// Shared workspaces whose role is being asked for now.
     private var rolesLoading: Set<String> = []
     /// The Done lens (`Engine.doneEverywhere`): every open workspace's
@@ -570,6 +575,13 @@ final class AppModel: ObservableObject {
         write({ try $0.setEvent(workspace: workspace, id: id, event: event) }, to: ref)
     }
 
+    /// Assign an item to one member of its workspace by account id, or
+    /// unassign it (nil) (`Engine.setAssignee`).
+    func setAssignee(_ ref: ItemRef, assignee: String?) {
+        let (workspace, id) = (selector(ref.docId), ref.itemId)
+        write({ try $0.setAssignee(workspace: workspace, id: id, assignee: assignee) }, to: ref)
+    }
+
     /// Set or clear (nil) an item's duration in minutes.
     func setDuration(_ ref: ItemRef, minutes: Int?) {
         let (workspace, id) = (selector(ref.docId), ref.itemId)
@@ -718,6 +730,7 @@ final class AppModel: ObservableObject {
         guard let me = session?.accountId, !me.isEmpty else { return }
         ownsWorkspace[docId] = members.first(where: { $0.accountId == me })?.owner ?? false
         memberCounts[docId] = members.count
+        self.members[docId] = members.sorted { $0.email < $1.email }
     }
 
     /// Whether a workspace has members besides the account: false for
@@ -738,11 +751,13 @@ final class AppModel: ObservableObject {
         guard let session, !session.localOnly else {
             ownsWorkspace = [:]
             memberCounts = [:]
+            members = [:]
             return
         }
         let shared = Set(session.docs.filter { !$0.home }.map(\.docId))
         for gone in ownsWorkspace.keys where !shared.contains(gone) { ownsWorkspace[gone] = nil }
         for gone in memberCounts.keys where !shared.contains(gone) { memberCounts[gone] = nil }
+        for gone in members.keys where !shared.contains(gone) { members[gone] = nil }
         for docId in shared where ownsWorkspace[docId] == nil && !rolesLoading.contains(docId) {
             rolesLoading.insert(docId)
             sharing({ try $0.workspaceMembers(docId: docId) }) { [weak self] result in

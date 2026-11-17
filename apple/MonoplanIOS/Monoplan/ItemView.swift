@@ -391,6 +391,7 @@ struct ItemView: View {
     private func fields(_ item: ItemInfo) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             listField(item)
+            assigneeField(item)
             ItemDateField(
                 item: item,
                 edit: { edit(.date) },
@@ -509,6 +510,52 @@ struct ItemView: View {
         .disabled(item.binnedAt != nil)
         .itemFieldOutset()
         .accessibilityHint("Moves the item to another list")
+    }
+
+    /// Who the item is assigned to, on a shared workspace
+    /// (spec/sharing-plan.md "Assignment"): a menu of its members and
+    /// "Unassigned". One assignee, so a pick replaces the last. Not
+    /// shown on the Personal workspace, nor on a workspace of one
+    /// unless the item is already assigned (so that can be cleared).
+    /// An assignee the member list does not hold is a former member;
+    /// while the list is not known the row says only that there is one.
+    @ViewBuilder
+    private func assigneeField(_ item: ItemInfo) -> some View {
+        if let docId = ref.docId, workspace != nil, model.hasOtherMembers(docId) || item.assignee != nil {
+            let people = model.members[docId]
+            let current = item.assignee
+            let name: String? = current.map { id in
+                if let member = people?.first(where: { $0.accountId == id }) { return member.email }
+                return people == nil ? String(localized: "Assigned") : String(localized: "A former member")
+            }
+            Menu {
+                Picker("Assignee", selection: Binding(
+                    get: { current ?? "" },
+                    set: { model.setAssignee(ref, assignee: $0.isEmpty ? nil : $0) }
+                )) {
+                    Text("Unassigned").tag("")
+                    ForEach(people ?? [], id: \.accountId) { member in
+                        Text(verbatim: member.email).tag(member.accountId)
+                    }
+                    if let current, let name, people?.contains(where: { $0.accountId == current }) != true {
+                        Text(verbatim: name).tag(current)
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    FieldRow("person", text: name ?? String(localized: "Assign"), empty: current == nil)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .itemField()
+            }
+            .buttonStyle(.plain)
+            .disabled(item.binnedAt != nil)
+            .itemFieldOutset()
+            .accessibilityHint("Assigns the item to a member")
+        }
     }
 
     @ViewBuilder

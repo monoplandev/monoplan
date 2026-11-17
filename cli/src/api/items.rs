@@ -120,6 +120,10 @@ pub struct Item {
     /// Creator's account id, when the creating client stamped one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
+    /// Account id of the member the item is assigned to, when it is
+    /// (`spec/sharing-plan.md` "Assignment").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assignee: Option<String>,
     pub started_at: Option<i64>,
     pub done_at: Option<i64>,
     pub binned_at: Option<i64>,
@@ -154,6 +158,7 @@ impl From<&ItemView> for Item {
             lifecycle_at: item.lifecycle_at,
             created_at: item.created_at,
             created_by: item.created_by.clone(),
+            assignee: item.assignee.clone(),
             started_at: item.started_at,
             done_at: item.done_at,
             binned_at: item.binned_at,
@@ -318,6 +323,14 @@ pub fn set_duration(cx: &Ctx, id: &str, minutes: Option<u32>) -> anyhow::Result<
     Ok(())
 }
 
+/// Assign the item to one member by account id, or unassign it
+/// (`None`). The id is not checked against the member list: callers
+/// offer members (`api::sharing::members`).
+pub fn set_assignee(cx: &Ctx, id: &str, assignee: Option<&str>) -> anyhow::Result<()> {
+    cx.doc.set_item_assignee(id, assignee)?;
+    Ok(())
+}
+
 /// Set the deadline (`YYYY-MM-DD`), or clear it (`None`).
 pub fn set_deadline(cx: &Ctx, id: &str, deadline: Option<&str>) -> anyhow::Result<()> {
     cx.doc.set_item_deadline(id, deadline)?;
@@ -421,7 +434,13 @@ mod tests {
             .collect();
         // Unset optionals that the old row skipped are absent; the
         // three stamps are always there, null when unset.
-        for k in ["created_by", "deadline", "when_suggested", "event"] {
+        for k in [
+            "created_by",
+            "assignee",
+            "deadline",
+            "when_suggested",
+            "event",
+        ] {
             assert!(!keys.contains(&k), "{k} should be absent: {json}");
         }
         assert_eq!(json["state"], "done");

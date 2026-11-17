@@ -318,6 +318,14 @@ const KEY_CREATED_AT: &str = "created_at";
 /// `Doc` has an author set; absent on anonymous / local-only writes and
 /// on every item from before the register existed.
 const KEY_CREATED_BY: &str = "created_by";
+/// Optional assignee: the account id of the one member the item is
+/// assigned to (`spec/sharing-plan.md` "Assignment"). Absent ≡
+/// unassigned; the mutation deletes the key when cleared. A plain LWW
+/// string register, self-asserted like `created_by`: the core cannot
+/// see the member list, so it stores whatever id a member writes.
+const KEY_ASSIGNEE: &str = "assignee";
+/// Longest account id `set_item_assignee` accepts.
+const MAX_ASSIGNEE_LEN: usize = 128;
 /// Reflection stamp: set on each entry into Done; never cleared, so it
 /// survives later binning and un-doing. View sorts use the workflow
 /// register's `at`, not this.
@@ -593,6 +601,10 @@ pub struct ItemView {
     /// Account id of the item's creator, when the creating client knew
     /// it (`Doc::set_author`). `None` ≡ unattributed.
     pub created_by: Option<String>,
+    /// Account id of the member the item is assigned to. `None` ≡
+    /// unassigned. Not checked against the member list: an id that is
+    /// no longer a member reads as it was written.
+    pub assignee: Option<String>,
     /// Reflection stamp: first entry into In Progress (write-once).
     pub started_at: Option<i64>,
     /// Reflection stamp: last entry into Done; never cleared. The Done
@@ -945,6 +957,10 @@ pub struct ExportItem {
     /// byte-identical.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub created_by: Option<String>,
+    /// Assignee's account id. Skipped when unset so older dumps stay
+    /// byte-identical.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub assignee: Option<String>,
     /// Reflection stamp (first entry into In Progress). Skipped when
     /// unset; v2 exports never carry it.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -2176,6 +2192,9 @@ impl Doc {
         if item.duration.is_some() {
             self.set_item_duration(&copy, item.duration)?;
         }
+        if let Some(assignee) = &item.assignee {
+            self.set_item_assignee(&copy, Some(assignee))?;
+        }
         if let Some(place) = &item.place {
             self.set_item_place(&copy, Some(place))?;
         }
@@ -2301,6 +2320,7 @@ impl Doc {
                 notes: String::new(),
                 created_at: now,
                 created_by: self.author.clone(),
+                assignee: None,
                 state,
                 lifecycle_at: now,
                 started_at: (state == WorkflowState::InProgress).then_some(now),
@@ -2472,6 +2492,39 @@ impl Doc {
                 delta: out,
             });
         }
+    }
+
+    /// Assign an item to one member, or unassign it. `Some(account_id)`
+    /// writes the trimmed id to the `assignee` register; `None` deletes
+    /// the key. One Loro commit. An empty or over-long id is rejected
+    /// with `Invalid`. The id is not checked against the member list
+    /// (the core has none): hosts offer members and render an id they
+    /// cannot resolve as a former member. Writing the value already
+    /// held is a no-op: no commit, no event.
+    pub fn set_item_assignee(&self, item_id: &str, assignee: Option<&str>) -> Result<(), DocError> {
+        let normalized = match assignee.map(str::trim) {
+            Some("") => return Err(DocError::Invalid("assignee is empty".into())),
+            Some(a) if a.len() > MAX_ASSIGNEE_LEN => {
+                return Err(DocError::Invalid("assignee is too long".into()));
+            }
+            other => other.map(str::to_string),
+        };
+        let map = self.find_item(item_id)?;
+        if read_string(&map, KEY_ASSIGNEE).filter(|s| !s.is_empty()) == normalized {
+            return Ok(());
+        }
+        match &normalized {
+            Some(a) => map.insert(KEY_ASSIGNEE, a.as_str())?,
+            None => {
+                let _ = map.delete(KEY_ASSIGNEE);
+            }
+        }
+        self.inner.commit();
+        self.push_event(AppEvent::ItemAssigneeChanged {
+            id: item_id.to_string(),
+            assignee: normalized,
+        });
+        Ok(())
     }
 
     /// Set or clear an item's date-only deadline. `Some(date)` validates
@@ -4367,6 +4420,14 @@ impl Doc {
         {
             map.insert(KEY_CREATED_BY, author)?;
         }
+        if let Some(assignee) = src
+            .assignee
+            .as_deref()
+            .map(str::trim)
+            .filter(|a| !a.is_empty() && a.len() <= MAX_ASSIGNEE_LEN)
+        {
+            map.insert(KEY_ASSIGNEE, assignee)?;
+        }
         // Workflow register + reflection stamps. An unrecognized
         // state name in a hand-edited export degrades to Backlog:
         // visible and open.
@@ -4455,8 +4516,11 @@ impl Doc {
     /// rejects the whole call, as does a malformed or repeated one.
     /// Every field travels (text, notes as plain content, deadline,
     /// when, duration, place, workflow state and stamps, creator), with
-    /// two exceptions: the item is located in `list_id`, and it lands
-    /// **not binned** (a move out of the Bin restores).
+    /// three exceptions: the item is located in `list_id`, it lands
+    /// **not binned** (a move out of the Bin restores), and the
+    /// assignee travels only when it is this doc's author. The mover is
+    /// the one account known to be a member here; anyone else may not
+    /// be, so their assignment is dropped rather than left dangling.
     pub fn adopt_items(
         &self,
         items: &[ExportItem],
@@ -4490,6 +4554,10 @@ impl Doc {
             let placement = new_placement(list_id);
             let arrived = ExportItem {
                 inbox_at: queued.then_some(now),
+                assignee: src
+                    .assignee
+                    .clone()
+                    .filter(|a| self.author.as_deref() == Some(a.as_str())),
                 ..src.clone()
             };
             self.write_item_from_export(
@@ -5277,6 +5345,7 @@ impl Doc {
                         KEY_TEXT,
                         KEY_NOTES,
                         KEY_DEADLINE,
+                        KEY_ASSIGNEE,
                         KEY_WHEN,
                         KEY_WHEN_SUGGESTED,
                         KEY_EVENT,
@@ -5418,6 +5487,12 @@ impl Doc {
                         deadline: view.deadline.clone(),
                     });
                 }
+                if has(KEY_ASSIGNEE) {
+                    self.push_event(AppEvent::ItemAssigneeChanged {
+                        id: id.clone(),
+                        assignee: view.assignee.clone(),
+                    });
+                }
                 // A date cleared on an Inbox item brings it back into
                 // Inbox's Open projection: the per-list walk reports
                 // that one, with its position.
@@ -5506,6 +5581,7 @@ impl Doc {
                     notes: view.notes,
                     created_at: view.created_at,
                     created_by: view.created_by,
+                    assignee: view.assignee,
                     state: view.state,
                     lifecycle_at: view.lifecycle_at,
                     started_at: view.started_at,
@@ -5574,6 +5650,7 @@ impl Doc {
                             notes: view.notes,
                             created_at: view.created_at,
                             created_by: view.created_by,
+                            assignee: view.assignee,
                             state: view.state,
                             lifecycle_at: view.lifecycle_at,
                             started_at: view.started_at,
@@ -5865,6 +5942,7 @@ impl Doc {
                 notes: item.notes,
                 created_at: item.created_at,
                 created_by: item.created_by,
+                assignee: item.assignee,
                 state: item.state,
                 lifecycle_at: item.lifecycle_at,
                 started_at: item.started_at,
@@ -5991,6 +6069,7 @@ impl Doc {
             hash_opt_i64(&mut hasher, i.done_at);
             hash_opt_i64(&mut hasher, i.binned_at);
             hash_opt_i64(&mut hasher, i.inbox_at);
+            hash_opt_str(&mut hasher, i.assignee.as_deref());
         }
         // Focus: the curated order fixes logical state (`spec/focus.md`),
         // exactly as each list's resolved order does. Hash the raw
@@ -6266,6 +6345,7 @@ fn export_item(item: ItemView) -> ExportItem {
         place: item.place,
         created_at: item.created_at,
         created_by: item.created_by,
+        assignee: item.assignee,
         started_at: item.started_at,
         done_at: item.done_at,
         binned_at: item.binned_at,
@@ -6799,6 +6879,7 @@ fn item_view(map: &LoroMap) -> Option<ItemView> {
         place: read_place(map),
         created_at: read_i64(map, KEY_CREATED_AT)?,
         created_by: read_string(map, KEY_CREATED_BY).filter(|s| !s.is_empty()),
+        assignee: read_string(map, KEY_ASSIGNEE).filter(|s| !s.is_empty()),
         started_at: read_i64(map, KEY_STARTED_AT),
         done_at: read_i64(map, KEY_DONE_AT),
         binned_at: read_i64(map, KEY_BINNED_AT),
@@ -7078,6 +7159,7 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                     notes: post_it.notes.clone(),
                     created_at: post_it.created_at,
                     created_by: post_it.created_by.clone(),
+                    assignee: post_it.assignee.clone(),
                     state: post_it.state,
                     lifecycle_at: post_it.lifecycle_at,
                     started_at: post_it.started_at,
@@ -7109,6 +7191,12 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                     out.push(AppEvent::ItemDeadlineChanged {
                         id: post_it.id.clone(),
                         deadline: post_it.deadline.clone(),
+                    });
+                }
+                if pre_it.assignee != post_it.assignee {
+                    out.push(AppEvent::ItemAssigneeChanged {
+                        id: post_it.id.clone(),
+                        assignee: post_it.assignee.clone(),
                     });
                 }
                 if pre_it.when != post_it.when {
@@ -10772,6 +10860,7 @@ mod tests {
             place: None,
             created_at: 1,
             created_by: None,
+            assignee: None,
             started_at: None,
             done_at: None,
             binned_at: None,
@@ -10870,6 +10959,7 @@ mod tests {
             place: None,
             created_at: 1,
             created_by: None,
+            assignee: None,
             started_at: None,
             done_at: None,
             binned_at: None,
@@ -11050,6 +11140,125 @@ mod tests {
         let no_deadline = imported.iter().find(|i| i.text == "no deadline").unwrap();
         assert_eq!(with_deadline.deadline.as_deref(), Some("2026-09-30"));
         assert_eq!(no_deadline.deadline, None);
+    }
+
+    #[test]
+    fn set_and_clear_item_assignee() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "call the plumber").unwrap();
+        let _ = doc.drain_events();
+        assert_eq!(doc.get_item(&id).unwrap().assignee, None);
+
+        doc.set_item_assignee(&id, Some("  acct-1  ")).unwrap();
+        assert_eq!(
+            doc.get_item(&id).unwrap().assignee.as_deref(),
+            Some("acct-1")
+        );
+        assert_eq!(
+            doc.drain_events(),
+            vec![AppEvent::ItemAssigneeChanged {
+                id: id.clone(),
+                assignee: Some("acct-1".into()),
+            }]
+        );
+
+        // The value already held: nothing written, nothing announced.
+        doc.set_item_assignee(&id, Some("acct-1")).unwrap();
+        assert!(doc.drain_events().is_empty());
+
+        // Reassigning replaces: there is one assignee.
+        doc.set_item_assignee(&id, Some("acct-2")).unwrap();
+        assert_eq!(
+            doc.get_item(&id).unwrap().assignee.as_deref(),
+            Some("acct-2")
+        );
+        let _ = doc.drain_events();
+
+        doc.set_item_assignee(&id, None).unwrap();
+        assert_eq!(doc.get_item(&id).unwrap().assignee, None);
+        assert!(doc.find_item(&id).unwrap().get(KEY_ASSIGNEE).is_none());
+        assert_eq!(
+            doc.drain_events(),
+            vec![AppEvent::ItemAssigneeChanged {
+                id: id.clone(),
+                assignee: None,
+            }]
+        );
+        doc.set_item_assignee(&id, None).unwrap();
+        assert!(doc.drain_events().is_empty());
+    }
+
+    #[test]
+    fn set_item_assignee_rejects_empty_overlong_and_unknown_item() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "x").unwrap();
+        for bad in ["", "   ", &"a".repeat(MAX_ASSIGNEE_LEN + 1)] {
+            assert!(matches!(
+                doc.set_item_assignee(&id, Some(bad)).unwrap_err(),
+                DocError::Invalid(_)
+            ));
+        }
+        assert_eq!(doc.get_item(&id).unwrap().assignee, None);
+        assert!(matches!(
+            doc.set_item_assignee(&"0".repeat(32), Some("acct-1"))
+                .unwrap_err(),
+            DocError::ItemNotFound(_)
+        ));
+    }
+
+    #[test]
+    fn assignee_survives_export_import_and_duplicate() {
+        let src = Doc::new().unwrap();
+        let id = src.add_item(LIST_INBOX, "mine").unwrap();
+        src.set_item_assignee(&id, Some("acct-1")).unwrap();
+        let copy = src.duplicate_item(&id).unwrap();
+        assert_eq!(
+            src.get_item(&copy).unwrap().assignee.as_deref(),
+            Some("acct-1")
+        );
+
+        let export = src.export_json();
+        let dst = Doc::new().unwrap();
+        dst.import_json(&export).unwrap();
+        assert!(
+            dst.iter_items()
+                .all(|i| i.assignee.as_deref() == Some("acct-1"))
+        );
+    }
+
+    #[test]
+    fn assignee_converges_between_peers() {
+        let dek = Dek::generate();
+        let mut a = Doc::new().unwrap();
+        let id = a.add_item(LIST_INBOX, "sync me").unwrap();
+        let seed = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        let mut b = Doc::empty();
+        b.apply_remote(&dek, &seed).unwrap();
+        let _ = a.drain_events();
+        let _ = b.drain_events();
+
+        a.set_item_assignee(&id, Some("acct-b")).unwrap();
+        let frame = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        b.apply_remote(&dek, &frame).unwrap();
+        assert_eq!(b.get_item(&id).unwrap().assignee.as_deref(), Some("acct-b"));
+        assert_eq!(a.fingerprint(), b.fingerprint());
+        assert!(b.drain_events().iter().any(|e| matches!(
+            e,
+            AppEvent::ItemAssigneeChanged { id: eid, assignee: Some(who) }
+                if eid == &id && who == "acct-b"
+        )));
+
+        a.set_item_assignee(&id, None).unwrap();
+        let frame = a.pending_export(&dek).unwrap().unwrap();
+        b.apply_remote(&dek, &frame).unwrap();
+        assert_eq!(b.get_item(&id).unwrap().assignee, None);
+        assert_eq!(a.fingerprint(), b.fingerprint());
+        assert!(b.drain_events().iter().any(|e| matches!(
+            e,
+            AppEvent::ItemAssigneeChanged { id: eid, assignee: None } if eid == &id
+        )));
     }
 
     #[test]
@@ -12035,6 +12244,7 @@ mod tests {
                 place: None,
                 created_at: 1_700_000_000_000,
                 created_by: None,
+                assignee: None,
                 started_at: None,
                 done_at: None,
                 binned_at: None,
@@ -14506,6 +14716,22 @@ mod cross_doc_move_tests {
         assert!(matches!(err, DocError::Invalid(_)));
         assert!(src.get_item(&a).is_some() && src.get_item(&b).is_some());
         assert!(dst.get_item(&b).is_none());
+    }
+
+    #[test]
+    fn adopt_keeps_the_movers_own_assignment_and_drops_anyone_elses() {
+        let (src, mut dst) = docs();
+        dst.set_author(Some("acct-me"));
+        let mine = src.add_item(LIST_INBOX, "mine").unwrap();
+        let theirs = src.add_item(LIST_INBOX, "theirs").unwrap();
+        src.set_item_assignee(&mine, Some("acct-me")).unwrap();
+        src.set_item_assignee(&theirs, Some("acct-other")).unwrap();
+        move_items_across_docs(&src, &dst, &[&mine, &theirs], LIST_INBOX, 0, None).unwrap();
+        assert_eq!(
+            dst.get_item(&mine).unwrap().assignee.as_deref(),
+            Some("acct-me")
+        );
+        assert_eq!(dst.get_item(&theirs).unwrap().assignee, None);
     }
 
     #[test]

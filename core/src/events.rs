@@ -43,6 +43,8 @@ pub enum AppEvent {
         created_at: i64,
         /// Creator's account id, when the creating client stamped one.
         created_by: Option<String>,
+        /// Assignee's account id, or `None` when unassigned.
+        assignee: Option<String>,
         /// Workflow register state (`spec/data-model.md` "Lifecycle").
         /// Masked by `binned_at` when that is set.
         state: WorkflowState,
@@ -112,6 +114,12 @@ pub enum AppEvent {
     ItemDeadlineChanged {
         id: String,
         deadline: Option<String>,
+    },
+    /// Item was assigned, reassigned or unassigned. The payload is the
+    /// assignee's account id after the write, `None` when unassigned.
+    ItemAssigneeChanged {
+        id: String,
+        assignee: Option<String>,
     },
     /// Item's planned date changed. The payload is the raw value after
     /// the write (`YYYY-MM-DD` all-day or `YYYY-MM-DDTHH:MM` timed) —

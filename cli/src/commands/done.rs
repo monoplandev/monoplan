@@ -183,6 +183,7 @@ mod tests {
             place: None,
             created_at: 0,
             created_by: None,
+            assignee: None,
             started_at: None,
             done_at: None,
             binned_at: None,

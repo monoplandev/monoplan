@@ -7,6 +7,7 @@ import usersSvg from "./icons/users.svg?raw";
 import { DndSelection } from "./dnd/solid";
 import { ItemContextMenu, canPinToFocusIn } from "./ItemContextMenu.tsx";
 import { DeadlineBadge } from "./DeadlineBadge.tsx";
+import { Avatar } from "./Avatar.tsx";
 import { PlaceBadge } from "./PlaceBadge.tsx";
 import { WhenBadge } from "./WhenBadge.tsx";
 import {
@@ -101,6 +102,10 @@ export function Row(props: {
   /** Resolves a list id (in the item's doc) to its display label (see
    *  Workspace `listLabel`). */
   listLabel?: (listId: string, docId?: string, dated?: boolean) => string;
+  /** The item's assignee as a person, or null to show none (Home,
+   *  unassigned). An open row or card then carries their avatar
+   *  (`spec/sharing-plan.md` §Assignment). */
+  assigneeOf?: (item: ItemView) => { accountId: string; email: string | null } | null;
   /** Whether a doc id is a shared workspace (anything but Home). The
    *  origin-list badge then leads with the people glyph, the same mark
    *  the nav and agenda use for a shared workspace. */
@@ -170,11 +175,18 @@ export function Row(props: {
   // individual `<Show>` guards below so the `.row-badges` container only
   // renders when it has children — an empty flex box would still eat a
   // slot of the row's gap.
+  // The assignee disc: open items only (a closed row keeps to its
+  // stamp), and not while the row is being edited in place.
+  const assignee = () =>
+    isOpen(props.item()) && !props.expanded() ? (props.assigneeOf?.(props.item()) ?? null) : null;
+  const assigneeTitle = (a: { email: string | null }): string =>
+    m().workspace.assignedTo(a.email ?? m().sharing.formerMember);
   const showInlineBadges = () =>
     Boolean(originList()) ||
     Boolean(stateBadge()) ||
     (!props.deadlineInFooter &&
       ((!leadingStamp() && Boolean(rowStamp())) ||
+        Boolean(assignee()) ||
         (!props.expanded() &&
           ((canPinToFocus() && focused()) ||
             (isOpen(props.item()) &&
@@ -525,6 +537,7 @@ export function Row(props: {
             !props.expanded() &&
             ((isOpen(props.item()) && (props.item().when || props.item().deadline)) ||
               (canPinToFocus() && focused()) ||
+              assignee() ||
               rowStamp())
           }
         >
@@ -542,6 +555,11 @@ export function Row(props: {
             </Show>
             <Show when={isOpen(props.item()) && props.item().deadline}>
               {(d) => <DeadlineBadge deadline={d()} />}
+            </Show>
+            <Show when={assignee()}>
+              {(a) => (
+                <Avatar accountId={a().accountId} email={a().email} title={assigneeTitle(a())} />
+              )}
             </Show>
             <Show when={rowStamp()}>
               {(ts) => (
@@ -604,6 +622,11 @@ export function Row(props: {
               }
             >
               {(p) => <PlaceBadge place={p()} />}
+            </Show>
+            <Show when={!props.deadlineInFooter && assignee()}>
+              {(a) => (
+                <Avatar accountId={a().accountId} email={a().email} title={assigneeTitle(a())} />
+              )}
             </Show>
             <Show when={stateBadge()}>
               {(label) => <span class="badge row-state">{label()}</span>}

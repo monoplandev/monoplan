@@ -431,6 +431,10 @@ pub struct SetArgs {
     /// Deadline, `YYYY-MM-DD`; `-` clears.
     #[arg(long, group = "field", value_name = "DATE|-")]
     pub deadline: Option<String>,
+    /// Assign to one member of the workspace by account id (`share
+    /// members` lists them), or `me`; `-` unassigns.
+    #[arg(long, group = "field", value_name = "ACCOUNT|me|-")]
+    pub assign: Option<String>,
     /// Place label; `-` clears. A bare label that matches a known place takes that place whole.
     #[arg(long, group = "field", value_name = "LABEL|-")]
     pub place: Option<String>,
@@ -494,6 +498,15 @@ pub fn set(cx: &Ctx, args: SetArgs, out: &mut dyn Write) -> anyhow::Result<()> {
     }
     if let Some(deadline) = &args.deadline {
         write::set_deadline(cx, id, clear_or(deadline))?;
+    }
+    if let Some(assign) = &args.assign {
+        let who = match clear_or(assign) {
+            Some("me") => Some(cx.doc.author().ok_or_else(|| {
+                anyhow::anyhow!("--assign me needs an account: this profile has none")
+            })?),
+            other => other,
+        };
+        write::set_assignee(cx, id, who)?;
     }
     if let Some(label) = &args.place {
         // --coords / --address / --new-place write exactly what was
@@ -634,6 +647,7 @@ mod tests {
             task: false,
             duration: None,
             deadline: None,
+            assign: None,
             place: None,
             coords: None,
             address: None,
@@ -641,6 +655,37 @@ mod tests {
             star: None,
             unstar: false,
         }
+    }
+
+    #[test]
+    fn set_assigns_by_account_id_and_me_and_unassigns_with_a_dash() {
+        let mut doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "call the plumber").unwrap();
+        let assign = |doc: &Doc, who: &str| {
+            set(
+                &Ctx::bare(doc, &[doc], &Lens::home(doc)),
+                SetArgs {
+                    assign: Some(who.into()),
+                    ..set_args(&id)
+                },
+                &mut Vec::new(),
+            )
+        };
+        assign(&doc, "acct-other").unwrap();
+        assert_eq!(
+            doc.get_item(&id).unwrap().assignee.as_deref(),
+            Some("acct-other")
+        );
+        // `me` is the profile's account; a profile without one refuses.
+        assert!(assign(&doc, "me").is_err());
+        doc.set_author(Some("acct-me"));
+        assign(&doc, "me").unwrap();
+        assert_eq!(
+            doc.get_item(&id).unwrap().assignee.as_deref(),
+            Some("acct-me")
+        );
+        assign(&doc, "-").unwrap();
+        assert_eq!(doc.get_item(&id).unwrap().assignee, None);
     }
 
     #[test]
@@ -1076,6 +1121,7 @@ mod tests {
             place: None,
             created_at: 0,
             created_by: None,
+            assignee: None,
             started_at: None,
             done_at: None,
             binned_at: None,

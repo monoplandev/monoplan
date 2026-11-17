@@ -99,6 +99,7 @@ import {
 import { Upcoming, type UpcomingImperative } from "./Upcoming.tsx";
 import { useSession } from "./SessionContext.tsx";
 import { createMemberDirectory } from "./sync/members.ts";
+import type { Assignment } from "./AssigneeField.tsx";
 import type { PresentAccount } from "./sync/runtime.ts";
 import type { DocsLayer } from "./sync/docs.ts";
 import {
@@ -934,6 +935,32 @@ export function Workspace(props: {
     const who = item.createdBy;
     if (!who || item.docId === docs.homeDocId) return null;
     return { accountId: who, email: members.emailOf(item.docId, who) ?? null };
+  };
+  // Assignment (`spec/sharing-plan.md` §Assignment) is a shared-doc
+  // thing: Home is one person, so nothing is shown or offered there.
+  const assigneeOf = (item: ItemView): { accountId: string; email: string | null } | null => {
+    const who = item.assignee;
+    if (!who || item.docId === docs.homeDocId) return null;
+    return { accountId: who, email: members.emailOf(item.docId, who) ?? null };
+  };
+  // What the task surface's assignee control offers: the doc's members,
+  // oneself first. Null (no control) on Home, and on a workspace known
+  // to have one member unless the item is already assigned, so a stale
+  // assignment can still be seen and cleared.
+  const assignmentOf = (item: ItemView): Assignment | null => {
+    if (item.docId === docs.homeDocId) return null;
+    const assignee = assigneeOf(item);
+    if (assignee === null && members.countOf(item.docId) === 1) return null;
+    const me = session.session().anonymous ? null : session.session().accountId;
+    const people = members.listOf(item.docId);
+    return {
+      people: [
+        ...people.filter((p) => p.accountId === me),
+        ...people.filter((p) => p.accountId !== me),
+      ],
+      assignee,
+      me,
+    };
   };
 
   // The list an item is filed under in its doc, for writes that need a
@@ -1834,8 +1861,10 @@ export function Workspace(props: {
       event?: boolean;
       duration?: number;
       place?: Place;
+      assignee?: string;
     },
   ): void => {
+    if (src.assignee) target.setItemAssignee(id, src.assignee);
     if (src.notes) target.setItemNotes(id, src.notes);
     if (src.deadline) target.setItemDeadline(id, src.deadline);
     if (src.when) target.setItemWhen(id, src.when);
@@ -3161,6 +3190,7 @@ export function Workspace(props: {
         {(tApp) => (
       <TaskDialog
         creatorOf={creatorOf}
+        assignmentOf={assignmentOf}
         itemId={shownItemId}
         setItemId={setOpenItemId}
         newItem={newItemTarget}
@@ -3746,6 +3776,7 @@ export function Workspace(props: {
                         }}
                         listLabel={listLabel}
                         isSharedDoc={(docId) => docId !== docs.homeDocId}
+                        assigneeOf={assigneeOf}
                         showState={() => {
                           const v = view();
                           return v.kind === "list" && showState(v.id);
@@ -3774,6 +3805,7 @@ export function Workspace(props: {
               listId={boardListId()!}
               onOpen={(id) => setOpenItemId(id)}
               onReveal={revealItemIn}
+              assigneeOf={assigneeOf}
               onMoveToList={openMovePalette}
               openOnTap={openOnTap}
               duplicateBlock={duplicateBlock}

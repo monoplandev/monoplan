@@ -50,6 +50,12 @@ struct ItemPanel: View {
     let setWhen: (ItemInfo, String?, DurationChange) -> Void
     /// The item was marked an event, or a task again.
     let setEvent: (ItemInfo, Bool) -> Void
+    /// Who the item can be assigned to; nil on Home, which has no
+    /// assignee row.
+    let assignment: PanelAssignment?
+    /// The item was assigned to a member (their account id), or
+    /// unassigned (nil).
+    let setAssignee: (ItemInfo, String?) -> Void
     /// The item's length was set, in minutes, or taken off (nil).
     let setDuration: (ItemInfo, Int?) -> Void
 
@@ -103,6 +109,12 @@ struct ItemPanel: View {
             // Its list floats over every row under it, the date and
             // place fields' included.
             .zIndex(3)
+            if let assignment, assignment.others || item.item.assignee != nil {
+                AssigneeField(
+                    assignee: item.item.assignee, assignment: assignment,
+                    locked: item.item.binnedAt != nil
+                ) { setAssignee(item, $0) }
+            }
             // The list, the date rows and the place are set apart: a
             // rule between each, with 16 pt between it and a row's
             // text (the stack's 4, 4 more, and the 8 inside a box).
@@ -429,6 +441,63 @@ struct PanelGlyph: View {
     var body: some View {
         NavIcon(image: image, size: size)
             .alignmentGuide(.firstTextBaseline) { $0[.bottom] - size * 0.2 }
+    }
+}
+
+/// What the assignee row needs of the item's workspace: whether anyone
+/// else is in it, and its members when the list is known (nil while it
+/// is loading or the server cannot be reached).
+struct PanelAssignment {
+    let others: Bool
+    let members: [WorkspaceMember]?
+}
+
+/// Who the item is assigned to, on a shared workspace
+/// (spec/sharing-plan.md "Assignment"): the assignee's email, or a muted
+/// "Assign", and a click offers the workspace's members and
+/// "Unassigned". One assignee, so a pick replaces the last. An assignee
+/// the member list does not hold is a former member; while the list is
+/// not known the row says only that there is one. Display first, as the
+/// other rows: the box fills under the pointer only.
+private struct AssigneeField: View {
+    let assignee: String?
+    let assignment: PanelAssignment
+    /// A binned item: shown, not offered.
+    let locked: Bool
+    let set: (String?) -> Void
+
+    private var name: String? {
+        guard let assignee else { return nil }
+        if let member = assignment.members?.first(where: { $0.accountId == assignee }) { return member.email }
+        return assignment.members == nil ? String(localized: "Assigned") : String(localized: "A former member")
+    }
+
+    var body: some View {
+        let row = PanelField(text: name ?? String(localized: "Assign"), empty: assignee == nil) {
+            Image(systemName: "person")
+        }
+        if locked {
+            row
+        } else {
+            Menu {
+                Picker("Assignee", selection: Binding(get: { assignee ?? "" }, set: { set($0.isEmpty ? nil : $0) })) {
+                    Text("Unassigned").tag("")
+                    ForEach(assignment.members ?? [], id: \.accountId) { member in
+                        Text(verbatim: member.email).tag(member.accountId)
+                    }
+                    if let assignee, let name, assignment.members?.contains(where: { $0.accountId == assignee }) != true {
+                        Text(verbatim: name).tag(assignee)
+                    }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } label: {
+                row
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+        }
     }
 }
 
