@@ -476,6 +476,17 @@ final class AppModel: ObservableObject {
         writeMany { try $0.starItems(items: items) }
     }
 
+    /// Unstar a selection. There is no call for many, so each is
+    /// unstarred in turn (`Engine.setStarred`) inside the one call.
+    func unstarItems(_ refs: [ItemRef]) {
+        let items = refs.map { (selector($0.docId), $0.itemId) }
+        writeMany {
+            for (workspace, id) in items {
+                try $0.setStarred(workspace: workspace, id: id, starred: false)
+            }
+        }
+    }
+
     /// A write to several items, then everything that lists items
     /// reread.
     private func writeMany(_ body: @escaping (MonoplanCore.Engine) throws -> Void) {

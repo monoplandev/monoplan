@@ -39,7 +39,8 @@
 // fingers dragged down pick a run, and the bottom bar gives way to a
 // toolbar that moves the picked rows to another list of the workspace,
 // stars them, or bins them (asked first), each as one undo step. Done
-// at the top right, or any of those, ends it.
+// at the top right, or any of those, ends it. Starred selects the same
+// way (`StarredView`).
 // Archived lists and the reserved `events` list (calendar-only,
 // spec/events-plan.md) are left out.
 
@@ -205,8 +206,8 @@ struct HomeView: View {
     @State private var showSignIn = false
     /// The Map page is up: its sheet stands where the bottom bar does.
     @State private var mapShown = false
-    /// The list page is selecting rows: its toolbar stands where the
-    /// bottom bar does.
+    /// The list page, or Starred, is selecting rows: its toolbar
+    /// stands where the bottom bar does.
     @State private var selectingItems = false
     /// The new-list popover is up.
     @State private var showNewList = false
@@ -448,7 +449,7 @@ struct HomeView: View {
             }
             .navigationDestination(for: HomePage.self) { page in
                 switch page {
-                case .starred: StarredView()
+                case .starred: StarredView(selecting: $selectingItems)
                 case .agenda: AgendaView()
                 case .map:
                     PlacesMapView(homePath: $path)
