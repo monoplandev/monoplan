@@ -54,7 +54,8 @@ final class AppModel: ObservableObject {
     /// its cross-workspace entries resolved.
     @Published private(set) var starred: [StarredItem] = []
     @Published private(set) var starredError: String?
-    /// The Open items that carry a place, every workspace
+    /// The Open items that carry a place, every workspace, and the
+    /// closed ones too when the Map page's filter asks for them
     /// (`Engine.placedItems`): what the Map page shows. Read while that
     /// page is up.
     @Published private(set) var placed: [LocatedItem] = []
@@ -1004,9 +1005,10 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// `Engine.placedItems`.
-    func refreshPlaced() {
-        read({ try $0.placedItems() }) { [weak self] rows, error in
+    /// `Engine.placedItems`: the Open items, and with `closed` the
+    /// closed ones as well.
+    func refreshPlaced(closed: Bool) {
+        read({ try $0.placedItems(closed: closed) }) { [weak self] rows, error in
             if let rows { self?.placed = rows }
             self?.placedError = error
         }

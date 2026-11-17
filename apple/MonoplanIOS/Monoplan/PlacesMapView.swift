@@ -1,8 +1,12 @@
 // The Map page, pushed from Home, with no title or bar surface over
-// the map, only the back button: the Open items that carry a place
-// with coordinates (`places --items`, every workspace, events
-// included), one marker per spot, over a sheet that stays up for as
-// long as the page does. The sheet lists the items nearest first: from
+// the map, only the back button and a filter button: the Open items
+// that carry a place with coordinates (`places --items`, every
+// workspace, events included), one marker per spot, over a sheet that
+// stays up for as long as the page does. The filter (top right) is a
+// menu of two ticks, Open and Closed: Open alone to start with, on
+// every visit; Closed adds the Done and Cancelled items (never the
+// binned) and the events that have gone by, their markers grey where
+// a spot has nothing open. The sheet lists the items nearest first: from
 // where the phone is when location is allowed, else from the middle of
 // the map; it has a search field (item text, place label, address) and
 // three heights (a strip, half, full), and the map behind it stays
@@ -68,6 +72,29 @@ final class LocationSource: NSObject, ObservableObject, CLLocationManagerDelegat
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
 }
 
+extension LocatedItem {
+    /// Closed as the Map page's filter has it: Done or Cancelled, or
+    /// an event that has gone by (its whole span ended before today,
+    /// the agenda's rule for a `when` that is over).
+    var isClosedOnMap: Bool { item.state.isClosed || hasGoneBy }
+
+    /// An event whose last day is before today.
+    var hasGoneBy: Bool {
+        guard item.event, let when = item.when,
+            let first = WhenText.date(String(when.prefix(10)))
+        else { return false }
+        let length = max(0, Int(item.duration ?? 0))
+        // Days past the first that the span reaches: a timed one up
+        // to the day its end falls on (an end at midnight belongs to
+        // the day before), an all-day one its whole days.
+        let extra = when.count >= 16
+            ? (length > 0 ? (ItemDateEditor.startClock(when) + length - 1) / 1440 : 0)
+            : max(1, length / 1440) - 1
+        let last = WhenText.calendar.date(byAdding: .day, value: extra, to: first) ?? first
+        return WhenText.day(last) < WhenText.today()
+    }
+}
+
 /// An item that can be pinned: its place has coordinates.
 private struct Pinned: Equatable {
     let item: LocatedItem
@@ -98,6 +125,10 @@ private struct Spot: Identifiable {
     let label: String
     let coordinate: CLLocationCoordinate2D
     let count: Int
+    /// Nothing open here: every item at the spot is closed.
+    let allClosed: Bool
+    /// Grey with nothing open, else red, a marker's own colour.
+    var tint: Color { allClosed ? .gray : .red }
 }
 
 struct PlacesMapView: View {
@@ -118,13 +149,27 @@ struct PlacesMapView: View {
     /// The item page pushed in the sheet, if one is.
     @State private var path: [ItemRef] = []
     @State private var query = ""
+    /// The filter: which items show, by whether they are open or
+    /// closed. Open alone on every visit.
+    @State private var showOpen = true
+    @State private var showClosed = false
     @FocusState private var searching: Bool
     /// Ties the controls drawn over the map to it.
     @Namespace private var mapScope
 
     private static let strip = PresentationDetent.height(120)
 
-    private var pinned: [Pinned] { model.placed.compactMap(Pinned.init) }
+    /// The filter's pick of what the model read (which holds closed
+    /// items only while the filter asks for them, give or take a read
+    /// in flight).
+    private var placed: [LocatedItem] {
+        model.placed.filter { $0.isClosedOnMap ? showClosed : showOpen }
+    }
+
+    private var pinned: [Pinned] { placed.compactMap(Pinned.init) }
+
+    /// Not the filter a visit starts with.
+    private var filtered: Bool { !showOpen || showClosed }
 
     private var spots: [Spot] {
         var order: [String] = []
@@ -135,7 +180,9 @@ struct PlacesMapView: View {
         }
         return order.compactMap { id in
             guard let pins = bySpot[id], let first = pins.first else { return nil }
-            return Spot(id: id, label: first.place.label, coordinate: first.coordinate, count: pins.count)
+            return Spot(
+                id: id, label: first.place.label, coordinate: first.coordinate, count: pins.count,
+                allClosed: pins.allSatisfy { $0.item.isClosedOnMap })
         }
     }
 
@@ -161,7 +208,7 @@ struct PlacesMapView: View {
     }
 
     /// Items with a place that has no coordinates.
-    private var unpinned: Int { model.placed.count - pinned.count }
+    private var unpinned: Int { placed.count - pinned.count }
 
     var body: some View {
         GeometryReader { geo in
@@ -173,13 +220,7 @@ struct PlacesMapView: View {
             Map(position: $camera, selection: $spot, scope: mapScope) {
                 UserAnnotation()
                 ForEach(spots) { spot in
-                    if spot.count > 1 {
-                        Marker(spot.label, monogram: Text("\(spot.count)"), coordinate: spot.coordinate)
-                            .tag(spot.id)
-                    } else {
-                        Marker(spot.label, coordinate: spot.coordinate)
-                            .tag(spot.id)
-                    }
+                    marker(spot)
                 }
             }
             // The map's own controls would sit under the status bar
@@ -215,9 +256,12 @@ struct PlacesMapView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { filterMenu }
+        }
         .sheet(isPresented: $sheetUp) { sheet }
         .onAppear {
-            model.refreshPlaced()
+            model.refreshPlaced(closed: showClosed)
             location.start()
             sheetUp = true
         }
@@ -225,11 +269,45 @@ struct PlacesMapView: View {
             sheetUp = false
             location.stop()
         }
-        .onChange(of: model.changeCount) { model.refreshPlaced() }
+        .onChange(of: model.changeCount) { model.refreshPlaced(closed: showClosed) }
+        .onChange(of: showClosed) { model.refreshPlaced(closed: showClosed) }
+        // A picked spot the filter has emptied is no longer on the map.
+        .onChange(of: spots.map(\.id)) {
+            if let spot, !spots.contains(where: { $0.id == spot }) { self.spot = nil }
+        }
         // The sheet is over the whole screen and cannot slide away
         // with the page, so it goes down as the pop starts instead of
         // staying up until the page has gone (`onDisappear`).
         .onChange(of: homePath.isEmpty) { if homePath.isEmpty { sheetUp = false } }
+    }
+
+    /// A spot's marker: its count on it when it holds several items.
+    @MapContentBuilder
+    private func marker(_ spot: Spot) -> some MapContent {
+        if spot.count > 1 {
+            Marker(spot.label, monogram: Text("\(spot.count)"), coordinate: spot.coordinate)
+                .tint(spot.tint)
+                .tag(spot.id)
+        } else {
+            Marker(spot.label, coordinate: spot.coordinate)
+                .tint(spot.tint)
+                .tag(spot.id)
+        }
+    }
+
+    /// The filter button: a menu of two ticks that stays open while
+    /// they are set. Filled while it is not the filter a visit starts
+    /// with.
+    private var filterMenu: some View {
+        Menu {
+            Toggle("Open", isOn: $showOpen)
+            Toggle("Closed", isOn: $showClosed)
+        } label: {
+            Image(systemName: filtered
+                ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease")
+        }
+        .menuActionDismissBehavior(.disabled)
+        .accessibilityLabel("Filter")
     }
 
     private var sheet: some View {
@@ -328,7 +406,10 @@ struct PlacesMapView: View {
         } else {
             ContentUnavailableView(
                 "Nothing on the map", systemImage: "map",
-                description: Text("Open items with a place show here, nearest first."))
+                description: Text(
+                    filtered
+                        ? String(localized: "No items with a place match the filter.")
+                        : String(localized: "Open items with a place show here, nearest first.")))
         }
     }
 
@@ -358,6 +439,9 @@ private struct PlacedRowView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(pin.item.text)
                 .itemTextSlot()
+                // A gone-by event was not done: muted, not struck.
+                .strikethrough(pin.item.item.state.isClosed)
+                .foregroundStyle(closed ? .secondary : .primary)
             Text(note)
                 .lineLimit(1)
                 .font(.caption)
@@ -372,6 +456,8 @@ private struct PlacedRowView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
     }
+
+    private var closed: Bool { pin.item.isClosedOnMap }
 
     private var note: String {
         var parts: [String] = []

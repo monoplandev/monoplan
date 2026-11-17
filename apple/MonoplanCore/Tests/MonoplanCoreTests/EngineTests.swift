@@ -216,7 +216,7 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(dated.rows.first?.docId, home)
         let json = try await calls.run { try $0.agendaJson(days: 36_500) }
         XCTAssertTrue(json.contains("\"day\":\"2030-01-04\""))
-        let placed = try await calls.run { try $0.placedItems() }
+        let placed = try await calls.run { try $0.placedItems(closed: false) }
         XCTAssertEqual(Set(placed.map(\.item.id)), [id, other])
         let hits = try await calls.run { try $0.find(query: "swee", limit: 10) }
         XCTAssertEqual(hits.first?.id, id)

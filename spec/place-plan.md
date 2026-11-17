@@ -258,8 +258,19 @@ lists the pinned items nearest first, searchable, and opens an item's
 page in place. Distance is from the phone's location (Core Location,
 when-in-use, computed on the device, never sent) or, without
 permission, from the middle of the map. Items whose place has no
-coordinates are counted, not pinned. Map tiles come from Apple. Not
-built: narrowing the list to the visible region, ticking from the
+coordinates are counted, not pinned. Map tiles come from Apple.
+
+A filter button at the top right (built 2026-11-17) is a menu of two
+ticks, Open and Closed. Open alone is the default, on every visit;
+Closed adds the Done and Cancelled items (never the binned), read with
+`places --items --closed` (`Engine.placed_items(closed)`). An event
+that has gone by (its whole span ended before today, the agenda's rule)
+counts as closed here too, though its state is still open: the page
+sorts it, the engine call does not. A Done or Cancelled row's text is
+struck through, a gone-by event's is only muted, and a marker with
+nothing open at it is grey.
+
+Not built: narrowing the list to the visible region, ticking from the
 list, a tasks / events filter.
 
 ## Deferred, with their extension points

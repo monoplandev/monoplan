@@ -445,7 +445,7 @@ async fn typed_reads_that_span_workspaces_tag_their_rows() {
             })
             .unwrap();
         let placed = c
-            .call_blocking(None, |cx| api::places::placed_items(cx, "", 0))
+            .call_blocking(None, |cx| api::places::placed_items(cx, "", 0, false))
             .unwrap();
         let hits = c
             .call_blocking(None, |cx| api::find::find(cx, "lif", 10))

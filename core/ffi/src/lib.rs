@@ -1201,11 +1201,12 @@ impl Engine {
         })?)
     }
 
-    /// The Open items that carry a place, every workspace.
-    pub fn placed_items(&self) -> Result<Vec<LocatedItem>, EngineError> {
+    /// The Open items that carry a place, every workspace; with
+    /// `closed`, the closed ones (not binned) too.
+    pub fn placed_items(&self, closed: bool) -> Result<Vec<LocatedItem>, EngineError> {
         Ok(self
             .client
-            .call_blocking(None, |cx| api::places::placed_items(cx, "", 0))?)
+            .call_blocking(None, move |cx| api::places::placed_items(cx, "", 0, closed))?)
     }
 
     /// Done across every workspace that `filter` admits (an empty

@@ -248,6 +248,10 @@ pub struct PlacesArgs {
     #[arg(long)]
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub items: bool,
+    /// With `--items`, the closed items (Done, Cancelled) too.
+    #[arg(long, requires = "items")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub closed: bool,
 }
 
 /// `places`: the account's known places (`api::places::places`), or
@@ -279,9 +283,12 @@ fn placed_items(
     out: &mut dyn Write,
 ) -> anyhow::Result<()> {
     if args.json {
-        return write_json(out, &api::places::placed_items(cx, query, args.limit)?);
+        return write_json(
+            out,
+            &api::places::placed_items(cx, query, args.limit, args.closed)?,
+        );
     }
-    for (tag, item, _) in &api::places::placed_item_views(cx, query, args.limit) {
+    for (tag, item, _) in &api::places::placed_item_views(cx, query, args.limit, args.closed) {
         let doc = tag
             .map(|c| format!("  [{}]", c.name.as_deref().unwrap_or(HOME_LABEL)))
             .unwrap_or_default();
@@ -674,6 +681,7 @@ mod tests {
                     limit: 0,
                     json: true,
                     items: false,
+                    closed: false,
                 },
                 &mut out,
             )
@@ -747,7 +755,7 @@ mod tests {
             workspaces: &tagged,
             home: Some(home_tag.doc_id),
         };
-        let run = |query: Option<&str>| {
+        let run_with = |query: Option<&str>, closed: bool| {
             let mut out = Vec::new();
             places(
                 &cx,
@@ -756,12 +764,14 @@ mod tests {
                     limit: 0,
                     json: true,
                     items: true,
+                    closed,
                 },
                 &mut out,
             )
             .unwrap();
             serde_json::from_slice::<serde_json::Value>(&out).unwrap()
         };
+        let run = |query: Option<&str>| run_with(query, false);
         let all = run(None);
         let rows = all.as_array().unwrap();
         assert_eq!(rows.len(), 2);
@@ -777,6 +787,16 @@ mod tests {
         let office = run(Some("off"));
         assert_eq!(office.as_array().unwrap().len(), 1);
         assert_eq!(office[0]["id"], standup.as_str());
+
+        // `--closed` adds the done one, never the binned one.
+        let with_closed = run_with(None, true);
+        let ids: Vec<_> = with_closed
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["id"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(ids, [gym.clone(), done.clone(), standup.clone()]);
     }
 
     #[test]

@@ -536,6 +536,17 @@
         }
       }
     },
+    "Closed" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cerrados"
+          }
+        }
+      }
+    },
     "Completed %@" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1846,6 +1857,17 @@
         }
       }
     },
+    "No items with a place match the filter." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ningún elemento con un lugar coincide con el filtro."
+          }
+        }
+      }
+    },
     "No lists match" : {
       "localizations" : {
         "es" : {
@@ -2052,6 +2074,17 @@
         }
       }
     },
+    "Open" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abiertos"
+          }
+        }
+      }
+    },
     "Open docs" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2074,6 +2107,7 @@
       }
     },
     "Open items with a place show here, nearest first." : {
+      "extractionState" : "stale",
       "localizations" : {
         "es" : {
           "stringUnit" : {

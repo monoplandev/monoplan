@@ -63,19 +63,26 @@ pub struct LocatedItem {
 pub type PlacedView<'a> = (Option<&'a Candidate>, ItemView, Option<String>);
 
 /// The Open items (not closed, not binned) that carry a place, over
-/// every open doc, each doc's in its own item order; `query` keeps
-/// those whose place matches, as for the places themselves, and
+/// every open doc, each doc's in its own item order; with `closed`,
+/// the closed ones (Done or Cancelled) too, never the binned. `query`
+/// keeps those whose place matches, as for the places themselves, and
 /// `limit` caps the rows (0 is no limit). A place without coordinates
 /// counts: what can be pinned is the reader's question. The core
 /// views, for a caller that renders more than the row carries;
 /// [`placed_items`] is the rows.
-pub fn placed_item_views<'a>(cx: &Ctx<'a>, query: &str, limit: usize) -> Vec<PlacedView<'a>> {
+pub fn placed_item_views<'a>(
+    cx: &Ctx<'a>,
+    query: &str,
+    limit: usize,
+    closed: bool,
+) -> Vec<PlacedView<'a>> {
     let mut rows = Vec::new();
     for (tag, doc) in cx.sources() {
         let names = ListNames::of(doc);
         for item in doc.all_items() {
             let placed = item.place.as_ref().is_some_and(|p| place_matches(p, query));
-            if !item.is_open() || !placed {
+            let wanted = item.is_open() || (closed && !item.is_binned());
+            if !wanted || !placed {
                 continue;
             }
             let list_name = names.of_item(&item);
@@ -89,8 +96,13 @@ pub fn placed_item_views<'a>(cx: &Ctx<'a>, query: &str, limit: usize) -> Vec<Pla
 }
 
 /// [`placed_item_views`] as rows. What the iOS map reads.
-pub fn placed_items(cx: &Ctx, query: &str, limit: usize) -> anyhow::Result<Vec<LocatedItem>> {
-    Ok(placed_item_views(cx, query, limit)
+pub fn placed_items(
+    cx: &Ctx,
+    query: &str,
+    limit: usize,
+    closed: bool,
+) -> anyhow::Result<Vec<LocatedItem>> {
+    Ok(placed_item_views(cx, query, limit, closed)
         .iter()
         .map(|(tag, item, list_name)| {
             let (doc_id, doc_name) = doc_tag(*tag);
