@@ -164,24 +164,43 @@ body {
   grid-template-columns: var(--nav-width, 260px) 1fr;
   grid-template-rows: 1fr;
   height: 100%;
+  /* The side panel's column: the dragged width (`--panel-width`,
+     panelWidth.ts), given back on a narrow window so the main surface
+     keeps 360px, down to the panel's own 260px minimum. The percentage
+     is the app's width in both places this is used (the grid track and
+     the resizer's `right`). */
+  --panel-col: min(
+    var(--panel-width, 300px),
+    max(260px, calc(100% - var(--nav-width, 260px) - 360px))
+  );
 }
 
 /* Drag handle over the nav's right edge (Workspace.tsx sets
    `--nav-width`, navWidth.ts bounds and stores it). Out of the grid's
    flow so it takes no column; a few px either side of the hairline so
    it's easy to hit, with only a thin line drawn, on hover or mid-drag. */
-.nav-resizer {
+.nav-resizer,
+.panel-resizer {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: calc(var(--nav-width, 260px) - 4px);
   width: 8px;
   z-index: 20;
   cursor: col-resize;
   touch-action: none;
 }
 
-.nav-resizer::after {
+.nav-resizer {
+  left: calc(var(--nav-width, 260px) - 4px);
+}
+
+/* The same handle over the side panel's left edge. */
+.panel-resizer {
+  right: calc(var(--panel-col) - 4px);
+}
+
+.nav-resizer::after,
+.panel-resizer::after {
   content: "";
   position: absolute;
   top: 0;
@@ -193,12 +212,14 @@ body {
   transition: opacity 0.12s ease;
 }
 
-.nav-resizer:hover::after {
+.nav-resizer:hover::after,
+.panel-resizer:hover::after {
   opacity: 1;
   transition-delay: 0.15s;
 }
 
-.nav-resizer-active::after {
+.nav-resizer-active::after,
+.panel-resizer-active::after {
   opacity: 1;
 }
 
@@ -246,7 +267,7 @@ body {
    of the main surface. The panel hosts the open task surface (`.task-panel`, portaled
    into `.side-panel-task`); idle, it sits blank. */
 .app.side-panel-open {
-  grid-template-columns: var(--nav-width, 260px) 1fr 300px;
+  grid-template-columns: var(--nav-width, 260px) 1fr var(--panel-col);
 }
 
 /* The column carries the surface frame (hairline left edge against the
@@ -1651,7 +1672,7 @@ input.task-check:hover {
 
 @media (min-width: 920px) {
   .app.splash {
-    grid-template-columns: var(--nav-width, 260px) 1fr 300px;
+    grid-template-columns: var(--nav-width, 260px) 1fr var(--panel-col);
   }
 
   .splash .side-panel {

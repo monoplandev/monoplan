@@ -5,6 +5,7 @@
 // the same lines when it replaces this.
 import { useAppI18n } from "./i18n.tsx";
 import { loadNavWidth } from "./navWidth.ts";
+import { loadPanelWidth } from "./panelWidth.ts";
 
 export function Splash() {
   const { m } = useAppI18n();
@@ -13,7 +14,10 @@ export function Splash() {
       class="app splash"
       role="status"
       aria-label={m().common.loading}
-      style={{ "--nav-width": `${loadNavWidth()}px` }}
+      style={{
+        "--nav-width": `${loadNavWidth()}px`,
+        "--panel-width": `${loadPanelWidth()}px`,
+      }}
     >
       <div class="nav" />
       <div class="content" />

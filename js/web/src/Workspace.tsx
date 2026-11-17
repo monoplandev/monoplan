@@ -126,6 +126,14 @@ import {
   loadNavWidth,
   saveNavWidth,
 } from "./navWidth.ts";
+import {
+  PANEL_WIDTH_DEFAULT,
+  PANEL_WIDTH_MAX,
+  PANEL_WIDTH_MIN,
+  clampPanelWidth,
+  loadPanelWidth,
+  savePanelWidth,
+} from "./panelWidth.ts";
 import { namesItem, parseHash, stateHash, type Route } from "./url.ts";
 import {
   encodeView,
@@ -3048,14 +3056,75 @@ export function Workspace(props: {
     saveNavWidth(NAV_WIDTH_DEFAULT);
   };
 
+  // Side panel width: the same drag on the panel's left edge
+  // (panelWidth.ts), so travel to the left widens it. A narrow window
+  // caps the column below the stored width (`--panel-col` in styles.css);
+  // the drag starts from the width on screen so the edge follows the
+  // pointer from the first pixel.
+  const [panelWidth, setPanelWidth] = createSignal(loadPanelWidth());
+  const [panelResizing, setPanelResizing] = createSignal(false);
+  let panelEl: HTMLElement | undefined;
+  let panelDrag: { pointerId: number; startX: number; startWidth: number } | null =
+    null;
+  const onPanelResizeDown = (e: PointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    const shown = panelEl?.getBoundingClientRect().width ?? panelWidth();
+    panelDrag = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startWidth: clampPanelWidth(shown),
+    };
+    setPanelResizing(true);
+  };
+  const onPanelResizeMove = (e: PointerEvent) => {
+    if (!panelDrag || e.pointerId !== panelDrag.pointerId) return;
+    setPanelWidth(
+      clampPanelWidth(panelDrag.startWidth + panelDrag.startX - e.clientX),
+    );
+  };
+  const onPanelResizeEnd = (e: PointerEvent) => {
+    if (!panelDrag || e.pointerId !== panelDrag.pointerId) return;
+    const moved = e.clientX !== panelDrag.startX;
+    panelDrag = null;
+    setPanelResizing(false);
+    // A plain click must not overwrite the stored width with the capped
+    // one a narrow window is showing.
+    if (moved) savePanelWidth(panelWidth());
+  };
+  const onPanelResizeReset = () => {
+    setPanelWidth(PANEL_WIDTH_DEFAULT);
+    savePanelWidth(PANEL_WIDTH_DEFAULT);
+  };
+
   return (
     <div
       class="app"
       classList={{
         "side-panel-open": sidePanelShown(),
       }}
-      style={{ "--nav-width": `${navWidth()}px` }}
+      style={{
+        "--nav-width": `${navWidth()}px`,
+        "--panel-width": `${panelWidth()}px`,
+      }}
     >
+      <Show when={sidePanelShown()}>
+        <div
+          class="panel-resizer"
+          classList={{ "panel-resizer-active": panelResizing() }}
+          role="separator"
+          aria-orientation="vertical"
+          aria-valuemin={PANEL_WIDTH_MIN}
+          aria-valuemax={PANEL_WIDTH_MAX}
+          aria-valuenow={panelWidth()}
+          onPointerDown={onPanelResizeDown}
+          onPointerMove={onPanelResizeMove}
+          onPointerUp={onPanelResizeEnd}
+          onPointerCancel={onPanelResizeEnd}
+          onDblClick={onPanelResizeReset}
+        />
+      </Show>
       <div
         class="nav-resizer"
         classList={{ "nav-resizer-active": navResizing() }}
@@ -3846,6 +3915,7 @@ export function Workspace(props: {
           class="side-panel"
           aria-label={m().sidePanel.title}
           ref={(el) => {
+            panelEl = el;
             // Capture phase (see `onPanePointerDown`); Solid's `on:` is
             // bubble-only. The listener goes with the element, which the
             // enclosing Show remounts with the pane.
