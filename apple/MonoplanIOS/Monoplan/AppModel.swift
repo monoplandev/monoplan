@@ -243,13 +243,14 @@ final class AppModel: ObservableObject {
     func showedCaptured() { captured = nil }
 
     /// Capture: create an item at the top of `list` (an Inbox's at
-    /// the end of its queue, whatever is asked), in Backlog
-    /// (`Engine.addItem`), then reread what is on screen as
-    /// `setDone` does. `done` gets the new item, or why there is none;
+    /// the end of its queue, whatever is asked) (`Engine.addItem`),
+    /// then reread what is on screen as `setDone` does. The engine
+    /// creates it in Backlog; any other `state` is a second write
+    /// straight after. `done` gets the new item, or why there is none;
     /// it may be left out by a caller that is going away (a capture
     /// sheet closing over a typed title).
     func addItem(
-        text: String, to list: ListRef, whenSuggested: String? = nil,
+        text: String, to list: ListRef, state: ItemState = .backlog, whenSuggested: String? = nil,
         done: ((ItemRef?, String?) -> Void)? = nil
     ) {
         let workspace = selector(list.docId)
@@ -266,6 +267,7 @@ final class AppModel: ObservableObject {
                 // The date its title named, as a question on the
                 // new item (`WhenSuggest`).
                 if let whenSuggested { setWhenSuggested(ref, when: whenSuggested) }
+                if state != .backlog { setState(ref, state: state) }
                 done?(ref, nil)
             case .failure(let error):
                 let failure = String(localized: "could not add item: \(engineErrorMessage(error))")

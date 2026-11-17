@@ -20,9 +20,12 @@
 // An empty title creates nothing, whichever way the sheet is left.
 // A date phrase in the title ("dentist friday 8:30") is written on the
 // new item as its date suggestion (`WhenPhrase`), answered on its page.
-// The list is the one field held before the item exists: with no title
+// Two fields are held before the item exists. The list: with no title
 // yet, the list field opens the list editor (`ItemListEditor`) over the
-// capture, and the item is created in what was picked.
+// capture, and the item is created in what was picked. And the workflow
+// state: the bar's status menu, which opens without leaving the title,
+// offers the open states (an item is not created already closed), and
+// the item is created in the one picked.
 
 import MonoplanCore
 import MonoplanMacKit
@@ -37,6 +40,9 @@ struct ItemCaptureView: View {
     @FocusState private var focused: Bool
     /// Where the item will be created; the picker changes it.
     @State private var list: ListRef
+    /// The workflow state the item will be created in; the bar's
+    /// status menu changes it.
+    @State private var state: ItemState = .backlog
     /// The item this capture became: the sheet shows its page from
     /// then on.
     @State private var promoted: ItemRef?
@@ -69,6 +75,9 @@ struct ItemCaptureView: View {
         _list = State(initialValue: target.list)
     }
 
+    /// What the status menu offers: the open states, in ladder order.
+    private static let states: [ItemState] = [.backlog, .todo, .inProgress, .review]
+
     private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     /// The title has been left: create the item if it has a title and
@@ -82,10 +91,10 @@ struct ItemCaptureView: View {
         error = nil
         let suggested = WhenPhrase.find(in: title)?.when
         if case .gone = after {
-            model.addItem(text: title, to: list, whenSuggested: suggested)
+            model.addItem(text: title, to: list, state: state, whenSuggested: suggested)
             return
         }
-        model.addItem(text: title, to: list, whenSuggested: suggested) { ref, failure in
+        model.addItem(text: title, to: list, state: state, whenSuggested: suggested) { ref, failure in
             guard let ref else {
                 draft.sent = false
                 error = failure
@@ -162,11 +171,17 @@ struct ItemCaptureView: View {
         }
         .scrollBounceBehavior(.basedOnSize)
         .navigationBarTitleDisplayMode(.inline)
-        // Where the item's status control and its buttons will be.
+        // The item's status control, where it will be: the box is
+        // only drawn (nothing to tick yet), the menu picks the state
+        // the item is created in.
         .toolbar {
             SheetCloseItem { dismiss() }
             ToolbarSpacer(.fixed, placement: .topBarLeading)
-            SheetStatusLabel(state: .backlog, text: String(localized: "New item"))
+            SheetStatusControl {
+                ItemCheckbox(state: .backlog).accessibilityHidden(true)
+            } menu: {
+                ItemStateMenu(states: Self.states, picked: state, label: state.label) { state = $0 }
+            }
         }
         .onAppear { focused = true }
     }

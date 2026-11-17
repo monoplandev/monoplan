@@ -83,10 +83,81 @@ struct SheetCloseItem: ToolbarContent {
     }
 }
 
+/// An item's status control, after the close button: the checkbox and
+/// the workflow state beside it as one glass control with two halves
+/// and a hairline between them, as the Mac's segmented status control
+/// has (UIKit has no segmented control whose segments are a button and
+/// a menu, so the line is drawn here). The item's page puts a checkbox
+/// that ticks in the first half; a capture, with nothing to tick yet,
+/// the drawing alone.
+struct SheetStatusControl<Check: View, StateMenu: View>: ToolbarContent {
+    @ViewBuilder let check: Check
+    @ViewBuilder let menu: StateMenu
+
+    /// The space each side of the hairline, less on the label's side
+    /// because the bar puts a few points of its own around the menu.
+    private let checkGap: CGFloat = 9
+    private let stateGap: CGFloat = 6
+    /// The hairline's height: about the label's line.
+    private let dividerHeight: CGFloat = 18
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            HStack(spacing: 0) {
+                check
+                Divider()
+                    .frame(height: dividerHeight)
+                    .padding(.leading, checkGap)
+                    .padding(.trailing, stateGap)
+                    .accessibilityHidden(true)
+                menu
+            }
+            .padding(.horizontal, 6)
+            .fixedSize()
+        }
+    }
+}
+
+/// A workflow state as a pull-down menu: the picked state ticked, its
+/// name as the label (the web dialog's status badge).
+struct ItemStateMenu: View {
+    let states: [ItemState]
+    let picked: ItemState
+    /// What the label says: the picked state's name, unless the caller
+    /// shows the item's own state under a stand-in pick (an event).
+    let label: String
+    var name: (ItemState) -> String = { $0.label }
+    let pick: (ItemState) -> Void
+
+    var body: some View {
+        Menu {
+            Picker("Status", selection: Binding(
+                get: { picked },
+                set: { if $0 != picked { pick($0) } }
+            )) {
+                ForEach(states, id: \.self) { state in
+                    Text(name(state)).tag(state)
+                }
+            }
+        } label: {
+            // No chevrons after the label: the bar is busy enough.
+            Text(label)
+                .font(.subheadline.weight(.medium))
+                // The bar's full height, for the tap.
+                .frame(minHeight: 36)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .sensoryFeedback(.selection, trigger: label)
+        .accessibilityLabel("Status")
+        .accessibilityValue(label)
+    }
+}
+
 /// A checkbox that does nothing and a word beside it, after the close
-/// button, where an item's status control goes: "New item" on a
-/// capture, "Binned" on a binned item. No glass behind it: it is not a
-/// button.
+/// button, where an item's status control goes: "Binned" on a binned
+/// item, nothing on one that has not loaded. No glass behind it: it is
+/// not a button.
 struct SheetStatusLabel: ToolbarContent {
     let state: ItemState
     let text: String

@@ -309,40 +309,20 @@ struct ItemView: View {
 
     /// The page's navigation bar. At the left, the close button in the
     /// corner on its own glass (where the editors have their cross),
-    /// then the checkbox and the workflow state beside it as one glass
-    /// control with two halves and a hairline between them, as the
-    /// Mac's segmented status control has (UIKit has no segmented
-    /// control whose segments are a button and a menu, so the line is
-    /// drawn here): the checkbox ticks and reopens, the label opens a
-    /// menu of the states (the web dialog's status badge). A binned item just says
-    /// so (the bin masks the state; Restore is the way out), and one
-    /// that has not loaded shows an inert box. At the right, the star
-    /// and the more menu.
-    /// The space each side of the status control's hairline, less on
-    /// the label's side because the bar puts a few points of its own
-    /// around the menu.
-    private static let checkGap: CGFloat = 9
-    private static let stateGap: CGFloat = 6
-    /// The hairline's height: about the label's line.
-    private static let statusDividerHeight: CGFloat = 18
-
+    /// then the status control (`SheetStatusControl`): the checkbox
+    /// ticks and reopens, the label opens a menu of the states. A
+    /// binned item just says so (the bin masks the state; Restore is
+    /// the way out), and one that has not loaded shows an inert box.
+    /// At the right, the star and the more menu.
     @ToolbarContentBuilder
     private var bar: some ToolbarContent {
         SheetCloseItem { dismiss() }
         ToolbarSpacer(.fixed, placement: .topBarLeading)
         if let item, item.binnedAt == nil {
-            ToolbarItem(placement: .topBarLeading) {
-                HStack(spacing: 0) {
-                    ItemCheckButton(ref: ref, state: item.state)
-                    Divider()
-                        .frame(height: Self.statusDividerHeight)
-                        .padding(.leading, Self.checkGap)
-                        .padding(.trailing, Self.stateGap)
-                        .accessibilityHidden(true)
-                    stateMenu(item)
-                }
-                .padding(.horizontal, 6)
-                .fixedSize()
+            SheetStatusControl {
+                ItemCheckButton(ref: ref, state: item.state)
+            } menu: {
+                stateMenu(item)
             }
         } else {
             SheetStatusLabel(state: item?.state ?? .backlog, text: item == nil ? "" : String(localized: "Binned"))
@@ -468,27 +448,12 @@ struct ItemView: View {
     private func stateMenu(_ item: ItemInfo) -> some View {
         let event = item.event
         let picked: ItemState = event && !item.state.isClosed ? .backlog : item.state
-        return Menu {
-            Picker("Status", selection: Binding(
-                get: { picked },
-                set: { if $0 != picked { model.setState(ref, state: $0) } }
-            )) {
-                ForEach(event ? Self.eventStates : Self.taskStates, id: \.self) { state in
-                    Text(Self.statusLabel(state, event: event)).tag(state)
-                }
-            }
-        } label: {
-            // No chevrons after the label: the bar is busy enough.
-            Text(Self.statusLabel(item.state, event: event))
-                .font(.subheadline.weight(.medium))
-                // The bar's full height, for the tap.
-                .frame(minHeight: 36)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .sensoryFeedback(.selection, trigger: item.state)
-        .accessibilityLabel("Status")
-        .accessibilityValue(Self.statusLabel(item.state, event: event))
+        return ItemStateMenu(
+            states: event ? Self.eventStates : Self.taskStates,
+            picked: picked,
+            label: Self.statusLabel(item.state, event: event),
+            name: { Self.statusLabel($0, event: event) },
+            pick: { model.setState(ref, state: $0) })
     }
 
     /// The list editor's rows: the workspace's lists, plus the item's

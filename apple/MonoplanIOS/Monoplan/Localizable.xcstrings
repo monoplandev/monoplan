@@ -1749,17 +1749,6 @@
         }
       }
     },
-    "New item" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Nuevo elemento"
-          }
-        }
-      }
-    },
     "New list" : {
       "extractionState" : "stale",
       "localizations" : {
