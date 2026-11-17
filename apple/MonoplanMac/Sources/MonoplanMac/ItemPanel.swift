@@ -10,8 +10,9 @@
 // Both are toolbar items with the close button, over the panel in the
 // window's bar and on the system's glass, as the iOS page's navigation
 // bar (`MainSplit.swift`).
-// The list row moves the item (`ListField.swift`) and the place row is
-// edited in place (`PlaceField.swift`). No other
+// The list row moves the item (`ListField.swift`); the planned date
+// (`DateField.swift`) and the place (`PlaceField.swift`) are edited in
+// place. No other
 // field editors, no state menu, no bin: those come with the views
 // shared with iOS.
 
@@ -44,6 +45,9 @@ struct ItemPanel: View {
     /// A place was picked for the item, or cleared (nil); `exact` for
     /// a known place, written as it is.
     let setPlace: (ItemInfo, Place?, Bool) -> Void
+    /// A date was picked for the item, or cleared (nil), with what
+    /// becomes of its duration.
+    let setWhen: (ItemInfo, String?, DurationChange) -> Void
 
     var body: some View {
         Group {
@@ -92,34 +96,43 @@ struct ItemPanel: View {
                 pick: { move(item, $0) }, pickAcross: { moveAcross(item, $0, $1) }
             )
             .id(item.item.id)
-            // Its list floats over every row under it, the place
-            // field's included.
-            .zIndex(2)
+            // Its list floats over every row under it, the date and
+            // place fields' included.
+            .zIndex(3)
             // The list, the date rows and the place are set apart: a
             // rule between each, with 16 pt between it and a row's
             // text (the stack's 4, 4 more, and the 8 inside a box).
             PanelRule().padding(.vertical, 4)
-            if let when = item.item.when {
-                // A timed date has its times on a row of their own
-                // under the day, in two columns: when it starts, then
-                // when it ends (a muted "End" while it has no length).
-                let time = Self.timeText(when)
-                PanelField(text: Self.dayText(String(when.prefix(10))), note: time == nil ? Self.lengthText(item) : nil) {
-                    PanelGlyph(image: NavArt.calendar)
+            if item.item.binnedAt == nil {
+                DateField(when: item.item.when, duration: item.item.duration.map(Int.init)) {
+                    setWhen(item, $0, $1)
                 }
-                if let time {
-                    // Each box is outset by its inset, so 4 pt shows
-                    // between the two.
-                    HStack(spacing: PanelBox.inset * 2 + 4) {
-                        PanelField(text: time) { Image(systemName: "clock") }
-                        let end = Self.endTimeText(item)
-                        PanelField(text: end ?? String(localized: "End"), empty: end == nil) {
-                            Image(systemName: "arrow.right")
-                        }
-                    }
+                .id(item.item.id)
+                // Its offers and month float over the rows under it.
+                .zIndex(2)
+            } else if let when = item.item.when {
+                PanelField(
+                    text: Self.dayText(String(when.prefix(10))),
+                    note: Self.timeText(when) == nil ? Self.lengthText(item) : nil
+                ) {
+                    PanelGlyph(image: NavArt.calendar)
                 }
             } else {
                 PanelField(text: String(localized: "Date"), empty: true) { PanelGlyph(image: NavArt.calendar) }
+            }
+            // A timed date has its times on a row of their own under
+            // the day, in two columns: when it starts, then when it
+            // ends (a muted "End" while it has no length).
+            if let time = item.item.when.flatMap(Self.timeText) {
+                // Each box is outset by its inset, so 4 pt shows
+                // between the two.
+                HStack(spacing: PanelBox.inset * 2 + 4) {
+                    PanelField(text: time) { Image(systemName: "clock") }
+                    let end = Self.endTimeText(item)
+                    PanelField(text: end ?? String(localized: "End"), empty: end == nil) {
+                        Image(systemName: "arrow.right")
+                    }
+                }
             }
             if let deadline = item.item.deadline {
                 PanelField(text: String(localized: "Due \(Self.dayText(deadline))")) { Image(systemName: "timer") }

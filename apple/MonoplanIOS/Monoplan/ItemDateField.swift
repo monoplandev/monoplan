@@ -277,9 +277,6 @@ struct ItemDateEditor: View {
                     use(offer.when)
                 } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Image(systemName: "arrow.turn.down.right")
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24)
                         if let name = offer.name {
                             Text(name)
                             Spacer(minLength: 8)

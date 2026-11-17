@@ -2530,6 +2530,56 @@
           }
         }
       }
+    },
+    "Tomorrow": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mañana"
+          }
+        }
+      }
+    },
+    "Remove date": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quitar fecha"
+          }
+        }
+      }
+    },
+    "No date in that yet": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ahí aún no hay una fecha"
+          }
+        }
+      }
+    },
+    "Type a date: fri 3pm": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escribe una fecha: viernes 15:00"
+          }
+        }
+      }
+    },
+    "Changes the date": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cambia la fecha"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

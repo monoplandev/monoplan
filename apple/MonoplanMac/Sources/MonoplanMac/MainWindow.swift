@@ -788,6 +788,12 @@ final class MainWindowModel: ObservableObject {
         write { try $0.setPlace(workspace: workspace, id: id, place: place, exact: exact) }
     }
 
+    /// Set or clear an item's planned date, and its duration in the
+    /// same call (`Engine.setWhen`).
+    func setWhen(workspace: String?, id: String, when: String?, duration: DurationChange) {
+        write { try $0.setWhen(workspace: workspace, id: id, when: when, duration: duration) }
+    }
+
     /// The account's known places matching `query` (all when empty),
     /// most recently used first, as the iOS place editor offers them.
     /// Nothing comes back on failure.
