@@ -132,9 +132,6 @@ export function Upcoming(props: {
   copyBlock: (sourceIds: readonly string[]) => void;
   onReveal?: (id: string, where: "list" | "focus") => void;
   onMoveToList?: (ids: readonly string[]) => void;
-  /** Open the item on its deadline band, calendar showing: the row
-   *  menu's "Set deadline…". */
-  onSetDeadline?: (id: string) => void;
 }) {
   const { m, locale } = useAppI18n();
 
@@ -540,7 +537,6 @@ export function Upcoming(props: {
                     onOpen={props.onOpen}
                     onReveal={props.onReveal}
                     onMoveToList={props.onMoveToList}
-                    onSetDeadline={props.onSetDeadline}
                     listLabel={props.listLabel}
                     onMenuOpenChange={setMenuOpen}
                   >

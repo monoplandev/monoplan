@@ -89,9 +89,6 @@ export function Board(props: {
   /** Row context-menu move-to-list (opens the workspace's move palette).
    *  Forwarded to each card. */
   onMoveToList?: (ids: readonly string[]) => void;
-  /** Open the item on its deadline band, calendar showing: the row
-   *  menu's "Set deadline…". */
-  onSetDeadline?: (id: string) => void;
   openOnTap: () => boolean;
   duplicateBlock: (sourceIds: readonly string[]) => void;
   copyBlock: (sourceIds: readonly string[]) => void;
@@ -662,7 +659,6 @@ export function Board(props: {
             onOpen={props.onOpen}
             onReveal={props.onReveal}
             onMoveToList={props.onMoveToList}
-            onSetDeadline={props.onSetDeadline}
             openOnTap={props.openOnTap}
             duplicateBlock={props.duplicateBlock}
             copyBlock={props.copyBlock}
@@ -688,7 +684,6 @@ export function Board(props: {
           onOpen={props.onOpen}
           onReveal={props.onReveal}
           onMoveToList={props.onMoveToList}
-          onSetDeadline={props.onSetDeadline}
           openOnTap={props.openOnTap}
           duplicateBlock={props.duplicateBlock}
           copyBlock={props.copyBlock}
@@ -713,9 +708,6 @@ function BoardColumn(props: {
   onOpen: (id: string) => void;
   onReveal?: (id: string, where: "list" | "focus") => void;
   onMoveToList?: (ids: readonly string[]) => void;
-  /** Open the item on its deadline band, calendar showing: the row
-   *  menu's "Set deadline…". */
-  onSetDeadline?: (id: string) => void;
   openOnTap: () => boolean;
   duplicateBlock: (sourceIds: readonly string[]) => void;
   copyBlock: (sourceIds: readonly string[]) => void;
@@ -798,7 +790,6 @@ function BoardColumn(props: {
               onOpen={props.onOpen}
               onReveal={props.onReveal}
               onMoveToList={props.onMoveToList}
-              onSetDeadline={props.onSetDeadline}
               openOnTap={props.openOnTap}
               deadlineInFooter
             />

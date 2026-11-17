@@ -2853,7 +2853,7 @@ export function Workspace(props: {
     }
     // Deadlines only matter while an item is open (the row badge and menu
     // entry hide for done rows too). Single item only: the pick happens
-    // in the item's own deadline popover, as the row menu's entry does.
+    // in the item's own deadline popover.
     if (openIds.length === 1) {
       out.push({
         label: `${msgs.deadline.label}: ${msgs.deadline.setDate}`,
@@ -3758,7 +3758,6 @@ export function Workspace(props: {
                         onOpen={(id) => setOpenItemId(id)}
                         onReveal={revealItemIn}
                         onMoveToList={openMovePalette}
-                        onSetDeadline={openItemDeadline}
                         openOnTap={openOnTap}
                       />
                     );
@@ -3776,7 +3775,6 @@ export function Workspace(props: {
               onOpen={(id) => setOpenItemId(id)}
               onReveal={revealItemIn}
               onMoveToList={openMovePalette}
-              onSetDeadline={openItemDeadline}
               openOnTap={openOnTap}
               duplicateBlock={duplicateBlock}
               copyBlock={copyRows}
@@ -3807,7 +3805,6 @@ export function Workspace(props: {
             copyBlock={copyRows}
             onReveal={revealItemIn}
             onMoveToList={openMovePalette}
-            onSetDeadline={openItemDeadline}
           />
         </Show>
       </main>

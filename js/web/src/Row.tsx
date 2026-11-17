@@ -117,9 +117,6 @@ export function Row(props: {
    *  when this row is part of it, else this row alone) — the menu twin of
    *  the `m` shortcut. */
   onMoveToList?: (ids: readonly string[]) => void;
-  /** Open the item on its deadline band, calendar showing: the row
-   *  menu's "Set deadline…". */
-  onSetDeadline?: (id: string) => void;
 }) {
   const { m, locale } = useAppI18n();
   // Origin-list badge text for the flat cross-list views (Focus, Done and
@@ -307,7 +304,6 @@ export function Row(props: {
       onOpen={props.onOpen}
       onReveal={props.onReveal}
       onMoveToList={props.onMoveToList}
-      onSetDeadline={props.onSetDeadline}
       listLabel={props.listLabel}
       onMenuOpenChange={setMenuOpen}
     >

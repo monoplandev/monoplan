@@ -428,10 +428,13 @@ for the month grid). `groupByDeadline` becomes
   deadline…" now opens the item on the deadline popover, as Set date… does).
 - **The deadline is a menu-only register** (web, decided 2026-11-17). An
   item without one shows no deadline control: "Set deadline…" is in the
-  row context menu (one Open row) and in the task surface's "…" menu, and
-  opens the item on its deadline band with the calendar showing. Once set,
+  task surface's "…" menu (and the selection panel's actions, `SelectionPanel.tsx`),
+  and opens the item on its deadline band with the calendar showing. It
+  was in the row context menu too until later the same day; that menu now
+  only removes. Once set,
   the band sits under the date and time section, where it is changed and
-  removed; the row menu's entry then reads "Remove deadline". The "+" chip
+  removed; the row context menu (one Open row) then offers "Remove
+  deadline". The "+" chip
   that sat beside the list picker for this is gone, and so is the
   new-item capture's deadline buffer: a capture has no row or "…" menu
   yet, so a deadline is added once the item exists. The band's input is
