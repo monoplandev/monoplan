@@ -1325,6 +1325,10 @@ struct MainWindowView: View {
             }
         }
         .listStyle(.sidebar)
+        // Opaque: the pane's own colour, to the window's top, under
+        // the bar.
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: PaneColor.sidebar).ignoresSafeArea())
         // Rows of 28 pt, between the system's small (24) and medium
         // (32), which has no such step: the small size, with each row
         // (`navRow`) at the medium's type and 4 pt taller.

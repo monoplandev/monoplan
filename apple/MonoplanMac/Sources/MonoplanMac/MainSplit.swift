@@ -1,5 +1,5 @@
 // The window's chrome, in AppKit as Xcode's or Sketch's is: a split
-// view controller of three panes (the glass sidebar, the list, the
+// view controller of three panes (the opaque sidebar, the list, the
 // item's panel), each one a SwiftUI view, under one toolbar that the
 // split view divides. The toolbar has a separator tracking each
 // divider, so what comes after the panel's separator sits over the
@@ -29,6 +29,9 @@ private extension NSToolbarItem.Identifier {
     /// The separator tracking the panel's edge (the system's own
     /// inspector separator wants an inspector item).
     static let panelSeparator = NSToolbarItem.Identifier("MonoplanPanelSeparator")
+    /// The separator tracking the sidebar's edge (the system's own
+    /// wants a sidebar item).
+    static let sidebarSeparator = NSToolbarItem.Identifier("MonoplanSidebarSeparator")
     /// The list's section, at its trailing edge: search, then new.
     static let search = NSToolbarItem.Identifier("MonoplanSearch")
     static let newItem = NSToolbarItem.Identifier("MonoplanNewItem")
@@ -93,13 +96,18 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         case .agenda: own = [.today, .space]
         default: own = []
         }
-        return [.sidebarTrackingSeparator, .title, .flexibleSpace] + own + [.search, .space, .newItem]
+        return [.sidebarSeparator, .title, .flexibleSpace] + own + [.search, .space, .newItem]
     }
 
     init(model: MainWindowModel) {
         self.model = model
+        // A plain pane, not a sidebar item: a sidebar item is glass,
+        // and this one is opaque (`PaneColor.sidebar`).
         sidebarItem = NSSplitViewItem(
-            sidebarWithViewController: Self.pane(MainWindowView(model: model, pane: .sidebar)))
+            viewController: Self.pane(MainWindowView(model: model, pane: .sidebar)))
+        // A sidebar item's own priority: the window's resizing goes
+        // to the list.
+        sidebarItem.holdingPriority = NSLayoutConstraint.Priority(260)
         listItem = NSSplitViewItem(
             viewController: Self.pane(MainWindowView(model: model, pane: .list)))
         // A plain pane, not an inspector item: an inspector is glass,
@@ -171,7 +179,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         // account, New List with one; the space before it pushes it to
         // the sidebar's trailing edge.
         let lead: [NSToolbarItem.Identifier] = [.flexibleSpace, signedIn ? .newList : .signIn]
-        let leading = toolbar.items.firstIndex { $0.itemIdentifier == .sidebarTrackingSeparator } ?? 0
+        let leading = toolbar.items.firstIndex { $0.itemIdentifier == .sidebarSeparator } ?? 0
         if toolbar.items.prefix(leading).map(\.itemIdentifier) != lead {
             for _ in 0..<leading { toolbar.removeItem(at: 0) }
             for (index, identifier) in lead.enumerated() {
@@ -289,6 +297,9 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         _ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier,
         willBeInsertedIntoToolbar flag: Bool
     ) -> NSToolbarItem? {
+        if identifier == .sidebarSeparator {
+            return NSTrackingSeparatorToolbarItem(identifier: identifier, splitView: splitView, dividerIndex: 0)
+        }
         if identifier == .panelSeparator {
             return NSTrackingSeparatorToolbarItem(identifier: identifier, splitView: splitView, dividerIndex: 1)
         }

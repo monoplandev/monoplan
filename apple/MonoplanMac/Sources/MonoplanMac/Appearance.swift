@@ -31,6 +31,9 @@ extension AppearancePreference {
 enum PaneColor {
     static let list = dynamic(dark: 0x12, light: .textBackgroundColor)
     static let panel = dynamic(dark: 0x18, light: .windowBackgroundColor)
+    /// The sidebar, opaque: off-white in light, the panel's grey in
+    /// dark.
+    static let sidebar = dynamic(dark: 0x18, light: grey(0xf7))
 
     /// The line between two panes: near-black in dark; in light,
     /// `system` (the split view's own, black at 10%) at half its alpha.
