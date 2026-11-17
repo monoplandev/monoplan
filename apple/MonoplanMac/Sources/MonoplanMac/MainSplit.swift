@@ -621,6 +621,7 @@ struct ItemPanelPane: View {
                     knownPlaces: { model.knownPlaces(matching: $0, completion: $1) },
                     setPlace: { model.setPlace(workspace: shown.workspace, id: $0.item.id, place: $1, exact: $2) },
                     setWhen: { model.setWhen(workspace: shown.workspace, id: $0.item.id, when: $1, duration: $2) },
+                    setEvent: { model.setEvent(workspace: shown.workspace, id: $0.item.id, event: $1) },
                     setDuration: { model.setDuration(workspace: shown.workspace, id: $0.item.id, minutes: $1) })
             }
         }
@@ -777,7 +778,7 @@ final class ToolbarTitleView: NSView {
 
     init() {
         super.init(frame: .zero)
-        label.font = .systemFont(ofSize: NSFont.systemFontSize + 2, weight: .bold)
+        label.font = .systemFont(ofSize: NSFont.systemFontSize + 2, weight: .semibold)
         label.textColor = .labelColor
         label.lineBreakMode = .byTruncatingTail
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)

@@ -2620,6 +2620,16 @@
           }
         }
       }
+    },
+    "Goes by when its day passes, instead of going overdue.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pasa sin más cuando termina su día, en lugar de quedar vencido."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

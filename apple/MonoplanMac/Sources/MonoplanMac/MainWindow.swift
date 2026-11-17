@@ -794,6 +794,11 @@ final class MainWindowModel: ObservableObject {
         write { try $0.setWhen(workspace: workspace, id: id, when: when, duration: duration) }
     }
 
+    /// Mark a dated item an event, or a task again (`Engine.setEvent`).
+    func setEvent(workspace: String?, id: String, event: Bool) {
+        write { try $0.setEvent(workspace: workspace, id: id, event: event) }
+    }
+
     /// Set an item's length in whole minutes, or clear it (nil)
     /// (`Engine.setDuration`).
     func setDuration(workspace: String?, id: String, minutes: Int?) {

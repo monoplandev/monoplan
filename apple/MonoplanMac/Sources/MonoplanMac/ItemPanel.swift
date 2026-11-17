@@ -48,6 +48,8 @@ struct ItemPanel: View {
     /// A date was picked for the item, or cleared (nil), with what
     /// becomes of its duration.
     let setWhen: (ItemInfo, String?, DurationChange) -> Void
+    /// The item was marked an event, or a task again.
+    let setEvent: (ItemInfo, Bool) -> Void
     /// The item's length was set, in minutes, or taken off (nil).
     let setDuration: (ItemInfo, Int?) -> Void
 
@@ -168,6 +170,11 @@ struct ItemPanel: View {
                         Image(systemName: "arrow.right")
                     }
                 }
+            }
+            // What the date means: something to do by then, or
+            // something that happens then (spec/events-plan.md).
+            if item.item.when != nil, item.item.binnedAt == nil {
+                EventToggle(event: item.item.event) { setEvent(item, $0) }
             }
             if let deadline = item.item.deadline {
                 PanelField(text: String(localized: "Due \(Self.dayText(deadline))")) { Image(systemName: "timer") }
@@ -449,6 +456,30 @@ private struct PanelField<Icon: View>: View {
             }
         }
         .panelBox(filled: false)
+    }
+}
+
+/// The event flag of a dated item, as a small switch at the row's
+/// leading edge with its name after it, as on the web. The whole row
+/// takes the click.
+private struct EventToggle: View {
+    let event: Bool
+    let set: (Bool) -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Toggle("Event", isOn: Binding(get: { event }, set: set))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+            Text("Event")
+                .lineLimit(1)
+                .foregroundStyle(event ? .primary : .secondary)
+        }
+        .panelBox(filled: false)
+        .onTapGesture { set(!event) }
+        .help("Goes by when its day passes, instead of going overdue.")
+        .accessibilityElement(children: .combine)
     }
 }
 
