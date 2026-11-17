@@ -1716,6 +1716,28 @@
         }
       }
     },
+    "Move to Today" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mover a hoy"
+          }
+        }
+      }
+    },
+    "Move to Tomorrow" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mover a mañana"
+          }
+        }
+      }
+    },
     "Moves the item to another list" : {
       "extractionState" : "stale",
       "localizations" : {

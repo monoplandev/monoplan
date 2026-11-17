@@ -317,7 +317,9 @@ for the month grid). `groupByDeadline` becomes
   and place, on every day including the first; the total is not shown, and a timed
   span shorter than 24 hours (an evening that runs past midnight) carries
   no day label at all.
-  The time lane reads what the day holds of the span: "All day" on every
+  The time lane reads what the day holds of the span (on an event; a
+  task's lane is empty wherever "All day" would stand, since 2026-11-17:
+  a task with no time is for the day, it does not fill it): "All day" on every
   day of an all-day span; for a timed one the start clock on the first
   day, "All day" on the days it runs through, and the end clock on the
   last ("until 03:00", since 2026-11-13). A span already under

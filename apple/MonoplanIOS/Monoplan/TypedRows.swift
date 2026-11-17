@@ -126,6 +126,39 @@ extension AgendaEntry {
     /// the `when`'s. A deadline's own row is a day, whatever time the
     /// item is planned for on another.
     var isTimed: Bool { placedBy == .when && (when?.count ?? 0) >= 16 }
+
+    /// The quick moves the row's menu offers (`ItemRowMenu`): an
+    /// overdue row goes to today or tomorrow, a row on today to
+    /// tomorrow, and any other row nowhere. Only an open row placed by
+    /// its `when`: a deadline is what is owed, and is put off on the
+    /// item's page, on purpose. The clock time is kept, as a pick in
+    /// the date editor keeps it.
+    var quickMoves: [WhenMove] {
+        WhenMove.offers(for: self, today: WhenText.today(), tomorrow: WhenText.today(plus: 1))
+    }
+}
+
+/// One quick move of an item's planned date: where to, and the `when`
+/// that puts it there.
+struct WhenMove: Equatable {
+    enum Day { case today, tomorrow }
+    let day: Day
+    let when: String
+
+    static func offers(for row: AgendaEntry, today: String, tomorrow: String) -> [WhenMove] {
+        guard row.placedBy == .when, !row.state.isClosed, let when = row.when, when.count >= 10 else { return [] }
+        let day = String(when.prefix(10))
+        let time = String(when.dropFirst(10))
+        if day == today {
+            return [WhenMove(day: .tomorrow, when: tomorrow + time)]
+        }
+        // A past day in the overdue tone: a task that slipped. A span
+        // still running, or an event gone by, has nothing to catch up.
+        if day < today, row.tone == .overdue {
+            return [WhenMove(day: .today, when: today + time), WhenMove(day: .tomorrow, when: tomorrow + time)]
+        }
+        return []
+    }
 }
 
 extension BinEntry {

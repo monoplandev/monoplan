@@ -7,7 +7,8 @@
 // over and places nothing here. Rows carry no date pills: the
 // day header is the date, and the task surface shows the rest. The
 // checkbox leads each row, then a fixed-width lane carries the start time
-// ("All day", "Due" on a deadline, or the planned date on a task that
+// ("All day" on an event with no time, nothing on a task with none,
+// "Due" on a deadline, or the planned date on a task that
 // slipped into Overdue, which has no day header to say it); the place is
 // a muted line under the title.
 // A deadline is a special kind of date here: its own row on the day it
@@ -88,6 +89,7 @@ import usersSvg from "./icons/users.svg?raw";
 import {
   isCancelled,
   isClosed,
+  isEvent,
   type ItemActions,
 } from "./sync/store.ts";
 
@@ -421,11 +423,14 @@ export function Upcoming(props: {
   };
 
   // Start time only: the agenda is a glance at the day, the end sits on
-  // the task surface. An all-day item says so in the lane, and a row
-  // here on its deadline says "Due". A multi-day span reads by what the
-  // day holds of it: every day of an all-day span is "All day"; a timed
-  // one shows its start clock on the first day, "All day" on the days it
-  // runs clean through, and its end clock on the last ("until 03:00"). Which
+  // the task surface. An all-day event says so in the lane; a task with
+  // no time says nothing (it is for the day, not something that fills
+  // it), and a row here on its deadline says "Due". A multi-day span
+  // reads by what the day holds of it: every day of an all-day span is
+  // "All day"; a timed one shows its start clock on the first day, "All
+  // day" on the days it runs clean through, and its end clock on the last
+  // ("until 03:00"); again a task's lane stays empty where an event's
+  // would say "All day". Which
   // day of the span a row is sits on the sub line (`spanDay`), not here.
   // A task in Overdue by its `when` shows the day it was planned for
   // ("7 Sept"): Overdue has no day header to carry it.
@@ -442,11 +447,12 @@ export function Upcoming(props: {
       );
       return info?.label ?? "";
     }
+    const allDay = isEvent(r.item) ? m().when.allDay : "";
     const start = whenTime(r.item.when!);
-    if (!start) return m().when.allDay;
+    if (!start) return allDay;
     if (r.span && r.span.day > 1) {
       const end = spanEnd(r);
-      return end ? m().upcoming.spanUntil(end) : m().when.allDay;
+      return end ? m().upcoming.spanUntil(end) : allDay;
     }
     return formatClockTime(start, locale());
   };

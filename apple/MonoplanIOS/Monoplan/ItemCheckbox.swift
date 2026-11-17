@@ -87,6 +87,9 @@ struct CheckboxRow<Content: View>: View {
     /// False where the content places the star itself (`RowStar`), as
     /// the agenda row does beside its text.
     var trailingStar = true
+    /// The date moves the row's menu offers (`AgendaEntry.quickMoves`);
+    /// none on a row that is not the calendar's.
+    var moves: [WhenMove] = []
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -105,7 +108,7 @@ struct CheckboxRow<Content: View>: View {
             .onTapGesture { if let ref { openItem(ref) } }
             .accessibilityAddTraits(.isButton)
         }
-        .modifier(ItemRowMenu(ref: ref, state: state))
+        .modifier(ItemRowMenu(ref: ref, state: state, moves: moves))
         // No dividers between item rows, on any page that lists them.
         .itemListRow()
     }
@@ -171,7 +174,9 @@ extension EnvironmentValues {
 
 /// The menu a long press on an item row opens, the same on every row
 /// surface: tick or reopen, star or unstar, copy the title, duplicate,
-/// bin (which asks first). Without an item (`ref` nil) there is no menu. On the Starred
+/// bin (which asks first). A calendar row that is overdue or on today
+/// also offers to move its date (`moves`: to today, to tomorrow).
+/// Without an item (`ref` nil) there is no menu. On the Starred
 /// page (`duplicatesStarred`) a duplicate is starred too, under the
 /// row it came from.
 struct ItemRowMenu: ViewModifier {
@@ -179,6 +184,7 @@ struct ItemRowMenu: ViewModifier {
     @Environment(\.duplicatesStarred) private var duplicatesStarred
     let ref: ItemRef?
     let state: ItemState
+    var moves: [WhenMove] = []
 
     /// "Move to Bin" is waiting on its confirmation.
     @State private var confirmingBin = false
@@ -218,6 +224,17 @@ struct ItemRowMenu: ViewModifier {
                 model.setStarred(ref, starred: !starred)
             } label: {
                 Label(starred ? String(localized: "Unstar") : String(localized: "Star"), systemImage: starred ? "star.slash" : "star")
+            }
+        }
+        // The length stays as it is: only the day moves.
+        ForEach(moves, id: \.when) { move in
+            Button {
+                model.setWhen(ref, when: move.when)
+            } label: {
+                switch move.day {
+                case .today: Label("Move to Today", systemImage: "calendar")
+                case .tomorrow: Label("Move to Tomorrow", systemImage: "calendar")
+                }
             }
         }
         Button {

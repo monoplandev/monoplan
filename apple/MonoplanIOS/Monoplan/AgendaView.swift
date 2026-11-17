@@ -91,7 +91,7 @@ struct AgendaRowView: View {
 
     var body: some View {
         ItemLink(ItemRef(docId: row.docId, itemId: row.id, title: row.text)) {
-            CheckboxRow(state: row.state, trailingStar: false) {
+            CheckboxRow(state: row.state, trailingStar: false, moves: row.quickMoves) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
                         // The star sits by the text, not past the
