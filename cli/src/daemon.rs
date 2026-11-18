@@ -104,9 +104,14 @@ pub enum DaemonSub {
     Uninstall,
 }
 
-/// Exclusive claim that a daemon owns this profile. Same mechanism and
-/// same rules as the peer lease (`crate::peer`): kernel flock, held via
-/// the `File`, never unlinked.
+/// Exclusive claim that a daemon owns this profile, and with it the
+/// only live instance of the profile's docs, which is what makes their
+/// stored peer ids safe to commit under (`spec/peer-id-plan.md`). A
+/// kernel flock, held via the `File` and released by the kernel on any
+/// exit path, crash included. The file is a zero-byte token and is
+/// never unlinked: deleting a held lock file lets a second process
+/// lock a fresh inode under the same name while the first still holds
+/// the old one.
 pub struct DaemonLock {
     _lock: File,
 }
@@ -814,7 +819,7 @@ async fn serve_conn(
 /// the binary's path.
 pub async fn spawn(profile: Profile) -> Result<DaemonHandle, SyncError> {
     let lock = try_acquire(&profile.dir)
-        .map_err(crate::peer::PeerError::Io)?
+        .map_err(SyncError::Lock)?
         .ok_or(SyncError::DaemonRunning)?;
     let listener = bind(&profile.dir).map_err(|e| SyncError::Engine(format!("bind: {e}")))?;
     let engine = Engine::open_resident(profile).await?;

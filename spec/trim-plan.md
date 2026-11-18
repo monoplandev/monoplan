@@ -288,7 +288,7 @@ wipe-everyone rule as this plan, plus a real hazard. Same peer ids with
 counters restarting at zero means an old-doc update reaching a new-doc
 replica is not rejected but silently misread as different ops with the
 same ids, which is the one unrecoverable corruption in Loro. Mitigation
-would be epoch-namespaced local storage and re-minted peer slots per
+would be epoch-namespaced local storage and re-minted peer ids per
 epoch. Rejected for now because the VV win is small (fact 1 sizes it in
 bytes) and the collision hazard is a new class of bug. Keep in mind if
 VV width ever becomes measurable.

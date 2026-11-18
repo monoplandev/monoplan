@@ -143,10 +143,10 @@ impl Doc {
     }
 
     /// As [`create`](Doc::create), but minting under an explicit Loro
-    /// peer id (the device's slot peer, `spec/peer-id-plan.md`) instead
-    /// of a random one — set before the builtin seed commits, so even
-    /// the first ops carry it. The caller must hold the slot's Web Lock
-    /// for the life of this doc. `u64::MAX` is reserved by Loro.
+    /// peer id (the one stored on the doc's local row,
+    /// `spec/peer-id-plan.md`) instead of a random one — set before the
+    /// builtin seed commits, so even the first ops carry it. The caller
+    /// must hold the single-tab Web Lock for the life of this doc. `u64::MAX` is reserved by Loro.
     #[wasm_bindgen(js_name = createWithPeer)]
     pub fn create_with_peer(peer: u64) -> Result<Doc, JsError> {
         Ok(Doc {

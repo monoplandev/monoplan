@@ -72,9 +72,11 @@ async fn status(json: bool) -> anyhow::Result<()> {
 
 async fn clear(force: bool) -> anyhow::Result<()> {
     let profile = Profile::require_active()?;
-    if crate::daemon::is_running(&profile.dir)? {
+    // Held to the end: nothing may boot the docs while their rows go
+    // (and, for a local-only workspace, while the fresh one is seeded).
+    let Some(_lock) = crate::daemon::try_acquire(&profile.dir)? else {
         anyhow::bail!("monoplan daemon is running; `monoplan daemon stop` first");
-    }
+    };
 
     // The doc store (wal + snapshot) and sync cursor live in the sqlite
     // db; account identity lives there too, so we truncate the doc
@@ -126,8 +128,7 @@ async fn clear(force: bool) -> anyhow::Result<()> {
         // Nothing will rehydrate it: start over from the onboarding
         // doc under the same id and key, as a wiped anonymous web
         // session does.
-        let peer = crate::peer::claim(&profile.dir, &storage)?;
-        let doc = crate::bootstrap::welcome_doc(peer.peer_id)?;
+        let doc = crate::bootstrap::welcome_doc(storage.doc_peer_id(doc_id)?)?;
         crate::storage::seed_snapshot(&storage, &dek, doc_id, &doc)?;
         println!("Local workspace erased; a fresh one is ready.");
     } else {

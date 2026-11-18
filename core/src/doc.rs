@@ -1998,7 +1998,7 @@ impl Doc {
     /// As [`empty`](Self::empty), but with an explicit Loro peer id —
     /// same contract as [`new_with_peer`](Self::new_with_peer). Used by
     /// `boot_doc` so replayed history and subsequent local commits share
-    /// the device's leased peer.
+    /// the doc's stored peer.
     pub fn empty_with_peer(peer: u64) -> Result<Self, DocError> {
         let inner = LoroDoc::new();
         inner.set_peer_id(peer)?;
@@ -2057,8 +2057,7 @@ impl Doc {
     ///
     /// Loro's UndoManager advances its internal "next counter" only on
     /// Local-triggered events; an *import* that carries ops for the
-    /// local peer (boot replay under a stable leased peer id, or a
-    /// snapshot minted under a reused peer slot — see
+    /// local peer (boot replay under the doc's stable peer id — see
     /// `spec/peer-id-plan.md`) leaves it stale, so the next local commit
     /// would record one undo span stretching back through the imported
     /// history. Recreating the manager clears both stacks, which is
@@ -2161,8 +2160,8 @@ impl Doc {
     // ---------- mutations: items ----------
 
     /// Seed a brand-new doc's Inbox with `WELCOME_ITEM`. One ordinary
-    /// committed op, so the creating client must bind its leased peer
-    /// id first and only the *creating* client calls it (genesis stays
+    /// committed op, so the creating client must bind the doc's stored
+    /// peer id first and only the *creating* client calls it (genesis stays
     /// an empty baseline, see `seed_builtins`); other devices receive
     /// it through sync. Returns the new item's id.
     pub fn seed_welcome(&self) -> Result<String, DocError> {
@@ -5266,7 +5265,7 @@ impl Doc {
     /// domain events: historical state is materialized explicitly by the
     /// attaching UI, not presented as live mutations.
     pub fn finish_oplog_replay(&self) {
-        // Replayed rows may carry the local leased peer's own history;
+        // Replayed rows may carry the local peer's own history;
         // re-bind the UndoManager at the post-replay frontier so the
         // first local commit's undo span starts here, not at counter 0.
         self.rearm_undo();
@@ -12900,7 +12899,7 @@ mod tests {
 
     #[test]
     fn undo_after_same_peer_oplog_replay_spares_replayed_history() {
-        // Stable leased peer ids mean boot replay carries the *same*
+        // Stable peer ids mean boot replay carries the *same*
         // peer the live UndoManager is bound to. Loro only advances the
         // manager's internal counter on Local events, so without the
         // finish_oplog_replay re-arm the first local commit after boot

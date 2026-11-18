@@ -1,201 +1,118 @@
-# Peer id plan (CLI minimum version)
+# Peer ids
 
-Status: built (CLI; web single-tab slot 0, Sep 2026). The web interim
-version is described under "Web (built, interim)" at the end; the
-multi-slot pool and multi-tab remain future work.
+Status: built. One stable Loro peer id per doc per device, stored on the
+doc's own local row (2026-11-19). This replaced the slot pool described
+under "History" at the end.
 
-Note for existing dev profiles: `peer_slots` was added to
-`cli/migrations/001_init.sql` in place (pre-release rule), so a profile
-whose `_migrations` ledger already contains `001_cli` lacks the table -
-wipe local dev state (`bun run wipe` / `monoplan auth logout`) rather than
-adding a bridge migration.
+Note for existing native profiles: `peer_id` was added to the `docs`
+table in `crates/storage-sqlite/migrations/001_init.sql` in place, and
+`peer_slots` removed from `cli/migrations/001_init.sql` (pre-release
+rule). A profile created before that lacks the column and fails on
+open: sign out and in again (`monoplan auth logout`, or the app's sign
+out) rather than adding a bridge migration. The web upgrades itself
+(IndexedDB v11).
 
 ## Problem
 
-Every CLI invocation currently mints a fresh random Loro peer id:
-`Engine::open` (`cli/src/sync.rs`) -> `boot_doc` (`core/src/storage.rs`)
--> `Doc::empty()` -> `LoroDoc::new()`. The CLI is a one-shot process per
-command, so every *mutating* invocation adds one permanent entry to the
-doc's version vector. VVs are carried forever in retained history and
-shipped/compared throughout sync: `server_known_vv`, `partial_end_vv`
-snapshot metadata, push `from_vv`/`to_vv`, server frontier tracking. A
-multi-year db accumulates thousands of peers -> hundreds of KB of VV,
-plus per-peer oplog change-store overhead that directly worsens the boot
-replay cost measured in `spec/tui-plan.md`.
+A Loro doc constructed without a peer id gets a random one. Every peer
+that ever commits adds a permanent entry to the doc's version vector,
+and VVs are carried forever in retained history and shipped and compared
+throughout sync (`server_known_vv`, snapshot metadata, push `from_vv` /
+`to_vv`). A device that minted a fresh peer on every process start or
+page load would add thousands of entries over a doc's life.
 
-## Design: stable per-device peer id + flock-leased slots
+So a device reuses one peer id per doc. That is only sound under two
+rules.
 
-Reuse one peer id per device for as long as only one process is live.
-Concurrent invocations are broken by a small slot pool; slots are
-*reused*, so VV width is bounded by max historical concurrency on the
-device (realistically 1-2 entries), not invocation count.
+## The two rules
 
-Loro's own `set_peer_id` docs state the safety rule this design
-satisfies: a fixed peer id requires strict single-ownership locking.
-Two live docs holding the same peer id concurrently is the one
-unrecoverable corruption (duplicate `(peer, counter)` op ids); sqlite
-serialises the *writes* but cannot prevent the *semantic* collision, so
-the lease must be process-scoped, not db-scoped.
+1. **One live instance.** Two live docs committing under the same peer
+   mint duplicate `(peer, counter)` op ids. Loro states this in its
+   `set_peer_id` docs: a fixed peer id requires single ownership.
+2. **The peer never outlives its local history.** Loro resumes a peer's
+   counter from the ops it has imported. A device that still holds
+   every op its peer wrote resumes past all of them. A device that lost
+   them (local copy wiped, doc left and rejoined) and is fetching them
+   back resumes from wherever the download has got to, and a local
+   write in that window reuses an op id the server already holds.
+   Loro 1.17 rejects the conflicting import (`UsedOpID`), the replica
+   cannot finish its bootstrap, and the doc stops syncing.
 
-### The lease: flock, not sqlite
+Rule 2 is the one the slot pool broke: see "History".
 
-One lock file per slot in the profile directory, next to the db:
+## Design
 
-```
-<profile dir>/peer-<slot>.lock      # slot = 0, 1, 2, ...
-```
+The peer id is a field of the doc's local row. It is minted when the row
+is created and it goes when the row goes, so rule 2 holds by
+construction instead of by every wipe path remembering it.
 
-- Claim: `open(O_CREAT)` then `flock(LOCK_EX | LOCK_NB)`. On `EWOULDBLOCK`
-  try the next slot. Slot 0 succeeds in the overwhelmingly common case.
-- Hold: keep the `File` handle alive for the whole process (store it in
-  `Engine`; for pre-session commands, in the command scope). Dropping it
-  at exit releases the lock; on crash the kernel releases it
-  unconditionally. Zero staleness bookkeeping - this is the whole reason
-  flock beats a lease row in sqlite (a claimed row goes stale on crash
-  and forces liveness heuristics).
-- Never unlink lock files. Deleting a held lock file lets a second
-  process lock a fresh inode under the same name while the first still
-  holds the old one. They are zero-byte files; leave them.
-- The pool is unbounded and lazy: slots (and their peer ids) are minted
-  only when contention actually happens, so claiming always succeeds.
+| | Where | Minted | Dropped |
+|---|---|---|---|
+| Native | `docs.peer_id` (`crates/storage-sqlite/migrations/001_init.sql`), read by `SqliteStorage::doc_peer_id` | column default, on row insert | `forget_doc` deletes the row; `clear_db` keeps the row and re-mints in the same transaction |
+| Web | `DocRow.peerIdHex` in the `docs` store, read by `IdbStorage.peerId()` | in the transaction that creates the row (`IdbStorage.open`) | `IdbStorage.wipe` and `wipeMonoplanDb` delete the row |
 
-Alternatives considered and rejected for the minimum: fcntl/OFD locks
-(same property, worse portability/footguns), a `BEGIN IMMEDIATE` held on
-a per-slot sentinel sqlite db (portable-flock fallback, keep in back
-pocket for Windows), PID/expiry heuristics (lie window after crash).
+Anything new that deletes a doc's WAL and snapshot while keeping its row
+must re-mint the peer in the same transaction, as `clear_db` does.
 
-### The mapping: slot -> peer id in sqlite
+The id is a random value: 63 bits on native (sqlite's `random()` masked
+non-negative), 64 on web. Loro reserves `u64::MAX`; neither can produce
+it. It is device-local state and never enters the CRDT doc.
 
-New table in the CLI migration (`cli/migrations/001_init.sql`, edited in
-place per the pre-release one-migration rule):
+Core takes the peer as an input: `Doc::new_with_peer` /
+`Doc::empty_with_peer`, and `boot_doc(.., Some(peer))`. It must be bound
+at construction, before the builtin seed commits and before the replay
+import, because the UndoManager binds to the local peer at construction
+and the seed is real ops. There is no set-peer-later API.
 
-```sql
-CREATE TABLE peer_slots (
-  slot     INTEGER PRIMARY KEY,   -- 0, 1, 2, ...
-  peer_id  INTEGER NOT NULL       -- random u64 stored as i64 cast
-);
-```
+### Rule 1: who holds the docs
 
-Mint-on-first-claim: after winning the flock for slot N, read the row;
-if absent, generate a random u64 (any value; Loro accepts the full
-range) and `INSERT OR IGNORE`, then re-read. The flock already excludes
-same-slot races, and sqlite's write serialisation covers the rest.
-Store as `i64` bit-cast (`peer as i64`), read back with `as u64`.
+- **Native.** `engine.lock` (`cli/src/daemon.rs`): the daemon, and the
+  Apple apps' in-process engine, hold it for as long as the docs are
+  open. The pre-daemon writers that commit a seed (`signup`, the
+  local-only bootstrap, `db clear` on a local-only workspace) hold the
+  same lock while they write. `Engine::open_with_profile` only checks
+  that no daemon is running and takes no lock of its own; it is used by
+  tests alone.
+- **Web.** The `monoplan-single-tab` Web Lock (`BrowserTabGate.tsx`). A
+  tab that renders without it (dev second tab, no `navigator.locks`)
+  boots every doc on a random peer and never reads the stored one.
 
-Device-local, not CRDT state: the mapping never enters the Loro doc.
-It also survives `monoplan db clear` deliberately - see counter
-continuity below.
+### What this costs
 
-### Core API change: peer id is an input, not a callback
+One VV entry per doc per device per lifetime of that device's local
+copy. A sign-out and sign-in, a leave and rejoin, or a `db clear` adds
+one.
 
-The platform acquires; core consumes. No `get_peer_id()` hook out of
-core - acquisition is async on the web (Web Locks) and sync construction
-across wasm/FFI wants a plain `u64` in, so the arrow points inward:
+## Known gap
 
-- `Doc::empty_with_peer(peer: u64)` and `Doc::new_with_peer(peer: u64)`:
-  identical to the existing constructors except `inner.set_peer_id(peer)`
-  is called immediately after `LoroDoc::new()`, *before* `seed_builtins`
-  and *before* `make_undo_manager` (the UndoManager binds to the local
-  peer at construction, and signup's seed commit must land under the
-  leased peer).
-- `boot_doc` / `load_doc` gain a `peer_id: Option<u64>` parameter
-  (`None` = today's random behaviour, used by tests and any caller that
-  hasn't adopted leasing yet). Internally: `Some(p)` ->
-  `Doc::empty_with_peer(p)` before the snapshot/WAL import.
-- Existing `Doc::new()` / `Doc::empty()` remain (tests, wasm wrapper
-  unchanged for now).
+Rule 2 assumes every op the peer pushed is also in local storage. On
+native the WAL append is synchronous and precedes the send. On web the
+IndexedDB write is queued and can still be in flight when the frame goes
+out, so a crash in that window leaves the server holding ops the local
+copy lacks. The next boot pulls them back, and a local write before that
+pull completes would collide. Not fixed.
 
-Counter continuity: setting the peer id before importing the snapshot +
-WAL is safe; Loro resumes that peer's counter from the imported oplog
-high-water. `db clear` is also safe: rebuilding from the server
-replays every op the server has for this peer, so counters resume past
-them; ops the server never saw also never reached any other replica, so
-their counters are unobserved and reusable.
+## Not built
 
-### CLI wiring (order matters)
+- Multi-tab web. Each extra tab needs a peer of its own for the docs it
+  holds; a random peer per tab session is the simple answer.
+- Trimming ancient peers out of the VV (`spec/trim-plan.md`).
 
-In `Engine::open_with_profile` (`cli/src/sync.rs`):
+## History
 
-1. `open_storage(&profile)` (unchanged).
-2. Claim a slot: flock scan in the profile dir, then read-or-mint the
-   peer id from `peer_slots`. New module `cli/src/peer.rs`, roughly
-   `fn claim(profile: &Profile, store: &SqliteStorage) -> Result<PeerLease>`
-   where `PeerLease { peer_id: u64, slot: u32, _lock: std::fs::File }`.
-3. `boot_doc(&storage, &dek, doc_id, Some(lease.peer_id))`.
-4. `Engine` holds the `PeerLease` so the lock lives as long as the doc.
+Until 2026-11-19 the peer id belonged to the device, not the doc: a
+`peer_slots` table (sqlite) or store (IndexedDB) mapped a slot number to
+a peer id, and a process claimed the lowest free slot with a flock on
+`peer-<slot>.lock` (web: slot 0, claimed by the single-tab lock). The
+pool existed because the CLI was then one process per command and two
+could run at once; the daemon (`spec/daemon-plan.md`) ended that, and
+nothing has claimed a slot above 0 since.
 
-Other sites:
-
-- `signup.rs`: claim before `Doc::new()`; use `Doc::new_with_peer` (the
-  builtin-seed commit is real ops and must carry the leased peer).
-- `login.rs` / `recover.rs`: `Doc::empty()` seeds carry no ops, so no
-  peer needed; leave as-is.
-- `logout` purges the profile dir including lock files - fine, any held
-  lock dies with its process and the files are recreated on demand.
-
-### Failure/edge notes
-
-- flock on network filesystems is unreliable, but so is sqlite itself;
-  no new constraint.
-- Read-only commands never commit, so their peer never enters the VV
-  regardless; claiming for them anyway (via `Engine::open`) is
-  harmless and keeps one code path.
-- Two processes, one slot each, both mutating: fine by construction -
-  that is exactly the CRDT's job; the slots only guarantee the peers
-  are distinct.
-
-### Testing
-
-- Unit (cli): two claims in one process -> distinct slots and distinct
-  peer ids (flock conflicts across separate opens even within one
-  process); drop the first lease -> next claim gets slot 0 again.
-- Unit (core): `boot_doc` with `Some(peer)` -> `doc.peer_id() == peer`;
-  mutate after boot-with-replay -> new op ids continue the peer's
-  counter (no overlap with replayed history).
-- Integration (`spec/testing.md` CLI driver): run N sequential mutating
-  commands, assert the doc's VV has exactly one CLI peer entry.
-
-## Web (built, interim: single-tab slot 0)
-
-Same shape as the CLI, holding the pool at one slot until multi-tab
-lands:
-
-- Slot -> peer mapping in IndexedDB: `peer_slots` store (`web-db.ts`
-  v10, a pure additive upgrade - the v9 WAL survives; the v9 `ops`
-  drop/recreate is now gated on `oldVersion < 9`). Read-or-mint in one
-  readwrite transaction (`peer-slots.ts`), mirroring the CLI's
-  `read_or_mint_peer_slot`.
-- The claim IS the single-tab Web Lock: `BrowserTabGate.tsx` now
-  always requests `monoplan-single-tab` (ifAvailable) when the API
-  exists, gates rendering only when enforcing, and passes `lockHeld`
-  into `App`. Boot (`App.tsx`) reads the slot-0 peer concurrently with
-  `IdbStorage.open` and constructs via `Doc.createWithPeer` /
-  `Doc.emptyWithPeer` (new wasm exports, u64 as BigInt) only when the
-  lock is held; no lock -> random peer, exactly the pre-slot behavior.
-  So a gate-disabled tab (DEV second tab, `VITE_ENFORCE_SINGLE_TAB=0`,
-  missing `navigator.locks`) can never share a peer with the holder.
-  The `?multiTab=1` escape hatch is removed.
-- The peer binds at construction - before `create`'s builtin seed
-  commits and before the replay import (counter resume). There is
-  deliberately no set-peer-later API: the UndoManager binds to the
-  local peer at construction, and fresh-signup seed ops would otherwise
-  mint under a throwaway random peer on every new device.
-
-## Out of scope (future)
-- Multi-tab web (later, decided direction): NOT a SharedWorker owning
-  the db (fights the platform: OPFS sync handles are dedicated-worker
-  only, SharedWorker support history is poor, and it turns every doc op
-  into RPC - tried before, rejected). Instead: every tab owns its own
-  wasm doc + slot peer; IndexedDB readwrite transactions serialise
-  cross-tab appends (derive `local_seq` inside the txn, not from
-  memory); commits fan out tab-to-tab over BroadcastChannel into
-  `apply_remote` (idempotent import, remote-origin undo exclusion both
-  already handle it); one leader per browser - Web Lock *without*
-  `ifAvailable`, auto-handover on close - owns the single WS, snapshot
-  folding, and acks. VV-derived push means the leader ships follower
-  ops with no forwarding protocol; the server still sees one device.
-- Hoisting the slot table/claim helper into `monoplan-storage-sqlite` for
-  the Apple FFI build (trivial move under the one-migration rule).
-- Shallow-snapshot/gc trimming of ancient peers as a compaction-era
-  backstop for the historical peers already minted by today's
-  random-per-invocation behaviour.
+The mapping deliberately survived a local wipe, on the reasoning that
+rebuilding from the server replays every op the peer wrote, so its
+counter resumes past them. That holds only once the rebuild has
+finished. On 2026-11-18 a web sign-out and sign-in wiped the docs and
+kept the slot; the snapshot chain arrived as twelve frames, a local
+write landed partway through, and it took op id 52140 on a peer
+whose real op 52140 was in a later frame. The Home doc could no longer
+bootstrap in that browser until its site data was cleared.

@@ -12,7 +12,7 @@
 
 import { createEffect, createSignal, onMount, Show } from "solid-js";
 import { Dek, Doc, EncryptedBlob } from "@monoplan/core/wasm";
-import { IdbStorage, clearPeerSlots, readOrMintPeerSlot, wipeMonoplanDb } from "@monoplan/core";
+import { IdbStorage, wipeMonoplanDb } from "@monoplan/core";
 import { deletePrefs, loadPrefs, savePrefs } from "./prefs.ts";
 import { api } from "./api.ts";
 import { dekVault } from "./sync/dekVault.ts";
@@ -28,7 +28,8 @@ import { clearBrowserState } from "./signOutWipe.ts";
 
 export function App(props: {
   /** True when this tab holds the `monoplan-single-tab` Web Lock — the
-   *  claim on peer slot 0. Without it, boot minted a random peer. */
+   *  claim on each doc's stored peer id. Without it, boot mints random
+   *  peers. */
   singleTabLockHeld: boolean;
 }) {
   const { locale, direction } = useAppI18n();
@@ -125,13 +126,13 @@ export function App(props: {
     setLastSyncAt(null);
     if (!opts?.wipeLocal) {
       // Forced sign-out: keys are forgotten, docs (and with them the
-      // peer slot they were written under) stay.
+      // peer ids they were written under) stay.
       setSession(await createAnonymousSession());
       return;
     }
     // The user's sign-out leaves nothing of the account in this
     // browser: every IndexedDB store (docs of every account, orphaned
-    // anonymous docs, the peer slots) and our localStorage /
+    // anonymous docs, their peer ids) and our localStorage /
     // sessionStorage keys; only theme, language and clock format stay
     // (`signOutWipe.ts`). Drop to the splash first so the old runtime
     // is disposed (keyed <Show>) and nothing is live to write rows back;
@@ -167,16 +168,6 @@ export function App(props: {
       } catch (e) {
         console.warn("migrating anonymous prefs failed:", e);
       }
-    }
-    // Every sign-in boots on a freshly minted peer id, whatever an
-    // earlier session left in `peer_slots` (a sign-out that never
-    // finished, say): an account's docs may arrive by bootstrap, and a
-    // write under a peer whose own history is still in flight mints
-    // duplicate op ids. Awaited so boot's read-or-mint sees the gap.
-    try {
-      await clearPeerSlots();
-    } catch (e) {
-      console.warn("sign-in: resetting the peer slot failed:", e);
     }
     setBoot(null);
     setBootError(null);
@@ -354,25 +345,24 @@ function BootGate(props: {
       // run for this account on this device) resolves null and `MainApp`
       // falls back to defaults.
       const prefsPromise = loadPrefs(props.session.accountId).catch(() => null);
-      // The slot-0 peer claim rides the storage open — holding the
-      // single-tab Web Lock (checked by `BrowserTabGate` before this
-      // mounts) IS the claim, so all that's left is reading the minted
-      // peer id. No lock → random peer, so a gate-disabled second tab
-      // can never share a peer with the holder. One peer serves every
-      // doc: op ids are per doc, so independent docs never collide.
-      const peerId = props.singleTabLockHeld ? await readOrMintPeerSlot(0) : null;
-
-      // The peer must be bound at construction — before `Doc.create`'s
-      // builtin seed commits and before the replay import (Loro resumes
-      // the slot peer's counter from the imported history).
-      const create = () =>
-        peerId !== null ? Doc.createWithPeer(peerId) : Doc.create();
-      const empty = () =>
-        peerId !== null ? Doc.emptyWithPeer(peerId) : Doc.empty();
+      // Each doc commits under the stable peer id stored on its own
+      // `docs` row (`IdbStorage.peerId`). Holding the single-tab Web
+      // Lock (checked by `BrowserTabGate` before this mounts) is the
+      // claim on it. No lock → random peer, so a gate-disabled second
+      // tab can never share a peer with the holder.
+      const stablePeers = props.singleTabLockHeld;
 
       const bootDoc = async (docId: string, dek: Dek): Promise<DocBoot> => {
         const isHome = docId === props.session.primaryDocId;
         const storage = await IdbStorage.open(docId);
+        // The peer must be bound at construction — before `Doc.create`'s
+        // builtin seed commits and before the replay import (Loro
+        // resumes the peer's counter from the imported history).
+        const peerId = stablePeers ? storage.peerId() : null;
+        const create = () =>
+          peerId !== null ? Doc.createWithPeer(peerId) : Doc.create();
+        const empty = () =>
+          peerId !== null ? Doc.emptyWithPeer(peerId) : Doc.empty();
         const rows = storage.bootRows();
         let doc: Doc;
         let seeded = false;
@@ -445,7 +435,7 @@ function BootGate(props: {
         for (const docId of stale) await forgetDoc(props.session, docId);
       }
 
-      props.setBoot({ docs, peerId, prefs: await prefsPromise });
+      props.setBoot({ docs, stablePeers, prefs: await prefsPromise });
     } catch (e) {
       // Hard fail & surfaces idb boot errors
       console.error("[boot] FAILED:", e);

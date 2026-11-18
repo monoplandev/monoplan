@@ -22,7 +22,16 @@ CREATE TABLE docs (
   server_known_vv       BLOB,
   -- Unix millis of the last successful online flush; NULL = never.
   -- Observability only — nothing in the sync path reads it.
-  last_sync_at          INTEGER
+  last_sync_at          INTEGER,
+  -- This device's Loro peer id in this doc (spec/peer-id-plan.md): a
+  -- random 63-bit value minted with the row, so every boot commits
+  -- under the same peer and the doc's version vector does not grow per
+  -- process start. It lives on this row on purpose: the peer is only
+  -- safe to mint under while this device holds every op it has written
+  -- to the doc, so it must go when the local history goes — with the
+  -- row, or re-minted by whatever clears the history and keeps the row.
+  -- 63 bits keeps it clear of u64::MAX, which Loro reserves.
+  peer_id               INTEGER NOT NULL DEFAULT (random() & 9223372036854775807)
 );
 
 -- The local WAL: encrypted Loro updates applied after the snapshot,

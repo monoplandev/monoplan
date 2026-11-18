@@ -108,6 +108,17 @@ function copyBytes(view: Uint8Array): Uint8Array {
   return view.slice();
 }
 
+/** Loro reserves `u64::MAX` (`set_peer_id` rejects it). */
+const RESERVED_PEER_HEX = "ffffffffffffffff";
+
+/** Random u64 peer id as 16 hex digits, never the reserved one. */
+function mintPeerIdHex(): string {
+  for (;;) {
+    const hex = bytesToHex(crypto.getRandomValues(new Uint8Array(8)));
+    if (hex !== RESERVED_PEER_HEX) return hex;
+  }
+}
+
 export class IdbStorage {
   private nextLocalSeq = 0;
   private snapshot: SnapshotRow | null = null;
@@ -118,6 +129,9 @@ export class IdbStorage {
   // Preserved across doc-row rewrites so updating a cursor doesn't
   // clobber the original creation time.
   private docCreatedAt = 0;
+  // The doc's stable Loro peer id (`DocRow.peerIdHex`). Carried through
+  // every doc-row rewrite for the same reason as `docCreatedAt`.
+  private peerIdHex = "";
   // Background IDB writes are serialised through this chain so on-disk
   // order matches mirror order. Per-segment errors are logged and
   // swallowed to keep the chain alive (a poisoned chain would stall
@@ -170,13 +184,22 @@ export class IdbStorage {
       );
       const docs = tx.objectStore(STORE_DOCS);
       const docGet = docs.get(this.docId);
+      // The peer id is minted in the transaction that creates the row
+      // (or, for a pre-v11 row, the first one that opens it), so two
+      // racing opens converge on one id.
+      let peerIdHex = "";
       docGet.onsuccess = () => {
-        if (!docGet.result) {
+        const existing = docGet.result as DocRow | undefined;
+        peerIdHex = existing?.peerIdHex ?? mintPeerIdHex();
+        if (!existing) {
           docs.put({
             id: this.docId,
             createdAt: Date.now(),
             lastAckedServerSeq: 0,
-          });
+            peerIdHex,
+          } satisfies DocRow);
+        } else if (!existing.peerIdHex) {
+          docs.put({ ...existing, peerIdHex } satisfies DocRow);
         }
       };
       const range = IDBKeyRange.bound(
@@ -210,6 +233,7 @@ export class IdbStorage {
         this.docCreatedAt = docRow?.createdAt ?? Date.now();
         this.lastAckedServerSeq = docRow?.lastAckedServerSeq ?? 0;
         this.serverKnownVv = docRow?.serverKnownVv ?? new Uint8Array(0);
+        this.peerIdHex = peerIdHex;
         resolve();
       };
       tx.onerror = () => reject(tx.error);
@@ -218,6 +242,20 @@ export class IdbStorage {
   }
 
   // ---------- host-facing (async) ----------
+
+  /** This browser's stable Loro peer id for the doc, for
+   *  `Doc.createWithPeer` / `Doc.emptyWithPeer`. It lives on the `docs`
+   *  row: minted with it, wiped with it (`wipe`), so a doc that comes
+   *  back after its local copy was dropped starts on a new peer and
+   *  cannot re-mint op ids the old one already used.
+   *
+   *  Binding a doc to it is only safe for the one live instance of the
+   *  doc in this browser (today: the tab holding the single-tab Web
+   *  Lock). Two live docs on one peer mint duplicate `(peer, counter)`
+   *  op ids — unrecoverable. No lock → use a random peer instead. */
+  peerId(): bigint {
+    return BigInt(`0x${this.peerIdHex}`);
+  }
 
   /** Snapshot + post-snapshot WAL rows for boot, plus every persisted
    *  cursor the replica seeds from. Read straight from the mirror
@@ -398,6 +436,7 @@ export class IdbStorage {
       createdAt: this.docCreatedAt,
       lastAckedServerSeq: this.lastAckedServerSeq,
       serverKnownVv: this.serverKnownVv,
+      peerIdHex: this.peerIdHex,
     };
   }
 

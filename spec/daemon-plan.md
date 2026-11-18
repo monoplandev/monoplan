@@ -149,12 +149,12 @@ tray / window     ──FFI──>  host loop ──WS──> server
   profile path is too long (tempdirs in tests can be), fall back to
   `$TMPDIR/monoplan-<blake3(profile dir)[..16]>.sock` and record the
   path in `<profile>/engine.sock.path` so clients find it.
-- The daemon holds `engine.lock` for its lifetime: the same kernel
-  flock mechanism and rules as the peer lease (`spec/peer-id-plan.md`),
-  released on any exit path, never unlinked. That lock, not a peer slot,
-  is the election and the "is a daemon running" probe: the peer slot
-  only identifies a Loro peer, and the daemon claims the lowest free one
-  like any process. A client that finds `engine.lock` held but the
+- The daemon holds `engine.lock` for its lifetime: a kernel flock,
+  released on any exit path, never unlinked. That lock is the election
+  and the "is a daemon running" probe, and since 2026-11-19 it is also
+  what makes each doc's stored peer id safe to commit under: one live
+  instance of a profile's docs (`spec/peer-id-plan.md`; the per-slot
+  peer lease it used to sit beside is gone). A client that finds `engine.lock` held but the
   socket not answering is looking at a daemon that is still starting
   (or wedged), and waits with bounded retries rather than proceeding
   alone.

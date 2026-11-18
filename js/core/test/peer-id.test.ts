@@ -1,8 +1,8 @@
 // The stable-peer wasm boundary (`spec/peer-id-plan.md`): the
-// `*WithPeer` constructors bind the slot peer before anything else
-// touches the doc — before `create`'s builtin seed commits and before
-// the replay import — so every op a device ever mints carries its slot
-// peer, and a reload resumes the peer's counter instead of restarting
+// `*WithPeer` constructors bind the doc's stored peer before anything
+// else touches the doc — before `create`'s builtin seed commits and
+// before the replay import — so every op a device mints in the doc
+// carries that peer, and a reload resumes the peer's counter instead of restarting
 // it (a restart would mint duplicate `(peer, counter)` ids that a
 // replica silently drops). Single-ownership of the peer is the JS
 // host's job (the single-tab Web Lock); these tests cover the doc
@@ -38,7 +38,7 @@ describe("peer id boundary", () => {
     const dek = Dek.generate();
 
     // Session 1: fresh signup — seed commits + one user item, all
-    // minted under the slot peer.
+    // minted under the doc's stored peer.
     const s1 = Doc.createWithPeer(PEER);
     s1.addItem(LIST_MAIN, "from session 1");
     const wal1 = exportSession(s1, dek);

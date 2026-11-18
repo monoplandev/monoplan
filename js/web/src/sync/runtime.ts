@@ -68,10 +68,11 @@ export type DocBoot = {
  *  doc the session can open (Home first) and the account's prefs. */
 export type BootInfo = {
   docs: DocBoot[];
-  /** The Loro peer id every doc was bound to (slot 0 while this tab
-   *  holds the single-tab lock), or null for a random peer. A doc
-   *  created mid-session is bound to the same one. */
-  peerId: bigint | null;
+  /** True while this tab holds the single-tab lock: every doc is then
+   *  bound to the stable peer id on its own `docs` row
+   *  (`IdbStorage.peerId`), as is a doc created or joined mid-session.
+   *  False → random peers. */
+  stablePeers: boolean;
   /** Whatever was in the `prefs` store for this account at boot. Null
    *  if the row was missing (first run for this account on this
    *  device). */
@@ -503,7 +504,7 @@ export function createWorkspaceRuntime(props: {
       console.warn("openNewDoc: vaulting the doc failed:", e);
     }
     const storage = await IdbStorage.open(docId);
-    const peerId = props.boot.peerId;
+    const peerId = props.boot.stablePeers ? storage.peerId() : null;
     const doc = opts.seeded
       ? peerId !== null
         ? Doc.createWithPeer(peerId)

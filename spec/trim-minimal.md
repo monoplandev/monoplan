@@ -175,7 +175,7 @@ rule as the oracle:**
    unsent work.
 4. Import that into `F`.
    - **Ok**: safe. `F` is now the device's doc, trimmed at the root, with
-     its unsent work intact. Set the leased peer id on `F` (forks get a
+     its unsent work intact. Set the doc's stored peer id on `F` (forks get a
      random one). Write `F` as the local checkpoint, prune the WAL, store
      the epoch. Carry on: pull from `last_acked_seq`, push with the new
      epoch.
@@ -213,7 +213,7 @@ else in the local store does.
 
 Then **discard**: adopt `F` from Part 2 as the live doc. It already *is*
 the server-known state trimmed at the root, so no download is needed.
-Set the leased peer id on it, write it as the checkpoint, drop the WAL and
+Set the doc's stored peer id on it, write it as the checkpoint, drop the WAL and
 the in-flight push, store the new epoch, then `PullUpdates` from
 `last_acked_seq` as normal. (A device below the compaction floor never
 reaches Part 2; it gets `SnapshotRequired` and bootstraps from the chain

@@ -37,9 +37,11 @@ const DB_NAME = "monoplan-web";
 // v9, its v8 rows abandoned; authed devices re-pull, and the snapshot
 // baseline carries anonymous docs), the `docs` row gains
 // `serverKnownVv`, and the `inflight` store holds the single durable
-// in-flight push. v10 adds `peer_slots` (stable Loro peer id per tab
-// slot, `spec/peer-id-plan.md`) — a pure addition; v9's WAL survives.
-const DB_VERSION = 10;
+// in-flight push. v10 added a `peer_slots` store (one stable Loro peer
+// id per browser); v11 drops it: the peer id is now a field of each
+// `docs` row (`peerIdHex`, `spec/peer-id-plan.md`), minted with the row
+// and deleted with it. Rows from before v11 mint theirs on next open.
+const DB_VERSION = 11;
 
 // Config-plane stores.
 export const STORE_VAULT = "vault";
@@ -51,13 +53,13 @@ export const STORE_DOCS = "docs";
 export const STORE_OPS = "ops";
 export const STORE_SNAPSHOTS = "snapshots";
 export const STORE_INFLIGHT = "inflight";
-export const STORE_PEER_SLOTS = "peer_slots";
 export const INDEX_OPS_SERVER_SEQ = "docIdServerSeq";
 
-// Pre-v7 oplog/OPFS stores, deleted on upgrade if present. `ops` is in
-// this list *and* recreated below as a replica store — the delete runs
-// first, so the legacy schema never survives into the replica store.
-const LEGACY_STORES = ["snapshot_meta"];
+// Retired stores, deleted on upgrade if present: the pre-v7 oplog/OPFS
+// `snapshot_meta` and the v10 `peer_slots`. (Pre-v9 `ops` is dropped
+// too and recreated below as a replica store — the delete runs first,
+// so the legacy schema never survives into the replica store.)
+const LEGACY_STORES = ["snapshot_meta", "peer_slots"];
 
 // The retired separate replica database (v7 only). Deleted best-effort
 // after the consolidated DB opens so it doesn't linger as an orphan.
@@ -85,17 +87,6 @@ export interface SnapshotRow {
   createdAt: number;
 }
 
-/** One row in the `peer_slots` store — the stable Loro peer id for one
- *  tab slot (`spec/peer-id-plan.md`), the web analogue of the CLI's
- *  sqlite `peer_slots` table. `peerIdHex` is the u64 as 16 lowercase
- *  hex digits (IDB numbers can't hold a u64; BigInt can't be compared
- *  as a key). Minted once per slot, then read forever. */
-export interface PeerSlotRow {
-  slot: number;
-  peerIdHex: string;
-  createdAt: number;
-}
-
 /** One row in the `docs` store. `lastAckedServerSeq` is the persisted
  *  resume cursor — the highest *contiguous* serverSeq the replica has
  *  durably applied. Set explicitly via `writeAckedSeq` (never derived
@@ -108,6 +99,12 @@ export interface DocRow {
   createdAt: number;
   lastAckedServerSeq: number;
   serverKnownVv?: Uint8Array;
+  /** This browser's Loro peer id in this doc: the u64 as 16 lowercase
+   *  hex digits (IDB numbers can't hold a u64). Minted when the row is
+   *  created and gone when the row is, so the peer never outlives the
+   *  local history it wrote (`spec/peer-id-plan.md`). Absent only on a
+   *  row from before v11, which mints one on its next open. */
+  peerIdHex?: string;
 }
 
 /** The single durable in-flight push for a doc (`inflight` store,
@@ -186,8 +183,7 @@ function openOnce(): Promise<IDBDatabase> {
       // Replica-data-plane stores. The logical model mirrors
       // `SqliteStorage` (CLI): one `docs` row per doc, an append-only
       // WAL (`ops`) keyed by `(docId, localSeq)`, one `snapshots` row
-      // per doc, one `inflight` push row per doc, one `peer_slots` row
-      // per tab slot.
+      // per doc, one `inflight` push row per doc.
       if (!db.objectStoreNames.contains(STORE_DOCS)) {
         db.createObjectStore(STORE_DOCS, { keyPath: "id" });
       }
@@ -207,9 +203,6 @@ function openOnce(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_INFLIGHT)) {
         db.createObjectStore(STORE_INFLIGHT, { keyPath: "docId" });
       }
-      if (!db.objectStoreNames.contains(STORE_PEER_SLOTS)) {
-        db.createObjectStore(STORE_PEER_SLOTS, { keyPath: "slot" });
-      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -218,18 +211,12 @@ function openOnce(): Promise<IDBDatabase> {
   });
 }
 
-/** Empty every store in the database: every doc's local copy, the
- *  vault, device and prefs rows of every account, and the peer slots.
- *  The user's sign-out. One transaction, so a crash leaves either all
- *  of it or none. Clears rather than `deleteDatabase`, which the open
- *  handle (ours, cached) would block.
- *
- *  `peer_slots` going is load-bearing, not tidiness: a slot's peer id
- *  is only safe to mint under while this browser still holds every op
- *  that peer ever minted. Once the docs are gone the peer's counter
- *  resumes from whatever a bootstrap has imported so far, and a local
- *  write mid-bootstrap mints an op id the server history already uses
- *  (`spec/peer-id-plan.md`). */
+/** Empty every store in the database: every doc's local copy (its
+ *  peer id included, which lives on the `docs` row), and the vault,
+ *  device and prefs rows of every account. The user's sign-out. One
+ *  transaction, so a crash leaves either all of it or none. Clears
+ *  rather than `deleteDatabase`, which the open handle (ours, cached)
+ *  would block. */
 export async function wipeMonoplanDb(): Promise<void> {
   const db = await openMonoplanDb();
   const names = [...db.objectStoreNames];

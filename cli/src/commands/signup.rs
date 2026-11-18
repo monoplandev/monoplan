@@ -212,8 +212,7 @@ pub async fn signup(profile: &Profile, creds: Credentials) -> anyhow::Result<Out
         // Device-1 (genesis) of a fresh account: seed the onboarding
         // doc as the baseline snapshot under the server's doc id. It
         // travels to future devices through snapshot bootstrap.
-        let peer = crate::peer::claim(&profile.dir, &storage)?;
-        let doc = crate::bootstrap::welcome_doc(peer.peer_id)?;
+        let doc = crate::bootstrap::welcome_doc(storage.doc_peer_id(doc_id)?)?;
         crate::storage::seed_snapshot(&storage, &dek, doc_id, &doc)?;
     }
     storage.write_account(&Account {

@@ -11,7 +11,6 @@ export {
   type InFlightPushJs,
 } from "./storage/idb-storage.ts";
 export { openMonoplanDb, wipeMonoplanDb, _resetMonoplanDbForTests } from "./storage/web-db.ts";
-export { clearPeerSlots, readOrMintPeerSlot } from "./storage/peer-slots.ts";
 export { deleteDevice, getDevice, putDevice } from "./storage/device-store.ts";
 export {
   DekVault,

@@ -177,24 +177,19 @@ impl SqliteStorage {
         Ok(())
     }
 
-    /// Read slot's peer id, minting `mint` as its permanent value on
-    /// the slot's first claim (see `peer_slots` in `001_init.sql` and
-    /// `spec/peer-id-plan.md`). Stored as an i64 bit-cast of the u64.
-    /// The caller holds the slot's flock, so there is no same-slot
-    /// race; `INSERT OR IGNORE` + re-read is belt and braces.
-    pub fn read_or_mint_peer_slot(&self, slot: u32, mint: u64) -> Result<u64, StorageError> {
+    /// This device's stable Loro peer id for `doc_id` (the `docs.peer_id`
+    /// column, `spec/peer-id-plan.md`), creating the doc's row, and so
+    /// minting the id, if it has none yet. Every doc is constructed
+    /// under it. Only one live instance of a profile's docs may exist
+    /// at a time: the caller holds `engine.lock` (`crate::daemon`).
+    pub fn doc_peer_id(&self, doc_id: DocId) -> Result<u64, StorageError> {
         let conn = self.conn().lock().expect("SqliteStorage mutex poisoned");
-        conn.execute(
-            "INSERT OR IGNORE INTO peer_slots (slot, peer_id) VALUES (?1, ?2)",
-            params![slot, mint as i64],
-        )
-        .map_err(backend)?;
+        let id = doc_id.0.as_bytes().to_vec();
+        ensure_doc(&conn, &id)?;
         let peer: i64 = conn
-            .query_row(
-                "SELECT peer_id FROM peer_slots WHERE slot = ?1",
-                [slot],
-                |r| r.get(0),
-            )
+            .query_row("SELECT peer_id FROM docs WHERE id = ?1", [&id], |r| {
+                r.get(0)
+            })
             .map_err(backend)?;
         Ok(peer as u64)
     }
@@ -263,7 +258,10 @@ impl SqliteStorage {
 
     /// Drop the doc store (WAL + snapshot + in-flight push) and reset
     /// every sync cursor, keeping account identity. Backs `monoplan db
-    /// clear`: the next sync rehydrates from server_seq 0.
+    /// clear`: the next sync rehydrates from server_seq 0. The peer id
+    /// is re-minted with it: the old one's history is gone from this
+    /// device, and a write made while the rehydrate is still in flight
+    /// would reuse op ids the server already holds under it.
     pub fn clear_db(&self, doc_id: DocId) -> Result<(), StorageError> {
         let mut conn = self.conn().lock().expect("SqliteStorage mutex poisoned");
         let id = doc_id.0.as_bytes().to_vec();
@@ -276,7 +274,9 @@ impl SqliteStorage {
             .map_err(backend)?;
         tx.execute(
             "UPDATE docs SET last_acked_server_seq = 0, server_known_vv = NULL,
-                             last_sync_at = NULL WHERE id = ?1",
+                             last_sync_at = NULL,
+                             peer_id = (random() & 9223372036854775807)
+             WHERE id = ?1",
             [&id],
         )
         .map_err(backend)?;
@@ -353,4 +353,51 @@ fn ensure_doc(conn: &Connection, id: &[u8]) -> Result<(), StorageError> {
 /// Open the profile's `SqliteStorage`.
 pub fn open_storage(profile: &Profile) -> Result<SqliteStorage, DbError> {
     SqliteStorage::open(&profile.db_path())
+}
+
+#[cfg(test)]
+mod peer_id_tests {
+    use super::*;
+
+    fn store(dir: &std::path::Path) -> SqliteStorage {
+        SqliteStorage::open(&dir.join("doc.sqlite")).unwrap()
+    }
+
+    fn doc() -> DocId {
+        DocId(uuid::Uuid::new_v4())
+    }
+
+    #[test]
+    fn a_doc_keeps_its_peer_across_opens_and_docs_differ() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (doc(), doc());
+        let (peer_a, peer_b) = {
+            let s = store(dir.path());
+            (s.doc_peer_id(a).unwrap(), s.doc_peer_id(b).unwrap())
+        };
+        assert_ne!(peer_a, peer_b);
+        assert_ne!(peer_a, u64::MAX, "Loro reserves u64::MAX");
+        let s = store(dir.path());
+        assert_eq!(s.doc_peer_id(a).unwrap(), peer_a);
+        assert_eq!(s.doc_peer_id(b).unwrap(), peer_b);
+    }
+
+    /// The peer must not outlive the local history it wrote: a doc that
+    /// comes back after either wipe starts on a new one.
+    #[test]
+    fn dropping_a_docs_history_drops_its_peer() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(dir.path());
+        let (forgotten, cleared, kept) = (doc(), doc(), doc());
+        let before_forgotten = s.doc_peer_id(forgotten).unwrap();
+        let before_cleared = s.doc_peer_id(cleared).unwrap();
+        let before_kept = s.doc_peer_id(kept).unwrap();
+
+        s.forget_doc(forgotten).unwrap();
+        s.clear_db(cleared).unwrap();
+
+        assert_ne!(s.doc_peer_id(forgotten).unwrap(), before_forgotten);
+        assert_ne!(s.doc_peer_id(cleared).unwrap(), before_cleared);
+        assert_eq!(s.doc_peer_id(kept).unwrap(), before_kept);
+    }
 }

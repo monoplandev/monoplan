@@ -24,17 +24,3 @@ CREATE TABLE account (
   primary_doc_id BLOB NOT NULL,
   CHECK ((account_id IS NULL) = (email IS NULL) AND (account_id IS NULL) = (device_id IS NULL))
 );
-
--- Loro peer id per lease slot (spec/peer-id-plan.md). Slot N's peer id
--- is minted (random u64, bit-cast to i64) on the slot's first claim and
--- reused for every later claim, so the doc's version vector stays as
--- wide as this device's max historical concurrency, not its invocation
--- count. Which slot a process may *use* is decided by the flock lease
--- on `peer-<slot>.lock` in the profile dir, never by this table —
--- device-local state, deliberately outside the CRDT doc, and
--- deliberately surviving `monoplan db clear` (counters resume safely
--- from replayed history).
-CREATE TABLE peer_slots (
-  slot     INTEGER PRIMARY KEY,
-  peer_id  INTEGER NOT NULL
-);

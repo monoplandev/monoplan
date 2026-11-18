@@ -63,8 +63,8 @@ pub enum SyncError {
     Boot(#[from] monoplan_core::BootError),
     #[error("storage: {0}")]
     Storage(#[from] monoplan_core::StorageError),
-    #[error(transparent)]
-    Peer(#[from] crate::peer::PeerError),
+    #[error("profile lock: {0}")]
+    Lock(#[from] std::io::Error),
     #[error(
         "monoplan daemon is running for this profile; one-shot commands are disabled while it holds the doc (spec/daemon-plan.md)"
     )]
@@ -95,7 +95,7 @@ pub struct DocState {
 }
 
 /// The profile's docs plus the one socket they share: every doc in
-/// `secrets.toml` booted under one peer lease, one replica each
+/// `secrets.toml` booted under its own stored peer id, one replica each
 /// (`spec/cli.md` §Workspaces). Hosts route server frames to replicas by
 /// doc id and drive every replica the same way.
 pub struct Engine {
@@ -116,11 +116,6 @@ pub struct Engine {
     /// replica can't stamp.
     store: SqliteStorage,
     ws: Option<WsStream>,
-    /// Exclusive claim on the device's peer id — held for the engine's
-    /// lifetime so no concurrent invocation can commit under the same
-    /// peer (see `crate::peer`). Every doc commits under it: the rule
-    /// is one live instance per (doc, peer), and each doc has one.
-    peer: crate::peer::PeerLease,
 }
 
 impl Engine {
@@ -130,11 +125,14 @@ impl Engine {
     /// mobile hosts' short exchange is shaped like (`spec/daemon-plan.md`);
     /// the CLI itself no longer uses it — tests do.
     pub async fn open_with_profile(profile: Profile, sync: bool) -> Result<Self, SyncError> {
-        // A resident daemon owns the docs for as long as it runs; a
-        // one-shot process writing WAL rows beside it would not corrupt
-        // anything (the peer lease prevents that) but the daemon's
-        // in-memory docs would never see them (spec/daemon-plan.md).
-        if crate::daemon::is_running(&profile.dir).map_err(crate::peer::PeerError::Io)? {
+        // A resident daemon owns the docs for as long as it runs. A
+        // second live instance beside it would commit under the same
+        // per-doc peer ids (duplicate op ids, unrecoverable), and the
+        // daemon's in-memory docs would never see its WAL rows
+        // (spec/daemon-plan.md). This check is not a lock: nothing
+        // stops two of these one-shot opens racing each other, which
+        // is why only tests use it.
+        if crate::daemon::is_running(&profile.dir)? {
             return Err(SyncError::DaemonRunning);
         }
         Self::open_inner(profile, sync).await
@@ -158,10 +156,6 @@ impl Engine {
         let storage = crate::storage::open_storage(&profile)?;
         let account = storage.read_account()?;
         let primary = account.primary_doc_id;
-        // Claim the device's peer id before any doc exists, so every
-        // local commit this process makes carries the leased peer
-        // (spec/peer-id-plan.md).
-        let peer = crate::peer::claim(&profile.dir, &storage)?;
         // `store` shares the replicas' connection (see `SqliteStorage`'s
         // `Clone`) — used only for the `last_sync_at` stamp; the replica
         // persists the resume cursor itself.
@@ -182,7 +176,7 @@ impl Engine {
         let author = account.identity.as_ref().map(|i| i.account_id.as_str());
         let mut docs = BTreeMap::new();
         for doc_id in doc_ids {
-            let state = boot_doc_state(&storage, &secrets, doc_id, peer.peer_id, author)?;
+            let state = boot_doc_state(&storage, &secrets, doc_id, author)?;
             docs.insert(doc_id, state);
         }
 
@@ -193,7 +187,6 @@ impl Engine {
             docs,
             store,
             ws: None,
-            peer,
         };
 
         if !sync || engine.is_local_only() {
@@ -559,13 +552,12 @@ impl Engine {
         );
         self.profile.write_secrets(&secrets)?;
 
-        let peer_id = self.peer.peer_id;
-        let doc = Doc::new_with_peer(peer_id)?;
+        let doc = Doc::new_with_peer(self.store.doc_peer_id(doc_id)?)?;
         doc.set_doc_name(Some(name))?;
         crate::storage::seed_snapshot(&self.store, &dek, doc_id, &doc)?;
         let account = self.store.read_account()?;
         let author = account.identity.as_ref().map(|i| i.account_id.as_str());
-        let state = boot_doc_state(&self.store, &secrets, doc_id, peer_id, author)?;
+        let state = boot_doc_state(&self.store, &secrets, doc_id, author)?;
         self.docs.insert(doc_id, state);
         Ok(doc_id)
     }
@@ -640,7 +632,6 @@ impl Engine {
         let home = dek_for_doc(&secrets, self.primary)?;
         let account = self.store.read_account()?;
         let author = account.identity.as_ref().map(|i| i.account_id.as_str());
-        let peer_id = self.peer.peer_id;
         let mut adopted = Vec::new();
         for m in fresh {
             let Ok(doc_id) = crate::keystore::parse_doc_id(&m.doc_id) else {
@@ -662,7 +653,7 @@ impl Engine {
                 },
             );
             self.profile.write_secrets(&secrets)?;
-            match boot_doc_state(&self.store, &secrets, doc_id, peer_id, author) {
+            match boot_doc_state(&self.store, &secrets, doc_id, author) {
                 Ok(state) => {
                     self.docs.insert(doc_id, state);
                     adopted.push(doc_id);
@@ -726,10 +717,12 @@ fn boot_doc_state(
     storage: &SqliteStorage,
     secrets: &crate::config::Secrets,
     doc_id: DocId,
-    peer_id: u64,
     author: Option<&str>,
 ) -> Result<DocState, SyncError> {
     let dek = dek_for_doc(secrets, doc_id)?;
+    // The doc's own stored peer, bound before the replay import so its
+    // counter resumes from the local history (spec/peer-id-plan.md).
+    let peer_id = storage.doc_peer_id(doc_id)?;
     let (mut doc, boot_meta) = crate::storage::boot_doc(storage, &dek, doc_id, Some(peer_id))?;
     doc.set_author(author);
     let last_synced_at = storage.read_sync_cursor(doc_id)?.last_sync_at;

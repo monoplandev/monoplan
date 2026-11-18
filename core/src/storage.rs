@@ -380,11 +380,12 @@ pub enum BootError {
 /// A doc the storage has never seen yields `BootState::default()`, so the
 /// result is a fresh empty `Doc` — the first-boot happy path.
 ///
-/// `peer_id` is the leased local peer for this process (`None` = Loro's
+/// `peer_id` is this device's stored peer for the doc (`None` = Loro's
 /// default random peer, one fresh peer per construction). Set before the
 /// replay import, so Loro resumes that peer's counter from the imported
 /// oplog high-water and new commits extend it. The caller must guarantee
-/// single ownership across live docs — see `spec/peer-id-plan.md`.
+/// one live instance of the doc under that peer, and that the storage
+/// holds every op the peer has written — see `spec/peer-id-plan.md`.
 pub fn boot_doc<S: LocalStorage + ?Sized>(
     storage: &S,
     dek: &Dek,

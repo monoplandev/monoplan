@@ -24,7 +24,8 @@ use crate::storage::Account;
 /// lists plus the core's `WELCOME_ITEM` in the Inbox (`Doc::seed_welcome`,
 /// the same call the web client makes), so a workspace looks the same
 /// whichever client created it. A real committed op, so `peer_id` must
-/// be the leased one (`spec/peer-id-plan.md`).
+/// be the doc's stored one (`SqliteStorage::doc_peer_id`,
+/// `spec/peer-id-plan.md`).
 pub fn welcome_doc(peer_id: u64) -> anyhow::Result<Doc> {
     let doc = Doc::new_with_peer(peer_id)?;
     doc.seed_welcome()?;
@@ -87,7 +88,7 @@ async fn discard_if_orphaned(profile: &Profile) -> anyhow::Result<()> {
 /// device token. The caller holds the profile (`client::claim`).
 pub fn init_local(profile: &Profile) -> anyhow::Result<()> {
     let storage = crate::storage::open_storage(profile)?;
-    let (doc_id, dek) = seed_local_doc(profile, &storage)?;
+    let (doc_id, dek) = seed_local_doc(&storage)?;
     storage.write_account(&Account {
         primary_doc_id: doc_id,
         identity: None,
@@ -101,18 +102,11 @@ pub fn init_local(profile: &Profile) -> anyhow::Result<()> {
 /// snapshot under them. The id is a locally generated UUID; the server
 /// adopts it at signup (`primary_doc_id`), since membership, not the
 /// id, grants access.
-pub fn seed_local_doc(
-    profile: &Profile,
-    storage: &crate::storage::SqliteStorage,
-) -> anyhow::Result<(DocId, Dek)> {
+pub fn seed_local_doc(storage: &crate::storage::SqliteStorage) -> anyhow::Result<(DocId, Dek)> {
     let doc_id = DocId(uuid::Uuid::new_v4());
     let dek = Dek::generate();
-    // `peer` stays in scope (lease held) until the snapshot is durably
-    // written: the seed is real committed ops under that peer id.
-    let peer = crate::peer::claim(&profile.dir, storage)?;
-    let doc = welcome_doc(peer.peer_id)?;
+    let doc = welcome_doc(storage.doc_peer_id(doc_id)?)?;
     crate::storage::seed_snapshot(storage, &dek, doc_id, &doc)?;
-    drop(peer);
     Ok((doc_id, dek))
 }
 

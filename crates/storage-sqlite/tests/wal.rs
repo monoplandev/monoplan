@@ -236,7 +236,7 @@ fn complete_push_is_scoped_to_its_push_id() {
     assert!(boot.in_flight_push.is_none());
 }
 
-/// spec/peer-id-plan.md: a doc booted with the leased peer id resumes
+/// spec/peer-id-plan.md: a doc booted with its stored peer id resumes
 /// that peer's counter from replayed history, so sequential invocations
 /// leave exactly one peer entry in the version vector instead of one
 /// per invocation.
