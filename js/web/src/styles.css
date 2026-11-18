@@ -3044,7 +3044,6 @@ input.task-check:hover {
 }
 
 .task-dialog-list:hover {
-  background: var(--bg-hover);
   color: var(--text);
 }
 
@@ -3419,7 +3418,7 @@ input.task-check:hover {
 
 .task-dialog-assignee:hover,
 .task-dialog-assignee[data-expanded] {
-  background: var(--bg-hover);
+  background: var(--bg-badge);
 }
 
 .task-dialog-assignee:focus-visible {
@@ -3618,7 +3617,7 @@ input.task-check:hover {
 }
 
 .time-picker-input:hover {
-  background: var(--bg-hover);
+  background: var(--bg-badge);
 }
 
 .time-picker-input:focus-visible {
@@ -3701,7 +3700,7 @@ input.task-check:hover {
 }
 
 .task-dialog-when-input:hover {
-  background: var(--bg-hover);
+  background: var(--bg-badge);
 }
 
 .task-dialog-when-input:focus-visible {
