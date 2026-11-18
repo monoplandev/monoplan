@@ -761,6 +761,16 @@
         }
       }
     },
+    "Nothing assigned": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nada asignado"
+          }
+        }
+      }
+    },
     "Nothing here": {
       "localizations": {
         "es": {

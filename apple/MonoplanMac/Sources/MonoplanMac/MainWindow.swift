@@ -192,7 +192,7 @@ struct NavSection: Identifiable {
 
 /// The views over every workspace, on top of the sidebar.
 enum Lens: Hashable {
-    case starred, agenda, done, bin
+    case starred, agenda, assigned, done, bin
 }
 
 /// What the list pane shows: a lens, or a list in a workspace.
@@ -205,6 +205,19 @@ struct Surface: Equatable {
 
 /// A Done row: the item, tagged with the workspace it was read from.
 struct DoneRow: Identifiable {
+    let item: Item
+    /// The workspace's doc id, Home's too: a typed call's `workspace`
+    /// takes it.
+    let workspace: String?
+    /// The workspace's name; nil for Home and an unnamed doc.
+    let workspaceName: String?
+
+    var id: String { "\(workspace ?? "")/\(item.id)" }
+}
+
+/// One row of the Assigned lens: an open item assigned to this
+/// account, and where it lives.
+struct AssignedRow: Identifiable {
     let item: Item
     /// The workspace's doc id, Home's too: a typed call's `workspace`
     /// takes it.
@@ -257,6 +270,10 @@ final class MainWindowModel: ObservableObject {
     }
     /// Their ids, for the star on a starred item's row elsewhere.
     private(set) var starredIds: Set<String> = []
+    /// The Assigned lens's rows (`Engine.assigned`): the open items
+    /// assigned to this account in every workspace. Always read: the
+    /// sidebar counts them, and shows the lens only while there are any.
+    @Published private(set) var assigned: [AssignedRow] = []
     /// The other lenses' rows, each read only while it is the one shown.
     @Published private(set) var agenda: [AgendaGroup] = []
     /// Counts the presses of the toolbar's "Today": each one scrolls
@@ -346,6 +363,7 @@ final class MainWindowModel: ObservableObject {
         switch lens {
         case .starred: return String(localized: "Starred")
         case .agenda: return String(localized: "Calendar")
+        case .assigned: return String(localized: "Assigned")
         case .done: return String(localized: "Done")
         case .bin: return String(localized: "Bin")
         case nil: break
@@ -376,6 +394,7 @@ final class MainWindowModel: ObservableObject {
         switch shown.lens {
         case .starred: return StarArt.outline
         case .agenda: return NavArt.calendar
+        case .assigned: return NavArt.person
         case .done: return NavArt.done
         case .bin: return NavArt.bin
         case nil: return shown.list == Self.inbox ? NavArt.inbox : nil
@@ -386,6 +405,7 @@ final class MainWindowModel: ObservableObject {
     var titleCount: Int {
         switch shown.lens {
         case .starred: return starred.count
+        case .assigned: return assigned.count
         case .bin: return binned.count
         case .agenda, .done: return 0
         case nil: return items.count
@@ -500,6 +520,7 @@ final class MainWindowModel: ObservableObject {
 
     private func clearLenses() {
         starred = []
+        assigned = []
         agenda = []
         done = []
         binned = []
@@ -523,6 +544,7 @@ final class MainWindowModel: ObservableObject {
         var list: String
         var items: [Item]
         var starred: [StarredItem] = []
+        var assigned: [AssignedRow] = []
         var agenda: [AgendaGroup] = []
         var done: [DoneRow] = []
         var binned: [BinEntry] = []
@@ -567,8 +589,13 @@ final class MainWindowModel: ObservableObject {
             snapshot.accountId = try engine.account()?.accountId
             snapshot.starred = try engine.starred()
             snapshot.binned = try engine.binned()
+            snapshot.assigned = try engine.assigned().map { entry in
+                let section = sections.first { $0.id == entry.docId }
+                return AssignedRow(
+                    item: entry.item, workspace: entry.docId, workspaceName: section?.workspace.name)
+            }
             switch lens {
-            case .starred, .bin:
+            case .starred, .assigned, .bin:
                 break
             case .agenda:
                 snapshot.agenda = try engine.agenda(days: Self.agendaDays, pastDays: Self.agendaPastDays)
@@ -626,6 +653,7 @@ final class MainWindowModel: ObservableObject {
                 self.shown = Surface(lens: snapshot.lens, workspace: snapshot.workspace, list: snapshot.list)
                 self.items = snapshot.items
                 self.starred = snapshot.starred
+                self.assigned = snapshot.assigned
                 self.agenda = snapshot.agenda
                 self.done = snapshot.done
                 self.binned = snapshot.binned
@@ -964,16 +992,36 @@ final class MainWindowModel: ObservableObject {
     /// without its emoji, then the workspace when it is not Personal's. An item whose
     /// list row has gone reads as the Inbox's, where it shows.
     func doneListName(_ row: DoneRow) -> String {
-        let listId = row.item.listId
+        listName(of: row.item, workspace: row.workspace, workspaceName: row.workspaceName)
+    }
+
+    /// The same for an Assigned row, led by its date (the earlier of
+    /// its planned day and deadline, which the lens orders by) when it
+    /// has one.
+    func assignedNote(_ row: AssignedRow) -> String {
+        let item = row.item
+        let date: String?
+        if let when = item.when, let deadline = item.deadline {
+            date = min(when, deadline)
+        } else {
+            date = item.when ?? item.deadline
+        }
+        let day = date.map { WhenSpan.dayLabel(String($0.prefix(10)), calendar: .current) }
+        let place = listName(of: item, workspace: row.workspace, workspaceName: row.workspaceName)
+        return [day, place].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private func listName(of item: Item, workspace: String?, workspaceName: String?) -> String {
+        let listId = item.listId
         let name: String
         if listId != Self.inbox,
-            let list = section(row.workspace)?.lists.first(where: { $0.id == listId })
+            let list = section(workspace)?.lists.first(where: { $0.id == listId })
         {
             name = list.name
         } else {
-            name = Self.noListLabel(dated: row.item.when != nil)
+            name = Self.noListLabel(dated: item.when != nil)
         }
-        return [name, row.workspaceName].compactMap { $0 }.joined(separator: " · ")
+        return [name, workspaceName].compactMap { $0 }.joined(separator: " · ")
     }
 
     // MARK: The Done filter
@@ -1319,6 +1367,16 @@ struct MainWindowView: View {
                     count(model.starred.count)
                 })
                 row(.lens(.agenda), Label { Text("Calendar") } icon: { NavIcon(image: NavArt.calendar) })
+                // Only while something is assigned to this account
+                // (or while it is the lens shown, so ticking the last
+                // row does not pull it away), as the web's nav; counted.
+                if !model.assigned.isEmpty || model.shown.lens == .assigned {
+                    row(.lens(.assigned), HStack {
+                        Label { Text("Assigned") } icon: { NavIcon(image: NavArt.person) }
+                        Spacer()
+                        count(model.assigned.count)
+                    })
+                }
                 row(.lens(.done), Label { Text("Done") } icon: { NavIcon(image: NavArt.done) })
                 // Only while something is binned, as the web's and iOS's
                 // nav; counted, as the web's.
@@ -1556,6 +1614,7 @@ struct MainWindowView: View {
             switch model.shown.lens {
             case .starred: starred
             case .agenda: agenda
+            case .assigned: assigned
             case .done: done
             case .bin: bin
             case nil: list
@@ -1781,6 +1840,41 @@ struct MainWindowView: View {
             }
             if model.starred.isEmpty {
                 Text("Nothing starred").foregroundStyle(.secondary)
+            }
+        }
+        .listStyle(.inset)
+        .scrollContentBackground(.hidden)
+    }
+
+    /// Assigned: the open items assigned to this account in every
+    /// workspace (spec/sharing-plan.md "Assignment"), dated ones first
+    /// by their earliest date, then the rest newest first. A row has
+    /// its tick, its text with its star, and at the far edge its date,
+    /// its list and, when not Personal's, its workspace. The tick drops
+    /// the row.
+    private var assigned: some View {
+        List(selection: selection { id in model.assigned.first { $0.item.id == id }?.workspace }) {
+            ForEach(model.assigned) { row in
+                HStack(alignment: .center, spacing: 8) {
+                    ItemCheckButton(state: row.item.state) {
+                        model.setDone(workspace: row.workspace, id: row.item.id, done: $0)
+                    }
+                    Text(verbatim: row.item.text)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    if model.starredIds.contains(row.item.id) { starMark }
+                    Spacer()
+                    Text(verbatim: model.assignedNote(row))
+                        .font(.footnote)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                .itemRow()
+                .itemMenu(model, workspace: row.workspace, id: row.item.id)
+                .tag(row.item.id)
+            }
+            if model.assigned.isEmpty {
+                Text("Nothing assigned").foregroundStyle(.secondary)
             }
         }
         .listStyle(.inset)

@@ -69,6 +69,8 @@ final class SearchModel: ObservableObject {
             (String(localized: "Calendar"), .lens(.agenda)),
             (String(localized: "Done"), .lens(.done)),
         ]
+        // Assigned only while something is, as in the sidebar.
+        if !window.assigned.isEmpty { pages.insert((String(localized: "Assigned"), .lens(.assigned)), at: 2) }
         if !window.binned.isEmpty { pages.append((String(localized: "Bin"), .lens(.bin))) }
         pages.append((String(localized: "Inbox"), .inbox))
         return pages.filter { matchesName(name: $0.0, query: query) }.map(\.1)
@@ -386,6 +388,7 @@ private struct SearchRowView: View {
         switch row {
         case .lens(.starred): NavIcon(image: StarArt.outline)
         case .lens(.agenda): NavIcon(image: NavArt.calendar)
+        case .lens(.assigned): NavIcon(image: NavArt.person)
         case .lens(.done): NavIcon(image: NavArt.done)
         case .lens(.bin): NavIcon(image: NavArt.bin)
         case .inbox: NavIcon(image: NavArt.inbox)
@@ -407,6 +410,7 @@ private struct SearchRowView: View {
         switch row {
         case .lens(.starred): Text("Starred")
         case .lens(.agenda): Text("Calendar")
+        case .lens(.assigned): Text("Assigned")
         case .lens(.done): Text("Done")
         case .lens(.bin): Text("Bin")
         case .inbox: Text("Inbox")

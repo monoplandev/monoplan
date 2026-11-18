@@ -1,6 +1,7 @@
 // Home: the root page and the app's one navigation stack; there is
 // no tab bar. First the pages that are not one list: Starred, Agenda,
-// Map, Done and Bin (Starred with its count). Then a section per open workspace (Personal first, as
+// Assigned (only while something is assigned), Map, Done and Bin
+// (Starred and Assigned with their counts). Then a section per open workspace (Personal first, as
 // `Engine.workspaces` orders them), each with its Inbox (and how many
 // Open items it holds) and then its
 // active lists in the doc's order, each led by its emoji (a folder
@@ -174,6 +175,7 @@ struct SharedWorkspaceBadge: View {
 enum HomePage: Hashable {
     case starred
     case agenda
+    case assigned
     case map
     case done
     case bin
@@ -278,6 +280,15 @@ struct HomeView: View {
                     }
                     NavigationLink(value: HomePage.agenda) {
                         Label { Text("Calendar") } icon: { CatalogIcon(name: "Calendar") }
+                    }
+                    // Only while something is assigned to this
+                    // account, as the Bin shows only while it holds
+                    // a row.
+                    if !model.assigned.isEmpty {
+                        NavigationLink(value: HomePage.assigned) {
+                            Label("Assigned", systemImage: "person")
+                                .counted(model.assigned.count)
+                        }
                     }
                     NavigationLink(value: HomePage.map) {
                         Label("Map", systemImage: "map")
@@ -451,6 +462,7 @@ struct HomeView: View {
                 switch page {
                 case .starred: StarredView(selecting: $selectingItems)
                 case .agenda: AgendaView()
+                case .assigned: AssignedView()
                 case .map:
                     PlacesMapView(homePath: $path)
                         .onAppear { mapShown = true }

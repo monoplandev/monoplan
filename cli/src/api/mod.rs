@@ -29,6 +29,7 @@ use crate::commands::focus::Lens;
 use crate::workspace::Candidate;
 
 pub mod agenda;
+pub mod assigned;
 pub mod bin;
 pub mod done;
 pub mod find;

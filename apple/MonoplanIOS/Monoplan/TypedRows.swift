@@ -189,6 +189,21 @@ extension BinEntry {
     var ref: ItemRef { ItemRef(docId: docId, itemId: id, title: text) }
 }
 
+extension AssignedEntry {
+    /// The row's identity across workspaces.
+    var key: String { "\(docId ?? "")/\(item.id)" }
+    var ref: ItemRef { ItemRef(docId: docId, itemId: item.id, title: item.text) }
+}
+
+extension Item {
+    /// The date the Assigned lens orders by: the earlier of the planned
+    /// day and the deadline (both `YYYY-MM-DD…`, so they order as text).
+    var assignedDate: String? {
+        if let when, let deadline { return min(when, deadline) }
+        return when ?? deadline
+    }
+}
+
 extension DoneEntry {
     /// The row's identity across workspaces.
     var key: String { "\(docId ?? "")/\(item.id)" }

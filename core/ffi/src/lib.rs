@@ -33,6 +33,7 @@ uniffi::setup_scaffolding!();
 use monoplan_cli::api::{
     self,
     agenda::{AgendaGroup, AgendaQuery},
+    assigned::AssignedEntry,
     bin::BinEntry,
     done::{DoneEntry, DoneFilter},
     find::FindHit,
@@ -1223,6 +1224,15 @@ impl Engine {
         Ok(self
             .client
             .call_blocking(None, move |cx| api::places::placed_items(cx, "", 0, closed))?)
+    }
+
+    /// The open items assigned to this account in every open
+    /// workspace, tasks and events alike, each tagged with its
+    /// workspace: dated ones first by their earliest date (`when` or
+    /// deadline), then the rest newest first
+    /// (spec/sharing-plan.md "Assignment").
+    pub fn assigned(&self) -> Result<Vec<AssignedEntry>, EngineError> {
+        Ok(self.client.call_blocking(None, api::assigned::assigned)?)
     }
 
     /// Done across every workspace that `filter` admits (an empty

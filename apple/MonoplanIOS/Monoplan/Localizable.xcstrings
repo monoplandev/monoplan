@@ -290,6 +290,17 @@
         }
       }
     },
+    "Assigned unavailable" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asignado no disponible"
+          }
+        }
+      }
+    },
     "Assignee" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1423,6 +1434,16 @@
         }
       }
     },
+    "Items assigned to you show here, from every workspace." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Los elementos que te asignan aparecen aquí, de todos los espacios de trabajo."
+          }
+        }
+      }
+    },
     "Items with a date or deadline will show here." : {
       "localizations" : {
         "es" : {
@@ -2003,6 +2024,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Notas"
+          }
+        }
+      }
+    },
+    "Nothing assigned" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nada asignado"
           }
         }
       }

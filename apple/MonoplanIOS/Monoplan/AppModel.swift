@@ -54,6 +54,10 @@ final class AppModel: ObservableObject {
     /// its cross-workspace entries resolved.
     @Published private(set) var starred: [StarredItem] = []
     @Published private(set) var starredError: String?
+    /// The Assigned lens (`Engine.assigned`): the open items assigned
+    /// to this account in every open workspace, reread on `Changed`.
+    @Published private(set) var assigned: [AssignedEntry] = []
+    @Published private(set) var assignedError: String?
     /// The Open items that carry a place, every workspace, and the
     /// closed ones too when the Map page's filter asks for them
     /// (`Engine.placedItems`): what the Map page shows. Read while that
@@ -169,6 +173,7 @@ final class AppModel: ObservableObject {
             loadSession()
             refreshAgenda()
             refreshStarred()
+            refreshAssigned()
             refreshDone()
         case .connecting:
             session = nil
@@ -198,6 +203,7 @@ final class AppModel: ObservableObject {
     private func refreshLenses() {
         refreshAgenda()
         refreshStarred()
+        refreshAssigned()
         refreshDone()
         refreshSearch()
         refreshBin()
@@ -1062,6 +1068,14 @@ final class AppModel: ObservableObject {
         guard doneHasMore, doneLoadedLimit == doneLimit else { return }
         doneLimit *= 2
         refreshDone()
+    }
+
+    /// `Engine.assigned`.
+    func refreshAssigned() {
+        read({ try $0.assigned() }) { [weak self] rows, error in
+            if let rows { self?.assigned = rows }
+            self?.assignedError = error
+        }
     }
 
     /// `Engine.starred`.
