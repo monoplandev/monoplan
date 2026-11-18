@@ -2,6 +2,8 @@
 
 Monoplan is a low-friction, FOSS, single-human-user/small-team, E2EE, multi-device capture/clarify/organise tool for ideas, intents, goals, projects. It is flexible but built with particular regard to improving users' productivity & focus.
 
+"What am I working on now" has two answers, and which one applies depends on the user's work mode, not on the product: **Starred** is a pick-and-choose shortlist (any item, dated or not), **Calendar** is the day planned out in time. A disciplined user in work mode plans much of their day, so Calendar is their "now" view; otherwise Starred is. Neither is the primary lens; build both as first-class.
+
 Workflow: a reserved primary capture list ("Inbox", id `inbox`), any number of user-created lists (each viewable as a fixed Backlog/Live/Done board), and a bin. Items move between lists, transition through the lifecycle (Backlog, Live, Done, Binned), can be restored, and deleted.
 
 ## Architecture
