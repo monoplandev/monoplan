@@ -325,6 +325,19 @@ describe("whenSpan", () => {
     });
     expect(whenSpan("2026-09-10T09:00", 120).total).toBe(1);
   });
+
+  test("a timed span ending at midnight exactly stops on the day before", () => {
+    expect(whenSpan("2026-09-10T21:00", 180)).toEqual({
+      start: "2026-09-10",
+      end: "2026-09-10",
+      total: 1,
+    });
+    // One minute past midnight is on the next day.
+    expect(whenSpan("2026-09-10T21:00", 181).total).toBe(2);
+    // Midnight to midnight is the one day; two days on ends on the second.
+    expect(whenSpan("2026-09-10T00:00", 1440).total).toBe(1);
+    expect(whenSpan("2026-09-10T21:00", 1440 + 180).end).toBe("2026-09-11");
+  });
 });
 
 describe("groupByDay: multi-day spans", () => {

@@ -33,7 +33,7 @@
 import {
   addDaysToStamp,
   formatDeadlineBadge,
-  spanEndOffset,
+  spanCoverOffset,
   whenDay,
 } from "./format.tsx";
 import {
@@ -61,9 +61,10 @@ export interface DayRow {
 
 /** The days a `when` covers, as `YYYY-MM-DD` stamps: the start day and
  *  the last day, with `total` the count between them inclusive. One day
- *  without a `duration`; otherwise the end lands `spanEndOffset` days
+ *  without a `duration`; otherwise the end lands `spanCoverOffset` days
  *  past the start (whole days beside an all-day start, the clock end
- *  beside a timed one, so an overnight 23:00 + 2h covers two days). The
+ *  beside a timed one, so an overnight 23:00 + 2h covers two days; an
+ *  end at 00:00 exactly is the end of the day before, not a day more). The
  *  one place the span is derived from the registers, for every surface
  *  that lays items out on days to share. */
 export function whenSpan(
@@ -71,7 +72,7 @@ export function whenSpan(
   duration: number | null | undefined,
 ): { start: string; end: string; total: number } {
   const start = whenDay(when);
-  const offset = spanEndOffset(when, duration);
+  const offset = spanCoverOffset(when, duration);
   return {
     start,
     end: offset > 0 ? addDaysToStamp(start, offset) : start,

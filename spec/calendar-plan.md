@@ -313,7 +313,9 @@ for the month grid). `groupByDeadline` becomes
   is planned for on its other day.
 - **Spans** (web, built 2026-10-29): a `when` with a `duration` covers
   `whenSpan` days (`dayGroups.ts`: whole days beside an all-day start,
-  the clock end beside a timed one, so 23:00 + 2h is two days). A row
+  the clock end beside a timed one, so 23:00 + 2h is two days; the end
+  is exclusive, so a span ending at 00:00 exactly stops on the day
+  before, here and in the CLI's `when_end_day`, changed 2026-11-18). A row
   placed by such a `when` is repeated on every day of the span from
   today onward, each copy stamped with its position (`DayRow.span`),
   shown as "Day 2" on the sub line under the title, beside the workspace

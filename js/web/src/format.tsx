@@ -286,6 +286,15 @@ export function endDayOffset(start: Required<TimeParts>, minutes: number): numbe
   return Math.floor((start.hour * 60 + start.minute + minutes) / DAY_MINUTES);
 }
 
+/** Days past the start day that a timed span still covers: the day its
+ *  last minute falls on. The end instant is exclusive, so a span ending
+ *  at 00:00 does not reach into the day that starts then (21:00 + 3h is
+ *  the one evening), where `endDayOffset` puts the end itself on it. */
+export function coveredDayOffset(start: Required<TimeParts>, minutes: number): number {
+  if (minutes <= 0) return 0;
+  return Math.floor((start.hour * 60 + start.minute + minutes - 1) / DAY_MINUTES);
+}
+
 /** Beside an all-day `when` the length counts whole days: a span of
  *  `minutes` covers `ceil(minutes / day)` days, so its last day is that
  *  many minus one past the start day (`spec/calendar-plan.md` "Field:
@@ -313,6 +322,15 @@ export function allDayDurationFor(offset: number): number | null {
 export function spanEndOffset(when: string, minutes: number | null | undefined): number {
   const start = whenTime(when);
   if (start) return minutes ? endDayOffset(start, minutes) : 0;
+  return allDayEndOffset(minutes);
+}
+
+/** Days past the start day a `when` covers, timed or all-day: what lays
+ *  an item out on days. Differs from `spanEndOffset` only for a timed
+ *  span ending exactly at midnight, which stops short of the next day. */
+export function spanCoverOffset(when: string, minutes: number | null | undefined): number {
+  const start = whenTime(when);
+  if (start) return minutes ? coveredDayOffset(start, minutes) : 0;
   return allDayEndOffset(minutes);
 }
 

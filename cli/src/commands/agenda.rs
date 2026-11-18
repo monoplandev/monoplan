@@ -310,14 +310,16 @@ fn day_band(item: &ItemView, placed_by: PlacedBy) -> u8 {
 
 /// The last day a `when` covers, as `YYYY-MM-DD`: its start day, pushed
 /// on by the `duration` beside it (whole days beside an all-day start,
-/// the clock end beside a timed one). Mirrors `whenSpan` in the web's
-/// `dayGroups.ts`. A value that does not parse yields its own day.
+/// the clock end beside a timed one). The end is exclusive: a timed
+/// span ending at 00:00 exactly stops on the day before. Mirrors
+/// `whenSpan` in the web's `dayGroups.ts`. A value that does not parse
+/// yields its own day.
 fn when_end_day(when: &str, duration: Option<u32>) -> String {
     let day = &when[..when.len().min(10)];
     let minutes = u64::from(duration.unwrap_or(0));
     let offset = match (when.get(11..13), when.get(14..16)) {
         (Some(h), Some(m)) => match (h.parse::<u64>(), m.parse::<u64>()) {
-            (Ok(h), Ok(m)) => (h * 60 + m + minutes) / 1440,
+            (Ok(h), Ok(m)) => (h * 60 + m + minutes).saturating_sub(1) / 1440,
             _ => 0,
         },
         _ => minutes.div_ceil(1440).saturating_sub(1),
@@ -671,6 +673,16 @@ mod tests {
                 (PlacedBy::When, Tone::Overdue),
             ]
         );
+    }
+
+    #[test]
+    fn a_timed_span_ending_at_midnight_stops_on_the_day_before() {
+        assert_eq!(when_end_day("2026-09-10T21:00", Some(180)), "2026-09-10");
+        assert_eq!(when_end_day("2026-09-10T21:00", Some(181)), "2026-09-11");
+        assert_eq!(when_end_day("2026-09-10T23:00", Some(120)), "2026-09-11");
+        assert_eq!(when_end_day("2026-09-10T00:00", Some(1440)), "2026-09-10");
+        assert_eq!(when_end_day("2026-09-10T00:00", None), "2026-09-10");
+        assert_eq!(when_end_day("2026-09-10", Some(3 * 1440)), "2026-09-12");
     }
 
     #[test]
