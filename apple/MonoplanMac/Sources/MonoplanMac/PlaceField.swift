@@ -127,6 +127,7 @@ struct PlaceField: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .hoverCircle()
                 .help("Remove place")
                 .accessibilityLabel("Remove place")
             }

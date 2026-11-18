@@ -2132,9 +2132,9 @@ final class NewWorkspacePrompt: NSObject, NSTextFieldDelegate {
     }
 }
 
-/// A translucent disc behind a small sidebar control while the pointer
-/// is over it, as a toolbar button's hover: the workspace row's "…"
-/// and chevron.
+/// A translucent disc behind a small control while the pointer is over
+/// it, as a toolbar button's hover: the workspace row's "…" and
+/// chevron, and the item panel fields' clear "x".
 private struct HoverCircle: ViewModifier {
     @State private var hovered = false
 
@@ -2147,5 +2147,5 @@ private struct HoverCircle: ViewModifier {
 }
 
 extension View {
-    fileprivate func hoverCircle() -> some View { modifier(HoverCircle()) }
+    func hoverCircle() -> some View { modifier(HoverCircle()) }
 }

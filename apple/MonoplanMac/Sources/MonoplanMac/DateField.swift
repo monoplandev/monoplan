@@ -2,14 +2,15 @@
 // spec/calendar-plan.md), and its editor: the place row's way of
 // working (`PlaceField.swift`) with the web date input's contents
 // (`js/web/src/WhenField.tsx`). At rest it is the day on one line, its
-// length at the trailing edge, or a muted "Date" when there is none. A
+// length at the trailing edge, or a muted "Date" when there is none;
+// under the pointer a set date shows an "x" that takes it off. A
 // click turns the row into a text box and drops a box under it,
 // floating over the panel's rows:
 //
 //   - the offers: what the typed text could mean, a few at most
 //     (`DateOffers`, over `WhenPhrase`, as the iOS editor reads it).
 //     Today and Tomorrow until something is typed on an item with no
-//     date; "Remove date" on one with a date.
+//     date.
 //   - a month calendar (`RangeCalendar`: AppKit's `NSDatePicker` in its
 //     range mode). It shows the item's date as a run of days, or the
 //     highlighted offer's day while there is one, so the offers are
@@ -46,6 +47,8 @@ struct DateField: View {
     /// The pointer is over the calendar: the caret leaving the box
     /// then is a click there, not a reason to shut.
     @State private var overCalendar = false
+    /// The pointer is over the row at rest: the clear "x" shows.
+    @State private var hovered = false
     @FocusState private var focused: Bool
 
     private var typed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -96,12 +99,33 @@ struct DateField: View {
                 if let note = restNote {
                     Spacer(minLength: 8)
                     Text(verbatim: note).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+                        // The "x" takes its place under the pointer.
+                        .opacity(hovered ? 0 : 1)
                 }
             }
             .panelBox(filled: false)
         }
         .buttonStyle(.plain)
         .accessibilityHint(Text("Changes the date"))
+        .overlay(alignment: .trailing) {
+            if when != nil, hovered {
+                Button {
+                    // The engine clears the duration with it.
+                    set(nil, .keep)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .hoverCircle()
+                .help("Remove date")
+                .accessibilityLabel("Remove date")
+            }
+        }
+        .onHover { hovered = $0 }
     }
 
     /// Beside an all-day date that spans several days, how many. A
@@ -137,7 +161,7 @@ struct DateField: View {
         let highlight = highlight(in: rows)
         return VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                DateRow(row: row, highlighted: highlight == index) { pick(row) }
+                DateRow(offer: row, highlighted: highlight == index) { pick(row) }
                     .onHover { if $0 { chosen = index } }
             }
             if rows.isEmpty, !typed.isEmpty {
@@ -166,28 +190,23 @@ struct DateField: View {
 
     // MARK: Offers
 
-    private var rows: [DateRow.Row] {
-        var rows: [DateRow.Row] = []
-        // Over a set date the list opens on the way to take it off.
-        if when != nil, typed.isEmpty { rows.append(.remove) }
-        rows += DateOffers.offers(
-            typed: typed, current: when, today: DateOffers.today(), tomorrow: DateOffers.today(plus: 1)
-        ).map(DateRow.Row.offer)
-        return rows
+    private var rows: [DateOffers.Offer] {
+        DateOffers.offers(
+            typed: typed, current: when, today: DateOffers.today(), tomorrow: DateOffers.today(plus: 1))
     }
 
     /// The row Return takes: the chosen one, else the first once
     /// something is typed.
-    private func highlight(in rows: [DateRow.Row]) -> Int? {
+    private func highlight(in rows: [DateOffers.Offer]) -> Int? {
         if let chosen, rows.indices.contains(chosen) { return chosen }
         return typed.isEmpty || rows.isEmpty ? nil : 0
     }
 
     /// What the month shows: the highlighted offer's day, else the
     /// item's own span, else today.
-    private func calendarSpan(_ rows: [DateRow.Row], _ highlight: Int?) -> (day: String, days: Int) {
-        if let highlight, case .offer(let offer) = rows[highlight] {
-            return (String(offer.when.prefix(10)), 1)
+    private func calendarSpan(_ rows: [DateOffers.Offer], _ highlight: Int?) -> (day: String, days: Int) {
+        if let highlight {
+            return (String(rows[highlight].when.prefix(10)), 1)
         }
         if let when {
             return (String(when.prefix(10)), DateOffers.spanDays(when: when, duration: duration))
@@ -213,19 +232,13 @@ struct DateField: View {
         // Text that names no date stays up to be fixed.
     }
 
-    private func pick(_ row: DateRow.Row) {
-        switch row {
-        case .remove:
-            // The engine clears the duration with it.
-            set(nil, .keep)
-        case .offer(let offer):
-            // Going between all-day and timed the old length no longer
-            // applies: an hour beside a time, a single day without one.
-            let nowTimed = offer.when.count >= 16
-            var change = DurationChange.keep
-            if when != nil, nowTimed != timed { change = nowTimed ? .minutes(minutes: 60) : .clear }
-            set(offer.when, change)
-        }
+    private func pick(_ offer: DateOffers.Offer) {
+        // Going between all-day and timed the old length no longer
+        // applies: an hour beside a time, a single day without one.
+        let nowTimed = offer.when.count >= 16
+        var change = DurationChange.keep
+        if when != nil, nowTimed != timed { change = nowTimed ? .minutes(minutes: 60) : .clear }
+        set(offer.when, change)
         finish()
     }
 
@@ -366,38 +379,24 @@ enum DateOffers {
     }()
 }
 
-/// One row of the list: "Remove date", or an offer (its name when it
-/// has one, the date after it).
+/// One row of the list: an offer (its name when it has one, the date
+/// after it).
 private struct DateRow: View {
-    enum Row {
-        /// Take the set date off the item.
-        case remove
-        case offer(DateOffers.Offer)
-    }
-
-    let row: Row
+    let offer: DateOffers.Offer
     let highlighted: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                switch row {
-                case .remove:
-                    Image(systemName: "xmark")
-                        .foregroundStyle(highlighted ? .white : .secondary)
-                        .frame(width: 16)
-                    Text("Remove date").lineLimit(1)
-                case .offer(let offer):
-                    if let name = offer.name {
-                        Text(verbatim: name).lineLimit(1)
-                        Spacer(minLength: 8)
-                        Text(verbatim: Self.text(offer.when))
-                            .foregroundStyle(highlighted ? .white.opacity(0.8) : .secondary)
-                            .lineLimit(1)
-                    } else {
-                        Text(verbatim: Self.text(offer.when)).lineLimit(1)
-                    }
+                if let name = offer.name {
+                    Text(verbatim: name).lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(verbatim: Self.text(offer.when))
+                        .foregroundStyle(highlighted ? .white.opacity(0.8) : .secondary)
+                        .lineLimit(1)
+                } else {
+                    Text(verbatim: Self.text(offer.when)).lineLimit(1)
                 }
                 Spacer(minLength: 0)
             }

@@ -120,6 +120,7 @@ struct TimeField: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .hoverCircle()
                 .help(clearLabel)
                 .accessibilityLabel(Text(verbatim: clearLabel))
             }
