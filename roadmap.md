@@ -116,3 +116,4 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - normalise nlp date suggestions acros platforms
 - task links / "blocked" feature? link? tag? both?
 - Consider an aggregate inbox
+- drag events to following days in agenda view
