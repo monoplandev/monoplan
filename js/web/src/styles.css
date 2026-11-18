@@ -3775,7 +3775,7 @@ input.task-check:hover {
    faces. With a place set it is the label as a link to the map, and the
    blank run of the row beside it (an unseen button) starts an edit; while
    editing it is a text input. The inset ✕ (while a place is set) follows
-   the date input's hover reveal. */
+   the date input's: hover reveal, opaque fill over the text's end. */
 .task-dialog-place {
   display: flex;
   flex-direction: column;
@@ -3784,7 +3784,6 @@ input.task-check:hover {
 .task-dialog-place-input {
   caret-color: auto;
   cursor: text;
-  padding-right: 28px;
 }
 
 .task-dialog-place-action {
@@ -3794,7 +3793,12 @@ input.task-check:hover {
   height: 18px;
   font-size: 11px;
   border-radius: 4px;
+  background: var(--bg-badge-solid);
   opacity: 0;
+}
+
+.task-dialog-place-action.icon-button:hover:not(:disabled) {
+  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg-badge-solid);
 }
 
 .task-dialog-when-anchor:hover .task-dialog-place-action,
@@ -3814,7 +3818,6 @@ input.task-check:hover {
 .task-dialog-place-display {
   display: inline-flex;
   align-items: center;
-  padding-right: 28px;
   cursor: default;
 }
 
