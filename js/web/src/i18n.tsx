@@ -225,11 +225,11 @@ export type Messages = {
     createdBy: string;
     /** The task dialog's assignee control (`AssigneeField`): its
      *  accessible name, the trigger's reading while unassigned, the
-     *  menu's "no one" row, and the tooltip naming the assignee (also
+     *  ✕ that unassigns, and the tooltip naming the assignee (also
      *  the row avatar's). */
     assignee: string;
     assign: string;
-    unassigned: string;
+    unassign: string;
     assignedTo: (who: string) => string;
     activity: string;
     activityCompleted: (when: string) => string;
@@ -743,7 +743,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       createdBy: "por",
       assignee: "Responsable",
       assign: "Asignar",
-      unassigned: "Sin asignar",
+      unassign: "Quitar responsable",
       assignedTo: (who) => `Asignado a ${who}`,
       activity: "Actividad",
       activityCompleted: (when) => `Completado ${when}`,
@@ -1135,7 +1135,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       createdBy: "by",
       assignee: "Assignee",
       assign: "Assign",
-      unassigned: "Unassigned",
+      unassign: "Unassign",
       assignedTo: (who) => `Assigned to ${who}`,
       activity: "Activity",
       activityCompleted: (when) => `Completed ${when}`,

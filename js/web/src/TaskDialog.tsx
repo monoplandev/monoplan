@@ -150,8 +150,8 @@ export function TaskDialog(props: {
    *  the workspace (`spec/sharing-plan.md` §Attribution). */
   creatorOf?: (item: ItemView) => { accountId: string; email: string | null } | null;
   /** Who the item is assigned to and who it could be, or null to offer
-   *  no assignment (Home, a workspace of one). The band shows once the
-   *  item has an assignee; until then "Assign" in the "…" menu opens it.
+   *  no assignment (Home, a workspace of one). The band is always there
+   *  then, a muted "Assign" while the item has no assignee.
    *  Existing items only: a capture has no "…" menu. Resolved by the
    *  workspace (`spec/sharing-plan.md` §Assignment). */
   assignmentOf?: (item: ItemView) => Assignment | null;
@@ -1270,10 +1270,11 @@ export function TaskDialog(props: {
   // item onto it). Until set it is a menu entry only: the row's context
   // menu and this surface's "…" menu.
   const deadlineShown = () => vDeadline() !== null || props.deadlineOpen();
-  // The assignee band follows the same rule (`spec/sharing-plan.md`
-  // §Assignment): shown while the item has an assignee or the "…"
-  // menu's "Assign" is being answered (its member menu is open). Its
-  // open state is the surface's own, since nothing outside opens it.
+  // The assignee band (`spec/sharing-plan.md` §Assignment) is always
+  // there on a shared workspace's item, as the date and place bands: a
+  // muted "Assign" until it holds someone. A binned item only shows an
+  // assignee it already has. The member menu's open state is the
+  // surface's own, so a change of item can close it.
   const [assignOpen, setAssignOpen] = createSignal(false);
   const assignment = () => {
     const it = item();
@@ -1281,7 +1282,7 @@ export function TaskDialog(props: {
   };
   const assigneeShown = () => {
     const a = assignment();
-    return a !== null && (a.assignee !== null || assignOpen());
+    return a !== null && (a.assignee !== null || !vBinned());
   };
   // A band folded back without a value leaves focus on a detached input;
   // put it on the "…" menu trigger instead. Only when the fold actually
@@ -1294,8 +1295,8 @@ export function TaskDialog(props: {
   // dismiss handling takes the new popover down with it.
   let menuPick: (() => void) | null = null;
   createEffect(
-    on([deadlineShown, assigneeShown], (now, before) => {
-      if (!before || !before.some((was, i) => was && !now[i])) return;
+    on(deadlineShown, (now, before) => {
+      if (!before || now) return;
       queueMicrotask(() => {
         const active = document.activeElement;
         if (active && active !== document.body && active.isConnected) return;
@@ -1506,16 +1507,6 @@ export function TaskDialog(props: {
                         {m().deadline.setDate}
                       </DropdownMenu.Item>
                     </Show>
-                    <Show when={!isBinned(it()) && assignment() !== null && !assigneeShown()}>
-                      <DropdownMenu.Item
-                        class="dropdown-menu-item"
-                        onSelect={() => {
-                          menuPick = () => setAssignOpen(true);
-                        }}
-                      >
-                        {m().workspace.assign}
-                      </DropdownMenu.Item>
-                    </Show>
                     <Show when={!isBinned(it())}>
                       <DropdownMenu.Item
                         class="dropdown-menu-item"
@@ -1608,15 +1599,32 @@ export function TaskDialog(props: {
             />
           </section>
 
-          {/* Badge row: the move-to-list picker (the pin toggle lives
-              in the header). */}
-          <section class="task-dialog-section task-dialog-badges">
-            <ListPicker
-              options={listOptions}
-              value={vListId}
-              workspace={props.docLabel}
-              onChange={onListChange}
-            />
+          {/* Where the item sits and whose it is, in one section: the
+              move-to-list picker (the pin toggle lives in the header),
+              then, on a shared workspace, the assignee band: who the
+              item is assigned to, or a muted "Assign". */}
+          <section class="task-dialog-section task-dialog-filing">
+            <div class="task-dialog-badges">
+              <ListPicker
+                options={listOptions}
+                value={vListId}
+                workspace={props.docLabel}
+                onChange={onListChange}
+              />
+            </div>
+            <Show when={assigneeShown() && assignment()}>
+              {(a) => (
+                <AssigneeField
+                  assignment={a}
+                  onChange={(who) => {
+                    const it = item();
+                    if (it) props.app.setItemAssignee(it.id, who);
+                  }}
+                  open={assignOpen}
+                  setOpen={setAssignOpen}
+                />
+              )}
+            </Show>
           </section>
 
           {/* Date section: the planned date between the badges and the
@@ -1660,25 +1668,6 @@ export function TaskDialog(props: {
                 setOpen={props.setDeadlineOpen}
               />
             </section>
-          </Show>
-
-          {/* Assignee section under the deadline: who the item is
-              assigned to, on a shared workspace. Reached from the "…"
-              menu until it holds someone. */}
-          <Show when={assigneeShown() && assignment()}>
-            {(a) => (
-              <section class="task-dialog-section task-dialog-assignee-section">
-                <AssigneeField
-                  assignment={a}
-                  onChange={(who) => {
-                    const it = item();
-                    if (it) props.app.setItemAssignee(it.id, who);
-                  }}
-                  open={assignOpen}
-                  setOpen={setAssignOpen}
-                />
-              </section>
-            )}
           </Show>
 
           {/* Place section under the deadline, always present: a typed

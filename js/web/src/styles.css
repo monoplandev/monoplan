@@ -3379,6 +3379,14 @@ input.task-check:hover {
   height: 12px;
 }
 
+/* The section under the title: the list picker's row, then the assignee
+   band on a shared workspace, stacked like the date rows. */
+.task-dialog-filing {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 /* Control row under the title: list picker, then the "more" menu. In the
    780px modal they run inline at their natural widths; the narrow shells
    below rearrange them. */
@@ -3430,14 +3438,15 @@ input.task-check:hover {
 
 /* Assignee band (AssigneeField.tsx): a row of its own in the manner of
    the date fields, the person's disc then their email, the whole row
-   the menu's trigger. Empty (the "…" menu's "Assign" being answered) it
-   reads "Assign" in the muted tone. */
+   the menu's trigger. Empty it reads "Assign" in the placeholder tone
+   behind a person glyph, which sits in the disc's 18px slot so the text
+   starts where the date fields' does. */
 .task-dialog-assignee {
   appearance: none;
   -webkit-appearance: none;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   width: 100%;
   height: 32px;
   box-sizing: border-box;
@@ -3464,7 +3473,21 @@ input.task-check:hover {
 }
 
 .task-dialog-assignee[data-empty] {
-  color: var(--text-muted);
+  color: var(--text-empty);
+}
+
+.task-dialog-assignee-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+}
+
+.task-dialog-assignee-icon svg {
+  width: 14px;
+  height: 14px;
 }
 
 .task-dialog-assignee-name {
