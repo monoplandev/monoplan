@@ -460,73 +460,24 @@ enum DateOffers {
         }
         return words
     }()
-    // MARK: The end day
+    // MARK: The end day (`WhenSpan`, shared with the iOS editor)
 
-    /// A day as a box shows it: "Wed 23 Sept", and in another year the
-    /// year in the weekday's place ("23 Sept 2027"), as the web's
-    /// inputs. Short, for half the panel's width.
-    static func dayLabel(_ day: String) -> String { dayLabel(day, now: Date()) }
+    static func dayLabel(_ day: String) -> String { WhenSpan.dayLabel(day, calendar: calendar) }
 
-    static func dayLabel(_ day: String, now: Date) -> String {
-        let calendar = calendar
-        guard let date = Agenda.start(of: day, calendar: calendar) else { return day }
-        if calendar.isDate(date, equalTo: now, toGranularity: .year) {
-            return date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
-        }
-        return date.formatted(.dateTime.day().month(.abbreviated).year())
-    }
-
-    /// Whole days from one `YYYY-MM-DD` to another.
     static func days(from: String, to: String) -> Int? {
-        let calendar = calendar
-        guard let a = Agenda.start(of: from, calendar: calendar),
-              let b = Agenda.start(of: to, calendar: calendar)
-        else { return nil }
-        return calendar.dateComponents([.day], from: a, to: b).day
+        WhenSpan.days(from: from, to: to, calendar: calendar)
     }
 
-    /// Days past the start day the span ends on, 0 for the start day
-    /// itself (the web's `spanEndOffset`): beside a time, the day the
-    /// end's clock time falls on; all-day, the last whole day.
     static func endOffset(when: String, duration: Int?) -> Int {
-        let minutes = max(0, duration ?? 0)
-        if let start = TimeOffers.minutes(of: when) { return (start + minutes) / TimeOffers.day }
-        return minutes == 0 ? 0 : (minutes + TimeOffers.day - 1) / TimeOffers.day - 1
+        WhenSpan.endOffset(when: when, duration: duration)
     }
 
-    /// The length that ends the span `offset` days past its start day:
-    /// 0 for none stored, nil when the register cannot hold that day
-    /// (before the start; with a timed start, the start day itself
-    /// while the end is not past the start on the clock; past the
-    /// one-year ceiling). All-day it counts whole days. Beside a time
-    /// the end's clock time is kept (an hour after the start while no
-    /// length is stored, the length such an item is drawn with).
     static func endLength(when: String, duration: Int?, offset: Int) -> Int? {
-        guard offset >= 0 else { return nil }
-        guard let start = TimeOffers.minutes(of: when) else {
-            let length = (offset + 1) * TimeOffers.day
-            guard length <= TimeOffers.maxDuration else { return nil }
-            return offset == 0 ? 0 : length
-        }
-        let stored = max(0, duration ?? 0)
-        let end = (start + (stored > 0 ? stored : 60)) % TimeOffers.day
-        let length = offset * TimeOffers.day + end - start
-        return (1...TimeOffers.maxDuration).contains(length) ? length : nil
+        WhenSpan.endLength(when: when, duration: duration, offset: offset)
     }
 
-    /// The length with the end brought back onto the start day (the
-    /// web's `sameDayDuration`): none all-day; beside a time the end's
-    /// clock time where that is after the start, else an hour, cut
-    /// short of midnight.
     static func sameDayLength(when: String, duration: Int?) -> Int {
-        guard let start = TimeOffers.minutes(of: when) else { return 0 }
-        let stored = max(0, duration ?? 0)
-        if stored > 0 {
-            if (start + stored) / TimeOffers.day == 0 { return stored }
-            let end = (start + stored) % TimeOffers.day
-            if end > start { return end - start }
-        }
-        return max(1, min(60, TimeOffers.day - 1 - start))
+        WhenSpan.sameDayLength(when: when, duration: duration)
     }
 
     /// What typed text could mean as the day a span ends on: days

@@ -151,17 +151,6 @@
         }
       }
     },
-    "1 day" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "1 día"
-          }
-        }
-      }
-    },
     "1 result" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -217,13 +206,12 @@
         }
       }
     },
-    "Add time" : {
-      "extractionState" : "stale",
+    "All day" : {
       "localizations" : {
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Añadir hora"
+            "value" : "Todo el día"
           }
         }
       }
@@ -1224,12 +1212,22 @@
       }
     },
     "End" : {
-      "extractionState" : "stale",
       "localizations" : {
         "es" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fin"
+          }
+        }
+      }
+    },
+    "End date" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fecha de fin"
           }
         }
       }
@@ -1567,17 +1565,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Salir del espacio de trabajo…"
-          }
-        }
-      }
-    },
-    "Length" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Duración"
           }
         }
       }
@@ -1988,17 +1975,6 @@
         }
       }
     },
-    "None" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ninguna"
-          }
-        }
-      }
-    },
     "Not done" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2398,6 +2374,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Quitar emoji"
+          }
+        }
+      }
+    },
+    "Remove end date" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quitar fecha de fin"
           }
         }
       }
