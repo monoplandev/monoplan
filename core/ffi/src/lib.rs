@@ -119,6 +119,22 @@ fn init_log(profile_dir: &std::path::Path) {
         .with_ansi(false)
         .with_writer(Append(profile_dir.join(monoplan_cli::daemon::LOG_FILE)))
         .try_init();
+
+    // A panic on the engine thread ends the loop like any fatal error,
+    // and its message goes to stderr, which nothing keeps on a phone.
+    // Put it in the log too, then let the hook before this one run.
+    static PANIC_HOOK: std::sync::Once = std::sync::Once::new();
+    PANIC_HOOK.call_once(|| {
+        let before = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let thread = std::thread::current();
+            tracing::error!(
+                "panic on thread {}: {info}",
+                thread.name().unwrap_or("unnamed")
+            );
+            before(info);
+        }));
+    });
 }
 
 fn runtime() -> Result<tokio::runtime::Runtime, EngineError> {
@@ -600,8 +616,16 @@ impl Engine {
                     };
                     let (serving, client) = daemon::Serving::new(started);
                     let _ = ready_tx.send(Ok(client));
-                    if let Err(e) = serving.run(shutdown_rx).await {
-                        eprintln!("monoplan engine: {e:#}");
+                    // Both ends in the log (`engine.log`): stderr is
+                    // not kept on a device, and why a loop ended is the
+                    // one thing a restart loop needs said.
+                    tracing::info!("engine loop started");
+                    match serving.run(shutdown_rx).await {
+                        Ok(()) => tracing::info!("engine loop stopped"),
+                        Err(e) => {
+                            tracing::error!("engine loop failed: {e:#}");
+                            eprintln!("monoplan engine: {e:#}");
+                        }
                     }
                 });
             })

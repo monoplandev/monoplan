@@ -23,6 +23,7 @@ monoplan-core = { path = ".." }
 # `KdfParams::DEFAULT` for `signup`.
 monoplan-protocol = { path = "../../crates/protocol" }
 tokio = { workspace = true }
+tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uniffi = { version = "0.32", features = ["cli"] }
 thiserror = { workspace = true }

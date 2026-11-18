@@ -47,6 +47,12 @@ final class EngineController {
     /// engine has gone, and a reason not to start one meanwhile.
     private var accountWork: String?
     private var backoff: TimeInterval = 1
+    /// When the engine we hold started serving, to tell one that ran
+    /// from one that ended straight away (`engineGone`).
+    private var startedAt: Date?
+    /// How long an engine must have run for its end to be taken as a
+    /// one-off, and its successor started at once.
+    private static let settled: TimeInterval = 10
     private var retryScheduled = false
 
     /// The engine's state, as it changes. Main queue.
@@ -132,7 +138,9 @@ final class EngineController {
                 return
             }
             engine = started
-            backoff = 1
+            // `backoff` is not reset here: starting is not yet proof
+            // the engine will stay up (`engineGone`).
+            startedAt = Date()
             NSLog("MonoplanMac: engine running on %@", location.dir.path)
             observe(started)
         case .failure(EngineError.NotLoggedIn):
@@ -176,7 +184,22 @@ final class EngineController {
         engine = nil
         engineCalls = nil
         state = .connecting(accountWork ?? reason)
-        ensure()
+        // An engine that ran for a while gets its successor at once.
+        // One that ended straight after starting would most likely do
+        // so again (whatever ended it is still there), and restarting
+        // it at once is a loop several times a second, each round
+        // clearing and refilling every view: pace those as failed
+        // starts are, backing off to ten seconds. Why it ended is in
+        // the profile's `engine.log`.
+        let ran = startedAt.map { Date().timeIntervalSince($0) } ?? 0
+        startedAt = nil
+        NSLog("%@: engine stopped after %.1fs", "MonoplanMac", ran)
+        if ran < Self.settled {
+            retry(showing: accountWork ?? reason)
+        } else {
+            backoff = 1
+            ensure()
+        }
     }
 
     private func retry(showing why: String) {
