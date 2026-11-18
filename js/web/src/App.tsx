@@ -12,7 +12,7 @@
 
 import { createEffect, createSignal, onMount, Show } from "solid-js";
 import { Dek, Doc, EncryptedBlob } from "@monoplan/core/wasm";
-import { IdbStorage, deleteDevice, readOrMintPeerSlot } from "@monoplan/core";
+import { IdbStorage, clearPeerSlots, readOrMintPeerSlot, wipeMonoplanDb } from "@monoplan/core";
 import { deletePrefs, loadPrefs, savePrefs } from "./prefs.ts";
 import { api } from "./api.ts";
 import { dekVault } from "./sync/dekVault.ts";
@@ -24,6 +24,7 @@ import { Workspace } from "./Workspace.tsx";
 import { createWorkspaceRuntime, type BootInfo, type DocBoot } from "./sync/runtime.ts";
 import { SessionProvider, useSession } from "./SessionContext.tsx";
 import { clearAuthPromptDismissed } from "./nav.tsx";
+import { clearBrowserState } from "./signOutWipe.ts";
 
 export function App(props: {
   /** True when this tab holds the `monoplan-single-tab` Web Lock — the
@@ -122,28 +123,31 @@ export function App(props: {
     setBootError(null);
     setOnline(false);
     setLastSyncAt(null);
-    // Swap first so the old runtime is disposed (keyed <Show>) before
-    // its rows go; the fresh anonymous doc has its own id, so the wipe
-    // below cannot touch it.
-    setSession(await createAnonymousSession());
-    if (opts?.wipeLocal && current) {
-      // Let the disposed replicas' queued IDB writes settle so a late
-      // append cannot resurrect a doc row after its wipe.
-      await Promise.allSettled(storages.map((s) => s.whenFlushed()));
-      for (const docId of current.docKeys.keys()) {
-        try {
-          await IdbStorage.wipe(docId);
-        } catch (e) {
-          console.warn("logout: wiping local doc failed:", docId, e);
-        }
-      }
-      try {
-        await deleteDevice(current.accountId);
-        await deletePrefs(current.accountId);
-      } catch (e) {
-        console.warn("logout: dropping account rows failed:", e);
-      }
+    if (!opts?.wipeLocal) {
+      // Forced sign-out: keys are forgotten, docs (and with them the
+      // peer slot they were written under) stay.
+      setSession(await createAnonymousSession());
+      return;
     }
+    // The user's sign-out leaves nothing of the account in this
+    // browser: every IndexedDB store (docs of every account, orphaned
+    // anonymous docs, the peer slots) and our localStorage /
+    // sessionStorage keys; only theme, language and clock format stay
+    // (`signOutWipe.ts`). Drop to the splash first so the old runtime
+    // is disposed (keyed <Show>) and nothing is live to write rows back;
+    // the fresh anonymous session is minted only after the wipe, so the
+    // wipe cannot take its rows.
+    setSession(null);
+    // Let the disposed replicas' queued IDB writes settle so a late
+    // append cannot resurrect a doc row after its wipe.
+    await Promise.allSettled(storages.map((s) => s.whenFlushed()));
+    try {
+      await wipeMonoplanDb();
+    } catch (e) {
+      console.warn("logout: wiping local data failed:", e);
+    }
+    clearBrowserState();
+    setSession(await createAnonymousSession());
   };
 
   // Signup adopts the anonymous doc (same doc id, so the op log,
@@ -163,6 +167,16 @@ export function App(props: {
       } catch (e) {
         console.warn("migrating anonymous prefs failed:", e);
       }
+    }
+    // Every sign-in boots on a freshly minted peer id, whatever an
+    // earlier session left in `peer_slots` (a sign-out that never
+    // finished, say): an account's docs may arrive by bootstrap, and a
+    // write under a peer whose own history is still in flight mints
+    // duplicate op ids. Awaited so boot's read-or-mint sees the gap.
+    try {
+      await clearPeerSlots();
+    } catch (e) {
+      console.warn("sign-in: resetting the peer slot failed:", e);
     }
     setBoot(null);
     setBootError(null);

@@ -64,3 +64,24 @@ export async function readOrMintPeerSlot(slot: number): Promise<bigint> {
     tx.onabort = () => reject(tx.error ?? new Error("peer slot tx aborted"));
   });
 }
+
+/**
+ * Forget every slot's peer id, so the next `readOrMintPeerSlot` mints a
+ * fresh one. Run at sign-in, before the new session boots: whatever an
+ * earlier session left behind (a sign-out that never finished, site
+ * data half cleared), the docs about to load never write under a peer
+ * whose history this browser may no longer hold in full. A new peer id
+ * is always safe; the cost is one more entry in each doc's version
+ * vector per sign-in. The caller must hold the slot's Web Lock, as for
+ * minting.
+ */
+export async function clearPeerSlots(): Promise<void> {
+  const db = await openMonoplanDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_PEER_SLOTS, "readwrite");
+    tx.objectStore(STORE_PEER_SLOTS).clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error("peer slot clear aborted"));
+  });
+}

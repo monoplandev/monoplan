@@ -218,6 +218,31 @@ function openOnce(): Promise<IDBDatabase> {
   });
 }
 
+/** Empty every store in the database: every doc's local copy, the
+ *  vault, device and prefs rows of every account, and the peer slots.
+ *  The user's sign-out. One transaction, so a crash leaves either all
+ *  of it or none. Clears rather than `deleteDatabase`, which the open
+ *  handle (ours, cached) would block.
+ *
+ *  `peer_slots` going is load-bearing, not tidiness: a slot's peer id
+ *  is only safe to mint under while this browser still holds every op
+ *  that peer ever minted. Once the docs are gone the peer's counter
+ *  resumes from whatever a bootstrap has imported so far, and a local
+ *  write mid-bootstrap mints an op id the server history already uses
+ *  (`spec/peer-id-plan.md`). */
+export async function wipeMonoplanDb(): Promise<void> {
+  const db = await openMonoplanDb();
+  const names = [...db.objectStoreNames];
+  if (names.length === 0) return;
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(names, "readwrite");
+    for (const name of names) tx.objectStore(name).clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error("wipe tx aborted"));
+  });
+}
+
 /** Best-effort, once-per-session cleanup of the retired `monoplan-engine`
  *  database (the v7-only separate op-log DB, now folded into
  *  `monoplan-web`). Fire-and-forget: a peer tab on old code may block the
