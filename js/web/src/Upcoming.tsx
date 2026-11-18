@@ -17,8 +17,9 @@
 // the `when` row stands for both and carries the "Due" mark after its
 // title.
 // Rows tick off in place and stay where they are on their `when` day once
-// done or cancelled, muted (tick or cross), so the day still records what
-// happened and what was called off.
+// done or cancelled (tick or cross), so the day still records what
+// happened and what was called off. Muted text marks the days gone by,
+// every row on them, not the closed rows; Overdue is not one of them.
 //
 // Events (`spec/events-plan.md`): an open event's row has a dot where a
 // task has its checkbox, since nothing asks for the tick and the event

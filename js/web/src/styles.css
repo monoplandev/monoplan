@@ -717,11 +717,11 @@ body {
   color: var(--due-today-text);
 }
 
-/* A ticked or crossed row stays on its day as the record of what
-   happened, or was called off: muted, the box doing the talking.
-   (`data-done`: the context-menu trigger owns `data-closed`.) The time
-   lane is already muted on every row. */
-.upcoming-row[data-done] .upcoming-row-text {
+/* A day gone by is the record of what happened: its rows are muted,
+   open events and settled items alike. Overdue is not a past day, and a
+   row ticked or crossed today or ahead keeps its text, the box doing
+   the talking. The time lane is already muted on every row. */
+.upcoming-day[data-urgency="past"] .upcoming-row-text {
   color: var(--text-muted);
 }
 
