@@ -65,7 +65,9 @@ struct AgendaTable: NSViewRepresentable {
         table.intercellSpacing = NSSize(width: table.intercellSpacing.width, height: 0)
         table.allowsEmptySelection = true
         table.allowsMultipleSelection = false
-        table.floatsGroupRows = true
+        // A day's header scrolls away with its rows: one pinned under
+        // the toolbar broke the page's flow for little.
+        table.floatsGroupRows = false
         table.dataSource = coordinator
         table.delegate = coordinator
         table.rowMenu = { [weak coordinator] in coordinator?.menu(forRow: $0) }

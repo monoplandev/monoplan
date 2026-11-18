@@ -1141,7 +1141,8 @@ impl Engine {
     /// calendar), in date order: each non-empty day gone by, back to
     /// `past_days` before today (0 for none, and then Today is
     /// first); Today, always there; then each non-empty day up to
-    /// `days` past today.
+    /// `days` past today. A task done today is at the end of Today
+    /// (`placed_by: done`); one done earlier is not on it.
     pub fn agenda(&self, days: u32, past_days: u32) -> Result<Vec<AgendaGroup>, EngineError> {
         Ok(self.client.call_blocking(None, move |cx| {
             api::agenda::agenda(
@@ -1151,6 +1152,7 @@ impl Engine {
                     past_days,
                     today: None,
                     everywhere: true,
+                    completed: true,
                 },
             )
         })?)
@@ -1159,7 +1161,7 @@ impl Engine {
     /// [`agenda`](Self::agenda) as the JSON `monoplan agenda --all
     /// --json` prints: the file format of the home-screen widget's
     /// snapshot, which the app leaves for it and never parses. From
-    /// today on: the widget shows no days gone by.
+    /// today on: the widget shows no days gone by, and no done tasks.
     pub fn agenda_json(&self, days: u32) -> Result<String, EngineError> {
         Ok(self.client.call_blocking(None, move |cx| {
             api::agenda::agenda_json(
@@ -1169,6 +1171,7 @@ impl Engine {
                     past_days: 0,
                     today: None,
                     everywhere: true,
+                    completed: false,
                 },
             )
         })?)

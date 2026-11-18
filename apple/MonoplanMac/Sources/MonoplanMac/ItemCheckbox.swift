@@ -50,18 +50,32 @@ struct ItemCheckbox: View {
     }
 }
 
-/// What an open event's Calendar row leads with instead of a checkbox:
-/// a dot in the box's place, so the texts stay in one column. Display
-/// only; the item's panel still marks it done.
-struct EventDot: View {
+/// The checkbox's place on a Calendar row that has none (an event's):
+/// empty, as wide as the box, so the texts stay in one column.
+/// `EventPill` is drawn over it.
+struct EventSlot: View {
     @ScaledMetric(relativeTo: .body) private var side: CGFloat = CheckMetrics.side
 
     var body: some View {
-        Circle()
+        Color.clear
+            .frame(width: side, height: 1)
+            .accessibilityHidden(true)
+    }
+}
+
+/// What an event's Calendar row leads with instead of a checkbox: the
+/// short upright bar a calendar leads an event with, grey, as tall as
+/// the row and centred in the box's column. Display only; the item's
+/// panel still marks it done.
+struct EventPill: View {
+    @ScaledMetric(relativeTo: .body) private var side: CGFloat = CheckMetrics.side
+
+    var body: some View {
+        Capsule()
             .fill(.tertiary)
-            .frame(width: side * 0.33, height: side * 0.33)
-            .frame(width: side, height: side)
-            .alignmentGuide(.firstTextBaseline) { $0[.bottom] - side * 0.2 - CheckMetrics.nudge }
+            .frame(width: 3)
+            .padding(.vertical, 3)
+            .frame(width: side)
             .accessibilityHidden(true)
     }
 }

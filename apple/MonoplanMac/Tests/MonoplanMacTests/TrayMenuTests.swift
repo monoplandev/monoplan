@@ -6,13 +6,35 @@ final class TrayMenuTests: XCTestCase {
     func entry(
         _ id: String, _ text: String, list: String = "inbox", state: ItemState = .backlog,
         event: Bool = false, when: String? = nil, duration: UInt32? = nil, deadline: String? = nil,
-        tone: AgendaTone = .neutral, docId: String? = nil
+        tone: AgendaTone = .neutral, docId: String? = nil, placedBy: AgendaPlacedBy? = nil
     ) -> AgendaEntry {
         AgendaEntry(
-            id: id, text: text, listId: list, state: state, event: event, when: when,
+            id: id, text: text, listId: list, listName: nil, listIcon: nil, state: state, event: event,
+            when: when,
             duration: duration,
-            deadline: deadline, place: nil, placedBy: when == nil ? .deadline : .when, tone: tone,
+            deadline: deadline, place: nil, placedBy: placedBy ?? (when == nil ? .deadline : .when),
+            tone: tone,
             docId: docId, docName: nil)
+    }
+
+    func testTasksDoneTodayAreLeftOut() {
+        let groups = [
+            AgendaGroup(day: "2026-10-26", today: true, rows: [
+                entry("a", "Standup", event: true, when: "2026-10-26T09:00"),
+                entry("b", "Groceries", state: .done, when: "2026-10-26", placedBy: .done),
+            ]),
+        ]
+        XCTAssertEqual(TodayMenu.lines(from: groups, now: date(9, 5)).map(\.id), ["a"])
+    }
+
+    func testAnEventHasNoCheckboxWhileOpenOrOnceItsDayHasGoneBy() {
+        let today = "2026-10-26"
+        let shows = { MainWindowView.agendaRowShowsCheck($0, today: today) }
+        XCTAssertFalse(shows(entry("a", "Gig", event: true, when: "2026-10-26T20:00")))
+        XCTAssertTrue(shows(entry("b", "Gig", state: .done, event: true, when: "2026-10-26T20:00")))
+        XCTAssertFalse(shows(entry("c", "Gig", state: .done, event: true, when: "2026-10-20T20:00")))
+        XCTAssertTrue(shows(entry("d", "Task", when: "2026-10-26")))
+        XCTAssertTrue(shows(entry("e", "Tickets", event: true, when: "2026-10-30", deadline: "2026-10-26", placedBy: .deadline)))
     }
 
     /// What `Engine.agenda(days: 0)` returns on a day with all five

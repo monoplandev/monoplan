@@ -1608,8 +1608,9 @@ struct MainWindowView: View {
     }
 
     /// The Calendar: the engine's agenda as it groups it. The days
-    /// gone by that have rows (events that happened, done items on the
-    /// day they were planned for), then Overdue while something is,
+    /// gone by that have rows (the events that happened on them; a
+    /// task done today is at the end of Today, muted, and one done
+    /// earlier is not here), then Overdue while something is,
     /// then Today, always there, then each non-empty day. It opens on
     /// Today's header (Overdue's, when it is there), the past above
     /// it, and the toolbar's "Today" comes back
@@ -1652,8 +1653,30 @@ struct MainWindowView: View {
         model.agendaListName(row) != nil || !(row.place?.label ?? "").isEmpty
     }
 
+    /// Whether a Calendar row leads with a checkbox. An event's own
+    /// row does not while it is open (spec/events-plan.md: nothing asks
+    /// for the tick) or once its day has gone by (it is a record of
+    /// what was on): the event pill holds the box's place. One marked
+    /// done from today on shows the box, ticked, and a deadline's own
+    /// row is owed, so it keeps it.
+    static func agendaRowShowsCheck(_ row: AgendaEntry, today: String = DateOffers.today()) -> Bool {
+        guard row.event, row.placedBy == .when else { return true }
+        return row.state.isClosed && !agendaRowIsPast(row, today: today)
+    }
+
+    /// An event's own row on a day gone by: the only rows the past
+    /// days hold. (A task whose day has passed is in Overdue, not
+    /// there.)
+    static func agendaRowIsPast(_ row: AgendaEntry, today: String = DateOffers.today()) -> Bool {
+        guard row.event, row.placedBy == .when, let when = row.when, when.count >= 10 else { return false }
+        return String(when.prefix(10)) < today
+    }
+
     private func agendaRow(_ row: AgendaEntry) -> some View {
-        let done = row.state == .done
+        // Muted: a done row, and every row of a day gone by, done or
+        // not.
+        let done = row.state == .done || Self.agendaRowIsPast(row)
+        let check = Self.agendaRowShowsCheck(row)
         let listName = model.agendaListName(row)
         let place = row.place?.label ?? ""
         let detailed = agendaRowDetailed(row)
@@ -1662,14 +1685,12 @@ struct MainWindowView: View {
         return HStack(alignment: .rowTitle, spacing: 8) {
             // The tick sits on the text's line, not the row's middle.
             HStack(alignment: .rowTitle, spacing: 8) {
-                // An open event on its day has a dot for a checkbox
-                // (spec/events-plan.md): nothing asks for the tick. Done
-                // or cancelled, the box is back, ticked or crossed. A
-                // deadline's own row is owed, so it keeps it.
-                if !row.event || row.placedBy != .when || row.state.isClosed {
+                // An event's row has the event pill for a checkbox
+                // (`agendaRowShowsCheck`), drawn over the row below.
+                if check {
                     ItemCheckButton(state: row.state) { model.setDone(workspace: row.docId, id: row.id, done: $0) }
                 } else {
-                    EventDot()
+                    EventSlot()
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     // The star follows the text, not the row's far edge.
@@ -1684,7 +1705,9 @@ struct MainWindowView: View {
                     if detailed {
                         HStack(alignment: .center, spacing: 8) {
                             if let listName {
-                                Text(verbatim: listName).lineLimit(1)
+                                // The list's own icon, when it has one.
+                                Text(verbatim: [row.listIcon, listName].compactMap { $0 }.joined(separator: " "))
+                                    .lineLimit(1)
                             }
                             if !place.isEmpty {
                                 HStack(alignment: .center, spacing: 2) {
@@ -1723,6 +1746,11 @@ struct MainWindowView: View {
                 // An event with a day and no clock time.
                 Text("All day").foregroundStyle(.secondary).fixedSize()
             }
+        }
+        // The pill runs the height of the row, so it spans the second
+        // line too.
+        .overlay(alignment: .leading) {
+            if !check { EventPill() }
         }
         .itemRow(height: detailed ? 42 : 24)
     }

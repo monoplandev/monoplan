@@ -90,15 +90,15 @@ struct CheckboxRow<Content: View>: View {
     /// The date moves the row's menu offers (`AgendaEntry.quickMoves`);
     /// none on a row that is not the calendar's.
     var moves: [WhenMove] = []
-    /// False on the calendar's row for an open event
-    /// (`AgendaEntry.showsCheck`): a dot holds the box's place.
+    /// False on the calendar's row for an event with no box
+    /// (`AgendaEntry.showsCheck`): the event pill holds the box's place.
     var check = true
     @ViewBuilder let content: Content
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             if !check {
-                EventDot()
+                EventSlot()
             } else if let ref {
                 ItemCheckButton(ref: ref, state: state)
             } else {
@@ -113,27 +113,44 @@ struct CheckboxRow<Content: View>: View {
             .onTapGesture { if let ref { openItem(ref) } }
             .accessibilityAddTraits(.isButton)
         }
+        // The pill runs the height of the row, so it spans the lines
+        // under the text too: drawn over the row, in the box's column.
+        .overlay(alignment: .leading) {
+            if !check { EventPill() }
+        }
         .modifier(ItemRowMenu(ref: ref, state: state, moves: moves))
         // No dividers between item rows, on any page that lists them.
         .itemListRow()
     }
 }
 
-/// What an open event's calendar row leads with instead of a checkbox
-/// (spec/events-plan.md): nothing asks for the tick, so a dot holds the
-/// box's place and keeps the texts in one column. Display only; the
-/// row's menu and the item's page still mark it done.
-struct EventDot: View {
-    /// `ItemCheckbox`'s side and nudge, so the dot sits where the box's
-    /// middle would.
+/// The checkbox's place on a calendar row that has none (an event's,
+/// spec/events-plan.md): empty, as wide as the box, so the texts stay
+/// in one column. `EventPill` is drawn over it.
+struct EventSlot: View {
+    /// `ItemCheckbox`'s side.
     @ScaledMetric(relativeTo: .body) private var side: CGFloat = 20
 
     var body: some View {
-        Circle()
+        Color.clear
+            .frame(width: side, height: 1)
+            .accessibilityHidden(true)
+    }
+}
+
+/// What an event's calendar row leads with instead of a checkbox: the
+/// short upright bar a calendar leads an event with, grey, as tall as
+/// the row and centred in the box's column. Display only; the row's
+/// menu and the item's page still mark it done.
+struct EventPill: View {
+    @ScaledMetric(relativeTo: .body) private var side: CGFloat = 20
+
+    var body: some View {
+        Capsule()
             .fill(.tertiary)
-            .frame(width: side * 0.3, height: side * 0.3)
-            .frame(width: side, height: side)
-            .alignmentGuide(.firstTextBaseline) { $0[.bottom] - side * 0.2 - 1.5 }
+            .frame(width: 3)
+            .padding(.vertical, 2)
+            .frame(width: side)
             .accessibilityHidden(true)
     }
 }

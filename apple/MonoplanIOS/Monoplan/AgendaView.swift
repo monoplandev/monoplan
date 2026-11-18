@@ -6,8 +6,8 @@
 // then each non-empty day. A row opens the item's sheet
 // (`ItemView`) and its checkbox ticks it, as in the other lenses.
 //
-// The days gone by (`AppModel.agendaPastDays`: events that happened,
-// done items on the day they were planned for) are sections above
+// The days gone by (`AppModel.agendaPastDays`: the events that
+// happened on them) are sections above
 // Overdue and Today. The page opens with Today's header at the top
 // (Overdue's, when it is there), so they are reached by scrolling up,
 // and the "Today" button comes back to the same place; Today's section
@@ -82,11 +82,15 @@ struct AgendaView: View {
 }
 
 /// One agenda row, laid out as the other lenses' rows are: the
-/// checkbox, the text (its star right after it when starred) with its place under it when it has one and then
+/// checkbox, the text (its star right after it when starred) with
+/// under it the list it is in (icon and name; none for an item on the
+/// calendar alone), its place when it has one and then
 /// the workspace when the row is not Personal's, and on the right the time when timed with a note under
 /// it for the tone (overdue in red, due today in orange) or the
 /// duration. The checkbox ticks; the rest of the row opens the sheet.
-/// An open event has a dot for a checkbox (`AgendaEntry.showsCheck`).
+/// An event has the event pill for a checkbox while it is open or its
+/// day has gone by (`AgendaEntry.showsCheck`). A task done today is
+/// muted at the end of Today, with no time or length.
 struct AgendaRowView: View {
     let row: AgendaEntry
 
@@ -102,6 +106,18 @@ struct AgendaRowView: View {
                                 .itemTextSlot()
                                 .foregroundStyle(row.isDone ? .secondary : .primary)
                             RowStar(state: row.state)
+                        }
+                        if let list = row.listName {
+                            // The list's icon, then its name.
+                            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                ListIcon(listId: row.listId, emoji: row.listIcon)
+                                    .imageScale(.small)
+                                Text(verbatim: list).lineLimit(1)
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(Text(verbatim: list))
                         }
                         if let place = row.place {
                             // The item page's place glyph, then the label.
@@ -156,7 +172,7 @@ struct AgendaRowView: View {
         if row.placedBy == .deadline {
             return row.deadline.map { (String(localized: "due \($0)"), .secondary) }
         }
-        if let minutes = row.duration, minutes > 0 {
+        if !row.isCompletedToday, let minutes = row.duration, minutes > 0 {
             return (Self.span(Int(minutes)), .secondary)
         }
         return nil

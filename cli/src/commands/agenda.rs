@@ -4,10 +4,13 @@
 //! row the item's `when` gives it. An Open task whose `when` has passed is still to do and
 //! folds into Today as overdue too; an event's past `when` has gone by
 //! and places nothing.
-//! Done items keep their `when` day and slot (the tick does not erase
-//! "happens on"); their deadline is settled and places nothing. Events
-//! (`spec/events-plan.md`) place and print by the same rules; an event
-//! always has a `when`, so it always has a day.
+//! A done task leaves its dates (`spec/calendar-plan.md` "Completed
+//! today"): done today it is at the end of Today, done earlier it is
+//! off the agenda. A done event keeps its `when` day and slot (it
+//! happened then, whatever was ticked); its deadline is settled and
+//! places nothing. Events (`spec/events-plan.md`) otherwise place and
+//! print by the same rules; an event always has a `when`, so it always
+//! has a day.
 //!
 //! Placement, tone, and ordering are pure functions of the item views
 //! and a `today` stamp, so they are unit-tested here without a doc.
@@ -38,8 +41,7 @@ pub struct AgendaArgs {
     #[arg(long, default_value_t = 14)]
     pub days: u32,
     /// How many days before today to show: the days that have gone by
-    /// (events that happened, done items on the day they were planned
-    /// for). 0, the default, shows none.
+    /// (the events that happened on them). 0, the default, shows none.
     #[arg(long, default_value_t = 0)]
     #[serde(default, skip_serializing_if = "is_zero")]
     pub past: u32,
@@ -115,24 +117,29 @@ pub struct AgendaDay {
 ///   them overdue), then the day's own rows in three bands
 ///   ([`day_band`]): all-day events, timed rows by the clock, then
 ///   untimed tasks and deadline rows. Inside a band, the raw string of
-///   the placing field, then `created_at`. Ticking a row does not move
-///   it.
-/// - Done items place by `when` only, on that day (today or later),
-///   neutral. A done item with no `when`, or a past `when`, is dropped:
-///   nothing is owed and past days are not shown. Cancelled and binned
-///   items never appear: a cancelled slot is something that did not
-///   happen, so it clutters rather than records.
-/// - Days gone by (`floor` before today): a day before today holds what
-///   has a `when` on it and is settled, an event (it happened) or a
-///   done item (on the day it was planned for), neutral, in the day's
+///   the placing field, then `created_at`.
+/// - A done task (anything done but an event with a `when`) leaves its
+///   dates. Done today, that is with a `lifecycle_at` at or after
+///   `closed_since` (the local midnight today began at, in ms), it is
+///   one row on Today, `placed_by: done`, neutral, after Today's other
+///   rows in the order done. Done before that, or with `closed_since`
+///   `None`, it is dropped. Mirrors `groupByDay` in the web's
+///   `dayGroups.ts`.
+/// - A done event places by `when` only, on that day, neutral, where it
+///   was: ticking it does not move it. Its deadline is settled.
+///   Cancelled and binned items never appear: a cancelled slot is
+///   something that did not happen, so it clutters rather than records.
+/// - Days gone by (`floor` before today): a day before today holds the
+///   events whose `when` is on it, done or not, neutral, in the day's
 ///   usual order. Nothing else lands there: an Open task with a past
-///   `when` is owed and stays in Today's overdue fold, and a deadline
-///   never places in the past. An event with a past `when` and a
-///   deadline still to come is on both days.
+///   `when` is owed and stays in Today's overdue fold, a done task is
+///   off the agenda, and a deadline never places in the past. An event
+///   with a past `when` and a deadline still to come is on both days.
 ///
-/// [`build_agenda`] is the agenda from today on (`floor` = today).
+/// [`build_agenda`] is the agenda from today on (`floor` = today), with
+/// no done tasks.
 pub fn build_agenda(items: &[ItemView], today: &str, horizon: &str) -> Vec<AgendaDay> {
-    build_agenda_from(&[(None, items)], today, today, horizon)
+    build_agenda_from(&[(None, items)], today, today, horizon, None)
 }
 
 /// [`build_agenda`] over several workspaces at once: one placement and
@@ -143,6 +150,7 @@ pub fn build_agenda_from(
     floor: &str,
     today: &str,
     horizon: &str,
+    closed_since: Option<i64>,
 ) -> Vec<AgendaDay> {
     // (day, fold group, day band, placing raw, created_at, row)
     let mut placed: Vec<(String, u8, u8, String, i64, AgendaRow)> = Vec::new();
@@ -151,11 +159,31 @@ pub fn build_agenda_from(
             if item.is_binned() || item.is_cancelled() {
                 continue;
             }
-            // A day gone by: what happened on it (an event) or was done
-            // for it. The rest of the placement is from today on.
+            // A done task is off its dates: at the end of Today (group
+            // 2, in the order done) if it was done today, else nowhere.
+            if item.is_done() && !(item.is_event() && item.when.is_some()) {
+                if closed_since.is_some_and(|since| item.lifecycle_at >= since) {
+                    placed.push((
+                        today.to_string(),
+                        2,
+                        0,
+                        format!("{:020}", item.lifecycle_at.max(0)),
+                        item.created_at,
+                        AgendaRow {
+                            item: item.clone(),
+                            placed_by: PlacedBy::Done,
+                            tone: Tone::Neutral,
+                            doc: doc.cloned(),
+                        },
+                    ));
+                }
+                continue;
+            }
+            // A day gone by: what happened on it, an event. The rest of
+            // the placement is from today on.
             if let Some(w) = item.when.as_deref() {
                 let day = &w[..w.len().min(10)];
-                if day < today && day >= floor && (item.is_event() || item.is_done()) {
+                if day < today && day >= floor && item.is_event() {
                     placed.push((
                         day.to_string(),
                         1,
@@ -342,6 +370,7 @@ pub fn run(cx: &Ctx, args: AgendaArgs, out: &mut dyn Write) -> anyhow::Result<()
             past_days: args.past,
             today: args.today.as_deref(),
             everywhere: args.all,
+            completed: true,
         },
     )?;
     if args.json {
@@ -452,6 +481,7 @@ mod tests {
             TODAY,
             TODAY,
             HORIZON,
+            None,
         );
         // Today: Home's overdue deadline leads, then Work's own row;
         // Saturday interleaves the two docs by time.
@@ -565,8 +595,6 @@ mod tests {
         birthday.event = true;
         let mut gig09 = item("gig09", Some("2026-09-12T09:00"), None, 7);
         gig09.event = true;
-        let mut done_task = item("done-task", Some("2026-09-12"), None, 10);
-        done_task.state = WorkflowState::Done;
         let items = [
             item("t14", Some("2026-09-12T14:00"), None, 1),
             item("task-late", Some("2026-09-12"), None, 9),
@@ -574,22 +602,13 @@ mod tests {
             item("due", None, Some("2026-09-12"), 3),
             birthday,
             gig09,
-            done_task,
         ];
         let days = build_agenda(&items, TODAY, HORIZON);
         // Inside the last band: raw string (one day here), then
         // `created_at`.
         assert_eq!(
             ids(&days[1]),
-            vec![
-                "birthday",
-                "gig09",
-                "t14",
-                "task-early",
-                "due",
-                "task-late",
-                "done-task"
-            ]
+            vec!["birthday", "gig09", "t14", "task-early", "due", "task-late"]
         );
     }
 
@@ -686,20 +705,27 @@ mod tests {
     }
 
     #[test]
-    fn done_rows_keep_their_when_day_and_slot() {
-        let mut done_today = item("done-today", Some(TODAY), None, 1);
-        done_today.state = WorkflowState::Done;
-        let mut done_early = item("done-early", Some("2026-09-09T08:00"), None, 2);
-        done_early.state = WorkflowState::Done;
-        // Deadline is settled: places nothing even when earlier than `when`.
-        let mut done_both = item("done-both", Some("2026-09-10"), Some("2026-09-05"), 3);
-        done_both.state = WorkflowState::Done;
-        // No `when`: nothing to show once done.
-        let mut done_deadline = item("done-deadline", None, Some("2026-09-12"), 4);
-        done_deadline.state = WorkflowState::Done;
-        // Past `when`: not folded into Today, not shown.
-        let mut done_past = item("done-past", Some("2026-09-01"), None, 5);
-        done_past.state = WorkflowState::Done;
+    fn a_done_task_is_at_the_end_of_today_if_done_today_else_nowhere() {
+        // `lifecycle_at` at or after SINCE is done today.
+        const SINCE: i64 = 1_000;
+        let done = |id: &str, when: Option<&str>, deadline: Option<&str>, at: i64| {
+            let mut it = item(id, when, deadline, at);
+            it.state = WorkflowState::Done;
+            it.lifecycle_at = at;
+            it
+        };
+        // Its planned day and time say nothing of when it was done.
+        let done_today = done("done-today", Some(TODAY), None, 1_300);
+        let done_early = done("done-early", Some("2026-09-09T08:00"), None, 1_100);
+        // Planned for tomorrow, an overdue deadline, done today: Today's.
+        let done_both = done("done-both", Some("2026-09-10"), Some("2026-09-05"), 1_200);
+        // A deadline alone counts too.
+        let done_deadline = done("done-deadline", None, Some("2026-09-12"), 1_400);
+        // Done before today: off the agenda, whatever it was planned for.
+        let done_before = done("done-before", Some(TODAY), None, 900);
+        // A done event stays on its `when`.
+        let mut done_event = done("done-event", Some("2026-09-10"), None, 1_500);
+        done_event.event = true;
         let mut binned = item("binned", Some(TODAY), None, 6);
         binned.binned_at = Some(5);
         // Cancelled: dropped even with a future `when` — it did not happen.
@@ -712,22 +738,39 @@ mod tests {
             item("future", Some("2026-09-10"), None, 8),
             done_both,
             done_deadline,
-            done_past,
+            done_before,
+            done_event,
             binned,
             cancelled,
         ];
-        let days = build_agenda(&items, TODAY, HORIZON);
+        let days = build_agenda_from(&[(None, &items)], TODAY, TODAY, HORIZON, Some(SINCE));
         let by_day: Vec<(&str, Vec<&str>)> =
             days.iter().map(|d| (d.day.as_str(), ids(d))).collect();
         assert_eq!(
             by_day,
             vec![
-                (TODAY, vec!["done-early", "open-today", "done-today"]),
-                ("2026-09-10", vec!["done-both", "future"]),
+                (
+                    TODAY,
+                    vec![
+                        "open-today",
+                        "done-early",
+                        "done-both",
+                        "done-today",
+                        "done-deadline"
+                    ]
+                ),
+                ("2026-09-10", vec!["done-event", "future"]),
             ]
         );
+        assert!(
+            days[0].rows[1..]
+                .iter()
+                .all(|r| r.placed_by == PlacedBy::Done && r.tone == Tone::Neutral)
+        );
         assert_eq!(days[1].rows[0].placed_by, PlacedBy::When);
-        assert_eq!(days[1].rows[0].tone, Tone::Neutral);
+        // Without `closed_since` no done task is placed at all.
+        let days = build_agenda(&items, TODAY, HORIZON);
+        assert_eq!(ids(&days[0]), vec!["open-today"]);
     }
 
     #[test]
@@ -756,7 +799,7 @@ mod tests {
     }
 
     #[test]
-    fn days_gone_by_hold_events_and_done_items_from_the_floor() {
+    fn days_gone_by_hold_events_from_the_floor() {
         let mut gig = item("gig", Some("2026-09-01T19:00"), None, 1);
         gig.event = true;
         let mut done = item("done", Some("2026-09-01"), None, 2);
@@ -787,13 +830,13 @@ mod tests {
             cancelled,
             binned,
         ];
-        let days = build_agenda_from(&[(None, &items)], "2026-08-26", TODAY, HORIZON);
+        let days = build_agenda_from(&[(None, &items)], "2026-08-26", TODAY, HORIZON, None);
         let by_day: Vec<(&str, Vec<&str>)> =
             days.iter().map(|d| (d.day.as_str(), ids(d))).collect();
         assert_eq!(
             by_day,
             vec![
-                ("2026-09-01", vec!["gig", "done"]),
+                ("2026-09-01", vec!["gig"]),
                 ("2026-09-03", vec!["tickets"]),
                 (TODAY, vec!["slipped"]),
                 ("2026-09-10", vec!["tickets"]),
@@ -807,11 +850,11 @@ mod tests {
         );
         // An empty Today still takes its place after the days gone by,
         // and no floor means none of them.
-        let days = build_agenda_from(&[(None, &items[..2])], "2026-08-26", TODAY, HORIZON);
+        let days = build_agenda_from(&[(None, &items[..1])], "2026-08-26", TODAY, HORIZON, None);
         let order: Vec<&str> = days.iter().map(|d| d.day.as_str()).collect();
         assert_eq!(order, vec!["2026-09-01", TODAY]);
         assert!(days[1].rows.is_empty());
-        let days = build_agenda(&items[..2], TODAY, HORIZON);
+        let days = build_agenda(&items[..1], TODAY, HORIZON);
         assert_eq!(days.len(), 1);
     }
 

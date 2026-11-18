@@ -127,11 +127,27 @@ extension AgendaEntry {
     /// item is planned for on another.
     var isTimed: Bool { placedBy == .when && (when?.count ?? 0) >= 16 }
 
-    /// Whether the row leads with a checkbox. An open event on its day
-    /// does not (spec/events-plan.md): nothing asks for the tick. One
-    /// marked done or cancelled shows it, ticked or crossed, and a
-    /// deadline's own row is owed, so it keeps it.
-    var showsCheck: Bool { !event || placedBy != .when || state.isClosed }
+    /// Whether the row leads with a checkbox. An event's own row does
+    /// not while it is open (spec/events-plan.md: nothing asks for the
+    /// tick) or once its day has gone by (it is a record of what was
+    /// on): the event pill holds the box's place. One marked done from
+    /// today on shows the box, ticked, and a deadline's own row is
+    /// owed, so it keeps it.
+    var showsCheck: Bool {
+        guard event, placedBy == .when else { return true }
+        return state.isClosed && !whenIsPast
+    }
+
+    /// The `when`'s day is before today.
+    private var whenIsPast: Bool {
+        guard let when, when.count >= 10 else { return false }
+        return String(when.prefix(10)) < WhenText.today()
+    }
+
+    /// A task done today, at the end of Today (`placed_by: done`,
+    /// spec/calendar-plan.md "Completed today"): off its dates, so the
+    /// row shows no time and no length.
+    var isCompletedToday: Bool { placedBy == .done }
 
     /// The quick moves the row's menu offers (`ItemRowMenu`): an
     /// overdue row goes to today or tomorrow, a row on today to

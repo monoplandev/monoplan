@@ -86,8 +86,9 @@ Done and binned items keep both fields untouched, as they keep `deadline`
 today. The fields are never cleared by a transition. Restore brings the
 dates back with the item.
 
-**On the web a closed task is on the day it was closed** (decided
-2026-11-18, narrowing the rule below to events there). A done or
+**A closed task is on the day it was closed** (decided 2026-11-18,
+narrowing the rule below to events; the web first, the engine's agenda
+and so the CLI and the Apple calendars the same day). A done or
 cancelled task, timed or not, leaves both its dates. Closed today, it is
 one row at the end of Today, muted, with no time in the lane (see
 "Completed today" under "Agenda"); from the next day it is
@@ -99,8 +100,7 @@ them on every past day was built first and dropped the same day: it
 repeated the Done view and filled the past with days that held nothing
 else. What was planned and got done, on which day, is no longer
 readable off the calendar. An event keeps the rule below: it
-happened on its `when` whatever was ticked. The CLI and the Apple
-calendars still follow the rule below for tasks too.
+happened on its `when` whatever was ticked.
 
 **`when` survives Done; `deadline` does not** (decided 2026-09-16). A
 ticked item still happened, or will happen, on its day, so it stays on the
@@ -125,8 +125,8 @@ says what the date means and changes one thing, what a past `when` means
 (it went by). Where a dated item shows is Inbox's rule, not the flag's:
 one with no list is here and not in Inbox (`inbox-plan.md`).
 Its calendar row has no checkbox while it is open (2026-11-17, web, iOS,
-macOS): a dot holds the box's place (an upright pill, a calendar's event bar, on
-the web since 2026-11-18), and the box shows, ticked or
+macOS): a dot holds the box's place (an upright pill, a calendar's event bar, since
+2026-11-18 on the web, iOS and macOS, as tall as the row), and the box shows, ticked or
 crossed, once the event is done or cancelled from the item surface or
 the row's menu (`events-plan.md`). The close-action
 objection lapsed on 2026-09-30 when a past `when` stopped needing a
@@ -422,13 +422,21 @@ for the month grid). `groupByDeadline` becomes
   with small tasks became noise to read through once half were ticked.
   A "N completed items" line the rows folded behind was built first and
   dropped the same day for showing them outright.
-  The CLI, tray, widgets and the Apple calendars do none of this yet.
+  The engine's agenda follows the same rule since the same day
+  (`build_agenda_from`, `placed_by: done`), so the CLI and the iOS and
+  macOS calendars show the same rows, muted and with no time, without
+  the linger: a ticked row moves at once. Two differences stay: the
+  engine never lists a cancelled item, so only done tasks are there; and
+  the Mac tray and the iOS widget leave done tasks out altogether, being
+  what is left of the day (`AgendaQuery.completed`).
 - **Past mark** (web, 2026-11-18): on a day gone by, an event's row
   leads with the event pill in place of the
   the checkbox, open or done alike: they are a record of what was on,
   and nothing there asks for a tick. A cancelled one leads with a bare
   cross, so the day still says what was called off.
-- **List** (web, 2026-11-18): a row whose item is in a list names it on
+- **List** (web, 2026-11-18; iOS the same day, from the agenda row's
+  `list_name` / `list_icon`; macOS already named the list and now leads
+  it with its icon): a row whose item is in a list names it on
   the sub line under the title (the list's own icon, or the default list glyph, + name), after the workspace
   and before the place. An item with no list, which lives on the
   calendar alone, shows nothing there.

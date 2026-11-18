@@ -1094,8 +1094,8 @@ final class AppModel: ObservableObject {
     static let agendaPastDays: UInt32 = 365
 
     /// `Engine.agenda`: every workspace merged, in date order: each
-    /// non-empty day gone by (events that happened, done items on the
-    /// day they were planned for), Today, then each non-empty day to
+    /// non-empty day gone by (the events that happened on it), Today
+    /// (the tasks done today at its end), then each non-empty day to
     /// the end of what is dated. Workspaces hidden from the calendar
     /// (the Home doc's setting) are already left out. The read from
     /// today on goes to the widget as JSON, which decodes it in its
