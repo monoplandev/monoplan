@@ -2291,26 +2291,6 @@
         }
       }
     },
-    "Recent": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Recientes"
-          }
-        }
-      }
-    },
-    "Your places": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tus lugares"
-          }
-        }
-      }
-    },
     "Export JSON…": {
       "localizations": {
         "es": {

@@ -4,16 +4,20 @@
 // search box. At rest it is
 // the place's label on one line (cut with an ellipsis when it
 // is longer; the panel puts the address under the map), or a muted
-// "Place" when there is none. A click turns the row into a search
-// box and drops a list under it, floating over the panel's rows, as
-// the iOS place editor
-// (apple/MonoplanIOS/Monoplan/ItemPlaceEditor.swift) lists them: the
-// typed text as a bare label, the account's known places that match
-// (from the engine, nothing leaves the device), then Apple's search
-// results from three characters on (MapKit; the query goes to Apple,
-// as the web's goes to Photon). Over a set place, until something is
-// typed, the list's first row is "Remove place", which takes it off
-// the item. A click on a row writes it at once. Return takes the
+// "Place" when there is none. Under the pointer a set place shows a ✕
+// at the box's end, which takes it off the item. A click turns the row
+// into a search box with a list under it: one run of rows, no
+// headings, in the order of the iOS place editor
+// (apple/MonoplanIOS/Monoplan/ItemPlaceEditor.swift): the typed text
+// as a bare label, the account's known places that match (from the
+// engine, nothing leaves the device), then Apple's search results from
+// three characters on (MapKit; the query goes to Apple, as the web's
+// goes to Photon). The list is part of the panel's column, not an
+// overlay on it (the place row is the panel's last, and an overlay ran
+// off the window's bottom edge where no scrolling reached it): it
+// pushes the map down, is as tall as its rows up to a cap, scrolling
+// past it, and the panel scrolls to bring it into sight (`reveal`).
+// A click on a row writes it at once. Return takes the
 // highlighted row, else the typed text; the arrow keys move the
 // highlight; Escape, or the caret leaving the box, shuts it with the
 // place as it was.
@@ -29,6 +33,11 @@ struct PlaceField: View {
     /// Write the place, or clear it with nil. `exact` for a known
     /// place, which is already whole.
     let set: (Place?, _ exact: Bool) -> Void
+    /// Scroll the panel so the list (`PlaceField.listID`) is in sight.
+    let reveal: () -> Void
+
+    /// The list's id in the panel's scroll view.
+    static let listID = "place-list"
 
     @State private var query = ""
     /// The search box is open.
@@ -38,6 +47,8 @@ struct PlaceField: View {
     @State private var armed = false
     @State private var known: [PlaceSuggestion] = []
     @State private var highlight: Int?
+    /// The pointer is over the box at rest: the ✕ shows.
+    @State private var hovered = false
     @StateObject private var search = MacPlaceSearch()
     @FocusState private var focused: Bool
 
@@ -46,22 +57,11 @@ struct PlaceField: View {
     var body: some View {
         Group {
             if picking {
-                // The list floats over the rows under the box: an
-                // overlay takes no room. It hangs from a zero-height
-                // strip on the box's bottom edge, so it grows
-                // downwards at its own height. The panel puts the field
-                // above its later rows (`zIndex`) so the list draws,
-                // and takes clicks, over them.
-                searchBox.overlay(alignment: .bottomLeading) {
-                    Color.clear
-                        .frame(height: 0)
-                        .overlay(alignment: .topLeading) {
-                            if !candidates.isEmpty {
-                                dropdown
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .padding(.top, 6)
-                            }
-                        }
+                VStack(alignment: .leading, spacing: 6) {
+                    searchBox
+                    if !candidates.isEmpty {
+                        dropdown.id(Self.listID)
+                    }
                 }
             } else {
                 shown
@@ -71,6 +71,11 @@ struct PlaceField: View {
             highlight = nil
             loadKnown()
             search.update(typed)
+        }
+        // The list has grown or shrunk: back into sight, once it is
+        // laid out.
+        .onChange(of: candidates.count) {
+            if picking { DispatchQueue.main.async(execute: reveal) }
         }
         .onChange(of: focused) {
             if focused {
@@ -97,6 +102,8 @@ struct PlaceField: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .foregroundStyle(place == nil ? .tertiary : .primary)
+                    // Room for the ✕.
+                    .padding(.trailing, place == nil ? 0 : 20)
             }
             // The whole box takes the click, not just its text.
             .panelBox(filled: false)
@@ -104,6 +111,23 @@ struct PlaceField: View {
         .buttonStyle(.plain)
         .help(place?.label ?? "")
         .accessibilityHint(Text("Searches for another place"))
+        .overlay(alignment: .trailing) {
+            if place != nil, hovered {
+                Button {
+                    set(nil, false)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Remove place")
+                .accessibilityLabel("Remove place")
+            }
+        }
+        .onHover { hovered = $0 }
     }
 
     private var searchBox: some View {
@@ -127,53 +151,44 @@ struct PlaceField: View {
         .onAppear { DispatchQueue.main.async { focused = true } }
     }
 
-    /// The candidates, in a box under the search box and as wide.
+    /// The candidates, in a box under the search box and as wide: as
+    /// tall as its rows up to a cap, scrolling past it.
     private var dropdown: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(candidates.enumerated()), id: \.offset) { index, candidate in
-                if let header = header(at: index) {
-                    Text(header)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.top, index == 0 ? 2 : 8)
-                        .padding(.bottom, 2)
+        let rows = candidates
+        return ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { index, candidate in
+                        CandidateRow(candidate: candidate, highlighted: highlight == index) {
+                            pick(candidate)
+                        }
+                        .onHover { if $0 { highlight = index } }
+                        .id(index)
+                    }
                 }
-                CandidateRow(candidate: candidate, highlighted: highlight == index) {
-                    pick(candidate)
-                }
-                .onHover { if $0 { highlight = index } }
+                .padding(4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 220)
+            .fixedSize(horizontal: false, vertical: true)
+            // The arrow keys can walk the highlight out of sight.
+            .onChange(of: highlight) {
+                guard let highlight, rows.indices.contains(highlight) else { return }
+                proxy.scrollTo(highlight)
             }
         }
-        .padding(4)
-        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(.separator))
-        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
     }
 
     // MARK: Candidates
 
     private var candidates: [Candidate] {
         var rows: [Candidate] = []
-        // Over a set place the list opens on the way to take it off.
-        if place != nil, typed.isEmpty { rows.append(.remove) }
         if !typed.isEmpty { rows.append(.typed(typed)) }
         rows += known.map(Candidate.known)
         rows += search.results.map(Candidate.result)
         return rows
-    }
-
-    /// A section's title over its first row.
-    private func header(at index: Int) -> String? {
-        let rows = candidates
-        let kind = rows[index].kind
-        guard index == 0 || rows[index - 1].kind != kind else { return nil }
-        switch kind {
-        case .remove, .typed: return nil
-        case .known: return typed.isEmpty ? String(localized: "Recent") : String(localized: "Your places")
-        case .result: return String(localized: "Search")
-        }
     }
 
     private func step(_ by: Int) -> KeyPress.Result {
@@ -196,8 +211,6 @@ struct PlaceField: View {
 
     private func pick(_ candidate: Candidate) {
         switch candidate {
-        case .remove:
-            set(nil, false)
         case .typed(let label):
             // The engine takes a known place of exactly that label
             // whole (what `item set --place <label>` does).
@@ -229,22 +242,9 @@ struct PlaceField: View {
 }
 
 private enum Candidate {
-    /// Take the set place off the item.
-    case remove
     case typed(String)
     case known(PlaceSuggestion)
     case result(MKLocalSearchCompletion)
-
-    enum Kind { case remove, typed, known, result }
-
-    var kind: Kind {
-        switch self {
-        case .remove: .remove
-        case .typed: .typed
-        case .known: .known
-        case .result: .result
-        }
-    }
 }
 
 /// One row of the list: an icon, the name, the address under it.
@@ -285,7 +285,6 @@ private struct CandidateRow: View {
     @ViewBuilder
     private var icon: some View {
         switch candidate {
-        case .remove: Image(systemName: "xmark")
         case .typed: Image(systemName: "character.cursor.ibeam")
         case .known: Image(systemName: "clock")
         case .result: PanelGlyph(image: NavArt.pin, size: 13)
@@ -295,7 +294,6 @@ private struct CandidateRow: View {
     @ViewBuilder
     private var title: some View {
         switch candidate {
-        case .remove: Text("Remove place").lineLimit(1)
         case .typed(let label): Text("Use “\(label)”").lineLimit(1)
         case .known(let row): Text(verbatim: row.place.label).lineLimit(1)
         case .result(let result): Text(verbatim: result.title).lineLimit(1)
@@ -304,7 +302,7 @@ private struct CandidateRow: View {
 
     private var subtitle: String? {
         switch candidate {
-        case .remove, .typed: nil
+        case .typed: nil
         case .known(let row): row.place.address
         case .result(let result): result.subtitle
         }
