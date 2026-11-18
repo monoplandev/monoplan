@@ -25,6 +25,7 @@ import { Switch } from "@kobalte/core/switch";
 import { Tooltip } from "@kobalte/core/tooltip";
 import archiveSvg from "./icons/archive.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
+import personSvg from "./icons/person.svg?raw";
 import cardStackSvg from "./icons/card-stack.svg?raw";
 import caretRightSvg from "./icons/caret-right.svg?raw";
 import checkCircledSvg from "./icons/check-circled.svg?raw";
@@ -830,8 +831,38 @@ export function Workspace(props: {
     const t = setTimeout(() => setDoneMoveTick((n) => n + 1), Math.max(next - now, 0) + 1);
     onCleanup(() => clearTimeout(t));
   });
+  // The Assigned lens (`spec/sharing-plan.md` §Assignment): Open items
+  // assigned to this account in any open doc. One just closed keeps its
+  // row for the linger beat (the order is by date, so it holds its
+  // place), then leaves on the same tick the agenda uses. No account,
+  // no assignments.
+  const assignedItems = createMemo((): ItemView[] => {
+    const s = session.session();
+    if (s.anonymous) return [];
+    doneMoveTick();
+    const now = Date.now();
+    return docs.assignedItems(s.accountId, (it) => doneLingers(it, now));
+  });
+  const assignedCount = createMemo(() => assignedItems().filter(isOpen).length);
+  // The nav offers the lens only while something is assigned, as the Bin
+  // shows only while it holds a row; it stays while it is the view, so
+  // ticking the last row does not pull the entry from under the user.
+  const assignedShown = (): boolean =>
+    assignedCount() > 0 || view().kind === "assigned";
+  createEffect(() => {
+    if (view().kind !== "assigned") return;
+    const now = Date.now();
+    let next = Infinity;
+    for (const it of assignedItems()) {
+      if (isClosed(it)) next = Math.min(next, it.lifecycleAt + DONE_LINGER_MS);
+    }
+    if (next === Infinity) return;
+    const t = setTimeout(() => setDoneMoveTick((n) => n + 1), Math.max(next - now, 0) + 1);
+    onCleanup(() => clearTimeout(t));
+  });
   const items = createMemo((): ItemView[] => {
     const v = view();
+    if (v.kind === "assigned") return assignedItems();
     if (v.kind === "list") {
       const st = viewApp().state;
       const out: ItemView[] = [];
@@ -872,7 +903,7 @@ export function Workspace(props: {
     return docs.binnedItems();
   });
 
-  // Item count for the header of a list, Starred or Done. A list and
+  // Item count for the header of a list, Starred, Assigned or Done. A list and
   // Starred read the projection like the nav's counts (not `items()`,
   // whose linger overlay briefly keeps a just-completed row); Done has
   // no overlay and counts the rows its filter admits. Zero elsewhere.
@@ -880,6 +911,7 @@ export function Workspace(props: {
     const v = view();
     if (v.kind === "list") return viewApp().state.listOpen[v.id]?.length ?? 0;
     if (v.kind === "focus") return docs.focusItems().length;
+    if (v.kind === "assigned") return assignedCount();
     if (v.kind === "done") return items().length;
     return 0;
   });
@@ -945,6 +977,10 @@ export function Workspace(props: {
         ? m().nav.upcoming
         : m().nav.inbox
       : (docs.listOf(docId ?? viewDocId(), listId)?.name ?? listId);
+  // The Assigned lens spans workspaces, and list names repeat across
+  // them (every one has an Inbox): its rows name the workspace too.
+  const assignedListLabel = (listId: string, docId?: string, dated?: boolean): string =>
+    `${docLabel(docId ?? viewDocId())} · ${listLabel(listId, docId, dated)}`;
 
   // Item attribution (`spec/sharing-plan.md` §Attribution), shown in the
   // item dialog's "Created …" line for every stamped item on a shared
@@ -1909,8 +1945,8 @@ export function Workspace(props: {
 
   const duplicateBlock = (sourceIds: readonly string[]): void => {
     const v = view();
-    if (v.kind === "focus" || v.kind === "upcoming") {
-      // Focus and the agenda own no items — each clone is created in its
+    if (v.kind === "focus" || v.kind === "upcoming" || v.kind === "assigned") {
+      // Focus, the agenda and Assigned own no items — each clone is created in its
       // source's own list directly below its source (inheriting the
       // source's lane), falling back to the top of the inbox only if that
       // list is gone. In Focus the clones are then pinned as a contiguous
@@ -2311,6 +2347,7 @@ export function Workspace(props: {
     const seq: ViewKey[] = [
       { kind: "focus" },
       { kind: "upcoming" },
+      ...(assignedShown() ? [{ kind: "assigned" } as ViewKey] : []),
       { kind: "done" },
       ...(docs.binCount() > 0 ? [{ kind: "bin" } as ViewKey] : []),
       ...docs.docs().flatMap((d): ViewKey[] => [
@@ -2901,7 +2938,7 @@ export function Workspace(props: {
     // Focus membership: pin / unpin from a list or board (open rows only,
     // like the row menu's `canPinToFocus`); the Focus lens itself only
     // ever removes.
-    if (kind === "list" && openIds.length > 0) {
+    if ((kind === "list" || kind === "assigned") && openIds.length > 0) {
       out.push({
         label: allFocusedIds(openIds) ? msgs.focus.remove : msgs.focus.add,
         shortcut: "S",
@@ -3170,6 +3207,7 @@ export function Workspace(props: {
         binCount={docs.binCount()}
         focusCount={docs.focusItems().length}
         upcomingBadge={upcomingBadge()}
+        assignedCount={assignedShown() ? assignedCount() : null}
         showListCounts={listCountsPref()}
         view={view()}
         setView={navigateTo}
@@ -3203,6 +3241,7 @@ export function Workspace(props: {
       />
       <FindPalette
         docs={docs}
+        assignedShown={assignedShown}
         open={findOpen()}
         onOpenChange={onFindOpenChange}
         onSelect={onFindPick}
@@ -3867,9 +3906,9 @@ export function Workspace(props: {
                         viewKind={view().kind}
                         showList={() => {
                           const k = view().kind;
-                          return k === "focus" || k === "done" || k === "bin";
+                          return k === "focus" || k === "assigned" || k === "done" || k === "bin";
                         }}
-                        listLabel={listLabel}
+                        listLabel={view().kind === "assigned" ? assignedListLabel : listLabel}
                         isSharedDoc={(docId) => docId !== docs.homeDocId}
                         assigneeOf={assigneeOf}
                         showState={() => {
@@ -3996,6 +4035,7 @@ function viewTitle(
   }
   if (v.kind === "focus") return m.nav.focus;
   if (v.kind === "upcoming") return m.nav.upcoming;
+  if (v.kind === "assigned") return m.nav.assigned;
   if (v.kind === "done") return m.nav.done;
   return m.nav.bin;
 }
@@ -4006,6 +4046,7 @@ function viewTitle(
 function viewIcon(v: ViewKey): string | null {
   if (v.kind === "focus") return starSvg;
   if (v.kind === "upcoming") return calendarSvg;
+  if (v.kind === "assigned") return personSvg;
   if (v.kind === "done") return checkCircledSvg;
   if (v.kind === "bin") return crumpledPaperSvg;
   if (v.kind === "list" && v.id === "inbox") return archiveSvg;

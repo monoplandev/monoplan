@@ -149,6 +149,12 @@ export interface DocsLayer {
    *  closed, Home's and foreign alike, in capture order. Feeds the
    *  lens's linger overlay, which applies its own (shorter) window. */
   focusRecentDone: Accessor<readonly FocusDoneEntry[]>;
+  /** The Assigned lens (`spec/sharing-plan.md` §Assignment): every open
+   *  doc's Open items whose assignee is `accountId`, dated ones first by
+   *  their earliest date (`when` or deadline), then the rest newest
+   *  first. `keep` admits a closed, not-binned one as well: the view's
+   *  linger beat for a row just ticked. */
+  assignedItems(accountId: string, keep?: (it: ItemView) => boolean): ItemView[];
   /** The Done view's input: closed, not-binned items of every open doc,
    *  newest transition first. The view narrows it by its device-local
    *  filter (`doneFilter.ts`). */
@@ -363,6 +369,28 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
   };
   createEffect(pruneDeadForeignRefs);
 
+  const assignedDate = (it: ItemView): string | undefined => {
+    if (it.when && it.deadline) return it.when < it.deadline ? it.when : it.deadline;
+    return it.when ?? it.deadline;
+  };
+  const assignedItems = (
+    accountId: string,
+    keep?: (it: ItemView) => boolean,
+  ): ItemView[] =>
+    allItems()
+      .filter(
+        (it) =>
+          it.assignee === accountId &&
+          !isBinned(it) &&
+          (!isClosed(it) || keep?.(it) === true),
+      )
+      .sort((a, b) => {
+        const da = assignedDate(a);
+        const db = assignedDate(b);
+        if (da !== undefined && db !== undefined && da !== db) return da < db ? -1 : 1;
+        if ((da === undefined) !== (db === undefined)) return da !== undefined ? -1 : 1;
+        return b.createdAt - a.createdAt || (a.id < b.id ? -1 : 1);
+      });
   const doneItems = (): ItemView[] =>
     allItems()
       .filter((it) => isClosed(it) && !isBinned(it))
@@ -770,6 +798,7 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
     isFocused,
     focusEntryIndex,
     focusRecentDone,
+    assignedItems,
     doneItems,
     binnedItems,
     binCount,

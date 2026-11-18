@@ -28,6 +28,7 @@ export type ViewKey =
     }
   | { kind: "focus" }
   | { kind: "upcoming" }
+  | { kind: "assigned" }
   | { kind: "done" }
   | { kind: "bin" };
 

@@ -124,11 +124,12 @@ export function Row(props: {
   onMoveToList?: (ids: readonly string[]) => void;
 }) {
   const { m, locale } = useAppI18n();
-  // Origin-list badge text for the flat cross-list views (Focus, Done and
-  // Bin). Null otherwise, or when no label resolves.
+  // Origin-list badge text for the flat cross-list views (Focus,
+  // Assigned, Done and Bin). Null otherwise, or when no label resolves.
   const originList = createMemo(() => {
     const k = props.viewKind;
-    return (k === "focus" || k === "done" || k === "bin") && props.showList?.()
+    return (k === "focus" || k === "assigned" || k === "done" || k === "bin") &&
+      props.showList?.()
       ? (props.listLabel?.(props.item().listId, props.item().docId, !!props.item().when) ||
         null)
       : null;
@@ -177,8 +178,11 @@ export function Row(props: {
   // slot of the row's gap.
   // The assignee disc: open items only (a closed row keeps to its
   // stamp), and not while the row is being edited in place.
+  // Not in the Assigned lens: every row there is one's own.
   const assignee = () =>
-    isOpen(props.item()) && !props.expanded() ? (props.assigneeOf?.(props.item()) ?? null) : null;
+    isOpen(props.item()) && !props.expanded() && props.viewKind !== "assigned"
+      ? (props.assigneeOf?.(props.item()) ?? null)
+      : null;
   const assigneeTitle = (a: { email: string | null }): string =>
     m().workspace.assignedTo(a.email ?? m().sharing.formerMember);
   const showInlineBadges = () =>

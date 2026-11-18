@@ -99,6 +99,9 @@ export type Messages = {
     focus: string;
     /** The Upcoming view: every open item with a deadline, by day. */
     upcoming: string;
+    /** The Assigned view: every open item assigned to this account,
+     *  across workspaces. */
+    assigned: string;
     done: string;
     bin: string;
     /** Context-menu action that archives a list: shelved intact,
@@ -658,6 +661,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       inbox: "Bandeja de entrada",
       focus: "Destacados",
       upcoming: "Calendario",
+      assigned: "Asignadas",
       done: "Hecho",
       bin: "Papelera",
       archiveList: "Archivar",
@@ -1052,6 +1056,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       inbox: "Inbox",
       focus: "Starred",
       upcoming: "Calendar",
+      assigned: "Assigned",
       done: "Done",
       bin: "Bin",
       archiveList: "Archive",

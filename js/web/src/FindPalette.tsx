@@ -22,13 +22,15 @@ import {
 
 export function FindPalette(props: {
   docs: DocsLayer;
+  /** Whether the nav shows the Assigned entry (`Workspace`). */
+  assignedShown: () => boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSelect?: (result: FindResult) => void;
 }) {
   const { m } = useAppI18n();
   trackOverlay(() => props.open);
-  const find = createFindState(props.docs);
+  const find = createFindState(props.docs, () => props.assignedShown());
   const [selectedIndex, setSelectedIndex] = createSignal(0);
   let inputRef: HTMLInputElement | undefined;
   let listRef: HTMLDivElement | undefined;

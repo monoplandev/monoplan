@@ -6,7 +6,7 @@
 // token, safe to paste into a shell or a chat:
 //
 //   "#item_" id | "#upcoming_" id | "#list_" id | "#inbox" | "#inbox_" doc
-//   | "#focus" | "#upcoming" | "#done" | "#bin" | "#menu"
+//   | "#focus" | "#upcoming" | "#assigned" | "#done" | "#bin" | "#menu"
 //   id  = [0-9a-f]{32}
 //   doc = [0-9a-f-]{32,36}      -- a server doc id (uuid, hyphenated)
 //
@@ -54,6 +54,7 @@ export function parseHash(hash: string): Route | null {
       return { kind: "view", view: { kind: "upcoming" } };
     case "focus":
     case "upcoming":
+    case "assigned":
     case "done":
     case "bin":
       return { kind: "view", view: { kind: token } };

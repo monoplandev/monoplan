@@ -33,14 +33,15 @@ import {
 } from "./sync/store.ts";
 
 /** The add-to-focus toggle shows on any open item outside the Focus /
- *  Done / Bin views: list + board lanes, and the agenda's task rows.
+ *  Done / Bin views: list + board lanes, the agenda's task rows and the
+ *  Assigned lens.
  *  Inside the Focus lens the row carries a remove affordance instead.
  *  Drafts never show either. */
 export const canPinToFocusIn = (
   viewKind: ViewKey["kind"],
   it: ItemView,
 ): boolean =>
-  (viewKind === "list" || viewKind === "upcoming") &&
+  (viewKind === "list" || viewKind === "upcoming" || viewKind === "assigned") &&
   isOpen(it) &&
   !isDraftId(it.id);
 
@@ -88,11 +89,13 @@ export function ItemContextMenu(props: {
   const inFocusView = (): boolean =>
     props.viewKind === "focus" && !isDraftId(props.item().id);
   // "Show in <list>" where the row is away from its home list: the Focus
-  // lens, and the agenda's rows that have a list (a dated item with
-  // none lives on the agenda).
+  // lens, and the agenda's and the Assigned lens's rows that have a list
+  // (a dated item with none lives on the agenda).
   const canShowInList = (): boolean =>
     inFocusView() ||
-    (props.viewKind === "upcoming" && !isInboxDated(props.item()));
+    ((props.viewKind === "upcoming" || props.viewKind === "assigned") &&
+      !isDraftId(props.item().id) &&
+      !isInboxDated(props.item()));
 
   // If the right-clicked row is already in the multi-select, act on the
   // whole selection; otherwise act on this row alone. The onOpenChange

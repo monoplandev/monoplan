@@ -240,6 +240,31 @@ describe("docs layer", () => {
     dispose();
   });
 
+  test("Assigned spans every doc: one's own open items, dated first", () => {
+    const { home, other, layer, dispose } = setup();
+    const mine = other.addItem("inbox", "mine");
+    const dated = other.addItem("inbox", "mine, dated");
+    const theirs = other.addItem("inbox", "theirs");
+    const closed = other.addItem("inbox", "mine, closed");
+    const binned = other.addItem("inbox", "mine, binned");
+    const inHome = home.addItem("inbox", "home");
+    for (const id of [mine, dated, closed, binned]) other.setItemAssignee(id, "me");
+    other.setItemAssignee(theirs, "them");
+    home.setItemAssignee(inHome, "me");
+    other.setItemDeadline(dated, "2026-12-01");
+    other.setDone(closed, true);
+    other.setBinnedMany([binned], true);
+
+    const ids = (keep?: Parameters<typeof layer.assignedItems>[1]) =>
+      layer.assignedItems("me", keep).map((it) => it.id);
+    expect(ids()[0]).toBe(dated);
+    expect([...ids()].sort()).toEqual([mine, dated, inHome].sort());
+    // The linger predicate admits a closed row, never a binned one.
+    expect([...ids(() => true)].sort()).toEqual([mine, dated, inHome, closed].sort());
+    expect(layer.assignedItems("nobody")).toEqual([]);
+    dispose();
+  });
+
   test("undo and redo interleave the docs' histories chronologically", () => {
     const { home, other, layer, dispose } = setup();
     // History: Home, Other, Home.

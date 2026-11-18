@@ -108,3 +108,10 @@ describe("internal links", () => {
     expect(parseInternalUrl("not a url", base)).toBeNull();
   });
 });
+
+describe("assigned view", () => {
+  test("round-trips #assigned", () => {
+    expect(parseHash("#assigned")).toEqual({ kind: "view", view: { kind: "assigned" } });
+    expect(viewHash({ kind: "assigned" })).toBe("#assigned");
+  });
+});

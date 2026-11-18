@@ -13,6 +13,7 @@ import calendarSvg from "./icons/calendar.svg?raw";
 import checkCircledSvg from "./icons/check-circled.svg?raw";
 import crumpledPaperSvg from "./icons/trash.svg?raw";
 import starSvg from "./icons/star.svg?raw";
+import personSvg from "./icons/person.svg?raw";
 import fileSvg from "./icons/file.svg?raw";
 import usersSvg from "./icons/users.svg?raw";
 
@@ -22,7 +23,7 @@ import usersSvg from "./icons/users.svg?raw";
 // present in the default (empty-query) menu, and name-matched into query
 // results so "foc" finds Focus the way it finds a user list. Bin follows
 // the sidebar's rule and only exists while it holds items.
-export type ViewResultId = "focus" | "inbox" | "upcoming" | "done" | "bin";
+export type ViewResultId = "focus" | "inbox" | "upcoming" | "assigned" | "done" | "bin";
 export interface ViewResult {
   kind: "view";
   id: ViewResultId;
@@ -36,6 +37,7 @@ const VIEW_ICONS: Record<ViewResultId, string> = {
   focus: starSvg,
   inbox: archiveSvg,
   upcoming: calendarSvg,
+  assigned: personSvg,
   done: checkCircledSvg,
   bin: crumpledPaperSvg,
 };
@@ -45,7 +47,7 @@ const VIEW_ICONS: Record<ViewResultId, string> = {
  *  flashes the previous query's results. Search fans out over every
  *  open doc (each has its own index, `spec/search.md`) and merge-ranks
  *  by score; every result is stamped with its doc. */
-export function createFindState(docs: DocsLayer) {
+export function createFindState(docs: DocsLayer, assignedShown: () => boolean) {
   const { m } = useAppI18n();
   const [input, setInput] = createSignal("");
   const [filter, setFilter] = createSignal("");
@@ -66,6 +68,10 @@ export function createFindState(docs: DocsLayer) {
   const builtinViews = (): ViewResult[] => [
     { kind: "view", id: "focus", title: m().nav.focus },
     { kind: "view", id: "upcoming", title: m().nav.upcoming },
+    // Assigned follows the sidebar too: only while something is assigned.
+    ...(assignedShown()
+      ? [{ kind: "view", id: "assigned", title: m().nav.assigned } as ViewResult]
+      : []),
     { kind: "view", id: "done", title: m().nav.done },
     ...(docs.binCount() > 0
       ? [{ kind: "view", id: "bin", title: m().nav.bin } as ViewResult]

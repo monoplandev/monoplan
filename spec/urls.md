@@ -11,7 +11,7 @@ The whole address lives in the URL fragment. One self-describing token:
 ```
 url    = <origin> <path> "#" token
 token  = "item_" id | "upcoming_" id | "list_" id | "inbox" | "inbox_" doc
-       | "focus" | "upcoming" | "done" | "bin"
+       | "focus" | "upcoming" | "assigned" | "done" | "bin"
 id     = [0-9a-f]{32}          -- uuid-v7 hex, same as ItemId / ListMeta.id
 doc    = [0-9a-f-]{32,36}      -- a server doc id (uuid, hyphenated)
 ```

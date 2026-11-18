@@ -29,6 +29,7 @@ import { Dnd, DndSelection, type DndOp } from "./dnd/solid";
 import { EmojiPicker } from "./EmojiPicker.tsx";
 import archiveSvg from "./icons/archive.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
+import personSvg from "./icons/person.svg?raw";
 import caretDownSvg from "./icons/caret-down.svg?raw";
 import checkCircledSvg from "./icons/check-circled.svg?raw";
 import cloudSvg from "./icons/cloud.svg?raw";
@@ -271,6 +272,10 @@ export function Nav(props: {
   /** The Upcoming entry's badge: Open rows owed or on today. Only the
    *  count is shown here; hidden at zero. */
   upcomingBadge: AttentionBadge;
+  /** The Assigned entry's count: Open items assigned to this account in
+   *  any workspace. Null hides the entry (nothing assigned, and not the
+   *  current view). */
+  assignedCount: number | null;
   /** The device's list-counts preference (`listCounts.ts`); when true, render the live-item count
    *  badge beside each non-Inbox list in every section (showing "-" when
    *  the list is empty). Inbox badges are always shown regardless. */
@@ -368,6 +373,23 @@ export function Nav(props: {
             <span class="nav-item-count">{props.upcomingBadge.count}</span>
           </Show>
         </button>
+        {/* Assigned: every open item assigned to this account, across
+            workspaces (`spec/sharing-plan.md` §Assignment). */}
+        <Show when={props.assignedCount !== null}>
+          <button
+            type="button"
+            class="nav-item"
+            data-active={props.view.kind === "assigned" ? "" : undefined}
+            tabIndex={-1}
+            onClick={() => props.setView({ kind: "assigned" })}
+          >
+            <span class="nav-item-icon" innerHTML={personSvg} />
+            {m().nav.assigned}
+            <Show when={(props.assignedCount ?? 0) > 0}>
+              <span class="nav-item-count">{props.assignedCount}</span>
+            </Show>
+          </button>
+        </Show>
         <button
           type="button"
           class="nav-item"
