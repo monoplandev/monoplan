@@ -341,6 +341,7 @@ fn import(cfg: &Cfg) {
                 created_at: 1_700_000_000_000 + i as i64,
                 created_by: None,
                 assignee: None,
+                subtasks: Vec::new(),
                 started_at: None,
                 done_at: None,
                 binned_at: None,

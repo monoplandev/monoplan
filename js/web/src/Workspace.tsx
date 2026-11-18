@@ -115,6 +115,7 @@ import {
   type DocApp,
   type ItemView,
   type Place,
+  type Subtask,
   type UndoOutcome,
   type ListView,
   type WorkflowState,
@@ -1932,9 +1933,14 @@ export function Workspace(props: {
       duration?: number;
       place?: Place;
       assignee?: string;
+      subtasks?: readonly Subtask[];
     },
   ): void => {
     if (src.assignee) target.setItemAssignee(id, src.assignee);
+    for (const sub of src.subtasks ?? []) {
+      const subId = target.addSubtask(id, sub.text);
+      if (subId && sub.done) target.setSubtaskDone(id, subId, true);
+    }
     if (src.notes) target.setItemNotes(id, src.notes);
     if (src.deadline) target.setItemDeadline(id, src.deadline);
     if (src.when) target.setItemWhen(id, src.when);

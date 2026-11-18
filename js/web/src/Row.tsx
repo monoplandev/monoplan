@@ -7,6 +7,7 @@ import usersSvg from "./icons/users.svg?raw";
 import { DndSelection } from "./dnd/solid";
 import { ItemContextMenu, canPinToFocusIn } from "./ItemContextMenu.tsx";
 import { DeadlineBadge } from "./DeadlineBadge.tsx";
+import { subtaskCount } from "./SubtasksField.tsx";
 import { Avatar } from "./Avatar.tsx";
 import { PlaceBadge } from "./PlaceBadge.tsx";
 import { WhenBadge } from "./WhenBadge.tsx";
@@ -183,6 +184,9 @@ export function Row(props: {
     isOpen(props.item()) && !props.expanded() && props.viewKind !== "assigned"
       ? (props.assigneeOf?.(props.item()) ?? null)
       : null;
+  // The subtask count (`spec/subtasks.md`): all a row shows of an
+  // item's subtasks. Open items only, as the dates.
+  const subtasks = () => (isOpen(props.item()) ? subtaskCount(props.item().subtasks) : null);
   const assigneeTitle = (a: { email: string | null }): string =>
     m().workspace.assignedTo(a.email ?? m().sharing.formerMember);
   const showInlineBadges = () =>
@@ -196,7 +200,8 @@ export function Row(props: {
             (isOpen(props.item()) &&
               (Boolean(props.item().when) ||
                 Boolean(props.item().deadline) ||
-                Boolean(props.item().place)))))));
+                Boolean(props.item().place) ||
+                Boolean(subtasks())))))));
   // Whether this row's context menu is up, so the "…" button that opened
   // it (or a right-click) stays visible under the menu instead of fading
   // with the hover (`.row[data-menu-open]`).
@@ -541,6 +546,7 @@ export function Row(props: {
             !props.expanded() &&
             ((isOpen(props.item()) && (props.item().when || props.item().deadline)) ||
               (canPinToFocus() && focused()) ||
+              subtasks() ||
               assignee() ||
               rowStamp())
           }
@@ -559,6 +565,16 @@ export function Row(props: {
             </Show>
             <Show when={isOpen(props.item()) && props.item().deadline}>
               {(d) => <DeadlineBadge deadline={d()} />}
+            </Show>
+            <Show when={subtasks()}>
+              {(c) => (
+                <span
+                  class="badge row-subtasks"
+                  title={m().workspace.subtasksDone(c().done, c().total)}
+                >
+                  {c().done}/{c().total}
+                </span>
+              )}
             </Show>
             <Show when={assignee()}>
               {(a) => (
@@ -626,6 +642,16 @@ export function Row(props: {
               }
             >
               {(p) => <PlaceBadge place={p()} />}
+            </Show>
+            <Show when={!props.deadlineInFooter && !props.expanded() && subtasks()}>
+              {(c) => (
+                <span
+                  class="badge row-subtasks"
+                  title={m().workspace.subtasksDone(c().done, c().total)}
+                >
+                  {c().done}/{c().total}
+                </span>
+              )}
             </Show>
             <Show when={!props.deadlineInFooter && assignee()}>
               {(a) => (

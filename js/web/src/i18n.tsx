@@ -234,6 +234,13 @@ export type Messages = {
     assign: string;
     unassign: string;
     assignedTo: (who: string) => string;
+    /** The task surface's subtasks group, and one row's text field. */
+    subtasks: string;
+    subtask: string;
+    addSubtask: string;
+    removeSubtask: string;
+    /** A list row's subtask count tooltip. */
+    subtasksDone: (done: number, total: number) => string;
     activity: string;
     activityCompleted: (when: string) => string;
     activityElapsed: (span: string) => string;
@@ -749,6 +756,11 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       assign: "Asignar",
       unassign: "Quitar responsable",
       assignedTo: (who) => `Asignado a ${who}`,
+      subtasks: "Subtareas",
+      subtask: "Subtarea",
+      addSubtask: "Añadir subtarea",
+      removeSubtask: "Quitar subtarea",
+      subtasksDone: (done, total) => `${done} de ${total} subtareas hechas`,
       activity: "Actividad",
       activityCompleted: (when) => `Completado ${when}`,
       activityElapsed: (span) => `Tiempo transcurrido: ${span}`,
@@ -1142,6 +1154,11 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       assign: "Assign",
       unassign: "Unassign",
       assignedTo: (who) => `Assigned to ${who}`,
+      subtasks: "Subtasks",
+      subtask: "Subtask",
+      addSubtask: "Add subtask",
+      removeSubtask: "Remove subtask",
+      subtasksDone: (done, total) => `${done} of ${total} subtasks done`,
       activity: "Activity",
       activityCompleted: (when) => `Completed ${when}`,
       activityElapsed: (span) => `${span} elapsed`,

@@ -184,6 +184,7 @@ mod tests {
             created_at: 0,
             created_by: None,
             assignee: None,
+            subtasks: Vec::new(),
             started_at: None,
             done_at: None,
             binned_at: None,

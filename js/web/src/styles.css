@@ -3316,6 +3316,81 @@ input.task-check:hover {
   cursor: text;
 }
 
+/* Subtasks (`SubtasksField`, `spec/subtasks.md`): a column of rows,
+   each a checkbox, a one-line text field and a hover-revealed ✕, over
+   the trailing add field, whose plus glyph sits in the checkbox's
+   place. Fields are borderless and read as text until focused. */
+.subtasks {
+  display: flex;
+  flex-direction: column;
+}
+
+.subtask {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.subtask-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  outline: none;
+  font: inherit;
+  color: var(--text);
+  text-overflow: ellipsis;
+}
+
+.subtask-text::placeholder {
+  color: var(--text-empty);
+}
+
+.subtask[data-done] .subtask-text:not(:focus) {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.subtask-add-mark {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--text-empty);
+}
+
+.subtask-remove {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  border-radius: 4px;
+  opacity: 0;
+}
+
+.subtask:hover .subtask-remove,
+.subtask:focus-within .subtask-remove {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .subtask-remove {
+    opacity: 1;
+  }
+}
+
+/* A row's subtask count: plain text like the stamp, no pill. */
+.row-subtasks {
+  background: none;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 .task-dialog-title:empty::before,
 .task-dialog-notes:empty::before {
   content: attr(data-placeholder);

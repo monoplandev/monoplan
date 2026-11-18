@@ -179,6 +179,74 @@ pub const MAX_PLACE_LABEL_CHARS: usize = 200;
 /// Upper bound on a place address or provider ref, in chars.
 pub const MAX_PLACE_DETAIL_CHARS: usize = 500;
 
+/// Subtasks (`spec/subtasks.md`): a mergeable `LoroMovableList` child of
+/// the item map, absent until the first subtask is added. Each element
+/// is one atomic plain `LoroValue` map `{id, text, done?}` (the `place`
+/// pattern), so a subtask's text and tick are written together and two
+/// members ticking different subtasks both land. Concurrent writes to
+/// the *same* subtask are last-writer-wins on the whole node.
+const KEY_SUBTASKS: &str = "subtasks";
+/// Upper bound on one subtask's text, in chars.
+pub const MAX_SUBTASK_TEXT_CHARS: usize = 500;
+/// Upper bound on the subtasks one item holds.
+pub const MAX_SUBTASKS: usize = 200;
+
+/// One subtask: a text node with done / not done, owned by its parent
+/// item. Not an item: no location, no dates, no lifecycle. `id` is
+/// stable across renames, ticks and reorders, and is unique within the
+/// parent only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Subtask {
+    pub id: String,
+    pub text: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub done: bool,
+}
+
+impl Subtask {
+    fn to_loro_value(&self) -> LoroValue {
+        let mut m: Vec<(String, LoroValue)> = vec![
+            ("id".into(), self.id.as_str().into()),
+            ("text".into(), self.text.as_str().into()),
+        ];
+        if self.done {
+            m.push(("done".into(), true.into()));
+        }
+        LoroValue::Map(m.into())
+    }
+
+    /// Anything that is not a well-formed node (a stray write, a newer
+    /// shape) reads as absent.
+    fn from_loro_value(value: &LoroValue) -> Option<Subtask> {
+        let LoroValue::Map(m) = value else {
+            return None;
+        };
+        let str_of = |k: &str| match m.get(k) {
+            Some(LoroValue::String(s)) => Some(s.to_string()),
+            _ => None,
+        };
+        let id = str_of("id").filter(|s| !s.is_empty())?;
+        let text = str_of("text").filter(|s| !s.is_empty())?;
+        let done = matches!(m.get("done"), Some(LoroValue::Bool(true)));
+        Some(Subtask { id, text, done })
+    }
+}
+
+/// Well-formed subtask nodes, each with its index in the raw list.
+type SubtaskNodes = Vec<(usize, Subtask)>;
+
+/// Trim and bound a subtask's text; empty or overlong is `Invalid`.
+fn normalize_subtask_text(text: &str) -> Result<String, DocError> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err(DocError::Invalid("subtask text is empty".into()));
+    }
+    if text.chars().count() > MAX_SUBTASK_TEXT_CHARS {
+        return Err(DocError::Invalid("subtask text is too long".into()));
+    }
+    Ok(text.to_string())
+}
+
 /// A named place, optionally pinned to coordinates. `label` is the
 /// user-facing name and the only required part; `lat` / `lon` are WGS84
 /// decimal degrees and come as a pair or not at all; `address` is a
@@ -605,6 +673,8 @@ pub struct ItemView {
     /// unassigned. Not checked against the member list: an id that is
     /// no longer a member reads as it was written.
     pub assignee: Option<String>,
+    /// Subtasks in their own order (`spec/subtasks.md`); empty ≡ none.
+    pub subtasks: Vec<Subtask>,
     /// Reflection stamp: first entry into In Progress (write-once).
     pub started_at: Option<i64>,
     /// Reflection stamp: last entry into Done; never cleared. The Done
@@ -961,6 +1031,10 @@ pub struct ExportItem {
     /// byte-identical.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub assignee: Option<String>,
+    /// Subtasks in order. Skipped when there are none so older dumps
+    /// stay byte-identical.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub subtasks: Vec<Subtask>,
     /// Reflection stamp (first entry into In Progress). Skipped when
     /// unset; v2 exports never carry it.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -1711,6 +1785,18 @@ fn classify_captured_diff(
             _ => CapturedDiff::Opaque,
         };
     }
+    // The `subtasks` list of an item map: a mergeable child too, so the
+    // same path shape as `notes`. Its nodes are plain values, so the
+    // list diff is the only shape; consumers re-read the whole list.
+    if let [(root, _), (item_map, _), (_, Index::Key(key)), ..] = path
+        && root_name(root).as_deref() == Some(ROOT_ITEMS)
+        && key.as_ref() == KEY_SUBTASKS
+    {
+        return CapturedDiff::ItemMap {
+            container: item_map.clone(),
+            keys: vec![KEY_SUBTASKS.to_string()],
+        };
+    }
     let path_root = path.first().map(|(cid, _)| cid);
     match root_name(target) {
         Some(name) if name == ROOT_ITEMS => {
@@ -2198,6 +2284,12 @@ impl Doc {
         if let Some(place) = &item.place {
             self.set_item_place(&copy, Some(place))?;
         }
+        for sub in &item.subtasks {
+            let id = self.add_subtask(&copy, &sub.text, None)?;
+            if sub.done {
+                self.set_subtask_done(&copy, &id, true)?;
+            }
+        }
         if !item.notes.is_empty() {
             self.apply_notes_delta(
                 &copy,
@@ -2321,6 +2413,7 @@ impl Doc {
                 created_at: now,
                 created_by: self.author.clone(),
                 assignee: None,
+                subtasks: Vec::new(),
                 state,
                 lifecycle_at: now,
                 started_at: (state == WorkflowState::InProgress).then_some(now),
@@ -2773,6 +2866,137 @@ impl Doc {
             id: item_id.to_string(),
             place,
         });
+        Ok(())
+    }
+
+    // ---------- subtasks (`spec/subtasks.md`) ----------
+
+    fn subtasks_changed(&self, item_id: &str, map: &LoroMap) {
+        self.inner.commit();
+        self.push_event(AppEvent::ItemSubtasksChanged {
+            id: item_id.to_string(),
+            subtasks: read_subtasks(map),
+        });
+    }
+
+    /// The item's subtask list and the node `subtask_id` names, with
+    /// its raw index.
+    fn find_subtask(
+        &self,
+        map: &LoroMap,
+        subtask_id: &str,
+    ) -> Result<(LoroMovableList, SubtaskNodes, usize), DocError> {
+        let missing = || DocError::Invalid(format!("no such subtask: {subtask_id}"));
+        let (list, nodes) = subtask_nodes(map).ok_or_else(missing)?;
+        let at = nodes
+            .iter()
+            .position(|(_, s)| s.id == subtask_id)
+            .ok_or_else(missing)?;
+        Ok((list, nodes, at))
+    }
+
+    /// Add a subtask to an item at `index` of its subtasks (`None`, or
+    /// past the end, appends). Returns the new subtask's id. The text
+    /// is trimmed; empty or overlong is `Invalid`, as is a full list.
+    /// One Loro commit.
+    pub fn add_subtask(
+        &self,
+        item_id: &str,
+        text: &str,
+        index: Option<usize>,
+    ) -> Result<String, DocError> {
+        let text = normalize_subtask_text(text)?;
+        let map = self.find_item(item_id)?;
+        let list = map.ensure_mergeable_movable_list(KEY_SUBTASKS)?;
+        let nodes = subtask_nodes(&map).map(|(_, n)| n).unwrap_or_default();
+        if nodes.len() >= MAX_SUBTASKS {
+            return Err(DocError::Invalid("too many subtasks".into()));
+        }
+        let raw = index
+            .and_then(|i| nodes.get(i))
+            .map_or(list.len(), |(raw, _)| *raw);
+        let node = Subtask {
+            id: new_id(),
+            text,
+            done: false,
+        };
+        list.insert(raw, node.to_loro_value())?;
+        self.subtasks_changed(item_id, &map);
+        Ok(node.id)
+    }
+
+    /// Rewrite a subtask's text (trimmed; empty or overlong is
+    /// `Invalid`). Writing the text it already has is a no-op.
+    pub fn set_subtask_text(
+        &self,
+        item_id: &str,
+        subtask_id: &str,
+        text: &str,
+    ) -> Result<(), DocError> {
+        let text = normalize_subtask_text(text)?;
+        let map = self.find_item(item_id)?;
+        let (list, nodes, at) = self.find_subtask(&map, subtask_id)?;
+        let (raw, node) = &nodes[at];
+        if node.text == text {
+            return Ok(());
+        }
+        let next = Subtask {
+            text,
+            ..node.clone()
+        };
+        list.set(*raw, next.to_loro_value())?;
+        self.subtasks_changed(item_id, &map);
+        Ok(())
+    }
+
+    /// Tick or untick a subtask. Writing the state it already has is a
+    /// no-op.
+    pub fn set_subtask_done(
+        &self,
+        item_id: &str,
+        subtask_id: &str,
+        done: bool,
+    ) -> Result<(), DocError> {
+        let map = self.find_item(item_id)?;
+        let (list, nodes, at) = self.find_subtask(&map, subtask_id)?;
+        let (raw, node) = &nodes[at];
+        if node.done == done {
+            return Ok(());
+        }
+        let next = Subtask {
+            done,
+            ..node.clone()
+        };
+        list.set(*raw, next.to_loro_value())?;
+        self.subtasks_changed(item_id, &map);
+        Ok(())
+    }
+
+    /// Move a subtask so it ends at `index` of the item's subtasks
+    /// (clamped to the end). A move to where it already is is a no-op.
+    pub fn move_subtask(
+        &self,
+        item_id: &str,
+        subtask_id: &str,
+        index: usize,
+    ) -> Result<(), DocError> {
+        let map = self.find_item(item_id)?;
+        let (list, nodes, at) = self.find_subtask(&map, subtask_id)?;
+        let to = index.min(nodes.len() - 1);
+        if to == at {
+            return Ok(());
+        }
+        list.mov(nodes[at].0, nodes[to].0)?;
+        self.subtasks_changed(item_id, &map);
+        Ok(())
+    }
+
+    /// Delete a subtask.
+    pub fn remove_subtask(&self, item_id: &str, subtask_id: &str) -> Result<(), DocError> {
+        let map = self.find_item(item_id)?;
+        let (list, nodes, at) = self.find_subtask(&map, subtask_id)?;
+        list.delete(nodes[at].0, 1)?;
+        self.subtasks_changed(item_id, &map);
         Ok(())
     }
 
@@ -4476,6 +4700,31 @@ impl Doc {
             let text = map.ensure_mergeable_text(KEY_NOTES)?;
             text.insert(0, notes)?;
         }
+        // Malformed subtasks (empty or overlong text, a repeated id) are
+        // dropped rather than rejected; a blank id is minted.
+        if !src.subtasks.is_empty() {
+            let list = map.ensure_mergeable_movable_list(KEY_SUBTASKS)?;
+            let mut seen = HashSet::new();
+            for sub in src.subtasks.iter().take(MAX_SUBTASKS) {
+                let Ok(text) = normalize_subtask_text(&sub.text) else {
+                    continue;
+                };
+                let id = if sub.id.trim().is_empty() {
+                    new_id()
+                } else {
+                    sub.id.trim().to_string()
+                };
+                if !seen.insert(id.clone()) {
+                    continue;
+                }
+                let node = Subtask {
+                    id,
+                    text,
+                    done: sub.done,
+                };
+                list.insert(list.len(), node.to_loro_value())?;
+            }
+        }
         if let Some(t) = src.done_at {
             map.insert(KEY_DONE_AT, t)?;
         }
@@ -5346,6 +5595,7 @@ impl Doc {
                         KEY_NOTES,
                         KEY_DEADLINE,
                         KEY_ASSIGNEE,
+                        KEY_SUBTASKS,
                         KEY_WHEN,
                         KEY_WHEN_SUGGESTED,
                         KEY_EVENT,
@@ -5493,6 +5743,12 @@ impl Doc {
                         assignee: view.assignee.clone(),
                     });
                 }
+                if has(KEY_SUBTASKS) {
+                    self.push_event(AppEvent::ItemSubtasksChanged {
+                        id: id.clone(),
+                        subtasks: view.subtasks.clone(),
+                    });
+                }
                 // A date cleared on an Inbox item brings it back into
                 // Inbox's Open projection: the per-list walk reports
                 // that one, with its position.
@@ -5582,6 +5838,7 @@ impl Doc {
                     created_at: view.created_at,
                     created_by: view.created_by,
                     assignee: view.assignee,
+                    subtasks: view.subtasks,
                     state: view.state,
                     lifecycle_at: view.lifecycle_at,
                     started_at: view.started_at,
@@ -5651,6 +5908,7 @@ impl Doc {
                             created_at: view.created_at,
                             created_by: view.created_by,
                             assignee: view.assignee,
+                            subtasks: view.subtasks,
                             state: view.state,
                             lifecycle_at: view.lifecycle_at,
                             started_at: view.started_at,
@@ -5943,6 +6201,7 @@ impl Doc {
                 created_at: item.created_at,
                 created_by: item.created_by,
                 assignee: item.assignee,
+                subtasks: item.subtasks,
                 state: item.state,
                 lifecycle_at: item.lifecycle_at,
                 started_at: item.started_at,
@@ -6070,6 +6329,12 @@ impl Doc {
             hash_opt_i64(&mut hasher, i.binned_at);
             hash_opt_i64(&mut hasher, i.inbox_at);
             hash_opt_str(&mut hasher, i.assignee.as_deref());
+            hasher.update((i.subtasks.len() as u32).to_be_bytes());
+            for sub in &i.subtasks {
+                hash_str(&mut hasher, &sub.id);
+                hash_str(&mut hasher, &sub.text);
+                hasher.update([u8::from(sub.done)]);
+            }
         }
         // Focus: the curated order fixes logical state (`spec/focus.md`),
         // exactly as each list's resolved order does. Hash the raw
@@ -6346,6 +6611,7 @@ fn export_item(item: ItemView) -> ExportItem {
         created_at: item.created_at,
         created_by: item.created_by,
         assignee: item.assignee,
+        subtasks: item.subtasks,
         started_at: item.started_at,
         done_at: item.done_at,
         binned_at: item.binned_at,
@@ -6705,6 +6971,35 @@ fn read_place(map: &LoroMap) -> Option<Place> {
     Place::from_loro_value(v.as_value()?)
 }
 
+/// The raw `subtasks` list paired with its well-formed nodes, each with
+/// its index in the raw list. A malformed node, or a second node with
+/// an id already seen, is skipped (it stays in the list, unread).
+fn subtask_nodes(map: &LoroMap) -> Option<(LoroMovableList, SubtaskNodes)> {
+    let ValueOrContainer::Container(Container::MovableList(list)) = map.get(KEY_SUBTASKS)? else {
+        return None;
+    };
+    let mut seen = HashSet::new();
+    let mut nodes = Vec::new();
+    for i in 0..list.len() {
+        let Some(ValueOrContainer::Value(v)) = list.get(i) else {
+            continue;
+        };
+        if let Some(sub) = Subtask::from_loro_value(&v)
+            && seen.insert(sub.id.clone())
+        {
+            nodes.push((i, sub));
+        }
+    }
+    Some((list, nodes))
+}
+
+/// An item's subtasks in order; none when the list was never created.
+fn read_subtasks(map: &LoroMap) -> Vec<Subtask> {
+    subtask_nodes(map)
+        .map(|(_, nodes)| nodes.into_iter().map(|(_, s)| s).collect())
+        .unwrap_or_default()
+}
+
 fn read_i64(map: &LoroMap, key: &str) -> Option<i64> {
     let v = map.get(key)?;
     let value = v.as_value()?.clone();
@@ -6880,6 +7175,7 @@ fn item_view(map: &LoroMap) -> Option<ItemView> {
         created_at: read_i64(map, KEY_CREATED_AT)?,
         created_by: read_string(map, KEY_CREATED_BY).filter(|s| !s.is_empty()),
         assignee: read_string(map, KEY_ASSIGNEE).filter(|s| !s.is_empty()),
+        subtasks: read_subtasks(map),
         started_at: read_i64(map, KEY_STARTED_AT),
         done_at: read_i64(map, KEY_DONE_AT),
         binned_at: read_i64(map, KEY_BINNED_AT),
@@ -7160,6 +7456,7 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                     created_at: post_it.created_at,
                     created_by: post_it.created_by.clone(),
                     assignee: post_it.assignee.clone(),
+                    subtasks: post_it.subtasks.clone(),
                     state: post_it.state,
                     lifecycle_at: post_it.lifecycle_at,
                     started_at: post_it.started_at,
@@ -7197,6 +7494,12 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                     out.push(AppEvent::ItemAssigneeChanged {
                         id: post_it.id.clone(),
                         assignee: post_it.assignee.clone(),
+                    });
+                }
+                if pre_it.subtasks != post_it.subtasks {
+                    out.push(AppEvent::ItemSubtasksChanged {
+                        id: post_it.id.clone(),
+                        subtasks: post_it.subtasks.clone(),
                     });
                 }
                 if pre_it.when != post_it.when {
@@ -10861,6 +11164,7 @@ mod tests {
             created_at: 1,
             created_by: None,
             assignee: None,
+            subtasks: Vec::new(),
             started_at: None,
             done_at: None,
             binned_at: None,
@@ -10960,6 +11264,7 @@ mod tests {
             created_at: 1,
             created_by: None,
             assignee: None,
+            subtasks: Vec::new(),
             started_at: None,
             done_at: None,
             binned_at: None,
@@ -11258,6 +11563,176 @@ mod tests {
         assert!(b.drain_events().iter().any(|e| matches!(
             e,
             AppEvent::ItemAssigneeChanged { id: eid, assignee: None } if eid == &id
+        )));
+    }
+
+    #[test]
+    fn subtasks_add_tick_rename_move_remove() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "shopping").unwrap();
+        let _ = doc.drain_events();
+        assert!(doc.get_item(&id).unwrap().subtasks.is_empty());
+
+        let milk = doc.add_subtask(&id, "  milk ", None).unwrap();
+        let eggs = doc.add_subtask(&id, "eggs", None).unwrap();
+        let bread = doc.add_subtask(&id, "bread", Some(0)).unwrap();
+        let texts = |doc: &Doc| -> Vec<String> {
+            doc.get_item(&id)
+                .unwrap()
+                .subtasks
+                .into_iter()
+                .map(|s| format!("{}{}", if s.done { "x " } else { "" }, s.text))
+                .collect()
+        };
+        assert_eq!(texts(&doc), ["bread", "milk", "eggs"]);
+        let events = doc.drain_events();
+        assert_eq!(events.len(), 3);
+        assert!(matches!(
+            &events[2],
+            AppEvent::ItemSubtasksChanged { id: eid, subtasks } if eid == &id && subtasks.len() == 3
+        ));
+
+        doc.set_subtask_done(&id, &milk, true).unwrap();
+        doc.set_subtask_text(&id, &eggs, "a dozen eggs").unwrap();
+        assert_eq!(texts(&doc), ["bread", "x milk", "a dozen eggs"]);
+        assert_eq!(doc.drain_events().len(), 2);
+        // Writes of the current value are no-ops: no commit, no event.
+        doc.set_subtask_done(&id, &milk, true).unwrap();
+        doc.set_subtask_text(&id, &eggs, "a dozen eggs").unwrap();
+        doc.move_subtask(&id, &bread, 0).unwrap();
+        assert!(doc.drain_events().is_empty());
+
+        doc.move_subtask(&id, &bread, 99).unwrap();
+        assert_eq!(texts(&doc), ["x milk", "a dozen eggs", "bread"]);
+        doc.move_subtask(&id, &bread, 1).unwrap();
+        assert_eq!(texts(&doc), ["x milk", "bread", "a dozen eggs"]);
+        doc.remove_subtask(&id, &milk).unwrap();
+        assert_eq!(texts(&doc), ["bread", "a dozen eggs"]);
+
+        // A tick is one workspace undo step.
+        doc.set_subtask_done(&id, &bread, true).unwrap();
+        assert!(doc.undo().unwrap());
+        assert_eq!(texts(&doc), ["bread", "a dozen eggs"]);
+
+        let _ = doc.drain_events();
+        for bad in ["", "   ", &"a".repeat(MAX_SUBTASK_TEXT_CHARS + 1)] {
+            assert!(matches!(
+                doc.add_subtask(&id, bad, None).unwrap_err(),
+                DocError::Invalid(_)
+            ));
+            assert!(matches!(
+                doc.set_subtask_text(&id, &bread, bad).unwrap_err(),
+                DocError::Invalid(_)
+            ));
+        }
+        assert!(doc.set_subtask_done(&id, &milk, true).is_err());
+        assert!(doc.remove_subtask(&id, "nope").is_err());
+        assert!(doc.add_subtask(&"0".repeat(32), "x", None).is_err());
+        assert!(doc.drain_events().is_empty());
+        assert_eq!(texts(&doc), ["bread", "a dozen eggs"]);
+    }
+
+    #[test]
+    fn subtasks_survive_export_import_duplicate_and_cross_doc_move() {
+        let src = Doc::new().unwrap();
+        let id = src.add_item(LIST_INBOX, "trip").unwrap();
+        src.add_subtask(&id, "passport", None).unwrap();
+        let charger = src.add_subtask(&id, "charger", None).unwrap();
+        src.set_subtask_done(&id, &charger, true).unwrap();
+        let shape = |doc: &Doc, id: &str| -> Vec<(String, bool)> {
+            doc.get_item(id)
+                .unwrap()
+                .subtasks
+                .into_iter()
+                .map(|s| (s.text, s.done))
+                .collect()
+        };
+        let want = vec![
+            ("passport".to_string(), false),
+            ("charger".to_string(), true),
+        ];
+
+        let copy = src.duplicate_item(&id).unwrap();
+        assert_eq!(shape(&src, &copy), want);
+
+        let dst = Doc::new().unwrap();
+        dst.import_json(&src.export_json()).unwrap();
+        assert_eq!(shape(&dst, &id), want);
+        assert_eq!(
+            dst.get_item(&id).unwrap().subtasks,
+            src.get_item(&id).unwrap().subtasks
+        );
+
+        let other = Doc::new().unwrap();
+        move_items_across_docs(&src, &other, &[&id], LIST_INBOX, 0, None).unwrap();
+        assert!(src.get_item(&id).is_none());
+        assert_eq!(shape(&other, &id), want);
+    }
+
+    #[test]
+    fn subtasks_converge_between_peers() {
+        let dek = Dek::generate();
+        let mut a = Doc::new().unwrap();
+        let id = a.add_item(LIST_INBOX, "sync me").unwrap();
+        let mut b = sync_fresh_peer(&mut a, &dek);
+        let texts = |doc: &Doc| -> Vec<String> {
+            doc.get_item(&id)
+                .unwrap()
+                .subtasks
+                .into_iter()
+                .map(|s| format!("{}{}", if s.done { "x " } else { "" }, s.text))
+                .collect()
+        };
+
+        // Both peers add the item's first subtask offline: one list.
+        a.add_subtask(&id, "from a", None).unwrap();
+        b.add_subtask(&id, "from b", None).unwrap();
+        let fa = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        let fb = b.pending_export(&dek).unwrap().unwrap();
+        b.mark_persisted();
+        let _ = (a.drain_events(), b.drain_events());
+        a.apply_remote(&dek, &fb).unwrap();
+        b.apply_remote(&dek, &fa).unwrap();
+        assert_eq!(texts(&a).len(), 2);
+        assert_eq!(texts(&a), texts(&b));
+        assert_eq!(a.fingerprint(), b.fingerprint());
+        // The remote add is one surgical event, not a resync.
+        let events = b.drain_events();
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert!(matches!(
+            &events[0],
+            AppEvent::ItemSubtasksChanged { id: eid, subtasks } if eid == &id && subtasks.len() == 2
+        ));
+        let _ = a.drain_events();
+
+        // Ticks on different subtasks, made concurrently, both land.
+        let subs = a.get_item(&id).unwrap().subtasks;
+        a.set_subtask_done(&id, &subs[0].id, true).unwrap();
+        b.set_subtask_done(&id, &subs[1].id, true).unwrap();
+        let fa = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        let fb = b.pending_export(&dek).unwrap().unwrap();
+        b.mark_persisted();
+        a.apply_remote(&dek, &fb).unwrap();
+        b.apply_remote(&dek, &fa).unwrap();
+        assert!(texts(&a).iter().all(|t| t.starts_with("x ")));
+        assert_eq!(texts(&a), texts(&b));
+        assert_eq!(a.fingerprint(), b.fingerprint());
+        assert!(
+            !b.drain_events()
+                .iter()
+                .any(|e| matches!(e, AppEvent::FullResync))
+        );
+
+        // A remote item arriving with subtasks carries them on the add.
+        let fresh = a.add_item(LIST_INBOX, "new").unwrap();
+        a.add_subtask(&fresh, "inside", None).unwrap();
+        let fa = a.pending_export(&dek).unwrap().unwrap();
+        b.apply_remote(&dek, &fa).unwrap();
+        assert!(b.drain_events().iter().any(|e| matches!(
+            e,
+            AppEvent::ItemAdded { id: eid, subtasks, .. } if eid == &fresh && subtasks.len() == 1
         )));
     }
 
@@ -12245,6 +12720,7 @@ mod tests {
                 created_at: 1_700_000_000_000,
                 created_by: None,
                 assignee: None,
+                subtasks: Vec::new(),
                 started_at: None,
                 done_at: None,
                 binned_at: None,

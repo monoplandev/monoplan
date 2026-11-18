@@ -32,6 +32,7 @@ import type { PlaceSuggestion } from "./placeSuggest.ts";
 import { WhenField } from "./WhenField.tsx";
 import { ListPicker, type ListOption } from "./ListPicker.tsx";
 import { AssigneeField, type Assignment } from "./AssigneeField.tsx";
+import { SubtasksField } from "./SubtasksField.tsx";
 import checkSvg from "./icons/check.svg?raw";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import starFilledSvg from "./icons/star-filled.svg?raw";
@@ -1680,6 +1681,24 @@ export function TaskDialog(props: {
               knownPlaces={() => props.knownPlaces(KNOWN_PLACES_LIMIT)}
             />
           </section>
+
+          {/* Subtasks between the place and the notes (`spec/subtasks.md`):
+              the one place they show. Only once the item exists; a
+              capture gains the section when its title blur promotes it. */}
+          <Show when={item()}>
+            {(it) => (
+              <section class="task-dialog-section task-dialog-subtasks">
+                <SubtasksField
+                  subtasks={() => it().subtasks ?? []}
+                  onAdd={(text) => props.app.addSubtask(it().id, text)}
+                  onText={(sub, text) => props.app.setSubtaskText(it().id, sub, text)}
+                  onDone={(sub, done) => props.app.setSubtaskDone(it().id, sub, done)}
+                  onMove={(sub, index) => props.app.moveSubtask(it().id, sub, index)}
+                  onRemove={(sub) => props.app.removeSubtask(it().id, sub)}
+                />
+              </section>
+            )}
+          </Show>
 
           <section class="task-dialog-section">
             <div

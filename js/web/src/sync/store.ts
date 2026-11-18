@@ -65,6 +65,29 @@ export interface Place {
   ref?: string;
 }
 
+/** One subtask (`spec/subtasks.md`): a text node with done / not done,
+ *  owned by its parent item. Not an item: it has no list, date or
+ *  lifecycle, and shows only in the task surface. `id` is stable
+ *  across renames, ticks and reorders. */
+export interface Subtask {
+  id: string;
+  text: string;
+  done?: boolean;
+}
+
+/** Parse the JSON text the wasm boundary carries subtasks as;
+ *  `undefined` for none. */
+export function parseSubtasksJson(json: string | undefined | null): Subtask[] | undefined {
+  if (!json) return undefined;
+  try {
+    const v = JSON.parse(json) as unknown;
+    if (!Array.isArray(v) || v.length === 0) return undefined;
+    return v as Subtask[];
+  } catch {
+    return undefined;
+  }
+}
+
 /** Parse the JSON text the wasm boundary carries a place as; `undefined`
  *  for unset or anything that is not a place. */
 export function parsePlaceJson(json: string | undefined | null): Place | undefined {
@@ -137,6 +160,9 @@ export interface ItemView {
    *  Not checked against the member list: an id the directory cannot
    *  resolve is a former member. Shown on shared docs only. */
   assignee?: string;
+  /** Subtasks in their own order (`spec/subtasks.md`). Absent means
+   *  none. Replaced whole on every change. */
+  subtasks?: Subtask[];
   /** Reflection stamp: first entry into In Progress, if any. */
   startedAt?: number;
   /** Reflection stamp: last entry into Done, if any. View sorts use
@@ -321,6 +347,16 @@ export interface DocItemActions {
   setItemNotes(id: string, notes: string): void;
   setItemDeadline(id: string, deadline: string | null): void;
   setItemAssignee(id: string, assignee: string | null): void;
+  /** Add a subtask to an item at `index` of its subtasks (omitted
+   *  appends) and return its id; blank text is ignored (`undefined`).
+   *  One undo step, like each of the subtask writes below. */
+  addSubtask(id: string, text: string, index?: number): string | undefined;
+  /** Rewrite a subtask's text. Blank text is ignored. */
+  setSubtaskText(id: string, subtaskId: string, text: string): void;
+  setSubtaskDone(id: string, subtaskId: string, done: boolean): void;
+  /** Move a subtask so it ends at `index` of the item's subtasks. */
+  moveSubtask(id: string, subtaskId: string, index: number): void;
+  removeSubtask(id: string, subtaskId: string): void;
   setItemWhen(id: string, when: string | null): void;
   setItemWhenSuggested(id: string, when: string | null): void;
   acceptItemWhenSuggestion(id: string): void;
@@ -911,6 +947,7 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
           createdAt: Number(ev.createdAt ?? 0),
           createdBy: ev.createdBy ?? undefined,
           assignee: ev.assignee ?? undefined,
+          subtasks: parseSubtasksJson(ev.subtasks),
           startedAt: ev.startedAt != null ? Number(ev.startedAt) : undefined,
           doneAt: ev.doneAt != null ? Number(ev.doneAt) : undefined,
           binnedAt: ev.binnedAt != null ? Number(ev.binnedAt) : undefined,
@@ -1034,6 +1071,12 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
       case "itemAssigneeChanged": {
         if (state.itemsById[ev.id]) {
           setState("itemsById", ev.id, "assignee", ev.assignee ?? undefined);
+        }
+        break;
+      }
+      case "itemSubtasksChanged": {
+        if (state.itemsById[ev.id]) {
+          setState("itemsById", ev.id, "subtasks", parseSubtasksJson(ev.subtasks));
         }
         break;
       }
@@ -1533,6 +1576,46 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
     },
     setItemAssignee(id, assignee) {
       mutate(() => replica.setItemAssignee(id, assignee ?? undefined));
+    },
+    // Subtask writes that change nothing make no commit; they are
+    // skipped so none is recorded as an undo step. Inside a batch the
+    // store may not have caught up (an item or subtask made earlier in
+    // the batch), so there the caller vouches for the write.
+    addSubtask(id, text, index) {
+      if (!text.trim()) return undefined;
+      return mutate(() => replica.addSubtask(id, text, index));
+    },
+    setSubtaskText(id, subtaskId, text) {
+      if (!text.trim()) return;
+      if (actionBatchDepth === 0) {
+        const sub = state.itemsById[id]?.subtasks?.find((s) => s.id === subtaskId);
+        if (!sub || sub.text === text.trim()) return;
+      }
+      mutate(() => replica.setSubtaskText(id, subtaskId, text));
+    },
+    setSubtaskDone(id, subtaskId, done) {
+      if (actionBatchDepth === 0) {
+        const sub = state.itemsById[id]?.subtasks?.find((s) => s.id === subtaskId);
+        if (!sub || (sub.done === true) === done) return;
+      }
+      mutate(() => replica.setSubtaskDone(id, subtaskId, done));
+    },
+    moveSubtask(id, subtaskId, index) {
+      if (actionBatchDepth === 0) {
+        const subs = state.itemsById[id]?.subtasks ?? [];
+        const from = subs.findIndex((s) => s.id === subtaskId);
+        if (from < 0 || Math.min(index, subs.length - 1) === from) return;
+      }
+      mutate(() => replica.moveSubtask(id, subtaskId, index));
+    },
+    removeSubtask(id, subtaskId) {
+      if (
+        actionBatchDepth === 0 &&
+        !state.itemsById[id]?.subtasks?.some((s) => s.id === subtaskId)
+      ) {
+        return;
+      }
+      mutate(() => replica.removeSubtask(id, subtaskId));
     },
     setItemWhen(id, when) {
       mutate(() => replica.setItemWhen(id, when ?? undefined));

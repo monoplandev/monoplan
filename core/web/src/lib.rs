@@ -283,6 +283,62 @@ impl Doc {
             .map_err(js_err)
     }
 
+    /// Add a subtask to an item (`spec/subtasks.md`) at `index` of its
+    /// subtasks (omitted or past the end appends). Returns its id.
+    #[wasm_bindgen(js_name = addSubtask)]
+    pub fn add_subtask(
+        &self,
+        item_id: &str,
+        text: &str,
+        index: Option<usize>,
+    ) -> Result<String, JsError> {
+        self.inner.add_subtask(item_id, text, index).map_err(js_err)
+    }
+
+    #[wasm_bindgen(js_name = setSubtaskText)]
+    pub fn set_subtask_text(
+        &self,
+        item_id: &str,
+        subtask_id: &str,
+        text: &str,
+    ) -> Result<(), JsError> {
+        self.inner
+            .set_subtask_text(item_id, subtask_id, text)
+            .map_err(js_err)
+    }
+
+    #[wasm_bindgen(js_name = setSubtaskDone)]
+    pub fn set_subtask_done(
+        &self,
+        item_id: &str,
+        subtask_id: &str,
+        done: bool,
+    ) -> Result<(), JsError> {
+        self.inner
+            .set_subtask_done(item_id, subtask_id, done)
+            .map_err(js_err)
+    }
+
+    /// Move a subtask so it ends at `index` of the item's subtasks.
+    #[wasm_bindgen(js_name = moveSubtask)]
+    pub fn move_subtask(
+        &self,
+        item_id: &str,
+        subtask_id: &str,
+        index: usize,
+    ) -> Result<(), JsError> {
+        self.inner
+            .move_subtask(item_id, subtask_id, index)
+            .map_err(js_err)
+    }
+
+    #[wasm_bindgen(js_name = removeSubtask)]
+    pub fn remove_subtask(&self, item_id: &str, subtask_id: &str) -> Result<(), JsError> {
+        self.inner
+            .remove_subtask(item_id, subtask_id)
+            .map_err(js_err)
+    }
+
     /// Set (`Some`) or clear (`None`) an item's date-only deadline. The
     /// value must be a `YYYY-MM-DD` calendar date or the call rejects.
     #[wasm_bindgen(js_name = setItemDeadline)]
@@ -1916,6 +1972,62 @@ impl Replica {
             .map_err(js_err)
     }
 
+    /// Add a subtask to an item (`spec/subtasks.md`) at `index` of its
+    /// subtasks (omitted or past the end appends). Returns its id.
+    #[wasm_bindgen(js_name = addSubtask)]
+    pub fn add_subtask(
+        &self,
+        item_id: &str,
+        text: &str,
+        index: Option<usize>,
+    ) -> Result<String, JsError> {
+        self.doc().add_subtask(item_id, text, index).map_err(js_err)
+    }
+
+    #[wasm_bindgen(js_name = setSubtaskText)]
+    pub fn set_subtask_text(
+        &self,
+        item_id: &str,
+        subtask_id: &str,
+        text: &str,
+    ) -> Result<(), JsError> {
+        self.doc()
+            .set_subtask_text(item_id, subtask_id, text)
+            .map_err(js_err)
+    }
+
+    #[wasm_bindgen(js_name = setSubtaskDone)]
+    pub fn set_subtask_done(
+        &self,
+        item_id: &str,
+        subtask_id: &str,
+        done: bool,
+    ) -> Result<(), JsError> {
+        self.doc()
+            .set_subtask_done(item_id, subtask_id, done)
+            .map_err(js_err)
+    }
+
+    /// Move a subtask so it ends at `index` of the item's subtasks.
+    #[wasm_bindgen(js_name = moveSubtask)]
+    pub fn move_subtask(
+        &self,
+        item_id: &str,
+        subtask_id: &str,
+        index: usize,
+    ) -> Result<(), JsError> {
+        self.doc()
+            .move_subtask(item_id, subtask_id, index)
+            .map_err(js_err)
+    }
+
+    #[wasm_bindgen(js_name = removeSubtask)]
+    pub fn remove_subtask(&self, item_id: &str, subtask_id: &str) -> Result<(), JsError> {
+        self.doc()
+            .remove_subtask(item_id, subtask_id)
+            .map_err(js_err)
+    }
+
     /// Set (`Some`) or clear (`None`) an item's date-only deadline. The
     /// value must be a `YYYY-MM-DD` calendar date or the call rejects.
     #[wasm_bindgen(js_name = setItemDeadline)]
@@ -2499,7 +2611,7 @@ impl From<CoreEvent> for ReplicaEvent {
 ///
 /// Variant → fields:
 /// - `fullResync` — no fields; rematerialize current state once
-/// - `itemAdded` — id, listId, text, notes, createdAt, createdBy?, assignee?, state, lifecycleAt, startedAt?, doneAt?, binnedAt?, deadline?, when?, whenSuggested?, event?, duration?, place?, openIndex?
+/// - `itemAdded` — id, listId, text, notes, createdAt, createdBy?, assignee?, subtasks? (JSON array, omitted when none), state, lifecycleAt, startedAt?, doneAt?, binnedAt?, deadline?, when?, whenSuggested?, event?, duration?, place?, openIndex?
 /// - `itemRemoved` — id
 /// - `itemMoved` — id, openIndex?
 /// - `itemTextChanged` — id, text
@@ -2507,6 +2619,7 @@ impl From<CoreEvent> for ReplicaEvent {
 /// - `itemNotesDelta` — id, delta (JSON array of `{retain}` / `{insert}` / `{delete}`, UTF-16 units; only for items with a `subscribeNotes` subscription)
 /// - `itemDeadlineChanged` — id, deadline? (undefined = no deadline)
 /// - `itemAssigneeChanged` — id, assignee? (undefined = unassigned)
+/// - `itemSubtasksChanged` — id, subtasks (JSON array of `{id, text, done?}`, the whole list in order)
 /// - `itemWhenChanged` — id, when? (undefined = unset; `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`), openIndex? (a dated Inbox item is in no Open array: drop it when a date arrives; set when a cleared date brings it back, splice it in there)
 /// - `itemWhenSuggestedChanged` — id, whenSuggested? (undefined = none pending; same shape as `when`)
 /// - `itemEventChanged` — id, event
@@ -2573,6 +2686,9 @@ pub struct AppEventJs {
     /// Assignee's account id (`itemAdded` / `itemAssigneeChanged`);
     /// `None` means unassigned.
     assignee: Option<String>,
+    /// Subtasks (`itemAdded` when the item has any, `itemSubtasksChanged`
+    /// always) as JSON text of `[{id, text, done?}]`.
+    subtasks: Option<String>,
     /// Reflection stamp: last entry into Done, if any.
     done_at: Option<i64>,
     binned_at: Option<i64>,
@@ -2645,6 +2761,10 @@ impl AppEventJs {
     #[wasm_bindgen(getter, js_name = assignee)]
     pub fn assignee(&self) -> Option<String> {
         self.assignee.clone()
+    }
+    #[wasm_bindgen(getter, js_name = subtasks)]
+    pub fn subtasks(&self) -> Option<String> {
+        self.subtasks.clone()
     }
     #[wasm_bindgen(getter, js_name = doneAt)]
     pub fn done_at(&self) -> Option<i64> {
@@ -2720,6 +2840,10 @@ impl AppEventJs {
     }
 }
 
+fn subtasks_json(subtasks: &[monoplan_core::Subtask]) -> String {
+    serde_json::to_string(subtasks).unwrap_or_else(|_| "[]".into())
+}
+
 fn place_json(place: &monoplan_core::Place) -> String {
     serde_json::to_string(place).unwrap_or_else(|_| "{}".into())
 }
@@ -2754,6 +2878,7 @@ impl From<CoreAppEvent> for AppEventJs {
             created_at: None,
             created_by: None,
             assignee: None,
+            subtasks: None,
             done_at: None,
             binned_at: None,
             archived_at: None,
@@ -2780,6 +2905,7 @@ impl From<CoreAppEvent> for AppEventJs {
                 created_at,
                 created_by,
                 assignee,
+                subtasks,
                 state,
                 lifecycle_at,
                 started_at,
@@ -2801,6 +2927,7 @@ impl From<CoreAppEvent> for AppEventJs {
                 created_at: Some(created_at),
                 created_by,
                 assignee,
+                subtasks: (!subtasks.is_empty()).then(|| subtasks_json(&subtasks)),
                 state: Some(state.name()),
                 lifecycle_at: Some(lifecycle_at),
                 started_at,
@@ -2854,6 +2981,12 @@ impl From<CoreAppEvent> for AppEventJs {
                 kind: "itemAssigneeChanged",
                 id,
                 assignee,
+                ..blank
+            },
+            CoreAppEvent::ItemSubtasksChanged { id, subtasks } => AppEventJs {
+                kind: "itemSubtasksChanged",
+                id,
+                subtasks: Some(subtasks_json(&subtasks)),
                 ..blank
             },
             CoreAppEvent::ItemWhenChanged {
@@ -3076,6 +3209,10 @@ fn item_to_json(it: &monoplan_core::ItemView) -> String {
     if let Some(a) = &it.assignee {
         s.push_str(",\"assignee\":");
         s.push_str(&json_string(a));
+    }
+    if !it.subtasks.is_empty() {
+        s.push_str(",\"subtasks\":");
+        s.push_str(&subtasks_json(&it.subtasks));
     }
     if let Some(t) = it.done_at {
         s.push_str(&format!(",\"doneAt\":{t}"));

@@ -13,7 +13,7 @@
 //! Initial attachment materializes current state explicitly. After that,
 //! consumers receive live deltas or an occasional `FullResync` request.
 
-use crate::doc::{DefaultView, NotesDeltaOp, Place, WorkflowState};
+use crate::doc::{DefaultView, NotesDeltaOp, Place, Subtask, WorkflowState};
 
 // `ItemAdded` carries every register and is intrinsically the fat variant;
 // events are pushed to a Vec and drained once, so the size gap is moot.
@@ -45,6 +45,8 @@ pub enum AppEvent {
         created_by: Option<String>,
         /// Assignee's account id, or `None` when unassigned.
         assignee: Option<String>,
+        /// Subtasks in order; empty when the item has none.
+        subtasks: Vec<Subtask>,
         /// Workflow register state (`spec/data-model.md` "Lifecycle").
         /// Masked by `binned_at` when that is set.
         state: WorkflowState,
@@ -155,6 +157,13 @@ pub enum AppEvent {
     ItemDurationChanged {
         id: String,
         duration: Option<u32>,
+    },
+    /// Item's subtasks changed (one added, renamed, ticked, moved or
+    /// removed). The payload is the whole list after the write, in
+    /// order: subtasks are few, so consumers replace rather than patch.
+    ItemSubtasksChanged {
+        id: String,
+        subtasks: Vec<Subtask>,
     },
     /// Item's place changed. The payload is the canonical value after
     /// the write, `None` when cleared.

@@ -300,6 +300,7 @@ mod tests {
             lifecycle_at: created_at,
             created_by: None,
             assignee: None,
+            subtasks: Vec::new(),
             deadline: None,
             when: None,
             when_suggested: None,

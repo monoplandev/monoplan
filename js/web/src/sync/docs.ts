@@ -454,6 +454,21 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
     setItemAssignee(id, assignee) {
       forItem(id, (app) => app.setItemAssignee(id, assignee));
     },
+    addSubtask(id, text, index) {
+      return appForItem(id)?.addSubtask(id, text, index);
+    },
+    setSubtaskText(id, subtaskId, text) {
+      forItem(id, (app) => app.setSubtaskText(id, subtaskId, text));
+    },
+    setSubtaskDone(id, subtaskId, done) {
+      forItem(id, (app) => app.setSubtaskDone(id, subtaskId, done));
+    },
+    moveSubtask(id, subtaskId, index) {
+      forItem(id, (app) => app.moveSubtask(id, subtaskId, index));
+    },
+    removeSubtask(id, subtaskId) {
+      forItem(id, (app) => app.removeSubtask(id, subtaskId));
+    },
     setItemWhen(id, when) {
       forItem(id, (app) => app.setItemWhen(id, when));
     },
