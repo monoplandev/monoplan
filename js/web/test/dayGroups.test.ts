@@ -10,6 +10,7 @@ import { describe, expect, test } from "bun:test";
 import {
   agendaItems,
   attentionBadge,
+  foldDone,
   groupByDay,
   isDueRow,
   whenSpan,
@@ -42,6 +43,12 @@ function item(
     ...dates,
     ...extra,
   } as ItemView;
+}
+
+/** Closed at `hour` o'clock, local, on `day`. */
+function closedOn(day: string, hour = 12, state = "done"): Partial<ItemView> {
+  const [y, mo, d] = day.split("-").map(Number);
+  return { state, lifecycleAt: new Date(y!, mo! - 1, d!, hour).getTime() } as Partial<ItemView>;
 }
 
 const ids = (g: { rows: { item: ItemView }[] }) => g.rows.map((r) => r.item.id);
@@ -99,7 +106,6 @@ describe("groupByDay", () => {
         item("birthday", { when: "2026-09-12" }, { event: true }),
         item("gig09", { when: "2026-09-12T09:00" }, { event: true }),
         item("task-b", { when: "2026-09-12" }),
-        item("done-task", { when: "2026-09-12" }, { state: "done" }),
       ],
       TODAY,
       LABELS,
@@ -113,7 +119,6 @@ describe("groupByDay", () => {
       "task-a",
       "due",
       "task-b",
-      "done-task",
     ]);
   });
 
@@ -198,50 +203,59 @@ describe("groupByDay", () => {
     expect(ids(groups[1]!)).toEqual(["own-timed", "own-allday"]);
   });
 
-  test("closed rows keep their when day and slot; binned never show", () => {
+  test("a closed task is on the day it was closed; a closed event keeps its when", () => {
     const groups = groupByDay(
       [
-        item("done-today", { when: TODAY }, { state: "done" }),
+        item("done-today", { when: TODAY }, closedOn(TODAY, 10)),
         item("open-today", { when: TODAY }),
-        item("done-early", { when: `${TODAY}T08:00` }, { state: "done" }),
+        // Its planned time says nothing of when it was done.
+        item("done-early", { when: `${TODAY}T08:00` }, closedOn(TODAY, 9)),
         item("binned", { deadline: TODAY }, { binnedAt: 1 }),
         item("future", { when: "2026-09-10" }),
-        // Done: deadline is settled and places nothing, even when earlier.
-        item(
-          "done-both",
-          { when: "2026-09-10", deadline: "2026-09-05" },
-          { state: "done" },
-        ),
-        // Done with no `when`: nothing to show.
-        item("done-deadline", { deadline: "2026-09-12" }, { state: "done" }),
-        // Done in the past: past days are not rendered.
-        item("done-past", { when: "2026-09-01" }, { state: "done" }),
-        // Cancelled: the same as done. `when` keeps the slot, the
-        // deadline is settled and places nothing.
-        item(
-          "cancelled",
-          { when: "2026-09-10", deadline: TODAY },
-          { state: "cancelled" },
-        ),
-        // Cancelled with no `when`: nothing to show.
-        item(
-          "cancelled-deadline",
-          { deadline: "2026-09-12" },
-          { state: "cancelled" },
-        ),
+        // Planned for tomorrow, done today: today's.
+        item("done-both", { when: "2026-09-10", deadline: "2026-09-05" }, closedOn(TODAY, 11)),
+        item("done-deadline", { deadline: "2026-09-12" }, closedOn(TODAY, 12)),
+        // Closed on a day gone by: off the calendar.
+        item("done-past", { when: TODAY }, closedOn("2026-09-01")),
+        item("cancelled", { when: "2026-09-10" }, closedOn(TODAY, 13, "cancelled")),
+        // A clock ahead of ours: read as today.
+        item("skewed", { when: TODAY }, closedOn("2026-09-11")),
+        item("event-done", { when: "2026-09-10" }, { ...closedOn(TODAY), event: true }),
       ],
       TODAY,
       LABELS,
       "en",
     );
     expect(groups.map((g) => [g.key, ids(g)])).toEqual([
-      [TODAY, ["done-early", "done-today", "open-today"]],
-      ["2026-09-10", ["future", "done-both", "cancelled"]],
+      [
+        TODAY,
+        ["open-today", "done-early", "done-today", "done-both", "done-deadline", "cancelled", "skewed"],
+      ],
+      ["2026-09-10", ["event-done", "future"]],
     ]);
-    expect(groups[1]!.label).toBe("Tomorrow");
-    expect(groups[1]!.rows.slice(1).map((r) => [r.placedBy, r.tone])).toEqual([
-      ["when", "neutral"],
-      ["when", "neutral"],
+    expect(groups[0]!.rows.slice(1).every((r) => r.placedBy === "done" && r.tone === "neutral")).toBe(true);
+    expect(groups[1]!.rows[0]).toMatchObject({ placedBy: "when" });
+  });
+
+  test("a lingering closed task stays where it was while open", () => {
+    const groups = groupByDay(
+      [
+        item("open-a", { when: TODAY }),
+        item("ticked", { when: TODAY }, closedOn(TODAY)),
+        item("open-b", { when: TODAY }),
+        item("ticked-late", { when: "2026-09-01" }, closedOn(TODAY)),
+        item("ticked-ahead", { when: "2026-09-10" }, closedOn(TODAY)),
+      ],
+      TODAY,
+      LABELS,
+      "en",
+      undefined,
+      () => true,
+    );
+    expect(groups.map((g) => [g.key, ids(g)])).toEqual([
+      ["overdue", ["ticked-late"]],
+      [TODAY, ["open-a", "ticked", "open-b"]],
+      ["2026-09-10", ["ticked-ahead"]],
     ]);
   });
 
@@ -387,19 +401,19 @@ describe("groupByDay: multi-day spans", () => {
     ]);
   });
 
-  test("an overnight timed start is on both days; closed spans keep every day", () => {
+  test("an overnight timed start is on both days; a closed event's span keeps every day", () => {
     const groups = groupByDay(
       [
         item("late", { when: `${TODAY}T23:00` }, { duration: 120 }),
-        item("done-conf", { when: TODAY }, { duration: 2 * 1440, state: "done" }),
+        item("done-conf", { when: TODAY }, { duration: 2 * 1440, state: "done", event: true }),
       ],
       TODAY,
       LABELS,
       "en",
     );
     expect(groups.map((g) => [g.key, ids(g)])).toEqual([
-      [TODAY, ["late", "done-conf"]],
-      ["2026-09-10", ["late", "done-conf"]],
+      [TODAY, ["done-conf", "late"]],
+      ["2026-09-10", ["done-conf", "late"]],
     ]);
   });
 
@@ -432,7 +446,7 @@ describe("groupByDay: multi-day spans", () => {
         item("same-day", { when: "2026-09-12T10:00", deadline: "2026-09-12" }),
         item("in-span", { when: "2026-09-14", deadline: "2026-09-15" }, { duration: 3 * 1440 }),
         item("today", { when: `${TODAY}T10:00`, deadline: TODAY }),
-        item("done", { when: "2026-09-12", deadline: "2026-09-12" }, { state: "done" }),
+        item("done", { when: "2026-09-12", deadline: "2026-09-12" }, { state: "done", event: true }),
       ],
       TODAY,
       LABELS,
@@ -441,7 +455,7 @@ describe("groupByDay: multi-day spans", () => {
     // One row per item per day, all of them the `when`'s.
     expect(groups.map((g) => [g.key, ids(g)])).toEqual([
       [TODAY, ["today"]],
-      ["2026-09-12", ["same-day", "done"]],
+      ["2026-09-12", ["done", "same-day"]],
       ["2026-09-14", ["in-span"]],
       ["2026-09-15", ["in-span"]],
       ["2026-09-16", ["in-span"]],
@@ -542,15 +556,15 @@ describe("groupByDay with a floor (the days gone by)", () => {
   const shape = (groups: ReturnType<typeof groupByDay>) =>
     groups.map((g) => [g.key, g.urgency, ids(g)]);
 
-  test("past days hold events and closed items, ahead of Overdue and Today", () => {
+  test("past days hold events only, ahead of Overdue and Today", () => {
     const groups = groupByDay(
       [
         item("event", { when: "2026-09-02T10:00" }, { event: true }),
-        item("done", { when: "2026-09-02" }, { state: "done" }),
+        item("done", { when: "2026-09-02" }, closedOn("2026-09-05")),
         item("older", { when: "2026-08-20" }, { event: true }),
         item("slipped", { when: "2026-09-03" }),
         item("late", { deadline: "2026-09-04" }),
-        item("done-deadline", { deadline: "2026-09-04" }, { state: "done" }),
+        item("done-deadline", { deadline: "2026-09-04" }, closedOn("2026-09-05", 13)),
         item("before-floor", { when: "2026-07-31" }, { event: true }),
         item("ahead", { when: "2026-09-10" }),
       ],
@@ -561,7 +575,7 @@ describe("groupByDay with a floor (the days gone by)", () => {
     );
     expect(shape(groups)).toEqual([
       ["2026-08-20", "past", ["older"]],
-      ["2026-09-02", "past", ["event", "done"]],
+      ["2026-09-02", "past", ["event"]],
       ["overdue", "overdue", ["slipped", "late"]],
       [TODAY, "today", []],
       ["2026-09-10", "future", ["ahead"]],
@@ -624,5 +638,51 @@ describe("groupByDay with a floor (the days gone by)", () => {
       ["gone", "2026-09-01"],
       ["both", "2026-09-12"],
     ]);
+  });
+});
+
+describe("foldDone", () => {
+  const build = () =>
+    groupByDay(
+      [
+        item("open-a", { when: TODAY }),
+        item("done-a", { when: TODAY }, closedOn(TODAY, 9)),
+        item("timed-done", { when: `${TODAY}T09:00` }, closedOn(TODAY, 10)),
+        item("event-done", { when: TODAY }, { ...closedOn(TODAY), event: true }),
+        item("done-b", { when: "2026-09-12" }, closedOn(TODAY, 11)),
+        item("open-b", { when: TODAY }),
+        item("later", { when: "2026-09-12" }),
+      ],
+      TODAY,
+      LABELS,
+      "en",
+    );
+  const today = (groups: ReturnType<typeof build>) =>
+    groups.find((g) => g.key === TODAY)!;
+
+  test("closed tasks leave the day's rows; a closed event stays", () => {
+    const g = today(foldDone(build(), false));
+    expect(ids(g)).toEqual(["event-done", "open-a", "open-b"]);
+    expect(g.fold).toEqual({ count: 3, open: false });
+  });
+
+  test("an open fold lists them after everything else, in the order closed", () => {
+    const g = today(foldDone(build(), true));
+    expect(ids(g)).toEqual([
+      "event-done",
+      "open-a",
+      "open-b",
+      "done-a",
+      "timed-done",
+      "done-b",
+    ]);
+    expect(g.fold).toEqual({ count: 3, open: true });
+  });
+
+  test("a day with nothing to fold is returned as it was", () => {
+    const groups = build();
+    const later = groups.find((g) => g.key === "2026-09-12")!;
+    expect(foldDone(groups, true).find((g) => g.key === "2026-09-12")).toBe(later);
+    expect(later.fold).toBeUndefined();
   });
 });

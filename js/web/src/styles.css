@@ -469,6 +469,31 @@ body {
   color: var(--text-faint);
 }
 
+/* The "N completed items" line Today's closed tasks fold
+   behind, until a press puts them in its place: a quiet button in the
+   rows' column, its label at the rows' left edge, where the checkboxes
+   are. */
+.upcoming-fold {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  font: inherit;
+  color: var(--text-faint);
+  text-align: left;
+  cursor: default;
+}
+
+.upcoming-fold:hover,
+.upcoming-fold:focus-visible {
+  color: var(--text-muted);
+}
+
 /* The first text line is a fixed 24px band (--upcoming-line) so the
    time, the check, the title and the list badge all centre on it; the
    place line then hangs below without pulling the flanks down to the
@@ -540,23 +565,20 @@ body {
   align-items: center;
 }
 
-/* An open event has no checkbox: a dot holds the box's 15px slot so the
-   titles stay in one column. */
-.upcoming-row-event-dot {
-  width: 15px;
-  height: 15px;
-  flex-shrink: 0;
+/* The calendar glyph in the box's 15px slot, so the titles stay in one
+   column: on an open event (it has no checkbox), and on every event of
+   a day gone by, where a cancelled one has the checkbox's cross, bare. */
+.upcoming-row-event-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 15px;
+  color: var(--text-faint);
 }
 
-.upcoming-row-event-dot::before {
-  content: "";
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--border-input);
+.upcoming-row-event-mark svg {
+  width: 13px;
+  height: 13px;
 }
 
 /* Time lane: a fixed column at the row's right edge (`order` moves it
@@ -1363,7 +1385,7 @@ input.task-check:hover {
   }
 
   /* The slot follows the box's 18px here. */
-  .upcoming-row-event-dot {
+  .upcoming-row-event-mark {
     width: 18px;
   }
 

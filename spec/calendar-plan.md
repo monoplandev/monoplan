@@ -86,6 +86,22 @@ Done and binned items keep both fields untouched, as they keep `deadline`
 today. The fields are never cleared by a transition. Restore brings the
 dates back with the item.
 
+**On the web a closed task is on the day it was closed** (decided
+2026-11-18, narrowing the rule below to events there). A done or
+cancelled task, timed or not, leaves both its dates. Closed today, it is
+one row on Today, with no time in the lane, behind Today's "N completed
+items" line (see "Done fold" under "Agenda"); from the next day it is
+off the calendar, and past days hold events only (the Done view is the
+record of what was finished). A done row on the day it was planned for
+could not say whether it was done then or some other day, and a tick at
+a clock time claimed something that may never have happened. A fold
+line on every past day was built first and dropped the same day: it
+repeated the Done view and filled the past with days that held nothing
+else. What was planned and got done, on which day, is no longer
+readable off the calendar. An event keeps the rule below: it
+happened on its `when` whatever was ticked. The CLI and the Apple
+calendars still follow the rule below for tasks too.
+
 **`when` survives Done; `deadline` does not** (decided 2026-09-16). A
 ticked item still happened, or will happen, on its day, so it stays on the
 calendar in the same slot: muted, tick shown, nothing reordered. A deadline is
@@ -109,7 +125,8 @@ says what the date means and changes one thing, what a past `when` means
 (it went by). Where a dated item shows is Inbox's rule, not the flag's:
 one with no list is here and not in Inbox (`inbox-plan.md`).
 Its calendar row has no checkbox while it is open (2026-11-17, web, iOS,
-macOS): a dot holds the box's place, and the box shows, ticked or
+macOS): a dot holds the box's place (the calendar glyph on the web
+since 2026-11-18), and the box shows, ticked or
 crossed, once the event is done or cancelled from the item surface or
 the row's menu (`events-plan.md`). The close-action
 objection lapsed on 2026-09-30 when a past `when` stopped needing a
@@ -284,8 +301,9 @@ for the month grid). `groupByDeadline` becomes
   Their deadline places nothing and badges muted. A done item whose `when` is past is not in
   Overdue (Open-only) or on any day from today on: it is on its day in
   the past, above Today, on every client that reads past days (the web
-  since 2026-11-17). A "show completed" toggle comes if the noise
-  warrants one.
+  since 2026-11-17). On the web a closed untimed task then folds away
+  (see "Done fold" below), which is the "show completed" toggle this
+  paragraph used to promise.
 - **Overdue** (web; iOS and macOS since 2026-11-17): any Open row with a `deadline` day before today goes
   to an Overdue section above Today, placed by the deadline whatever `when`
   says (it is owed now; a `when` of today or later still has its own row
@@ -391,12 +409,34 @@ for the month grid). `groupByDeadline` becomes
   a new event: no list, `when` prefilled to today and the Event box under
   it ticked. Unticking the box makes it a task with that date, still
   shown here and not in Inbox (`inbox-plan.md` "Membership").
+- **Done fold** (web, built 2026-11-18, `foldDone` in `dayGroups.ts`):
+  a closed (done or cancelled) task, timed or not and with a `when` or
+  only a deadline, that was closed today is placed on Today (`placedBy:
+  "done"`, from `lifecycleAt`; a day ahead of this device's clock reads
+  as today) and folds behind one "N completed items" line at the end of
+  Today, in the order closed. One closed before today is not on the
+  agenda. The line is a button: pressed, the closed rows take its
+  place, and there is no shutting it again; every fold is shut afresh
+  when the Calendar is next opened. A row just closed lingers where it
+  was (its planned day, Overdue) for three seconds first, as on a list.
+  Folded rows are out of the selection order and the arrow keys. Events
+  are not folded: they stay on their `when`, muted, as the day's record.
+  This narrows "ticking never moves a row" to events; the reason is that
+  a day loaded with small tasks became noise to read through once half
+  were ticked.
+  The CLI, tray, widgets and the Apple calendars do not fold yet.
+- **Past mark** (web, 2026-11-18): on a day gone by, an event's row
+  leads with the calendar glyph in place of the dot or
+  the checkbox, open or done alike: they are a record of what was on,
+  and nothing there asks for a tick. A cancelled one leads with a bare
+  cross, so the day still says what was called off.
 - **List** (web, 2026-11-18): a row whose item is in a list names it on
   the sub line under the title (the list's own icon, or the default list glyph, + name), after the workspace
   and before the place. An item with no list, which lives on the
   calendar alone, shows nothing there.
 - **Events** (`events-plan.md`): an event's row is a task's row, except
-  that while open it leads with a dot, not a checkbox (2026-11-17).
+  that while open it leads with a dot, not a checkbox (2026-11-17; the
+  calendar glyph in the dot's place on the web, 2026-11-18).
   Everything else above applies to events unchanged. An event always has a
   `when`, so there is no Unscheduled section (there was one while events
   were a list, removed 2026-11-16).
