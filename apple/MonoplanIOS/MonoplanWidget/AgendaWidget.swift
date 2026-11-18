@@ -79,11 +79,20 @@ struct AgendaWidgetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Today").font(.headline)
+                // The day's name, short where the full one has no room
+                // beside the date (the small widget on a long weekday).
+                ViewThatFits(in: .horizontal) {
+                    Text(Self.weekday(entry.date, .wide))
+                    Text(Self.weekday(entry.date, .abbreviated))
+                }
+                .font(.headline)
+                .lineLimit(1)
                 Spacer(minLength: 4)
-                Text(entry.date, format: .dateTime.weekday(.abbreviated).day())
+                Text(entry.date, format: .dateTime.day().month(.abbreviated))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
             }
             if let days = entry.days {
                 content(WidgetAgenda.lines(from: days, on: entry.date, limit: limit))
@@ -124,6 +133,12 @@ struct AgendaWidgetView: View {
         Text(text)
             .font(.subheadline)
             .foregroundStyle(.secondary)
+    }
+
+    /// The day's name as a title ("Wednesday"; capitalised, since some
+    /// languages write weekdays in lower case).
+    static func weekday(_ date: Date, _ width: Date.FormatStyle.Symbol.Weekday) -> String {
+        date.formatted(.dateTime.weekday(width)).localizedCapitalized
     }
 
     /// "Tomorrow", or the day spelled out ("Fri 7 Nov").

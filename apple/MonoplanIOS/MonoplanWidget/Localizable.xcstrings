@@ -72,16 +72,6 @@
         }
       }
     },
-    "Today" : {
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hoy"
-          }
-        }
-      }
-    },
     "Today, and what is next." : {
       "extractionState" : "stale",
       "localizations" : {
