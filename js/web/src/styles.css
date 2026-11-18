@@ -3517,12 +3517,6 @@ input.task-check:hover {
   grid-template-columns: 1fr 1fr;
 }
 
-/* The end-date input carries no ✕, so it keeps the plain right inset,
-   as the end-time input below it does. */
-.task-dialog-end-date-input {
-  padding-right: 8px;
-}
-
 /* While the end is only the start day again (nothing stored), the end
    date reads as dim as a placeholder: implied, there to be changed. */
 .task-dialog-end-date-input[data-implied] {
@@ -3563,7 +3557,8 @@ input.task-check:hover {
 }
 
 /* The ✕ inset at the start field's right edge (rendered only while a
-   time is set): the date input's ✕ again, revealed on hover / focus. */
+   time is set): the date input's ✕ again, opaque fill and all, revealed
+   on hover / focus. */
 .time-picker-clear {
   position: absolute;
   right: 3px;
@@ -3571,7 +3566,12 @@ input.task-check:hover {
   height: 18px;
   font-size: 11px;
   border-radius: 4px;
+  background: var(--bg-badge-solid);
   opacity: 0;
+}
+
+.time-picker-clear.icon-button:hover:not(:disabled) {
+  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg-badge-solid);
 }
 
 .time-picker-field:hover .time-picker-clear,
@@ -3628,18 +3628,13 @@ input.task-check:hover {
   box-sizing: border-box;
   min-width: 0;
   margin: 0;
-  padding: 2px 24px 2px 26px;
+  padding: 2px 2px 2px 26px;
   border: none;
   border-radius: 4px;
   background: transparent;
   font: inherit;
   color: var(--text);
   outline: none;
-}
-
-/* The end field carries no ✕, so it keeps the plain right inset. */
-.task-dialog-end-input {
-  padding-right: 8px;
 }
 
 /* Dim length after each end-time option ("3:30 PM  1h 30m"). */
@@ -3698,7 +3693,7 @@ input.task-check:hover {
   box-sizing: border-box;
   min-width: 0;
   margin: 0;
-  padding: 2px 24px 2px 26px;
+  padding: 2px 2px 2px 26px;
   border: none;
   border-radius: 4px;
   background: transparent;
@@ -3746,7 +3741,10 @@ input.task-check:hover {
 }
 
 /* The date input's ✕: rendered only while a date is set, visible on hover
-   or focus within the field, always on touch (no hover there). */
+   or focus within the field, always on touch (no hover there). The text
+   runs to the field's edge, so the ✕ sits over its end, opaque, in the
+   field's hover fill (`--bg-badge` flattened onto the dialog's surface);
+   its own hover tint is layered on that. */
 .task-dialog-when-clear {
   position: absolute;
   right: 3px;
@@ -3754,7 +3752,12 @@ input.task-check:hover {
   height: 18px;
   font-size: 11px;
   border-radius: 4px;
+  background: var(--bg-badge-solid);
   opacity: 0;
+}
+
+.task-dialog-when-clear.icon-button:hover:not(:disabled) {
+  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg-badge-solid);
 }
 
 .task-dialog-when-anchor:hover .task-dialog-when-clear,
