@@ -460,9 +460,6 @@ export type Messages = {
     /** Sub-line label of a row of a multi-day span: which day of the
      *  span this is ("Day 2"). */
     spanDay: (day: number) => string;
-    /** The line a day's closed untimed tasks fold behind
-     *  ("3 completed items"). */
-    doneFold: (count: number) => string;
     /** Time-lane label on the last day of a timed span: its end clock,
      *  `time` already formatted. Kept short: the lane is clock-time wide. */
     spanUntil: (time: string) => string;
@@ -871,8 +868,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       due: "Vence",
       startsIn: (span) => `en ${span}`,
       spanDay: (day) => `Día ${day}`,
-      doneFold: (count) =>
-        count === 1 ? "1 elemento completado" : `${count} elementos completados`,
       spanUntil: (time) => `hasta ${time}`,
     },
     sidePanel: {
@@ -1265,8 +1260,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       due: "Due",
       startsIn: (span) => `in ${span}`,
       spanDay: (day) => `Day ${day}`,
-      doneFold: (count) =>
-        count === 1 ? "1 completed item" : `${count} completed items`,
       spanUntil: (time) => `until ${time}`,
     },
     sidePanel: {

@@ -99,17 +99,6 @@ export interface DayGroup {
    *  a floor. */
   urgency: "past" | "overdue" | "today" | "future";
   rows: DayRow[];
-  /** Set by `foldDone` on a day with closed tasks: Today, in practice. */
-  fold?: DayFold;
-}
-
-/** A day's fold of closed tasks (`foldDone`): `count` of them sit
- *  behind one "N completed items" line at the end of the day. Shut, the
- *  folded rows are not in `rows`; `open`, they are its last `count` rows
- *  and the line is gone. */
-export interface DayFold {
-  count: number;
-  open: boolean;
 }
 
 export interface DayGroupLabels {
@@ -144,22 +133,6 @@ export const dayBand = (row: DayRow): 0 | 1 | 2 => {
  *  ticked. The flag only means something beside a `when`. */
 export const isClosedTask = (it: ItemView): boolean =>
   isClosed(it) && !(isEvent(it) && !!it.when);
-
-/** Fold the closed tasks (the rows placed by `done`, which `groupByDay`
- *  puts last on Today) behind one line (`spec/calendar-plan.md` "Done
- *  fold"): they leave `rows` unless `open`. Days with nothing to fold
- *  come back as they were. */
-export function foldDone(groups: readonly DayGroup[], open: boolean): DayGroup[] {
-  return groups.map((g) => {
-    const count = g.rows.filter((r) => r.placedBy === "done").length;
-    if (count === 0) return g;
-    return {
-      ...g,
-      rows: open ? g.rows : g.rows.filter((r) => r.placedBy !== "done"),
-      fold: { count, open },
-    };
-  });
-}
 
 /** Bucket `items` by placement day. `today` is the local `YYYY-MM-DD`
  *  stamp everything is judged against. An Overdue group leads when any

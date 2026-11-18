@@ -18,19 +18,17 @@
 // title.
 // An event ticks off in place and stays on its `when` day once done or
 // cancelled, so the day still records what happened and what was called
-// off. A task does not: closed, it moves to Today (`placedBy: "done"`, no
-// time in the lane) and folds behind Today's "N completed items" line
-// after a short linger (`foldDone`, done by the Workspace), so what is
-// left is not read through what is settled; a click on the line puts
-// the rows in its place, until the view is next opened. The day after,
-// it is off the agenda: past days hold events only. Muted text marks the days gone by,
+// off. A task does not: closed, it moves to the end of Today
+// (`placedBy: "done"`, no time in the lane, muted) after a short linger
+// where it was, so what is left is not read through what is settled.
+// The day after, it is off the agenda: past days hold events only. Muted text marks the days gone by,
 // every row on them, not the closed rows; Overdue is not one of them.
 //
-// Events (`spec/events-plan.md`): an open event's row has the calendar
-// glyph where a task has its checkbox, since nothing asks for the tick
+// Events (`spec/events-plan.md`): an open event's row has a small
+// upright pill, a calendar's event bar, where a task has its checkbox, since nothing asks for the tick
 // and the event just goes by. One marked done or cancelled (from the
 // task surface or the row's menu) shows the box, ticked or crossed,
-// until its day has gone by; there every event has the glyph again, a
+// until its day has gone by; there every event has the pill again, a
 // cancelled one a bare cross. A row in a list names it on the sub line
 // under the title, with the list's icon.
 //
@@ -91,7 +89,6 @@ import {
   whenTime,
 } from "./format.tsx";
 import { useAppI18n } from "./i18n.tsx";
-import calendarSvg from "./icons/calendar.svg?raw";
 import fileSvg from "./icons/file.svg?raw";
 import mapPinSvg from "./icons/map-pin.svg?raw";
 import starFilledSvg from "./icons/star-filled.svg?raw";
@@ -121,6 +118,10 @@ export interface UpcomingImperative {
 const crossSvg =
   '<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M5 5l6 6M11 5l-6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>';
 
+/** An event's mark in the checkbox's slot: the short upright bar a
+ *  calendar leads an event with (`.upcoming-row-event-pill`). */
+const EVENT_PILL = '<span class="upcoming-row-event-pill"></span>';
+
 const isMac =
   typeof navigator !== "undefined" &&
   /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
@@ -142,9 +143,6 @@ export function Upcoming(props: {
    *  (anything but Home) names it under the title with the shared
    *  people glyph; null for Home rows, which carry no marker. */
   workspaceLabel: (docId: string) => string | null;
-  /** Open Today's fold of closed tasks (`DayGroup.fold`): its rows
-   *  take the line's place. */
-  onOpenFold: () => void;
   onOpen: (id: string) => void;
   /** Touch: a tap opens the row. */
   openOnTap?: () => boolean;
@@ -501,24 +499,6 @@ export function Upcoming(props: {
     return m().upcoming.startsIn(formatDurationShort(Math.ceil(diff / 60_000)));
   };
 
-  // Today's "N completed items" line: a button in the rows' column
-  // that the fold's rows replace once it is pressed (there is no
-  // shutting it again). Enter / Space are kept from the host's key
-  // handler, which would open the selected item.
-  const foldLine = (g: DayGroup) => (
-    <button
-      type="button"
-      class="upcoming-fold"
-      tabIndex={0}
-      onClick={() => props.onOpenFold()}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") e.stopPropagation();
-      }}
-    >
-      {m().upcoming.doneFold(g.fold!.count)}
-    </button>
-  );
-
   return (
     <div
       ref={hostEl}
@@ -547,7 +527,7 @@ export function Upcoming(props: {
               <h2 class="upcoming-day-label">{dayHeading(g)}</h2>
             </header>
             <Show
-              when={g.rows.length > 0 || g.fold}
+              when={g.rows.length > 0}
               fallback={
                 <div class="upcoming-empty-day">{m().upcoming.emptyToday}</div>
               }
@@ -601,7 +581,7 @@ export function Upcoming(props: {
                       {/* An event's own row has no box while it is
                           open (nothing asks for the tick) or once its
                           day has gone by (it is a record of what was
-                          on): the calendar glyph holds the slot, or a
+                          on): an upright pill holds the slot, or a
                           bare cross on a cancelled one. Done or
                           cancelled from today on, it shows the box,
                           ticked or crossed, and unticks as usual. A
@@ -616,7 +596,7 @@ export function Upcoming(props: {
                           <span
                             class="upcoming-row-event-mark"
                             aria-hidden="true"
-                            innerHTML={isCancelled(r.item) ? crossSvg : calendarSvg}
+                            innerHTML={isCancelled(r.item) ? crossSvg : EVENT_PILL}
                           />
                         }
                       >
@@ -763,7 +743,6 @@ export function Upcoming(props: {
                   );
                 }}
               </For>
-              <Show when={g.fold && !g.fold.open}>{foldLine(g)}</Show>
             </Show>
           </section>
         )}

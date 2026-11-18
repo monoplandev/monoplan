@@ -53,7 +53,6 @@ import {
   AGENDA_PAST_DAYS,
   agendaItems,
   attentionBadge,
-  foldDone,
   groupByDay,
   isClosedTask,
   type DayGroup,
@@ -792,25 +791,18 @@ export function Workspace(props: {
   // `Upcoming` so the same rows, in the same order, feed `items()` below:
   // the selection-scoped shortcuts filter by what is on screen and pick
   // the survivor after a removal from that order.
-  // A task closed today is on Today, behind its "N completed items"
-  // line (`foldDone`), so what is left to do is not
-  // read through what is settled. One just closed stays where it was
-  // for the list view's linger beat first, read off the closing
-  // transition's time.
-  const foldLingers = (it: ItemView, now: number): boolean =>
+  // A task closed today moves to the end of Today (`groupByDay`), so
+  // what is left to do is not read through what is settled. One just
+  // closed stays where it was for the list view's linger beat first,
+  // read off the closing transition's time.
+  const doneLingers = (it: ItemView, now: number): boolean =>
     Math.abs(now - it.lifecycleAt) < DONE_LINGER_MS;
-  const [foldTick, setFoldTick] = createSignal(0);
-  // Whether the fold has been opened: it does not shut again, until the
-  // agenda is left.
-  const [foldOpen, setFoldOpen] = createSignal(false);
-  createEffect(() => {
-    if (view().kind !== "upcoming") setFoldOpen(false);
-  });
+  const [doneMoveTick, setDoneMoveTick] = createSignal(0);
   const upcomingGroups = createMemo((): DayGroup[] => {
     const today = todayStamp(nowMs());
-    foldTick();
+    doneMoveTick();
     const now = Date.now();
-    const groups = groupByDay(
+    return groupByDay(
       docs.calendarItems(),
       today,
       {
@@ -820,23 +812,22 @@ export function Workspace(props: {
       },
       locale(),
       addDaysToStamp(today, -AGENDA_PAST_DAYS),
-      (it) => foldLingers(it, now),
+      (it) => doneLingers(it, now),
     );
-    return foldDone(groups, foldOpen());
   });
-  // One timeout for the next lingering row to fold; re-armed as rows
+  // One timeout for the next lingering row to move; re-armed as rows
   // close. Only while the agenda is the view.
   createEffect(() => {
     if (view().kind !== "upcoming") return;
-    foldTick();
+    doneMoveTick();
     const now = Date.now();
     let next = Infinity;
     for (const it of docs.calendarItems()) {
-      if (!isClosedTask(it) || !foldLingers(it, now)) continue;
+      if (!isClosedTask(it) || !doneLingers(it, now)) continue;
       next = Math.min(next, it.lifecycleAt + DONE_LINGER_MS);
     }
     if (next === Infinity) return;
-    const t = setTimeout(() => setFoldTick((n) => n + 1), Math.max(next - now, 0) + 1);
+    const t = setTimeout(() => setDoneMoveTick((n) => n + 1), Math.max(next - now, 0) + 1);
     onCleanup(() => clearTimeout(t));
   });
   const items = createMemo((): ItemView[] => {
@@ -3934,7 +3925,6 @@ export function Workspace(props: {
             selection={selection}
             listLabel={listLabel}
             listIcon={(listId, docId) => docs.listOf(docId ?? viewDocId(), listId)?.icon}
-            onOpenFold={() => setFoldOpen(true)}
             workspaceLabel={(docId) => (docId === docs.homeDocId ? null : docLabel(docId))}
             onOpen={(id) => setOpenItemId(id)}
             openOnTap={openOnTap}

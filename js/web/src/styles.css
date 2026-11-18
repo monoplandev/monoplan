@@ -469,28 +469,9 @@ body {
   color: var(--text-faint);
 }
 
-/* The "N completed items" line Today's closed tasks fold
-   behind, until a press puts them in its place: a quiet button in the
-   rows' column, its label at the rows' left edge, where the checkboxes
-   are. */
-.upcoming-fold {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 28px;
-  padding: 2px 6px;
-  border: 0;
-  border-radius: 4px;
-  background: none;
-  font: inherit;
-  color: var(--text-faint);
-  text-align: left;
-  cursor: default;
-}
-
-.upcoming-fold:hover,
-.upcoming-fold:focus-visible {
+/* A task closed today, at the end of Today: muted, so the eye stays on
+   what is left. */
+.upcoming-row[data-placed="done"] .upcoming-row-text {
   color: var(--text-muted);
 }
 
@@ -502,7 +483,7 @@ body {
   --upcoming-line: 24px;
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 4px;
   min-height: 32px;
   padding: 4px 6px;
   position: relative;
@@ -565,9 +546,10 @@ body {
   align-items: center;
 }
 
-/* The calendar glyph in the box's 15px slot, so the titles stay in one
+/* An event's mark in the box's 15px slot, so the titles stay in one
    column: on an open event (it has no checkbox), and on every event of
-   a day gone by, where a cancelled one has the checkbox's cross, bare. */
+   a day gone by. The pill below, or on a cancelled one the checkbox's
+   cross, bare. */
 .upcoming-row-event-mark {
   display: inline-flex;
   align-items: center;
@@ -579,6 +561,32 @@ body {
 .upcoming-row-event-mark svg {
   width: 13px;
   height: 13px;
+}
+
+/* The event bar: a short upright pill, as a calendar leads an event
+   with, in grey; lighter on the days gone by. */
+.upcoming-row-event-pill {
+  width: 3px;
+  margin: 4px 0;
+  border-radius: 2px;
+  background: var(--text-muted);
+}
+
+/* The pill runs the height of the row, so it spans the sub line too
+   when there is one: its slot stretches where the checkbox's stays on
+   the first text line. */
+.upcoming-row-check:has(.upcoming-row-event-pill) {
+  align-self: stretch;
+  height: auto;
+}
+
+.upcoming-row-check:has(.upcoming-row-event-pill) .upcoming-row-event-mark {
+  align-self: stretch;
+  align-items: stretch;
+}
+
+.upcoming-day[data-urgency="past"] .upcoming-row-event-pill {
+  background: var(--border-input);
 }
 
 /* Time lane: a fixed column at the row's right edge (`order` moves it

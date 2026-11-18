@@ -10,7 +10,6 @@ import { describe, expect, test } from "bun:test";
 import {
   agendaItems,
   attentionBadge,
-  foldDone,
   groupByDay,
   isDueRow,
   whenSpan,
@@ -638,51 +637,5 @@ describe("groupByDay with a floor (the days gone by)", () => {
       ["gone", "2026-09-01"],
       ["both", "2026-09-12"],
     ]);
-  });
-});
-
-describe("foldDone", () => {
-  const build = () =>
-    groupByDay(
-      [
-        item("open-a", { when: TODAY }),
-        item("done-a", { when: TODAY }, closedOn(TODAY, 9)),
-        item("timed-done", { when: `${TODAY}T09:00` }, closedOn(TODAY, 10)),
-        item("event-done", { when: TODAY }, { ...closedOn(TODAY), event: true }),
-        item("done-b", { when: "2026-09-12" }, closedOn(TODAY, 11)),
-        item("open-b", { when: TODAY }),
-        item("later", { when: "2026-09-12" }),
-      ],
-      TODAY,
-      LABELS,
-      "en",
-    );
-  const today = (groups: ReturnType<typeof build>) =>
-    groups.find((g) => g.key === TODAY)!;
-
-  test("closed tasks leave the day's rows; a closed event stays", () => {
-    const g = today(foldDone(build(), false));
-    expect(ids(g)).toEqual(["event-done", "open-a", "open-b"]);
-    expect(g.fold).toEqual({ count: 3, open: false });
-  });
-
-  test("an open fold lists them after everything else, in the order closed", () => {
-    const g = today(foldDone(build(), true));
-    expect(ids(g)).toEqual([
-      "event-done",
-      "open-a",
-      "open-b",
-      "done-a",
-      "timed-done",
-      "done-b",
-    ]);
-    expect(g.fold).toEqual({ count: 3, open: true });
-  });
-
-  test("a day with nothing to fold is returned as it was", () => {
-    const groups = build();
-    const later = groups.find((g) => g.key === "2026-09-12")!;
-    expect(foldDone(groups, true).find((g) => g.key === "2026-09-12")).toBe(later);
-    expect(later.fold).toBeUndefined();
   });
 });
