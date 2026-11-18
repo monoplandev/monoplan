@@ -84,6 +84,7 @@ import {
   whenTime,
 } from "./format.tsx";
 import { useAppI18n } from "./i18n.tsx";
+import fileSvg from "./icons/file.svg?raw";
 import mapPinSvg from "./icons/map-pin.svg?raw";
 import starFilledSvg from "./icons/star-filled.svg?raw";
 import timerSvg from "./icons/timer.svg?raw";
@@ -121,6 +122,9 @@ export function Upcoming(props: {
   /** Display label for a list id in the row's doc (Inbox is localized,
    *  others by name). */
   listLabel: (listId: string, docId?: string, dated?: boolean) => string;
+  /** A list's chosen emoji, looked up in the row's doc; undefined when
+   *  it has none (the row then draws the default list glyph). */
+  listIcon: (listId: string, docId?: string) => string | undefined;
   /** The agenda merges every workspace, so a row from a shared one
    *  (anything but Home) names it under the title with the shared
    *  people glyph; null for Home rows, which carry no marker. */
@@ -612,13 +616,15 @@ export function Upcoming(props: {
                       {/* Sub line under the title: which day of a
                           multi-day span this row is ("Day 2"), the shared
                           workspace a foreign row comes from (people glyph
-                          + name), then the place. Home rows carry no
-                          workspace marker; the task surface names the
-                          list. */}
+                          + name), the list the item is in, then the place.
+                          Home rows carry no workspace marker, and an item
+                          with no list (it lives on the calendar alone)
+                          no list. */}
                       <Show
                         when={
                           spanDayLabel(r) ||
                           props.workspaceLabel(r.item.docId) ||
+                          r.item.listId !== "inbox" ||
                           r.item.place
                         }
                       >
@@ -637,6 +643,35 @@ export function Upcoming(props: {
                                   class="upcoming-row-place-icon"
                                   innerHTML={usersSvg}
                                 />
+                                <span class="upcoming-row-place-label">{name()}</span>
+                              </span>
+                            )}
+                          </Show>
+                          <Show
+                            when={
+                              r.item.listId !== "inbox" &&
+                              props.listLabel(r.item.listId, r.item.docId)
+                            }
+                          >
+                            {(name) => (
+                              <span class="upcoming-row-place upcoming-row-list" title={name()}>
+                                {/* The nav's glyphs: the list's chosen
+                                    emoji, else the default file mark. */}
+                                <Show
+                                  when={props.listIcon(r.item.listId, r.item.docId)}
+                                  fallback={
+                                    <span
+                                      class="upcoming-row-place-icon"
+                                      innerHTML={fileSvg}
+                                    />
+                                  }
+                                >
+                                  {(icon) => (
+                                    <span class="upcoming-row-place-icon upcoming-row-list-emoji">
+                                      {icon()}
+                                    </span>
+                                  )}
+                                </Show>
                                 <span class="upcoming-row-place-label">{name()}</span>
                               </span>
                             )}

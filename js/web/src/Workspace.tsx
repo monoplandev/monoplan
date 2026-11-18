@@ -3898,6 +3898,7 @@ export function Workspace(props: {
             groups={upcomingGroups()}
             selection={selection}
             listLabel={listLabel}
+            listIcon={(listId, docId) => docs.listOf(docId ?? viewDocId(), listId)?.icon}
             workspaceLabel={(docId) => (docId === docs.homeDocId ? null : docLabel(docId))}
             onOpen={(id) => setOpenItemId(id)}
             openOnTap={openOnTap}

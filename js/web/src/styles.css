@@ -610,8 +610,9 @@ body {
 }
 
 /* Sub line under the title: the shared-workspace mark (people glyph +
-   name, foreign rows only) and the place, side by side, wrapping onto a
-   second line when the two will not fit. */
+   name, foreign rows only), the item's list (none for an item on the
+   calendar alone) and the place, side by side, wrapping onto a second
+   line when they will not fit. */
 .upcoming-row-sub {
   display: flex;
   flex-wrap: wrap;
@@ -642,6 +643,12 @@ body {
 .upcoming-row-place-icon svg {
   width: 12px;
   height: 12px;
+}
+
+/* A list's emoji in the pin's slot, sized to sit on the sub line. */
+.upcoming-row-list-emoji {
+  font-size: 11px;
+  line-height: 1;
 }
 
 /* The people glyph is drawn wider than the pin; match the nav marker's

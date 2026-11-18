@@ -389,6 +389,10 @@ for the month grid). `groupByDeadline` becomes
   a new event: no list, `when` prefilled to today and the Event box under
   it ticked. Unticking the box makes it a task with that date, still
   shown here and not in Inbox (`inbox-plan.md` "Membership").
+- **List** (web, 2026-11-18): a row whose item is in a list names it on
+  the sub line under the title (the list's own icon, or the default list glyph, + name), after the workspace
+  and before the place. An item with no list, which lives on the
+  calendar alone, shows nothing there.
 - **Events** (`events-plan.md`): an event's row is a task's row, except
   that while open it leads with a dot, not a checkbox (2026-11-17).
   Everything else above applies to events unchanged. An event always has a
