@@ -30,6 +30,10 @@ struct PlaceField: View {
     let place: Place?
     /// Known places matching the text (all for none).
     let knownPlaces: (String, @escaping ([PlaceSuggestion]) -> Void) -> Void
+    /// Bottom padding for the row at rest (negative when it ends the
+    /// panel's block, see `ItemPanel.fields`); the search box and its
+    /// list keep their full height.
+    let trim: CGFloat
     /// Write the place, or clear it with nil. `exact` for a known
     /// place, which is already whole.
     let set: (Place?, _ exact: Bool) -> Void
@@ -128,6 +132,7 @@ struct PlaceField: View {
             }
         }
         .onHover { hovered = $0 }
+        .padding(.bottom, trim)
     }
 
     private var searchBox: some View {

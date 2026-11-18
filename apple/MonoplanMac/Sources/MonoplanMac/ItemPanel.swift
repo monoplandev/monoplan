@@ -195,8 +195,15 @@ struct ItemPanel: View {
                 PanelField(text: String(localized: "Due \(Self.dayText(deadline))")) { Image(systemName: "timer") }
             }
             PanelRule().padding(.vertical, 4)
+            // The place row with no map or address under it ends the
+            // block. Its box has 8 pt of nothing under its text, which
+            // would put the text 24 pt over the rule after the block
+            // against the 16 under the rule before it: the row gives
+            // those 8 back.
+            let bare = item.item.place?.lat == nil && (item.item.place?.address ?? "").isEmpty
+            let trim: CGFloat = bare ? -PanelBox.inset : 0
             if item.item.binnedAt == nil {
-                PlaceField(place: item.item.place, knownPlaces: knownPlaces) {
+                PlaceField(place: item.item.place, knownPlaces: knownPlaces, trim: trim) {
                     setPlace(item, $0, $1)
                 } reveal: {
                     withAnimation { scroll.scrollTo(PlaceField.listID) }
@@ -204,8 +211,10 @@ struct ItemPanel: View {
                 .id(item.item.id)
             } else if let place = item.item.place {
                 PanelField(text: place.label) { PanelGlyph(image: NavArt.pin) }
+                    .padding(.bottom, trim)
             } else {
                 PanelField(text: String(localized: "Place"), empty: true) { PanelGlyph(image: NavArt.pin) }
+                    .padding(.bottom, trim)
             }
             if let place = item.item.place, let lat = place.lat, let lon = place.lon {
                 PlaceMapCard(label: place.label, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
