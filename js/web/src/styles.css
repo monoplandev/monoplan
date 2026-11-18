@@ -1462,7 +1462,7 @@ input.task-check:hover {
   line-height: var(--lh-compact);
 }
 
-.row[data-expanded] .row-text a {
+.row .row-text[contenteditable="true"] a {
   color: var(--link);
   text-decoration: underline;
   cursor: pointer;
@@ -1564,7 +1564,10 @@ input.task-check:hover {
   overflow: clip;
 }
 
-.row[data-expanded] .row-text {
+/* Inline-edit styles key on contenteditable, not `.row[data-expanded]`:
+   Kobalte also sets data-expanded on the row while its context menu is
+   open, which would unwrap the collapsed title under the menu. */
+.row .row-text[contenteditable="true"] {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   overflow: visible;
@@ -1581,7 +1584,7 @@ input.task-check:hover {
   flex: 1;
 }
 
-.row[data-expanded] .row-text:empty::before {
+.row .row-text[contenteditable="true"]:empty::before {
   content: attr(data-placeholder);
   color: var(--text-empty);
   pointer-events: none;
@@ -4903,17 +4906,12 @@ input.task-check:hover {
 
 /* Board cards are taller than list rows (CARD_HEIGHT in Board.tsx), so the
    title wraps to two lines instead of the list view's single ellipsized
-   line. Skip expanded (inline-editing) cards so the editor can grow. */
-/* Board cards never inline-edit (the board's Dnd has expansion disabled), so
-   the title always clamps to two lines. The second selector outranks
-   `.row[data-expanded] .row-text` (the inline-edit pre-wrap style) which
-   Kobalte's context menu would otherwise trigger by setting `data-expanded`
-   on the row while its menu is open — spilling long titles out of the card.
+   line. Board cards never inline-edit (the board's Dnd has expansion
+   disabled), so the title always clamps to two lines.
    Scoped by `.row-card` (a class on the card itself, not its column
    ancestor) so the styles survive the drag overlay cloning the card out
    of `.board-col-dnd` to under <body>. Same for every card rule below. */
-.row-card .row-text,
-.row.row-card[data-expanded] .row-text {
+.row-card .row-text {
   white-space: normal;
   display: -webkit-box;
   -webkit-box-orient: vertical;
