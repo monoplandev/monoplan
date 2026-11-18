@@ -2601,6 +2601,26 @@
         }
       }
     },
+    "End date": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fecha de fin"
+          }
+        }
+      }
+    },
+    "Remove end date": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quitar fecha de fin"
+          }
+        }
+      }
+    },
     "Changes the date": {
       "localizations": {
         "es": {

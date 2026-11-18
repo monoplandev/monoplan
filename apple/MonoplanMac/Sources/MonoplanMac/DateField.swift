@@ -1,21 +1,31 @@
 // The item panel's planned-date row (`when` and `duration`,
 // spec/calendar-plan.md), and its editor: the place row's way of
-// working (`PlaceField.swift`) with the web date input's contents
-// (`js/web/src/WhenField.tsx`). At rest it is the day on one line, its
-// length at the trailing edge, or a muted "Date" when there is none;
-// under the pointer a set date shows an "x" that takes it off. A
-// click turns the row into a text box and drops a box under it,
-// floating over the panel's rows:
+// working (`PlaceField.swift`) with the web date input's contents and
+// layout (`js/web/src/WhenField.tsx`). With no date it is one box, a
+// muted "Date". Once a date is set the row splits into the time row's
+// two columns: the start day, then, after an arrow, the day the span
+// ends on, over the end time. While that is the start day itself (no
+// span) the end reads dim: it is implied, not stored. Under the pointer
+// a box shows an "x": the start's takes the date off, the end's brings
+// the span back onto the start day.
+//
+// A click on either box turns it into a text box and drops a box under
+// the row, floating over the panel's rows:
 //
 //   - the offers: what the typed text could mean, a few at most
 //     (`DateOffers`, over `WhenPhrase`, as the iOS editor reads it).
-//     Today and Tomorrow until something is typed on an item with no
-//     date.
-//   - a month calendar (`RangeCalendar`: AppKit's `NSDatePicker` in its
-//     range mode). It shows the item's date as a run of days, or the
-//     highlighted offer's day while there is one, so the offers are
-//     seen on the month as they are stepped through. A click on a day
-//     sets it; a drag over several sets the span.
+//     For the start, Today and Tomorrow until something is typed on an
+//     item with no date. The end's are days only, read from the start
+//     day once that is ahead of today ("friday" is the Friday the span
+//     could end on), with the days it cannot reach left out.
+//   - a month calendar (`MonthCalendar`: AppKit's `NSDatePicker`). It
+//     shows the box's day, or the highlighted offer's while there is
+//     one, so the offers are seen on the month as they are stepped
+//     through. A click on a day sets it. A start day keeps the time
+//     and the length, so the span moves whole; an end day is the
+//     second way to write the stored `duration` (the end time under it
+//     is the first): beside a timed start it keeps the end's clock
+//     time, beside an all-day one the length counts whole days.
 //
 // Typing highlights the first offer; Return takes the highlighted row,
 // the arrow keys move the highlight; Escape, or the caret leaving the
@@ -36,8 +46,11 @@ struct DateField: View {
     /// duration in the same call (`Engine.setWhen`).
     let set: (String?, DurationChange) -> Void
 
+    private enum Side { case start, end }
+
     @State private var query = ""
-    @State private var picking = false
+    /// The box being edited, nil at rest.
+    @State private var picking: Side?
     /// The text box has had the caret since it opened: only then is
     /// the caret leaving it a reason to shut.
     @State private var armed = false
@@ -47,29 +60,49 @@ struct DateField: View {
     /// The pointer is over the calendar: the caret leaving the box
     /// then is a click there, not a reason to shut.
     @State private var overCalendar = false
-    /// The pointer is over the row at rest: the clear "x" shows.
-    @State private var hovered = false
+    /// The pointer is over a box at rest: its "x" shows.
+    @State private var hovered: Side?
     @FocusState private var focused: Bool
 
     private var typed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var timed: Bool { (when?.count ?? 0) >= 16 }
+    private var startDay: String? { when.map { String($0.prefix(10)) } }
+    /// Days past the start day the span ends on; 0 is the start day.
+    private var endOffset: Int { when.map { DateOffers.endOffset(when: $0, duration: duration) } ?? 0 }
+    private var endDay: String? {
+        startDay.flatMap { DateOffers.shift($0, days: endOffset) }
+    }
 
     var body: some View {
-        Group {
-            if picking {
-                // As the place field's list: an overlay hung from the
-                // box's bottom edge, taking no room in the panel.
-                textBox.overlay(alignment: .bottomLeading) {
-                    Color.clear
-                        .frame(height: 0)
-                        .overlay(alignment: .topLeading) {
-                            dropdown
-                                .fixedSize(horizontal: false, vertical: true)
-                                .padding(.top, 6)
-                        }
-                }
+        // Each box is outset by its inset, so 4 pt shows between the
+        // two, as on the time row under this one.
+        HStack(spacing: PanelBox.inset * 2 + 4) {
+            if picking == .start {
+                textBox(.start)
             } else {
-                shown
+                shownStart
+            }
+            if when != nil {
+                if picking == .end {
+                    textBox(.end)
+                } else {
+                    shownEnd
+                }
+            }
+        }
+        // As the place field's list: an overlay hung from the row's
+        // bottom edge, taking no room in the panel, as wide as the
+        // boxes (which are drawn outset).
+        .overlay(alignment: .bottomLeading) {
+            if let side = picking {
+                Color.clear
+                    .frame(height: 0)
+                    .overlay(alignment: .topLeading) {
+                        dropdown(side)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 6)
+                    }
+                    .padding(.horizontal, -PanelBox.inset)
             }
         }
         .onChange(of: query) { chosen = nil }
@@ -84,79 +117,130 @@ struct DateField: View {
 
     // MARK: Rows
 
-    /// The date at rest: its day, or a muted "Date".
-    private var shown: some View {
+    /// The start at rest: its day, or a muted "Date".
+    private var shownStart: some View {
         Button {
-            picking = true
+            open(.start)
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 PanelGlyph(image: NavArt.calendar)
                     .foregroundStyle(when == nil ? .tertiary : .secondary)
                     .frame(width: 20)
-                Text(verbatim: when.map { ItemPanel.dayText(String($0.prefix(10))) } ?? String(localized: "Date"))
+                Text(verbatim: startDay.map(DateOffers.dayLabel) ?? String(localized: "Date"))
                     .lineLimit(1)
                     .foregroundStyle(when == nil ? .tertiary : .primary)
-                if let note = restNote {
-                    Spacer(minLength: 8)
-                    Text(verbatim: note).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
-                        // The "x" takes its place under the pointer.
-                        .opacity(hovered ? 0 : 1)
-                }
             }
             .panelBox(filled: false)
         }
         .buttonStyle(.plain)
         .accessibilityHint(Text("Changes the date"))
         .overlay(alignment: .trailing) {
-            if when != nil, hovered {
-                Button {
+            if when != nil, hovered == .start {
+                clearButton(String(localized: "Remove date")) {
                     // The engine clears the duration with it.
                     set(nil, .keep)
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 20, height: 20)
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .hoverCircle()
-                .help("Remove date")
-                .accessibilityLabel("Remove date")
             }
         }
-        .onHover { hovered = $0 }
+        .onHover { hover(.start, $0) }
     }
 
-    /// Beside an all-day date that spans several days, how many. A
-    /// timed date's times are on the panel's row under this one.
-    private var restNote: String? {
-        guard when != nil, !timed else { return nil }
-        let days = DateOffers.spanDays(when: when, duration: duration)
-        return days >= 2 ? String(localized: "\(days) days") : nil
+    /// The end at rest: the day the span ends on, dim while that is
+    /// only the start day again.
+    private var shownEnd: some View {
+        let label = endDay.map(DateOffers.dayLabel) ?? ""
+        return Button {
+            open(.end)
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: "arrow.right")
+                    .foregroundStyle(endOffset == 0 ? .tertiary : .secondary)
+                    .frame(width: 20)
+                Text(verbatim: label)
+                    .lineLimit(1)
+                    .foregroundStyle(endOffset == 0 ? .tertiary : .primary)
+            }
+            .panelBox(filled: false)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("End date"))
+        .accessibilityValue(Text(verbatim: label))
+        .overlay(alignment: .trailing) {
+            if endOffset > 0, hovered == .end {
+                clearButton(String(localized: "Remove end date"), action: removeEnd)
+            }
+        }
+        .onHover { hover(.end, $0) }
     }
 
-    private var textBox: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            PanelGlyph(image: NavArt.calendar)
+    /// The "x" at a box's trailing edge.
+    private func clearButton(_ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-                .frame(width: 20)
-            TextField("Type a date: fri 3pm", text: $query)
-                .textFieldStyle(.plain)
-                .autocorrectionDisabled()
-                .focused($focused)
-                .onSubmit(submit)
-                .onExitCommand(perform: finish)
-                .onKeyPress(.downArrow) { step(1) }
-                .onKeyPress(.upArrow) { step(-1) }
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverCircle()
+        .help(label)
+        .accessibilityLabel(Text(verbatim: label))
+    }
+
+    private func hover(_ side: Side, _ inside: Bool) {
+        if inside {
+            hovered = side
+        } else if hovered == side {
+            hovered = nil
+        }
+    }
+
+    @ViewBuilder
+    private func textBox(_ side: Side) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Group {
+                switch side {
+                case .start: PanelGlyph(image: NavArt.calendar)
+                case .end: Image(systemName: "arrow.right")
+                }
+            }
+            .foregroundStyle(.secondary)
+            .frame(width: 20)
+            Group {
+                switch side {
+                case .start:
+                    TextField("Type a date: fri 3pm", text: $query)
+                case .end:
+                    // The stored day stays in sight, dim, until typed
+                    // over, as the time fields' does.
+                    TextField(text: $query, prompt: Text(verbatim: endDay.map(DateOffers.dayLabel) ?? "")) {
+                        Text("End date")
+                    }
+                }
+            }
+            .textFieldStyle(.plain)
+            .autocorrectionDisabled()
+            .focused($focused)
+            .onSubmit(submit)
+            .onExitCommand(perform: finish)
+            .onKeyPress(.downArrow) { step(1) }
+            .onKeyPress(.upArrow) { step(-1) }
         }
         .panelBox()
-        // A turn after the box appears, as the place field's.
-        .onAppear { DispatchQueue.main.async { focused = true } }
+        // A turn after the box appears, as the place field's. Armed
+        // here too: going straight from one box to the other the caret
+        // may never be seen to leave.
+        .onAppear {
+            DispatchQueue.main.async {
+                focused = true
+                armed = true
+            }
+        }
     }
 
-    /// The offers, then the month, in a box under the text box.
-    private var dropdown: some View {
+    /// The offers, then the month, in a box under the row.
+    private func dropdown(_ side: Side) -> some View {
         let rows = rows
         let highlight = highlight(in: rows)
         return VStack(alignment: .leading, spacing: 0) {
@@ -173,13 +257,11 @@ struct DateField: View {
             if !rows.isEmpty || !typed.isEmpty {
                 Divider().padding(.vertical, 4)
             }
-            RangeCalendar(day: calendarSpan(rows, highlight).day, days: calendarSpan(rows, highlight).days) {
-                pickSpan(day: $0, days: $1)
-            }
-            .fixedSize()
-            .frame(maxWidth: .infinity)
-            .onHover { overCalendar = $0 }
-            .accessibilityLabel(Text("Calendar"))
+            MonthCalendar(day: calendarDay(rows, highlight)) { pickDay($0) }
+                .fixedSize()
+                .frame(maxWidth: .infinity)
+                .onHover { overCalendar = $0 }
+                .accessibilityLabel(Text("Calendar"))
         }
         .padding(4)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -191,8 +273,11 @@ struct DateField: View {
     // MARK: Offers
 
     private var rows: [DateOffers.Offer] {
-        DateOffers.offers(
-            typed: typed, current: when, today: DateOffers.today(), tomorrow: DateOffers.today(plus: 1))
+        guard picking == .end, let when else {
+            return DateOffers.offers(
+                typed: typed, current: when, today: DateOffers.today(), tomorrow: DateOffers.today(plus: 1))
+        }
+        return DateOffers.endOffers(typed: typed, when: when, duration: duration)
     }
 
     /// The row Return takes: the chosen one, else the first once
@@ -203,15 +288,10 @@ struct DateField: View {
     }
 
     /// What the month shows: the highlighted offer's day, else the
-    /// item's own span, else today.
-    private func calendarSpan(_ rows: [DateOffers.Offer], _ highlight: Int?) -> (day: String, days: Int) {
-        if let highlight {
-            return (String(rows[highlight].when.prefix(10)), 1)
-        }
-        if let when {
-            return (String(when.prefix(10)), DateOffers.spanDays(when: when, duration: duration))
-        }
-        return (DateOffers.today(), 1)
+    /// day of the box being edited, else today.
+    private func calendarDay(_ rows: [DateOffers.Offer], _ highlight: Int?) -> String {
+        if let highlight { return String(rows[highlight].when.prefix(10)) }
+        return (picking == .end ? endDay : startDay) ?? DateOffers.today()
     }
 
     private func step(_ by: Int) -> KeyPress.Result {
@@ -233,6 +313,10 @@ struct DateField: View {
     }
 
     private func pick(_ offer: DateOffers.Offer) {
+        if picking == .end {
+            _ = pickEnd(String(offer.when.prefix(10)))
+            return
+        }
         // Going between all-day and timed the old length no longer
         // applies: an hour beside a time, a single day without one.
         let nowTimed = offer.when.count >= 16
@@ -242,37 +326,49 @@ struct DateField: View {
         finish()
     }
 
-    /// A day clicked on the month (`days` 1) or a run of them dragged
-    /// over. The time of day stays; a run is the span's whole days,
-    /// with a timed date's end kept on the clock on the last one.
-    private func pickSpan(day: String, days: Int) {
-        guard let when, timed else {
-            let change: DurationChange =
-                days > 1 ? .minutes(minutes: UInt32(days * 1440)) : (when == nil ? .keep : .clear)
-            set(day, change)
-            return finish()
-        }
-        let start = (Int(when.dropFirst(11).prefix(2)) ?? 0) * 60 + (Int(when.dropFirst(14).prefix(2)) ?? 0)
-        let length = max(0, duration ?? 0)
-        let change: DurationChange
-        if days > 1 {
-            let end = (start + length) % 1440
-            change = .minutes(minutes: UInt32((days - 1) * 1440 + end - start))
-        } else if length >= 1440 {
-            // Whole days come off the length; the end's time stays.
-            change = .minutes(minutes: UInt32(length % 1440 == 0 ? 60 : length % 1440))
-        } else {
-            change = .keep
-        }
-        set(day + when.dropFirst(10).prefix(6), change)
+    /// A day clicked on the month. False when the box cannot take it:
+    /// the month then goes back to the day it showed.
+    private func pickDay(_ day: String) -> Bool {
+        if picking == .end { return pickEnd(day) }
+        // The time of day and the length stay: the span moves whole.
+        set(day + (when.map { String($0.dropFirst(10).prefix(6)) } ?? ""), .keep)
         finish()
+        return true
+    }
+
+    /// The span ends on `day`, if it can.
+    private func pickEnd(_ day: String) -> Bool {
+        guard let when, let startDay, let offset = DateOffers.days(from: startDay, to: day),
+              let length = DateOffers.endLength(when: when, duration: duration, offset: offset)
+        else { return false }
+        if offset != endOffset {
+            set(when, length > 0 ? .minutes(minutes: UInt32(length)) : .clear)
+        }
+        finish()
+        return true
+    }
+
+    /// The end's "x": the span back onto the start day.
+    private func removeEnd() {
+        guard let when else { return }
+        let length = DateOffers.sameDayLength(when: when, duration: duration)
+        set(when, length > 0 ? .minutes(minutes: UInt32(length)) : .clear)
+    }
+
+    /// A box takes the caret: a fresh editor, whichever was open.
+    private func open(_ side: Side) {
+        query = ""
+        chosen = nil
+        armed = false
+        overCalendar = false
+        picking = side
     }
 
     /// Back to the row as it was: no text, no list.
     private func finish() {
         query = ""
         chosen = nil
-        picking = false
+        picking = nil
         armed = false
         overCalendar = false
         focused = false
@@ -292,8 +388,6 @@ enum DateOffers {
 
     /// Rows shown at most.
     static let limit = 5
-    /// The longest span the month writes, in days.
-    static let maxDays = 366
 
     /// The standing two (Today, Tomorrow: both with nothing typed on an
     /// item with no date, then only those the text is the start of),
@@ -315,17 +409,6 @@ enum DateOffers {
             offers.append(Offer(when: when))
         }
         return Array(offers.prefix(limit))
-    }
-
-    /// The days an item's date covers: whole days beside an all-day
-    /// date, and beside a timed one every day up to the one its end
-    /// falls on (an end at midnight belongs to the day before).
-    static func spanDays(when: String?, duration: Int?) -> Int {
-        guard let when else { return 1 }
-        let minutes = max(0, duration ?? 0)
-        guard when.count >= 16 else { return min(maxDays, max(1, (minutes + 1439) / 1440)) }
-        let start = (Int(when.dropFirst(11).prefix(2)) ?? 0) * 60 + (Int(when.dropFirst(14).prefix(2)) ?? 0)
-        return min(maxDays, max(1, (start + minutes + 1439) / 1440))
     }
 
     /// The Gregorian calendar the register is written in, at the
@@ -377,6 +460,97 @@ enum DateOffers {
         }
         return words
     }()
+    // MARK: The end day
+
+    /// A day as a box shows it: "Wed 23 Sept", and in another year the
+    /// year in the weekday's place ("23 Sept 2027"), as the web's
+    /// inputs. Short, for half the panel's width.
+    static func dayLabel(_ day: String) -> String { dayLabel(day, now: Date()) }
+
+    static func dayLabel(_ day: String, now: Date) -> String {
+        let calendar = calendar
+        guard let date = Agenda.start(of: day, calendar: calendar) else { return day }
+        if calendar.isDate(date, equalTo: now, toGranularity: .year) {
+            return date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+        }
+        return date.formatted(.dateTime.day().month(.abbreviated).year())
+    }
+
+    /// Whole days from one `YYYY-MM-DD` to another.
+    static func days(from: String, to: String) -> Int? {
+        let calendar = calendar
+        guard let a = Agenda.start(of: from, calendar: calendar),
+              let b = Agenda.start(of: to, calendar: calendar)
+        else { return nil }
+        return calendar.dateComponents([.day], from: a, to: b).day
+    }
+
+    /// Days past the start day the span ends on, 0 for the start day
+    /// itself (the web's `spanEndOffset`): beside a time, the day the
+    /// end's clock time falls on; all-day, the last whole day.
+    static func endOffset(when: String, duration: Int?) -> Int {
+        let minutes = max(0, duration ?? 0)
+        if let start = TimeOffers.minutes(of: when) { return (start + minutes) / TimeOffers.day }
+        return minutes == 0 ? 0 : (minutes + TimeOffers.day - 1) / TimeOffers.day - 1
+    }
+
+    /// The length that ends the span `offset` days past its start day:
+    /// 0 for none stored, nil when the register cannot hold that day
+    /// (before the start; with a timed start, the start day itself
+    /// while the end is not past the start on the clock; past the
+    /// one-year ceiling). All-day it counts whole days. Beside a time
+    /// the end's clock time is kept (an hour after the start while no
+    /// length is stored, the length such an item is drawn with).
+    static func endLength(when: String, duration: Int?, offset: Int) -> Int? {
+        guard offset >= 0 else { return nil }
+        guard let start = TimeOffers.minutes(of: when) else {
+            let length = (offset + 1) * TimeOffers.day
+            guard length <= TimeOffers.maxDuration else { return nil }
+            return offset == 0 ? 0 : length
+        }
+        let stored = max(0, duration ?? 0)
+        let end = (start + (stored > 0 ? stored : 60)) % TimeOffers.day
+        let length = offset * TimeOffers.day + end - start
+        return (1...TimeOffers.maxDuration).contains(length) ? length : nil
+    }
+
+    /// The length with the end brought back onto the start day (the
+    /// web's `sameDayDuration`): none all-day; beside a time the end's
+    /// clock time where that is after the start, else an hour, cut
+    /// short of midnight.
+    static func sameDayLength(when: String, duration: Int?) -> Int {
+        guard let start = TimeOffers.minutes(of: when) else { return 0 }
+        let stored = max(0, duration ?? 0)
+        if stored > 0 {
+            if (start + stored) / TimeOffers.day == 0 { return stored }
+            let end = (start + stored) % TimeOffers.day
+            if end > start { return end - start }
+        }
+        return max(1, min(60, TimeOffers.day - 1 - start))
+    }
+
+    /// What typed text could mean as the day a span ends on: days
+    /// only, read from the start day once that is ahead of today, the
+    /// days the register cannot reach left out. A weekday comes with
+    /// the two after it, as the start's.
+    static func endOffers(typed: String, when: String, duration: Int?, now: Date = Date()) -> [Offer] {
+        let startDay = String(when.prefix(10))
+        var reference = now
+        if let start = Agenda.start(of: startDay, calendar: calendar), start > now { reference = start }
+        guard let phrase = WhenPhrase.find(in: typed, now: reference) else { return [] }
+        var days = [String(phrase.when.prefix(10))]
+        if namesWeekday(phrase.text) {
+            days += [7, 14].compactMap { shift(days[0], days: $0) }
+        }
+        var offers: [Offer] = []
+        for day in days where !offers.contains(where: { $0.when == day }) {
+            guard let offset = self.days(from: startDay, to: day),
+                  endLength(when: when, duration: duration, offset: offset) != nil
+            else { continue }
+            offers.append(Offer(when: day))
+        }
+        return Array(offers.prefix(limit))
+    }
 }
 
 /// One row of the list: an offer (its name when it has one, the date
@@ -419,24 +593,23 @@ private struct DateRow: View {
     }
 }
 
-/// A month of days with a run of them selected: AppKit's graphical
-/// date picker in its range mode (`NSDatePicker.Mode.range`, which only
-/// that style has). `day` and `days` are what it shows; a click on a
-/// day, or a drag over several, is reported once the mouse is up.
-private struct RangeCalendar: NSViewRepresentable {
-    /// The first day selected, `YYYY-MM-DD`.
+/// A month of days with one selected: AppKit's graphical date picker.
+/// `day` is what it shows; a click on a day is reported once the mouse
+/// is up. A day the caller turns down is not kept: the month goes back
+/// to `day`.
+private struct MonthCalendar: NSViewRepresentable {
+    /// The day selected, `YYYY-MM-DD`.
     let day: String
-    /// How many days the selection runs, from 1.
-    let days: Int
-    let pick: (_ day: String, _ days: Int) -> Void
+    /// Take the day clicked; false when it cannot be taken.
+    let pick: (_ day: String) -> Bool
 
-    func makeCoordinator() -> Coordinator { Coordinator(pick: pick) }
+    func makeCoordinator() -> Coordinator { Coordinator(day: day, pick: pick) }
 
     func makeNSView(context: Context) -> NSDatePicker {
         let picker = Picker()
         picker.datePickerStyle = .clockAndCalendar
         picker.datePickerElements = [.yearMonthDay]
-        picker.datePickerMode = .range
+        picker.datePickerMode = .single
         picker.calendar = DateOffers.calendar
         picker.timeZone = .current
         picker.locale = .current
@@ -445,31 +618,16 @@ private struct RangeCalendar: NSViewRepresentable {
         picker.drawsBackground = false
         picker.target = context.coordinator
         picker.action = #selector(Coordinator.changed(_:))
-        show(on: picker)
+        Coordinator.show(day, on: picker)
         return picker
     }
 
     func updateNSView(_ picker: NSDatePicker, context: Context) {
         context.coordinator.pick = pick
-        // Not under a drag: what it shows then is the user's.
+        context.coordinator.day = day
+        // Not under a click: what it shows then is the user's.
         guard context.coordinator.pending == nil else { return }
-        show(on: picker)
-    }
-
-    /// Noon of the first day, and whole days after it: an hour either
-    /// way at a clock change stays inside the day meant. Left alone
-    /// when it already shows this, so the month the user has turned to
-    /// is not turned back.
-    private func show(on picker: NSDatePicker) {
-        let calendar = DateOffers.calendar
-        guard let start = Agenda.start(of: day, calendar: calendar),
-              let noon = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: start)
-        else { return }
-        let interval = TimeInterval((max(1, days) - 1) * 86400)
-        if Coordinator.span(of: picker) != (day, max(1, days)) {
-            picker.dateValue = noon
-            picker.timeInterval = interval
-        }
+        Coordinator.show(day, on: picker)
     }
 
     /// The picker, never the key view: a click on it leaves the caret
@@ -480,25 +638,33 @@ private struct RangeCalendar: NSViewRepresentable {
     }
 
     final class Coordinator: NSObject {
-        var pick: (String, Int) -> Void
-        /// The selection changed and has not been reported yet.
-        private(set) var pending: (day: String, days: Int)?
+        var pick: (String) -> Bool
+        /// The day the caller last asked for.
+        var day: String
+        /// The day clicked, not reported yet, and the picker it is on.
+        private(set) var pending: (day: String, picker: NSDatePicker)?
 
-        init(pick: @escaping (String, Int) -> Void) {
+        init(day: String, pick: @escaping (String) -> Bool) {
+            self.day = day
             self.pick = pick
         }
 
-        /// What the picker has selected: its first day and how many.
-        static func span(of picker: NSDatePicker) -> (String, Int) {
-            let days = Int((picker.timeInterval / 86400).rounded()) + 1
-            return (DateOffers.day(picker.dateValue), min(DateOffers.maxDays, max(1, days)))
+        /// Noon of the day: an hour either way at a clock change stays
+        /// inside the day meant. Left alone when it already shows the
+        /// day, so the month the user has turned to is not turned back.
+        static func show(_ day: String, on picker: NSDatePicker) {
+            let calendar = DateOffers.calendar
+            guard DateOffers.day(picker.dateValue) != day,
+                  let start = Agenda.start(of: day, calendar: calendar),
+                  let noon = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: start)
+            else { return }
+            picker.dateValue = noon
         }
 
-        /// The picker's action, sent for every change, a drag's each
-        /// step included. Held until the mouse is up and the run loop
-        /// is back out of the drag, so a span is one write.
+        /// The picker's action. Held until the mouse is up and the run
+        /// loop is back out of the click, so a pick is one write.
         @objc func changed(_ sender: NSDatePicker) {
-            pending = Self.span(of: sender)
+            pending = (DateOffers.day(sender.dateValue), sender)
             settle(after: 0)
         }
 
@@ -509,9 +675,12 @@ private struct RangeCalendar: NSViewRepresentable {
 
         @objc private func settled() {
             guard NSEvent.pressedMouseButtons & 1 == 0 else { return settle(after: 0.05) }
-            guard let span = pending else { return }
+            guard let picked = pending else { return }
             pending = nil
-            pick(span.day, span.days)
+            if !pick(picked.day) {
+                NSSound.beep()
+                Self.show(day, on: picked.picker)
+            }
         }
     }
 }
