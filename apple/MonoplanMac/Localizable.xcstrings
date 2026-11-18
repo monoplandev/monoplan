@@ -141,6 +141,16 @@
         }
       }
     },
+    "Back": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atrás"
+          }
+        }
+      }
+    },
     "Backlog": {
       "localizations": {
         "es": {
@@ -311,16 +321,6 @@
         }
       }
     },
-    "Create Account…": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Crear cuenta…"
-          }
-        }
-      }
-    },
     "Create a shareable workspace": {
       "localizations": {
         "es": {
@@ -331,12 +331,32 @@
         }
       }
     },
+    "Create your account": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Crea tu cuenta"
+          }
+        }
+      }
+    },
     "Created %@": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
             "value": "Creado %@"
+          }
+        }
+      }
+    },
+    "Custom": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Personalizado"
           }
         }
       }
@@ -367,16 +387,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Fecha"
-          }
-        }
-      }
-    },
-    "Device name": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nombre del dispositivo"
           }
         }
       }
@@ -457,6 +467,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Usar pantalla completa"
+          }
+        }
+      }
+    },
+    "Enter the email and password of your account.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Introduce el correo y la contraseña de tu cuenta."
           }
         }
       }
@@ -547,6 +567,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Se cerrará su sesión y tendrá que iniciarla de nuevo para acceder a tu cuenta."
+          }
+        }
+      }
+    },
+    "Keep your lists in sync across your devices, end-to-end encrypted.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mantén tus listas sincronizadas en todos tus dispositivos, con cifrado de extremo a extremo."
           }
         }
       }
@@ -1151,6 +1181,16 @@
         }
       }
     },
+    "Sign in to Monoplan": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inicia sesión en Monoplan"
+          }
+        }
+      }
+    },
     "Sign In…": {
       "localizations": {
         "es": {
@@ -1251,6 +1291,16 @@
         }
       }
     },
+    "Start using Monoplan": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Empezar a usar Monoplan"
+          }
+        }
+      }
+    },
     "Status": {
       "localizations": {
         "es": {
@@ -1321,12 +1371,32 @@
         }
       }
     },
+    "The server your account lives on. Leave it alone unless you host your own.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El servidor donde está tu cuenta. No lo cambies a menos que alojes el tuyo."
+          }
+        }
+      }
+    },
     "This Mac": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
             "value": "Este Mac"
+          }
+        }
+      }
+    },
+    "This Mac now syncs with your account.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este Mac ahora se sincroniza con tu cuenta."
           }
         }
       }
@@ -1411,6 +1481,16 @@
         }
       }
     },
+    "Using server %@": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usando el servidor %@"
+          }
+        }
+      }
+    },
     "View": {
       "localizations": {
         "es": {
@@ -1427,6 +1507,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Esperando al motor…"
+          }
+        }
+      }
+    },
+    "Welcome to Monoplan": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Te damos la bienvenida a Monoplan"
+          }
+        }
+      }
+    },
+    "What is on this Mac becomes your account's and starts syncing.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lo que hay en este Mac pasa a ser de tu cuenta y empieza a sincronizarse."
           }
         }
       }
@@ -1477,6 +1577,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tu código de recuperación"
+          }
+        }
+      }
+    },
+    "You’re all set": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Todo listo"
           }
         }
       }

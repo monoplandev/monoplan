@@ -26,6 +26,7 @@ final class TrayController: NSObject, NSMenuDelegate {
     private let location: ProfileLocation
     private let engineController: EngineController
     private var settingsWindow: SettingsWindowController?
+    private var onboardingWindow: OnboardingWindowController?
     /// Edit › Undo / Redo: the editing text's, else the engine's.
     private(set) lazy var editUndo = EditUndo(engine: engineController)
     /// The window: one per process, made on first open.
@@ -232,7 +233,7 @@ final class TrayController: NSObject, NSMenuDelegate {
         // right-aligned notes. An image would likewise open an icon
         // column that the other rows do not use.
         // A local-only workspace (no account): the way to one. The
-        // sheet offers both signing in and creating an account.
+        // account window offers both signing in and creating an account.
         if !location.hasAccount {
             addAction(String(localized: "Sign In…"), #selector(signIn))
         }
@@ -394,15 +395,26 @@ final class TrayController: NSObject, NSMenuDelegate {
     }
 
     @objc private func signIn() {
-        settings().showSignIn()
+        onboarding().show()
+    }
+
+    /// The account window: one for the process, as with Settings.
+    private func onboarding() -> OnboardingWindowController {
+        if let onboardingWindow { return onboardingWindow }
+        let w = OnboardingWindowController(
+            location: location,
+            signIn: { [weak self] creds, done in self?.engineController.signIn(creds, completion: done) },
+            signUp: { [weak self] creds, done in self?.engineController.signUp(creds, completion: done) },
+            openApp: { [weak self] in self?.openWindow() })
+        onboardingWindow = w
+        return w
     }
 
     private func settings() -> SettingsWindowController {
         if let settingsWindow { return settingsWindow }
         let w = SettingsWindowController(
             location: location, engine: engineController,
-            signIn: { [weak self] creds, done in self?.engineController.signIn(creds, completion: done) },
-            signUp: { [weak self] creds, done in self?.engineController.signUp(creds, completion: done) },
+            onSignIn: { [weak self] in self?.signIn() },
             signOut: { [weak self] done in self?.engineController.signOut(completion: done) },
             deleteAccount: { [weak self] password, done in
                 self?.engineController.deleteAccount(password: password, completion: done)

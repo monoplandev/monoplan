@@ -301,7 +301,7 @@ final class EngineController {
             let result = Result {
                 try MonoplanCore.login(
                     profileDir: dir, server: creds.server, email: creds.email,
-                    password: creds.password, deviceName: creds.deviceName)
+                    password: creds.password, deviceName: SignInCredentials.deviceName)
             }
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -326,7 +326,7 @@ final class EngineController {
             let result = Result {
                 try MonoplanCore.signup(
                     profileDir: dir, server: creds.server, email: creds.email,
-                    password: creds.password, deviceName: creds.deviceName)
+                    password: creds.password, deviceName: SignInCredentials.deviceName)
             }
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -341,7 +341,10 @@ struct SignInCredentials {
     var server: String
     var email: String
     var password: String
-    var deviceName: String
+
+    /// What the account's device list calls this Mac: its own name,
+    /// never asked for. Settings › Devices renames it.
+    static var deviceName: String { Host.current().localizedName ?? "Mac" }
 }
 
 /// An engine error as a sentence. The generated `EngineError` describes

@@ -32,14 +32,13 @@ final class SettingsWindowController: NSWindowController {
 
     init(
         location: ProfileLocation, engine: EngineController,
-        signIn: @escaping (SignInCredentials, @escaping (Error?) -> Void) -> Void,
-        signUp: @escaping (SignInCredentials, @escaping (Result<SignupOutcome, Error>) -> Void) -> Void,
+        onSignIn: @escaping () -> Void,
         signOut: @escaping (@escaping (Error?) -> Void) -> Void,
         deleteAccount: @escaping (String, @escaping (Error?) -> Void) -> Void,
         credential: @escaping () -> APICredential?
     ) {
         model = SettingsModel(
-            location: location, engine: engine, signIn: signIn, signUp: signUp, signOut: signOut,
+            location: location, engine: engine, onSignIn: onSignIn, signOut: signOut,
             deleteAccount: deleteAccount, credential: credential)
         // The toolbar tab style: AppKit builds the toolbar from the tab
         // items (one icon + label each) and, with the `.preference`
@@ -77,7 +76,7 @@ final class SettingsWindowController: NSWindowController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    /// The Account pane's position among the tabs, for `showSignIn`.
+    /// The Account pane's position among the tabs, for `showAccount`.
     private static let accountPaneIndex = 1
 
     /// The tray forwards engine state and change events here; the
@@ -98,14 +97,6 @@ final class SettingsWindowController: NSWindowController {
     func showAccount() {
         (contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = Self.accountPaneIndex
         show()
-    }
-
-    /// Open on the Account pane with the sign-in sheet up (the tray's
-    /// "Sign In…"); the sheet itself offers creating an account too.
-    func showSignIn(mode: SignInSheet.Mode = .signIn) {
-        showAccount()
-        model.signInMode = mode
-        model.showSignIn = true
     }
 }
 
@@ -132,17 +123,9 @@ final class SettingsModel: ObservableObject {
     @Published var loginError: String?
     @Published var signingOut = false
     @Published var signOutError: String?
-    @Published var showSignIn = false
     @Published var showDeleteAccount = false
     @Published var deletingAccount = false
     @Published var deleteAccountError: String?
-    /// Which form the sheet opens on; the sheet can switch.
-    @Published var signInMode: SignInSheet.Mode = .signIn
-    @Published var signingIn = false
-    @Published var signInError: String?
-    /// A signup's recovery code, held only while the sheet shows it
-    /// once; cleared when the sheet closes.
-    @Published var recoveryCode: String?
     /// Settings › Devices. Nil until the first load (or without a
     /// signed-in engine); reloaded when the pane appears and after every
     /// rename or revoke, never on doc events (it is server state).
@@ -158,8 +141,9 @@ final class SettingsModel: ObservableObject {
 
     private let location: ProfileLocation
     private let engine: EngineController
-    private let signInAction: (SignInCredentials, @escaping (Error?) -> Void) -> Void
-    private let signUpAction: (SignInCredentials, @escaping (Result<SignupOutcome, Error>) -> Void) -> Void
+    /// Opens the account window (`Onboarding.swift`), which offers
+    /// both signing in and creating an account.
+    let onSignIn: () -> Void
     private let signOutAction: (@escaping (Error?) -> Void) -> Void
     private let deleteAccountAction: (String, @escaping (Error?) -> Void) -> Void
     private let credential: () -> APICredential?
@@ -172,8 +156,7 @@ final class SettingsModel: ObservableObject {
 
     init(
         location: ProfileLocation, engine: EngineController,
-        signIn: @escaping (SignInCredentials, @escaping (Error?) -> Void) -> Void,
-        signUp: @escaping (SignInCredentials, @escaping (Result<SignupOutcome, Error>) -> Void) -> Void,
+        onSignIn: @escaping () -> Void,
         signOut: @escaping (@escaping (Error?) -> Void) -> Void,
         deleteAccount: @escaping (String, @escaping (Error?) -> Void) -> Void,
         credential: @escaping () -> APICredential?
@@ -181,50 +164,12 @@ final class SettingsModel: ObservableObject {
         self.location = location
         self.deleteAccountAction = deleteAccount
         self.engine = engine
-        self.signInAction = signIn
-        self.signUpAction = signUp
+        self.onSignIn = onSignIn
         self.signOutAction = signOut
         self.credential = credential
         profilePath = location.dir.path
         refresh()
     }
-
-    /// The sheet's submit. The password goes straight to Rust and is
-    /// never stored here; the sheet closes itself on success.
-    func signIn(_ creds: SignInCredentials, done: @escaping (Bool) -> Void) {
-        signingIn = true
-        signInError = nil
-        signInAction(creds) { [weak self] error in
-            guard let self else { return }
-            self.signingIn = false
-            self.signInError = error?.localizedDescription
-            self.refresh()
-            done(error == nil)
-        }
-    }
-
-    /// The sheet's Create Account. On success the sheet stays up to
-    /// show the recovery code once (`recoveryCode`); the local
-    /// workspace is now the account's Home doc.
-    func signUp(_ creds: SignInCredentials) {
-        signingIn = true
-        signInError = nil
-        signUpAction(creds) { [weak self] result in
-            guard let self else { return }
-            self.signingIn = false
-            switch result {
-            case .success(let outcome):
-                self.recoveryCode = outcome.recoveryCode
-            case .failure(let error):
-                self.signInError = error.localizedDescription
-            }
-            self.refresh()
-        }
-    }
-
-    /// Whether signing in would replace a local-only workspace (the
-    /// sheet warns; creating an account keeps it instead).
-    var hasLocalWorkspace: Bool { location.hasProfile && !location.hasAccount }
 
     /// Confirm, then stop the engine and wipe the profile. Local state
     /// only: everything is on the server, and signing in again pulls
@@ -493,16 +438,7 @@ struct AccountPane: View {
                     }
                     .disabled(model.signingOut)
                 } else {
-                    HStack {
-                        Button("Sign In…") {
-                            model.signInMode = .signIn
-                            model.showSignIn = true
-                        }
-                        Button("Create Account…") {
-                            model.signInMode = .signUp
-                            model.showSignIn = true
-                        }
-                    }
+                    Button("Sign In…") { model.onSignIn() }
                 }
             }
             if let error = model.signOutError {
@@ -519,9 +455,6 @@ struct AccountPane: View {
         }
         .formStyle(.grouped)
         .frame(width: 460)
-        .sheet(isPresented: $model.showSignIn) {
-            SignInSheet(model: model)
-        }
         .sheet(isPresented: $model.showDeleteAccount) {
             if let email = model.email {
                 DeleteAccountSheet(model: model, email: email)
@@ -586,176 +519,6 @@ struct DeleteAccountSheet: View {
     private func submit() {
         model.deleteAccount(password: password) { ok in
             if ok { dismiss() }
-        }
-    }
-}
-
-/// The account sheet: sign in to an account, or create one, with the
-/// server and device name under a disclosure since almost nobody
-/// changes them. The server is part of the account, not a preference,
-/// which is why it is set here and only read back on the Account pane.
-/// Creating an account adopts the local workspace the app has been
-/// running (`spec/auth.md` §Device pairing) and then shows the
-/// recovery code once, in place of the form; signing in to an existing
-/// account replaces that workspace, which the form says.
-struct SignInSheet: View {
-    enum Mode { case signIn, signUp }
-
-    @ObservedObject var model: SettingsModel
-    @Environment(\.dismiss) private var dismiss
-    @State private var email = ""
-    @State private var password = ""
-    @State private var server = SignInSheet.defaultServer
-    @State private var deviceName = Host.current().localizedName ?? "Mac"
-    @State private var advanced = false
-
-    static let defaultServer = "https://alpha.monoplan.app"
-
-    private var canSubmit: Bool {
-        !model.signingIn && !email.isEmpty && !password.isEmpty && !server.isEmpty && !deviceName.isEmpty
-    }
-
-    var body: some View {
-        Group {
-            if let code = model.recoveryCode {
-                RecoveryCodePane(code: code) {
-                    model.recoveryCode = nil
-                    dismiss()
-                }
-            } else {
-                form
-            }
-        }
-        .padding(20)
-        .frame(width: 400)
-        .onDisappear {
-            model.signInError = nil
-            model.recoveryCode = nil
-        }
-    }
-
-    private var form: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Picker("", selection: $model.signInMode) {
-                Text("Sign In").tag(Mode.signIn)
-                Text("Create Account").tag(Mode.signUp)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .disabled(model.signingIn)
-            Form {
-                TextField("Email", text: $email)
-                    .textContentType(.username)
-                SecureField("Password", text: $password)
-                    .textContentType(model.signInMode == .signUp ? .newPassword : .password)
-                    .onSubmit { if canSubmit { submit() } }
-                DisclosureGroup("Advanced", isExpanded: $advanced) {
-                    TextField("Server", text: $server)
-                        .textContentType(.URL)
-                    TextField("Device name", text: $deviceName)
-                }
-            }
-            .formStyle(.columns)
-            .disabled(model.signingIn)
-            if model.signInMode == .signUp {
-                Text("You will get a 12-word recovery code. It is the only way back in if you forget your password: Monoplan cannot reset it for you.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if model.hasLocalWorkspace {
-                Text("Signing in replaces the local workspace on this Mac with the account's. Create an account instead to keep it.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let error = model.signInError {
-                Text(error).font(.footnote).foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            HStack {
-                Spacer()
-                if model.signingIn { ProgressView().controlSize(.small) }
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                    .disabled(model.signingIn)
-                if model.signInMode == .signUp {
-                    Button("Create Account") { submit() }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(!canSubmit)
-                } else {
-                    Button("Sign In") { submit() }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(!canSubmit)
-                }
-            }
-        }
-    }
-
-    private func submit() {
-        let creds = SignInCredentials(
-            server: Self.normalise(server), email: email.trimmingCharacters(in: .whitespaces),
-            password: password, deviceName: deviceName.trimmingCharacters(in: .whitespaces))
-        switch model.signInMode {
-        case .signIn:
-            model.signIn(creds) { ok in
-                if ok { dismiss() }
-            }
-        case .signUp:
-            model.signUp(creds)
-        }
-    }
-
-    /// A bare host becomes https; a trailing slash would double up
-    /// against the `/api/…` paths the client appends.
-    static func normalise(_ raw: String) -> String {
-        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !s.contains("://") { s = "https://" + s }
-        while s.hasSuffix("/") { s.removeLast() }
-        return s
-    }
-}
-
-/// The one time the recovery code is ever shown (the web client's
-/// pane, `Login.tsx`): the twelve words, Copy, and a checkbox that
-/// gates Continue, so the only way on is to confirm they are written
-/// down. The sheet has no close button around it.
-struct RecoveryCodePane: View {
-    let code: String
-    let onContinue: () -> Void
-    @State private var saved = false
-    @State private var copied = false
-
-    private var words: [String] { code.split(separator: " ").map(String.init) }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Your recovery code").font(.headline)
-            Text("Write these 12 words down and keep them somewhere safe. They are shown only once and are the only way to reset a forgotten password.")
-                .font(.footnote).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 3), spacing: 6) {
-                ForEach(Array(words.enumerated()), id: \.offset) { i, word in
-                    HStack(spacing: 6) {
-                        Text(verbatim: "\(i + 1).").foregroundStyle(.secondary).monospacedDigit()
-                        Text(word).textSelection(.enabled)
-                    }
-                }
-            }
-            .padding(10)
-            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(code, forType: .string)
-                copied = true
-            } label: {
-                if copied { Text("Copied") } else { Text("Copy") }
-            }
-            Toggle("I have written down these 12 words", isOn: $saved)
-                .toggleStyle(.checkbox)
-            HStack {
-                Spacer()
-                Button("Continue") { onContinue() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!saved)
-            }
         }
     }
 }

@@ -276,15 +276,20 @@ launch". Devices: the account's devices over the server API (rename,
 revoke), with the engine's device token. Account: server, status ("Local workspace (no
 account)" until there is one), sync, an "Open at login" toggle
 (`SMAppService.mainApp`, which lists the app under System Settings ›
-Login Items; works only from an .app bundle), and Sign In / Create
-Account / Sign Out. The account sheet (email, password; server and
-device name under an Advanced disclosure, the server defaulting to
-`https://alpha.monoplan.app`) has two modes: Sign In runs
+Login Items; works only from an .app bundle), and Sign In / Sign Out.
+Sign In opens the account window (`Onboarding.swift`, 2026-11-19), its
+own window of steps and no longer a sheet over Settings: a welcome
+offering the two paths, the form (email, password), then for a new
+account the recovery code and a closing page that opens the main
+window. The server (default `https://alpha.monoplan.app`) is behind the
+gear in the window's corner and serves both paths; the device name is
+not asked, it is the Mac's own name. Sign In runs
 `monoplan-ffi::login`, the same body as `monoplan auth login`, and
 replaces the local workspace (the form says so); Create Account runs
 `monoplan-ffi::signup`, the same body as `monoplan auth signup`, adopts
 the local workspace as the account's Home doc, and shows the recovery
-code once. The tray shows "Sign In…" while there is no account. Sign
+code once. The tray and the main window's toolbar show "Sign In" while
+there is no account, and open the same window. Sign
 Out is confirmed and runs `monoplan-ffi::logout`, the same as
 `monoplan auth logout`: it stops the in-app engine, revokes this device on
 the server (best-effort; an unreachable server does not block it) and wipes
