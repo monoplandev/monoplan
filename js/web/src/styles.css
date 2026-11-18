@@ -3540,7 +3540,7 @@ input.task-check:hover {
   gap: 8px;
 }
 
-/* The "Fixed event" switch under the time row: the popovers' switch
+/* The "Event" switch under the time row: the popovers' switch
    (`.done-switch`) with the switch leading its label, at the dialog's
    text size, inset to the date input's text edge. */
 .done-switch.task-dialog-event-toggle {

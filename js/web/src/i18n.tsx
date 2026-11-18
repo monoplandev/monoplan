@@ -863,7 +863,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     upcoming: {
       emptyToday: "Nada para hoy",
       event: "Evento",
-      fixedEvent: "Evento fijo",
+      fixedEvent: "Evento",
       eventHint: "Ocurre en esta fecha: pasa sin más, en lugar de quedar atrasado",
       due: "Vence",
       startsIn: (span) => `en ${span}`,
@@ -1255,7 +1255,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     upcoming: {
       emptyToday: "Nothing due today",
       event: "Event",
-      fixedEvent: "Fixed event",
+      fixedEvent: "Event",
       eventHint: "Happens on this date: it goes by instead of going overdue",
       due: "Due",
       startsIn: (span) => `in ${span}`,
