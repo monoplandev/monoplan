@@ -525,7 +525,7 @@ private struct PanelField<Icon: View>: View {
     @ViewBuilder let icon: Icon
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
             icon
                 .foregroundStyle(empty ? .tertiary : .secondary)
                 .frame(width: 20)

@@ -122,7 +122,7 @@ struct DateField: View {
         Button {
             open(.start)
         } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
                 PanelGlyph(image: NavArt.calendar)
                     .foregroundStyle(when == nil ? .tertiary : .secondary)
                     .frame(width: 20)
@@ -152,7 +152,7 @@ struct DateField: View {
         return Button {
             open(.end)
         } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Image(systemName: "arrow.right")
                     .foregroundStyle(endOffset == 0 ? .tertiary : .secondary)
                     .frame(width: 20)
@@ -198,7 +198,7 @@ struct DateField: View {
 
     @ViewBuilder
     private func textBox(_ side: Side) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
             Group {
                 switch side {
                 case .start: PanelGlyph(image: NavArt.calendar)

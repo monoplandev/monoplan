@@ -95,7 +95,7 @@ struct TimeField: View {
         Button {
             picking = true
         } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Image(systemName: systemImage)
                     .foregroundStyle(value == nil ? .tertiary : .secondary)
                     .frame(width: 20)
@@ -129,7 +129,7 @@ struct TimeField: View {
     }
 
     private var textBox: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
             Image(systemName: systemImage)
                 .foregroundStyle(.secondary)
                 .frame(width: 20)

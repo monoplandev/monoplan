@@ -98,7 +98,7 @@ struct PlaceField: View {
         Button {
             picking = true
         } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
                 PanelGlyph(image: NavArt.pin)
                     .foregroundStyle(place == nil ? .tertiary : .secondary)
                     .frame(width: 20)
@@ -137,7 +137,7 @@ struct PlaceField: View {
     }
 
     private var searchBox: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
                 .frame(width: 20)

@@ -114,7 +114,7 @@ struct ListField: View {
         Button {
             picking = true
         } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Group {
                     if let emoji = item.listIcon {
                         Text(verbatim: emoji)
@@ -141,7 +141,7 @@ struct ListField: View {
     }
 
     private var searchBox: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
                 .frame(width: 20)
