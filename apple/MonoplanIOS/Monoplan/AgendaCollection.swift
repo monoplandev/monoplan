@@ -2,18 +2,22 @@
 // 2026-11-17). The page opens on Today with a year of days above it,
 // and a SwiftUI `List` cannot be put there reliably: it guesses the
 // height of every row it has not built, and `ScrollViewProxy.scrollTo`
-// is the only way to move it. A collection view lays out the same
-// inset-grouped list, and its layout says where Today's header is, so
-// the page sets the offset itself and corrects it on each layout pass
-// until it has appeared.
+// is the only way to move it. A collection view's layout says where
+// Today's header is, so the page sets the offset itself and corrects it
+// on each layout pass until it has appeared.
+//
+// The list is plain, as the Mac's Calendar is (`AgendaTable.swift`,
+// 2026-11-18): no card behind a day's rows. A day's header is a line of
+// secondary text at the body's size, its rows sit on the page's own
+// ground, and a hairline runs between two rows of a day.
 //
 // What is overdue (the rows the engine leads Today with, in the overdue
 // tone) has a section of its own right above Today, there only while
 // something is overdue (`spec/calendar-plan.md` "Overdue"). When it is
 // there it is what the page opens on and what "Today" comes back to.
 //
-// The rows are the SwiftUI ones (`AgendaRowView`), hosted in the cells;
-// the headers are the system's list headers.
+// The rows are the SwiftUI ones (`AgendaRowView`), hosted in the cells,
+// and so are the headers, which keeps the two on the same margin.
 
 import MonoplanCore
 import SwiftUI
@@ -72,6 +76,9 @@ final class AgendaCollectionController: UICollectionViewController {
     private var entries: [Item: AgendaEntry] = [:]
     /// Each shown day's header.
     private var titles: [String: String] = [:]
+    /// The rows with a line under them: every row of a day but its
+    /// last.
+    private var divided: Set<Item> = []
     /// The section the page opens on and "Today" comes back to:
     /// Overdue's when it is there (it sits right above Today's), else
     /// Today's.
@@ -80,6 +87,9 @@ final class AgendaCollectionController: UICollectionViewController {
     /// The Overdue section's identifier, where a day's date is for the
     /// others.
     private static let overdue = "overdue"
+
+    /// The margin a header and a row keep from the sides of the page.
+    private static let margin: CGFloat = 20
 
     /// The page is still to be put on Today: set by the first rows,
     /// cleared once the page has appeared or a finger is on it. While
@@ -90,10 +100,17 @@ final class AgendaCollectionController: UICollectionViewController {
 
     init(model: AppModel) {
         self.model = model
-        var list = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
+        // The grouped appearance, not the plain one: plain pins a
+        // day's header under the bar, and a pinned header's frame
+        // moves with the scroll, which `todayOffset` reads. The cells
+        // clear the grouped ground, so the list looks plain.
+        var list = UICollectionLayoutListConfiguration(appearance: .grouped)
         list.headerMode = .supplementary
-        // No dividers between item rows, as on every page that lists
-        // them (`itemListRow`).
+        list.headerTopPadding = 0
+        list.backgroundColor = .systemBackground
+        // The line between two rows of a day is the cell's own
+        // (`divided`): the system's would also rule a day off above
+        // and below.
         list.showsSeparators = false
         super.init(collectionViewLayout: UICollectionViewCompositionalLayout.list(using: list))
     }
@@ -120,13 +137,18 @@ final class AgendaCollectionController: UICollectionViewController {
         collectionView.refreshControl = pull
 
         let cell = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [unowned self] cell, _, item in
+            cell.backgroundConfiguration = .clear()
             guard let row = entries[item] else {
-                var content = cell.defaultContentConfiguration()
-                content.text = String(localized: "Nothing scheduled")
-                content.textProperties.color = .secondaryLabel
-                cell.contentConfiguration = content
+                cell.contentConfiguration = UIHostingConfiguration {
+                    Text("Nothing scheduled")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .margins(.horizontal, Self.margin)
+                .minSize(height: 44)
                 return
             }
+            let divided = divided.contains(item)
             // The insets and the minimum height `itemListRow` gives a
             // row in a SwiftUI list.
             cell.contentConfiguration = UIHostingConfiguration {
@@ -135,8 +157,15 @@ final class AgendaCollectionController: UICollectionViewController {
                     .environment(\.openItem) { [weak self] in self?.openItem($0) }
             }
             .margins(.vertical, 4)
-            .margins(.horizontal, 20)
+            .margins(.horizontal, Self.margin)
             .minSize(height: 44)
+            .background {
+                if divided {
+                    Divider()
+                        .padding(.horizontal, Self.margin)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                }
+            }
         }
         let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
             elementKind: UICollectionView.elementKindSectionHeader
@@ -166,7 +195,6 @@ final class AgendaCollectionController: UICollectionViewController {
         var snapshot = Snapshot()
         var entries: [Item: AgendaEntry] = [:]
         var titles: [String: String] = [:]
-        var changed: [Item] = []
         var anchor: String?
         func append(_ rows: [AgendaEntry], to section: String) {
             for row in rows {
@@ -174,8 +202,6 @@ final class AgendaCollectionController: UICollectionViewController {
                 guard entries[item] == nil else { continue }
                 entries[item] = row
                 snapshot.appendItems([item], toSection: section)
-                // Same row, new content: the cell is told to redraw.
-                if let old = self.entries[item], old != row { changed.append(item) }
             }
         }
         for day in groups where day.today || !day.rows.isEmpty {
@@ -200,10 +226,20 @@ final class AgendaCollectionController: UICollectionViewController {
             }
             append(rows, to: day.day)
         }
-        snapshot.reconfigureItems(changed)
+        var divided: Set<Item> = []
+        for section in snapshot.sectionIdentifiers {
+            divided.formUnion(snapshot.itemIdentifiers(inSection: section).dropLast())
+        }
+        // Same row, new content or a line gained or lost: the cell is
+        // told to redraw.
+        snapshot.reconfigureItems(snapshot.itemIdentifiers.filter { item in
+            guard let old = self.entries[item] else { return false }
+            return old != entries[item] || self.divided.contains(item) != divided.contains(item)
+        })
 
         let first = self.entries.isEmpty && self.titles.isEmpty
         self.entries = entries
+        self.divided = divided
         self.titles = titles
         self.anchor = anchor
         dataSource.apply(snapshot, animatingDifferences: !first && view.window != nil)
@@ -222,11 +258,18 @@ final class AgendaCollectionController: UICollectionViewController {
     }
 
     private func setTitle(of header: UICollectionViewListCell, section: Int) {
-        var content = header.defaultContentConfiguration()
-        if let day = dataSource.sectionIdentifier(for: section) {
-            content.text = titles[day]
+        let title = dataSource.sectionIdentifier(for: section).flatMap { titles[$0] } ?? ""
+        header.backgroundConfiguration = .clear()
+        // The Mac's header: the body's size, in the secondary colour.
+        header.contentConfiguration = UIHostingConfiguration {
+            Text(verbatim: title)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityAddTraits(.isHeader)
         }
-        header.contentConfiguration = content
+        .margins(.horizontal, Self.margin)
+        .margins(.top, 16)
+        .margins(.bottom, 4)
     }
 
     override func viewDidLayoutSubviews() {
