@@ -396,6 +396,9 @@ export function createWorkspaceRuntime(props: {
       },
       onMembershipsChanged: () => relistDocs(),
       onAuthFailed: () => void props.logout(),
+      // Connection-level problems no replica sees: a rejected or timed
+      // out handshake, a frame for a doc nothing routes.
+      onError: (message) => console.error("sync: connection error:", message),
       // `docClosed`: the server refused our `OpenDoc` (`DocRejected`)
       // or unbound the doc mid-session (`DocClosed`): this account is
       // no longer a member, or the doc is gone. Either way a reconnect
@@ -412,6 +415,14 @@ export function createWorkspaceRuntime(props: {
             email: emails[i] ?? "",
           }));
           setPresence((prev) => ({ ...prev, [docId]: list }));
+          return;
+        }
+        // Protocol / storage / import failures the replica reports and
+        // carries on from (or disconnects itself over). Nothing else
+        // shows them, and a doc that stops syncing with a healthy
+        // socket is otherwise silent.
+        if (ev.kind === "error") {
+          console.error(`sync: replica error on doc ${docId}:`, ev.message);
           return;
         }
         if (ev.kind !== "docClosed") return;
