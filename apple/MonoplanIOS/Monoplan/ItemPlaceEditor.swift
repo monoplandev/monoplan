@@ -195,10 +195,10 @@ final class PlaceSearch: NSObject, ObservableObject, MKLocalSearchCompleterDeleg
         MKLocalSearch(request: MKLocalSearch.Request(completion: result)).start { response, _ in
             let place: Place
             if let item = response?.mapItems.first {
-                let at = item.placemark.coordinate
+                let at = item.location.coordinate
                 place = Place(
                     label: item.name ?? result.title, lat: at.latitude, lon: at.longitude,
-                    address: address ?? item.placemark.title)
+                    address: address ?? item.address?.fullAddress)
             } else {
                 place = Place(label: result.title, address: address)
             }
