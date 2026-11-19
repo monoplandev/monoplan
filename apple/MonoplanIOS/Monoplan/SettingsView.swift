@@ -35,9 +35,12 @@ struct SettingsView: View {
                     Text(error).foregroundStyle(.red)
                 }
             }
+            // Debug builds only: an archive (Release) has no Debug row.
+            #if DEBUG
             Section {
                 NavigationLink("Debug") { DebugView() }
             }
+            #endif
         }
         .navigationTitle("Settings")
         .sheet(isPresented: $showSignIn) {
