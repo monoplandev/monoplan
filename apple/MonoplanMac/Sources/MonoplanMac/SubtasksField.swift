@@ -112,24 +112,36 @@ struct SubtasksField: View {
             Image(systemName: "plus")
                 .foregroundStyle(.tertiary)
                 .frame(width: 20)
-            TextField("Add subtask", text: $addDraft)
-                .textFieldStyle(.plain)
-                .focused($focus, equals: .add)
-                .onSubmit {
-                    commitAdd()
-                    focus = .add
+            // The placeholder is our own `Text`, in the ink of the
+            // panel's unset "Date" and "Place" rows: a field's own
+            // prompt is drawn in the system's placeholder colour.
+            ZStack(alignment: .leading) {
+                if addDraft.isEmpty {
+                    Text("Add subtask")
+                        .lineLimit(1)
+                        .foregroundStyle(.tertiary)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                 }
-                .onKeyPress(keys: [.delete, .upArrow], phases: .down) { _ in
-                    guard addDraft.isEmpty, let last = rows.last else { return .ignored }
-                    focus = .row(last.id)
-                    return .handled
-                }
-                .onKeyPress(.escape) {
-                    guard !addDraft.isEmpty else { return .ignored }
-                    addDraft = ""
-                    return .handled
-                }
-                .onChange(of: focus) { if focus != .add { commitAdd() } }
+                TextField("Add subtask", text: $addDraft, prompt: Text(verbatim: ""))
+                    .textFieldStyle(.plain)
+                    .focused($focus, equals: .add)
+                    .onSubmit {
+                        commitAdd()
+                        focus = .add
+                    }
+                    .onKeyPress(keys: [.delete, .upArrow], phases: .down) { _ in
+                        guard addDraft.isEmpty, let last = rows.last else { return .ignored }
+                        focus = .row(last.id)
+                        return .handled
+                    }
+                    .onKeyPress(.escape) {
+                        guard !addDraft.isEmpty else { return .ignored }
+                        addDraft = ""
+                        return .handled
+                    }
+                    .onChange(of: focus) { if focus != .add { commitAdd() } }
+            }
         }
         .frame(height: Self.rowHeight)
     }

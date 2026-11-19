@@ -206,6 +206,17 @@
         }
       }
     },
+    "Add subtask" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Añadir subtarea"
+          }
+        }
+      }
+    },
     "All day" : {
       "localizations" : {
         "es" : {
@@ -2973,6 +2984,27 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Estado"
+          }
+        }
+      }
+    },
+    "Subtask" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subtarea"
+          }
+        }
+      }
+    },
+    "Subtasks" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subtareas"
           }
         }
       }

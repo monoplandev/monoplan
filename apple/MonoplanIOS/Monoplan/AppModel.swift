@@ -588,6 +588,35 @@ final class AppModel: ObservableObject {
         write({ try $0.setAssignee(workspace: workspace, id: id, assignee: assignee) }, to: ref)
     }
 
+    /// The item page's subtask writes (spec/subtasks.md), one typed
+    /// call and one undo step each: add at the end, retitle, tick or
+    /// untick, move to an index, remove.
+    func addSubtask(_ ref: ItemRef, text: String) {
+        let (workspace, id) = (selector(ref.docId), ref.itemId)
+        write({ _ = try $0.addSubtask(workspace: workspace, id: id, text: text, index: nil) }, to: ref)
+    }
+
+    func setSubtaskText(_ ref: ItemRef, subtask: String, text: String) {
+        let (workspace, id) = (selector(ref.docId), ref.itemId)
+        write({ try $0.setSubtaskText(workspace: workspace, id: id, subtask: subtask, text: text) }, to: ref)
+    }
+
+    func setSubtaskDone(_ ref: ItemRef, subtask: String, done: Bool) {
+        let (workspace, id) = (selector(ref.docId), ref.itemId)
+        write({ try $0.setSubtaskDone(workspace: workspace, id: id, subtask: subtask, done: done) }, to: ref)
+    }
+
+    func moveSubtask(_ ref: ItemRef, subtask: String, index: Int) {
+        let (workspace, id) = (selector(ref.docId), ref.itemId)
+        let index = UInt32(clamping: index)
+        write({ try $0.moveSubtask(workspace: workspace, id: id, subtask: subtask, index: index) }, to: ref)
+    }
+
+    func removeSubtask(_ ref: ItemRef, subtask: String) {
+        let (workspace, id) = (selector(ref.docId), ref.itemId)
+        write({ try $0.removeSubtask(workspace: workspace, id: id, subtask: subtask) }, to: ref)
+    }
+
     /// Set or clear (nil) an item's duration in minutes.
     func setDuration(_ ref: ItemRef, minutes: Int?) {
         let (workspace, id) = (selector(ref.docId), ref.itemId)

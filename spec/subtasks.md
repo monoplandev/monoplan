@@ -1,6 +1,6 @@
 # Subtasks
 
-Status: **first pass built 2026-11-18: core, wasm and web; the macOS item panel 2026-11-19. Not on iOS or the CLI.**
+Status: **first pass built 2026-11-18: core, wasm and web; the macOS item panel and the iOS item page 2026-11-19. Not on the CLI.**
 
 **Vetoed (2026-08-27): subtasks as full items** (an item located under a
 parent item, with its own lifecycle, location and lens membership). It hides
@@ -59,6 +59,13 @@ Open: whether a subtask records a done timestamp (leaning no; not stored).
   it takes the focus, so a held key would otherwise run up the list. A
   binned item's subtasks are shown, not edited. No count on the Mac's
   rows yet.
+- **iOS (2026-11-19).** `ItemSubtasksField.swift` on the item page
+  between the place and the notes, edited in place (no editor takes the
+  sheet): the Mac's field for touch, rows a full 44 pt, the grip always
+  shown. A row emptied and then left (Return, or the focus going) is
+  removed: the software keyboard reports no Backspace in an empty
+  field. A hardware keyboard gets the Mac's keys. The page now puts the
+  keyboard away on a scroll. No count on iOS rows yet.
 
 Not built: "untick all" for a re-used checklist, subtask
-text in search, a count on the calendar's rows or any Mac row, iOS, CLI.
+text in search, a count on the calendar's rows or any Mac or iOS row, CLI.

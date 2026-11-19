@@ -1,7 +1,7 @@
 // The item panel: the selected row's item, at the right of the window.
 // The iOS item page (apple/MonoplanIOS/Monoplan/ItemView.swift) laid
 // out the same way, top to bottom: status, title, list, planned date,
-// deadline, place, subtasks (`SubtasksField.swift`, not on iOS yet),
+// deadline, place, subtasks (`SubtasksField.swift`),
 // notes, then the activity log. Read from
 // `Engine.item` in the window's snapshot, so it is reread on every doc
 // change like the rest.
@@ -101,6 +101,11 @@ struct ItemPanel: View {
                                 remove: { removeSubtask(item, $0) }
                             )
                             .id(item.item.id)
+                            // A row is taller than its text by 6 pt
+                            // each side: given back, so the first and
+                            // last sit 16 pt from the rules, as the
+                            // date and place rows do from theirs.
+                            .padding(.vertical, -(SubtasksField.rowHeight - 16) / 2)
                             PanelRule()
                         }
                         notes(item)

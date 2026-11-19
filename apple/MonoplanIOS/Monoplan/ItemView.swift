@@ -276,6 +276,26 @@ struct ItemView: View {
                 if let item {
                     fields(item)
                     Divider()
+                    // Between the place and the notes, as on the web
+                    // and the Mac. A binned item's are shown, not
+                    // edited, and it has no row to add one.
+                    if item.binnedAt == nil || !item.subtasks.isEmpty {
+                        ItemSubtasksField(
+                            subtasks: item.subtasks, locked: item.binnedAt != nil,
+                            add: { model.addSubtask(ref, text: $0) },
+                            setText: { model.setSubtaskText(ref, subtask: $0, text: $1) },
+                            setDone: { model.setSubtaskDone(ref, subtask: $0, done: $1) },
+                            move: { model.moveSubtask(ref, subtask: $0, index: $1) },
+                            remove: { model.removeSubtask(ref, subtask: $0) }
+                        )
+                        .id(ref.key)
+                        // A row is a 44 pt target around a line of
+                        // text: the slack over the first and under the
+                        // last is given back, so they sit as far from
+                        // the dividers as the date and place rows do.
+                        .padding(.vertical, -10)
+                        Divider()
+                    }
                     notes(item)
                     Divider()
                     activity(item)
@@ -293,6 +313,8 @@ struct ItemView: View {
         // sheet down". Content that fits does not scroll at all, so the
         // same drag works from anywhere on it.
         .scrollBounceBehavior(.basedOnSize)
+        // The subtasks are typed in on the page itself.
+        .scrollDismissesKeyboard(.interactively)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { bar }
         .confirmationDialog("Move this item to the Bin?", isPresented: $confirmingBin, titleVisibility: .visible) {
