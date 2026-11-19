@@ -479,10 +479,14 @@ public final class DndListView: NSView {
     private func beginDrag(_ drag: DndListModel.Drag, cursor: CGPoint) {
         let stack = drag.keys.compactMap { mounted[$0] }.prefix(model.config.dragStackCount)
         let grabRow = mounted[drag.grabKey] ?? stack.first
-        let grabInWindow = grabRow.map { $0.convert($0.bounds, to: nil) } ?? .zero
+        // The stack is as wide as the selection, not the row: the
+        // margins of an inset list stay behind.
+        let grabInWindow = grabRow.map {
+            $0.convert($0.bounds.insetBy(dx: selectionInset, dy: 0), to: nil)
+        } ?? .zero
         let grabRect = window?.convertToScreen(grabInWindow) ?? grabInWindow
         let itemSize = CGSize(
-            width: listbox.frame.width,
+            width: listbox.frame.width - selectionInset * 2,
             height: model.config.itemHeight - model.config.placeholderGap
         )
         var background = NSColor.windowBackgroundColor.cgColor

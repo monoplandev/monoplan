@@ -108,11 +108,13 @@ final class DndRowView: NSView {
         return path
     }
 
-    /// The row as drawn now, for the drag stack.
+    /// The row as drawn now, for the drag stack: the part the selection
+    /// covers, without the margins either side of it.
     func snapshot() -> CGImage? {
-        guard bounds.width > 0, bounds.height > 0,
-              let rep = bitmapImageRepForCachingDisplay(in: bounds) else { return nil }
-        cacheDisplay(in: bounds, to: rep)
+        let rect = bounds.insetBy(dx: selectionInset, dy: 0)
+        guard rect.width > 0, rect.height > 0,
+              let rep = bitmapImageRepForCachingDisplay(in: rect) else { return nil }
+        cacheDisplay(in: rect, to: rep)
         return rep.cgImage
     }
 }
