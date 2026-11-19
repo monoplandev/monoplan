@@ -3327,7 +3327,7 @@ input.task-check:hover {
 }
 
 /* Subtasks (`SubtasksField`, `spec/subtasks.md`): a column of rows,
-   each a checkbox, a one-line text field and a hover-revealed ✕, over
+   each a checkbox, a one-line text field and a hover-revealed grip, over
    the trailing add field, whose plus glyph sits in the checkbox's
    place. Fields are borderless and read as text until focused. */
 .subtasks {
@@ -3374,22 +3374,48 @@ input.task-check:hover {
   color: var(--text-empty);
 }
 
-.subtask-remove {
+/* The grip that drags a row to reorder it, shown on hover. While a
+   drag is in flight the dragged row tracks the pointer and the others
+   ease aside; the eases are off again the moment it lands, so the
+   reordered rows do not slide back from their offsets. */
+.subtask-grip {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 18px;
   height: 18px;
-  font-size: 11px;
-  border-radius: 4px;
+  color: var(--text-faint);
+  cursor: grab;
+  touch-action: none;
   opacity: 0;
 }
 
-.subtask:hover .subtask-remove,
-.subtask:focus-within .subtask-remove {
+.subtask:hover .subtask-grip,
+.subtasks[data-dragging] .subtask[data-dragged] .subtask-grip {
   opacity: 1;
 }
 
+.subtasks[data-dragging] .subtask:not([data-dragged]) .subtask-grip {
+  opacity: 0;
+}
+
+.subtasks[data-dragging],
+.subtasks[data-dragging] .subtask-grip {
+  cursor: grabbing;
+}
+
+.subtasks[data-dragging] .subtask:not([data-dragged]) {
+  transition: transform 120ms ease;
+}
+
+.subtask[data-dragged] {
+  position: relative;
+  z-index: 1;
+}
+
 @media (hover: none) {
-  .subtask-remove {
+  .subtask-grip {
     opacity: 1;
   }
 }

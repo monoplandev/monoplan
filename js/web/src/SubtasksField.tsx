@@ -5,11 +5,15 @@
 // Subtasks show here and nowhere else; a list row carries only a count.
 //
 // Keys in a row: Enter commits and moves down, Backspace in an emptied
-// row removes it, Up / Down walk the rows, Alt+Up / Alt+Down reorder,
-// Escape puts the text back.
+// row removes it (the only way to remove one), Up / Down walk the rows,
+// Alt+Up / Alt+Down reorder, Escape puts the text back.
+//
+// The pointer reorders by the grip at a row's end: the row follows the
+// pointer, the rows it passes step aside, and the release is one move.
 
-import { For } from "solid-js";
+import { batch, createSignal, For, onCleanup } from "solid-js";
 import { useAppI18n } from "./i18n.tsx";
+import dragHandleSvg from "./icons/drag-handle.svg?raw";
 import plusSvg from "./icons/plus.svg?raw";
 import type { Subtask } from "./sync/store.ts";
 
@@ -44,8 +48,8 @@ export function SubtasksField(props: {
     const sub = subOf(id);
     if (!sub) return;
     const text = el.value.trim();
-    // An emptied row is not a delete on its own (Backspace or the ✕
-    // is): the text comes back.
+    // An emptied row is not a delete on its own (Backspace is): the
+    // text comes back.
     if (!text) el.value = sub.text;
     else if (text !== sub.text) props.onText(id, text);
   };
@@ -94,11 +98,108 @@ export function SubtasksField(props: {
     props.onAdd(text);
   };
 
+  // A grip drag in flight: the row at `from` is `dy` px off its slot
+  // and would land at `to`. Rows are one line, so one height serves.
+  const [drag, setDrag] = createSignal<{
+    id: string;
+    from: number;
+    to: number;
+    dy: number;
+    rowHeight: number;
+  } | null>(null);
+  let endDrag: (() => void) | undefined;
+  onCleanup(() => endDrag?.());
+
+  const onGripDown = (e: PointerEvent, id: string): void => {
+    if (e.button !== 0 || drag()) return;
+    const grip = e.currentTarget as HTMLElement;
+    const row = grip.closest<HTMLElement>(".subtask");
+    const from = ids().indexOf(id);
+    if (!row || from < 0) return;
+    // No focus change and no text selection: an edit in progress in
+    // another row keeps its caret through the drag.
+    e.preventDefault();
+    const rowHeight = row.getBoundingClientRect().height;
+    const startY = e.clientY;
+    const count = ids().length;
+    const pointerId = e.pointerId;
+    grip.setPointerCapture(pointerId);
+    setDrag({ id, from, to: from, dy: 0, rowHeight });
+
+    const finish = (drop: boolean): void => {
+      const d = drag();
+      endDrag?.();
+      if (!d) return;
+      // Reordering the DOM drops the caret from a moved row's input.
+      const active = document.activeElement;
+      const focused =
+        active instanceof HTMLInputElement ? active.dataset.subtask : undefined;
+      batch(() => {
+        setDrag(null);
+        // The list changing under the drag (a remote edit) voids it.
+        if (drop && d.to !== d.from && ids()[d.from] === id && ids().length === count) {
+          props.onMove(id, d.to);
+        }
+      });
+      if (focused) queueMicrotask(() => inputOf(focused)?.focus());
+    };
+    const onMove = (ev: PointerEvent): void => {
+      const { dy, to } = dragTarget(from, ev.clientY - startY, rowHeight, count);
+      setDrag({ id, from, to, dy, rowHeight });
+    };
+    const onUp = (): void => finish(true);
+    const onCancel = (): void => finish(false);
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.key !== "Escape") return;
+      // Escape ends the drag, not the surface.
+      ev.preventDefault();
+      ev.stopPropagation();
+      finish(false);
+    };
+    grip.addEventListener("pointermove", onMove);
+    grip.addEventListener("pointerup", onUp);
+    grip.addEventListener("pointercancel", onCancel);
+    grip.addEventListener("lostpointercapture", onCancel);
+    document.addEventListener("keydown", onKey, true);
+    endDrag = () => {
+      endDrag = undefined;
+      grip.removeEventListener("pointermove", onMove);
+      grip.removeEventListener("pointerup", onUp);
+      grip.removeEventListener("pointercancel", onCancel);
+      grip.removeEventListener("lostpointercapture", onCancel);
+      document.removeEventListener("keydown", onKey, true);
+      if (grip.hasPointerCapture(pointerId)) grip.releasePointerCapture(pointerId);
+    };
+  };
+
+  // The dragged row follows the pointer; rows between its slot and its
+  // target step one row towards the slot it left.
+  const rowShift = (id: string): string | undefined => {
+    const d = drag();
+    if (!d) return undefined;
+    if (d.id === id) return `translateY(${d.dy}px)`;
+    const at = ids().indexOf(id);
+    if (at > d.from && at <= d.to) return `translateY(${-d.rowHeight}px)`;
+    if (at < d.from && at >= d.to) return `translateY(${d.rowHeight}px)`;
+    return undefined;
+  };
+
   return (
-    <div class="subtasks" ref={rootRef} role="group" aria-label={m().workspace.subtasks}>
+    <div
+      class="subtasks"
+      ref={rootRef}
+      role="group"
+      aria-label={m().workspace.subtasks}
+      data-dragging={drag() ? "" : undefined}
+    >
       <For each={ids()}>
         {(id) => (
-          <div class="subtask" data-done={subOf(id)?.done ? "" : undefined}>
+          <div
+            class="subtask"
+            data-done={subOf(id)?.done ? "" : undefined}
+            data-dragged={drag()?.id === id ? "" : undefined}
+            style={{ transform: rowShift(id) }}
+          >
             <input
               type="checkbox"
               class="task-check"
@@ -114,16 +215,13 @@ export function SubtasksField(props: {
               onBlur={(e) => commit(id, e.currentTarget)}
               onKeyDown={(e) => onRowKeyDown(e, id)}
             />
-            <button
-              type="button"
-              class="icon-button subtask-remove"
-              tabIndex={-1}
-              title={m().workspace.removeSubtask}
-              aria-label={m().workspace.removeSubtask}
-              onClick={() => props.onRemove(id)}
-            >
-              ✕
-            </button>
+            {/* Pointer only: the keyboard reorders with Alt+Up / Down. */}
+            <span
+              class="subtask-grip"
+              aria-hidden="true"
+              innerHTML={dragHandleSvg}
+              onPointerDown={(e) => onGripDown(e, id)}
+            />
           </div>
         )}
       </For>
@@ -154,6 +252,21 @@ export function SubtasksField(props: {
       </div>
     </div>
   );
+}
+
+/** Where a grip drag stands: the row that started at `from` of `count`
+ *  rows, each `rowHeight` tall, with the pointer `delta` px from where
+ *  it went down. `dy` is the row's offset, held inside the list; `to`
+ *  the index it would land at, changing as it crosses half a row. */
+export function dragTarget(
+  from: number,
+  delta: number,
+  rowHeight: number,
+  count: number,
+): { dy: number; to: number } {
+  if (rowHeight <= 0 || count <= 0) return { dy: 0, to: from };
+  const dy = Math.min(Math.max(delta, -from * rowHeight), (count - 1 - from) * rowHeight);
+  return { dy, to: from + Math.round(dy / rowHeight) };
 }
 
 /** The count a list row carries for an item's subtasks, `done/total`,

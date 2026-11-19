@@ -9,7 +9,7 @@ import { Dek, Doc, Replica } from "@monoplan/core/wasm";
 import type { ReplicaStorage } from "@monoplan/core/wasm";
 import { MemReplicaStorage } from "../../core/test/mem-replica-storage.ts";
 import { createSyncedApp } from "../src/sync/store.ts";
-import { subtaskCount } from "../src/SubtasksField.tsx";
+import { dragTarget, subtaskCount } from "../src/SubtasksField.tsx";
 
 const DOC_ID = "00000000-0000-0000-0000-00000000000c";
 
@@ -62,6 +62,17 @@ describe("subtasks", () => {
       expect(shape()).toEqual(["bread"]);
       dispose();
     });
+  });
+
+  test("a grip drag lands half a row past each neighbour and stays in the list", () => {
+    // Row 1 of 4, rows 28 px tall.
+    expect(dragTarget(1, 0, 28, 4)).toEqual({ dy: 0, to: 1 });
+    expect(dragTarget(1, 13, 28, 4)).toEqual({ dy: 13, to: 1 });
+    expect(dragTarget(1, 15, 28, 4)).toEqual({ dy: 15, to: 2 });
+    expect(dragTarget(1, -15, 28, 4)).toEqual({ dy: -15, to: 0 });
+    expect(dragTarget(1, 500, 28, 4)).toEqual({ dy: 56, to: 3 });
+    expect(dragTarget(1, -500, 28, 4)).toEqual({ dy: -28, to: 0 });
+    expect(dragTarget(0, 40, 0, 4)).toEqual({ dy: 0, to: 0 });
   });
 
   test("subtasks survive the boot snapshot path", () => {

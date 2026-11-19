@@ -483,7 +483,16 @@ private struct AssigneeField: View {
 
     var body: some View {
         let row = PanelField(text: name ?? String(localized: "Assign"), empty: assignee == nil) {
-            Image(systemName: "person")
+            // The assignee's avatar in the icon's place once there is
+            // one (a former member's is the dashed "?"), as on iOS.
+            if let assignee {
+                MemberAvatar(
+                    accountId: assignee,
+                    email: assignment.members?.first(where: { $0.accountId == assignee })?.email,
+                    side: 16)
+            } else {
+                Image(systemName: "person")
+            }
         }
         if locked {
             row
