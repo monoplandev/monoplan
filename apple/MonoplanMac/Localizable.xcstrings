@@ -131,6 +131,16 @@
         }
       }
     },
+    "Assigned to %@": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Asignado a %@"
+          }
+        }
+      }
+    },
     "Assignee": {
       "localizations": {
         "es": {

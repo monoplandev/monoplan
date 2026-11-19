@@ -63,6 +63,7 @@ import {
   Show,
 } from "solid-js";
 import { ContextMenu } from "@kobalte/core/context-menu";
+import { Avatar } from "./Avatar.tsx";
 import { ItemContextMenu } from "./ItemContextMenu.tsx";
 import { RowMenuButton } from "./Row.tsx";
 import {
@@ -99,6 +100,7 @@ import {
   isClosed,
   isEvent,
   type ItemActions,
+  type ItemView,
 } from "./sync/store.ts";
 
 /** The slice of `DndImperative` the Workspace drives on this view. */
@@ -143,6 +145,10 @@ export function Upcoming(props: {
    *  (anything but Home) names it under the title with the shared
    *  people glyph; null for Home rows, which carry no marker. */
   workspaceLabel: (docId: string) => string | null;
+  /** The item's assignee as a person, or null to show none (Home,
+   *  unassigned), as `Row` takes it: an open row carries their avatar
+   *  at the head of its sub line. */
+  assigneeOf?: (item: ItemView) => { accountId: string; email: string | null } | null;
   onOpen: (id: string) => void;
   /** Touch: a tap opens the row. */
   openOnTap?: () => boolean;
@@ -546,6 +552,8 @@ export function Upcoming(props: {
                   const starred = createMemo(() =>
                     props.app.isFocused(r.item.id),
                   );
+                  const assignee = () =>
+                    isClosed(r.item) ? null : (props.assigneeOf?.(r.item) ?? null);
                   return (
                   <ItemContextMenu
                     item={() => r.item}
@@ -640,9 +648,12 @@ export function Upcoming(props: {
                           + name), the list the item is in, then the place.
                           Home rows carry no workspace marker, and an item
                           with no list (it lives on the calendar alone)
-                          no list. */}
+                          no list. An open item's assignee leads the
+                          line as a small disc (shared workspaces only,
+                          as list rows). */}
                       <Show
                         when={
+                          assignee() ||
                           spanDayLabel(r) ||
                           props.workspaceLabel(r.item.docId) ||
                           r.item.listId !== "inbox" ||
@@ -650,6 +661,17 @@ export function Upcoming(props: {
                         }
                       >
                         <span class="upcoming-row-sub">
+                          <Show when={assignee()}>
+                            {(a) => (
+                              <Avatar
+                                accountId={a().accountId}
+                                email={a().email}
+                                title={m().workspace.assignedTo(
+                                  a().email ?? m().sharing.formerMember,
+                                )}
+                              />
+                            )}
+                          </Show>
                           <Show when={spanDayLabel(r)}>
                             {(label) => (
                               <span class="upcoming-row-place upcoming-row-span">

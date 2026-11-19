@@ -66,6 +66,10 @@ pub struct AgendaEntry {
     pub deadline: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub place: Option<Place>,
+    /// The account id the item is assigned to (`spec/sharing-plan.md`
+    /// "Assignment"); absent when unassigned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assignee: Option<String>,
     /// Which field placed the row.
     pub placed_by: AgendaPlacedBy,
     pub tone: AgendaTone,
@@ -219,6 +223,7 @@ pub fn groups(placed: &Placed) -> Vec<AgendaGroup> {
                         duration: r.item.duration,
                         deadline: r.item.deadline.clone(),
                         place: r.item.place.as_ref().map(Place::from),
+                        assignee: r.item.assignee.clone(),
                         placed_by: r.placed_by,
                         tone: r.tone,
                         doc_id,

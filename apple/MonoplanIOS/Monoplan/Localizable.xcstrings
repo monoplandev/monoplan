@@ -290,6 +290,16 @@
         }
       }
     },
+    "Assigned to %@" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Asignado a %@"
+          }
+        }
+      }
+    },
     "Assigned unavailable" : {
       "extractionState" : "stale",
       "localizations" : {

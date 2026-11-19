@@ -369,10 +369,12 @@ private struct MemberRow<Trailing: View>: View {
 /// the web's `Avatar` (and iOS's `MemberAvatar`), same palette and same
 /// pick from the account id, so a member is the same colour on every
 /// device.
-private struct MemberAvatar: View {
+/// With no email (an assignee who is no longer a member) the disc is a
+/// grey dashed "?", as the web's.
+struct MemberAvatar: View {
     let accountId: String
-    let email: String
-    private let side: CGFloat = 24
+    let email: String?
+    var side: CGFloat = 24
 
     private static let colours: [Color] = [
         0xFF928B, 0xFFD9C6, 0xFEC3A6, 0xFEF2AD, 0xE2BDFE,
@@ -393,16 +395,23 @@ private struct MemberAvatar: View {
     }
 
     private var initial: String {
-        let trimmed = email.trimmingCharacters(in: .whitespaces)
+        let trimmed = (email ?? "").trimmingCharacters(in: .whitespaces)
         return trimmed.first.map { String($0).uppercased() } ?? "?"
     }
 
     var body: some View {
         Text(verbatim: initial)
-            .font(.system(size: side * 0.5, weight: .semibold))
-            .foregroundStyle(.black.opacity(0.75))
+            // The small disc's letter stays legible.
+            .font(.system(size: max(9, side * 0.5), weight: .semibold))
+            .foregroundStyle(email == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.black.opacity(0.75)))
             .frame(width: side, height: side)
-            .background(colour, in: Circle())
+            .background {
+                if email == nil {
+                    Circle().strokeBorder(.secondary, style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
+                } else {
+                    Circle().fill(colour)
+                }
+            }
             .accessibilityHidden(true)
     }
 }

@@ -3971,6 +3971,7 @@ export function Workspace(props: {
             listLabel={listLabel}
             listIcon={(listId, docId) => docs.listOf(docId ?? viewDocId(), listId)?.icon}
             workspaceLabel={(docId) => (docId === docs.homeDocId ? null : docLabel(docId))}
+            assigneeOf={assigneeOf}
             onOpen={(id) => setOpenItemId(id)}
             openOnTap={openOnTap}
             ref={(h) => (upcomingHandle = h)}

@@ -342,10 +342,18 @@ private struct MemberRow: View {
 /// A person as a coloured disc with the first letter of their email:
 /// the web's `Avatar`, same palette and same pick from the account id,
 /// so a member is the same colour on every device.
+/// With no email (an assignee who is no longer a member) the disc is a
+/// grey dashed "?", as the web's.
 struct MemberAvatar: View {
     let accountId: String
-    let email: String
-    @ScaledMetric(relativeTo: .body) private var side: CGFloat = 28
+    let email: String?
+    @ScaledMetric private var side: CGFloat
+
+    init(accountId: String, email: String?, side: CGFloat = 28) {
+        self.accountId = accountId
+        self.email = email
+        _side = ScaledMetric(wrappedValue: side, relativeTo: .body)
+    }
 
     private static let colours: [Color] = [
         0xFF928B, 0xFFD9C6, 0xFEC3A6, 0xFEF2AD, 0xE2BDFE,
@@ -366,16 +374,23 @@ struct MemberAvatar: View {
     }
 
     private var initial: String {
-        let trimmed = email.trimmingCharacters(in: .whitespaces)
+        let trimmed = (email ?? "").trimmingCharacters(in: .whitespaces)
         return trimmed.first.map { String($0).uppercased() } ?? "?"
     }
 
     var body: some View {
         Text(initial)
-            .font(.system(size: side * 0.5, weight: .semibold))
-            .foregroundStyle(.black.opacity(0.75))
+            // The small disc's letter stays legible.
+            .font(.system(size: max(9, side * 0.5), weight: .semibold))
+            .foregroundStyle(email == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.black.opacity(0.75)))
             .frame(width: side, height: side)
-            .background(colour, in: Circle())
+            .background {
+                if email == nil {
+                    Circle().strokeBorder(.secondary, style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
+                } else {
+                    Circle().fill(colour)
+                }
+            }
             .accessibilityHidden(true)
     }
 }

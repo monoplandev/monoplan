@@ -85,14 +85,27 @@ struct AgendaView: View {
 /// checkbox, the text (its star right after it when starred) with
 /// under it the list it is in (icon and name; none for an item on the
 /// calendar alone), its place when it has one and then
-/// the workspace when the row is not Personal's, and on the right the time when timed with a note under
+/// the workspace when the row is not Personal's (ahead of those lines
+/// the assignee's small avatar, when an open item has one), and on the right the time when timed with a note under
 /// it for the tone (overdue in red, due today in orange) or the
 /// duration. The checkbox ticks; the rest of the row opens the sheet.
 /// An event has the event pill for a checkbox while it is open or its
 /// day has gone by (`AgendaEntry.showsCheck`). A task done today is
 /// muted at the end of Today, with no time or length.
 struct AgendaRowView: View {
+    @EnvironmentObject private var model: AppModel
     let row: AgendaEntry
+
+    /// Who the item is assigned to (spec/sharing-plan.md "Assignment"):
+    /// open items of a shared workspace only, as the web's rows. Nil
+    /// while the workspace's member list is not known, which is always
+    /// so for Personal; a nil email is a former member.
+    private var assignee: (id: String, email: String?)? {
+        guard !row.state.isClosed, let docId = row.docId, let id = row.assignee,
+              let people = model.members[docId]
+        else { return nil }
+        return (id, people.first { $0.accountId == id }?.email)
+    }
 
     var body: some View {
         ItemLink(ItemRef(docId: row.docId, itemId: row.id, title: row.text)) {
@@ -107,40 +120,54 @@ struct AgendaRowView: View {
                                 .foregroundStyle(row.isDone ? .secondary : .primary)
                             RowStar(state: row.state)
                         }
-                        if let list = row.listName {
-                            // The list's icon, then its name.
-                            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                                ListIcon(listId: row.listId, emoji: row.listIcon)
-                                    .imageScale(.small)
-                                Text(verbatim: list).lineLimit(1)
+                        // Where it lives, with who it is assigned to
+                        // ahead of those lines.
+                        if assignee != nil || row.listName != nil || row.place != nil || row.docName != nil {
+                            HStack(alignment: .top, spacing: 5) {
+                                if let assignee {
+                                    MemberAvatar(accountId: assignee.id, email: assignee.email, side: 15)
+                                        .accessibilityElement()
+                                        .accessibilityLabel(
+                                            "Assigned to \(assignee.email ?? String(localized: "A former member"))")
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    if let list = row.listName {
+                                        // The list's icon, then its name.
+                                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                            ListIcon(listId: row.listId, emoji: row.listIcon)
+                                                .imageScale(.small)
+                                            Text(verbatim: list).lineLimit(1)
+                                        }
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .accessibilityElement(children: .ignore)
+                                        .accessibilityLabel(Text(verbatim: list))
+                                    }
+                                    if let place = row.place {
+                                        // The item page's place glyph, then the label.
+                                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                            PinIcon(size: 11)
+                                            Text(place.label).lineLimit(1)
+                                        }
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .accessibilityElement(children: .ignore)
+                                        .accessibilityLabel("At \(place.label)")
+                                    }
+                                    if let name = row.docName {
+                                        // The shared glyph, then the workspace's
+                                        // name, as `SharedWorkspaceBadge` has them.
+                                        HStack(spacing: 4) {
+                                            SharedIcon()
+                                            Text(name).lineLimit(1)
+                                        }
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                        .accessibilityElement(children: .ignore)
+                                        .accessibilityLabel("Shared workspace \(name)")
+                                    }
+                                }
                             }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel(Text(verbatim: list))
-                        }
-                        if let place = row.place {
-                            // The item page's place glyph, then the label.
-                            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                                PinIcon(size: 11)
-                                Text(place.label).lineLimit(1)
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel("At \(place.label)")
-                        }
-                        if let name = row.docName {
-                            // The shared glyph, then the workspace's
-                            // name, as `SharedWorkspaceBadge` has them.
-                            HStack(spacing: 4) {
-                                SharedIcon()
-                                Text(name).lineLimit(1)
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel("Shared workspace \(name)")
                         }
                     }
                     Spacer(minLength: 8)

@@ -12,7 +12,7 @@ final class TrayMenuTests: XCTestCase {
             id: id, text: text, listId: list, listName: nil, listIcon: nil, state: state, event: event,
             when: when,
             duration: duration,
-            deadline: deadline, place: nil, placedBy: placedBy ?? (when == nil ? .deadline : .when),
+            deadline: deadline, place: nil, assignee: nil, placedBy: placedBy ?? (when == nil ? .deadline : .when),
             tone: tone,
             docId: docId, docName: nil)
     }

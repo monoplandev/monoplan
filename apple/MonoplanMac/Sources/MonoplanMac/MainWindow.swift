@@ -1706,10 +1706,22 @@ struct MainWindowView: View {
             .ignoresSafeArea()
     }
 
-    /// Whether a Calendar row has its second line (where it lives, its
-    /// place): such a row is taller.
+    /// Whether a Calendar row has its second line (who it is assigned
+    /// to, where it lives, its place): such a row is taller.
     private func agendaRowDetailed(_ row: AgendaEntry) -> Bool {
-        model.agendaListName(row) != nil || !(row.place?.label ?? "").isEmpty
+        agendaAssignee(row) != nil || model.agendaListName(row) != nil || !(row.place?.label ?? "").isEmpty
+    }
+
+    /// Who a Calendar row's item is assigned to, drawn as a small disc
+    /// at the head of its second line (spec/sharing-plan.md
+    /// "Assignment"): open items of a shared workspace only, as the
+    /// web's rows. Nil while the workspace's member list is not known,
+    /// which is always so for Personal; a nil email is a former member.
+    private func agendaAssignee(_ row: AgendaEntry) -> (id: String, email: String?)? {
+        guard !row.state.isClosed, let docId = row.docId, let id = row.assignee,
+              let people = model.members[docId]
+        else { return nil }
+        return (id, people.first { $0.accountId == id }?.email)
     }
 
     /// Whether a Calendar row leads with a checkbox. An event's own
@@ -1763,6 +1775,16 @@ struct MainWindowView: View {
                     .alignmentGuide(.rowTitle) { $0[VerticalAlignment.center] }
                     if detailed {
                         HStack(alignment: .center, spacing: 8) {
+                            if let assignee = agendaAssignee(row) {
+                                let label = Text("Assigned to \(assignee.email ?? String(localized: "A former member"))")
+                                MemberAvatar(accountId: assignee.id, email: assignee.email, side: 14)
+                                    .accessibilityElement()
+                                    .accessibilityLabel(label)
+                                    .help(label)
+                                    // Closer to what follows than
+                                    // the line's own gap.
+                                    .padding(.trailing, -3)
+                            }
                             if let listName {
                                 // The list's own icon, when it has one.
                                 Text(verbatim: [row.listIcon, listName].compactMap { $0 }.joined(separator: " "))

@@ -714,6 +714,16 @@ body {
   height: var(--upcoming-line);
 }
 
+/* The assignee's disc at the head of a calendar row's sub line: sized
+   down to that line's glyphs, and closer to what follows than the
+   line's own gap. */
+.upcoming-row-sub .avatar {
+  width: 14px;
+  height: 14px;
+  font-size: 8px;
+  margin-right: -4px;
+}
+
 /* "in 45m" on a timed row later today: a muted countdown ahead of the
    list badge. */
 .upcoming-row-soon {
