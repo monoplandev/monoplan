@@ -122,8 +122,8 @@ pub struct AgendaDay {
 ///   dates. Done today, that is with a `lifecycle_at` at or after
 ///   `closed_since` (the local midnight today began at, in ms), it is
 ///   one row on Today, `placed_by: done`, neutral, after Today's other
-///   rows in the order done. Done before that, or with `closed_since`
-///   `None`, it is dropped. Mirrors `groupByDay` in the web's
+///   rows in the order done. Done before that, with no date at all, or
+///   with `closed_since` `None`, it is dropped. Mirrors `groupByDay` in the web's
 ///   `dayGroups.ts`.
 /// - A done event places by `when` only, on that day, neutral, where it
 ///   was: ticking it does not move it. Its deadline is settled.
@@ -162,7 +162,11 @@ pub fn build_agenda_from(
             // A done task is off its dates: at the end of Today (group
             // 2, in the order done) if it was done today, else nowhere.
             if item.is_done() && !(item.is_event() && item.when.is_some()) {
-                if closed_since.is_some_and(|since| item.lifecycle_at >= since) {
+                // Dated ones only: a task that never had a date was
+                // never on the calendar, and being done today does not
+                // put it there.
+                let dated = item.when.is_some() || item.deadline.is_some();
+                if dated && closed_since.is_some_and(|since| item.lifecycle_at >= since) {
                     placed.push((
                         today.to_string(),
                         2,
@@ -722,6 +726,8 @@ mod tests {
         let done_both = done("done-both", Some("2026-09-10"), Some("2026-09-05"), 1_200);
         // A deadline alone counts too.
         let done_deadline = done("done-deadline", None, Some("2026-09-12"), 1_400);
+        // No date at all: never on the calendar, done today or not.
+        let done_undated = done("done-undated", None, None, 1_350);
         // Done before today: off the agenda, whatever it was planned for.
         let done_before = done("done-before", Some(TODAY), None, 900);
         // A done event stays on its `when`.
@@ -739,6 +745,7 @@ mod tests {
             item("future", Some("2026-09-10"), None, 8),
             done_both,
             done_deadline,
+            done_undated,
             done_before,
             done_event,
             binned,
