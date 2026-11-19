@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		4E00000000000000000000C5 /* MonoplanCore in Frameworks */ = {isa = PBXBuildFile; productRef = 4E00000000000000000000C3 /* MonoplanCore */; };
 		4E00000000000000000000C6 /* MonoplanMacKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4E00000000000000000000C4 /* MonoplanMacKit */; };
+		4E00000000000000000000CA /* MonoplanDnd in Frameworks */ = {isa = PBXBuildFile; productRef = 4E00000000000000000000C8 /* MonoplanDnd */; };
+		4E00000000000000000000CB /* MonoplanDndCore in Frameworks */ = {isa = PBXBuildFile; productRef = 4E00000000000000000000C9 /* MonoplanDndCore */; };
 		4E00000000000000000000D2 /* icon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 4E00000000000000000000D1 /* icon.icon */; };
 		4E00000000000000000000D4 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 4E00000000000000000000D3 /* Localizable.xcstrings */; };
 		4E00000000000000000000D6 /* container-migration.plist in Resources */ = {isa = PBXBuildFile; fileRef = 4E00000000000000000000D5 /* container-migration.plist */; };
@@ -39,6 +41,8 @@
 			files = (
 				4E00000000000000000000C5 /* MonoplanCore in Frameworks */,
 				4E00000000000000000000C6 /* MonoplanMacKit in Frameworks */,
+				4E00000000000000000000CA /* MonoplanDnd in Frameworks */,
+				4E00000000000000000000CB /* MonoplanDndCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -89,6 +93,8 @@
 			packageProductDependencies = (
 				4E00000000000000000000C3 /* MonoplanCore */,
 				4E00000000000000000000C4 /* MonoplanMacKit */,
+				4E00000000000000000000C8 /* MonoplanDnd */,
+				4E00000000000000000000C9 /* MonoplanDndCore */,
 			);
 			productName = Monoplan;
 			productReference = 4E00000000000000000000A5 /* Monoplan.app */;
@@ -121,6 +127,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				4E00000000000000000000C1 /* XCLocalSwiftPackageReference "../MonoplanCore" */,
+				4E00000000000000000000C7 /* XCLocalSwiftPackageReference "../MonoplanDnd" */,
 				4E00000000000000000000C2 /* XCLocalSwiftPackageReference "." */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -378,6 +385,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = .;
 		};
+		4E00000000000000000000C7 /* XCLocalSwiftPackageReference "../MonoplanDnd" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../MonoplanDnd;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -388,6 +399,14 @@
 		4E00000000000000000000C4 /* MonoplanMacKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MonoplanMacKit;
+		};
+		4E00000000000000000000C8 /* MonoplanDnd */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MonoplanDnd;
+		};
+		4E00000000000000000000C9 /* MonoplanDndCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MonoplanDndCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

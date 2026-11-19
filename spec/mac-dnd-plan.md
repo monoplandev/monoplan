@@ -13,6 +13,26 @@ spec for the macOS side is to be written before another attempt.
 Phases 3–4 not built. The AppKit mapping below is the original plan,
 not a design proven in the app.
 
+**v2 baseline (spike, 2026-11-20):** `apple/MonoplanDnd/`, a port of
+the web component itself rather than a mapping onto `NSTableView`:
+frame-positioned rows in a scroll view, our own nudge, placeholder,
+drag stack and autoscroll, no `NSDraggingSession`. A Foundation-only
+core (selection, windowing, the drag state machine) under an AppKit
+view, with a harness window and scripted drags that dump frames
+(the "way to see it" asked for below). Contract and web → AppKit
+mapping in `apple/MonoplanDnd/spec.md`.
+
+**Phase 2 built on it (2026-11-20):** a list's rows and Starred's are
+`ItemList.swift` over `DndListView`: multi-select, drag to reorder and
+⌘↑ / ⌘↓ through `reorder_items` / `reorder_starred` (the model reorders
+its own rows first, so the list never shows the old order while the
+write is out), right-click on several rows to bin them in one step
+(`set_binned_many`). One row selected opens its panel; none or several
+shut it. An Inbox neither drags nor reorders. Rows are AppKit with the
+checkbox and star hosted from SwiftUI. Not built: drops on the sidebar
+(phase 3, the list's delegate already reports the drag for it), across
+workspaces (4); the other lenses are still SwiftUI lists.
+
 ## What the web does
 
 The web carries its own component (`js/web/src/dnd/`, contract in

@@ -31,6 +31,7 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../MonoplanCore"),
+        .package(path: "../MonoplanDnd"),
     ],
     targets: [
         .target(
@@ -39,7 +40,11 @@ let package = Package(
         ),
         .executableTarget(
             name: "MonoplanMac",
-            dependencies: ["MonoplanMacKit", "MonoplanCore"],
+            dependencies: [
+                "MonoplanMacKit", "MonoplanCore",
+                .product(name: "MonoplanDnd", package: "MonoplanDnd"),
+                .product(name: "MonoplanDndCore", package: "MonoplanDnd"),
+            ],
             path: "Sources/MonoplanMac"
         ),
         .testTarget(

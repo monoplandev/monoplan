@@ -78,6 +78,10 @@ enum PaneColor {
     /// #e5e7eb in light and #2a2a2e in dark.
     static let rowSelectedInactive = rgb(dark: 0x2a2a2e, light: 0xe5e7eb)
 
+    /// Where dragged rows will land: the web's
+    /// `--dnd-placeholder-color`, #cbd5e1 in light and #475569 in dark.
+    static let dropSlot = rgb(dark: 0x475569, light: 0xcbd5e1)
+
     /// `0xRRGGBB` for each appearance.
     private static func rgb(dark: Int, light: Int) -> NSColor {
         NSColor(name: nil) { appearance in

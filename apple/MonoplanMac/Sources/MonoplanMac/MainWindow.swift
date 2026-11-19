@@ -983,6 +983,37 @@ final class MainWindowModel: ObservableObject {
         write { try $0.setBinned(workspace: workspace, id: id, binned: true) }
     }
 
+    /// Send several items to the Bin in one step
+    /// (`Engine.setBinnedMany`: one Undo brings them all back).
+    func bin(_ refs: [ItemRef]) {
+        if let selected, refs.contains(where: { $0.id == selected.id }) { clearItem() }
+        write { try $0.setBinnedMany(items: refs, binned: true) }
+    }
+
+    /// The shown list's rows `ids` moved, as one block in list order,
+    /// to directly above `before` (nil: the end): a drag in the list
+    /// or ⌘↑ / ⌘↓ (`Engine.reorderItems`, one Undo step). The rows are
+    /// put in their new order here first, so the list does not show
+    /// the old one again while the write and its reread are out.
+    func reorderItems(workspace: String?, ids: [String], before: String?) {
+        items = Self.moved(items, ids: ids, before: before, id: \.id)
+        write { try $0.reorderItems(workspace: workspace, ids: ids, before: before) }
+    }
+
+    /// The same in Starred (`Engine.reorderStarred`).
+    func reorderStarred(ids: [String], before: String?) {
+        starred = Self.moved(starred, ids: ids, before: before, id: \.id)
+        write { try $0.reorderStarred(ids: ids, before: before) }
+    }
+
+    private static func moved<Row>(_ rows: [Row], ids: [String], before: String?, id: (Row) -> String) -> [Row] {
+        let moving = Set(ids)
+        var rest = rows.filter { !moving.contains(id($0)) }
+        let at = before.flatMap { key in rest.firstIndex { id($0) == key } } ?? rest.count
+        rest.insert(contentsOf: rows.filter { moving.contains(id($0)) }, at: at)
+        return rest
+    }
+
     /// Take an item out of the Bin, back to its list and state.
     func restore(workspace: String?, id: String) {
         write { try $0.setBinned(workspace: workspace, id: id, binned: false) }
@@ -1665,39 +1696,60 @@ struct MainWindowView: View {
             set: { id in model.selectItem(workspace: id.flatMap(workspace), id: id) })
     }
 
+    /// A list's rows on the drag-and-drop list (`ItemList`): several
+    /// can be selected, and dragged or ⌘-moved to reorder.
     private var list: some View {
-        VStack(spacing: 0) {
-            List(selection: selection { _ in model.shown.workspace }) {
-                // Rows are identified by position, not by item: going
-                // from one list to another then rewrites the rows on
-                // screen in place, where item identity tears every one
-                // down and builds it again (a few ms each). The tag
-                // keeps selection on the item.
-                // An Inbox is a queue in arrival order: shown newest
-                // first when this Mac says so, and never reordered by
-                // hand (no row drag, here or anywhere).
-                let rows = model.shown.list == MainWindowModel.inbox && inboxNewestFirst
-                    ? Array(model.items.reversed()) : model.items
-                ForEach(Array(rows.enumerated()), id: \.offset) { _, item in
-                    HStack(alignment: .center, spacing: 8) {
-                        ItemCheckButton(state: item.state) { _ in model.tick(item) }
-                        Text(verbatim: item.text)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        Spacer()
-                        if model.starredIds.contains(item.id) { starMark }
-                    }
-                    .itemRow()
-                    .itemMenu(model, workspace: model.shown.workspace, id: item.id)
-                    .tag(item.id)
-                }
-                if model.items.isEmpty {
-                    Text("Nothing here").foregroundStyle(.secondary)
-                }
+        // An Inbox is a queue in arrival order: shown newest first
+        // when this Mac says so, and never reordered by hand (no row
+        // drag, here or anywhere).
+        let inbox = model.shown.list == MainWindowModel.inbox
+        let items = inbox && inboxNewestFirst ? Array(model.items.reversed()) : model.items
+        let workspace = model.shown.workspace
+        return ItemList(
+            surface: model.shown,
+            rows: items.map {
+                ItemListRow(
+                    id: $0.id, workspace: workspace, text: $0.text, state: $0.state,
+                    starred: model.starredIds.contains($0.id))
+            },
+            selected: model.selected?.id,
+            reorder: !inbox,
+            select: { model.selectItem(workspace: $0?.workspace, id: $0?.id) },
+            toggle: { row, done in model.setDone(workspace: row.workspace, id: row.id, done: done) },
+            move: { ids, before in model.reorderItems(workspace: workspace, ids: ids, before: before) },
+            menu: itemListMenu)
+            // Under the toolbar, as a list is: the scroll view insets
+            // its own content for it.
+            .ignoresSafeArea()
+            .overlay(alignment: .topLeading) {
+                if model.items.isEmpty { emptyNote(Text("Nothing here")) }
             }
-            .listStyle(.inset)
-            .scrollContentBackground(.hidden)
+    }
+
+    /// What an empty list says, where its first row would be.
+    private func emptyNote(_ text: Text) -> some View {
+        text.foregroundStyle(.secondary)
+            .padding(.horizontal, 20)
+            .frame(height: 32)
+            .allowsHitTesting(false)
+    }
+
+    /// The right-click menu of `ItemList`'s selected rows: one row's
+    /// is the other lists' `itemMenu`; several can only go to the Bin
+    /// together.
+    private func itemListMenu(_ rows: [ItemListRow]) -> [AgendaTable.RowAction?] {
+        guard let first = rows.first else { return [] }
+        let bin = AgendaTable.RowAction(title: String(localized: "Move to Bin")) {
+            model.bin(rows.map { ItemRef(workspace: $0.workspace, id: $0.id) })
         }
+        guard rows.count == 1 else { return [bin] }
+        return [
+            .init(title: String(localized: "Duplicate")) {
+                model.duplicate(workspace: first.workspace, id: first.id)
+            },
+            nil,
+            bin,
+        ]
     }
 
     /// The Calendar: the engine's agenda as it groups it. The days
@@ -1875,31 +1927,24 @@ struct MainWindowView: View {
     /// workspace when it is not Personal's). No star on a row: every
     /// one here has it. The item's panel takes it off.
     private var starred: some View {
-        List(selection: selection { id in model.starred.first { $0.id == id }?.docId }) {
-            ForEach(model.starred, id: \.id) { row in
-                let done = row.state == .done
-                HStack(alignment: .center, spacing: 8) {
-                    ItemCheckButton(state: row.state) { model.setDone(workspace: row.docId, id: row.id, done: $0) }
-                    Text(verbatim: row.text)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .foregroundStyle(done ? .secondary : .primary)
-                    Spacer()
-                    Text(verbatim: [row.listName, row.docName].compactMap { $0 }.joined(separator: " · "))
-                        .font(.footnote)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-                .itemRow()
-                .itemMenu(model, workspace: row.docId, id: row.id)
-                .tag(row.id)
+        ItemList(
+            surface: model.shown,
+            rows: model.starred.map {
+                ItemListRow(
+                    id: $0.id, workspace: $0.docId, text: $0.text, state: $0.state,
+                    note: [$0.listName, $0.docName].compactMap { $0 }.joined(separator: " · "),
+                    muted: $0.state == .done)
+            },
+            selected: model.selected?.id,
+            reorder: true,
+            select: { model.selectItem(workspace: $0?.workspace, id: $0?.id) },
+            toggle: { row, done in model.setDone(workspace: row.workspace, id: row.id, done: done) },
+            move: { ids, before in model.reorderStarred(ids: ids, before: before) },
+            menu: itemListMenu)
+            .ignoresSafeArea()
+            .overlay(alignment: .topLeading) {
+                if model.starred.isEmpty { emptyNote(Text("Nothing starred")) }
             }
-            if model.starred.isEmpty {
-                Text("Nothing starred").foregroundStyle(.secondary)
-            }
-        }
-        .listStyle(.inset)
-        .scrollContentBackground(.hidden)
     }
 
     /// Assigned: the open items assigned to this account in every
