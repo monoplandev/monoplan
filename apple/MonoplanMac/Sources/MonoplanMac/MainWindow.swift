@@ -388,8 +388,9 @@ final class MainWindowModel: ObservableObject {
     }
 
     /// The sidebar row's glyph for what is shown, before the bar's
-    /// title: the lenses' and Inbox's. A user list has none here (its
-    /// emoji, if any, leads `listTitle`).
+    /// title: the lenses', Inbox's, and the document glyph of a user
+    /// list with no emoji (one with an emoji has none here: the emoji
+    /// leads `listTitle`).
     var titleIcon: NSImage? {
         switch shown.lens {
         case .starred: return StarArt.outline
@@ -397,7 +398,11 @@ final class MainWindowModel: ObservableObject {
         case .assigned: return NavArt.person
         case .done: return NavArt.done
         case .bin: return NavArt.bin
-        case nil: return shown.list == Self.inbox ? NavArt.inbox : nil
+        case nil:
+            if shown.list == Self.inbox { return NavArt.inbox }
+            let lists = sections.first { $0.target == shown.workspace }?.lists ?? []
+            guard let found = lists.first(where: { $0.id == shown.list }) else { return nil }
+            return (found.icon ?? "").isEmpty ? NavArt.list : nil
         }
     }
 
@@ -1401,16 +1406,16 @@ struct MainWindowView: View {
                         .contextMenu { inboxOrderPicker })
                         ForEach(section.userLists) { list in
                             row(.list(workspace: section.target, list: list.id), HStack {
-                                // The list's emoji as its icon, a folder
-                                // without one, as on iOS: the names line
-                                // up under Inbox's.
+                                // The list's emoji as its icon, the web's
+                                // document glyph without one: the names
+                                // line up under Inbox's.
                                 Label {
                                     Text(verbatim: list.name).lineLimit(1)
                                 } icon: {
                                     if let icon = list.icon, !icon.isEmpty {
                                         Text(verbatim: icon)
                                     } else {
-                                        Image(systemName: "folder")
+                                        NavIcon(image: NavArt.list)
                                     }
                                 }
                                 Spacer()

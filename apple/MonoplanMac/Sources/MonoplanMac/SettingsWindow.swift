@@ -175,13 +175,7 @@ final class SettingsModel: ObservableObject {
     /// only: everything is on the server, and signing in again pulls
     /// it back; a fresh local workspace takes its place meanwhile.
     func signOut() {
-        let alert = NSAlert()
-        alert.messageText = String(localized: "Sign out of Monoplan?")
-        alert.informativeText = String(localized: "This removes the local copy of your data from this Mac and starts a fresh local workspace. Your data stays on the server and comes back when you sign in again.")
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: String(localized: "Sign Out"))
-        alert.addButton(withTitle: String(localized: "Cancel"))
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard Self.confirmSignOut() else { return }
         signingOut = true
         signOutError = nil
         signOutAction { [weak self] error in
@@ -191,6 +185,18 @@ final class SettingsModel: ObservableObject {
             self.email = nil
             self.refresh()
         }
+    }
+
+    /// The question every Sign Out… asks first (here, the tray's and
+    /// the app menu's): true when the user went ahead.
+    static func confirmSignOut() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Sign out of Monoplan?")
+        alert.informativeText = String(localized: "This removes the local copy of your data from this Mac and starts a fresh local workspace. Your data stays on the server and comes back when you sign in again.")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: String(localized: "Sign Out"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     /// The delete sheet's submit.

@@ -12,7 +12,7 @@
 import AppKit
 
 enum MainMenu {
-    static func build(newWorkspace: Selector, settings: Selector, target: AnyObject, undo: EditUndo) -> NSMenu {
+    static func build(newWorkspace: Selector, settings: Selector, account: Selector, target: AnyObject, undo: EditUndo) -> NSMenu {
         let main = NSMenu()
 
         let app = NSMenu()
@@ -25,6 +25,10 @@ enum MainMenu {
         newWorkspaceItem.target = target
         let settingsItem = app.addItem(withTitle: String(localized: "Settings…"), action: settings, keyEquivalent: ",")
         settingsItem.target = target
+        // Sign In… without an account, Sign Out… with one: the target
+        // retitles it when the menu opens.
+        let accountItem = app.addItem(withTitle: String(localized: "Sign In…"), action: account, keyEquivalent: "")
+        accountItem.target = target
         app.addItem(.separator())
         app.addItem(withTitle: String(localized: "Hide Monoplan"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let hideOthers = app.addItem(withTitle: String(localized: "Hide Others"),

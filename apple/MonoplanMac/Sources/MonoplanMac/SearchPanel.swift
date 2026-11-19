@@ -398,7 +398,7 @@ private struct SearchRowView: View {
                 if let icon = hit.icon, !icon.isEmpty {
                     Text(verbatim: icon)
                 } else {
-                    Image(systemName: "folder")
+                    NavIcon(image: NavArt.list)
                 }
             case .item:
                 ItemCheckbox(state: hit.state?.itemState ?? .backlog)

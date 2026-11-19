@@ -38,6 +38,8 @@ final class TrayController: NSObject, NSMenuDelegate {
     /// Whether the last engine state was running, to tell an engine
     /// coming (back) up from a sync report.
     private var hadEngine = false
+    /// A sign-out from the menus is under way: no second one meanwhile.
+    private var signingOut = false
     private var lines: [MenuLine] = []
     private var starred: [MenuLine] = []
     private var fetchError: String?
@@ -234,7 +236,10 @@ final class TrayController: NSObject, NSMenuDelegate {
         // column that the other rows do not use.
         // A local-only workspace (no account): the way to one. The
         // account window offers both signing in and creating an account.
-        if !location.hasAccount {
+        // With an account, the way out of it, behind its confirmation.
+        if location.hasAccount {
+            addAction(String(localized: "Sign Out…"), #selector(signOut))
+        } else {
             addAction(String(localized: "Sign In…"), #selector(signIn))
         }
         addAction(String(localized: "Settings…"), #selector(openSettings))
@@ -378,12 +383,19 @@ final class TrayController: NSObject, NSMenuDelegate {
     }
 
     /// New Workspace… needs an engine that is serving a signed-in
-    /// profile; every other item of ours is always available.
+    /// profile, and a sign-out waits for the one under way; every
+    /// other item of ours is always available. The app menu's account
+    /// item is one row that reads as whichever applies.
     @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
         case #selector(newWorkspace(_:)):
             guard location.hasAccount, case .connected = engineController.state else { return false }
             return true
+        case #selector(signOut):
+            return !signingOut
+        case #selector(signInOrOut(_:)):
+            item.title = location.hasAccount ? String(localized: "Sign Out…") : String(localized: "Sign In…")
+            return !signingOut
         default: return true
         }
     }
@@ -396,6 +408,25 @@ final class TrayController: NSObject, NSMenuDelegate {
 
     @objc private func signIn() {
         onboarding().show()
+    }
+
+    /// Sign Out…, from the tray or the app menu: the same question and
+    /// the same wipe as the Settings button (`SettingsModel.signOut`).
+    /// The tray alone is an accessory app, so it comes forward for the
+    /// alert to be seen.
+    @objc private func signOut() {
+        NSApp.activate(ignoringOtherApps: true)
+        guard !signingOut, SettingsModel.confirmSignOut() else { return }
+        signingOut = true
+        engineController.signOut { [weak self] error in
+            self?.signingOut = false
+            if let error { NSAlert(error: error).runModal() }
+        }
+    }
+
+    /// Monoplan › Sign In… / Sign Out…, titled by `validateMenuItem`.
+    @objc func signInOrOut(_ sender: Any?) {
+        if location.hasAccount { signOut() } else { signIn() }
     }
 
     /// The account window: one for the process, as with Settings.
@@ -479,6 +510,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = MainMenu.build(
             newWorkspace: #selector(TrayController.newWorkspace(_:)),
             settings: #selector(TrayController.openSettings),
+            account: #selector(TrayController.signInOrOut(_:)),
             target: tray,
             undo: tray.editUndo)
     }
