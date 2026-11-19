@@ -276,9 +276,19 @@ public final class DndListView: NSView {
 
         let animate = animated && window != nil
             && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        var seen = Set<String>()
+        // Rows out of the window, and the dragged rows for the length of
+        // the drag, leave the listbox first, so the rows this pass mounts
+        // reuse them: a jump down the list swaps the whole window, and
+        // would otherwise build a second set of row views. They are
+        // re-mounted fresh, in place, when they are next wanted.
+        let seen = Set(state.items.map(\.key))
+        for (key, row) in mounted where !seen.contains(key) {
+            row.removeFromSuperview()
+            row.reset()
+            pool.append(row)
+            mounted[key] = nil
+        }
         for item in state.items {
-            seen.insert(item.key)
             let frame = NSRect(x: 0, y: item.top, width: width, height: item.height)
             let rowState = DndRowState(
                 selected: item.selected, selFirst: item.selFirst, selLast: item.selLast,
@@ -303,16 +313,6 @@ public final class DndListView: NSView {
                 dataSource?.dndList(self, configure: row.content, key: item.key, state: rowState)
             }
         }
-        // Rows out of the window, and the dragged rows for the length of
-        // the drag, leave the listbox: they are re-mounted fresh, in
-        // place, when they are next wanted.
-        for (key, row) in mounted where !seen.contains(key) {
-            row.removeFromSuperview()
-            row.reset()
-            pool.append(row)
-            mounted[key] = nil
-        }
-
         renderPlaceholder(state.placeholderY)
     }
 

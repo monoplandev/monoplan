@@ -3,10 +3,13 @@
 // dragged to reorder, moved with ⌘↑ / ⌘↓ (spec/mac-dnd-plan.md). The
 // other lenses are still SwiftUI lists, and the Calendar a table.
 //
-// A row is AppKit (a label, the hairline) around two small hosted
-// SwiftUI drawings, the checkbox and the star, so they are the ones the
-// rest of the app has. Only the checkbox takes its own clicks; a press
-// anywhere else on the row selects or drags it.
+// A row is AppKit throughout: the labels, the hairline, and the
+// checkbox and star as AppKit drawings of the ones the rest of the app
+// has (`ItemCheckArt.drawRowBox`, `StarArt.row`). They were hosted
+// SwiftUI views until 2026-11-20; a jump down a list recycles a
+// windowful of rows in a frame or two, and the hosting views made that
+// drop frames. Only the checkbox takes its own clicks; a press anywhere
+// else on the row selects or drags it.
 
 import AppKit
 import MonoplanCore
@@ -173,7 +176,50 @@ private final class ClosureMenuItem: NSMenuItem {
 
 /// The checkbox, hosted: the one part of a row that takes its own
 /// clicks.
-private final class CheckHost: NSHostingView<AnyView>, DndInteractiveView {}
+/// A row's checkbox: the box `ItemCheckbox` draws, as a plain view that
+/// takes its own clicks. Not a hosted SwiftUI button, which costs a
+/// couple of milliseconds a row each time the list recycles one.
+private final class RowCheck: NSView, DndInteractiveView {
+    var state: ItemState = .todo {
+        didSet { if state != oldValue { needsDisplay = true } }
+    }
+    var toggle: (Bool) -> Void = { _ in }
+    private var pressed = false {
+        didSet { if pressed != oldValue { needsDisplay = true } }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        context.setAlpha(pressed ? 0.5 : 1)
+        ItemCheckArt.drawRowBox(state, in: bounds)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) { pressed = true }
+
+    override func mouseDragged(with event: NSEvent) {
+        pressed = bounds.contains(convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard pressed else { return }
+        pressed = false
+        toggle(!state.isClosed)
+    }
+
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .button }
+    override func accessibilityLabel() -> String? {
+        state == .cancelled
+            ? String(localized: "Reopen")
+            : state.isClosed ? String(localized: "Mark as not done") : String(localized: "Mark as done")
+    }
+    override func accessibilityPerformPress() -> Bool {
+        toggle(!state.isClosed)
+        return true
+    }
+}
 
 /// A row's content: the checkbox, the text, then at the far edge the
 /// star or the small print, over the hairline to the next row.
@@ -181,19 +227,16 @@ private final class ItemRowContent: NSView {
     private static let edge: CGFloat = 20
     private static let checkSide: CGFloat = 22
 
-    private let check = CheckHost(rootView: AnyView(EmptyView()))
+    private let check = RowCheck()
     private let title = NSTextField(labelWithString: "")
     private let note = NSTextField(labelWithString: "")
-    private let star = NSHostingView(rootView: StarGlyph(starred: true, size: 13))
+    private let star = NSImageView(image: StarArt.row)
     private var selected = false
 
     override var isFlipped: Bool { true }
 
     init() {
         super.init(frame: .zero)
-        // The row sizes them, not the other way round.
-        check.sizingOptions = []
-        star.sizingOptions = []
         star.setAccessibilityLabel(String(localized: "Starred"))
         title.font = .systemFont(ofSize: NSFont.systemFontSize)
         title.lineBreakMode = .byTruncatingTail
@@ -209,9 +252,8 @@ private final class ItemRowContent: NSView {
     required init?(coder: NSCoder) { fatalError("not built from a nib") }
 
     func show(_ row: ItemListRow, selected: Bool, toggle: @escaping (Bool) -> Void) {
-        check.rootView = AnyView(
-            ItemCheckButton(state: row.state, toggle: toggle)
-                .frame(maxWidth: .infinity, maxHeight: .infinity))
+        check.state = row.state
+        check.toggle = toggle
         title.stringValue = row.text
         title.textColor = row.muted ? .secondaryLabelColor : .labelColor
         note.stringValue = row.note ?? ""

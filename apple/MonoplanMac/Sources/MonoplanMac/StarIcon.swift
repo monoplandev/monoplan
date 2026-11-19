@@ -32,6 +32,14 @@ enum StarArt {
             image.size = size
             return image
         }
+        return starredImage(size: size)
+    }
+
+    /// The starred star at a row's size (`StarGlyph(starred: true)` as
+    /// an image, for rows that are AppKit).
+    static let row = starredImage(size: NSSize(width: 13, height: 13))
+
+    private static func starredImage(size: NSSize) -> NSImage {
         let yellow = tinted(fill, NSColor(red: 1.0, green: 0.906, blue: 0.522, alpha: 1), size: size)
         let dark = tinted(stroke, .white, size: size)
         let light = tinted(stroke, .black, size: size)

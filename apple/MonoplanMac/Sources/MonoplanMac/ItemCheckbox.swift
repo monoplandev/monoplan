@@ -128,6 +128,27 @@ enum ItemCheckArt {
         return image
     }
 
+    /// A row's box (`ItemCheckbox`, not the toolbar's filled one), drawn
+    /// centred in `bounds` in the current context, y up. For rows that
+    /// are AppKit: a hosted SwiftUI box per row costs frames when a
+    /// list recycles a windowful of rows at once.
+    static func drawRowBox(_ state: ItemState, in bounds: NSRect) {
+        let side = CheckMetrics.side
+        let rect = NSRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side)
+        let radius = side * CheckMetrics.radius - CheckMetrics.border / 2
+        let path = NSBezierPath(
+            roundedRect: rect.insetBy(dx: CheckMetrics.border / 2, dy: CheckMetrics.border / 2),
+            xRadius: radius, yRadius: radius)
+        path.lineWidth = CheckMetrics.border
+        NSColor.tertiaryLabelColor.setStroke()
+        path.stroke()
+        if state == .done {
+            mark(cancelled: false, colour: .labelColor, in: rect)
+        } else if state == .cancelled {
+            mark(cancelled: true, colour: .tertiaryLabelColor, in: rect)
+        }
+    }
+
     /// `CheckGlyph`'s strokes, flipped into AppKit's y-up drawing.
     private static func mark(cancelled: Bool, colour: NSColor, in rect: NSRect) {
         let unit = rect.width / 16
