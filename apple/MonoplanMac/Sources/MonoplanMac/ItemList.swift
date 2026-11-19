@@ -237,10 +237,15 @@ private final class ItemRowContent: NSView {
         let left = Self.edge + 15 + 8
         if !note.isHidden {
             // The text keeps at least half the row.
-            let wanted = ceil(note.intrinsicContentSize.width)
+            // The cell's size, not the intrinsic one: that leaves out
+            // the cell's 2 pt of padding either side, and a frame that
+            // narrow truncates every label. The frame overhangs `right`
+            // by the padding so the glyphs still end on it.
+            let pad: CGFloat = 2
+            let wanted = ceil(note.cell?.cellSize.width ?? note.intrinsicContentSize.width)
             let width = min(wanted, max(0, (right - left) / 2))
             let height = ceil(note.intrinsicContentSize.height)
-            note.frame = NSRect(x: right - width, y: mid - height / 2, width: width, height: height)
+            note.frame = NSRect(x: right + pad - width, y: mid - height / 2, width: width, height: height)
             right = note.frame.minX - 8
         }
         let height = ceil(title.intrinsicContentSize.height)
