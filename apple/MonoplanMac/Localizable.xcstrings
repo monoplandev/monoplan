@@ -2810,6 +2810,36 @@
           }
         }
       }
+    },
+    "Subtasks": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Subtareas"
+          }
+        }
+      }
+    },
+    "Subtask": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Subtarea"
+          }
+        }
+      }
+    },
+    "Add subtask": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Añadir subtarea"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

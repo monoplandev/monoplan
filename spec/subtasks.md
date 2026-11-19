@@ -1,6 +1,6 @@
 # Subtasks
 
-Status: **first pass built 2026-11-18: core, wasm and web. Not on iOS, macOS or the CLI.**
+Status: **first pass built 2026-11-18: core, wasm and web; the macOS item panel 2026-11-19. Not on iOS or the CLI.**
 
 **Vetoed (2026-08-27): subtasks as full items** (an item located under a
 parent item, with its own lifecycle, location and lens membership). It hides
@@ -44,5 +44,21 @@ Open: whether a subtask records a done timestamp (leaning no; not stored).
   passes step aside, the release is one `moveSubtask`, Escape cancels. List rows and board cards show a `done/total` count on open
   items, nothing else. Duplicate copies subtasks with their ticks.
 
+- **Typed api and FFI (2026-11-19).** `api::items::Subtask`,
+  `ItemInfo.subtasks` (in `item show --json` when the item has any),
+  `api::items::{add_subtask, set_subtask_text, set_subtask_done,
+  move_subtask, remove_subtask}` and the five `Engine` methods of the
+  same names. No CLI command writes subtasks.
+- **macOS (2026-11-19).** `SubtasksField.swift` in the item panel
+  between the place and the notes, the web's field key for key (Option
+  for Alt): checkbox, one-line field, hover grip, trailing "Add
+  subtask". The grip drag is plain SwiftUI offsets over rows of one
+  height, not a table or a system drag session. A reorder is shown at
+  once and held until the reread brings it. Backspace removes an
+  emptied row on a fresh press only: AppKit selects a field's text as
+  it takes the focus, so a held key would otherwise run up the list. A
+  binned item's subtasks are shown, not edited. No count on the Mac's
+  rows yet.
+
 Not built: "untick all" for a re-used checklist, subtask
-text in search, a count on the calendar's rows, native clients, CLI.
+text in search, a count on the calendar's rows or any Mac row, iOS, CLI.

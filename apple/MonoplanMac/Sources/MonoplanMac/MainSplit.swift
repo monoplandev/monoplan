@@ -622,7 +622,18 @@ struct ItemPanelPane: View {
                     setEvent: { model.setEvent(workspace: shown.workspace, id: $0.item.id, event: $1) },
                     assignment: model.assignment(workspace: shown.workspace),
                     setAssignee: { model.setAssignee(workspace: shown.workspace, id: $0.item.id, assignee: $1) },
-                    setDuration: { model.setDuration(workspace: shown.workspace, id: $0.item.id, minutes: $1) })
+                    setDuration: { model.setDuration(workspace: shown.workspace, id: $0.item.id, minutes: $1) },
+                    addSubtask: { model.addSubtask(workspace: shown.workspace, id: $0.item.id, text: $1) },
+                    setSubtaskText: {
+                        model.setSubtaskText(workspace: shown.workspace, id: $0.item.id, subtask: $1, text: $2)
+                    },
+                    setSubtaskDone: {
+                        model.setSubtaskDone(workspace: shown.workspace, id: $0.item.id, subtask: $1, done: $2)
+                    },
+                    moveSubtask: {
+                        model.moveSubtask(workspace: shown.workspace, id: $0.item.id, subtask: $1, index: $2)
+                    },
+                    removeSubtask: { model.removeSubtask(workspace: shown.workspace, id: $0.item.id, subtask: $1) })
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

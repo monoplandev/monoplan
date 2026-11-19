@@ -844,6 +844,29 @@ final class MainWindowModel: ObservableObject {
         write { try $0.setAssignee(workspace: workspace, id: id, assignee: assignee) }
     }
 
+    /// The item panel's subtask writes (spec/subtasks.md), one typed
+    /// call and one undo step each: add at the end, retitle, tick or
+    /// untick, move to an index, remove.
+    func addSubtask(workspace: String?, id: String, text: String) {
+        write { _ = try $0.addSubtask(workspace: workspace, id: id, text: text, index: nil) }
+    }
+
+    func setSubtaskText(workspace: String?, id: String, subtask: String, text: String) {
+        write { try $0.setSubtaskText(workspace: workspace, id: id, subtask: subtask, text: text) }
+    }
+
+    func setSubtaskDone(workspace: String?, id: String, subtask: String, done: Bool) {
+        write { try $0.setSubtaskDone(workspace: workspace, id: id, subtask: subtask, done: done) }
+    }
+
+    func moveSubtask(workspace: String?, id: String, subtask: String, index: Int) {
+        write { try $0.moveSubtask(workspace: workspace, id: id, subtask: subtask, index: UInt32(max(0, index))) }
+    }
+
+    func removeSubtask(workspace: String?, id: String, subtask: String) {
+        write { try $0.removeSubtask(workspace: workspace, id: id, subtask: subtask) }
+    }
+
     /// What the item panel's assignee row offers for an item of
     /// `workspace` (spec/sharing-plan.md "Assignment"): nil for Home,
     /// where there is no row; otherwise whether the workspace has

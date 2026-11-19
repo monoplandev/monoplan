@@ -885,6 +885,72 @@ impl Engine {
         })?)
     }
 
+    /// Add a subtask to an item (`spec/subtasks.md`) at `index` of its
+    /// subtasks (nil appends); its id.
+    pub fn add_subtask(
+        &self,
+        workspace: Option<String>,
+        id: String,
+        text: String,
+        index: Option<u32>,
+    ) -> Result<String, EngineError> {
+        Ok(self.client.call_blocking(workspace, move |cx| {
+            api::items::add_subtask(cx, &id, &text, index.map(|i| i as usize))
+        })?)
+    }
+
+    /// Rewrite a subtask's text; blank text is refused.
+    pub fn set_subtask_text(
+        &self,
+        workspace: Option<String>,
+        id: String,
+        subtask: String,
+        text: String,
+    ) -> Result<(), EngineError> {
+        Ok(self.client.call_blocking(workspace, move |cx| {
+            api::items::set_subtask_text(cx, &id, &subtask, &text)
+        })?)
+    }
+
+    /// Tick or untick a subtask.
+    pub fn set_subtask_done(
+        &self,
+        workspace: Option<String>,
+        id: String,
+        subtask: String,
+        done: bool,
+    ) -> Result<(), EngineError> {
+        Ok(self.client.call_blocking(workspace, move |cx| {
+            api::items::set_subtask_done(cx, &id, &subtask, done)
+        })?)
+    }
+
+    /// Move a subtask so it ends at the 0-based `index` of the item's
+    /// subtasks.
+    pub fn move_subtask(
+        &self,
+        workspace: Option<String>,
+        id: String,
+        subtask: String,
+        index: u32,
+    ) -> Result<(), EngineError> {
+        Ok(self.client.call_blocking(workspace, move |cx| {
+            api::items::move_subtask(cx, &id, &subtask, index as usize)
+        })?)
+    }
+
+    /// Remove a subtask.
+    pub fn remove_subtask(
+        &self,
+        workspace: Option<String>,
+        id: String,
+        subtask: String,
+    ) -> Result<(), EngineError> {
+        Ok(self.client.call_blocking(workspace, move |cx| {
+            api::items::remove_subtask(cx, &id, &subtask)
+        })?)
+    }
+
     /// Set an item's deadline (`YYYY-MM-DD`), or clear it (nil).
     pub fn set_deadline(
         &self,

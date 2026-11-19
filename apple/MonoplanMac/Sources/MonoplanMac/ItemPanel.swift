@@ -1,7 +1,8 @@
 // The item panel: the selected row's item, at the right of the window.
 // The iOS item page (apple/MonoplanIOS/Monoplan/ItemView.swift) laid
 // out the same way, top to bottom: status, title, list, planned date,
-// deadline, place, notes, then the activity log. Read from
+// deadline, place, subtasks (`SubtasksField.swift`, not on iOS yet),
+// notes, then the activity log. Read from
 // `Engine.item` in the window's snapshot, so it is reread on every doc
 // change like the rest.
 //
@@ -58,6 +59,14 @@ struct ItemPanel: View {
     let setAssignee: (ItemInfo, String?) -> Void
     /// The item's length was set, in minutes, or taken off (nil).
     let setDuration: (ItemInfo, Int?) -> Void
+    /// The item's subtasks edited (spec/subtasks.md): one added, then
+    /// by its id one retitled, ticked or unticked, moved to an index,
+    /// removed.
+    let addSubtask: (ItemInfo, String) -> Void
+    let setSubtaskText: (ItemInfo, String, String) -> Void
+    let setSubtaskDone: (ItemInfo, String, Bool) -> Void
+    let moveSubtask: (ItemInfo, String, Int) -> Void
+    let removeSubtask: (ItemInfo, String) -> Void
 
     var body: some View {
         Group {
@@ -79,6 +88,21 @@ struct ItemPanel: View {
                             // The list, date and time lists float over the rows below.
                             .zIndex(1)
                         PanelRule()
+                        // Between the place and the notes, as on the
+                        // web. A binned item's are shown, not edited,
+                        // and it has no row to add one.
+                        if item.item.binnedAt == nil || !item.subtasks.isEmpty {
+                            SubtasksField(
+                                subtasks: item.subtasks, locked: item.item.binnedAt != nil,
+                                add: { addSubtask(item, $0) },
+                                setText: { setSubtaskText(item, $0, $1) },
+                                setDone: { setSubtaskDone(item, $0, $1) },
+                                move: { moveSubtask(item, $0, $1) },
+                                remove: { removeSubtask(item, $0) }
+                            )
+                            .id(item.item.id)
+                            PanelRule()
+                        }
                         notes(item)
                         PanelRule()
                         activity(item)

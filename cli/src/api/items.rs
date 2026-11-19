@@ -104,6 +104,28 @@ impl From<Place> for monoplan_core::Place {
     }
 }
 
+/// One subtask of an item (`monoplan_core::Subtask`,
+/// `spec/subtasks.md`): a text node with done / not done, copied at
+/// this boundary like [`Place`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct Subtask {
+    pub id: String,
+    pub text: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub done: bool,
+}
+
+impl From<&monoplan_core::Subtask> for Subtask {
+    fn from(s: &monoplan_core::Subtask) -> Self {
+        Subtask {
+            id: s.id.clone(),
+            text: s.text.clone(),
+            done: s.done,
+        }
+    }
+}
+
 /// One item as a list shows it; the `item ls --json` row.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
@@ -228,6 +250,10 @@ pub struct ItemInfo {
     pub item: Item,
     /// Plain text; empty when the item has none.
     pub notes: String,
+    /// Subtasks in their own order (`spec/subtasks.md`); absent from
+    /// the JSON when the item has none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub subtasks: Vec<Subtask>,
     /// The item's list's name; absent for the reserved lists, which
     /// have no `ListMeta` row (clients label those).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -258,6 +284,7 @@ pub fn item_info(cx: &Ctx, item: &ItemView) -> ItemInfo {
     ItemInfo {
         item: Item::from(item),
         notes: item.notes.clone(),
+        subtasks: item.subtasks.iter().map(Subtask::from).collect(),
         list_icon: list.as_ref().and_then(|l| l.icon.clone()),
         list_name: list.map(|l| l.name),
         starred: cx.lens.has(item),
@@ -328,6 +355,37 @@ pub fn set_duration(cx: &Ctx, id: &str, minutes: Option<u32>) -> anyhow::Result<
 /// offer members (`api::sharing::members`).
 pub fn set_assignee(cx: &Ctx, id: &str, assignee: Option<&str>) -> anyhow::Result<()> {
     cx.doc.set_item_assignee(id, assignee)?;
+    Ok(())
+}
+
+/// Add a subtask to the item (`spec/subtasks.md`) at `index` of its
+/// subtasks (`None`, or past the end, appends) and return its id.
+pub fn add_subtask(cx: &Ctx, id: &str, text: &str, index: Option<usize>) -> anyhow::Result<String> {
+    Ok(cx.doc.add_subtask(id, text, index)?)
+}
+
+/// Rewrite a subtask's text. The core refuses blank text.
+pub fn set_subtask_text(cx: &Ctx, id: &str, subtask: &str, text: &str) -> anyhow::Result<()> {
+    cx.doc.set_subtask_text(id, subtask, text)?;
+    Ok(())
+}
+
+/// Tick or untick a subtask.
+pub fn set_subtask_done(cx: &Ctx, id: &str, subtask: &str, done: bool) -> anyhow::Result<()> {
+    cx.doc.set_subtask_done(id, subtask, done)?;
+    Ok(())
+}
+
+/// Move a subtask so it ends at the 0-based `index` of the item's
+/// subtasks (past the end clamps to the end).
+pub fn move_subtask(cx: &Ctx, id: &str, subtask: &str, index: usize) -> anyhow::Result<()> {
+    cx.doc.move_subtask(id, subtask, index)?;
+    Ok(())
+}
+
+/// Remove a subtask.
+pub fn remove_subtask(cx: &Ctx, id: &str, subtask: &str) -> anyhow::Result<()> {
+    cx.doc.remove_subtask(id, subtask)?;
     Ok(())
 }
 
@@ -457,6 +515,42 @@ mod tests {
                 .unwrap()
                 .iter()
                 .all(|r| r.id != id)
+        );
+    }
+
+    #[test]
+    fn subtasks_round_trip_through_the_page_row() {
+        let doc = Doc::new().unwrap();
+        let lens = Lens::home(&doc);
+        let docs = [&doc];
+        let cx = Ctx::bare(&doc, &docs, &lens);
+        let id = add_items(&cx, LIST_INBOX, &["Shopping".into()], false)
+            .unwrap()
+            .remove(0);
+        let none = serde_json::to_value(item(&cx, &id).unwrap()).unwrap();
+        assert!(none.get("subtasks").is_none(), "{none}");
+
+        let milk = add_subtask(&cx, &id, "milk", None).unwrap();
+        let eggs = add_subtask(&cx, &id, "eggs", None).unwrap();
+        let bread = add_subtask(&cx, &id, "bread", Some(0)).unwrap();
+        set_subtask_done(&cx, &id, &milk, true).unwrap();
+        set_subtask_text(&cx, &id, &eggs, "a dozen eggs").unwrap();
+        move_subtask(&cx, &id, &eggs, 0).unwrap();
+        remove_subtask(&cx, &id, &bread).unwrap();
+
+        let page = item(&cx, &id).unwrap();
+        let shape: Vec<(&str, bool)> = page
+            .subtasks
+            .iter()
+            .map(|s| (s.text.as_str(), s.done))
+            .collect();
+        assert_eq!(shape, [("a dozen eggs", false), ("milk", true)]);
+        assert_eq!(
+            serde_json::to_value(&page).unwrap()["subtasks"],
+            serde_json::json!([
+                {"id": eggs, "text": "a dozen eggs"},
+                {"id": milk, "text": "milk", "done": true},
+            ])
         );
     }
 
