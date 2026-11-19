@@ -54,6 +54,15 @@ final class DndRowView: NSView {
         return true
     }
 
+    /// The layer redraws only when asked (`.onSetNeedsDisplay`), so a
+    /// resize would stretch or crop the selection drawn at the old
+    /// width: the list widening as a side panel closes, say.
+    override func setFrameSize(_ newSize: NSSize) {
+        let changed = newSize != frame.size
+        super.setFrameSize(newSize)
+        if changed, state?.selected == true { needsDisplay = true }
+    }
+
     func reset() {
         state = nil
         layer?.removeAllAnimations()
