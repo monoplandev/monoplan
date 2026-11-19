@@ -12,11 +12,12 @@
 // as a bare label, the account's known places that match (from the
 // engine, nothing leaves the device), then Apple's search results from
 // three characters on (MapKit; the query goes to Apple, as the web's
-// goes to Photon). The list is part of the panel's column, not an
-// overlay on it (the place row is the panel's last, and an overlay ran
-// off the window's bottom edge where no scrolling reached it): it
-// pushes the map down, is as tall as its rows up to a cap, scrolling
-// past it, and the panel scrolls to bring it into sight (`reveal`).
+// goes to Photon). The list floats under the box in a window of its
+// own (`FloatingList`), not in the panel's column and not an overlay
+// on it: the place row is the panel's last, so an overlay ran off the
+// window's bottom edge where no scrolling reached it, and a window can
+// pass that edge (and sits over the map). It is as tall as its rows up
+// to a cap, scrolling past it.
 // A click on a row writes it at once. Return takes the
 // highlighted row, else the typed text; the arrow keys move the
 // highlight; Escape, or the caret leaving the box, shuts it with the
@@ -37,11 +38,6 @@ struct PlaceField: View {
     /// Write the place, or clear it with nil. `exact` for a known
     /// place, which is already whole.
     let set: (Place?, _ exact: Bool) -> Void
-    /// Scroll the panel so the list (`PlaceField.listID`) is in sight.
-    let reveal: () -> Void
-
-    /// The list's id in the panel's scroll view.
-    static let listID = "place-list"
 
     @State private var query = ""
     /// The search box is open.
@@ -61,10 +57,11 @@ struct PlaceField: View {
     var body: some View {
         Group {
             if picking {
-                VStack(alignment: .leading, spacing: 6) {
-                    searchBox
+                // The list hangs under the box in its own window, so
+                // it takes no room in the panel.
+                searchBox.background {
                     if !candidates.isEmpty {
-                        dropdown.id(Self.listID)
+                        FloatingList { dropdown }
                     }
                 }
             } else {
@@ -75,11 +72,6 @@ struct PlaceField: View {
             highlight = nil
             loadKnown()
             search.update(typed)
-        }
-        // The list has grown or shrunk: back into sight, once it is
-        // laid out.
-        .onChange(of: candidates.count) {
-            if picking { DispatchQueue.main.async(execute: reveal) }
         }
         .onChange(of: focused) {
             if focused {
@@ -313,6 +305,112 @@ private struct CandidateRow: View {
         case .result(let result): result.subtitle
         }
     }
+}
+
+/// A list floating under the view it is the background of, as wide as
+/// it: a borderless child window of the view's own, so it can pass the
+/// window's edges and sits over AppKit views (the map). The window
+/// never becomes key, so the caret stays in the search box while a row
+/// is clicked. It follows the view as the panel scrolls, hides while
+/// the view is scrolled out of sight, and goes above the view when the
+/// screen has no room under it.
+private struct FloatingList<Content: View>: NSViewRepresentable {
+    @ViewBuilder let content: Content
+
+    func makeNSView(context: Context) -> FloatingListAnchor { FloatingListAnchor() }
+
+    func updateNSView(_ view: FloatingListAnchor, context: Context) {
+        view.show(AnyView(content))
+    }
+
+    static func dismantleNSView(_ view: FloatingListAnchor, coordinator: ()) {
+        view.close()
+    }
+}
+
+private final class FloatingListAnchor: NSView {
+    /// The gap between the view and the list.
+    private static let gap: CGFloat = 6
+
+    private var content = AnyView(EmptyView())
+    private var panel: NSPanel?
+    private var scrolled: NSObjectProtocol?
+
+    func show(_ content: AnyView) {
+        self.content = content
+        place()
+    }
+
+    func close() {
+        if let scrolled { NotificationCenter.default.removeObserver(scrolled) }
+        scrolled = nil
+        hide()
+        panel = nil
+    }
+
+    private func hide() {
+        guard let panel else { return }
+        panel.parent?.removeChildWindow(panel)
+        panel.orderOut(nil)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return close() }
+        // The panel's scroll view moves this view without laying it
+        // out: follow it.
+        if scrolled == nil, let clip = enclosingScrollView?.contentView {
+            clip.postsBoundsChangedNotifications = true
+            scrolled = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification, object: clip, queue: .main
+            ) { [weak self] _ in self?.place() }
+        }
+        // Once the view has its frame.
+        DispatchQueue.main.async { [weak self] in self?.place() }
+    }
+
+    override func layout() {
+        super.layout()
+        place()
+    }
+
+    private func place() {
+        guard let window, bounds.width > 0 else { return }
+        guard !visibleRect.isEmpty else { return hide() }
+        let panel = self.panel ?? makePanel()
+        self.panel = panel
+        guard let host = panel.contentView as? FloatingListHost else { return }
+        host.rootView = AnyView(content.frame(width: bounds.width))
+        let height = host.fittingSize.height
+        guard height > 0 else { return hide() }
+        let anchor = window.convertToScreen(convert(bounds, to: nil))
+        var y = anchor.minY - Self.gap - height
+        // No room under the view on this screen: above it, when there
+        // is room there.
+        if let screen = window.screen?.visibleFrame, y < screen.minY,
+           anchor.maxY + Self.gap + height <= screen.maxY {
+            y = anchor.maxY + Self.gap
+        }
+        panel.setFrame(NSRect(x: anchor.minX, y: y, width: bounds.width, height: height), display: true)
+        if panel.parent == nil { window.addChildWindow(panel, ordered: .above) }
+        panel.invalidateShadow()
+    }
+
+    private func makePanel() -> NSPanel {
+        let panel = NSPanel(
+            contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.contentView = FloatingListHost(rootView: AnyView(EmptyView()))
+        return panel
+    }
+}
+
+/// The floating list's content. Its window is never key, so a click on
+/// a row has to count as it lands.
+private final class FloatingListHost: NSHostingView<AnyView> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 /// Apple's place search as-you-type (`MKLocalSearchCompleter`), and the

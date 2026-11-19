@@ -62,32 +62,29 @@ struct ItemPanel: View {
     var body: some View {
         Group {
             if let item {
-                // The place field scrolls its list into sight.
-                ScrollViewReader { scroll in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 16) {
-                            // The bin masks an item: nothing of it is
-                            // edited until it is restored.
-                            if item.item.binnedAt == nil {
-                                PanelTitle(text: item.item.text, closed: item.closedAt != nil) { retitle(item, $0) }
-                                    .id(item.item.id)
-                            } else {
-                                Text(verbatim: item.item.text)
-                                    .font(.title2.weight(.medium))
-                                    .foregroundStyle(.secondary)
-                                    .textSelection(.enabled)
-                            }
-                            fields(item, scroll: scroll)
-                                // The list, date and time lists float over the rows below.
-                                .zIndex(1)
-                            PanelRule()
-                            notes(item)
-                            PanelRule()
-                            activity(item)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        // The bin masks an item: nothing of it is
+                        // edited until it is restored.
+                        if item.item.binnedAt == nil {
+                            PanelTitle(text: item.item.text, closed: item.closedAt != nil) { retitle(item, $0) }
+                                .id(item.item.id)
+                        } else {
+                            Text(verbatim: item.item.text)
+                                .font(.title2.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
+                        fields(item)
+                            // The list, date and time lists float over the rows below.
+                            .zIndex(1)
+                        PanelRule()
+                        notes(item)
+                        PanelRule()
+                        activity(item)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
                 }
             } else {
                 Color.clear
@@ -101,7 +98,7 @@ struct ItemPanel: View {
     /// place rows are always there, muted when empty. Each row is a
     /// box (`panelBox`): the list's is always filled, the others' only
     /// under the pointer.
-    private func fields(_ item: ItemInfo, scroll: ScrollViewProxy) -> some View {
+    private func fields(_ item: ItemInfo) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             ListField(
                 item: item, workspaceName: workspaceName,
@@ -205,8 +202,6 @@ struct ItemPanel: View {
             if item.item.binnedAt == nil {
                 PlaceField(place: item.item.place, knownPlaces: knownPlaces, trim: trim) {
                     setPlace(item, $0, $1)
-                } reveal: {
-                    withAnimation { scroll.scrollTo(PlaceField.listID) }
                 }
                 .id(item.item.id)
             } else if let place = item.item.place {
