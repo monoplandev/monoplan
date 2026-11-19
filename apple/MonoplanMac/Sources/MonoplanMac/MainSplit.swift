@@ -41,12 +41,12 @@ private extension NSToolbarItem.Identifier {
     static let doneFilter = NSToolbarItem.Identifier("MonoplanDoneFilter")
     /// The Calendar's "Today": scrolls back to Today's header.
     static let today = NSToolbarItem.Identifier("MonoplanToday")
-    /// Over the sidebar, at its trailing edge, while there is no
-    /// account. Nothing takes its place once there is one: the
-    /// account lives in Settings, New Workspace… in the app menu.
+    /// At the far end of the list's section, after new, while there
+    /// is no account. Nothing takes its place once there is one: the
+    /// account lives in Settings and the menus.
     static let signIn = NSToolbarItem.Identifier("MonoplanSignIn")
-    /// In Sign In's place once there is an account: the iOS Home's
-    /// folder button, a popover that names a new list.
+    /// Over the sidebar, at its trailing edge, after search: the iOS
+    /// Home's folder button, a popover that names a new list.
     static let newList = NSToolbarItem.Identifier("MonoplanNewList")
     /// The list's name, in the window title's place, after the
     /// sidebar's separator. On a user list a click renames it.
@@ -62,11 +62,6 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     /// Set while `sync` moves the panel itself, so the resize it
     /// causes is not read as the user folding the panel away.
     private var syncing = false
-    /// Whether the profile has an account: without one the bar leads
-    /// with Sign In. The window's controller keeps it and calls `sync`.
-    var signedIn = true
-    /// Sign In was clicked.
-    var onSignIn: () -> Void = {}
     /// The rename popover, while it is up.
     private var renamePopover: NSPopover?
     /// The new-list popover, while it is up.
@@ -88,15 +83,16 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     /// The list's section of the bar. On Done its filter leads the
     /// button at the end, on a glass of its own (the space between
     /// them: adjacent buttons would share one); on the Calendar
-    /// "Today" does.
-    private static func listItems(lens: Lens?) -> [NSToolbarItem.Identifier] {
+    /// "Today" does. Without an account Sign In ends the section,
+    /// likewise on its own glass.
+    private static func listItems(lens: Lens?, signedIn: Bool = true) -> [NSToolbarItem.Identifier] {
         let own: [NSToolbarItem.Identifier]
         switch lens {
         case .done: own = [.doneFilter, .space]
         case .agenda: own = [.today, .space]
         default: own = []
         }
-        return [.sidebarSeparator, .title, .flexibleSpace] + own + [.newItem]
+        return [.sidebarSeparator, .title, .flexibleSpace] + own + [.newItem] + (signedIn ? [] : [.space, .signIn])
     }
 
     init(model: MainWindowModel) {
@@ -175,12 +171,12 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             panelItem.isCollapsed = !open
             syncing = false
         }
-        // Over the sidebar, before its separator: Sign In without an
-        // account, search then New List with one (side by side, on
-        // one glass: the sidebar is too narrow at its least for a
-        // space between); the space before pushes them to the
-        // sidebar's trailing edge.
-        let lead: [NSToolbarItem.Identifier] = [.flexibleSpace] + (signedIn ? [.search, .newList] : [.signIn])
+        // Over the sidebar, before its separator: search then New
+        // List, account or none (side by side, on one glass: the
+        // sidebar is too narrow at its least for a space between);
+        // the space before pushes them to the sidebar's trailing
+        // edge. Sign In is at the end of the list's section.
+        let lead: [NSToolbarItem.Identifier] = [.flexibleSpace, .search, .newList]
         let leading = toolbar.items.firstIndex { $0.itemIdentifier == .sidebarSeparator } ?? 0
         if toolbar.items.prefix(leading).map(\.itemIdentifier) != lead {
             for _ in 0..<leading { toolbar.removeItem(at: 0) }
@@ -190,7 +186,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         }
         // The rest: the list's section, then the panel's. Whatever
         // already matches from the front stays; the tail is rebuilt.
-        let wanted = lead + Self.listItems(lens: model.shown.lens) + panelItems()
+        let wanted = lead + Self.listItems(lens: model.shown.lens, signedIn: model.signedIn) + panelItems()
         let have = toolbar.items.map(\.itemIdentifier)
         if have != wanted {
             let kept = zip(have, wanted).prefix { $0 == $1 }.count
@@ -400,7 +396,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     }
 
     @objc private func signIn(_ sender: Any?) {
-        onSignIn()
+        model.onSignIn()
     }
 
     /// The toolbar's magnifying glass and Edit › Find…: Spotlight's bar

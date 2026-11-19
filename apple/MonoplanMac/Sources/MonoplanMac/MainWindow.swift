@@ -61,8 +61,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         // whole frame so the sidebar runs to the top edge under them.
         // The panes and the toolbar are `MainSplitViewController`'s.
         split = MainSplitViewController(model: model)
-        split.signedIn = signedIn()
-        split.onSignIn = onSignIn
+        model.signedIn = signedIn()
+        model.onSignIn = onSignIn
         let window = NSWindow(contentViewController: split)
         window.title = "Monoplan"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
@@ -132,7 +132,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     /// The toolbar's Sign In, there while there is no account.
     private func syncSignedIn() {
-        split.signedIn = signedIn()
+        let now = signedIn()
+        if model.signedIn != now { model.signedIn = now }
         split.sync()
     }
 
@@ -246,6 +247,11 @@ enum NavTarget: Hashable {
 /// engine's call queue and come back here.
 final class MainWindowModel: ObservableObject {
     @Published private(set) var state: EngineState
+    /// Whether the profile has an account: without one the bar's
+    /// list section ends in Sign In. The window's controller keeps it.
+    @Published var signedIn = true
+    /// Sign In was clicked.
+    var onSignIn: () -> Void = {}
     /// The sidebar: every open workspace with its lists, Home first.
     @Published private(set) var sections: [NavSection] = []
     /// The doc ids of the workspaces whose group is folded. Local to
