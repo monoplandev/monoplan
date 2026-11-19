@@ -3256,6 +3256,7 @@
       }
     },
     "Unassigned" : {
+      "extractionState" : "stale",
       "localizations" : {
         "es" : {
           "stringUnit" : {

@@ -11,8 +11,9 @@
 // down does); at the right the star, which stars and unstars it, and
 // the more menu. A tap
 // on the title hands the sheet to the title editor (`ItemTitleEditor`),
-// the list field and the date and place rows hand the sheet to their
-// editors (`ItemListEditor`, `ItemDateEditor`, `ItemPlaceEditor`);
+// the list and assignee fields and the date and place rows hand the
+// sheet to their editors (`ItemListEditor`, `ItemAssigneeEditor`,
+// `ItemDateEditor`, `ItemPlaceEditor`);
 // everything else is display only.
 // The same sheet is where a new item is captured (`ItemCaptureView`,
 // opened by the bottom bar's add button): a title field, and this page
@@ -183,6 +184,7 @@ struct ItemView: View {
         case list
         case date
         case place
+        case assignee
     }
 
     /// An editor takes the sheet over; closing it gives the sheet back.
@@ -216,6 +218,12 @@ struct ItemView: View {
                             done: endEditing)
                     case .date: ItemDateEditor(ref: ref, item: item, done: endEditing)
                     case .place: ItemPlaceEditor(ref: ref, item: item, done: endEditing)
+                    case .assignee:
+                        ItemAssigneeEditor(
+                            itemTitle: item.text, members: ref.docId.flatMap { model.members[$0] },
+                            current: item.assignee,
+                            pick: { model.setAssignee(ref, assignee: $0) },
+                            done: endEditing)
                     }
                 }
                 .transition(.opacity)
@@ -513,48 +521,37 @@ struct ItemView: View {
     }
 
     /// Who the item is assigned to, on a shared workspace
-    /// (spec/sharing-plan.md "Assignment"): a menu of its members and
-    /// "Unassigned". One assignee, so a pick replaces the last. Not
-    /// shown on the Personal workspace, nor on a workspace of one
-    /// unless the item is already assigned (so that can be cleared).
-    /// An assignee the member list does not hold is a former member;
-    /// while the list is not known the row says only that there is one.
+    /// (spec/sharing-plan.md "Assignment"), with a divider under it. A
+    /// plain row, no box until it is pressed; a tap hands the sheet to
+    /// the assignee editor (`ItemAssigneeEditor`), as the list field
+    /// does with its own. Not shown on the Personal workspace, nor on a
+    /// workspace of one unless the item is already assigned (so that
+    /// can be cleared). A binned item stays as it is.
     @ViewBuilder
     private func assigneeField(_ item: ItemInfo) -> some View {
         if let docId = ref.docId, workspace != nil, model.hasOtherMembers(docId) || item.assignee != nil {
-            let people = model.members[docId]
-            let current = item.assignee
-            let name: String? = current.map { id in
-                if let member = people?.first(where: { $0.accountId == id }) { return member.email }
-                return people == nil ? String(localized: "Assigned") : String(localized: "A former member")
-            }
-            Menu {
-                Picker("Assignee", selection: Binding(
-                    get: { current ?? "" },
-                    set: { model.setAssignee(ref, assignee: $0.isEmpty ? nil : $0) }
-                )) {
-                    Text("Unassigned").tag("")
-                    ForEach(people ?? [], id: \.accountId) { member in
-                        Text(verbatim: member.email).tag(member.accountId)
-                    }
-                    if let current, let name, people?.contains(where: { $0.accountId == current }) != true {
-                        Text(verbatim: name).tag(current)
-                    }
-                }
+            let name = item.assignee.map { ItemAssigneeEditor.name(of: $0, in: model.members[docId]) }
+            Button {
+                edit(.assignee)
             } label: {
-                HStack(spacing: 6) {
-                    FieldRow("person", text: name ?? String(localized: "Assign"), empty: current == nil)
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                // The assignee's avatar in the icon's place once there
+                // is one (a former member's is the dashed "?").
+                FieldRow(text: name ?? String(localized: "Assign"), empty: name == nil) {
+                    if let id = item.assignee {
+                        MemberAvatar(
+                            accountId: id,
+                            email: model.members[docId]?.first(where: { $0.accountId == id })?.email,
+                            side: 22)
+                    } else {
+                        Image(systemName: "person")
+                    }
                 }
-                .itemField()
             }
-            .buttonStyle(.plain)
+            .buttonStyle(BareFieldStyle())
             .disabled(item.binnedAt != nil)
             .itemFieldOutset()
             .accessibilityHint("Assigns the item to a member")
+            Divider()
         }
     }
 
@@ -865,5 +862,18 @@ extension View {
     /// in line with the plain rows around it.
     func itemFieldOutset() -> some View {
         padding(.horizontal, -itemFieldInset)
+    }
+}
+
+/// A field with no box of its own: the same full-height target as
+/// `itemField()`, its faint fill showing only while it is pressed.
+struct BareFieldStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        let box = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        configuration.label
+            .padding(.horizontal, itemFieldInset)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background(.quaternary.opacity(configuration.isPressed ? 0.5 : 0), in: box)
+            .contentShape(box)
     }
 }
