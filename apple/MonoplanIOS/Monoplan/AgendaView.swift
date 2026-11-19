@@ -117,7 +117,7 @@ struct AgendaRowView: View {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(row.text)
                                 .itemTextSlot()
-                                .foregroundStyle(row.isDone ? .secondary : .primary)
+                                .foregroundStyle(row.isMuted ? .secondary : .primary)
                             RowStar(state: row.state)
                         }
                         // Where it lives, with who it is assigned to

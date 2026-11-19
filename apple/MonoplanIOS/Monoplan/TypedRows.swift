@@ -138,6 +138,14 @@ extension AgendaEntry {
         return state.isClosed && !whenIsPast
     }
 
+    /// The row's text is muted: a done row, and an event's own row on
+    /// a day gone by, done or not (the only rows the past days hold; a
+    /// task whose day has passed is in Overdue). The Mac's rule
+    /// (`MainWindow.agendaRowIsPast`).
+    var isMuted: Bool {
+        isDone || (event && placedBy == .when && whenIsPast)
+    }
+
     /// The `when`'s day is before today.
     private var whenIsPast: Bool {
         guard let when, when.count >= 10 else { return false }

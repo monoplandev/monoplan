@@ -291,6 +291,7 @@
       }
     },
     "Assigned to %@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "es" : {
           "stringUnit" : {
