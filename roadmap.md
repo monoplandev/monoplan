@@ -120,3 +120,4 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - All live view
 - DB file size optimisation
 - claude mcp
+- drag events to following days in agenda view?
