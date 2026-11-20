@@ -2136,7 +2136,7 @@ struct MainWindowView: View {
                         Text(verbatim: row.text)
                             .lineLimit(1)
                             .truncationMode(.tail)
-                            .foregroundStyle(done ? .secondary : .primary)
+                            .foregroundStyle(done ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color(nsColor: PaneColor.rowText)))
                         if model.starredIds.contains(row.id) { starMark }
                     }
                     .alignmentGuide(.rowTitle) { $0[VerticalAlignment.center] }

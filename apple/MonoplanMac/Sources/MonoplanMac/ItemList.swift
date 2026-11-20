@@ -340,7 +340,7 @@ private final class ItemRowContent: NSView {
         check.state = row.state
         check.toggle = toggle
         title.stringValue = row.text
-        title.textColor = row.muted ? .secondaryLabelColor : .labelColor
+        title.textColor = row.muted ? .secondaryLabelColor : PaneColor.rowText
         note.stringValue = row.note ?? ""
         note.isHidden = (row.note ?? "").isEmpty
         star.isHidden = !row.starred

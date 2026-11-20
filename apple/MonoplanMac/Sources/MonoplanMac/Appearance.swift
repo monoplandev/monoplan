@@ -27,15 +27,15 @@ extension AppearancePreference {
 }
 
 /// The panes' backgrounds. Dark is the web's (a trial): the sidebar
-/// and the item's panel its `--bg` / `--surface`, #1a1a1d
-/// (`js/web/src/styles.css`), and the list a step darker, its
-/// `--bg-board-col`; light is the system's.
+/// its `--bg` / `--surface`, #1a1a1d (`js/web/src/styles.css`), and
+/// the list a step darker in the same cool grey, #161619; light is the
+/// system's. The item's panel shares the list's ground.
 enum PaneColor {
     /// The web's dark `--bg` / `--surface`.
     private static let webDark = 0x1a1a1d
 
-    static let list = dynamic(dark: 0x171718, light: .textBackgroundColor)
-    static let panel = dynamic(dark: webDark, light: .windowBackgroundColor)
+    static let list = dynamic(dark: 0x161619, light: .textBackgroundColor)
+    static let panel = list
     /// The sidebar, opaque: off-white in light, the panes' colour in
     /// dark.
     static let sidebar = dynamic(dark: webDark, light: grey(0xf7))
@@ -64,6 +64,13 @@ enum PaneColor {
             resolved = NSColor.separatorColor.usingColorSpace(.sRGB) ?? .separatorColor
         }
         return resolved.withAlphaComponent(resolved.alphaComponent * 0.25)
+    }
+
+    /// An item row's title: in dark, the system label (white at 85%)
+    /// dimmed about 15%; light is the system label.
+    static let rowText = NSColor(name: nil) { appearance in
+        guard appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua else { return .labelColor }
+        return NSColor(white: 1, alpha: 0.72)
     }
 
     /// The hairline between two item rows, just visible: half the
