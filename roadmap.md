@@ -117,3 +117,6 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - task links / "blocked" feature? link? tag? both?
 - Consider an aggregate inbox
 - drag events to following days in agenda view
+- All live view
+- DB file size optimisation
+- claude mcp
