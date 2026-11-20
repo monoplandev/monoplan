@@ -30,6 +30,10 @@ public struct DndConfig {
     public var dragSlop: CGFloat = 3
     /// Shaved off the bottom of the placeholder, for gapped rows.
     public var placeholderGap: CGFloat = 0
+    /// Height of the slot directly after the last row (the web's
+    /// `trailer`), 0 for none. The slot is not a row: no key, no part in
+    /// selection, drag or the arrows. The scroll extent covers it.
+    public var trailerHeight: CGFloat = 0
 
     public init() {}
 }
@@ -78,6 +82,9 @@ public struct DndRenderState: Equatable {
     public var items: [DndRenderItem]
     /// Placeholder top in viewport coordinates, nil when hidden.
     public var placeholderY: CGFloat?
+    /// The trailer slot's top in list coordinates (the rows' end, so it
+    /// rides the nudge slot during a drag), nil when there is none.
+    public var trailerTop: CGFloat?
 }
 
 public enum DndDragPhase: Equatable {
@@ -90,8 +97,8 @@ public enum DndDragPhase: Equatable {
 /// view feeds it pointer and key input in viewport coordinates and the
 /// viewport's geometry, then draws `renderState()`.
 ///
-/// Not ported: expansion, the native drag type, touch, the trailer slot,
-/// foreign-drag preview (a drag from another list hovering this one).
+/// Not ported: expansion, the native drag type, touch, foreign-drag
+/// preview (a drag from another list hovering this one).
 public final class DndListModel {
     public var config: DndConfig
     public let selection: DndSelection
@@ -181,7 +188,8 @@ public final class DndListModel {
                 listHeight: listHeight(contentHeight),
                 contentHeight: contentHeight,
                 items: items,
-                placeholderY: hover.map { CGFloat($0) * h - viewport.scrollTop }
+                placeholderY: hover.map { CGFloat($0) * h - viewport.scrollTop },
+                trailerTop: trailerTop(contentHeight)
             )
         }
 
@@ -207,19 +215,25 @@ public final class DndListModel {
             listHeight: listHeight(contentHeight),
             contentHeight: contentHeight,
             items: items,
-            placeholderY: nil
+            placeholderY: nil,
+            trailerTop: trailerTop(contentHeight)
         )
     }
 
     private func listHeight(_ contentHeight: CGFloat) -> CGFloat {
-        config.fillHeight ? max(contentHeight, viewport.height - viewport.topInset) : contentHeight
+        let extent = contentHeight + config.trailerHeight
+        return config.fillHeight ? max(extent, viewport.height - viewport.topInset) : extent
+    }
+
+    private func trailerTop(_ contentHeight: CGFloat) -> CGFloat? {
+        config.trailerHeight > 0 ? contentHeight : nil
     }
 
     /// The furthest the list scrolls in its current layout.
     public var maxScrollTop: CGFloat {
         let count = drag.map { $0.collapsed.count + (config.reorder && config.nudge && $0.hoverIndex != nil ? 1 : 0) }
             ?? order.count
-        return max(minScrollTop, virtualization.totalHeight(count: count) - viewport.height)
+        return max(minScrollTop, virtualization.totalHeight(count: count) + config.trailerHeight - viewport.height)
     }
 
     /// The rest position: the first row just below the top inset.
@@ -451,5 +465,16 @@ public final class DndListModel {
         }
         guard bottom > viewport.scrollTop + viewport.height else { return nil }
         return idx == order.count - 1 ? maxScrollTop : bottom - viewport.height
+    }
+
+    /// Where to scroll so the trailer slot is in view, nil when it
+    /// already is (or there is none).
+    public func scrollOffsetToRevealTrailer() -> CGFloat? {
+        guard config.trailerHeight > 0, drag == nil else { return nil }
+        let top = virtualization.totalHeight(count: order.count)
+        if top + config.trailerHeight > viewport.scrollTop + viewport.height {
+            return maxScrollTop
+        }
+        return top < viewport.scrollTop + viewport.topInset ? top - viewport.topInset : nil
     }
 }

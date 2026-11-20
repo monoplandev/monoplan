@@ -43,6 +43,52 @@ final class DndListModelTests: XCTestCase {
         XCTAssertEqual(state.listHeight, 320)
     }
 
+    // MARK: Trailer
+
+    func testTrailerFollowsTheRowsAndExtendsTheScroll() {
+        let m = model(20)
+        XCTAssertNil(m.renderState().trailerTop)
+        m.config.trailerHeight = 32
+        let state = m.renderState()
+        XCTAssertEqual(state.trailerTop, 640)
+        XCTAssertEqual(state.contentHeight, 640)
+        XCTAssertEqual(state.listHeight, 672)
+        XCTAssertEqual(m.maxScrollTop, 352)
+        // The last row is revealed with the slot under it.
+        XCTAssertEqual(m.scrollOffset(toReveal: "r19"), 352)
+        XCTAssertEqual(m.scrollOffsetToRevealTrailer(), 352)
+        m.viewport.scrollTop = 352
+        XCTAssertNil(m.scrollOffsetToRevealTrailer())
+    }
+
+    func testTrailerOnAShortListStaysUnderTheRows() {
+        let m = model(3)
+        m.config.trailerHeight = 32
+        let state = m.renderState()
+        XCTAssertEqual(state.trailerTop, 96)
+        XCTAssertEqual(state.listHeight, 320)
+        XCTAssertNil(m.scrollOffsetToRevealTrailer())
+        // No row under it: a press there is a blank one.
+        XCTAssertNil(m.key(at: CGPoint(x: 100, y: 110)))
+    }
+
+    func testTrailerRidesTheNudgeSlotDuringADrag() {
+        let m = model(5)
+        m.config.trailerHeight = 32
+        press(m, row: 1)
+        _ = m.pointerDragged(to: slot(3, m))
+        // Four rows left, one slot open: where the five rows ended.
+        XCTAssertEqual(m.renderState().trailerTop, 160)
+        // Over the trailer is past the last row.
+        _ = m.pointerDragged(to: CGPoint(x: 100, y: 170))
+        XCTAssertEqual(m.drag?.hoverIndex, 4)
+        // Off the viewport the slot closes and the trailer comes up.
+        _ = m.pointerDragged(to: CGPoint(x: 400, y: 100))
+        XCTAssertEqual(m.renderState().trailerTop, 128)
+        _ = m.pointerDragged(to: CGPoint(x: 100, y: 170))
+        XCTAssertEqual(m.endDrag(), DndMove(keys: ["r1"], before: nil))
+    }
+
     // MARK: Clicks
 
     func testClickModifiers() {

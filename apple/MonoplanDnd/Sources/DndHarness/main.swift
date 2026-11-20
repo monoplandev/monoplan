@@ -53,6 +53,46 @@ final class FakeRow: NSView {
     }
 }
 
+/// The trailer: a field after the last row; Return adds a row.
+final class FakeAddRow: NSView {
+    let field = NSTextField()
+    var onAdd: ((String) -> Void)?
+
+    override var isFlipped: Bool { true }
+
+    init() {
+        super.init(frame: .zero)
+        field.placeholderString = "Add an item…"
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = .systemFont(ofSize: 13)
+        field.target = self
+        field.action = #selector(submit)
+        addSubview(field)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    @objc func submit() {
+        let text = field.stringValue.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return }
+        field.stringValue = ""
+        onAdd?(text)
+    }
+
+    override func layout() {
+        super.layout()
+        field.frame = NSRect(x: 36, y: (bounds.height - 17) / 2, width: max(0, bounds.width - 48), height: 17)
+    }
+
+    /// The slot's presses are its content's: anywhere on it is the field.
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(field)
+    }
+}
+
 /// A drop target outside the list, standing in for a sidebar row.
 final class DropZone: NSView {
     var hot = false { didSet { needsDisplay = true } }
@@ -82,6 +122,7 @@ final class DropZone: NSView {
 final class Harness: NSObject, DndListDataSource, DndListDelegate {
     var items: [String: FakeItem] = [:]
     let list: DndListView
+    let addRow = FakeAddRow()
     let zone = DropZone(frame: .zero)
     let status = NSTextField(labelWithString: "Drag rows to reorder, or onto the Bin.")
     let window: NSWindow
@@ -109,6 +150,16 @@ final class Harness: NSObject, DndListDataSource, DndListDelegate {
         list.delegate = self
         list.badgeText = { "\($0) items" }
         list.setOrder(order, animated: false)
+        list.setTrailer(addRow)
+        var added = 0
+        addRow.onAdd = { [weak self] text in
+            guard let self else { return }
+            added += 1
+            let id = "n\(added)"
+            self.items[id] = FakeItem(id: id, title: text)
+            self.list.setOrder(self.list.order + [id])
+            self.list.scrollToTrailer()
+        }
 
         let content = NSView(frame: NSRect(origin: .zero, size: size))
         let zoneWidth: CGFloat = 120
@@ -156,6 +207,13 @@ final class Harness: NSObject, DndListDataSource, DndListDelegate {
 
     func dndListSelectionDidChange(_ list: DndListView) {
         status.stringValue = "selected \(list.selectedKeys.count)"
+    }
+
+    func dndListNavigatePastEnd(_ list: DndListView) -> Bool {
+        note("past end")
+        list.window?.makeFirstResponder(addRow.field)
+        list.scrollToTrailer()
+        return true
     }
 
     func dndList(_ list: DndListView, didDoubleClick key: String) {
@@ -249,6 +307,7 @@ final class Script {
             "{\"step\":\"\(name)\",\"scrollTop\":\(Int(frame.scrollTop.rounded()))," +
             "\"listHeight\":\(Int(frame.listHeight))," +
             "\"placeholder\":\(frame.placeholder.map(rect) ?? "null")," +
+            "\"trailer\":\(frame.trailer.map(rect) ?? "null")," +
             "\"stack\":[\(frame.stack.map(rect).joined(separator: ","))]," +
             "\"order\":\"\(list.order.prefix(10).joined(separator: " "))\"," +
             "\"rows\":[\(rows)]}"
@@ -384,6 +443,43 @@ final class Script {
         frames(40)
         capture("revealed-last")
         check("⌥↓ scrolled to the end", abs(list.debugFrame.scrollTop - (list.debugFrame.listHeight - 400)) < 1.5)
+
+        // 7. The trailer: after the last row, and ↓ past the end is its.
+        check("trailer sits under the last row", list.debugFrame.trailer?.minY == 400 - 32
+            && list.debugFrame.rows.last.map { $0.frame.maxY == 400 - 32 } == true)
+        list.perform(.navigate(.down))
+        check("↓ on the last row hands on", harness.log.last == "past end"
+            && harness.window.firstResponder === harness.addRow.field.currentEditor())
+        harness.window.makeFirstResponder(list)
+
+        // A short list: the slot follows the rows, not the viewport.
+        list.setOrder(["r0", "r1", "r2"], animated: false)
+        capture("trailer-short")
+        check("trailer under three rows", list.debugFrame.trailer?.minY == 96)
+        list.pointerDown(at: slot(1)); list.pointerUp()
+        list.pointerDown(at: slot(3)); list.pointerUp()
+        check("a press the trailer leaves is a blank click", list.selectedKeys.isEmpty)
+        harness.addRow.field.stringValue = "Typed"
+        harness.addRow.submit()
+        capture("trailer-added")
+        check("the row lands where the trailer was", list.order == ["r0", "r1", "r2", "n1"]
+            && list.debugFrame.rows.last?.frame.minY == 96 && list.debugFrame.trailer?.minY == 128)
+
+        // A drag: the slot rides the rows' end, the nudge slot included.
+        list.pointerDown(at: slot(0))
+        list.pointerDragged(to: slot(0, dy: 8))
+        list.pointerDragged(to: slot(2))
+        frames(2)
+        capture("trailer-drag")
+        check("one-row drag leaves the trailer where it was", list.debugFrame.trailer?.minY == 128)
+        list.pointerDragged(to: CGPoint(x: 460, y: 150))
+        capture("trailer-drag-off")
+        check("off the list it comes up a row", list.debugFrame.trailer?.minY == 96)
+        list.pointerDragged(to: CGPoint(x: 150, y: 140))
+        list.pointerUp()
+        capture("trailer-dropped")
+        check("a drop on the trailer is a drop at the end", list.order == ["r1", "r2", "n1", "r0"]
+            && list.debugFrame.trailer?.minY == 128)
 
         try? lines.joined(separator: "\n").write(
             to: dir.appendingPathComponent("frames.jsonl"), atomically: true, encoding: .utf8

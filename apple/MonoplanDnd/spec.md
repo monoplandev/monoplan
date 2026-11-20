@@ -20,6 +20,8 @@ image, `moveRow` timing). Here nothing is AppKit's: no table, no
 | `.dnd-parent`, `overflow-y: scroll` | `NSScrollView`, no background |
 | `role="listbox"`, height of the whole list | `DndListbox`, the flipped document view |
 | `role="option"`, `position:absolute; top` | `DndRowView`, one per row in view, set by `frame`, pooled |
+| `trailer` in `.dnd-trailer`, after the last row | `setTrailer(view, height:)`: the host's view in a `DndTrailerSlot` in the listbox |
+| `on-trailer-navigate` | `DndListDelegate.dndListNavigatePastEnd -> Bool` |
 | renderer `mount(key, item, container)` | `DndListDataSource`: make a content view, configure it for a key |
 | placeholder: sibling of the parent, `translateY`, opacity fade | a layer-backed `NSView` behind the scroll view, in viewport coordinates |
 | `transition: top 0.15s ease` | additive keyframe animation on the row layer's `position.y`: 0.15 s, the CSS `ease` curve, in whole-pixel steps (below) |
@@ -106,10 +108,18 @@ The drag rules are the web's, unchanged:
   panes do. The rest position is `scrollTop = -topInset`; reveal,
   autoscroll's top zone and the fill-height floor allow for it.
 - `drag = false` turns dragging off altogether (the Inbox).
+- The trailer's presses are its view's own (the listbox does not take
+  them, as it does a row's). One the view does not handle climbs the
+  responder chain to the listbox and is a blank click, which is the
+  web's rule with `stopPropagation` turned round. Its slide rule is the
+  web's: it slides only on a pass where a row already on screen moved.
+- `scrollToTrailer()`: the host calls it after putting the keyboard in
+  the trailer, and as the list grows above it. Revealing the last row
+  scrolls to the end, so the trailer comes with it.
 
 ## Not ported
 
-Expansion, the trailer slot, the native (`draggable`) drag type, touch,
+Expansion, the native (`draggable`) drag type, touch,
 foreign-drag preview (`setForeignHover`: a drag from another list
 previewing an insertion here), `clear-on-click-outside`, accessibility
 roles. Rows hosted in `NSHostingView` are untried: SwiftUI content takes
@@ -118,11 +128,12 @@ its own mouse events, so the press rule above needs a decision first.
 ## Harness
 
 `swift run --package-path apple/MonoplanDnd DndHarness` opens 2,000 fake
-rows beside a "Bin" drop target (a stand-in for a sidebar row).
+rows beside a "Bin" drop target (a stand-in for a sidebar row), with a
+field in the trailer that adds a row on Return.
 
 `DndHarness --script <dir>` drives an off-screen window through one-row
 and multi-row drags, autoscroll, Escape, a drop on the foreign target
-and the keyboard, with time advanced by hand (`step(dt:)`). Each step
+the keyboard and the trailer, with time advanced by hand (`step(dt:)`). Each step
 writes a PNG and a line of `frames.jsonl` (row frames, placeholder,
 stack, scroll position) and the outcomes are checked. It sees layout,
 not motion: the PNGs show where rows end up, not the slide between, and

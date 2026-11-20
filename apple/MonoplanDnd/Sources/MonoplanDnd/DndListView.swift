@@ -51,7 +51,8 @@ public extension DndListDelegate {
 ///     ├── placeholder        the drop slot, behind the scroll view
 ///     └── NSScrollView       parent: the scroll viewport
 ///         └── DndListbox     listbox: as tall as the whole list
-///             └── DndRowView option: one per row in view, frame-positioned
+///             ├── DndRowView option: one per row in view, frame-positioned
+///             └── DndTrailerSlot the host's view after the last row, if any
 ///
 /// Behaviour lives in `DndListModel`; this view turns events into model
 /// input, then lays the rows out from `renderState()`.
@@ -67,6 +68,7 @@ public final class DndListView: NSView {
     private let listbox = DndListbox()
     private let placeholder = NSView()
 
+    private var trailerSlot: DndTrailerSlot?
     private var mounted: [String: DndRowView] = [:]
     private var pool: [DndRowView] = []
 
@@ -163,6 +165,34 @@ public final class DndListView: NSView {
                 dataSource?.dndList(self, configure: row.content, key: key, state: state)
             }
         }
+    }
+
+    /// The view in the slot directly after the last row, inside the
+    /// scrolled content (the web's `trailer`: the app's "new item" row).
+    public var trailer: NSView? { trailerSlot?.content }
+
+    /// Put `view` in the trailer slot, `height` tall (nil: a row's
+    /// height); nil takes the slot away. The view's presses are its
+    /// own, and one it does not handle is a click on blank space. With
+    /// a trailer, `dndListNavigatePastEnd` is where ↓ hands on to it.
+    public func setTrailer(_ view: NSView?, height: CGFloat? = nil) {
+        let height = view == nil ? 0 : height ?? model.config.itemHeight
+        guard view !== trailer || height != model.config.trailerHeight else { return }
+        if view !== trailer {
+            trailerSlot?.removeFromSuperview()
+            trailerSlot = view.map { DndTrailerSlot(content: $0) }
+            if let trailerSlot { listbox.addSubview(trailerSlot) }
+        }
+        model.config.trailerHeight = height
+        render(animated: false)
+    }
+
+    /// Scroll the trailer into view (the host has put the keyboard in it).
+    public func scrollToTrailer() {
+        syncViewport()
+        guard let offset = model.scrollOffsetToRevealTrailer() else { return }
+        scrollTarget = offset
+        updateTicker()
     }
 
     /// To the rest position, at once.
@@ -288,6 +318,7 @@ public final class DndListView: NSView {
             pool.append(row)
             mounted[key] = nil
         }
+        var rowMoved = false
         for item in state.items {
             let frame = NSRect(x: 0, y: item.top, width: width, height: item.height)
             let rowState = DndRowState(
@@ -297,6 +328,7 @@ public final class DndListView: NSView {
             let row: DndRowView
             if let existing = mounted[item.key] {
                 row = existing
+                if row.frame.minY != frame.minY || row.frame.height != frame.height { rowMoved = true }
                 row.move(to: frame, animated: animate)
             } else {
                 row = dequeueRow()
@@ -312,6 +344,16 @@ public final class DndListView: NSView {
             if row.apply(rowState) {
                 dataSource?.dndList(self, configure: row.content, key: item.key, state: rowState)
             }
+        }
+        if let slot = trailerSlot, let top = state.trailerTop {
+            // The web's rule: the trailer slides only when a row that
+            // was already on screen moved (one added or removed above
+            // it, a drag's slot opening). When none did (first paint, a
+            // row appended or removed at the very end) the rows pop,
+            // and so does the trailer.
+            let frame = NSRect(x: 0, y: top, width: width, height: model.config.trailerHeight)
+            slot.dndMove(to: frame, animated: animate && rowMoved && slot.placed)
+            slot.placed = true
         }
         renderPlaceholder(state.placeholderY)
     }
@@ -631,6 +673,7 @@ public final class DndListView: NSView {
         public var listHeight: CGFloat
         public var rows: [(key: String, frame: CGRect, selected: Bool)]
         public var placeholder: CGRect?
+        public var trailer: CGRect?
         /// The drag stack, lead first, in this view's coordinates.
         public var stack: [CGRect]
         public var stackImages: [CGImage]
@@ -650,6 +693,7 @@ public final class DndListView: NSView {
             listHeight: listbox.frame.height,
             rows: rows,
             placeholder: placeholder.alphaValue > 0 ? placeholder.frame : nil,
+            trailer: trailerSlot.map { convert($0.frame, from: listbox) },
             stack: stack,
             stackImages: overlay?.images ?? [],
             mountedCount: mounted.count

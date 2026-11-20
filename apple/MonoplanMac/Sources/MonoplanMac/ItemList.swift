@@ -3,6 +3,9 @@
 // dragged to reorder, moved with ⌘↑ / ⌘↓ (spec/mac-dnd-plan.md). The
 // other lenses are still SwiftUI lists, and the Calendar a table.
 //
+// A list that takes new items ends in a row to type one into
+// (`ItemAddRow`, in the list's trailer slot: the web's capture row).
+//
 // A row is AppKit throughout: the labels, the hairline, and the
 // checkbox and star as AppKit drawings of the ones the rest of the app
 // has (`ItemCheckArt.drawRowBox`, `StarArt.row`). They were hosted
@@ -50,6 +53,11 @@ struct ItemList: NSViewRepresentable {
     let move: ([String], String?) -> Void
     /// The right-click menu for the selected rows; nil is a separator.
     let menu: ([ItemListRow]) -> [AgendaTable.RowAction?]
+    /// A new item's text, typed into the row after the last one, for
+    /// the end of this list; nil is a list with no such row. It is this
+    /// surface's own: text still in the row when another list is shown
+    /// goes to the list it was typed under.
+    var add: ((String) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -84,24 +92,46 @@ struct ItemList: NSViewRepresentable {
         private var synced: String?
         /// Inside `apply`: the list's own notices are not the user's.
         private var applying = false
+        private let addRow = ItemAddRow()
+        private weak var list: DndListView?
 
         init(_ parent: ItemList) {
             self.parent = parent
+            super.init()
+            addRow.commit = { [weak self] text in self?.parent.add?(text) }
+            addRow.leave = { [weak self] toLastRow in
+                guard let list = self?.list else { return }
+                list.window?.makeFirstResponder(list)
+                if toLastRow { list.perform(.selectOnlyLast) }
+            }
         }
 
         func apply(_ next: ItemList, to list: DndListView) {
             applying = true
             defer { applying = false }
+            self.list = list
+            let moved = surface != next.surface
+            // Text typed under the last list is that list's item.
+            if moved { addRow.flush() }
+            let grew = !moved && next.rows.count > rows.count
+            // The item Return sent is in these rows for the first time.
+            let landed = moved ? nil : addRow.pending.flatMap { text in
+                next.rows.contains { rows[$0.id] == nil && $0.text == text } ? text : nil
+            }
             parent = next
             rows = Dictionary(next.rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             list.model.config.reorder = next.reorder
             list.model.config.drag = next.reorder
 
-            let moved = surface != next.surface
             surface = next.surface
             list.setOrder(next.rows.map(\.id), animated: !moved)
+            list.setTrailer(next.add == nil ? nil : addRow)
+            if let landed { addRow.landed(landed) }
             list.reloadRows()
             if moved { list.scrollToTop() }
+            // Typing one item after another: the row stays in view as
+            // the list grows above it.
+            if grew, addRow.isEditing { list.scrollToTrailer() }
 
             // The model's selection moves the list's only when it has
             // itself changed (a search hit opened, the panel shut):
@@ -145,6 +175,15 @@ struct ItemList: NSViewRepresentable {
 
         func dndList(_ list: DndListView, didMove keys: [String], before: String?) {
             parent.move(keys, before)
+        }
+
+        /// ↓ on the last row (or in an empty list) goes on to the row
+        /// that takes a new item.
+        func dndListNavigatePastEnd(_ list: DndListView) -> Bool {
+            guard parent.add != nil else { return false }
+            addRow.focus()
+            list.scrollToTrailer()
+            return true
         }
 
         func dndList(_ list: DndListView, menuFor keys: [String]) -> NSMenu? {
@@ -301,5 +340,155 @@ private final class ItemRowContent: NSView {
         guard !selected else { return }
         PaneColor.rowDivider.setFill()
         NSRect(x: Self.edge, y: bounds.maxY - 1, width: max(0, bounds.width - Self.edge * 2), height: 1).fill()
+    }
+}
+
+/// The row after a list's last: a plus where a row has its checkbox,
+/// and a field to type the next item into (the web's `.row-new`).
+/// Return adds the item and keeps the keyboard for the one after;
+/// Return on nothing and Escape give the keyboard back to the list, and
+/// ↑ in the empty field goes to the last row. Text left in it when the
+/// keyboard goes elsewhere is added too.
+///
+/// Return leaves the text in the field until the item is a row
+/// (`landed`): the write is off the main thread, and a field emptied at
+/// once shows its placeholder for a frame or two before the row draws
+/// in its place. Held, the text stands still and the row appears under
+/// it as the field empties and steps down.
+private final class ItemAddRow: NSView, NSTextFieldDelegate {
+    private static let edge: CGFloat = 20
+
+    var commit: (String) -> Void = { _ in }
+    /// The keyboard goes back to the list, onto its last row if so.
+    var leave: (Bool) -> Void = { _ in }
+
+    private let plus = NSImageView()
+    private let field = NSTextField()
+    /// Sent by Return and not yet a row; still in the field.
+    private(set) var pending: String?
+
+    override var isFlipped: Bool { true }
+
+    init() {
+        super.init(frame: .zero)
+        plus.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
+        plus.symbolConfiguration = .init(pointSize: 12, weight: .regular)
+        plus.contentTintColor = .tertiaryLabelColor
+        plus.setAccessibilityElement(false)
+        field.font = .systemFont(ofSize: NSFont.systemFontSize)
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.lineBreakMode = .byTruncatingTail
+        field.cell?.usesSingleLineMode = true
+        field.cell?.isScrollable = true
+        // In the plus's ink, not the system's placeholder colour.
+        field.placeholderAttributedString = NSAttributedString(
+            string: String(localized: "Add an item…"),
+            attributes: [.foregroundColor: NSColor.tertiaryLabelColor, .font: field.font as Any])
+        field.delegate = self
+        addSubview(plus)
+        addSubview(field)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not built from a nib") }
+
+    var isEditing: Bool { field.currentEditor() != nil }
+
+    func focus() {
+        window?.makeFirstResponder(field)
+    }
+
+    private var typed: String {
+        field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Return: send what has been typed and hold it in the field until
+    /// it lands. False when there is nothing to send.
+    private func submit() -> Bool {
+        // One on its way: Return again is not a second item.
+        guard pending == nil else { return true }
+        let text = typed
+        guard !text.isEmpty else { return false }
+        pending = text
+        commit(text)
+        // A write that failed lands nothing: the text stays, to send again.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            if self?.pending == text { self?.pending = nil }
+        }
+        return true
+    }
+
+    /// The item Return sent is a row now: the field lets go of it, and
+    /// keeps anything typed after it.
+    func landed(_ text: String) {
+        guard pending == text else { return }
+        pending = nil
+        dropSent(text)
+    }
+
+    private func dropSent(_ text: String) {
+        let now = field.stringValue
+        let lead = now.prefix { $0.isWhitespace || $0.isNewline }
+        let rest = now.dropFirst(lead.count)
+        field.stringValue = rest.hasPrefix(text) ? String(rest.dropFirst(text.count)) : ""
+    }
+
+    /// Add what has been typed and not yet sent, if anything, and empty
+    /// the field.
+    func flush() {
+        if let pending {
+            self.pending = nil
+            dropSent(pending)
+        }
+        let text = typed
+        field.stringValue = ""
+        if !text.isEmpty { commit(text) }
+    }
+
+    override func layout() {
+        super.layout()
+        let mid = bounds.midY
+        // The checkbox's 15 pt slot, and the text column of the rows.
+        plus.frame = NSRect(x: Self.edge, y: mid - 7.5, width: 15, height: 15)
+        let left = Self.edge + 15 + 8
+        let height = ceil(field.intrinsicContentSize.height)
+        field.frame = NSRect(
+            x: left, y: mid - height / 2, width: max(0, bounds.maxX - Self.edge - left), height: height)
+    }
+
+    /// Anywhere on the row is the field.
+    override func mouseDown(with event: NSEvent) {
+        focus()
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .iBeam)
+    }
+
+    // MARK: NSTextFieldDelegate
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        switch selector {
+        case #selector(NSResponder.insertNewline(_:)):
+            if !submit() { leave(false) }
+            return true
+        case #selector(NSResponder.cancelOperation(_:)):
+            pending = nil
+            field.stringValue = ""
+            leave(false)
+            return true
+        case #selector(NSResponder.moveUp(_:)):
+            guard field.stringValue.isEmpty else { return false }
+            leave(true)
+            return true
+        default:
+            return false
+        }
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        flush()
     }
 }

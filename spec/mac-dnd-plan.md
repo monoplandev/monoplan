@@ -33,6 +33,19 @@ checkbox and star hosted from SwiftUI. Not built: drops on the sidebar
 (phase 3, the list's delegate already reports the drag for it), across
 workspaces (4); the other lenses are still SwiftUI lists.
 
+**New-item row (2026-11-20):** a list ends in a row to type the next
+item into, the web's trailing capture slot (`ItemAddRow` in the list's
+trailer, `DndListView.setTrailer`). Return adds at the end of the list
+(`add_item`, one undo step) and keeps the keyboard; Return on nothing
+and Escape hand it back to the list; ↓ on the last row enters the row
+and ↑ in it, empty, leaves for the last row; text left in it when the
+keyboard or the list goes elsewhere is added to the list it was typed
+under. It stands in for "Nothing here" on an empty list. Not on
+Starred (the web's capture-and-star needs one typed call for one undo
+step), not on an Inbox shown newest first (its end is the top). Not
+built: the web's draft row mid-list (Space under a selection, needs an
+`add_item_at` call) and the date phrase suggestion on a new title.
+
 ## What the web does
 
 The web carries its own component (`js/web/src/dnd/`, contract in

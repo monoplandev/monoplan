@@ -69,28 +69,8 @@ final class DndRowView: NSView {
         layer?.zPosition = 0
     }
 
-    /// Put the row at `frame`. Animated, the row is at its new frame at
-    /// once and slides there from where it was: an additive animation on
-    /// the layer's position, so a second move mid-slide composes with the
-    /// first instead of restarting it (the web's `transition: top 0.15s`).
     func move(to frame: NSRect, animated: Bool) {
-        guard frame != self.frame else { return }
-        // AppKit moves the backing layer with the frame, in the parent's
-        // (flipped) coordinates: the layer's own delta is the slide.
-        let from = layer?.position.y
-        self.frame = frame
-        guard animated, let layer, let from else { return }
-        let delta = from - layer.position.y
-        guard delta != 0 else { return }
-        // Whole-pixel steps, 120 a second (`dndSlideSteps` says why).
-        let steps = Int(DndListView.moveDuration * 120)
-        let slide = CAKeyframeAnimation(keyPath: "position.y")
-        slide.values = dndSlideSteps(delta: delta, steps: steps, scale: window?.backingScaleFactor ?? 2)
-        slide.keyTimes = (0...steps).map { NSNumber(value: Double($0) / Double(steps)) }
-        slide.calculationMode = .discrete
-        slide.isAdditive = true
-        slide.duration = DndListView.moveDuration
-        layer.add(slide, forKey: nil)
+        dndMove(to: frame, animated: animated)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -128,9 +108,59 @@ final class DndRowView: NSView {
     }
 }
 
+extension NSView {
+    /// Put a layer-backed slot (a row, the trailer) at `frame`. Animated,
+    /// it is at its new frame at once and slides there from where it
+    /// was: an additive animation on the layer's position, so a second
+    /// move mid-slide composes with the first instead of restarting it
+    /// (the web's `transition: top 0.15s`).
+    func dndMove(to frame: NSRect, animated: Bool) {
+        guard frame != self.frame else { return }
+        // AppKit moves the backing layer with the frame, in the parent's
+        // (flipped) coordinates: the layer's own delta is the slide.
+        let from = layer?.position.y
+        self.frame = frame
+        guard animated, let layer, let from else { return }
+        let delta = from - layer.position.y
+        guard delta != 0 else { return }
+        // Whole-pixel steps, 120 a second (`dndSlideSteps` says why).
+        let steps = Int(DndListView.moveDuration * 120)
+        let slide = CAKeyframeAnimation(keyPath: "position.y")
+        slide.values = dndSlideSteps(delta: delta, steps: steps, scale: window?.backingScaleFactor ?? 2)
+        slide.keyTimes = (0...steps).map { NSNumber(value: Double($0) / Double(steps)) }
+        slide.calculationMode = .discrete
+        slide.isAdditive = true
+        slide.duration = DndListView.moveDuration
+        layer.add(slide, forKey: nil)
+    }
+}
+
+/// The web's `.dnd-trailer`: the slot directly after the last row, as
+/// tall as the host says, holding the host's view. Not a row: presses
+/// inside it are its content's own, and one the content leaves alone
+/// climbs to the listbox as a blank click.
+final class DndTrailerSlot: NSView {
+    let content: NSView
+    /// False until the first layout pass has placed it.
+    var placed = false
+    override var isFlipped: Bool { true }
+
+    init(content: NSView) {
+        self.content = content
+        super.init(frame: .zero)
+        wantsLayer = true
+        content.frame = bounds
+        content.autoresizingMask = [.width, .height]
+        addSubview(content)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+}
+
 /// The web's `role="listbox"`: the scrolled document view. It takes
 /// every click in a row that is not on an interactive view, so rows
-/// select and drag from anywhere on them.
+/// select and drag from anywhere on them. The trailer slot keeps its own.
 final class DndListbox: NSView {
     weak var owner: DndListView?
 
@@ -140,7 +170,7 @@ final class DndListbox: NSView {
         guard let hit = super.hitTest(point) else { return nil }
         var view: NSView? = hit
         while let current = view, current !== self {
-            if Self.isInteractive(current) { return hit }
+            if current is DndTrailerSlot || Self.isInteractive(current) { return hit }
             view = current.superview
         }
         return self

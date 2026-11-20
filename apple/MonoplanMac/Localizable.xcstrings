@@ -2840,6 +2840,16 @@
           }
         }
       }
+    },
+    "Add an item…": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Añadir un elemento…"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

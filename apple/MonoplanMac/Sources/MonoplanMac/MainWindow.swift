@@ -1184,11 +1184,10 @@ final class MainWindowModel: ObservableObject {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    func add(_ text: String) {
+    /// A new item at the end of a list.
+    func add(_ text: String, workspace: String?, list: String) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        guard shown.lens == nil else { return }
-        let workspace = shown.workspace, list = shown.list
         write { _ = try $0.addItem(workspace: workspace, list: list, text: text, top: false) }
     }
 
@@ -1705,6 +1704,11 @@ struct MainWindowView: View {
         let inbox = model.shown.list == MainWindowModel.inbox
         let items = inbox && inboxNewestFirst ? Array(model.items.reversed()) : model.items
         let workspace = model.shown.workspace
+        let listId = model.shown.list
+        // The row to type a new item into is where that item lands: the
+        // end. An Inbox shown newest first has its end at the top, so
+        // it has no such row.
+        let adds = !(inbox && inboxNewestFirst)
         return ItemList(
             surface: model.shown,
             rows: items.map {
@@ -1717,12 +1721,14 @@ struct MainWindowView: View {
             select: { model.selectItem(workspace: $0?.workspace, id: $0?.id) },
             toggle: { row, done in model.setDone(workspace: row.workspace, id: row.id, done: done) },
             move: { ids, before in model.reorderItems(workspace: workspace, ids: ids, before: before) },
-            menu: itemListMenu)
+            menu: itemListMenu,
+            add: adds ? { model.add($0, workspace: workspace, list: listId) } : nil)
             // Under the toolbar, as a list is: the scroll view insets
             // its own content for it.
             .ignoresSafeArea()
             .overlay(alignment: .topLeading) {
-                if model.items.isEmpty { emptyNote(Text("Nothing here")) }
+                // The row for a new item is the empty list's first row.
+                if model.items.isEmpty, !adds { emptyNote(Text("Nothing here")) }
             }
     }
 
