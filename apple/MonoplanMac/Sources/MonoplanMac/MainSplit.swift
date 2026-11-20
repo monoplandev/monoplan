@@ -853,14 +853,14 @@ final class ToolbarTitleView: NSView {
 
     init() {
         super.init(frame: .zero)
-        label.font = .systemFont(ofSize: NSFont.systemFontSize + 2, weight: .semibold)
+        label.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .medium)
         label.textColor = .labelColor
         label.lineBreakMode = .byTruncatingTail
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         iconView.contentTintColor = .labelColor
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.isHidden = true
-        countLabel.font = .systemFont(ofSize: NSFont.systemFontSize + 2, weight: .regular)
+        countLabel.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         countLabel.textColor = .secondaryLabelColor
         countLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         countLabel.isHidden = true
