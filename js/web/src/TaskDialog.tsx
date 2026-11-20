@@ -1768,7 +1768,7 @@ export function TaskDialog(props: {
                     </div>
                     <div>
                       <dt>{m().workspace.activityElapsed}</dt>
-                      <dd>{formatElapsed(doneAt(it()) - it().createdAt, locale())}</dd>
+                      <dd>{formatElapsed(doneAt(it()) - it().createdAt)}</dd>
                     </div>
                   </Show>
                   <Show when={isCancelled(it())}>
@@ -1778,7 +1778,7 @@ export function TaskDialog(props: {
                     </div>
                     <div>
                       <dt>{m().workspace.activityElapsed}</dt>
-                      <dd>{formatElapsed(it().lifecycleAt - it().createdAt, locale())}</dd>
+                      <dd>{formatElapsed(it().lifecycleAt - it().createdAt)}</dd>
                     </div>
                   </Show>
                 </dl>

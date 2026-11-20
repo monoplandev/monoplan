@@ -354,7 +354,6 @@ struct ItemPanel: View {
                 }
             }
         }
-        .font(.footnote)
         .foregroundStyle(.secondary)
     }
 
@@ -451,23 +450,34 @@ struct ItemPanel: View {
         return days >= 2 ? String(localized: "\(days) days") : nil
     }
 
-    /// An instant for the activity log: the time alone today, otherwise
-    /// the date and time.
+    /// An instant for the activity log: "Today 2:05 PM" today, otherwise
+    /// "2026.11.09 2:05 PM", the date in year.month.day digits so the
+    /// rows compare at a glance one under the other.
     static func stamp(_ millis: Int64, now: Date = Date(), calendar: Calendar = .current) -> String {
         let date = Date(timeIntervalSince1970: Double(millis) / 1000)
+        let time = date.formatted(date: .omitted, time: .shortened)
         if calendar.isDate(date, inSameDayAs: now) {
-            return String(localized: "today \(date.formatted(date: .omitted, time: .shortened))")
+            return String(localized: "Today \(time)")
         }
-        return date.formatted(date: .abbreviated, time: .shortened)
+        let day = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d.%02d.%02d", day.year ?? 0, day.month ?? 0, day.day ?? 0) + " " + time
     }
 
-    /// "2 days, 3 hours": two units at most, the larger first.
+    /// "1d 3h": two units at most, the larger first, the smaller only
+    /// when it is not zero, each a single letter (y, d, h, m, s; no
+    /// weeks or months, whose letters would be taken for something
+    /// else). The same in every language.
     static func elapsed(from start: Int64, to end: Int64) -> String? {
-        let formatter = DateComponentsFormatter()
-        formatter.unitsStyle = .full
-        formatter.maximumUnitCount = 2
-        formatter.allowedUnits = [.year, .month, .day, .hour, .minute, .second]
-        return formatter.string(from: TimeInterval(max(0, end - start)) / 1000)
+        let seconds = max(0, end - start) / 1000
+        let units: [(Int64, String)] = [(365 * 86400, "y"), (86400, "d"), (3600, "h"), (60, "m"), (1, "s")]
+        guard let first = units.firstIndex(where: { seconds >= $0.0 }) else { return "0s" }
+        let whole = seconds / units[first].0
+        var text = "\(whole)\(units[first].1)"
+        if first + 1 < units.count {
+            let rest = (seconds - whole * units[first].0) / units[first + 1].0
+            if rest > 0 { text += " \(rest)\(units[first + 1].1)" }
+        }
+        return text
     }
 }
 

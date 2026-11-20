@@ -94,12 +94,14 @@ export function calendarDayDiff(later: Date, earlier: Date): number {
 const relativeEs = {
   minutesAgo: (n: number) => `hace ${n} min`,
   hoursAgo: (n: number) => `hace ${n} h`,
+  todayAt: (time: string) => `Hoy ${time}`,
   yesterdayAt: (time: string) => `Ayer ${time}`,
 };
 
 const relativeEn = {
   minutesAgo: (n: number) => `${n}m ago`,
   hoursAgo: (n: number) => `${n}h ago`,
+  todayAt: (time: string) => `Today ${time}`,
   yesterdayAt: (time: string) => `Yesterday ${time}`,
 };
 
@@ -521,68 +523,41 @@ export function formatDoneStamp(ts: number, now: number, locale: string): string
   }).format(tsDate);
 }
 
-// Task-dialog stamp: the dialog has room for the full picture, so every
-// stamp carries its time of day. Today → time only; yesterday → "Yesterday
-// HH:MM"; otherwise the short weekday and date (with the year once it
-// differs) plus time: "Thu, Nov 5 8:19 AM".
+// Task-dialog stamp, for the activity rows: every stamp carries its time
+// of day. Today → "Today 2:05 PM"; yesterday → "Yesterday 8:06 PM";
+// otherwise the date in year.month.day digits plus time, "2026.11.09
+// 8:19 AM", so the rows compare at a glance one under the other.
 export function formatDialogStamp(ts: number, now: number, locale: string): string {
   const tsDate = new Date(ts);
   const nowDate = new Date(now);
   const time = timeFormatter(locale).format(tsDate);
   const days = calendarDayDiff(nowDate, tsDate);
-  if (days === 0) return time;
-  if (days === 1) {
-    const m = locale.startsWith("es") ? relativeEs : relativeEn;
-    return m.yesterdayAt(time);
-  }
-  const date = new Intl.DateTimeFormat(locale, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    ...(tsDate.getFullYear() === nowDate.getFullYear() ? {} : { year: "numeric" }),
-  }).format(tsDate);
+  const m = locale.startsWith("es") ? relativeEs : relativeEn;
+  if (days === 0) return m.todayAt(time);
+  if (days === 1) return m.yesterdayAt(time);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const date = `${tsDate.getFullYear()}.${pad(tsDate.getMonth() + 1)}.${pad(tsDate.getDate())}`;
   return `${date} ${time}`;
 }
 
 // Elapsed span between two instants, for the task dialog's activity
-// section ("2 days 3 hours"). Localised via `Intl.NumberFormat`'s
-// unit style so the unit words come out right per locale. Two units at
-// most, the larger first, and the smaller only when it is non-zero:
-// seconds under a minute; minutes under an hour; hours + minutes under a
-// day; days + hours under a week; weeks + days under a month; months +
-// days under a year; years + months beyond. Months are calendar-average
-// (30.44 days), which is as exact as a plain span can be.
-export function formatElapsed(ms: number, locale: string): string {
-  const unit = (n: number, u: string) =>
-    new Intl.NumberFormat(locale, { style: "unit", unit: u, unitDisplay: "long" }).format(n);
-  const pair = (a: number, ua: string, b: number, ub: string) =>
-    b > 0 ? `${unit(a, ua)} ${unit(b, ub)}` : unit(a, ua);
-  const SEC = 1_000;
-  const MIN = 60 * SEC;
-  const HOUR = 60 * MIN;
-  const DAY = 24 * HOUR;
-  const WEEK = 7 * DAY;
-  const MONTH = 30.44 * DAY;
-  const YEAR = 365.25 * DAY;
-  const span = Math.max(0, ms);
-  if (span < MIN) return unit(Math.floor(span / SEC), "second");
-  if (span < HOUR) return unit(Math.floor(span / MIN), "minute");
-  if (span < DAY) {
-    const h = Math.floor(span / HOUR);
-    return pair(h, "hour", Math.floor((span - h * HOUR) / MIN), "minute");
-  }
-  if (span < WEEK) {
-    const d = Math.floor(span / DAY);
-    return pair(d, "day", Math.floor((span - d * DAY) / HOUR), "hour");
-  }
-  if (span < MONTH) {
-    const w = Math.floor(span / WEEK);
-    return pair(w, "week", Math.floor((span - w * WEEK) / DAY), "day");
-  }
-  if (span < YEAR) {
-    const mo = Math.floor(span / MONTH);
-    return pair(mo, "month", Math.floor((span - mo * MONTH) / DAY), "day");
-  }
-  const y = Math.floor(span / YEAR);
-  return pair(y, "year", Math.floor((span - y * YEAR) / MONTH), "month");
+// section ("1d 3h"). Two units at most, the larger first, the smaller
+// only when it is non-zero, each a single letter: y, d, h, m, s (no
+// weeks or months, whose letters would be taken for something else).
+// The same in every language.
+export function formatElapsed(ms: number): string {
+  const seconds = Math.floor(Math.max(0, ms) / 1000);
+  const units: [number, string][] = [
+    [365 * 86_400, "y"],
+    [86_400, "d"],
+    [3_600, "h"],
+    [60, "m"],
+    [1, "s"],
+  ];
+  const first = units.findIndex(([size]) => seconds >= size);
+  if (first < 0) return "0s";
+  const whole = Math.floor(seconds / units[first][0]);
+  const next = units[first + 1];
+  const rest = next ? Math.floor((seconds - whole * units[first][0]) / next[0]) : 0;
+  return rest > 0 ? `${whole}${units[first][1]} ${rest}${next[1]}` : `${whole}${units[first][1]}`;
 }

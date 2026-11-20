@@ -2792,13 +2792,13 @@
         }
       }
     },
-    "today %@" : {
+    "Today %@" : {
       "extractionState" : "stale",
       "localizations" : {
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "hoy %@"
+            "value" : "Hoy %@"
           }
         }
       }
