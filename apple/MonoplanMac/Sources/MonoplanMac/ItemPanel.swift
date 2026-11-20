@@ -33,6 +33,9 @@ struct ItemPanel: View {
     /// list, date and place are what it will be made with; it has no
     /// subtasks, notes or history to show.
     var isNew = false
+    /// The title takes the caret as the page appears: a new item
+    /// begun from the toolbar, with nothing typed yet.
+    var focusTitle = false
     /// The item's workspace when it is a shared one.
     let workspaceName: String?
     /// The lists the item can be moved to: its workspace's, Inbox
@@ -84,7 +87,9 @@ struct ItemPanel: View {
                         // The bin masks an item: nothing of it is
                         // edited until it is restored.
                         if item.item.binnedAt == nil {
-                            PanelTitle(text: item.item.text, closed: item.closedAt != nil) { retitle(item, $0) }
+                            PanelTitle(text: item.item.text, closed: item.closedAt != nil, autofocus: focusTitle) {
+                                retitle(item, $0)
+                            }
                                 .id(identity)
                         } else {
                             Text(verbatim: item.item.text)
@@ -691,13 +696,16 @@ private struct PanelTitle: View {
     /// The item's title as the engine has it.
     let text: String
     let closed: Bool
+    /// Takes the caret as it appears (a new item's, from the toolbar).
+    let autofocus: Bool
     let commit: (String) -> Void
     @State private var draft: String
     @FocusState private var focused: Bool
 
-    init(text: String, closed: Bool, commit: @escaping (String) -> Void) {
+    init(text: String, closed: Bool, autofocus: Bool = false, commit: @escaping (String) -> Void) {
         self.text = text
         self.closed = closed
+        self.autofocus = autofocus
         self.commit = commit
         _draft = State(initialValue: text)
     }
@@ -734,6 +742,8 @@ private struct PanelTitle: View {
                 focused = false
             }
             .onChange(of: focused) { if !focused { finish() } }
+            // After the appearing pass: the focus set inside it is lost.
+            .onAppear { if autofocus { DispatchQueue.main.async { focused = true } } }
             // Changed elsewhere (another device, an undo): shown,
             // unless this one is being typed in.
             .onChange(of: text) { if !focused { draft = text } }

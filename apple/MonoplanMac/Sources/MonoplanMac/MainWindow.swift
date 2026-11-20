@@ -268,6 +268,8 @@ struct ItemCapture: Equatable {
     var sent = false
     /// The item the panel showed before, to go back to.
     var returnTo: ItemSelection?
+    /// Begun from the toolbar: the panel's title takes the caret.
+    var focusTitle = false
 
     var identity: String { "capture-\(key)" }
 }
@@ -360,6 +362,22 @@ final class MainWindowModel: ObservableObject {
     /// The panel has a page: an item's, or one being captured. It is
     /// empty otherwise (it is always shown).
     var panelOpen: Bool { selected != nil || capture != nil }
+
+    /// How many rows the list has selected and the surface it was
+    /// showing: several selected rows are the list's own state
+    /// (`ItemList`), with no item in the panel, which says how many.
+    @Published private var rowsSelected: (count: Int, surface: Surface)?
+
+    /// The rows selected in what is shown; 0 off an `ItemList`.
+    var selectedCount: Int {
+        guard let rowsSelected, rowsSelected.surface == shown else { return 0 }
+        return rowsSelected.count
+    }
+
+    func rowsSelected(_ count: Int, on surface: Surface) {
+        guard rowsSelected?.count != count || rowsSelected?.surface != surface else { return }
+        rowsSelected = (count, surface)
+    }
 
     /// What tells the panel's views one page from the next. An item a
     /// capture became keeps the capture's, so the field the click that
@@ -1293,6 +1311,26 @@ final class MainWindowModel: ObservableObject {
         capture = freshCapture(workspace: workspace, list: list, returnTo: back)
     }
 
+    /// The toolbar's New Item: the panel is a new item's page with the
+    /// caret in its title, for the list shown, or the Inbox when a
+    /// lens is. Typing the title makes it (`captureTitled`); what is
+    /// picked on the panel before that lands with it. Pressed again,
+    /// it starts over.
+    func newItem() {
+        let back = capture?.returnTo ?? selected
+        selected = nil
+        detail = nil
+        detailOf = nil
+        promoted = nil
+        following = nil
+        let onList = shown.lens == nil
+        var next = freshCapture(
+            workspace: onList ? shown.workspace : nil, list: onList ? shown.list : Self.inbox, returnTo: back)
+        next.phase = .pane
+        next.focusTitle = true
+        capture = next
+    }
+
     private func freshCapture(workspace: String?, list: String, returnTo: ItemSelection?) -> ItemCapture {
         captureKey += 1
         return ItemCapture(key: captureKey, workspace: workspace, list: list, returnTo: returnTo)
@@ -1956,6 +1994,7 @@ struct MainWindowView: View {
             selected: model.capture == nil ? model.selected?.id : nil,
             reorder: !inbox,
             select: { model.selectItem(workspace: $0?.workspace, id: $0?.id) },
+            selectedCount: { [surface = model.shown] in model.rowsSelected($0, on: surface) },
             toggle: { row, done in model.setDone(workspace: row.workspace, id: row.id, done: done) },
             move: { ids, before in model.reorderItems(workspace: workspace, ids: ids, before: before) },
             menu: itemListMenu,
@@ -2190,6 +2229,7 @@ struct MainWindowView: View {
             selected: model.selected?.id,
             reorder: true,
             select: { model.selectItem(workspace: $0?.workspace, id: $0?.id) },
+            selectedCount: { [surface = model.shown] in model.rowsSelected($0, on: surface) },
             toggle: { row, done in model.setDone(workspace: row.workspace, id: row.id, done: done) },
             move: { ids, before in model.reorderStarred(ids: ids, before: before) },
             menu: itemListMenu)

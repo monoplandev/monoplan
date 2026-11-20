@@ -73,10 +73,9 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     static let sidebarWidth = (min: 160.0, initial: 200.0, max: 400.0)
     static let panelWidth = (min: 240.0, max: 520.0)
 
-    /// The toolbar with the panel shut: the title's section after the
-    /// sidebar's separator, with new at its end. The
-    /// panel's separator is there only with the panel (`panelItems`):
-    /// with the panel shut it would draw at the window's edge.
+    /// The toolbar before the first `sync`: the title's section after
+    /// the sidebar's separator, with new at its end. `sync` adds the
+    /// sidebar's items before it and the panel's (`panelItems`) after.
     private static let fixedItems = listItems(lens: nil)
 
     /// The list's section of the bar. On Done its filter leads the
@@ -185,7 +184,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         }
         // The rest: the list's section, then the panel's. Whatever
         // already matches from the front stays; the tail is rebuilt.
-        let wanted = lead + Self.listItems(lens: model.shown.lens, signedIn: model.signedIn) + panelItems()
+        let wanted = lead + Self.listItems(lens: model.shown.lens, signedIn: model.signedIn) + Self.panelItems
         let have = toolbar.items.map(\.itemIdentifier)
         if have != wanted {
             let kept = zip(have, wanted).prefix { $0 == $1 }.count
@@ -199,21 +198,18 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         for item in toolbar.items { update(item) }
     }
 
-    /// The panel's part of the bar: its separator, then with an item
-    /// on it the status once the item is read, and the star and the
-    /// "…" menu at the far edge. Only an Open, unbinned item can be
-    /// starred (spec/focus.md); a binned item's "…" menu restores or
-    /// deletes it.
-    private func panelItems() -> [NSToolbarItem.Identifier] {
-        var items: [NSToolbarItem.Identifier] = [.panelSeparator]
-        // A capture is not an item yet: nothing to tick, star or bin.
-        guard model.capture == nil, let item = model.detail else { return items }
-        items.append(.itemStatus)
-        items.append(.flexibleSpace)
-        if item.item.binnedAt == nil, item.closedAt == nil { items.append(.itemStar) }
-        items.append(.itemMore)
-        return items
-    }
+    /// The panel's part of the bar: its separator, the status, and
+    /// the star and the "…" menu at the far edge. Always all of them:
+    /// taking items out and putting them back as the selection comes
+    /// and goes redraws the bar over the panel, so what does not apply
+    /// is disabled instead (`update`).
+    private static let panelItems: [NSToolbarItem.Identifier] =
+        [.panelSeparator, .itemStatus, .flexibleSpace, .itemStar, .itemMore]
+
+    /// The item the panel's controls act on; nil with the panel empty
+    /// and during a capture, which is not an item yet: nothing to
+    /// tick, star or bin.
+    private var barItem: ItemInfo? { model.capture == nil ? model.detail : nil }
 
     private func update(_ toolbarItem: NSToolbarItem) {
         if toolbarItem.itemIdentifier == .title {
@@ -237,10 +233,23 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             toolbarItem.toolTip = label
             return
         }
-        guard let item = model.detail else { return }
+        let item = barItem
         switch toolbarItem.itemIdentifier {
         case .itemStatus:
             guard let control = toolbarItem.view as? NSSegmentedControl else { return }
+            guard let item else {
+                // No item: an empty box and the control's name, greyed.
+                control.segmentCount = 2
+                control.setLabel("", forSegment: 0)
+                control.setImage(ItemCheckArt.image(.backlog, accessibilityDescription: nil), forSegment: 0)
+                control.setToolTip(nil, forSegment: 0)
+                control.setLabel(String(localized: "Status"), forSegment: 1)
+                control.setToolTip(nil, forSegment: 1)
+                control.isEnabled = false
+                for segment in 0..<control.segmentCount { control.setWidth(0, forSegment: segment) }
+                control.sizeToFit()
+                return
+            }
             // A binned item just says so: the bin masks its state.
             if item.item.binnedAt != nil {
                 control.segmentCount = 1
@@ -263,12 +272,18 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             for segment in 0..<control.segmentCount { control.setWidth(0, forSegment: segment) }
             control.sizeToFit()
         case .itemStar:
-            let hint = item.starred ? String(localized: "Remove star") : String(localized: "Star")
-            toolbarItem.image = StarArt.toolbarImage(starred: item.starred)
+            let starred = item?.starred ?? false
+            let hint = starred ? String(localized: "Remove star") : String(localized: "Star")
+            toolbarItem.image = StarArt.toolbarImage(starred: starred)
             toolbarItem.label = hint
             toolbarItem.toolTip = hint
+            // Only an Open, unbinned item can be starred (spec/focus.md).
+            toolbarItem.isEnabled = item.map { $0.item.binnedAt == nil && $0.closedAt == nil } ?? false
         case .itemMore:
-            // The menu follows the item in and out of the Bin.
+            toolbarItem.isEnabled = item != nil
+            guard let item else { return }
+            // The menu follows the item in and out of the Bin: a
+            // binned item's restores or deletes it.
             let binned = item.item.binnedAt != nil
             if let menuItem = toolbarItem as? NSMenuToolbarItem,
                (menuItem.menu.items.first?.action == #selector(restoreItem(_:))) != binned {
@@ -307,6 +322,9 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             item.toolTip = label
             item.showsIndicator = false
             item.menu = itemMenu(binned: model.detail?.item.binnedAt != nil)
+            // Enabled by `update`, not by the toolbar's validation.
+            item.autovalidates = false
+            update(item)
             return item
         }
         let item = NSToolbarItem(itemIdentifier: identifier)
@@ -360,8 +378,8 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             item.target = self
             item.action = #selector(jumpToToday(_:))
         case .newItem:
-            // Not wired yet: the action does nothing (without one the
-            // toolbar would draw the button disabled).
+            // A new item's page on the panel, the caret in its title
+            // (`MainWindowModel.newItem`).
             let label = String(localized: "New Item")
             item.image = NSImage(systemSymbolName: "square.and.pencil", accessibilityDescription: label)
             item.label = label
@@ -382,6 +400,8 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             item.isBordered = true
             item.target = self
             item.action = #selector(toggleStar(_:))
+            // Enabled by `update`, not by the toolbar's validation.
+            item.autovalidates = false
         default:
             return nil
         }
@@ -485,7 +505,9 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: sender.isFlipped ? .maxY : .minY)
     }
 
-    @objc private func newItem(_ sender: Any?) {}
+    @objc private func newItem(_ sender: Any?) {
+        model.newItem()
+    }
 
     /// The status control's halves: the checkbox, then the label.
     @objc private func statusClicked(_ sender: NSSegmentedControl) {
@@ -587,7 +609,8 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
 
 }
 
-/// The inspector pane: the selected item's page, empty without one.
+/// The inspector pane: the selected item's page; without one, how
+/// many rows are selected when there are several, and otherwise empty.
 struct ItemPanelPane: View {
     @ObservedObject var model: MainWindowModel
 
@@ -605,6 +628,7 @@ struct ItemPanelPane: View {
                 ItemPanel(
                     item: capture.map(model.captureInfo) ?? model.detail, identity: identity,
                     isNew: capture != nil,
+                    focusTitle: capture?.focusTitle ?? false,
                     workspaceName: model.sharedWorkspaceName(workspace),
                     lists: model.moveLists(workspace: workspace),
                     otherLists: model.otherMoveLists(workspace: workspace),
@@ -671,6 +695,9 @@ struct ItemPanelPane: View {
                         model.moveSubtask(workspace: workspace, id: $0.item.id, subtask: $1, index: $2)
                     },
                     removeSubtask: { model.removeSubtask(workspace: workspace, id: $0.item.id, subtask: $1) })
+            } else if model.selectedCount > 1 {
+                Text("\(model.selectedCount) items selected")
+                    .foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

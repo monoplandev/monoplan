@@ -67,6 +67,9 @@ struct ItemList: NSViewRepresentable {
     /// The selection came down to one row (its panel opens), or to
     /// none or several (it shuts).
     let select: (ItemListRow?) -> Void
+    /// How many rows are selected, on each change of it: the panel
+    /// says so when there are several.
+    var selectedCount: (Int) -> Void = { _ in }
     /// A row's checkbox, with the new "done".
     let toggle: (ItemListRow, Bool) -> Void
     /// `ids`, in order, now sit directly above `before` (nil: last).
@@ -112,6 +115,8 @@ struct ItemList: NSViewRepresentable {
         private var synced: String?
         /// Inside `apply`: the list's own notices are not the user's.
         private var applying = false
+        /// The count last given to `selectedCount`.
+        private var counted = 0
         private let addRow = ItemAddRow()
         private weak var list: DndListView?
 
@@ -131,7 +136,18 @@ struct ItemList: NSViewRepresentable {
 
         func apply(_ next: ItemList, to list: DndListView) {
             applying = true
-            defer { applying = false }
+            defer {
+                applying = false
+                // Rows that left, or another list: the selection may
+                // have changed with no notice. Told after this view
+                // update, not inside it.
+                if list.selectedKeys.count != counted {
+                    DispatchQueue.main.async { [weak self, weak list] in
+                        guard let self, let list else { return }
+                        self.count(list)
+                    }
+                }
+            }
             self.list = list
             let moved = surface != next.surface
             // Text typed under the last list is that list's item.
@@ -193,6 +209,14 @@ struct ItemList: NSViewRepresentable {
             let one = keys.count == 1 ? rows[keys[0]] : nil
             synced = one?.id
             parent.select(one)
+            count(list)
+        }
+
+        private func count(_ list: DndListView) {
+            let count = list.selectedKeys.count
+            guard count != counted else { return }
+            counted = count
+            parent.selectedCount(count)
         }
 
         func dndList(_ list: DndListView, didMove keys: [String], before: String?) {

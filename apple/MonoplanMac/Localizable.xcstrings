@@ -821,6 +821,16 @@
         }
       }
     },
+    "%lld items selected": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld elementos seleccionados"
+          }
+        }
+      }
+    },
     "Nothing starred": {
       "localizations": {
         "es": {
