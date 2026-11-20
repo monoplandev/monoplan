@@ -12,7 +12,7 @@
 docker run -d \
     -p 8000:8000 \
     -v /srv/monoplan:/data \
-    ghcr.io/airdaydev/airday-server:v0.0.1-alpha.15
+    ghcr.io/airdaydev/airday-server:v0.0.1-alpha.16
 ```
 
 ```
