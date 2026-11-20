@@ -525,15 +525,7 @@ export function formatDoneStamp(ts: number, now: number, locale: string): string
 // stamp carries its time of day. Today → time only; yesterday → "Yesterday
 // HH:MM"; otherwise the short weekday and date (with the year once it
 // differs) plus time: "Thu, Nov 5 8:19 AM".
-//
-// `inline` marks a stamp that continues a sentence ("Created yesterday
-// 8:06 PM"), where "Yesterday" drops its capital; standalone stamps keep it.
-export function formatDialogStamp(
-  ts: number,
-  now: number,
-  locale: string,
-  opts?: { inline?: boolean },
-): string {
+export function formatDialogStamp(ts: number, now: number, locale: string): string {
   const tsDate = new Date(ts);
   const nowDate = new Date(now);
   const time = timeFormatter(locale).format(tsDate);
@@ -541,8 +533,7 @@ export function formatDialogStamp(
   if (days === 0) return time;
   if (days === 1) {
     const m = locale.startsWith("es") ? relativeEs : relativeEn;
-    const label = m.yesterdayAt(time);
-    return opts?.inline ? label.charAt(0).toLocaleLowerCase(locale) + label.slice(1) : label;
+    return m.yesterdayAt(time);
   }
   const date = new Intl.DateTimeFormat(locale, {
     weekday: "short",
@@ -554,7 +545,7 @@ export function formatDialogStamp(
 }
 
 // Elapsed span between two instants, for the task dialog's activity
-// section ("took 2 days 3 hours"). Localised via `Intl.NumberFormat`'s
+// section ("2 days 3 hours"). Localised via `Intl.NumberFormat`'s
 // unit style so the unit words come out right per locale. Two units at
 // most, the larger first, and the smaller only when it is non-zero:
 // seconds under a minute; minutes under an hour; hours + minutes under a

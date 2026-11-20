@@ -586,22 +586,55 @@ struct ItemView: View {
         }
     }
 
-    /// The item's timeline as plain sentences: created, and once closed,
-    /// when and how long it took.
+    /// The item's timeline as label and value rows, the label at the
+    /// leading edge and the value at the trailing: who created it (on
+    /// a shared workspace), when, and once closed, when and how long
+    /// it took.
     private func activity(_ item: ItemInfo) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Created \(Self.stamp(item.createdAt))")
+            // Who added it, on a shared workspace: their email beside
+            // their avatar, the avatar alone while the members are not
+            // known.
+            if let docId = ref.docId, workspace != nil, let creator = item.item.createdBy {
+                let members = model.members[docId]
+                let member = members?.first(where: { $0.accountId == creator })
+                activityRow(String(localized: "Created by")) {
+                    if members != nil {
+                        Text(verbatim: member?.email ?? String(localized: "A former member"))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    MemberAvatar(accountId: creator, email: member?.email, side: 18)
+                }
+            }
+            activityRow(String(localized: "Created"), Self.stamp(item.createdAt))
             if let closedAt = item.closedAt {
-                Text(item.state == .done
-                    ? String(localized: "Completed \(Self.stamp(closedAt))")
-                    : String(localized: "Cancelled \(Self.stamp(closedAt))"))
+                activityRow(
+                    item.state == .done ? String(localized: "Completed") : String(localized: "Cancelled"),
+                    Self.stamp(closedAt))
                 if let took = Self.elapsed(from: item.createdAt, to: closedAt) {
-                    Text("Took \(took)")
+                    activityRow(String(localized: "Elapsed"), took)
                 }
             }
         }
         .font(.footnote)
         .foregroundStyle(.secondary)
+    }
+
+    private func activityRow(_ label: String, _ value: String) -> some View {
+        activityRow(label) {
+            Text(verbatim: value)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func activityRow(_ label: String, @ViewBuilder value: () -> some View) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Text(verbatim: label)
+            Spacer(minLength: 0)
+            value()
+        }
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: Formatting

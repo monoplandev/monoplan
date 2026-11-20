@@ -1722,10 +1722,12 @@ export function TaskDialog(props: {
             />
           </section>
 
-          {/* Activity log under the notes: the item's timeline as plain
-              sentences, unheaded (the section's name is its aria-label).
-              When it was created, and once closed, when it was completed
-              or cancelled and, on a line of its own, how long that took.
+          {/* Activity log under the notes: the item's timeline as label
+              and value rows, unheaded (the section's name is its
+              aria-label), the label at the start of the row and the
+              value at its end. Who created it (shared docs), when,
+              and once closed,
+              when it was completed or cancelled and how long that took.
               The completion stamp is the reflection `doneAt` (last entry
               into Done), falling back to the register's transition
               time; cancelling stamps nothing, so its instant is the
@@ -1736,50 +1738,50 @@ export function TaskDialog(props: {
                 class="task-dialog-section task-dialog-activity"
                 aria-label={m().workspace.activity}
               >
-                <ul class="task-dialog-activity-log">
-                  <li title={formatDateTime(it().createdAt, locale())}>
-                    {m().workspace.createdStamp(
-                      formatDialogStamp(it().createdAt, nowMs(), locale(), { inline: true }),
-                    )}
-                    {/* "… by (avatar)" on shared docs: who added it. */}
-                    <Show when={props.creatorOf?.(it())}>
-                      {(c) => (
-                        <span class="task-dialog-by">
-                          {m().workspace.createdBy}
+                <dl class="task-dialog-activity-log">
+                  {/* Who added it, on shared docs: the top row. */}
+                  <Show when={props.creatorOf?.(it())}>
+                    {(c) => (
+                      <div>
+                        <dt>{m().workspace.activityCreatedBy}</dt>
+                        <dd>
+                          <span class="task-dialog-by">
+                            {c().email ?? m().sharing.formerMember}
+                          </span>
                           <Avatar
                             accountId={c().accountId}
                             email={c().email}
                             title={c().email ?? m().sharing.formerMember}
                           />
-                        </span>
-                      )}
-                    </Show>
-                  </li>
+                        </dd>
+                      </div>
+                    )}
+                  </Show>
+                  <div title={formatDateTime(it().createdAt, locale())}>
+                    <dt>{m().workspace.activityCreated}</dt>
+                    <dd>{formatDialogStamp(it().createdAt, nowMs(), locale())}</dd>
+                  </div>
                   <Show when={isDone(it())}>
-                    <li title={formatDateTime(doneAt(it()), locale())}>
-                      {m().workspace.activityCompleted(
-                        formatDialogStamp(doneAt(it()), nowMs(), locale(), { inline: true }),
-                      )}
-                    </li>
-                    <li>
-                      {m().workspace.activityElapsed(
-                        formatElapsed(doneAt(it()) - it().createdAt, locale()),
-                      )}
-                    </li>
+                    <div title={formatDateTime(doneAt(it()), locale())}>
+                      <dt>{m().workspace.activityCompleted}</dt>
+                      <dd>{formatDialogStamp(doneAt(it()), nowMs(), locale())}</dd>
+                    </div>
+                    <div>
+                      <dt>{m().workspace.activityElapsed}</dt>
+                      <dd>{formatElapsed(doneAt(it()) - it().createdAt, locale())}</dd>
+                    </div>
                   </Show>
                   <Show when={isCancelled(it())}>
-                    <li title={formatDateTime(it().lifecycleAt, locale())}>
-                      {m().workspace.activityCancelled(
-                        formatDialogStamp(it().lifecycleAt, nowMs(), locale(), { inline: true }),
-                      )}
-                    </li>
-                    <li>
-                      {m().workspace.activityElapsed(
-                        formatElapsed(it().lifecycleAt - it().createdAt, locale()),
-                      )}
-                    </li>
+                    <div title={formatDateTime(it().lifecycleAt, locale())}>
+                      <dt>{m().workspace.activityCancelled}</dt>
+                      <dd>{formatDialogStamp(it().lifecycleAt, nowMs(), locale())}</dd>
+                    </div>
+                    <div>
+                      <dt>{m().workspace.activityElapsed}</dt>
+                      <dd>{formatElapsed(it().lifecycleAt - it().createdAt, locale())}</dd>
+                    </div>
                   </Show>
-                </ul>
+                </dl>
               </section>
             )}
           </Show>

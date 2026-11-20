@@ -53,21 +53,23 @@ enum PaneColor {
         }
     }
 
-    /// A rule across the item's panel: the rows' hairline
-    /// (`rowDivider`) in dark; in light, the panes' divider (the system
-    /// separator at half its alpha, lighter than `Divider()`'s).
+    /// A rule across the item's panel, just visible: in dark, half the
+    /// contrast of the web's `--row-divider` (#2a2a2a) against the
+    /// panel's ground; in light, the system separator at a quarter of
+    /// its alpha (half the panes' divider).
     static let panelRule = NSColor(name: nil) { appearance in
-        guard appearance.bestMatch(from: [.aqua, .darkAqua]) != .darkAqua else { return rowDivider }
+        guard appearance.bestMatch(from: [.aqua, .darkAqua]) != .darkAqua else { return grey(0x22) }
         var resolved = NSColor.separatorColor
         appearance.performAsCurrentDrawingAppearance {
             resolved = NSColor.separatorColor.usingColorSpace(.sRGB) ?? .separatorColor
         }
-        return resolved.withAlphaComponent(resolved.alphaComponent * 0.5)
+        return resolved.withAlphaComponent(resolved.alphaComponent * 0.25)
     }
 
-    /// The hairline between two item rows, just visible: the web's
-    /// `--row-divider` (`js/web/src/styles.css`).
-    static let rowDivider = dynamic(dark: 0x2a2a2a, light: grey(0xf5))
+    /// The hairline between two item rows, just visible: half the
+    /// contrast of the web's `--row-divider` (`js/web/src/styles.css`,
+    /// #2a2a2a / #f5f5f5) against the list's ground.
+    static let rowDivider = dynamic(dark: 0x212121, light: grey(0xfa))
 
     /// The ground of a selected row in the key window: the web's
     /// `--dnd-select-bg` (`js/web/src/styles.css`), #dbeafe in light

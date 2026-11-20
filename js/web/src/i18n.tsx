@@ -218,14 +218,15 @@ export type Messages = {
      *  (`spec/data-model.md` "Lifecycle"). `reopen` is its un-done. */
     markCancelled: string;
     reopen: string;
-    /** Activity section under the task-dialog notes: a log of plain
-     *  sentences (`activity` is its accessible name, not shown).
-     *  `createdStamp` is the creation line; once done, the completion
-     *  line ("Completed yesterday 8:06 PM") is followed by the elapsed
-     *  span since creation on its own line ("3 hours elapsed"). */
-    createdStamp: (when: string) => string;
-    /** Joins the creation stamp to the creator's avatar: "Created 5:49 PM by ●". */
-    createdBy: string;
+    /** Activity section under the task-dialog notes: label and value
+     *  rows (`activity` is its accessible name, not shown), the label
+     *  at the start of the row and the value at its end.
+     *  `activityCreatedBy` labels who added it (shared docs only, the
+     *  top row), `activityCreated` the creation stamp; once closed,
+     *  `activityCompleted` or `activityCancelled` labels the closing
+     *  stamp and `activityElapsed` the span since creation. */
+    activityCreated: string;
+    activityCreatedBy: string;
     /** The task dialog's assignee control (`AssigneeField`): its
      *  accessible name, the trigger's reading while unassigned, the
      *  ✕ that unassigns, and the tooltip naming the assignee (also
@@ -241,10 +242,10 @@ export type Messages = {
     /** A list row's subtask count tooltip. */
     subtasksDone: (done: number, total: number) => string;
     activity: string;
-    activityCompleted: (when: string) => string;
-    activityElapsed: (span: string) => string;
-    /** Activity line for a cancelled item: when it was cancelled. */
-    activityCancelled: (when: string) => string;
+    activityCompleted: string;
+    activityElapsed: string;
+    /** Activity label for a cancelled item's closing stamp. */
+    activityCancelled: string;
     duplicate: string;
     moveToBin: string;
     moveToList: string;
@@ -749,8 +750,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       markNotDone: "Marcar como no hecho",
       markCancelled: "Cancelar",
       reopen: "Reabrir",
-      createdStamp: (when) => `Creado ${when}`,
-      createdBy: "por",
+      activityCreated: "Creado",
+      activityCreatedBy: "Creado por",
       assignee: "Responsable",
       assign: "Asignar",
       unassign: "Quitar responsable",
@@ -760,9 +761,9 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       addSubtask: "Añadir subtarea",
       subtasksDone: (done, total) => `${done} de ${total} subtareas hechas`,
       activity: "Actividad",
-      activityCompleted: (when) => `Completado ${when}`,
-      activityElapsed: (span) => `Tiempo transcurrido: ${span}`,
-      activityCancelled: (when) => `Cancelado ${when}`,
+      activityCompleted: "Completado",
+      activityElapsed: "Transcurrido",
+      activityCancelled: "Cancelado",
       duplicate: "Duplicar",
       moveToBin: "Mover a la papelera",
       moveToList: "Mover a la lista",
@@ -1146,8 +1147,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       markNotDone: "Mark as not done",
       markCancelled: "Cancel",
       reopen: "Reopen",
-      createdStamp: (when) => `Created ${when}`,
-      createdBy: "by",
+      activityCreated: "Created",
+      activityCreatedBy: "Created by",
       assignee: "Assignee",
       assign: "Assign",
       unassign: "Unassign",
@@ -1157,9 +1158,9 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       addSubtask: "Add subtask",
       subtasksDone: (done, total) => `${done} of ${total} subtasks done`,
       activity: "Activity",
-      activityCompleted: (when) => `Completed ${when}`,
-      activityElapsed: (span) => `${span} elapsed`,
-      activityCancelled: (when) => `Cancelled ${when}`,
+      activityCompleted: "Completed",
+      activityElapsed: "Elapsed",
+      activityCancelled: "Cancelled",
       duplicate: "Duplicate",
       moveToBin: "Move to bin",
       moveToList: "Move to list",
