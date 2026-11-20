@@ -37,7 +37,7 @@ use monoplan_cli::api::{
     bin::BinEntry,
     done::{DoneEntry, DoneFilter},
     find::FindHit,
-    items::{Item, ItemInfo, ItemState, Place},
+    items::{Item, ItemInfo, ItemState, NewItemFields, Place},
     json::ImportCounts,
     lists::{ListFilter, ListInfo},
     moves::ItemRef,
@@ -756,6 +756,22 @@ impl Engine {
         Ok(self.client.call_blocking(workspace, move |cx| {
             let mut ids = api::items::add_items(cx, &list, &[text], top)?;
             Ok(ids.remove(0))
+        })?)
+    }
+
+    /// Capture: add an item to `list` (at the top with `top`, else the
+    /// end) with `fields` already on it, and return its id. One call,
+    /// so one undo step.
+    pub fn capture_item(
+        &self,
+        workspace: Option<String>,
+        list: String,
+        text: String,
+        top: bool,
+        fields: NewItemFields,
+    ) -> Result<String, EngineError> {
+        Ok(self.client.call_blocking(workspace, move |cx| {
+            api::items::capture(cx, &list, &text, top, fields)
         })?)
     }
 

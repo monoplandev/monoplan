@@ -61,7 +61,6 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     let toolbar = NSToolbar(identifier: "MonoplanMain")
     /// Set while `sync` moves the panel itself, so the resize it
     /// causes is not read as the user folding the panel away.
-    private var syncing = false
     /// The rename popover, while it is up.
     private var renamePopover: NSPopover?
     /// The new-list popover, while it is up.
@@ -111,6 +110,13 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         panelItem = NSSplitViewItem(
             viewController: Self.pane(ItemPanelPane(model: model)))
         super.init(nibName: nil, bundle: nil)
+        // A press that takes the keyboard from the new-item row: in
+        // the panel, it is after the item being typed (`ItemCapture`).
+        model.isInPanel = { [weak self] point in
+            guard let self else { return false }
+            let view = self.panelItem.viewController.view
+            return view.window != nil && view.bounds.contains(view.convert(point, from: nil))
+        }
         // Before the panes go in: the split view with our dividers.
         let split = PaneSplitView()
         split.isVertical = true
@@ -122,11 +128,11 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         listItem.minimumThickness = 260
         panelItem.minimumThickness = Self.panelWidth.min
         panelItem.maximumThickness = Self.panelWidth.max
-        panelItem.canCollapse = true
-        panelItem.canCollapseFromWindowResize = false
+        // Always there (2026-11-20): the selected item's page, a new
+        // item's while one is typed, and empty otherwise.
+        panelItem.canCollapse = false
         // As a sidebar's: the window's resizing goes to the list.
         panelItem.holdingPriority = sidebarItem.holdingPriority
-        panelItem.isCollapsed = true
         addSplitViewItem(sidebarItem)
         addSplitViewItem(listItem)
         addSplitViewItem(panelItem)
@@ -161,16 +167,9 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
 
     // MARK: The model's state, shown
 
-    /// The panel open on a selection and shut without one, and the
-    /// toolbar's item controls for the item it shows. Called on every
-    /// change of the model.
+    /// The toolbar's sections, with the item controls for the item
+    /// the panel shows. Called on every change of the model.
     func sync() {
-        let open = model.selected != nil
-        if panelItem.isCollapsed == open {
-            syncing = true
-            panelItem.isCollapsed = !open
-            syncing = false
-        }
         // Over the sidebar, before its separator: search then New
         // List, account or none (side by side, on one glass: the
         // sidebar is too narrow at its least for a space between);
@@ -200,16 +199,15 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         for item in toolbar.items { update(item) }
     }
 
-    /// The panel's part of the bar: nothing with the panel shut; else
-    /// its separator, the status once the item is read, and the star
-    /// and the "…" menu at the far edge. No close button: Escape, or
-    /// its edge dragged shut. Only an Open, unbinned item can be
+    /// The panel's part of the bar: its separator, then with an item
+    /// on it the status once the item is read, and the star and the
+    /// "…" menu at the far edge. Only an Open, unbinned item can be
     /// starred (spec/focus.md); a binned item's "…" menu restores or
     /// deletes it.
     private func panelItems() -> [NSToolbarItem.Identifier] {
-        guard model.selected != nil else { return [] }
         var items: [NSToolbarItem.Identifier] = [.panelSeparator]
-        guard let item = model.detail else { return items }
+        // A capture is not an item yet: nothing to tick, star or bin.
+        guard model.capture == nil, let item = model.detail else { return items }
         items.append(.itemStatus)
         items.append(.flexibleSpace)
         if item.item.binnedAt == nil, item.closedAt == nil { items.append(.itemStar) }
@@ -581,19 +579,12 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         model.setStarred(workspace: selected.workspace, id: selected.id, starred: !item.starred)
     }
 
-    /// Escape, when nothing nearer wants it, shuts the panel.
+    /// Escape, when nothing nearer wants it, empties the panel: the
+    /// selection, or a capture, is let go.
     override func cancelOperation(_ sender: Any?) {
-        if model.selected != nil { model.closeItem() }
+        if model.panelOpen { model.closeItem() }
     }
 
-    // MARK: Split view
-
-    /// The panel's edge dragged until it folds away is the panel
-    /// closed: the selection goes with it.
-    override func splitViewDidResizeSubviews(_ notification: Notification) {
-        super.splitViewDidResizeSubviews(notification)
-        if !syncing, panelItem.isCollapsed, model.selected != nil { model.closeItem() }
-    }
 }
 
 /// The inspector pane: the selected item's page, empty without one.
@@ -605,35 +596,81 @@ struct ItemPanelPane: View {
             // The page shown, which on a new selection is the old one
             // until the new one is read: its fields, and its writes,
             // are for the item it shows, in that item's workspace.
-            if model.selected != nil, let shown = model.detailOf {
+            // One `ItemPanel` for an item and for a capture, so the
+            // item a capture becomes takes over its views as they are.
+            let capture = model.capture
+            let shown = model.selected != nil ? model.detailOf : nil
+            let workspace = capture.map(\.workspace) ?? shown?.workspace
+            if let identity = model.panelIdentity, capture != nil || shown != nil {
                 ItemPanel(
-                    item: model.detail, workspaceName: model.sharedWorkspaceName(shown.workspace),
-                    lists: model.moveLists(workspace: shown.workspace),
-                    otherLists: model.otherMoveLists(workspace: shown.workspace),
-                    retitle: { model.setText(workspace: shown.workspace, item: $0, text: $1) },
-                    move: { model.moveItem(workspace: shown.workspace, id: $0.item.id, list: $1) },
-                    moveAcross: {
+                    item: capture.map(model.captureInfo) ?? model.detail, identity: identity,
+                    isNew: capture != nil,
+                    workspaceName: model.sharedWorkspaceName(workspace),
+                    lists: model.moveLists(workspace: workspace),
+                    otherLists: model.otherMoveLists(workspace: workspace),
+                    retitle: { item, text in
+                        if capture != nil { return model.captureTitled(text) }
+                        model.setText(workspace: workspace, item: item, text: text)
+                    },
+                    move: { item, list in
+                        if capture != nil { return model.editCapture { $0.list = list } }
+                        model.moveItem(workspace: workspace, id: item.item.id, list: list)
+                    },
+                    moveAcross: { item, target, list in
+                        if capture != nil {
+                            return model.editCapture {
+                                $0.workspace = target
+                                $0.list = list
+                            }
+                        }
                         model.moveItemAcross(
-                            from: shown.workspace, id: $0.item.id, to: $1, list: $2, on: NSApp.keyWindow)
+                            from: workspace, id: item.item.id, to: target, list: list, on: NSApp.keyWindow)
                     },
                     knownPlaces: { model.knownPlaces(matching: $0, completion: $1) },
-                    setPlace: { model.setPlace(workspace: shown.workspace, id: $0.item.id, place: $1, exact: $2) },
-                    setWhen: { model.setWhen(workspace: shown.workspace, id: $0.item.id, when: $1, duration: $2) },
-                    setEvent: { model.setEvent(workspace: shown.workspace, id: $0.item.id, event: $1) },
-                    assignment: model.assignment(workspace: shown.workspace),
-                    setAssignee: { model.setAssignee(workspace: shown.workspace, id: $0.item.id, assignee: $1) },
-                    setDuration: { model.setDuration(workspace: shown.workspace, id: $0.item.id, minutes: $1) },
-                    addSubtask: { model.addSubtask(workspace: shown.workspace, id: $0.item.id, text: $1) },
+                    setPlace: { item, place, exact in
+                        if capture != nil {
+                            return model.editCapture {
+                                $0.place = place
+                                $0.placeExact = exact
+                            }
+                        }
+                        model.setPlace(workspace: workspace, id: item.item.id, place: place, exact: exact)
+                    },
+                    setWhen: { item, when, duration in
+                        if capture != nil {
+                            return model.editCapture {
+                                $0.when = when
+                                switch duration {
+                                case .keep: break
+                                case .clear: $0.duration = nil
+                                case .minutes(let minutes): $0.duration = Int(minutes)
+                                }
+                            }
+                        }
+                        model.setWhen(workspace: workspace, id: item.item.id, when: when, duration: duration)
+                    },
+                    setEvent: { item, event in
+                        if capture != nil { return model.editCapture { $0.event = event } }
+                        model.setEvent(workspace: workspace, id: item.item.id, event: event)
+                    },
+                    // Assigned once it is an item.
+                    assignment: capture == nil ? model.assignment(workspace: workspace) : nil,
+                    setAssignee: { model.setAssignee(workspace: workspace, id: $0.item.id, assignee: $1) },
+                    setDuration: { item, minutes in
+                        if capture != nil { return model.editCapture { $0.duration = minutes } }
+                        model.setDuration(workspace: workspace, id: item.item.id, minutes: minutes)
+                    },
+                    addSubtask: { model.addSubtask(workspace: workspace, id: $0.item.id, text: $1) },
                     setSubtaskText: {
-                        model.setSubtaskText(workspace: shown.workspace, id: $0.item.id, subtask: $1, text: $2)
+                        model.setSubtaskText(workspace: workspace, id: $0.item.id, subtask: $1, text: $2)
                     },
                     setSubtaskDone: {
-                        model.setSubtaskDone(workspace: shown.workspace, id: $0.item.id, subtask: $1, done: $2)
+                        model.setSubtaskDone(workspace: workspace, id: $0.item.id, subtask: $1, done: $2)
                     },
                     moveSubtask: {
-                        model.moveSubtask(workspace: shown.workspace, id: $0.item.id, subtask: $1, index: $2)
+                        model.moveSubtask(workspace: workspace, id: $0.item.id, subtask: $1, index: $2)
                     },
-                    removeSubtask: { model.removeSubtask(workspace: shown.workspace, id: $0.item.id, subtask: $1) })
+                    removeSubtask: { model.removeSubtask(workspace: workspace, id: $0.item.id, subtask: $1) })
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

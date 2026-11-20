@@ -231,6 +231,53 @@ pub fn add_items(cx: &Ctx, list: &str, texts: &[String], top: bool) -> anyhow::R
     Ok(ids)
 }
 
+/// What a capture sets on the item it creates besides its title: the
+/// fields picked on the capture surface before the item existed.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct NewItemFields {
+    /// Planned date (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`).
+    pub when: Option<String>,
+    /// Duration in whole minutes; only with `when`.
+    pub duration: Option<u32>,
+    /// An event (`spec/events-plan.md`); only with `when`.
+    pub event: bool,
+    pub place: Option<Place>,
+    /// As [`set_place`]'s `exact`.
+    pub place_exact: bool,
+    /// The date the title names, raised as the item's suggestion; only
+    /// without `when` (a date set answers it).
+    pub when_suggested: Option<String>,
+}
+
+/// Capture: add one item to `list` (at the top with `top`, else the
+/// end) with `fields` already on it, and return its id. One call, so
+/// one undo step takes the item and its fields away together.
+pub fn capture(
+    cx: &Ctx,
+    list: &str,
+    text: &str,
+    top: bool,
+    fields: NewItemFields,
+) -> anyhow::Result<String> {
+    let id = add_items(cx, list, &[text.to_owned()], top)?.remove(0);
+    if let Some(when) = &fields.when {
+        set_when(cx, &id, Some(when))?;
+        if fields.duration.is_some() {
+            set_duration(cx, &id, fields.duration)?;
+        }
+        if fields.event {
+            set_event(cx, &id, true)?;
+        }
+    } else if let Some(suggested) = &fields.when_suggested {
+        set_when_suggested(cx, &id, Some(suggested))?;
+    }
+    if fields.place.is_some() {
+        set_place(cx, &id, fields.place, fields.place_exact)?;
+    }
+    Ok(id)
+}
+
 /// Tick or untick: `Done`, or back to `Backlog`.
 pub fn set_done(cx: &Ctx, id: &str, done: bool) -> anyhow::Result<()> {
     let state = if done {
@@ -454,6 +501,66 @@ mod tests {
     use super::*;
     use crate::commands::focus::Lens;
     use monoplan_core::{Doc, LIST_INBOX};
+
+    #[test]
+    fn capture_adds_the_item_with_its_fields() {
+        let doc = Doc::new().unwrap();
+        let lens = Lens::home(&doc);
+        let docs = [&doc];
+        let cx = Ctx::bare(&doc, &docs, &lens);
+        add_items(&cx, LIST_INBOX, &["First".into()], false).unwrap();
+        let id = capture(
+            &cx,
+            LIST_INBOX,
+            "Dentist",
+            false,
+            NewItemFields {
+                when: Some("2026-11-21T09:00".into()),
+                duration: Some(45),
+                event: true,
+                place: Some(Place {
+                    label: "Clinic".into(),
+                    lat: None,
+                    lon: None,
+                    address: None,
+                    reference: None,
+                }),
+                place_exact: true,
+                // A date was picked: the title's own is not asked about.
+                when_suggested: Some("2026-11-27".into()),
+            },
+        )
+        .unwrap();
+        let made = item(&cx, &id).unwrap().item;
+        assert_eq!(made.text, "Dentist");
+        assert_eq!(made.when.as_deref(), Some("2026-11-21T09:00"));
+        assert_eq!(made.duration, Some(45));
+        assert!(made.event);
+        assert_eq!(made.place.map(|p| p.label).as_deref(), Some("Clinic"));
+        assert_eq!(made.when_suggested, None);
+
+        let plain = capture(
+            &cx,
+            LIST_INBOX,
+            "Call friday",
+            false,
+            NewItemFields {
+                when_suggested: Some("2026-11-27".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let made = item(&cx, &plain).unwrap().item;
+        assert_eq!(made.when, None);
+        assert_eq!(made.when_suggested.as_deref(), Some("2026-11-27"));
+        // At the end of its list, after what was there.
+        let order: Vec<String> = items(&cx, LIST_INBOX, false)
+            .unwrap()
+            .into_iter()
+            .map(|i| i.text)
+            .collect();
+        assert_eq!(order, ["First", "Call friday"]);
+    }
 
     /// The `--json` row is pinned here, field for field: what every
     /// script decodes.

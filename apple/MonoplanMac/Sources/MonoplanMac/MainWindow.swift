@@ -73,8 +73,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         // own title stays set for the Window menu and Mission Control.
         window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 520, height: 360)
-        window.setContentSize(NSSize(width: 860, height: 560))
+        // The three panes at their least: sidebar, list, item panel.
+        window.minSize = NSSize(width: 660, height: 360)
+        window.setContentSize(NSSize(width: 1040, height: 560))
         window.center()
         // After the default frame, so a saved one wins.
         window.setFrameAutosaveName("MonoplanWindow")
@@ -237,6 +238,40 @@ struct ItemSelection: Equatable {
     let id: String
 }
 
+/// A new item on the panel before it exists (the web's draft mirror,
+/// `js/web/src/TaskDialog.tsx` `NewItemTarget.draft`): while the row
+/// after a list's last is being typed into, the panel shows the item it
+/// will be, and holds the fields picked there until it is made.
+struct ItemCapture: Equatable {
+    enum Phase {
+        /// The list's row has the caret and is the title's editor.
+        case row
+        /// The row was left with nothing typed, for the panel: its
+        /// title is typed there.
+        case pane
+    }
+
+    var phase = Phase.row
+    /// Tells one capture from the next, for the panel's views.
+    let key: Int
+    /// Where the item will be made: the workspace (nil is Home) and
+    /// the list.
+    var workspace: String?
+    var list: String
+    var text = ""
+    var when: String?
+    var duration: Int?
+    var event = false
+    var place: Place?
+    var placeExact = false
+    /// The create is out, and the panel is to follow the item.
+    var sent = false
+    /// The item the panel showed before, to go back to.
+    var returnTo: ItemSelection?
+
+    var identity: String { "capture-\(key)" }
+}
+
 /// A sidebar row: a lens, or a list in a workspace (nil being Home).
 enum NavTarget: Hashable {
     case lens(Lens)
@@ -303,6 +338,37 @@ final class MainWindowModel: ObservableObject {
     @Published private(set) var detail: ItemInfo?
     /// The selection `detail` was read for: `selected` once it lands.
     @Published private(set) var detailOf: ItemSelection?
+
+    /// The new item the panel shows in place of a selected one, while
+    /// one is being captured.
+    @Published private(set) var capture: ItemCapture?
+    /// How many items typed into a list's last row have landed in the
+    /// rows: the row lets go of its text on a change of it.
+    @Published private(set) var captureSettled = 0
+    /// Creates that have succeeded and are not yet in the rows.
+    private var unsettled = 0
+    /// The item a sent capture became, until the panel shows it.
+    private var following: String?
+    /// The item a capture became with the panel on it, and the
+    /// capture's identity: the panel's views carry on as they were.
+    private var promoted: (id: String, identity: String)?
+    private var captureKey = 0
+    /// Whether a point of the window is in the item panel (the split
+    /// view says).
+    var isInPanel: (NSPoint) -> Bool = { _ in false }
+
+    /// The panel has a page: an item's, or one being captured. It is
+    /// empty otherwise (it is always shown).
+    var panelOpen: Bool { selected != nil || capture != nil }
+
+    /// What tells the panel's views one page from the next. An item a
+    /// capture became keeps the capture's, so the field the click that
+    /// made it landed in stays as it is.
+    var panelIdentity: String? {
+        if let capture { return capture.identity }
+        guard let id = detailOf?.id else { return nil }
+        return promoted?.id == id ? promoted?.identity : id
+    }
 
     /// The panel's item when it is the selected one, for the panel's
     /// and toolbar's writes: nil in the moment between a click and the
@@ -461,7 +527,13 @@ final class MainWindowModel: ObservableObject {
     /// Select a row's item, opening its panel; nil closes it.
     func selectItem(workspace: String?, id: String?) {
         guard let id else { return clearItem() }
+        // A row picked ends a capture, whatever it was at.
+        if capture != nil {
+            capture = nil
+            following = nil
+        }
         guard id != selected?.id else { return }
+        promoted = nil
         let picked = ItemSelection(workspace: workspace, id: id)
         selected = picked
         readDetail(picked)
@@ -495,6 +567,9 @@ final class MainWindowModel: ObservableObject {
     }
 
     private func clearItem() {
+        capture = nil
+        following = nil
+        promoted = nil
         selected = nil
         detail = nil
         detailOf = nil
@@ -673,9 +748,21 @@ final class MainWindowModel: ObservableObject {
                 if let picked = snapshot.selected, picked == self.selected {
                     if let detail = snapshot.detail {
                         self.setDetail(detail, of: picked)
+                        // The item a capture became is read: the panel
+                        // goes from the capture to it in this pass.
+                        if let capture = self.capture, capture.sent, self.following == picked.id {
+                            self.promoted = (picked.id, capture.identity)
+                            self.capture = nil
+                            self.following = nil
+                        }
                     } else {
                         self.clearItem()
                     }
+                }
+                // With the rows they are now in.
+                if self.unsettled > 0 {
+                    self.captureSettled += self.unsettled
+                    self.unsettled = 0
                 }
                 self.error = nil
                 // The Bin emptied while shown: its sidebar row goes, so
@@ -1184,11 +1271,160 @@ final class MainWindowModel: ObservableObject {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    /// A new item at the end of a list.
-    func add(_ text: String, workspace: String?, list: String) {
+    // MARK: Capture
+
+    /// The row after a list's last took the keyboard: the panel is the
+    /// new item's page (`ItemCapture`) in place of the selected item's,
+    /// which it goes back to if the capture is dropped.
+    func rowBegan(workspace: String?, list: String) {
+        if var capture {
+            // Back from the panel: what was picked there is kept.
+            guard !capture.sent, capture.phase == .pane else { return }
+            capture.phase = .row
+            capture.text = ""
+            self.capture = capture
+            return
+        }
+        let back = selected
+        selected = nil
+        detail = nil
+        detailOf = nil
+        promoted = nil
+        capture = freshCapture(workspace: workspace, list: list, returnTo: back)
+    }
+
+    private func freshCapture(workspace: String?, list: String, returnTo: ItemSelection?) -> ItemCapture {
+        captureKey += 1
+        return ItemCapture(key: captureKey, workspace: workspace, list: list, returnTo: returnTo)
+    }
+
+    /// The row's text as it is typed: the panel's title follows.
+    func rowTyped(_ text: String) {
+        guard capture?.phase == .row, capture?.sent == false else { return }
+        capture?.text = text
+    }
+
+    /// The row's text is an item: by Return (`chained`: the row keeps
+    /// the keyboard for the next) or by the keyboard leaving it, `click`
+    /// being the press that took it, if one did. It is made at the end
+    /// of the row's list, with whatever the panel's capture holds. A
+    /// press in the panel takes the panel onto the item; otherwise the
+    /// panel goes back to what it showed, or on to the next capture.
+    func rowSubmitted(_ text: String, workspace: String?, list: String, chained: Bool, click: NSPoint?) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        write { _ = try $0.addItem(workspace: workspace, list: list, text: text, top: false) }
+        guard var capture, capture.phase == .row, !capture.sent else {
+            sendCapture(workspace: workspace, list: list, text: text, fields: Self.fields(nil), follow: false)
+            return
+        }
+        let fields = Self.fields(capture)
+        if !chained, let click, isInPanel(click) {
+            capture.text = text
+            capture.sent = true
+            self.capture = capture
+            sendCapture(workspace: capture.workspace, list: capture.list, text: text, fields: fields, follow: true)
+            return
+        }
+        sendCapture(workspace: capture.workspace, list: capture.list, text: text, fields: fields, follow: false)
+        if chained {
+            self.capture = freshCapture(workspace: workspace, list: list, returnTo: capture.returnTo)
+        } else {
+            endCapture()
+        }
+    }
+
+    /// The row was left with nothing typed: by Escape (`cancelled`), or
+    /// the keyboard going elsewhere. Into the panel, the capture stays
+    /// there with its title to be typed; anywhere else it is dropped,
+    /// and the panel goes back to the item it showed.
+    func rowEnded(cancelled: Bool, click: NSPoint?) {
+        guard var capture, capture.phase == .row, !capture.sent else { return }
+        if !cancelled, let click, isInPanel(click) {
+            capture.phase = .pane
+            capture.text = ""
+            self.capture = capture
+        } else {
+            endCapture()
+        }
+    }
+
+    private func endCapture() {
+        let back = capture?.returnTo
+        capture = nil
+        following = nil
+        if let back { selectItem(workspace: back.workspace, id: back.id) }
+    }
+
+    /// The capture's title was typed in the panel: the item is made,
+    /// and the panel is its page.
+    func captureTitled(_ text: String) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard var capture, !capture.sent, !text.isEmpty else { return }
+        capture.text = text
+        capture.sent = true
+        self.capture = capture
+        sendCapture(
+            workspace: capture.workspace, list: capture.list, text: text, fields: Self.fields(capture), follow: true)
+    }
+
+    /// A field picked on the panel for the item not yet made.
+    func editCapture(_ edit: (inout ItemCapture) -> Void) {
+        guard var capture, !capture.sent else { return }
+        edit(&capture)
+        // No date, nothing that needs one.
+        if capture.when == nil {
+            capture.duration = nil
+            capture.event = false
+        }
+        self.capture = capture
+    }
+
+    private static func fields(_ capture: ItemCapture?) -> NewItemFields {
+        NewItemFields(
+            when: capture?.when, duration: capture?.duration.map(UInt32.init), event: capture?.event ?? false,
+            place: capture?.place, placeExact: capture?.placeExact ?? false, whenSuggested: nil)
+    }
+
+    /// One call, so one undo step for the item and its fields
+    /// (`Engine.captureItem`), then the reread that shows it. `follow`:
+    /// the panel goes onto the item, in the pass that reads it.
+    private func sendCapture(workspace: String?, list: String, text: String, fields: NewItemFields, follow: Bool) {
+        guard let calls = engine.calls else {
+            error = engineErrorMessage(EngineError.Stopped)
+            if follow { capture?.sent = false }
+            return
+        }
+        calls.run({ try $0.captureItem(workspace: workspace, list: list, text: text, top: false, fields: fields) }) {
+            [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.error = engineErrorMessage(error)
+                // Still a capture: its title can be sent again.
+                if follow { self.capture?.sent = false }
+            case .success(let id):
+                self.unsettled += 1
+                if follow, self.capture?.sent == true {
+                    self.selected = ItemSelection(workspace: workspace, id: id)
+                    self.following = id
+                }
+                self.reload()
+            }
+        }
+    }
+
+    /// The capture as the panel's page: the item it will be.
+    func captureInfo(_ capture: ItemCapture) -> ItemInfo {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let list = moveLists(workspace: capture.workspace).first { $0.id == capture.list }
+        let item = Item(
+            id: capture.identity, text: capture.text, listId: capture.list, state: .backlog, lifecycleAt: now,
+            createdAt: now, createdBy: nil, assignee: nil, startedAt: nil, doneAt: nil, binnedAt: nil,
+            deadline: nil, when: capture.when, whenSuggested: nil, event: capture.event,
+            duration: capture.duration.map(UInt32.init), place: capture.place)
+        return ItemInfo(
+            item: item, notes: "", subtasks: [],
+            listName: capture.list == Self.inbox ? nil : list?.name, listIcon: list?.icon, starred: false)
     }
 
     /// Create a list at the end of a workspace's lists
@@ -1716,13 +1952,23 @@ struct MainWindowView: View {
                     id: $0.id, workspace: workspace, text: $0.text, state: $0.state,
                     starred: model.starredIds.contains($0.id))
             },
-            selected: model.selected?.id,
+            // A capture has the panel: no row is its item.
+            selected: model.capture == nil ? model.selected?.id : nil,
             reorder: !inbox,
             select: { model.selectItem(workspace: $0?.workspace, id: $0?.id) },
             toggle: { row, done in model.setDone(workspace: row.workspace, id: row.id, done: done) },
             move: { ids, before in model.reorderItems(workspace: workspace, ids: ids, before: before) },
             menu: itemListMenu,
-            add: adds ? { model.add($0, workspace: workspace, list: listId) } : nil)
+            capture: adds
+                ? ItemListCapture(
+                    began: { model.rowBegan(workspace: workspace, list: listId) },
+                    typed: { model.rowTyped($0) },
+                    submitted: {
+                        model.rowSubmitted($0, workspace: workspace, list: listId, chained: $1, click: $2)
+                    },
+                    ended: { model.rowEnded(cancelled: $0, click: $1) },
+                    settled: model.captureSettled)
+                : nil)
             // Under the toolbar, as a list is: the scroll view insets
             // its own content for it.
             .ignoresSafeArea()

@@ -35,6 +35,26 @@ struct ItemListRow: Equatable {
     var muted = false
 }
 
+/// What the row for a new item tells its owner. The item panel shows
+/// the item being typed (`ItemCapture`), so the owner hears of the row
+/// as it goes, not only of the item at the end.
+struct ItemListCapture {
+    /// The row took the keyboard.
+    let began: () -> Void
+    /// Its text, as typed.
+    let typed: (String) -> Void
+    /// The text is an item: by Return (`chained`, the row keeps the
+    /// keyboard) or by the keyboard leaving, `click` being the press
+    /// that took it (in the window's coordinates) if one did.
+    let submitted: (String, _ chained: Bool, _ click: NSPoint?) -> Void
+    /// The row was left with nothing typed, by Escape (`cancelled`) or
+    /// the keyboard going elsewhere.
+    let ended: (_ cancelled: Bool, _ click: NSPoint?) -> Void
+    /// Counts the submitted items now in the rows: on a change, the
+    /// row lets go of the text it was holding for one.
+    let settled: Int
+}
+
 struct ItemList: NSViewRepresentable {
     /// What is shown: a change of it is another list, not an edit of
     /// this one, so its rows do not slide and it starts at the top.
@@ -53,11 +73,11 @@ struct ItemList: NSViewRepresentable {
     let move: ([String], String?) -> Void
     /// The right-click menu for the selected rows; nil is a separator.
     let menu: ([ItemListRow]) -> [AgendaTable.RowAction?]
-    /// A new item's text, typed into the row after the last one, for
-    /// the end of this list; nil is a list with no such row. It is this
+    /// The row after the last one, to type a new item into for the end
+    /// of this list; nil is a list with no such row. It is this
     /// surface's own: text still in the row when another list is shown
     /// goes to the list it was typed under.
-    var add: ((String) -> Void)?
+    var capture: ItemListCapture?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -98,7 +118,10 @@ struct ItemList: NSViewRepresentable {
         init(_ parent: ItemList) {
             self.parent = parent
             super.init()
-            addRow.commit = { [weak self] text in self?.parent.add?(text) }
+            addRow.began = { [weak self] in self?.parent.capture?.began() }
+            addRow.typed = { [weak self] in self?.parent.capture?.typed($0) }
+            addRow.commit = { [weak self] in self?.parent.capture?.submitted($0, $1, $2) }
+            addRow.ended = { [weak self] in self?.parent.capture?.ended($0, $1) }
             addRow.leave = { [weak self] toLastRow in
                 guard let list = self?.list else { return }
                 list.window?.makeFirstResponder(list)
@@ -114,10 +137,9 @@ struct ItemList: NSViewRepresentable {
             // Text typed under the last list is that list's item.
             if moved { addRow.flush() }
             let grew = !moved && next.rows.count > rows.count
-            // The item Return sent is in these rows for the first time.
-            let landed = moved ? nil : addRow.pending.flatMap { text in
-                next.rows.contains { rows[$0.id] == nil && $0.text == text } ? text : nil
-            }
+            // The item Return sent is in these rows, or wherever else
+            // the panel sent it.
+            let settled = !moved && next.capture?.settled != parent.capture?.settled
             parent = next
             rows = Dictionary(next.rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             list.model.config.reorder = next.reorder
@@ -125,8 +147,8 @@ struct ItemList: NSViewRepresentable {
 
             surface = next.surface
             list.setOrder(next.rows.map(\.id), animated: !moved)
-            list.setTrailer(next.add == nil ? nil : addRow)
-            if let landed { addRow.landed(landed) }
+            list.setTrailer(next.capture == nil ? nil : addRow)
+            if settled { addRow.settle() }
             list.reloadRows()
             if moved { list.scrollToTop() }
             // Typing one item after another: the row stays in view as
@@ -180,7 +202,7 @@ struct ItemList: NSViewRepresentable {
         /// ↓ on the last row (or in an empty list) goes on to the row
         /// that takes a new item.
         func dndListNavigatePastEnd(_ list: DndListView) -> Bool {
-            guard parent.add != nil else { return false }
+            guard parent.capture != nil else { return false }
             addRow.focus()
             list.scrollToTrailer()
             return true
@@ -351,21 +373,32 @@ private final class ItemRowContent: NSView {
 /// keyboard goes elsewhere is added too.
 ///
 /// Return leaves the text in the field until the item is a row
-/// (`landed`): the write is off the main thread, and a field emptied at
+/// (`settle`): the write is off the main thread, and a field emptied at
 /// once shows its placeholder for a frame or two before the row draws
 /// in its place. Held, the text stands still and the row appears under
 /// it as the field empties and steps down.
 private final class ItemAddRow: NSView, NSTextFieldDelegate {
     private static let edge: CGFloat = 20
 
-    var commit: (String) -> Void = { _ in }
+    /// The field took the keyboard.
+    var began: () -> Void = {}
+    /// Its text as typed, less what Return has already sent.
+    var typed: (String) -> Void = { _ in }
+    /// The text is an item: by Return (true), or by the keyboard
+    /// leaving, with the press that took it.
+    var commit: (String, Bool, NSPoint?) -> Void = { _, _, _ in }
+    /// Left with nothing typed: by Escape (true), and the press that
+    /// took the keyboard.
+    var ended: (Bool, NSPoint?) -> Void = { _, _ in }
     /// The keyboard goes back to the list, onto its last row if so.
     var leave: (Bool) -> Void = { _ in }
 
     private let plus = NSImageView()
-    private let field = NSTextField()
+    private let field = FocusField()
     /// Sent by Return and not yet a row; still in the field.
-    private(set) var pending: String?
+    private var pending: String?
+    /// Escape is why the keyboard is leaving.
+    private var cancelling = false
 
     override var isFlipped: Bool { true }
 
@@ -387,6 +420,7 @@ private final class ItemAddRow: NSView, NSTextFieldDelegate {
             string: String(localized: "Add an item…"),
             attributes: [.foregroundColor: NSColor.tertiaryLabelColor, .font: field.font as Any])
         field.delegate = self
+        field.focused = { [weak self] in self?.began() }
         addSubview(plus)
         addSubview(field)
     }
@@ -400,8 +434,14 @@ private final class ItemAddRow: NSView, NSTextFieldDelegate {
         window?.makeFirstResponder(field)
     }
 
-    private var typed: String {
-        field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// The field's text less what Return has sent, trimmed.
+    private var typedText: String {
+        var text = Substring(field.stringValue)
+        if let pending {
+            let rest = text.drop { $0.isWhitespace || $0.isNewline }
+            text = rest.hasPrefix(pending) ? rest.dropFirst(pending.count) : ""
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Return: send what has been typed and hold it in the field until
@@ -409,10 +449,10 @@ private final class ItemAddRow: NSView, NSTextFieldDelegate {
     private func submit() -> Bool {
         // One on its way: Return again is not a second item.
         guard pending == nil else { return true }
-        let text = typed
+        let text = typedText
         guard !text.isEmpty else { return false }
         pending = text
-        commit(text)
+        commit(text, true, nil)
         // A write that failed lands nothing: the text stays, to send again.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
             if self?.pending == text { self?.pending = nil }
@@ -420,31 +460,29 @@ private final class ItemAddRow: NSView, NSTextFieldDelegate {
         return true
     }
 
-    /// The item Return sent is a row now: the field lets go of it, and
-    /// keeps anything typed after it.
-    func landed(_ text: String) {
-        guard pending == text else { return }
+    /// The item Return sent is in the rows: the field lets go of it,
+    /// and keeps anything typed after it.
+    func settle() {
+        guard pending != nil else { return }
+        let rest = typedText
         pending = nil
-        dropSent(text)
+        field.stringValue = rest
     }
 
-    private func dropSent(_ text: String) {
-        let now = field.stringValue
-        let lead = now.prefix { $0.isWhitespace || $0.isNewline }
-        let rest = now.dropFirst(lead.count)
-        field.stringValue = rest.hasPrefix(text) ? String(rest.dropFirst(text.count)) : ""
-    }
-
-    /// Add what has been typed and not yet sent, if anything, and empty
-    /// the field.
-    func flush() {
-        if let pending {
-            self.pending = nil
-            dropSent(pending)
-        }
-        let text = typed
+    /// The row is done with: add what has been typed and not yet sent,
+    /// if anything, and empty the field. `click` is the press that took
+    /// the keyboard away.
+    func flush(click: NSPoint? = nil) {
+        let text = typedText
+        pending = nil
         field.stringValue = ""
-        if !text.isEmpty { commit(text) }
+        let cancelled = cancelling
+        cancelling = false
+        if text.isEmpty {
+            ended(cancelled, click)
+        } else {
+            commit(text, false, click)
+        }
     }
 
     override func layout() {
@@ -477,7 +515,9 @@ private final class ItemAddRow: NSView, NSTextFieldDelegate {
         case #selector(NSResponder.cancelOperation(_:)):
             pending = nil
             field.stringValue = ""
+            cancelling = true
             leave(false)
+            cancelling = false
             return true
         case #selector(NSResponder.moveUp(_:)):
             guard field.stringValue.isEmpty else { return false }
@@ -488,7 +528,29 @@ private final class ItemAddRow: NSView, NSTextFieldDelegate {
         }
     }
 
+    func controlTextDidChange(_ obj: Notification) {
+        typed(typedText)
+    }
+
     func controlTextDidEndEditing(_ obj: Notification) {
-        flush()
+        // A press that is taking the keyboard: where it landed says
+        // whether the item being typed is wanted in the panel.
+        var click: NSPoint?
+        if let event = NSApp.currentEvent, event.type == .leftMouseDown || event.type == .leftMouseUp,
+           event.window === window {
+            click = event.locationInWindow
+        }
+        flush(click: click)
+    }
+}
+
+/// A text field that says when it takes the keyboard.
+private final class FocusField: NSTextField {
+    var focused: () -> Void = {}
+
+    override func becomeFirstResponder() -> Bool {
+        let took = super.becomeFirstResponder()
+        if took { focused() }
+        return took
     }
 }

@@ -25,6 +25,14 @@ import SwiftUI
 struct ItemPanel: View {
     /// Nil until the read for a new selection lands.
     let item: ItemInfo?
+    /// What tells this page's views from another's (their state is
+    /// kept while it holds): the item's id, or a capture's own, which
+    /// the item it becomes keeps.
+    let identity: String
+    /// A capture (`ItemCapture`): the item is not made yet. Its title,
+    /// list, date and place are what it will be made with; it has no
+    /// subtasks, notes or history to show.
+    var isNew = false
     /// The item's workspace when it is a shared one.
     let workspaceName: String?
     /// The lists the item can be moved to: its workspace's, Inbox
@@ -77,7 +85,7 @@ struct ItemPanel: View {
                         // edited until it is restored.
                         if item.item.binnedAt == nil {
                             PanelTitle(text: item.item.text, closed: item.closedAt != nil) { retitle(item, $0) }
-                                .id(item.item.id)
+                                .id(identity)
                         } else {
                             Text(verbatim: item.item.text)
                                 .font(.title2.weight(.medium))
@@ -87,11 +95,11 @@ struct ItemPanel: View {
                         fields(item)
                             // The list, date and time lists float over the rows below.
                             .zIndex(1)
-                        PanelRule()
+                        if !isNew { PanelRule() }
                         // Between the place and the notes, as on the
                         // web. A binned item's are shown, not edited,
                         // and it has no row to add one.
-                        if item.item.binnedAt == nil || !item.subtasks.isEmpty {
+                        if !isNew, item.item.binnedAt == nil || !item.subtasks.isEmpty {
                             SubtasksField(
                                 subtasks: item.subtasks, locked: item.item.binnedAt != nil,
                                 add: { addSubtask(item, $0) },
@@ -100,7 +108,7 @@ struct ItemPanel: View {
                                 move: { moveSubtask(item, $0, $1) },
                                 remove: { removeSubtask(item, $0) }
                             )
-                            .id(item.item.id)
+                            .id(identity)
                             // A row is taller than its text by 6 pt
                             // each side: given back, so the first and
                             // last sit 16 pt from the rules, as the
@@ -108,9 +116,11 @@ struct ItemPanel: View {
                             .padding(.vertical, -(SubtasksField.rowHeight - 16) / 2)
                             PanelRule()
                         }
-                        notes(item)
-                        PanelRule()
-                        activity(item)
+                        if !isNew {
+                            notes(item)
+                            PanelRule()
+                            activity(item)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
@@ -134,7 +144,7 @@ struct ItemPanel: View {
                 lists: listOptions(item), others: otherOptions(item),
                 pick: { move(item, $0) }, pickAcross: { moveAcross(item, $0, $1) }
             )
-            .id(item.item.id)
+            .id(identity)
             // Its list floats over every row under it, the date and
             // place fields' included.
             .zIndex(3)
@@ -152,7 +162,7 @@ struct ItemPanel: View {
                 DateField(when: item.item.when, duration: item.item.duration.map(Int.init)) {
                     setWhen(item, $0, $1)
                 }
-                .id(item.item.id)
+                .id(identity)
                 // Its offers and month float over the rows under it.
                 .zIndex(2)
             } else if let when = item.item.when {
@@ -200,7 +210,7 @@ struct ItemPanel: View {
                         }
                     }
                 }
-                .id(item.item.id)
+                .id(identity)
                 // Their lists float over the rows under them.
                 .zIndex(1.5)
             } else if let time = item.item.when.flatMap(Self.timeText) {
@@ -232,7 +242,7 @@ struct ItemPanel: View {
                 PlaceField(place: item.item.place, knownPlaces: knownPlaces, trim: trim) {
                     setPlace(item, $0, $1)
                 }
-                .id(item.item.id)
+                .id(identity)
             } else if let place = item.item.place {
                 PanelField(text: place.label) { PanelGlyph(image: NavArt.pin) }
                     .padding(.bottom, trim)

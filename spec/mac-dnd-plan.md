@@ -46,6 +46,35 @@ step), not on an Inbox shown newest first (its end is the top). Not
 built: the web's draft row mid-list (Space under a selection, needs an
 `add_item_at` call) and the date phrase suggestion on a new title.
 
+**The row on the item panel (2026-11-20):** the web's draft mirror
+(`TaskDialog.tsx` `NewItemTarget.draft`). The panel is always shown
+(decided 2026-11-20: it no longer opens on a selection and folds away
+without one; empty with nothing selected, Escape empties it). The row
+taking the keyboard puts the item it will be on the panel
+(`ItemCapture` in `MainWindowModel`): the title follows the row as it
+is typed, and the list, date, times, event flag and place picked there
+are held and go on the item as it is made, in one call and so one undo
+step (`api::items::capture`, `Engine.capture_item`). The capture is an item
+as soon as its title is left with text in it:
+
+- Return in the row makes it and starts the next capture, fields clean.
+- A press in the panel that takes the keyboard from a named row makes
+  it and puts the panel on it, its views kept as they were (the field
+  the press landed in carries on, now writing to the item).
+- The same press from an empty row leaves the capture on the panel,
+  where its title is typed; Return or leaving that title makes the
+  item, and the panel is its page.
+- Escape, or the keyboard leaving an empty row for anywhere else,
+  drops the capture, and the panel goes back to the item it showed,
+  if it showed one.
+
+A capture shows no subtasks, notes or history and has no status, star
+or "…" in the bar; the list picker re-targets it, across workspaces
+too, with no audience confirm (nothing exists to move). The row holds
+its text until the item is in the rows wherever it went (the model's
+`captureSettled`). Not built: a capture opened from the bar's
+New Item button (still a stub), done / state / star on a capture.
+
 ## What the web does
 
 The web carries its own component (`js/web/src/dnd/`, contract in
