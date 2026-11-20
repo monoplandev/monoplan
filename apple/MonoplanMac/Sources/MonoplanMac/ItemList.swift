@@ -326,7 +326,7 @@ private final class ItemRowContent: NSView {
         title.font = .systemFont(ofSize: NSFont.systemFontSize)
         title.lineBreakMode = .byTruncatingTail
         title.maximumNumberOfLines = 1
-        note.font = .preferredFont(forTextStyle: .footnote)
+        note.font = .systemFont(ofSize: NSFont.systemFontSize)
         note.textColor = .tertiaryLabelColor
         note.lineBreakMode = .byTruncatingTail
         note.alignment = .right

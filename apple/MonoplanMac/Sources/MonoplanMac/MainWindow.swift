@@ -1165,20 +1165,10 @@ final class MainWindowModel: ObservableObject {
         listName(of: row.item, workspace: row.workspace, workspaceName: row.workspaceName)
     }
 
-    /// The same for an Assigned row, led by its date (the earlier of
-    /// its planned day and deadline, which the lens orders by) when it
-    /// has one.
+    /// The same for an Assigned row: where it lives and nothing else
+    /// (its date is on the item's panel).
     func assignedNote(_ row: AssignedRow) -> String {
-        let item = row.item
-        let date: String?
-        if let when = item.when, let deadline = item.deadline {
-            date = min(when, deadline)
-        } else {
-            date = item.when ?? item.deadline
-        }
-        let day = date.map { WhenSpan.dayLabel(String($0.prefix(10)), calendar: .current) }
-        let place = listName(of: item, workspace: row.workspace, workspaceName: row.workspaceName)
-        return [day, place].compactMap { $0 }.joined(separator: " · ")
+        listName(of: row.item, workspace: row.workspace, workspaceName: row.workspaceName)
     }
 
     private func listName(of item: Item, workspace: String?, workspaceName: String?) -> String {
@@ -2242,8 +2232,8 @@ struct MainWindowView: View {
     /// Assigned: the open items assigned to this account in every
     /// workspace (spec/sharing-plan.md "Assignment"), dated ones first
     /// by their earliest date, then the rest newest first. A row has
-    /// its tick, its text with its star, and at the far edge its date,
-    /// its list and, when not Personal's, its workspace. The tick drops
+    /// its tick, its text with its star, and at the far edge its list
+    /// and, when not Personal's, its workspace. The tick drops
     /// the row.
     private var assigned: some View {
         List(selection: selection { id in model.assigned.first { $0.item.id == id }?.workspace }) {
@@ -2258,7 +2248,6 @@ struct MainWindowView: View {
                     if model.starredIds.contains(row.item.id) { starMark }
                     Spacer()
                     Text(verbatim: model.assignedNote(row))
-                        .font(.footnote)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
@@ -2297,7 +2286,6 @@ struct MainWindowView: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                     Text(verbatim: model.doneListName(row))
-                        .font(.footnote)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
