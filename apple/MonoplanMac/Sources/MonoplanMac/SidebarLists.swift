@@ -58,8 +58,9 @@ struct SidebarLists: NSViewRepresentable {
         list.delegate = context.coordinator
         list.selectionInset = 0
         list.selectionRadius = 8
-        list.selectionColor = .controlAccentColor
-        list.dormantSelectionColor = .unemphasizedSelectedContentBackgroundColor
+        // The web nav's `--bg-active`, focused or not (`.nav-item[data-active]`).
+        list.selectionColor = PaneColor.rowSelectedInactive
+        list.dormantSelectionColor = PaneColor.rowSelectedInactive
         list.placeholderColor = PaneColor.dropSlot
         list.dragBackgroundColor = PaneColor.sidebar
         return list
@@ -107,7 +108,7 @@ struct SidebarLists: NSViewRepresentable {
 
         func dndList(_ list: DndListView, configure content: NSView, key: String, state: DndRowState) {
             guard let content = content as? SidebarListRow, let info = rows[key] else { return }
-            content.show(info, count: parent.counts, highlighted: state.selected && state.emphasized)
+            content.show(info, count: parent.counts)
         }
 
         // MARK: DndListDelegate
@@ -196,7 +197,7 @@ private final class SidebarListRow: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not built from a nib") }
 
-    func show(_ list: ListInfo, count shown: Bool, highlighted: Bool) {
+    func show(_ list: ListInfo, count shown: Bool) {
         let icon = list.icon.flatMap { $0.isEmpty ? nil : $0 }
         emoji.stringValue = icon ?? ""
         emoji.isHidden = icon == nil
@@ -205,12 +206,11 @@ private final class SidebarListRow: NSView {
         let open = Int(list.open)
         count.stringValue = shown && open > 0 ? "\(open)" : ""
         count.isHidden = count.stringValue.isEmpty
-        // On the live selection, white throughout, as the system rows.
-        let text: NSColor = highlighted ? .alternateSelectedControlTextColor : .labelColor
-        title.textColor = text
-        emoji.textColor = text
-        glyph.contentTintColor = text
-        count.textColor = highlighted ? .alternateSelectedControlTextColor : .secondaryLabelColor
+        // The same on the grey selection as off it, as the web nav.
+        title.textColor = .labelColor
+        emoji.textColor = .labelColor
+        glyph.contentTintColor = .labelColor
+        count.textColor = .secondaryLabelColor
         needsLayout = true
     }
 

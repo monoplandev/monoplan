@@ -45,10 +45,9 @@ title, count and selection rect to the pixel). Drag one list, or
 ↑ / ↓ move between a workspace's lists; right-click is Delete. One list
 at a time (`multi` off). The block's selection is its own (the list
 shown when it is one of these; the `List` then has no selected row),
-live in the accent colour while it has the keyboard and the system's
-unemphasized colour otherwise: the system sidebar's dormant selection
-is a material `cacheDisplay` cannot capture, so that colour is a guess
-to check by eye. The block does not scroll (`DndListView.scrolls`
+in the web nav's grey (`--bg-active`, `PaneColor.rowSelectedInactive`)
+whether or not it has the keyboard, text unchanged on it (2026-11-22;
+first built in the system's accent blue). The block does not scroll (`DndListView.scrolls`
 off): the wheel goes to the sidebar. Inbox, the lenses and the
 workspace headings stay SwiftUI rows. Not built: item drops onto
 sidebar rows (the other half of phase 3), dragging a list into another
