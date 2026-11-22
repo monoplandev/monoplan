@@ -600,12 +600,6 @@ body {
   }
 }
 
-/* A task closed today, at the end of Today: muted, so the eye stays on
-   what is left. */
-.upcoming-row[data-placed="done"] .upcoming-row-text {
-  color: var(--text-muted);
-}
-
 /* The first text line is a fixed 24px band (--upcoming-line) so the
    time, the check, the title and the list badge all centre on it; the
    place line then hangs below without pulling the flanks down to the

@@ -819,6 +819,34 @@ export function Workspace(props: {
   // read off the closing transition's time.
   const doneLingers = (it: ItemView, now: number): boolean =>
     Math.abs(now - it.lifecycleAt) < DONE_LINGER_MS;
+  // The agenda's linger group, the list view's chain (`lingerChain`) read
+  // off the closing times: walking back from the latest close, each one
+  // within DONE_LINGER_MS of the next joins, and the whole group holds
+  // until the latest's beat is over, so a burst of ticks moves together.
+  // A close stamped further ahead than one beat (another device's clock)
+  // is left out, so it cannot start a chain that never ends.
+  const agendaLinger = (now: number): { ids: Set<string>; expiry: number } => {
+    const closed = docs
+      .calendarItems()
+      .filter(
+        (it) =>
+          isClosedTask(it) &&
+          !isBinned(it) &&
+          it.lifecycleAt < now + DONE_LINGER_MS,
+      )
+      .sort((a, b) => b.lifecycleAt - a.lifecycleAt);
+    const ids = new Set<string>();
+    if (closed.length === 0 || now - closed[0].lifecycleAt >= DONE_LINGER_MS) {
+      return { ids, expiry: -Infinity };
+    }
+    let prev = closed[0].lifecycleAt;
+    for (const it of closed) {
+      if (prev - it.lifecycleAt >= DONE_LINGER_MS) break;
+      ids.add(it.id);
+      prev = it.lifecycleAt;
+    }
+    return { ids, expiry: closed[0].lifecycleAt + DONE_LINGER_MS };
+  };
   const [doneMoveTick, setDoneMoveTick] = createSignal(0);
   // Every day gets a section unless "Hide empty days" (the agenda's
   // filter menu, a device preference, off by default) is checked.
@@ -838,31 +866,28 @@ export function Workspace(props: {
       today: m().deadline.today,
       tomorrow: m().deadline.tomorrow,
     };
+    const lingering = agendaLinger(now).ids;
     const groups = groupByDay(
       docs.calendarItems(),
       today,
       labels,
       locale(),
       addDaysToStamp(today, -AGENDA_PAST_DAYS),
-      (it) => doneLingers(it, now),
+      (it) => lingering.has(it.id),
     );
     return hideEmptyDays()
       ? groups
       : fillEmptyDays(groups, today, labels, locale(), undefined, agendaReach());
   });
-  // One timeout for the next lingering row to move; re-armed as rows
-  // close. Only while the agenda is the view.
+  // One timeout for the linger group to move; re-armed as a close
+  // extends it. Only while the agenda is the view.
   createEffect(() => {
     if (view().kind !== "upcoming") return;
     doneMoveTick();
     const now = Date.now();
-    let next = Infinity;
-    for (const it of docs.calendarItems()) {
-      if (!isClosedTask(it) || !doneLingers(it, now)) continue;
-      next = Math.min(next, it.lifecycleAt + DONE_LINGER_MS);
-    }
-    if (next === Infinity) return;
-    const t = setTimeout(() => setDoneMoveTick((n) => n + 1), Math.max(next - now, 0) + 1);
+    const { expiry } = agendaLinger(now);
+    if (expiry === -Infinity) return;
+    const t = setTimeout(() => setDoneMoveTick((n) => n + 1), Math.max(expiry - now, 0) + 1);
     onCleanup(() => clearTimeout(t));
   });
   // The Assigned lens (`spec/sharing-plan.md` §Assignment): Open items

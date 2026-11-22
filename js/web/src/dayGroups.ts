@@ -25,9 +25,8 @@
 // ahead of Overdue and Today, oldest first, as `agenda --past N` and the
 // Mac and iOS Calendar do (`spec/cli.md` §Items): a past day holds what
 // has a `when` on it and went by, an event, neutral. A closed task
-// (2026-11-18) leaves its dates: closed today it is among Today's
-// completed items, closed earlier it is off the calendar (the Done view
-// has it); an event alone keeps its `when` once closed. An Open task with a
+// leaves the calendar once closed (2026-11-22; the Done view has it);
+// an event alone keeps its `when` once closed. An Open task with a
 // past `when` is in Overdue only, and a deadline never places in the
 // past. Pure so it can be unit-tested without a DOM
 // (`test/dayGroups.test.ts`).
@@ -36,7 +35,6 @@ import {
   addDaysToStamp,
   formatDeadlineBadge,
   spanCoverOffset,
-  todayStamp,
   whenDay,
 } from "./format.tsx";
 import {
@@ -54,7 +52,7 @@ export interface DayRow {
   item: ItemView;
   /** What put the row on this day: one of its two dates, or, for a
    *  closed task, the day it was closed (`done`). */
-  placedBy: "when" | "deadline" | "done";
+  placedBy: "when" | "deadline";
   tone: DayTone;
   /** Set on every row of a `when` that covers more than one day: which
    *  day of the span this row is (1-based) and how many there are. The
@@ -147,12 +145,9 @@ export const isClosedTask = (it: ItemView): boolean =>
  *  a band, the raw string of the placing field, then `createdAt`.
  *  Overdue has no bands.
  *
- *  A closed task (`isClosedTask`) leaves its dates: closed today
- *  (`lifecycleAt`, a day ahead read as today) it is one of Today's rows,
- *  placed by `done`, after the others in the order they were closed;
- *  closed on a day gone by it is not on the agenda at all. `lingers` holds one just closed where it was, placed as if it
- *  were still open, for the beat before it moves. A closed event stays
- *  on its `when`.
+ *  A closed task (`isClosedTask`) is not on the agenda. `lingers` holds
+ *  one just closed where it was, placed as if it were still open, for
+ *  the beat before it leaves. A closed event stays on its `when`.
  *
  *  A row placed by a `when` that covers several days is repeated on each
  *  day of the span from today onward (`span` on every copy), and an item
@@ -183,18 +178,8 @@ export function groupByDay(
   for (const it of items) {
     if (isBinned(it) || (!it.when && !it.deadline)) continue;
     const closedTask = isClosedTask(it);
-    if (closedTask && !lingers(it)) {
-      // Among today's completed items if it was closed today (or on a
-      // clock ahead of ours), whatever its dates say. Closed on a day
-      // gone by, it is off the calendar: the Done view is its record.
-      if (todayStamp(it.lifecycleAt) < today) continue;
-      placed.push({
-        day: today,
-        raw: String(it.lifecycleAt).padStart(16, "0"),
-        row: { item: it, placedBy: "done", tone: "neutral" },
-      });
-      continue;
-    }
+    // Off the calendar once closed: the Done view is its record.
+    if (closedTask && !lingers(it)) continue;
     // From today on, a `when` that is over places nothing, done or not.
     // A span still running is placed from today: `wDay` is its first day
     // there, the start or today, whichever is later.
@@ -290,12 +275,9 @@ export function groupByDay(
   ) =>
     a.raw.localeCompare(b.raw) || a.row.item.createdAt - b.row.item.createdAt;
   overdueRows.sort(byRawThenCreated);
-  // Closed tasks after the day's other rows, by when they were closed.
-  const closedLast = (r: DayRow) => (r.placedBy === "done" ? 1 : 0);
   placed.sort(
     (a, b) =>
       a.day.localeCompare(b.day) ||
-      closedLast(a.row) - closedLast(b.row) ||
       dayBand(a.row) - dayBand(b.row) ||
       byRawThenCreated(a, b),
   );

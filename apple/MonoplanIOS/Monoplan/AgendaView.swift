@@ -199,7 +199,7 @@ struct AgendaRowView: View {
         if row.placedBy == .deadline {
             return row.deadline.map { (String(localized: "due \($0)"), .secondary) }
         }
-        if !row.isCompletedToday, let minutes = row.duration, minutes > 0 {
+        if let minutes = row.duration, minutes > 0 {
             return (Self.span(Int(minutes)), .secondary)
         }
         return nil

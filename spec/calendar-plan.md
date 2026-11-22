@@ -86,14 +86,12 @@ Done and binned items keep both fields untouched, as they keep `deadline`
 today. The fields are never cleared by a transition. Restore brings the
 dates back with the item.
 
-**A closed task is on the day it was closed** (decided 2026-11-18,
-narrowing the rule below to events; the web first, the engine's agenda
-and so the CLI and the Apple calendars the same day). A done or
-cancelled task, timed or not, leaves both its dates. Closed today, it is
-one row at the end of Today, muted, with no time in the lane (see
-"Completed today" under "Agenda"); from the next day it is
-off the calendar, and past days hold events only (the Done view is the
-record of what was finished). A done row on the day it was planned for
+**A closed task is off the calendar** (decided 2026-11-18 as "on the
+day it was closed", narrowed 2026-11-22; web, the engine's agenda and so
+the CLI and the Apple calendars). A done or cancelled task, timed or
+not, leaves both its dates and the calendar, closed today or not (see
+"Completed today" under "Agenda"); past days hold events only (the
+Done view is the record of what was finished). A done row on the day it was planned for
 could not say whether it was done then or some other day, and a tick at
 a clock time claimed something that may never have happened. Showing
 them on every past day was built first and dropped the same day: it
@@ -301,9 +299,8 @@ for the month grid). `groupByDeadline` becomes
   Their deadline places nothing and badges muted. A done item whose `when` is past is not in
   Overdue (Open-only) or on any day from today on: it is on its day in
   the past, above Today, on every client that reads past days (the web
-  since 2026-11-17). On the web a closed task leaves its dates instead
-  (see "Completed today" below), which stands in for the "show
-  completed" toggle this paragraph used to promise.
+  since 2026-11-17). A closed task leaves the calendar instead (see
+  "Completed today" below).
 - **Overdue** (web; iOS and macOS since 2026-11-17): any Open row with a `deadline` day before today goes
   to an Overdue section above Today, placed by the deadline whatever `when`
   says (it is owed now; a `when` of today or later still has its own row
@@ -413,9 +410,7 @@ for the month grid). `groupByDeadline` becomes
   section under the pointer is the target, tinted, and the edges
   autoscroll. The drop writes `dropOnDay` (`dayGroups.ts`) for each
   carried item in one action batch, so one undo step; the rules are
-  "Reschedule" under "Deferred" below. A row closed today does not pick
-  up, and is left where it is when carried in a selection. Escape
-  cancels. Not built: touch, ⌘↑ / ⌘↓ nudging by a day, the month grid.
+  "Reschedule" under "Deferred" below. Escape cancels. Not built: touch, ⌘↑ / ⌘↓ nudging by a day, the month grid.
 - **Empty days** (web, 2026-11-22): by default every day from today on
   has a section, to the later of the last placed day and two weeks ahead
   (`fillEmptyDays`); a past day never shows empty, only when something
@@ -457,26 +452,17 @@ for the month grid). `groupByDeadline` becomes
   A day with no section (empty days hidden) gets the pane's capture
   alone. Overdue and past days take no Add. The toolbar's Add is
   unchanged (an event on today, in the pane).
-- **Completed today** (web, built 2026-11-18, `groupByDay` in
-  `dayGroups.ts`): a closed (done or cancelled) task, timed or not and
-  with a `when` or only a deadline, that was closed today is placed on
-  Today (`placedBy: "done"`, from `lifecycleAt`; a day ahead of this
-  device's clock reads as today), after Today's other rows in the order
-  closed, its title muted and its lane empty. One closed before today is
-  not on the agenda. A row just closed lingers where it was (its planned
-  day, Overdue) for three seconds first, as on a list. Events do not
-  move: they stay on their `when` as the day's record. This narrows
-  "ticking never moves a row" to events; the reason is that a day loaded
-  with small tasks became noise to read through once half were ticked.
-  A "N completed items" line the rows folded behind was built first and
-  dropped the same day for showing them outright.
-  The engine's agenda follows the same rule since the same day
-  (`build_agenda_from`, `placed_by: done`), so the CLI and the iOS and
-  macOS calendars show the same rows, muted and with no time, without
-  the linger: a ticked row moves at once. Two differences stay: the
-  engine never lists a cancelled item, so only done tasks are there; and
-  the Mac tray and the iOS widget leave done tasks out altogether, being
-  what is left of the day (`AgendaQuery.completed`).
+- **Completed today** (removed 2026-11-22): a closed (done or cancelled)
+  task is not on the agenda at all, closed today or not. It lingers
+  where it was (its planned day, Overdue) for two seconds first, as on
+  a list, and a run of ticks each within that beat of the next leaves
+  together, at the last one's expiry (web, `agendaLinger` in
+  `Workspace.tsx`; the engine's agenda drops a ticked row at once).
+  Events do not move: they stay on their `when` as the day's record.
+  Built first (2026-11-18) as rows at the end of Today, muted with no
+  time (`placedBy: "done"`, the engine's `placed_by: done` and
+  `AgendaQuery.completed`); dropped because the Done view already
+  holds them and what is left of the day reads better alone.
 - **Past mark** (web, 2026-11-18): on a day gone by, an event's row
   leads with the event pill in place of the
   the checkbox, open or done alike: they are a record of what was on,

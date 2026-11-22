@@ -207,22 +207,18 @@ describe("groupByDay", () => {
     expect(ids(groups[1]!)).toEqual(["own-timed", "own-allday"]);
   });
 
-  test("a closed task is on the day it was closed; a closed event keeps its when", () => {
+  test("a closed task is off the agenda; a closed event keeps its when", () => {
     const groups = groupByDay(
       [
         item("done-today", { when: TODAY }, closedOn(TODAY, 10)),
         item("open-today", { when: TODAY }),
-        // Its planned time says nothing of when it was done.
         item("done-early", { when: `${TODAY}T08:00` }, closedOn(TODAY, 9)),
         item("binned", { deadline: TODAY }, { binnedAt: 1 }),
         item("future", { when: "2026-09-10" }),
-        // Planned for tomorrow, done today: today's.
         item("done-both", { when: "2026-09-10", deadline: "2026-09-05" }, closedOn(TODAY, 11)),
         item("done-deadline", { deadline: "2026-09-12" }, closedOn(TODAY, 12)),
-        // Closed on a day gone by: off the calendar.
         item("done-past", { when: TODAY }, closedOn("2026-09-01")),
         item("cancelled", { when: "2026-09-10" }, closedOn(TODAY, 13, "cancelled")),
-        // A clock ahead of ours: read as today.
         item("skewed", { when: TODAY }, closedOn("2026-09-11")),
         item("event-done", { when: "2026-09-10" }, { ...closedOn(TODAY), event: true }),
       ],
@@ -231,13 +227,9 @@ describe("groupByDay", () => {
       "en",
     );
     expect(groups.map((g) => [g.key, ids(g)])).toEqual([
-      [
-        TODAY,
-        ["open-today", "done-early", "done-today", "done-both", "done-deadline", "cancelled", "skewed"],
-      ],
+      [TODAY, ["open-today"]],
       ["2026-09-10", ["event-done", "future"]],
     ]);
-    expect(groups[0]!.rows.slice(1).every((r) => r.placedBy === "done" && r.tone === "neutral")).toBe(true);
     expect(groups[1]!.rows[0]).toMatchObject({ placedBy: "when" });
   });
 

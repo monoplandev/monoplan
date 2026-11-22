@@ -26,15 +26,13 @@ pub enum AgendaTone {
     Overdue,
 }
 
-/// What put the row on its day: one of its two dates, or, for a task
-/// done today, that it was done (`Done`, always on Today).
+/// What put the row on its day: one of its two dates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum AgendaPlacedBy {
     When,
     Deadline,
-    Done,
 }
 
 /// One row of a group; the `agenda --json` row.
@@ -105,10 +103,6 @@ pub struct AgendaQuery<'a> {
     /// ones hidden from the calendar (Home's `calendar_hidden_docs`).
     /// Otherwise the context's own workspace, untagged.
     pub everywhere: bool,
-    /// The tasks done today, at the end of Today (`placed_by: done`).
-    /// Without it a done task is not on the agenda at all: the tray
-    /// and the widgets, which show what is left.
-    pub completed: bool,
 }
 
 /// An agenda as placed, before it is shaped into rows: what the
@@ -138,16 +132,6 @@ pub fn place(cx: &Ctx, query: &AgendaQuery) -> anyhow::Result<Placed> {
     let floor = today
         .checked_sub_days(Days::new(u64::from(query.past_days)))
         .ok_or_else(|| anyhow::anyhow!("--past out of range"))?;
-    // The local midnight today began at: a task done since is today's.
-    let closed_since = query
-        .completed
-        .then(|| {
-            today
-                .and_hms_opt(0, 0, 0)
-                .and_then(|t| t.and_local_timezone(Local).earliest())
-                .map(|t| t.timestamp_millis())
-        })
-        .flatten();
     let floor = floor.format("%Y-%m-%d").to_string();
     let today = today.format("%Y-%m-%d").to_string();
     let horizon = horizon.format("%Y-%m-%d").to_string();
@@ -175,7 +159,7 @@ pub fn place(cx: &Ctx, query: &AgendaQuery) -> anyhow::Result<Placed> {
         .map(|(c, items)| (*c, items.as_slice()))
         .collect();
     Ok(Placed {
-        days: rules::build_agenda_from(&sources, &floor, &today, &horizon, closed_since),
+        days: rules::build_agenda_from(&sources, &floor, &today, &horizon),
         today,
         lists,
     })

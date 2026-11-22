@@ -18,10 +18,9 @@
 // title.
 // An event ticks off in place and stays on its `when` day once done or
 // cancelled, so the day still records what happened and what was called
-// off. A task does not: closed, it moves to the end of Today
-// (`placedBy: "done"`, no time in the lane, muted) after a short linger
-// where it was, so what is left is not read through what is settled.
-// The day after, it is off the agenda: past days hold events only. Muted text marks the days gone by,
+// off. A task does not: closed, it leaves the agenda after a short
+// linger where it was (the Done view has it), so what is left is not
+// read through what is settled. Past days hold events only. Muted text marks the days gone by,
 // every row on them, not the closed rows; Overdue is not one of them.
 //
 // Events (`spec/events-plan.md`): an open event's row has a small
@@ -777,9 +776,8 @@ export function Upcoming(props: {
   // row is selected first if it is not), the list view's overlay stack
   // follows the pointer, and the day section under it is the target
   // (any day, past ones included; not Overdue). The drop writes
-  // `dropOnDay` for each item as one undo step. A row closed today (at
-  // the end of Today by when it was closed) does not pick up, and in a
-  // selection it stays put. Escape cancels. Mouse only.
+  // `dropOnDay` for each item as one undo step. Escape cancels. Mouse
+  // only.
   const DRAG_START_PX = 4;
   const overlay = new DndDragOverlay(3);
   let autoscroll: DndAutoscroll | null = null;
@@ -803,7 +801,7 @@ export function Upcoming(props: {
     const t = e.target as HTMLElement | null;
     if (t?.closest("input, button, a")) return;
     const row = rowFromEvent(e);
-    if (!row || row.dataset.placed === "done") return;
+    if (!row) return;
     press = {
       x: e.clientX,
       y: e.clientY,

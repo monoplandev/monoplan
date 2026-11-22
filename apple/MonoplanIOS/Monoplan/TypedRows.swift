@@ -152,11 +152,6 @@ extension AgendaEntry {
         return String(when.prefix(10)) < WhenText.today()
     }
 
-    /// A task done today, at the end of Today (`placed_by: done`,
-    /// spec/calendar-plan.md "Completed today"): off its dates, so the
-    /// row shows no time and no length.
-    var isCompletedToday: Bool { placedBy == .done }
-
     /// The quick moves the row's menu offers (`ItemRowMenu`): an
     /// overdue row goes to today or tomorrow, a row on today to
     /// tomorrow, and any other row nowhere. Only an open row placed by
