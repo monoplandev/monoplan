@@ -105,6 +105,21 @@ pub struct AgendaQuery<'a> {
     pub everywhere: bool,
 }
 
+/// The workspaces hidden from the merged calendar: Home's
+/// `calendar_hidden_docs`, a personal preference synced across this
+/// account's devices (the web's Upcoming filter, the Mac Calendar's).
+/// Ids of docs no longer open may linger; they are harmless.
+pub fn calendar_hidden_docs(cx: &Ctx) -> anyhow::Result<Vec<String>> {
+    Ok(cx.home_doc()?.get_settings().calendar_hidden_docs)
+}
+
+/// Hide `doc_id` from the merged calendar, or show it again. One
+/// commit on Home; a no-op when already so.
+pub fn set_calendar_doc_hidden(cx: &Ctx, doc_id: &str, hidden: bool) -> anyhow::Result<()> {
+    cx.home_doc()?.set_calendar_doc_hidden(doc_id, hidden)?;
+    Ok(())
+}
+
 /// An agenda as placed, before it is shaped into rows: what the
 /// terminal prints from.
 pub struct Placed {

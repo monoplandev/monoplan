@@ -30,11 +30,11 @@ struct MenuLine: Equatable {
 enum TodayMenu {
     /// Today's rows as menu lines, in the order the engine placed them.
     /// Only the Today group is shown; later days are not a tray's
-    /// business. Nor are the tasks done today, which the engine puts at
-    /// the end of Today (`placed_by: done`): the tray is what is left.
+    /// business. A task leaves the agenda once done (the engine no
+    /// longer places it), so the tray is what is left.
     static func lines(from groups: [AgendaGroup], now: Date, calendar: Calendar = .current) -> [MenuLine] {
         guard let today = groups.first(where: { $0.today }) else { return [] }
-        return today.rows.filter { $0.placedBy != .done }.map { row in
+        return today.rows.map { row in
             var title = clipped(row.text)
             if isTimed(row), let when = row.when {
                 title = "\(when.dropFirst(11).prefix(5))  \(title)"

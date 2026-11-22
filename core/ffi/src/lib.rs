@@ -1263,6 +1263,22 @@ impl Engine {
         })?)
     }
 
+    /// The workspaces left out of `agenda`: Home's synced
+    /// `calendar_hidden_docs` (the Calendar's workspace filter).
+    pub fn calendar_hidden_docs(&self) -> Result<Vec<String>, EngineError> {
+        Ok(self
+            .client
+            .call_blocking(None, api::agenda::calendar_hidden_docs)?)
+    }
+
+    /// Hide a workspace from `agenda`, or show it again. Synced: the
+    /// web's Upcoming filter reads the same set.
+    pub fn set_calendar_doc_hidden(&self, doc_id: String, hidden: bool) -> Result<(), EngineError> {
+        Ok(self.client.call_blocking(None, move |cx| {
+            api::agenda::set_calendar_doc_hidden(cx, &doc_id, hidden)
+        })?)
+    }
+
     /// [`agenda`](Self::agenda) as the JSON `monoplan agenda --all
     /// --json` prints: the file format of the home-screen widget's
     /// snapshot, which the app leaves for it and never parses. From

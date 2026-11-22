@@ -17,16 +17,6 @@ final class TrayMenuTests: XCTestCase {
             docId: docId, docName: nil)
     }
 
-    func testTasksDoneTodayAreLeftOut() {
-        let groups = [
-            AgendaGroup(day: "2026-10-26", today: true, rows: [
-                entry("a", "Standup", event: true, when: "2026-10-26T09:00"),
-                entry("b", "Groceries", state: .done, when: "2026-10-26", placedBy: .done),
-            ]),
-        ]
-        XCTAssertEqual(TodayMenu.lines(from: groups, now: date(9, 5)).map(\.id), ["a"])
-    }
-
     func testAnEventHasNoCheckboxWhileOpenOrOnceItsDayHasGoneBy() {
         let today = "2026-10-26"
         let shows = { MainWindowView.agendaRowShowsCheck($0, today: today) }

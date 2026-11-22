@@ -344,6 +344,9 @@ final class MainWindowModel: ObservableObject {
     @Published private(set) var assigned: [AssignedRow] = []
     /// The other lenses' rows, each read only while it is the one shown.
     @Published private(set) var agenda: [AgendaGroup] = []
+    /// The workspaces hidden from the Calendar (`Engine.calendarHiddenDocs`,
+    /// Home's synced set, the web Upcoming filter's), read with it.
+    @Published private(set) var calendarHidden: [String] = []
     /// Counts the presses of the toolbar's "Today": each one scrolls
     /// the Calendar back to Today's header, or Overdue's above it
     /// (`AgendaTable`).
@@ -689,6 +692,7 @@ final class MainWindowModel: ObservableObject {
         var starred: [StarredItem] = []
         var assigned: [AssignedRow] = []
         var agenda: [AgendaGroup] = []
+        var calendarHidden: [String] = []
         var done: [DoneRow] = []
         var binned: [BinEntry] = []
         /// The selection the read was made for, and its item.
@@ -742,6 +746,7 @@ final class MainWindowModel: ObservableObject {
                 break
             case .agenda:
                 snapshot.agenda = try engine.agenda(days: Self.agendaDays, pastDays: Self.agendaPastDays)
+                snapshot.calendarHidden = try engine.calendarHiddenDocs()
             case .done:
                 // One read over every workspace, merged and filtered
                 // in Rust; the filter narrowed to the sections just
@@ -799,6 +804,7 @@ final class MainWindowModel: ObservableObject {
                 self.starred = snapshot.starred
                 self.assigned = snapshot.assigned
                 self.agenda = snapshot.agenda
+                self.calendarHidden = snapshot.calendarHidden
                 self.done = snapshot.done
                 self.binned = snapshot.binned
                 // An item selected since the read went out keeps the
@@ -1295,6 +1301,51 @@ final class MainWindowModel: ObservableObject {
                         icon: $0.icon, workspace: workspace, archived: $0.archivedAt != nil)
                 }
             }
+    }
+
+    // MARK: Calendar filter (`CalendarFilter.swift`)
+
+    /// The Calendar filter's checked workspaces, read off the hidden
+    /// set as the web reads it: nothing hidden is no filter (nothing
+    /// checked); otherwise the open workspaces not hidden.
+    var calendarCheckedDocs: [String] {
+        let open = sections.map(\.id)
+        guard open.contains(where: calendarHidden.contains) else { return [] }
+        return open.filter { !calendarHidden.contains($0) }
+    }
+
+    /// Whether any open workspace is hidden from the Calendar.
+    var calendarFiltered: Bool { !calendarCheckedDocs.isEmpty }
+
+    /// Check or uncheck a workspace in the Calendar filter.
+    func toggleCalendarWorkspace(_ docId: String) {
+        var checked = calendarCheckedDocs
+        checked.toggle(docId)
+        setCalendarCheckedDocs(checked)
+    }
+
+    func clearCalendarFilter() {
+        setCalendarCheckedDocs([])
+    }
+
+    /// Write a checked set back as hidden workspaces: none checked (or
+    /// all of them) hides nothing. Only the workspaces that change are
+    /// written, in one turn of the call queue.
+    private func setCalendarCheckedDocs(_ checked: [String]) {
+        let hidden = calendarHidden
+        let changes: [(String, Bool)] = sections.compactMap { section in
+            let hide = !checked.isEmpty && !checked.contains(section.id)
+            return hide != hidden.contains(section.id) ? (section.id, hide) : nil
+        }
+        guard !changes.isEmpty else { return }
+        // Shown at once; the reload after the write confirms it.
+        calendarHidden = hidden.filter { id in !changes.contains { $0.0 == id && !$0.1 } }
+            + changes.filter(\.1).map(\.0)
+        write { engine in
+            for (docId, hide) in changes {
+                try engine.setCalendarDocHidden(docId: docId, hidden: hide)
+            }
+        }
     }
 
     /// Check or uncheck a workspace in the Done filter.
