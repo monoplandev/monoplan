@@ -98,7 +98,7 @@ export type NewItemTarget = {
   /** Which open lane to capture into (`backlog` is also the list view's
    *  default). */
   state: WorkflowState;
-  /** Open-projection index to insert at (Space capture below a board
+  /** Open-projection index to insert at (N capture below a board
    *  card, a list draft's slot). Omitted lands at the top of the lane. */
   index?: number;
   /** Log an already-completed item: created open, marked done on commit. */

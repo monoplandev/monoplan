@@ -2303,13 +2303,13 @@ export function Workspace(props: {
   };
   onGlobalKey(onHelpKey);
 
-  // Space: shortcut for the Add button. In the list view it starts an
+  // N: shortcut for the Add button. In the list view it starts an
   // inline draft below the topmost selection. In a board it opens the
   // new-item dialog (boards capture via the dialog, not an inline draft),
   // placing the new card just below the selected card in its column — or
   // at the top of the default column when nothing is selected.
-  const onSpaceAdd = (e: KeyboardEvent) => {
-    if (e.key !== " ") return;
+  const onNewKey = (e: KeyboardEvent) => {
+    if (e.key !== "n" && e.key !== "N") return;
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
     if (view().kind !== "list" && view().kind !== "focus") return;
 
@@ -2347,7 +2347,7 @@ export function Workspace(props: {
     e.preventDefault();
     startDraft();
   };
-  onGlobalKey(onSpaceAdd);
+  onGlobalKey(onNewKey);
 
   // [ / ]: cycle through the nav views in top-to-bottom order — Focus, Home,
   // Done, Bin, then the user lists (Bin only earns a slot while it holds

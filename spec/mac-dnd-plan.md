@@ -43,7 +43,7 @@ keyboard or the list goes elsewhere is added to the list it was typed
 under. It stands in for "Nothing here" on an empty list. Not on
 Starred (the web's capture-and-star needs one typed call for one undo
 step), not on an Inbox shown newest first (its end is the top). Not
-built: the web's draft row mid-list (Space under a selection, needs an
+built: the web's draft row mid-list (N under a selection, needs an
 `add_item_at` call) and the date phrase suggestion on a new title.
 
 **The row on the item panel (2026-11-20):** the web's draft mirror

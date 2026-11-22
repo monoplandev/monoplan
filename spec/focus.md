@@ -261,7 +261,7 @@ event — so the web store must re-derive `focus_view` on **item events too**
   pinned/unpinned in one commit. Inside the Focus lens the row instead carries a
   cheap remove (×) gesture.
 - **Direct capture into Focus.** The Focus lens is itself a capture surface: the
-  same inline-draft gestures a list has (Space / the add button /
+  same inline-draft gestures a list has (N / the add button /
   Enter-to-chain / paste) work here too. Because Focus owns no items — it
   is a lens — a captured item is created in the **inbox** (the default home) and
   a FocusRef is pinned to it in the **same undo step**, landing at the draft's

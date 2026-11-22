@@ -4,7 +4,7 @@
 // The shortcuts in Workspace.tsx / FindPalette.tsx listen on `document`,
 // so a keystroke aimed at an open modal (pressing a non-editable button
 // inside it, or just having the dialog focused) still bubbles through to
-// the list behind it — pressing `x` toggled done, Space started a draft,
+// the list behind it — pressing `x` toggled done, `n` started a draft,
 // Delete binned rows, etc. Kobalte's Dialog traps focus and swallows
 // Escape, but plain keydown still reaches document.
 //

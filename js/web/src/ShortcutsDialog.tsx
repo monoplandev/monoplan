@@ -34,7 +34,7 @@ export function ShortcutsDialog(props: {
   const rows = (): { label: string; key: string | string[] }[] => {
     const s = m().shortcuts;
     return [
-      { label: s.newItem, key: "Space" },
+      { label: s.newItem, key: "N" },
       { label: s.openItem, key: "Enter" },
       { label: s.toggleDone, key: "X" },
       { label: s.toggleCancelled, key: "⇧X" },
