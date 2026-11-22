@@ -34,14 +34,19 @@ Open: whether a subtask records a done timestamp (leaning no; not stored).
   `itemAdded` / `itemSubtasksChanged` and as an array in the snapshot.
 - **Web.** `SubtasksField` in the task surface between the place and the
   notes, existing items only (a capture gains it once its title blur
-  promotes it): a checkbox and a one-line text field per subtask, a
+  promotes it): a checkbox and a text field per subtask, a
   hover grip at the row's end, and a trailing "Add subtask" field that
   keeps the caret after Enter. Enter commits and moves down, Backspace in
   an emptied row removes it (the only way to remove one: the hover ✕ was
   dropped 2026-11-19), Up / Down walk the rows, Alt+Up / Alt+Down
   reorder, Escape puts the text back. Dragging the grip reorders
   (2026-11-19): the row follows the pointer inside the list, the rows it
-  passes step aside, the release is one `moveSubtask`, Escape cancels. List rows and board cards show a `done/total` count on open
+  passes step aside, the release is one `moveSubtask`, Escape cancels.
+  Long text wraps (2026-11-22): fields are textareas sized to their
+  text, the checkbox and grip sit on the first line, and the grip drag
+  measures each row's height. The text stays one line: Enter commits,
+  a pasted newline becomes a space. Up / Down walk a wrapped row's lines
+  before leaving it from its start / end. List rows and board cards show a `done/total` count on open
   items, nothing else. Duplicate copies subtasks with their ticks.
 
 - **Typed api and FFI (2026-11-19).** `api::items::Subtask`,

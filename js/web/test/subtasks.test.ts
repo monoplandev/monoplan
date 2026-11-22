@@ -66,13 +66,29 @@ describe("subtasks", () => {
 
   test("a grip drag lands half a row past each neighbour and stays in the list", () => {
     // Row 1 of 4, rows 28 px tall.
-    expect(dragTarget(1, 0, 28, 4)).toEqual({ dy: 0, to: 1 });
-    expect(dragTarget(1, 13, 28, 4)).toEqual({ dy: 13, to: 1 });
-    expect(dragTarget(1, 15, 28, 4)).toEqual({ dy: 15, to: 2 });
-    expect(dragTarget(1, -15, 28, 4)).toEqual({ dy: -15, to: 0 });
-    expect(dragTarget(1, 500, 28, 4)).toEqual({ dy: 56, to: 3 });
-    expect(dragTarget(1, -500, 28, 4)).toEqual({ dy: -28, to: 0 });
-    expect(dragTarget(0, 40, 0, 4)).toEqual({ dy: 0, to: 0 });
+    const even = [28, 28, 28, 28];
+    expect(dragTarget(1, 0, even)).toEqual({ dy: 0, to: 1 });
+    expect(dragTarget(1, 13, even)).toEqual({ dy: 13, to: 1 });
+    expect(dragTarget(1, 15, even)).toEqual({ dy: 15, to: 2 });
+    expect(dragTarget(1, -15, even)).toEqual({ dy: -15, to: 0 });
+    expect(dragTarget(1, 500, even)).toEqual({ dy: 56, to: 3 });
+    expect(dragTarget(1, -500, even)).toEqual({ dy: -28, to: 0 });
+    expect(dragTarget(0, 40, [0, 28])).toEqual({ dy: 0, to: 0 });
+  });
+
+  test("a grip drag over wrapped rows crosses half of each row it passes", () => {
+    // Row 1 of 4; row 2 wraps to three lines (68 px).
+    const mixed = [28, 28, 68, 28];
+    expect(dragTarget(1, 33, mixed)).toEqual({ dy: 33, to: 1 });
+    expect(dragTarget(1, 34, mixed)).toEqual({ dy: 34, to: 2 });
+    expect(dragTarget(1, 81, mixed)).toEqual({ dy: 81, to: 2 });
+    expect(dragTarget(1, 82, mixed)).toEqual({ dy: 82, to: 3 });
+    expect(dragTarget(1, 500, mixed)).toEqual({ dy: 96, to: 3 });
+    // Row 3 dragged up past the tall row and then row 1.
+    expect(dragTarget(3, -33, mixed)).toEqual({ dy: -33, to: 3 });
+    expect(dragTarget(3, -34, mixed)).toEqual({ dy: -34, to: 2 });
+    expect(dragTarget(3, -82, mixed)).toEqual({ dy: -82, to: 1 });
+    expect(dragTarget(3, -500, mixed)).toEqual({ dy: -124, to: 0 });
   });
 
   test("subtasks survive the boot snapshot path", () => {

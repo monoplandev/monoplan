@@ -3412,9 +3412,11 @@ input.task-check:hover {
 }
 
 /* Subtasks (`SubtasksField`, `spec/subtasks.md`): a column of rows,
-   each a checkbox, a one-line text field and a hover-revealed grip, over
-   the trailing add field, whose plus glyph sits in the checkbox's
-   place. Fields are borderless and read as text until focused. */
+   each a checkbox, a text field and a hover-revealed grip, over the
+   trailing add field, whose plus glyph sits in the checkbox's place.
+   Fields are borderless textareas sized to their text by the
+   component, so a long subtask wraps; the leading box and the grip are
+   one line tall and sit on the first line. */
 .subtasks {
   display: flex;
   flex-direction: column;
@@ -3422,22 +3424,34 @@ input.task-check:hover {
 
 .subtask {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   min-height: 28px;
 }
 
+.subtask-lead {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+}
+
 .subtask-text {
   flex: 1 1 auto;
+  display: block;
   min-width: 0;
   margin: 0;
-  padding: 2px 0;
+  /* One line is 28px, the row's height. */
+  padding: 4px 0;
   border: none;
   background: transparent;
   outline: none;
   font: inherit;
+  line-height: 20px;
   color: var(--text);
-  text-overflow: ellipsis;
+  resize: none;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .subtask-text::placeholder {
@@ -3469,7 +3483,7 @@ input.task-check:hover {
   align-items: center;
   justify-content: center;
   width: 18px;
-  height: 18px;
+  height: 28px;
   color: var(--text-faint);
   cursor: grab;
   touch-action: none;
