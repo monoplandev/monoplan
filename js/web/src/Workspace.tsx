@@ -298,7 +298,19 @@ export function Workspace(props: {
   const home = docs.home;
   const routed = docs.routed;
   const view = props.view;
-  const setView = props.setView;
+  // A view change closes the entered item (unless it was entered under
+  // the destination view, i.e. a reveal) in the same batch, so the
+  // address-bar mirror never sees the new view with the old item still
+  // open. Left to the view-change effect alone, that effect and the
+  // mirror run in an order Solid doesn't fix: when the mirror went
+  // first it recorded `(new view, item)`, then read the close as a
+  // same-view close of an item entry and went Back, popping to the old
+  // view. The effect keeps the rule for a view set from outside.
+  const setView = (v: ViewKey) =>
+    batch(() => {
+      if (untrack(openItemId) !== null && openedViewKey !== viewKey(v)) setOpenItemId(null);
+      props.setView(v);
+    });
   // The doc the current view is scoped to: a list view's own doc, Home
   // for the lenses. Everything list-shaped (the board, the inline draft,
   // list rename / icon / archive, the display options) acts on it.
