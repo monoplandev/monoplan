@@ -475,14 +475,15 @@ for the month grid). `groupByDeadline` becomes
   Everything else above applies to events unchanged. An event always has a
   `when`, so there is no Unscheduled section (there was one while events
   were a list, removed 2026-11-16).
-- **Mini calendar** (web, built 2026-11-22): a month grid pinned above
-  the sidebar footer, for orientation. It is the date pickers' corvu
+- **Mini calendar** (web, built 2026-11-22): a month grid pinned at
+  the top of the sidebar, above the nav list, for orientation. It is the date pickers' corvu
   grid (`MonthGrid.tsx`) with nothing selected and today marked. A
   click on a day opens the agenda with that day's header at the top of
   the pane. With empty days shown, the agenda's range widens to take in
   the picked day until the agenda is left. With them hidden, the jump
-  lands on the next day that has rows. The footer's calendar button
-  shows and hides it, a device preference (shown by default). The URL
+  lands on the next day that has rows. "Show mini calendar" in the
+  sidebar's blank-space context menu (beside "Show list counts") shows
+  and hides it, a device preference (shown by default). The URL
   does not change: the `upcoming_<day>` anchor (§URLs) stays unbuilt.
 
 ## Task surface and rows

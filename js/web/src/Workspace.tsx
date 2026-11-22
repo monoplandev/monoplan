@@ -140,12 +140,7 @@ import {
   savePanelWidth,
 } from "./panelWidth.ts";
 import { namesItem, parseHash, stateHash, type Route } from "./url.ts";
-import {
-  loadMiniCalendarShown,
-  MiniCalendar,
-  MiniCalendarToggle,
-  saveMiniCalendarShown,
-} from "./MiniCalendar.tsx";
+import { MiniCalendar, miniCalendarShown } from "./MiniCalendar.tsx";
 import {
   encodeView,
   LIST_VIEW,
@@ -3130,12 +3125,6 @@ export function Workspace(props: {
       upcomingHandle?.focus();
     });
   };
-  const [miniCalendarShown, setMiniCalendarShown] = createSignal(loadMiniCalendarShown());
-  const toggleMiniCalendar = () => {
-    const next = !miniCalendarShown();
-    setMiniCalendarShown(next);
-    saveMiniCalendarShown(next);
-  };
 
   // Sidebar width: dragged from the nav's right edge, saved per device
   // (navWidth.ts). The drag tracks the pointer's travel from where it
@@ -3284,11 +3273,10 @@ export function Workspace(props: {
               session={session.session()}
               onSession={session.swapSession}
             />
-            <MiniCalendarToggle shown={miniCalendarShown()} onToggle={toggleMiniCalendar} />
             <NavFindButton onClick={() => setFindOpen(true)} />
           </>
         }
-        aboveFooter={
+        header={
           <Show when={miniCalendarShown()}>
             <MiniCalendar onPickDay={showAgendaDay} />
           </Show>

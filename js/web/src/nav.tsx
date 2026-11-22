@@ -27,10 +27,13 @@ import { pendingInvite } from "./invite.ts";
 import type { AttentionBadge } from "./dayGroups.ts";
 import { Dnd, DndSelection, type DndOp } from "./dnd/solid";
 import { EmojiPicker } from "./EmojiPicker.tsx";
+import { listCountsPref, setListCountsPref } from "./listCounts.ts";
+import { miniCalendarShown, setMiniCalendarShown } from "./MiniCalendar.tsx";
 import archiveSvg from "./icons/archive.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
 import personSvg from "./icons/person.svg?raw";
 import caretDownSvg from "./icons/caret-down.svg?raw";
+import checkSvg from "./icons/check.svg?raw";
 import checkCircledSvg from "./icons/check-circled.svg?raw";
 import cloudSvg from "./icons/cloud.svg?raw";
 import cloudOffSvg from "./icons/cloud-off.svg?raw";
@@ -298,9 +301,9 @@ export function Nav(props: {
   /** Chrome pinned to the bottom of the sidebar (app menu + account/sync
    *  widget) — see `.nav-footer` in styles.css. */
   footer?: JSX.Element;
-  /** Pinned above the footer, below the scrolling groups: the mini
-   *  calendar (`MiniCalendar.tsx`) when shown. */
-  aboveFooter?: JSX.Element;
+  /** Pinned at the top, above the scrolling groups: the mini calendar
+   *  (`MiniCalendar.tsx`) when shown. */
+  header?: JSX.Element;
 }) {
   const { m } = useAppI18n();
   const [emptyBinConfirmOpen, setEmptyBinConfirmOpen] = createSignal(false);
@@ -339,8 +342,29 @@ export function Nav(props: {
     revealActiveNav();
   });
 
+  // The sidebar's general context menu (sidebar display toggles). The
+  // whole <nav> is its trigger; rows with their own menu (lists, Bin,
+  // workspace headings) stop the event at their trigger, so this one
+  // opens on the space they leave. A right-click in a text field (the
+  // new-list form) keeps the browser's menu: pointerdown precedes
+  // contextmenu, so it disables the trigger for that click.
+  const [navMenuOff, setNavMenuOff] = createSignal(false);
+  const onNavPointerDown = (e: PointerEvent) => {
+    const t = e.target as HTMLElement | null;
+    setNavMenuOff(
+      !!t?.closest("input, textarea, [contenteditable=''], [contenteditable='true']"),
+    );
+  };
+
   return (
-    <nav class="nav">
+    <ContextMenu>
+    <ContextMenu.Trigger
+      as="nav"
+      class="nav"
+      disabled={navMenuOff()}
+      onPointerDown={onNavPointerDown}
+    >
+      {props.header}
       <div class="nav-scroll" tabIndex={-1} ref={navScrollEl}>
       <div class="nav-group">
         {/* Focus: a reserved lens (spec/focus.md), not a `ListMeta` row, so
@@ -455,7 +479,6 @@ export function Nav(props: {
         )}
       </For>
       </div>
-      {props.aboveFooter}
       <Show when={props.footer}>
         <div class="nav-footer">{props.footer}</div>
       </Show>
@@ -467,7 +490,38 @@ export function Nav(props: {
         confirmLabel={m().workspace.emptyBin}
         onConfirm={() => props.docs.emptyBin()}
       />
-    </nav>
+    </ContextMenu.Trigger>
+    <ContextMenu.Portal>
+      <ContextMenu.Content class="context-menu-content">
+        <ContextMenu.CheckboxItem
+          class="context-menu-item"
+          checked={listCountsPref()}
+          onChange={setListCountsPref}
+          closeOnSelect
+        >
+          <span>{m().nav.showListCounts}</span>
+          <ContextMenu.ItemIndicator
+            class="menu-check"
+            aria-hidden="true"
+            innerHTML={checkSvg}
+          />
+        </ContextMenu.CheckboxItem>
+        <ContextMenu.CheckboxItem
+          class="context-menu-item"
+          checked={miniCalendarShown()}
+          onChange={setMiniCalendarShown}
+          closeOnSelect
+        >
+          <span>{m().nav.showMiniCalendar}</span>
+          <ContextMenu.ItemIndicator
+            class="menu-check"
+            aria-hidden="true"
+            innerHTML={checkSvg}
+          />
+        </ContextMenu.CheckboxItem>
+      </ContextMenu.Content>
+    </ContextMenu.Portal>
+    </ContextMenu>
   );
 }
 

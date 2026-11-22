@@ -30,6 +30,7 @@ import {
   type TimeFormatPreference,
 } from "./format.tsx";
 import { listCountsPref, setListCountsPref } from "./listCounts.ts";
+import { miniCalendarShown, setMiniCalendarShown } from "./MiniCalendar.tsx";
 
 type Section = "general" | "account" | "devices";
 
@@ -390,6 +391,22 @@ export function Settings(props: {
                       aria-label={m().settings.showListCounts}
                       checked={listCountsPref()}
                       onChange={(checked) => setListCountsPref(checked)}
+                    >
+                      <Switch.Input class="settings-switch-input" />
+                      <Switch.Control class="settings-switch-control">
+                        <Switch.Thumb class="settings-switch-thumb" />
+                      </Switch.Control>
+                    </Switch>
+                  </div>
+                  <div class="settings-row">
+                    <div class="settings-row-label">
+                      {m().settings.showMiniCalendar}
+                    </div>
+                    <Switch
+                      class="settings-switch"
+                      aria-label={m().settings.showMiniCalendar}
+                      checked={miniCalendarShown()}
+                      onChange={(checked) => setMiniCalendarShown(checked)}
                     >
                       <Switch.Input class="settings-switch-input" />
                       <Switch.Control class="settings-switch-control">

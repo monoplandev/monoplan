@@ -96,6 +96,12 @@ export type Messages = {
   };
   nav: {
     inbox: string;
+    /** The sidebar's blank-space context menu: toggles each list's open
+     *  count (the same device preference as Settings). */
+    showListCounts: string;
+    /** The sidebar's blank-space context menu: shows / hides the mini
+     *  calendar at the top of the sidebar. */
+    showMiniCalendar: string;
     focus: string;
     /** The Upcoming view: every open item with a deadline, by day. */
     upcoming: string;
@@ -391,9 +397,6 @@ export type Messages = {
     prevMonth: string;
     /** Accessible label for the calendar's next-month button. */
     nextMonth: string;
-    /** The sidebar footer's button that shows / hides the mini calendar. */
-    showCalendar: string;
-    hideCalendar: string;
   };
   when: {
     /** Section label / accessible name for the planned-date control. */
@@ -549,6 +552,7 @@ export type Messages = {
     light: string;
     dark: string;
     showListCounts: string;
+    showMiniCalendar: string;
     /** 12 / 24-hour clock preference; "Auto" reuses `auto`. */
     timeFormat: string;
     timeFormat12: string;
@@ -676,6 +680,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     nav: {
       inbox: "Bandeja de entrada",
+      showListCounts: "Mostrar contadores de listas",
+      showMiniCalendar: "Mostrar minicalendario",
       focus: "Destacados",
       upcoming: "Calendario",
       assigned: "Asignadas",
@@ -856,8 +862,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       setDate: "Elegir fecha límite",
       prevMonth: "Mes anterior",
       nextMonth: "Mes siguiente",
-      showCalendar: "Mostrar calendario",
-      hideCalendar: "Ocultar calendario",
     },
     when: {
       label: "Fecha",
@@ -952,6 +956,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       light: "Claro",
       dark: "Oscuro",
       showListCounts: "Mostrar contadores de listas en la navegación",
+      showMiniCalendar: "Mostrar minicalendario en la navegación",
       timeFormat: "Formato de hora",
       timeFormat12: "12 h",
       timeFormat24: "24 h",
@@ -1080,6 +1085,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     nav: {
       inbox: "Inbox",
+      showListCounts: "Show list counts",
+      showMiniCalendar: "Show mini calendar",
       focus: "Starred",
       upcoming: "Calendar",
       assigned: "Assigned",
@@ -1258,8 +1265,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       setDate: "Set deadline",
       prevMonth: "Previous month",
       nextMonth: "Next month",
-      showCalendar: "Show calendar",
-      hideCalendar: "Hide calendar",
     },
     when: {
       label: "Date",
@@ -1354,6 +1359,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       light: "Light",
       dark: "Dark",
       showListCounts: "Show list counts in nav",
+      showMiniCalendar: "Show mini calendar in nav",
       timeFormat: "Time format",
       timeFormat12: "12h",
       timeFormat24: "24h",
