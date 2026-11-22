@@ -321,11 +321,14 @@ export function Upcoming(props: {
   // nothing else. ⌘/Ctrl+↑/↓ reorders a list; the agenda is ordered by
   // date, so it is left alone here.
   // With nothing selected ↓ starts at the top of Overdue / Today, not a
-  // year back, and ↑ at the last row above it.
+  // year back, and ↑ at the last row above it. ⌘/Ctrl+A does nothing:
+  // the agenda reaches a year back, so "all" is never what is meant. It
+  // is still swallowed so the browser does not select the page's text.
   const onKeyDown = (e: KeyboardEvent) => {
     const action = mapDndKeyEvent(e);
     if (action.type === "ignore" || action.type === "move-selection") return;
     e.preventDefault();
+    if (action.type === "select-all") return;
     release();
     if (
       (action.type === "navigate" || action.type === "extend") &&
@@ -532,13 +535,7 @@ export function Upcoming(props: {
             <header class="upcoming-day-header">
               <h2 class="upcoming-day-label">{dayHeading(g)}</h2>
             </header>
-            <Show
-              when={g.rows.length > 0}
-              fallback={
-                <div class="upcoming-empty-day">{m().upcoming.emptyToday}</div>
-              }
-            >
-              <For each={g.rows}>
+            <For each={g.rows}>
                 {(r) => {
                   const selected = createMemo(
                     () =>
@@ -764,7 +761,21 @@ export function Upcoming(props: {
                   </ItemContextMenu>
                   );
                 }}
-              </For>
+            </For>
+            {/* An empty day keeps a blank row-height slot: room to drop
+                onto it once drag-to-reschedule lands (`data-drop-day`);
+                a day with rows has them to drop onto. Today with nothing
+                on it says so here. Overdue is never empty. */}
+            <Show when={g.rows.length === 0 && g.urgency !== "overdue"}>
+              <div
+                class="upcoming-day-slot"
+                data-drop-day={g.key}
+                aria-hidden="true"
+              >
+                <Show when={g.urgency === "today"}>
+                  <span class="upcoming-empty-day">{m().upcoming.emptyToday}</span>
+                </Show>
+              </div>
             </Show>
           </section>
         )}

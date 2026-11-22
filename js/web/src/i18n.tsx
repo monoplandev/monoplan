@@ -454,6 +454,10 @@ export type Messages = {
   upcoming: {
     /** Upcoming view's Today group when nothing is due today. */
     emptyToday: string;
+    /** Header toggle: show every day, empty ones too. */
+    allDays: string;
+    /** Tooltip of the "All days" toggle. */
+    allDaysHint: string;
     /** Heading over the calendar's per-doc show / hide toggles. */
     /** What an Open event's status reads: the one label its four open
      *  states share in the status controls (`statusLabel`). */
@@ -877,6 +881,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     upcoming: {
       emptyToday: "Nada para hoy",
+      allDays: "Todos los días",
+      allDaysHint: "Mostrar también los días vacíos",
       event: "Evento",
       fixedEvent: "Evento",
       eventHint: "Ocurre en esta fecha: pasa sin más, en lugar de quedar atrasado",
@@ -1274,6 +1280,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     upcoming: {
       emptyToday: "Nothing due today",
+      allDays: "All days",
+      allDaysHint: "Show empty days too",
       event: "Event",
       fixedEvent: "Event",
       eventHint: "Happens on this date: it goes by instead of going overdue",

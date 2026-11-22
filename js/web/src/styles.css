@@ -464,8 +464,16 @@ body {
   color: var(--text-muted);
 }
 
+/* The blank slot of an empty day, one row high: the day's drop
+   target-to-be. */
+.upcoming-day-slot {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+}
+
 .upcoming-empty-day {
-  padding: 6px 8px;
+  padding: 0 8px;
   color: var(--text-faint);
 }
 
@@ -808,6 +816,11 @@ body {
   width: auto;
   padding: 0 8px;
   font-size: 13px;
+}
+
+.header-toggle-button[aria-pressed="true"] {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .icon-button:hover:not(:disabled) {

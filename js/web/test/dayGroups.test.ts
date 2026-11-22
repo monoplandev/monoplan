@@ -10,6 +10,7 @@ import { describe, expect, test } from "bun:test";
 import {
   agendaItems,
   attentionBadge,
+  fillEmptyDays,
   groupByDay,
   isDueRow,
   whenSpan,
@@ -637,5 +638,48 @@ describe("groupByDay with a floor (the days gone by)", () => {
       ["gone", "2026-09-01"],
       ["both", "2026-09-12"],
     ]);
+  });
+});
+
+describe("fillEmptyDays", () => {
+  test("every day from the first past day to two weeks ahead, Overdue before Today", () => {
+    const groups = groupByDay(
+      [
+        item("past", { when: "2026-09-06" }, { event: true }),
+        item("late", { deadline: "2026-09-01" }),
+        item("soon", { when: "2026-09-11" }),
+      ],
+      TODAY,
+      LABELS,
+      "en",
+      "2025-09-09",
+    );
+    const filled = fillEmptyDays(groups, TODAY, LABELS, "en");
+    const keys = filled.map((g) => g.key);
+    expect(keys.slice(0, 5)).toEqual([
+      "2026-09-06",
+      "2026-09-07",
+      "2026-09-08",
+      "overdue",
+      TODAY,
+    ]);
+    expect(keys[keys.length - 1]).toBe("2026-09-22");
+    expect(filled.length).toBe(3 + 1 + 14);
+    expect(filled.find((g) => g.key === "2026-09-11")!.rows.length).toBe(1);
+    expect(filled.find((g) => g.key === "2026-09-07")!.urgency).toBe("past");
+    expect(filled.find((g) => g.key === "2026-09-10")!.label).toBe("Tomorrow");
+  });
+
+  test("reaches past two weeks to the last placed day", () => {
+    const groups = groupByDay(
+      [item("far", { when: "2026-10-01" })],
+      TODAY,
+      LABELS,
+      "en",
+    );
+    const filled = fillEmptyDays(groups, TODAY, LABELS, "en");
+    expect(filled[0]!.key).toBe(TODAY);
+    expect(filled[filled.length - 1]!.key).toBe("2026-10-01");
+    expect(filled.length).toBe(23);
   });
 });

@@ -54,10 +54,12 @@ import {
   AGENDA_PAST_DAYS,
   agendaItems,
   attentionBadge,
+  fillEmptyDays,
   groupByDay,
   isClosedTask,
   type DayGroup,
 } from "./dayGroups.ts";
+import { loadAgendaAllDays, saveAgendaAllDays } from "./agendaAllDays.ts";
 import { addDaysToStamp, nowMs, todayStamp } from "./format.tsx";
 import { applySuggestionChange } from "./whenSuggest.ts";
 import { restoreCapturedPositions } from "./linger.ts";
@@ -800,22 +802,29 @@ export function Workspace(props: {
   const doneLingers = (it: ItemView, now: number): boolean =>
     Math.abs(now - it.lifecycleAt) < DONE_LINGER_MS;
   const [doneMoveTick, setDoneMoveTick] = createSignal(0);
+  // "All days" (the header toggle, a device preference, on by default):
+  // every day gets a section, not just the days something is on.
+  const [agendaAllDays, setAgendaAllDays] = createSignal(loadAgendaAllDays());
   const upcomingGroups = createMemo((): DayGroup[] => {
     const today = todayStamp(nowMs());
     doneMoveTick();
     const now = Date.now();
-    return groupByDay(
+    const labels = {
+      overdue: m().deadline.overdue,
+      today: m().deadline.today,
+      tomorrow: m().deadline.tomorrow,
+    };
+    const groups = groupByDay(
       docs.calendarItems(),
       today,
-      {
-        overdue: m().deadline.overdue,
-        today: m().deadline.today,
-        tomorrow: m().deadline.tomorrow,
-      },
+      labels,
       locale(),
       addDaysToStamp(today, -AGENDA_PAST_DAYS),
       (it) => doneLingers(it, now),
     );
+    return agendaAllDays()
+      ? fillEmptyDays(groups, today, labels, locale())
+      : groups;
   });
   // One timeout for the next lingering row to move; re-armed as rows
   // close. Only while the agenda is the view.
@@ -3744,6 +3753,20 @@ export function Workspace(props: {
                 }}
               >
                 {m().deadline.today}
+              </button>
+              <button
+                type="button"
+                class="icon-button header-text-button header-toggle-button"
+                tabIndex={-1}
+                aria-pressed={agendaAllDays()}
+                title={m().upcoming.allDaysHint}
+                onClick={() => {
+                  const on = !agendaAllDays();
+                  setAgendaAllDays(on);
+                  saveAgendaAllDays(on);
+                }}
+              >
+                {m().upcoming.allDays}
               </button>
             </Show>
             {/* The calendar merges every doc; the Done view's filter menu

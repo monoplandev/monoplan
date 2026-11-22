@@ -415,3 +415,52 @@ const coversToday = (
   const span = whenSpan(when, duration);
   return span.start <= today && today <= span.end;
 };
+
+/** How far ahead of today the agenda's "all days" mode reaches when
+ *  nothing is placed later: two weeks, so the days ahead read as a
+ *  calendar even when they are empty. */
+export const AGENDA_ALL_DAYS_AHEAD = 13;
+
+/** The agenda with every day in it, not just the days something is on
+ *  (the web Upcoming view's "All days" toggle, a device preference): an
+ *  empty group for each missing day from the first past group (if any)
+ *  through to the later of the last placed day and `today + ahead`.
+ *  Overdue keeps its place between the days gone by and Today. Labels
+ *  follow `groupByDay`'s rules. */
+export function fillEmptyDays(
+  groups: readonly DayGroup[],
+  today: string,
+  labels: DayGroupLabels,
+  locale: string,
+  ahead: number = AGENDA_ALL_DAYS_AHEAD,
+): DayGroup[] {
+  const byDay = new Map<string, DayGroup>();
+  let first = today;
+  let last = addDaysToStamp(today, ahead);
+  for (const g of groups) {
+    if (g.key === OVERDUE_KEY) continue;
+    byDay.set(g.key, g);
+    if (g.key < first) first = g.key;
+    if (g.key > last) last = g.key;
+  }
+  const overdue = groups.find((g) => g.key === OVERDUE_KEY);
+  const out: DayGroup[] = [];
+  for (let day = first; day <= last; day = addDaysToStamp(day, 1)) {
+    if (day === today && overdue) out.push(overdue);
+    const have = byDay.get(day);
+    if (have) {
+      out.push(have);
+      continue;
+    }
+    const info = formatDeadlineBadge(day, today, labels, locale, {
+      pastAsDate: true,
+    });
+    out.push({
+      key: day,
+      label: day === today ? labels.today : (info?.label ?? day),
+      urgency: day < today ? "past" : day === today ? "today" : "future",
+      rows: [],
+    });
+  }
+  return out;
+}
