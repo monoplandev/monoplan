@@ -3418,7 +3418,18 @@ export function Workspace(props: {
           // selected by the row path, which clears the target first.
           const v = view();
           if (boardListId() !== null) setBoardRevealIds([id]);
-          else if (v.kind === "list" || v.kind === "focus") {
+          else if (v.kind === "upcoming") {
+            // The agenda's Add: select the new item once the agenda's
+            // rows (and so the selection's order) include it, and bring
+            // it into view, since its date may be any day. Deferred like
+            // `revealItem`'s agenda path; an item the agenda doesn't show
+            // (its date cleared in the capture) just isn't selected.
+            setTimeout(() => {
+              if (!docs.getItem(id)) return;
+              selection.selectOnly(id);
+              upcomingHandle?.scrollToKey(id);
+            }, 0);
+          } else if (v.kind === "list" || v.kind === "focus") {
             queueMicrotask(() => {
               if (docs.getItem(id)) selection.selectOnly(id);
             });
