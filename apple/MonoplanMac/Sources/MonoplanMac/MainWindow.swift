@@ -1658,6 +1658,10 @@ struct MainWindowView: View {
     @State private var sharing: SharingTarget?
     /// The workspace row under the pointer: its "…" and chevron show.
     @State private var hoveredWorkspace: String?
+    /// Whether the window is key: the nav's labels dim when it is not
+    /// (`PaneColor.navTextInactive`).
+    @Environment(\.controlActiveState) private var activeState
+    private var windowActive: Bool { activeState != .inactive }
     /// Which of the window's panes this is (`MainSplitViewController`
     /// hosts each apart).
     enum Pane { case sidebar, list }
@@ -1693,9 +1697,12 @@ struct MainWindowView: View {
         // (macOS 26, probed 2026-11-15).
         func row<V: View>(_ target: NavTarget, _ content: V) -> some View {
             let selected = target == current
+            let ink = Color(nsColor: windowActive ? PaneColor.navText : PaneColor.navTextInactive)
             return content.navRow()
-                // Template glyphs in their label colour, not the accent.
-                .listItemTint(Color(nsColor: .labelColor))
+                // The item rows' text colour, dimmer while the window is
+                // not key; template glyphs in it too, not the accent.
+                .foregroundStyle(ink)
+                .listItemTint(ink)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 // Out to the selection's bounds: the row's height, and
                 // `bleed` past the cell each side, as the lists' rows.
@@ -1771,6 +1778,7 @@ struct MainWindowView: View {
                                 lists: lists,
                                 selected: model.lens == nil && model.workspace == section.target ? model.list : nil,
                                 counts: showListCounts,
+                                active: windowActive,
                                 select: { model.select(workspace: section.target, list: $0) },
                                 move: { model.reorderLists(workspace: section.target, ids: $0, before: $1) },
                                 delete: { confirmDelete(section, $0) })
@@ -1956,7 +1964,9 @@ struct MainWindowView: View {
     @ViewBuilder
     private func count(_ count: Int) -> some View {
         if count > 0 {
-            Text(verbatim: "\(count)").foregroundStyle(.secondary).monospacedDigit()
+            Text(verbatim: "\(count)")
+                .foregroundStyle(Color(nsColor: windowActive ? PaneColor.navCount : PaneColor.navCountInactive))
+                .monospacedDigit()
         }
     }
 

@@ -73,6 +73,22 @@ enum PaneColor {
         return NSColor(white: 1, alpha: 0.72)
     }
 
+    /// A sidebar row's label and glyph: the item rows' text, so the nav
+    /// reads as the lists do.
+    static let navText = rowText
+
+    /// The same in a window that is not key: dimmer, white at 45% in
+    /// dark (from 72%), black at 50% in light (from the label's 85%).
+    static let navTextInactive = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(white: 1, alpha: 0.45)
+            : NSColor(white: 0, alpha: 0.5)
+    }
+
+    /// A sidebar row's count, active and not.
+    static let navCount = NSColor.secondaryLabelColor
+    static let navCountInactive = NSColor.tertiaryLabelColor
+
     /// The hairline between two item rows, just visible: half the
     /// contrast of the web's `--row-divider` (`js/web/src/styles.css`,
     /// #2a2a2a / #f5f5f5) against the list's ground.

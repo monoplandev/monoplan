@@ -37,6 +37,9 @@ struct SidebarLists: NSViewRepresentable {
     let selected: String?
     /// Each list's open count at its trailing edge (the preference).
     let counts: Bool
+    /// The window is key: the labels in `PaneColor.navText`, else the
+    /// dimmer `navTextInactive`.
+    let active: Bool
     let select: (String) -> Void
     /// `ids` now sit directly above `before` (nil: last).
     let move: ([String], String?) -> Void
@@ -109,7 +112,7 @@ struct SidebarLists: NSViewRepresentable {
 
         func dndList(_ list: DndListView, configure content: NSView, key: String, state: DndRowState) {
             guard let content = content as? SidebarListRow, let info = rows[key] else { return }
-            content.show(info, count: parent.counts)
+            content.show(info, count: parent.counts, active: parent.active)
         }
 
         // MARK: DndListDelegate
@@ -198,7 +201,7 @@ private final class SidebarListRow: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not built from a nib") }
 
-    func show(_ list: ListInfo, count shown: Bool) {
+    func show(_ list: ListInfo, count shown: Bool, active: Bool) {
         let icon = list.icon.flatMap { $0.isEmpty ? nil : $0 }
         emoji.stringValue = icon ?? ""
         emoji.isHidden = icon == nil
@@ -207,11 +210,13 @@ private final class SidebarListRow: NSView {
         let open = Int(list.open)
         count.stringValue = shown && open > 0 ? "\(open)" : ""
         count.isHidden = count.stringValue.isEmpty
-        // The same on the grey selection as off it, as the web nav.
-        title.textColor = .labelColor
-        emoji.textColor = .labelColor
-        glyph.contentTintColor = .labelColor
-        count.textColor = .secondaryLabelColor
+        // The same on the grey selection as off it, as the web nav; the
+        // SwiftUI rows' colours (`MainWindowView.sidebar`).
+        let ink = active ? PaneColor.navText : PaneColor.navTextInactive
+        title.textColor = ink
+        emoji.textColor = ink
+        glyph.contentTintColor = ink
+        count.textColor = active ? PaneColor.navCount : PaneColor.navCountInactive
         needsLayout = true
     }
 

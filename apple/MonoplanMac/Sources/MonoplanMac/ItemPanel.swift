@@ -770,6 +770,14 @@ private struct PanelTitle: View {
             field
         }
         .font(.title2.weight(.medium))
+        // Focused, the list field's fill (`panelBox`) behind it, drawn
+        // outset so the title does not move as the caret comes and goes.
+        .background {
+            RoundedRectangle(cornerRadius: PanelBox.radius, style: .continuous)
+                .fill(.quaternary.opacity(focused ? 0.5 : 0))
+                .padding(.horizontal, -PanelBox.inset)
+                .padding(.vertical, -4)
+        }
     }
 
     private var ink: Color { closed ? .secondary : .primary }
