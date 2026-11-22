@@ -22,7 +22,7 @@
 //
 // Paste prefers the custom type, then the html payload, then plain lines.
 // The payload carries the fields that define a clone (title, notes, the
-// dates, duration, workflow state) and no identity: no id, no timestamps.
+// dates, event flag, duration, workflow state) and no identity: no id, no timestamps.
 // A structured paste is a duplicate into the target view. The one trace of
 // where an item came from is `origin`, its doc and list, which only a
 // paste into a view that owns no items (Starred) reads, to file the clone
@@ -41,6 +41,8 @@ export interface ClipItem {
   notes?: string;
   deadline?: string;
   when?: string;
+  /** The event flag (`spec/events-plan.md`); only carried with a `when`. */
+  event?: boolean;
   duration?: number;
   place?: Place;
   state: WorkflowState;
@@ -71,6 +73,7 @@ export const toClipItem = (it: ItemView): ClipItem => {
   if (it.notes) out.notes = it.notes;
   if (it.deadline) out.deadline = it.deadline;
   if (it.when) out.when = it.when;
+  if (it.when && it.event) out.event = true;
   if (it.when && it.duration) out.duration = it.duration;
   if (it.place) out.place = { ...it.place };
   if (it.docId && it.listId)
@@ -208,6 +211,7 @@ const parseClip = (raw: string): ClipItem[] | null => {
     if (typeof e.deadline === "string" && e.deadline)
       item.deadline = e.deadline;
     if (typeof e.when === "string" && e.when) item.when = e.when;
+    if (item.when && e.event === true) item.event = true;
     if (
       item.when &&
       typeof e.duration === "number" &&

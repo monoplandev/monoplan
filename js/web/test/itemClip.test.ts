@@ -69,6 +69,21 @@ describe("toClipItem", () => {
     });
   });
 
+  test("carries the event flag with a `when`, drops it without one", () => {
+    expect(toClipItem(item({ when: "2026-10-02", event: true }))).toEqual({
+      text: "Buy milk",
+      when: "2026-10-02",
+      event: true,
+      state: "backlog",
+      origin,
+    });
+    expect(toClipItem(item({ event: true }))).toEqual({
+      text: "Buy milk",
+      state: "backlog",
+      origin,
+    });
+  });
+
   test("duration is dropped without a `when`", () => {
     expect(toClipItem(item({ duration: 30 }))).toEqual({
       text: "Buy milk",
@@ -162,12 +177,18 @@ describe("readClip", () => {
         { text: "A", state: "bogus", notes: "", duration: 15 },
         { text: "B", state: "done", when: "2026-10-02", duration: 1.5 },
         { text: "C", state: "cancelled" },
+        { text: "D", state: "backlog", when: "2026-10-03", event: true },
+        { text: "E", state: "backlog", event: true },
+        { text: "F", state: "backlog", when: "2026-10-03", event: "yes" },
       ],
     });
     expect(readClip(transfer({ [ITEM_CLIP_TYPE]: raw }))).toEqual([
       { text: "A", state: "backlog" },
       { text: "B", state: "done", when: "2026-10-02" },
       { text: "C", state: "cancelled" },
+      { text: "D", state: "backlog", when: "2026-10-03", event: true },
+      { text: "E", state: "backlog" },
+      { text: "F", state: "backlog", when: "2026-10-03" },
     ]);
   });
 
