@@ -35,11 +35,11 @@
 // (click selects, the side pane follows, Enter / double-click opens, the
 // item shortcuts act on the selection) but not a `Dnd`: day sections are
 // the point, rows are not one height, and the flat virtualised list can't
-// host group headers. So it runs the Workspace's `DndSelection` over the
-// rows of every day concatenated, and answers the same keys through the
-// shared `applySelectionKeyAction`, which makes ↑ / ↓ cross day boundaries
-// for free. Rows drag between days to reschedule (see "Drag to
-// reschedule" below).
+// host group headers. So it runs the Workspace's `DndSelection` over one
+// day's rows at a time (a multi-selection never spans days), answers the
+// same keys through the shared `applySelectionKeyAction`, and moves the
+// selection to another day when a click or plain ↑ / ↓ lands there. Rows
+// drag between days to reschedule (see "Drag to reschedule" below).
 //
 // Windowed by day, not by row: the day sections from a pane's height
 // above the pane to one below are drawn, spacers stand in for the rest
@@ -67,9 +67,11 @@ import {
   createMemo,
   createSignal,
   For,
+  on,
   onCleanup,
   onMount,
   Show,
+  untrack,
 } from "solid-js";
 import { ContextMenu } from "@kobalte/core/context-menu";
 import { Avatar } from "./Avatar.tsx";
@@ -194,43 +196,108 @@ export function Upcoming(props: {
 
   let hostEl!: HTMLDivElement;
 
-  // The selection's order is every day's rows in display order, each id
-  // once (`agendaItems`): a multi-day span repeats its item on each day
-  // it covers (`DayRow.span`), and selecting any of those rows selects
-  // the item. Fresh array per change: `updateOrder` is identity-guarded.
+  // The selection lives in one day (`selDay`): its order is that day's
+  // rows, so a shift or ⌘ range never crosses into another day, and the
+  // selected rows are that day's rows of the selected items. A click or
+  // a key that lands on another day moves the selection there, starting
+  // afresh. Fresh array per change: `updateOrder` is identity-guarded.
+  const [selDay, setSelDay] = createSignal<string | null>(null);
+  const dayIds = (day: string | null): string[] =>
+    day === null
+      ? []
+      : (props.groups.find((g) => g.key === day)?.rows.map((r) => r.item.id) ??
+        []);
+  const order = createMemo<string[]>(() => dayIds(selDay()));
+  // What the selection is indexed over right now.
+  let indexed = new Set<string>();
+  const useDay = (day: string | null) => {
+    setSelDay(day);
+    const o = untrack(order);
+    indexed = new Set(o);
+    props.selection.updateOrder(o);
+  };
+  // Every block's ends are rows of the indexed day. Not so after the
+  // Workspace selects an item by id (a new item, a duplicate) or after
+  // an edit moves a selected item off the day.
+  const consistent = (): boolean =>
+    props.selection
+      .getSelection()
+      .blocks.every((b) => indexed.has(String(b.anchor)) && indexed.has(String(b.to)));
+  // An item's day when it has to be found by id: its first row from
+  // Overdue on (`agendaItems`).
   const flat = createMemo(() => agendaItems(props.groups));
-  const order = createMemo<string[]>(() => flat().map((r) => r.item.id));
-  createEffect(() => props.selection.updateOrder(order()));
+  const firstDayOf = createMemo(
+    () => new Map(flat().map((r) => [r.item.id, r.group])),
+  );
+  // The selected ids as of the last consistent selection, what `settle`
+  // carries over when the rows change under it.
+  let selectedIds: string[] = [];
+  // The day a drop landed on, preferred by the next `settle`.
+  let landingDay: string | null = null;
+  // Put the selection on `ids` in one day: `prefer` when it holds any
+  // of them, else the day of the first one still on the agenda.
+  let settling = false;
+  const settle = (ids: readonly string[], prefer: string | null) => {
+    let day =
+      prefer !== null && ids.some((id) => dayIds(prefer).includes(id))
+        ? prefer
+        : null;
+    for (const id of ids) {
+      if (day !== null) break;
+      day = firstDayOf().get(id) ?? null;
+    }
+    settling = true;
+    useDay(day);
+    const here = ids.filter((id) => indexed.has(id));
+    if (here.length === 0) props.selection.clear();
+    else props.selection.setSelectedKeys(here);
+    settling = false;
+  };
 
   // Selected set as a signal so only rows whose membership flips re-render
   // their chrome. `equals: false`: the selection mutates in place.
   const [selTick, setSelTick] = createSignal(0, { equals: false });
-  onCleanup(props.selection.onChange(() => setSelTick((n) => n + 1)));
+  onCleanup(
+    props.selection.onChange((sel) => {
+      if (!settling && sel.hasSelection() && !consistent()) {
+        const ends = sel
+          .getSelection()
+          .blocks.flatMap((b) => [String(b.anchor), String(b.to)]);
+        settle([...new Set(ends)], selDay());
+      }
+      selectedIds = sel.getSelectedKeys().map(String);
+      setSelTick((n) => n + 1);
+    }),
+  );
   const selectedSet = createMemo(() => {
     selTick();
     return props.selection.getSelectedKeySet();
   });
-
-  // Which row of an item on several days (a multi-day span, a date and
-  // a deadline) draws the selection: the one the pointer picked, else
-  // the item's place in the order (its earliest day from today on, or
-  // in the past when it is only there). The selection itself is by item
-  // id (one item, however many rows it has), so this is chrome only; a
-  // row is lit when its item is selected and it is on that item's chosen
-  // day.
-  const [pickedDay, setPickedDay] = createSignal<Map<string, string>>(
-    new Map(),
+  // The rows changed (an edit here or elsewhere): re-index the day and
+  // keep what is still selected on it, following the selection to
+  // another day when its items all left this one.
+  createEffect(
+    on(
+      () => props.groups,
+      () => {
+        const prefer = landingDay ?? selDay();
+        landingDay = null;
+        const was = selectedIds;
+        useDay(selDay());
+        if (was.length === 0) return;
+        const now = props.selection.getSelectedKeys().map(String);
+        const same =
+          prefer === selDay() &&
+          consistent() &&
+          now.length === was.length &&
+          now.every((id, i) => id === was[i]);
+        if (!same) settle(was, prefer);
+      },
+    ),
   );
-  const firstDayOf = createMemo(
-    () => new Map(flat().map((r) => [r.item.id, r.group])),
-  );
-  // A picked day that no longer holds the item (an undo / redo or a
-  // remote edit moved its date) falls back to the first copy.
-  const litDay = (id: string): string | undefined => {
-    const picked = pickedDay().get(id);
-    if (picked !== undefined && onPage().has(`${id}\n${picked}`)) return picked;
-    return firstDayOf().get(id);
-  };
+  // Selection lights `selDay`'s rows of the selected items.
+  const isLit = (id: string, day: string): boolean =>
+    day === selDay() && selectedSet().has(id);
   // Every row on the page in display order, an item's several rows
   // included: what plain ↑ / ↓ step through.
   const pageRows = createMemo(() =>
@@ -238,19 +305,29 @@ export function Upcoming(props: {
       g.rows.map((r) => ({ id: r.item.id, day: g.key })),
     ),
   );
-  const onPage = createMemo(
-    () => new Set(pageRows().map((r) => `${r.id}\n${r.day}`)),
-  );
-  // A picked row only lives while its item stays selected; other paths
-  // fall back to the first copy.
-  createEffect(() => {
-    const sel = selectedSet();
-    const picked = pickedDay();
-    if ([...picked.keys()].every((id) => sel.has(id))) return;
-    const next = new Map(picked);
-    for (const id of picked.keys()) if (!sel.has(id)) next.delete(id);
-    setPickedDay(next);
+  // A multi-day span drags by its first day only: the day of each span
+  // item that holds its lowest `span.day` (day 1, or the earliest day
+  // shown when day 1 is not: a task span that began before today starts
+  // on today's page). Its other days are tail rows, which select but
+  // do not pick up a drag (`data-span-tail`).
+  const spanHead = createMemo(() => {
+    const head = new Map<string, { day: string; n: number }>();
+    for (const g of props.groups) {
+      for (const r of g.rows) {
+        if (!r.span || r.placedBy !== "when") continue;
+        const at = head.get(r.item.id);
+        if (!at || r.span.day < at.n) {
+          head.set(r.item.id, { day: g.key, n: r.span.day });
+        }
+      }
+    }
+    return head;
   });
+  const isSpanTail = (r: DayRow, day: string): boolean => {
+    if (!r.span || r.placedBy !== "when") return false;
+    const head = spanHead().get(r.item.id);
+    return head !== undefined && head.day !== day;
+  };
 
   // Week labels: the day that opens a week (by the locale's first day)
   // has "Week 48" at the end of its header. Over every group, not just
@@ -657,11 +734,11 @@ export function Upcoming(props: {
     queueMicrotask(updateWindow);
   });
 
-  // The copy that draws the selection (`litDay`), else the first row
-  // carrying the id in DOM order; its day is drawn first if it is not.
+  // The selected day's row of the item, else its first row; its day is
+  // drawn first if it is not.
   const scrollToKey = (id: string) => {
     release();
-    const day = litDay(id);
+    const day = indexed.has(id) ? (selDay() ?? undefined) : firstDayOf().get(id);
     let i = day === undefined ? -1 : props.groups.findIndex((g) => g.key === day);
     if (i < 0) {
       i = props.groups.findIndex((g) => g.rows.some((r) => r.item.id === id));
@@ -705,39 +782,43 @@ export function Upcoming(props: {
   // nothing else. ⌘/Ctrl+↑/↓ reorders a list; the agenda is ordered by
   // date, so it is left alone here.
   // With nothing selected ↓ starts at the top of Overdue / Today, not a
-  // year back, and ↑ at the last row above it. ⌘/Ctrl+A does nothing:
-  // the agenda reaches a year back, so "all" is never what is meant. It
-  // is still swallowed so the browser does not select the page's text.
+  // year back, and ↑ at the last row above it. ⌘/Ctrl+A selects every
+  // row of the selection's day (the selection's order is that day), and
+  // with nothing selected does nothing: the agenda reaches a year back,
+  // so "all of it" is never what is meant. Swallowed either way so the
+  // browser does not select the page's text.
   const onKeyDown = (e: KeyboardEvent) => {
     const action = mapDndKeyEvent(e);
     if (action.type === "ignore" || action.type === "move-selection") return;
     e.preventDefault();
-    if (action.type === "select-all") return;
+    if (action.type === "select-all") {
+      if (props.selection.hasSelection()) props.selection.selectAll();
+      return;
+    }
     release();
     if (
       (action.type === "navigate" || action.type === "extend") &&
       !props.selection.hasSelection()
     ) {
-      const rows = flat();
+      const rows = pageRows();
       const past = new Set<string>();
       for (const g of props.groups) if (g.urgency === "past") past.add(g.key);
-      const first = rows.findIndex((r) => !past.has(r.group));
+      const first = rows.findIndex((r) => !past.has(r.day));
       const at =
         action.direction === "down"
           ? first
           : first > 0
             ? first - 1
             : rows.length - 1;
-      const id = rows[at]?.item.id;
-      if (id === undefined) return;
-      props.selection.selectOnly(id);
-      scrollToKey(id);
+      const row = rows[at];
+      if (row === undefined) return;
+      useDay(row.day);
+      props.selection.selectOnly(row.id);
+      scrollToKey(row.id);
       return;
     }
-    // Plain ↑ / ↓ go row by row, so an item's second row (its deadline,
-    // a later day of its span) is a stop like any other: the selection
-    // is by item id, which alone would step straight past it. Shift
-    // ranges stay by item.
+    // Plain ↑ / ↓ go row by row down the page, crossing into the next
+    // day; shift ↑ / ↓ extend within the day and stop at its edge.
     if (action.type === "navigate") {
       const down = action.direction === "down";
       const from = down
@@ -745,13 +826,11 @@ export function Upcoming(props: {
         : props.selection.getSelectionTop();
       const rows = pageRows();
       const fromId = from === null ? null : String(from);
-      const day = fromId === null ? undefined : litDay(fromId);
-      let at = rows.findIndex((r) => r.id === fromId && r.day === day);
-      if (at < 0) at = rows.findIndex((r) => r.id === fromId);
+      const at = rows.findIndex((r) => r.id === fromId && r.day === selDay());
       const next = at < 0 ? undefined : rows[at + (down ? 1 : -1)];
       if (next) {
+        useDay(next.day);
         props.selection.selectOnly(next.id);
-        setPickedDay(new Map([[next.id, next.day]]));
         scrollToKey(next.id);
       }
       if (at >= 0) return;
@@ -802,7 +881,8 @@ export function Upcoming(props: {
     const t = e.target as HTMLElement | null;
     if (t?.closest("input, button, a")) return;
     const row = rowFromEvent(e);
-    if (!row) return;
+    // A later day of a span is not a handle, whatever else is selected.
+    if (!row || row.dataset.spanTail !== undefined) return;
     press = {
       x: e.clientX,
       y: e.clientY,
@@ -815,22 +895,34 @@ export function Upcoming(props: {
   };
   const startDrag = () => {
     const p = press!;
-    if (!props.selection.getSelectedKeySet().has(p.id)) {
+    if (p.day !== selDay() || !props.selection.getSelectedKeySet().has(p.id)) {
+      useDay(p.day);
       props.selection.selectOnly(p.id);
-      setPickedDay(new Map([[p.id, p.day]]));
     }
-    const ids = props.selection.getSelectedKeys().map(String);
+    // The selection's rows in the grabbed day, less its span tails: a
+    // later day of a span stays put when its neighbours are dragged.
+    const rowsHere = new Map(
+      (props.groups.find((g) => g.key === p.day)?.rows ?? []).map((r) => [
+        r.item.id,
+        r,
+      ]),
+    );
+    const ids = props.selection.getSelectedKeys().map(String).filter((id) => {
+      const r = rowsHere.get(id);
+      return r !== undefined && !isSpanTail(r, p.day);
+    });
     dragIds = ids;
     setDragging(new Set(ids));
     release();
     window.getSelection()?.removeAllRanges();
-    // The grabbed row leads the stack, then the other selected rows that
-    // are drawn, each once.
+    // The grabbed row leads the stack, then the other dragged rows of the
+    // day.
     const els: HTMLElement[] = [p.el];
+    const dayAttr = `[data-day="${CSS.escape(p.day)}"]`;
     for (const id of ids) {
       if (id === p.id) continue;
       const el = hostEl.querySelector<HTMLElement>(
-        `[data-key="${CSS.escape(id)}"]`,
+        `[data-key="${CSS.escape(id)}"]${dayAttr}`,
       );
       if (el) els.push(el);
     }
@@ -886,14 +978,17 @@ export function Upcoming(props: {
       return w ? [{ id, ...w }] : [];
     });
     if (writes.length === 0) return;
-    props.app.withActionBatch(() => {
-      for (const w of writes) {
-        if (w.field === "when") props.app.setItemWhen(w.id, w.value);
-        else props.app.setItemDeadline(w.id, w.value);
-      }
-    });
-    // The moved items light on the day they landed on.
-    setPickedDay(new Map(ids.map((id) => [id, day])));
+    // The selection follows the moved items to the day they land on;
+    // one Solid batch, so the rows change once with every item moved.
+    landingDay = day;
+    batch(() =>
+      props.app.withActionBatch(() => {
+        for (const w of writes) {
+          if (w.field === "when") props.app.setItemWhen(w.id, w.value);
+          else props.app.setItemDeadline(w.id, w.value);
+        }
+      }),
+    );
   };
   const onDocMouseUp = () => endDrag(true);
   const onDragKeyDown = (e: KeyboardEvent) => {
@@ -934,13 +1029,15 @@ export function Upcoming(props: {
       return;
     }
     const mod = isMac ? e.metaKey : e.ctrlKey;
-    if (e.shiftKey) props.selection.extendActive(id);
+    // Shift and ⌘ build on the selection within its day; on another day
+    // they start afresh there, as a plain click does.
+    const day = row!.dataset.day!;
+    if (day !== selDay() || !props.selection.hasSelection()) {
+      useDay(day);
+      props.selection.selectOnly(id);
+    } else if (e.shiftKey) props.selection.extendActive(id);
     else if (mod) props.selection.toggleItem(id);
     else props.selection.selectOnly(id);
-    const day = row?.dataset.day;
-    if (day && props.selection.getSelectedKeySet().has(id)) {
-      setPickedDay((prev) => new Map(prev).set(id, day));
-    }
   };
   const onDblClick = (e: MouseEvent) => {
     const t = e.target as HTMLElement | null;
@@ -1097,11 +1194,7 @@ export function Upcoming(props: {
             </header>
             <For each={g.rows}>
                 {(r) => {
-                  const selected = createMemo(
-                    () =>
-                      selectedSet().has(r.item.id) &&
-                      litDay(r.item.id) === g.key,
-                  );
+                  const selected = createMemo(() => isLit(r.item.id, g.key));
                   // Starred (pinned to Focus): a star follows the title.
                   const starred = createMemo(() =>
                     props.app.isFocused(r.item.id),
@@ -1130,6 +1223,7 @@ export function Upcoming(props: {
                     data-tone={r.tone}
                     data-placed={r.placedBy}
                     data-dragging={dragging().has(r.item.id) ? "" : undefined}
+                    data-span-tail={isSpanTail(r, g.key) ? "" : undefined}
                     // `data-done`, not `data-closed`: the menu trigger
                     // sets its own `data-closed` while the menu is shut.
                     data-done={isClosed(r.item) ? "" : undefined}

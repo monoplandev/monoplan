@@ -346,13 +346,11 @@ for the month grid). `groupByDeadline` becomes
   way starts on Today with its count intact. A row placed by its
   deadline, or sent to Overdue, is one row: the deadline is one day. The
   same id therefore appears down several days (a span's, and the days of
-  a date and a deadline); the selection order and the view's flat item
-  list keep each id once, at its first row. A selected item on several
-  days draws its highlight on one row only: the one the pointer picked,
-  else its earliest day on the page. Plain ↑ / ↓ step row by row (since
-  2026-11-17), so each of an item's rows is a stop and the highlight moves
-  to it; shift-ranges stay by item. The CLI `agenda` still places on
-  the start day only.
+  a date and a deadline); the view's flat item list keeps each id once,
+  at its first row. The selection is in one day (since 2026-11-23, see
+  below), so a selected item lights only its row on that day. Plain
+  ↑ / ↓ step row by row (since 2026-11-17), so each of an item's rows is
+  a stop. The CLI `agenda` still places on the start day only.
 - **Tone** is per row: a deadline's row is overdue (deadline day < today)
   or today-warning (deadline day = today); a `when`'s row is overdue (a
   task's `when` over) or today-warning (it carries a deadline that is
@@ -401,12 +399,19 @@ for the month grid). `groupByDeadline` becomes
   over the workspaces the Calendar shows).
 - Not a `Dnd` listbox (day sections, rows of two heights), but a
   listbox in the list view's sense (web, built 2026-10-14): it runs the
-  Workspace's `DndSelection` over every day's rows concatenated and answers
-  the same keys through the shared `applySelectionKeyAction`, so ↑ / ↓ and
-  shift-ranges cross day boundaries. Click selects and the side pane
+  Workspace's `DndSelection` and answers the same keys through the shared
+  `applySelectionKeyAction`. Since 2026-11-23 a selection is contained in
+  one day: the selection's order is that day's rows, so shift / ⌘ ranges
+  and shift ↑ / ↓ stop at the day's edge, and a click (shift and ⌘
+  included) or plain ↑ / ↓ landing on another day starts a fresh
+  selection there. An item selected by id from outside (a new item, a
+  survivor after ⌫) is selected on its first day from Overdue on; an edit
+  that moves every selected item off the day follows them to their new
+  day, and a drop follows them to the drop day. Click selects and the side pane
   follows; Enter / double-click opens; `x`, `f`, `m`, ⌫, ⌘C, ⌘D act on the
-  selection as on a list. ⌘↑ / ⌘↓ (reorder) and ⌘A (select all: the
-  agenda reaches a year back) do nothing here.
+  selection as on a list. ⌘A selects every row of the selection's day
+  (since 2026-11-23; nothing with no selection, the agenda reaching a
+  year back). ⌘↑ / ⌘↓ (reorder) do nothing here.
 - **Drag to reschedule** (web, built 2026-11-22, mouse only): a press on
   a row that moves a few px picks up the selection (the row selected
   first if it is not) under the list view's overlay stack; the day
@@ -720,8 +725,12 @@ here.
   row placed by `when` moves its `when` with the time part kept; a row placed
   by `deadline` only moves its deadline; a row with both moves `when`, the
   deadline being a commitment that moves only through the explicit control.
-  Decided 2026-11-22: a multi-day span moves its start to the drop day
-  (whichever day of the span was grabbed), keeping its `duration`; rows
+  Decided 2026-11-22: a multi-day span moves its start to the drop day,
+  keeping its `duration`. Since 2026-11-23 only the span's first day is
+  a handle (day 1, or its earliest day on the page when day 1 is not:
+  a task span begun before today): its later days select but pick up no
+  drag. Grabbing a handle carries the day's selected rows less any span
+  tails among them, which stay put. Rows
   drag out of Overdue; any day takes a drop, past days included (not
   Overdue, which is not a day); a multi-selection lands every item on the
   drop day (not shifted by a common offset). The drop target is the whole
