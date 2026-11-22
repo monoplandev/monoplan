@@ -1,3 +1,4 @@
+import { Show } from "solid-js";
 import mapPinSvg from "./icons/map-pin.svg?raw";
 import type { Place } from "./sync/store.ts";
 
@@ -6,16 +7,26 @@ import type { Place } from "./sync/store.ts";
 // tight row squeezes the pill (`.place-badge` in styles.css). The title
 // carries the formatted address when the place came from a lookup, so
 // hovering reveals where "Luigi's" actually is. Muted for done/binned
-// items like the date pills.
-export function PlaceBadge(props: { place: Place; muted?: boolean }) {
+// items like the date pills. `iconOnly` (list rows) shows just the pin;
+// the label moves into the title.
+export function PlaceBadge(props: { place: Place; muted?: boolean; iconOnly?: boolean }) {
+  const title = () => {
+    const { label, address } = props.place;
+    if (!props.iconOnly) return address ?? label;
+    return address && address !== label ? `${label} — ${address}` : label;
+  };
   return (
     <span
       class="badge place-badge"
+      classList={{ "badge-icon-only": props.iconOnly }}
       data-tone={props.muted ? "muted" : undefined}
-      title={props.place.address ?? props.place.label}
+      title={title()}
+      aria-label={props.iconOnly ? title() : undefined}
     >
       <span class="deadline-badge-icon" innerHTML={mapPinSvg} />
-      <span class="place-badge-label">{props.place.label}</span>
+      <Show when={!props.iconOnly}>
+        <span class="place-badge-label">{props.place.label}</span>
+      </Show>
     </span>
   );
 }

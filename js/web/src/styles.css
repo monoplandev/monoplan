@@ -5139,6 +5139,13 @@ input.task-check:hover {
   white-space: nowrap;
 }
 
+/* List rows show the date and place pills as the glyph alone (the
+   value is in the title); the place pill's label-room floor goes too. */
+.place-badge.badge-icon-only {
+  flex-shrink: 0;
+  min-width: 0;
+}
+
 .place-badge[data-tone="muted"] {
   color: var(--text-badge-faint);
 }

@@ -614,7 +614,7 @@ export function Row(props: {
                 props.item().when
               }
             >
-              {(w) => <WhenBadge when={w()} />}
+              {(w) => <WhenBadge when={w()} iconOnly />}
             </Show>
             <Show
               when={
@@ -634,7 +634,7 @@ export function Row(props: {
                 props.item().place
               }
             >
-              {(p) => <PlaceBadge place={p()} />}
+              {(p) => <PlaceBadge place={p()} iconOnly />}
             </Show>
             <Show when={!props.deadlineInFooter && !props.expanded() && subtasks()}>
               {(c) => (
