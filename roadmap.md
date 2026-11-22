@@ -121,3 +121,6 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - DB file size optimisation
 - claude mcp
 - drag events to following days in agenda view?
+- mini cal collapse to single date
+- mini cal scrolls up / down easily
+- mini cal grays out prior dates
