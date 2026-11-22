@@ -23,7 +23,7 @@ image, `moveRow` timing). Here nothing is AppKit's: no table, no
 | `trailer` in `.dnd-trailer`, after the last row | `setTrailer(view, height:)`: the host's view in a `DndTrailerSlot` in the listbox |
 | `on-trailer-navigate` | `DndListDelegate.dndListNavigatePastEnd -> Bool` |
 | renderer `mount(key, item, container)` | `DndListDataSource`: make a content view, configure it for a key |
-| placeholder: sibling of the parent, `translateY`, opacity fade | a layer-backed `NSView` behind the scroll view, in viewport coordinates |
+| placeholder: a layer of shades, sibling of the parent, `translateY`; crossfades on a slot change (old shade fades out in place, new fades in) | layer-backed shade `NSView`s behind the scroll view, in viewport coordinates, same crossfade (`placeholderSlot` in the render state) |
 | `transition: top 0.15s ease` | additive keyframe animation on the row layer's `position.y`: 0.15 s, the CSS `ease` curve, in whole-pixel steps (below) |
 | overlay `position:fixed; inset:0` on `<body>` | borderless, transparent, click-through child window over every screen; rows are `CALayer`s holding snapshots |
 | `requestAnimationFrame` loops | one `CADisplayLink` (`NSView.displayLink`, macOS 14), live only while something moves |

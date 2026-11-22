@@ -82,6 +82,9 @@ public struct DndRenderState: Equatable {
     public var items: [DndRenderItem]
     /// Placeholder top in viewport coordinates, nil when hidden.
     public var placeholderY: CGFloat?
+    /// The slot the placeholder marks (`placeholderY` is its top), nil
+    /// when hidden. The view crossfades when it changes.
+    public var placeholderSlot: Int?
     /// The trailer slot's top in list coordinates (the rows' end, so it
     /// rides the nudge slot during a drag), nil when there is none.
     public var trailerTop: CGFloat?
@@ -189,6 +192,7 @@ public final class DndListModel {
                 contentHeight: contentHeight,
                 items: items,
                 placeholderY: hover.map { CGFloat($0) * h - viewport.scrollTop },
+                placeholderSlot: hover,
                 trailerTop: trailerTop(contentHeight)
             )
         }
@@ -216,6 +220,7 @@ public final class DndListModel {
             contentHeight: contentHeight,
             items: items,
             placeholderY: nil,
+            placeholderSlot: nil,
             trailerTop: trailerTop(contentHeight)
         )
     }

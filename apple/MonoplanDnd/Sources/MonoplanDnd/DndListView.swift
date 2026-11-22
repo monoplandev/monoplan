@@ -48,7 +48,7 @@ public extension DndListDelegate {
 /// list of fixed-height rows. Same structure as the web component:
 ///
 ///     DndListView            host: positioning context
-///     ├── placeholder        the drop slot, behind the scroll view
+///     ├── placeholder shades the drop slot, behind the scroll view
 ///     └── NSScrollView       parent: the scroll viewport
 ///         └── DndListbox     listbox: as tall as the whole list
 ///             ├── DndRowView option: one per row in view, frame-positioned
@@ -59,6 +59,9 @@ public extension DndListDelegate {
 public final class DndListView: NSView {
     /// The web's `transition: top 0.15s ease`.
     static let moveDuration: CFTimeInterval = 0.15
+    /// A placeholder shade's fade into or out of a slot (the web's
+    /// `FADE_MS`).
+    static let placeholderFadeDuration: CFTimeInterval = 0.2
 
     public let model: DndListModel
     public weak var dataSource: DndListDataSource?
@@ -66,7 +69,10 @@ public final class DndListView: NSView {
 
     public let scrollView = NSScrollView()
     private let listbox = DndListbox()
-    private let placeholder = NSView()
+    /// Placeholder shades: the live one marks the drop slot, the rest
+    /// are fading out of slots the pointer left (or idle, for reuse).
+    private var shades: [DndPlaceholderShade] = []
+    private var liveShade: DndPlaceholderShade?
 
     private var trailerSlot: DndTrailerSlot?
     private var mounted: [String: DndRowView] = [:]
@@ -107,10 +113,6 @@ public final class DndListView: NSView {
         autoscroll = DndAutoscroll(buffer: config.autoscrollBuffer, confine: config.confineAutoscroll)
         super.init(frame: .zero)
         wantsLayer = true
-
-        placeholder.wantsLayer = true
-        placeholder.alphaValue = 0
-        addSubview(placeholder)
 
         listbox.owner = self
         scrollView.drawsBackground = false
@@ -355,7 +357,7 @@ public final class DndListView: NSView {
             slot.dndMove(to: frame, animated: animate && rowMoved && slot.placed)
             slot.placed = true
         }
-        renderPlaceholder(state.placeholderY)
+        renderPlaceholder(state.placeholderSlot)
     }
 
     private func dequeueRow() -> DndRowView {
@@ -364,29 +366,64 @@ public final class DndListView: NSView {
     }
 
     /// The placeholder is a sibling of the scroll view, in viewport
-    /// coordinates, so it does not ride the scrolled content. It moves
-    /// without animation and fades in and out.
-    private func renderPlaceholder(_ y: CGFloat?) {
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            placeholder.layer?.backgroundColor = placeholderColor.cgColor
+    /// coordinates, so it does not ride the scrolled content. When the
+    /// slot changes, the shade at the old slot fades out in place while
+    /// one at the new slot fades in, so two (or, on a fast sweep, a few)
+    /// show at once; every shade is re-placed on each pass so those still
+    /// fading track their slots through autoscroll. Moving back onto a
+    /// slot still fading out turns that shade round.
+    private func renderPlaceholder(_ slot: Int?) {
+        if liveShade?.slot != slot {
+            if let live = liveShade { fade(live, to: 0) }
+            liveShade = nil
+            if let slot {
+                let next = shades.first { $0.slot == slot && $0.target == 0 }
+                    ?? shades.first { $0.isIdle }
+                    ?? makeShade()
+                next.slot = slot
+                liveShade = next
+                fade(next, to: 1)
+            }
         }
-        placeholder.layer?.cornerRadius = selectionRadius
-        if let y {
-            placeholder.frame = NSRect(
-                x: selectionInset, y: y,
-                width: scrollView.contentView.bounds.width - selectionInset * 2,
-                height: model.config.itemHeight - model.config.placeholderGap
+        let h = model.config.itemHeight
+        let width = scrollView.contentView.bounds.width - selectionInset * 2
+        var color = placeholderColor.cgColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            color = placeholderColor.cgColor
+        }
+        for shade in shades {
+            shade.layer?.backgroundColor = color
+            shade.layer?.cornerRadius = selectionRadius
+            guard let s = shade.slot else { continue }
+            shade.frame = NSRect(
+                x: selectionInset, y: CGFloat(s) * h - scrollTop,
+                width: width, height: h - model.config.placeholderGap
             )
         }
-        let alpha: CGFloat = y == nil ? 0 : 1
-        guard placeholder.alphaValue != alpha else { return }
-        if window == nil || !drivesFrames {
-            placeholder.alphaValue = alpha
-        } else {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = Self.moveDuration
-                placeholder.animator().alphaValue = alpha
-            }
+    }
+
+    private func makeShade() -> DndPlaceholderShade {
+        let shade = DndPlaceholderShade()
+        addSubview(shade, positioned: .below, relativeTo: scrollView)
+        shades.append(shade)
+        return shade
+    }
+
+    /// Fade from wherever the shade is now (mid-fade included), taking
+    /// the share of the fade time the remaining distance needs.
+    private func fade(_ shade: DndPlaceholderShade, to alpha: CGFloat) {
+        shade.target = alpha
+        let animate = window != nil && drivesFrames
+            && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        guard animate else {
+            shade.alphaValue = alpha
+            return
+        }
+        let from = CGFloat(shade.layer?.presentation()?.opacity ?? Float(shade.alphaValue))
+        shade.alphaValue = from
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.placeholderFadeDuration * abs(alpha - from)
+            shade.animator().alphaValue = alpha
         }
     }
 
@@ -692,12 +729,34 @@ public final class DndListView: NSView {
             scrollTop: scrollTop,
             listHeight: listbox.frame.height,
             rows: rows,
-            placeholder: placeholder.alphaValue > 0 ? placeholder.frame : nil,
+            placeholder: liveShade?.frame,
             trailer: trailerSlot.map { convert($0.frame, from: listbox) },
             stack: stack,
             stackImages: overlay?.images ?? [],
             mountedCount: mounted.count
         )
+    }
+}
+
+/// One placeholder shade. `target` is the alpha it is heading to: 1 for
+/// the live shade, 0 for the rest.
+final class DndPlaceholderShade: NSView {
+    var slot: Int?
+    var target: CGFloat = 0
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        alphaValue = 0
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    /// Faded out and done: free for another slot.
+    var isIdle: Bool {
+        target == 0 && (layer?.animationKeys()?.isEmpty ?? true)
     }
 }
 #endif
