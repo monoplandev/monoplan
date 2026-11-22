@@ -95,10 +95,11 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
 
     init(model: MainWindowModel) {
         self.model = model
-        // A plain pane, not a sidebar item: a sidebar item is glass,
-        // and this one is opaque (`PaneColor.sidebar`).
+        // A sidebar item: the system's Liquid Glass sidebar, the
+        // SwiftUI pane clear over it (trial, 2026-11-23; it was a plain
+        // pane, opaque in `PaneColor.sidebar`).
         sidebarItem = NSSplitViewItem(
-            viewController: Self.pane(MainWindowView(model: model, pane: .sidebar)))
+            sidebarWithViewController: Self.pane(MainWindowView(model: model, pane: .sidebar)))
         // A sidebar item's own priority: the window's resizing goes
         // to the list.
         sidebarItem.holdingPriority = NSLayoutConstraint.Priority(260)
