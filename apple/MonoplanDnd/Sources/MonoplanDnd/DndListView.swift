@@ -67,7 +67,7 @@ public final class DndListView: NSView {
     public weak var dataSource: DndListDataSource?
     public weak var delegate: DndListDelegate?
 
-    public let scrollView = NSScrollView()
+    public let scrollView: NSScrollView = DndScrollView()
     private let listbox = DndListbox()
     /// Placeholder shades: the live one marks the drop slot, the rest
     /// are fading out of slots the pointer left (or idle, for reuse).
@@ -104,6 +104,20 @@ public final class DndListView: NSView {
     public var placeholderColor: NSColor = .quaternaryLabelColor { didSet { needsLayout = true } }
     /// Painted under each row of the drag stack (rows are often clear).
     public var dragBackgroundColor: NSColor = .windowBackgroundColor
+    /// False: the list never scrolls itself. Its host sizes it to every
+    /// row (a block of rows inside another scrolling view, as the Mac
+    /// sidebar's lists): the wheel goes on to the view around it, there
+    /// is no scroller, and no toolbar inset is taken.
+    public var scrolls = true {
+        didSet {
+            guard scrolls != oldValue else { return }
+            (scrollView as? DndScrollView)?.scrolls = scrolls
+            scrollView.hasVerticalScroller = scrolls
+            scrollView.automaticallyAdjustsContentInsets = scrolls
+            if !scrolls { scrollView.contentInsets = NSEdgeInsetsZero }
+            needsLayout = true
+        }
+    }
 
     public override var isFlipped: Bool { true }
     public override var acceptsFirstResponder: Bool { true }
@@ -735,6 +749,21 @@ public final class DndListView: NSView {
             stackImages: overlay?.images ?? [],
             mountedCount: mounted.count
         )
+    }
+}
+
+/// The list's scroll view. With `scrolls` off the wheel is not its to
+/// take, and climbs the responder chain to the scrolling view around the
+/// list.
+final class DndScrollView: NSScrollView {
+    var scrolls = true
+
+    override func scrollWheel(with event: NSEvent) {
+        if scrolls {
+            super.scrollWheel(with: event)
+        } else {
+            nextResponder?.scrollWheel(with: event)
+        }
     }
 }
 

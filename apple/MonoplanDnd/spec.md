@@ -113,6 +113,11 @@ The drag rules are the web's, unchanged:
   responder chain to the listbox and is a blank click, which is the
   web's rule with `stopPropagation` turned round. Its slide rule is the
   web's: it slides only on a pass where a row already on screen moved.
+- `scrolls = false`: a block of rows sized by its host inside another
+  scrolling view (the Mac sidebar's lists, `SidebarLists.swift`). The
+  wheel climbs to the view around it, no scroller, no automatic toolbar
+  inset. Its viewport is its rows, so a drag outside them is off the
+  viewport (no hover, snap back), and there is nothing to autoscroll.
 - `scrollToTrailer()`: the host calls it after putting the keyboard in
   the trailer, and as the list grows above it. Revealing the last row
   scrolls to the end, so the trailer comes with it.

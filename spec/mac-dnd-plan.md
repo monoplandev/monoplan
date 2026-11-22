@@ -10,7 +10,8 @@ Status: phase 1 built 2026-11-15. Phase 2 attempted 2026-11-15 and
 **abandoned**: the Swift code was reverted, the window is back on
 SwiftUI lists. What was learnt is in "Phase 2 attempt" below; a v2
 spec for the macOS side is to be written before another attempt.
-Phases 3–4 not built. The AppKit mapping below is the original plan,
+Phase 3's list reorder built 2026-11-22 (below); its item drops and
+phase 4 not built. The AppKit mapping below is the original plan,
 not a design proven in the app.
 
 **v2 baseline (spike, 2026-11-20):** `apple/MonoplanDnd/`, a port of
@@ -29,9 +30,30 @@ its own rows first, so the list never shows the old order while the
 write is out), right-click on several rows to bin them in one step
 (`set_binned_many`). One row selected opens its panel; none or several
 shut it. An Inbox neither drags nor reorders. Rows are AppKit with the
-checkbox and star hosted from SwiftUI. Not built: drops on the sidebar
-(phase 3, the list's delegate already reports the drag for it), across
+checkbox and star hosted from SwiftUI. Not built: item drops on the
+sidebar (phase 3, the list's delegate already reports the drag for it), across
 workspaces (4); the other lenses are still SwiftUI lists.
+
+**Sidebar list reorder (2026-11-22):** the half of phase 3 that moves
+lists. Each workspace's active lists are one `DndListView` block
+(`SidebarLists.swift`) set into the SwiftUI sidebar `List` under its
+Inbox, as tall as its rows, with no row insets and 6 pt wider than the
+cell either side, which puts its rows and selection where the system's
+are (measured off-screen against a sidebar `List`: same icon column,
+title, count and selection rect to the pixel). Drag one list, or
+⌘↑ / ⌘↓, through `move_lists`; the model reorders `sections` first.
+↑ / ↓ move between a workspace's lists; right-click is Delete. One list
+at a time (`multi` off). The block's selection is its own (the list
+shown when it is one of these; the `List` then has no selected row),
+live in the accent colour while it has the keyboard and the system's
+unemphasized colour otherwise: the system sidebar's dormant selection
+is a material `cacheDisplay` cannot capture, so that colour is a guess
+to check by eye. The block does not scroll (`DndListView.scrolls`
+off): the wheel goes to the sidebar. Inbox, the lenses and the
+workspace headings stay SwiftUI rows. Not built: item drops onto
+sidebar rows (the other half of phase 3), dragging a list into another
+workspace, autoscroll of the sidebar during a drag, arrows across the
+block's edges into the SwiftUI rows.
 
 **New-item row (2026-11-20):** a list ends in a row to type the next
 item into, the web's trailing capture slot (`ItemAddRow` in the list's

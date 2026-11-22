@@ -1105,6 +1105,19 @@ final class MainWindowModel: ObservableObject {
         write { try $0.reorderItems(workspace: workspace, ids: ids, before: before) }
     }
 
+    /// Reorder a workspace's lists in the sidebar (`Engine.moveLists`):
+    /// `ids` become one block directly above `before` (nil: last). The
+    /// sidebar takes the new order at once, as `reorderItems` does.
+    func reorderLists(workspace: String?, ids: [String], before: String?) {
+        if let index = sections.firstIndex(where: { $0.target == workspace }) {
+            let section = sections[index]
+            let active = Self.moved(section.userLists, ids: ids, before: before, id: \.id)
+            let rest = section.lists.filter { $0.archivedAt != nil || $0.id == Self.inbox }
+            sections[index] = NavSection(workspace: section.workspace, lists: active + rest, inboxOpen: section.inboxOpen)
+        }
+        write { try $0.moveLists(workspace: workspace, ids: ids, before: before) }
+    }
+
     /// The same in Starred (`Engine.reorderStarred`).
     func reorderStarred(ids: [String], before: String?) {
         starred = Self.moved(starred, ids: ids, before: before, id: \.id)
@@ -1727,24 +1740,22 @@ struct MainWindowView: View {
                             count(section.inboxOpen)
                         }
                         .contextMenu { inboxOrderPicker })
-                        ForEach(section.userLists) { list in
-                            row(.list(workspace: section.target, list: list.id), HStack {
-                                // The list's emoji as its icon, the web's
-                                // document glyph without one: the names
-                                // line up under Inbox's.
-                                Label {
-                                    Text(verbatim: list.name).lineLimit(1)
-                                } icon: {
-                                    if let icon = list.icon, !icon.isEmpty {
-                                        Text(verbatim: icon)
-                                    } else {
-                                        NavIcon(image: NavArt.list)
-                                    }
-                                }
-                                Spacer()
-                                if showListCounts { count(Int(list.open)) }
-                            }
-                            .contextMenu { listMenu(section, list) })
+                        // The lists drag to reorder: AppKit rows of
+                        // their own (`SidebarLists`), one block per
+                        // workspace under its Inbox.
+                        let lists = section.userLists
+                        if !lists.isEmpty {
+                            SidebarLists(
+                                lists: lists,
+                                selected: model.lens == nil && model.workspace == section.target ? model.list : nil,
+                                counts: showListCounts,
+                                select: { model.select(workspace: section.target, list: $0) },
+                                move: { model.reorderLists(workspace: section.target, ids: $0, before: $1) },
+                                delete: { confirmDelete(section, $0) })
+                            .frame(height: SidebarLists.height(lists.count))
+                            .padding(.horizontal, -SidebarLists.bleed)
+                            .listRowInsets(EdgeInsets())
+                            .selectionDisabled()
                         }
                     }
                 }
@@ -1901,17 +1912,14 @@ struct MainWindowView: View {
         .pickerStyle(.inline)
     }
 
-    /// A user list's right-click menu: Delete, which confirms and bins
+    /// A user list's Delete (its right-click menu): confirms, then bins
     /// its open items (`ListConfirm`).
-    @ViewBuilder
-    private func listMenu(_ section: NavSection, _ list: ListInfo) -> some View {
+    private func confirmDelete(_ section: NavSection, _ list: ListInfo) {
         let target = section.target
-        Button("Delete") {
-            let shared = model.hasOtherMembers(section.id)
-                ? section.workspace.name ?? section.workspace.docId : nil
-            ListConfirm.delete(name: list.name, sharedWith: shared, on: NSApp.keyWindow) {
-                model.deleteList(workspace: target, list: list.id, mode: .toBin)
-            }
+        let shared = model.hasOtherMembers(section.id)
+            ? section.workspace.name ?? section.workspace.docId : nil
+        ListConfirm.delete(name: list.name, sharedWith: shared, on: NSApp.keyWindow) {
+            model.deleteList(workspace: target, list: list.id, mode: .toBin)
         }
     }
 
