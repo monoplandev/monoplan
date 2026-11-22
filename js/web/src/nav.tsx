@@ -298,6 +298,9 @@ export function Nav(props: {
   /** Chrome pinned to the bottom of the sidebar (app menu + account/sync
    *  widget) — see `.nav-footer` in styles.css. */
   footer?: JSX.Element;
+  /** Pinned above the footer, below the scrolling groups: the mini
+   *  calendar (`MiniCalendar.tsx`) when shown. */
+  aboveFooter?: JSX.Element;
 }) {
   const { m } = useAppI18n();
   const [emptyBinConfirmOpen, setEmptyBinConfirmOpen] = createSignal(false);
@@ -452,6 +455,7 @@ export function Nav(props: {
         )}
       </For>
       </div>
+      {props.aboveFooter}
       <Show when={props.footer}>
         <div class="nav-footer">{props.footer}</div>
       </Show>

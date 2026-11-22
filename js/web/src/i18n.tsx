@@ -391,6 +391,9 @@ export type Messages = {
     prevMonth: string;
     /** Accessible label for the calendar's next-month button. */
     nextMonth: string;
+    /** The sidebar footer's button that shows / hides the mini calendar. */
+    showCalendar: string;
+    hideCalendar: string;
   };
   when: {
     /** Section label / accessible name for the planned-date control. */
@@ -853,6 +856,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       setDate: "Elegir fecha límite",
       prevMonth: "Mes anterior",
       nextMonth: "Mes siguiente",
+      showCalendar: "Mostrar calendario",
+      hideCalendar: "Ocultar calendario",
     },
     when: {
       label: "Fecha",
@@ -1253,6 +1258,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       setDate: "Set deadline",
       prevMonth: "Previous month",
       nextMonth: "Next month",
+      showCalendar: "Show calendar",
+      hideCalendar: "Hide calendar",
     },
     when: {
       label: "Date",

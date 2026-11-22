@@ -250,6 +250,50 @@ body {
   margin-left: auto;
 }
 
+/* The mini calendar's toggle sits just left of Find, both at the right
+   edge. */
+.nav-calendar-button {
+  margin-left: auto;
+}
+.nav-calendar-button + .nav-find-button {
+  margin-left: 0;
+}
+.nav-calendar-button[aria-pressed="true"] {
+  color: var(--text);
+}
+
+/* The sidebar's mini calendar (`MiniCalendar.tsx`), pinned above the
+   footer. The shared grid's cells are a fixed 26px; here the table
+   fills the sidebar's width instead, so it fits the narrowest sidebar
+   (200px) and centres in a wider one. */
+.mini-calendar {
+  flex-shrink: 0;
+  padding: 8px 12px 0;
+  border-top: 0.5px solid var(--border-surface);
+}
+.mini-calendar .calendar-table {
+  width: 100%;
+  max-width: 224px;
+  margin: 0 auto;
+  table-layout: fixed;
+}
+.mini-calendar .calendar-header {
+  max-width: 224px;
+  margin: 0 auto;
+}
+.mini-calendar .calendar-headcell {
+  height: 22px;
+  padding: 0;
+}
+.mini-calendar .calendar-cell {
+  padding: 1px 0;
+}
+.mini-calendar .calendar-cell-trigger {
+  width: 100%;
+  max-width: 26px;
+  height: 24px;
+}
+
 [data-theme="dark"] .nav {
   color: var(--text-muted);
 }

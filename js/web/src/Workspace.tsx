@@ -141,6 +141,12 @@ import {
 } from "./panelWidth.ts";
 import { namesItem, parseHash, stateHash, type Route } from "./url.ts";
 import {
+  loadMiniCalendarShown,
+  MiniCalendar,
+  MiniCalendarToggle,
+  saveMiniCalendarShown,
+} from "./MiniCalendar.tsx";
+import {
   encodeView,
   LIST_VIEW,
   parseView,
@@ -805,6 +811,12 @@ export function Workspace(props: {
   // Every day gets a section unless "Hide empty days" (the agenda's
   // filter menu, a device preference, off by default) is checked.
   const [hideEmptyDays, setHideEmptyDays] = createSignal(loadHideEmptyDays());
+  // A day the sidebar's mini calendar jumped to, so the agenda's empty
+  // days reach it (`fillEmptyDays`); dropped when the agenda is left.
+  const [agendaReach, setAgendaReach] = createSignal<string | null>(null);
+  createEffect(() => {
+    if (view().kind !== "upcoming") setAgendaReach(null);
+  });
   const upcomingGroups = createMemo((): DayGroup[] => {
     const today = todayStamp(nowMs());
     doneMoveTick();
@@ -824,7 +836,7 @@ export function Workspace(props: {
     );
     return hideEmptyDays()
       ? groups
-      : fillEmptyDays(groups, today, labels, locale());
+      : fillEmptyDays(groups, today, labels, locale(), undefined, agendaReach());
   });
   // One timeout for the next lingering row to move; re-armed as rows
   // close. Only while the agenda is the view.
@@ -3107,6 +3119,24 @@ export function Workspace(props: {
       });
   };
 
+  // The mini calendar's pick: the agenda, scrolled to that day. Scrolled
+  // a frame later so a freshly mounted agenda has laid out (and has
+  // taken in the widened range) first.
+  const showAgendaDay = (day: string) => {
+    setAgendaReach(day);
+    if (view().kind !== "upcoming") navigateTo({ kind: "upcoming" });
+    requestAnimationFrame(() => {
+      upcomingHandle?.scrollToDay(day);
+      upcomingHandle?.focus();
+    });
+  };
+  const [miniCalendarShown, setMiniCalendarShown] = createSignal(loadMiniCalendarShown());
+  const toggleMiniCalendar = () => {
+    const next = !miniCalendarShown();
+    setMiniCalendarShown(next);
+    saveMiniCalendarShown(next);
+  };
+
   // Sidebar width: dragged from the nav's right edge, saved per device
   // (navWidth.ts). The drag tracks the pointer's travel from where it
   // went down, so the edge doesn't jump to the pointer on grab; the
@@ -3254,8 +3284,14 @@ export function Workspace(props: {
               session={session.session()}
               onSession={session.swapSession}
             />
+            <MiniCalendarToggle shown={miniCalendarShown()} onToggle={toggleMiniCalendar} />
             <NavFindButton onClick={() => setFindOpen(true)} />
           </>
+        }
+        aboveFooter={
+          <Show when={miniCalendarShown()}>
+            <MiniCalendar onPickDay={showAgendaDay} />
+          </Show>
         }
       />
       <FindPalette

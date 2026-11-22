@@ -426,7 +426,9 @@ export const AGENDA_ALL_DAYS_AHEAD = 13;
  *  menu, a device preference, turns it off): an
  *  empty group for each missing day from the first past group (if any)
  *  through to the later of the last placed day and `today + ahead`.
- *  Overdue keeps its place between the days gone by and Today. Labels
+ *  Overdue keeps its place between the days gone by and Today. `reach`
+ *  (a day the sidebar's mini calendar jumped to) widens the range to
+ *  take it in, so the jump lands on that day's own section. Labels
  *  follow `groupByDay`'s rules. */
 export function fillEmptyDays(
   groups: readonly DayGroup[],
@@ -434,10 +436,15 @@ export function fillEmptyDays(
   labels: DayGroupLabels,
   locale: string,
   ahead: number = AGENDA_ALL_DAYS_AHEAD,
+  reach: string | null = null,
 ): DayGroup[] {
   const byDay = new Map<string, DayGroup>();
   let first = today;
   let last = addDaysToStamp(today, ahead);
+  if (reach !== null) {
+    if (reach < first) first = reach;
+    if (reach > last) last = reach;
+  }
   for (const g of groups) {
     if (g.key === OVERDUE_KEY) continue;
     byDay.set(g.key, g);

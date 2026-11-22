@@ -124,6 +124,10 @@ export interface UpcomingImperative {
   /** The header's "Today": scroll back to where the view opens,
    *  Overdue's header or Today's when nothing is overdue. */
   scrollToToday(): void;
+  /** The mini calendar's pick: put day `YYYY-MM-DD`'s header at the
+   *  top of the pane. A day with no section (empty days hidden) lands
+   *  on the next day that has one, else the last. */
+  scrollToDay(day: string): void;
 }
 
 /** The cancelled checkbox's cross (`.task-check[data-cancelled]`), bare:
@@ -390,11 +394,11 @@ export function Upcoming(props: {
     put = hostEl.scrollTop;
   };
   // A press is the user's scroll: it does not re-arm the opening hold.
-  // Smooth when Today is drawn; from further off it is a jump.
-  const scrollToToday = () => {
+  // Smooth when the target is drawn; from further off it is a jump.
+  const scrollToGroup = (i: number, find: () => Element | null) => {
     release();
-    ensureDrawn(anchorIndex());
-    let el = anchorEl();
+    ensureDrawn(i);
+    let el = find();
     if (!el) return;
     // Draw the days around where it lands now, so none is drawn above
     // the top row mid-scroll (which moves the page and stops the scroll).
@@ -405,12 +409,34 @@ export function Upcoming(props: {
       start: Math.min(cur.start, there.start),
       end: Math.max(cur.end, there.end),
     });
-    el = anchorEl();
+    el = find();
     if (!el) return;
     hostEl.scrollTo({
       top: hostEl.scrollTop + offsetOf(el),
       behavior: "smooth",
     });
+  };
+  const scrollToToday = () => scrollToGroup(anchorIndex(), anchorEl);
+  // Day keys are `YYYY-MM-DD`, so they order as strings; Overdue's key
+  // is not a day and is skipped.
+  const dayIndex = (day: string): number => {
+    const groups = props.groups;
+    const exact = groups.findIndex((g) => g.key === day);
+    if (exact >= 0) return exact;
+    const next = groups.findIndex((g) => g.key !== OVERDUE_KEY && g.key > day);
+    if (next >= 0) return next;
+    for (let j = groups.length - 1; j >= 0; j--) {
+      if (groups[j]!.key !== OVERDUE_KEY) return j;
+    }
+    return -1;
+  };
+  const scrollToDay = (day: string) => {
+    const i = dayIndex(day);
+    if (i < 0) return;
+    const key = props.groups[i]!.key;
+    scrollToGroup(i, () =>
+      hostEl.querySelector(`[data-group="${CSS.escape(key)}"]`),
+    );
   };
   // Where the opening scroll left the pane: a scroll to anywhere else
   // is the user's (the scrollbar, Page Down), and ends it.
@@ -465,6 +491,7 @@ export function Upcoming(props: {
     focus: () => hostEl.focus({ preventScroll: true }),
     scrollToKey,
     scrollToToday,
+    scrollToDay,
   });
 
   // Autofocus on entry, as the list's Dnd does, so the keys act here

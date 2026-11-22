@@ -674,6 +674,16 @@ describe("fillEmptyDays", () => {
     expect(filled.find((g) => g.key === "2026-09-10")!.label).toBe("Tomorrow");
   });
 
+  test("a reach day widens the range either way", () => {
+    const ahead = fillEmptyDays([], TODAY, LABELS, "en", undefined, "2026-10-31");
+    expect(ahead[0]!.key).toBe(TODAY);
+    expect(ahead[ahead.length - 1]!.key).toBe("2026-10-31");
+    const back = fillEmptyDays([], TODAY, LABELS, "en", undefined, "2026-09-01");
+    expect(back[0]!.key).toBe("2026-09-01");
+    expect(back[0]!.urgency).toBe("past");
+    expect(back[back.length - 1]!.key).toBe("2026-09-22");
+  });
+
   test("reaches past two weeks to the last placed day", () => {
     const groups = groupByDay(
       [item("far", { when: "2026-10-01" })],
