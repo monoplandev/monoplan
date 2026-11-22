@@ -394,10 +394,10 @@ export class DndController {
       this.placeholder.clear();
       return;
     }
-    const y =
-      this.foreignHoverIndex * this.cfg.itemHeight -
-      this.opts.host.parent.scrollTop;
-    this.placeholder.renderPlaceholder(y);
+    this.placeholder.render(
+      this.foreignHoverIndex,
+      this.opts.host.parent.scrollTop,
+    );
   }
 
   /**
@@ -1295,9 +1295,7 @@ export class DndController {
       this.placeholder.clear();
       return;
     }
-    const y =
-      this.hoverIndex * this.cfg.itemHeight - this.opts.host.parent.scrollTop;
-    this.placeholder.renderPlaceholder(y);
+    this.placeholder.render(this.hoverIndex, this.opts.host.parent.scrollTop);
   }
 
   private rebuildCollapsedOrder(): void {
