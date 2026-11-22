@@ -8,8 +8,8 @@
 // when it has none); a list opens its Open items.
 // The gear at the top right opens Settings (account and sync, with
 // Debug a level under it). With an account, the avatar at the top left
-// is the account's menu: its email and New Workspace (named in an
-// alert); a shared workspace's section header has a "..." menu with
+// is the account's menu: its email, New Workspace (named in an
+// alert) and Sign Out (confirmed as in Settings); a shared workspace's section header has a "..." menu with
 // Share… (the Sharing sheet, `SharingView`: members, invite links),
 // Rename… (an alert with the name in a field),
 // then Delete Workspace to its owner, which asks for the name typed
@@ -232,6 +232,8 @@ struct HomeView: View {
     @State private var renameText = ""
     /// Home's Bin row was long-pressed and "Empty Bin…" picked.
     @State private var confirmingEmptyBin = false
+    /// The account menu's Sign Out was picked.
+    @State private var confirmSignOut = false
 
     struct Failure {
         let title: String
@@ -420,6 +422,14 @@ struct HomeView: View {
                                     namingWorkspace = true
                                 }
                             }
+                            // Apart at the bottom, as in Settings, and
+                            // confirmed the same way.
+                            Section {
+                                Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                                    confirmSignOut = true
+                                }
+                                .disabled(model.busy != nil)
+                            }
                         } label: {
                             // The account's own avatar, coloured as the
                             // sharing sheet and the web draw it.
@@ -486,6 +496,7 @@ struct HomeView: View {
             SignInView()
                 .environmentObject(model)
         }
+        .signOutConfirmation(isPresented: $confirmSignOut)
         .alert(
             failure?.title ?? "",
             isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })

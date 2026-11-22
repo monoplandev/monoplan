@@ -73,12 +73,7 @@ struct SettingsView: View {
                 LabeledContent("Server", value: session.serverUrl)
                 Button("Sign Out", role: .destructive) { confirmSignOut = true }
                     .disabled(model.busy != nil)
-                    .confirmationDialog("Sign out of Monoplan?", isPresented: $confirmSignOut, titleVisibility: .visible) {
-                        Button("Sign Out", role: .destructive) { model.signOut() }
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        Text("This removes the account's data from this iPhone. It stays on the server and your other devices.")
-                    }
+                    .signOutConfirmation(isPresented: $confirmSignOut)
             } else {
                 if model.session?.localOnly == true {
                     Text("This device is running a local-only workspace. Signing in replaces it with the account's.")
@@ -181,5 +176,27 @@ struct DeleteAccountView: View {
         model.deleteAccount(password: password) { ok in
             if ok { dismiss() }
         }
+    }
+}
+
+/// The one confirmation before Sign Out, for both places that offer it
+/// (Settings' account section and Home's account menu).
+private struct SignOutConfirmation: ViewModifier {
+    @EnvironmentObject private var model: AppModel
+    @Binding var isPresented: Bool
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog("Sign out of Monoplan?", isPresented: $isPresented, titleVisibility: .visible) {
+            Button("Sign Out", role: .destructive) { model.signOut() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the account's data from this iPhone. It stays on the server and your other devices.")
+        }
+    }
+}
+
+extension View {
+    func signOutConfirmation(isPresented: Binding<Bool>) -> some View {
+        modifier(SignOutConfirmation(isPresented: isPresented))
     }
 }
