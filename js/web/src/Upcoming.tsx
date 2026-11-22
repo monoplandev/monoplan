@@ -107,6 +107,7 @@ import {
 import { useAppI18n } from "./i18n.tsx";
 import fileSvg from "./icons/file.svg?raw";
 import mapPinSvg from "./icons/map-pin.svg?raw";
+import plusSvg from "./icons/plus.svg?raw";
 import starFilledSvg from "./icons/star-filled.svg?raw";
 import timerSvg from "./icons/timer.svg?raw";
 import usersSvg from "./icons/users.svg?raw";
@@ -177,6 +178,17 @@ export function Upcoming(props: {
   copyBlock: (sourceIds: readonly string[]) => void;
   onReveal?: (id: string, where: "list" | "focus") => void;
   onMoveToList?: (ids: readonly string[]) => void;
+  /** A day's Add (its header's "+", `data-add-day`):
+   *  capture a new item on day `YYYY-MM-DD`. Today and later only. */
+  onAddOnDay?: (day: string) => void;
+  /** The day's draft row, at the end of that day's rows (in place of an
+   *  empty day's "Nothing scheduled"); `key` remounts it per draft. */
+  draft?: () => { day: string; key: string } | null;
+  /** The draft row's text on every edit (the pane's capture follows it). */
+  onDraftInput?: (text: string) => void;
+  /** The draft row settled, with its trimmed text: Enter, Escape (or ↑
+   *  out of it), or focus leaving it. Called once per draft. */
+  onDraftSettle?: (text: string, how: "enter" | "escape" | "blur") => void;
 }) {
   const { m, locale } = useAppI18n();
 
@@ -906,6 +918,12 @@ export function Upcoming(props: {
     }
     const t = e.target as HTMLElement | null;
     if (t?.closest("input")) return;
+    // A day header's "+" (here, so the host's click handling runs once).
+    const addDay = t?.closest<HTMLElement>("[data-add-day]")?.dataset.addDay;
+    if (addDay) {
+      props.onAddOnDay?.(addDay);
+      return;
+    }
     const row = rowFromEvent(e);
     const id = row?.dataset.key ?? null;
     if (id === null) {
@@ -932,6 +950,10 @@ export function Upcoming(props: {
     if (id !== null) props.onOpen(id);
   };
 
+  // A day takes an Add from today on: Overdue has no day to plan
+  // onto, and a day gone by is not one to plan.
+  const canAdd = (g: DayGroup) =>
+    g.urgency === "today" || g.urgency === "future";
   // Every day heads with the same long-form date ("Sat 24 Sept"); Today
   // and Tomorrow lead with their name ("Today - Sat 24 Sept") so the eye
   // lands on them without the other days changing shape as they
@@ -1055,6 +1077,17 @@ export function Upcoming(props: {
           >
             <header class="upcoming-day-header">
               <h2 class="upcoming-day-label">{dayHeading(g)}</h2>
+              <Show when={props.onAddOnDay && canAdd(g)}>
+                <button
+                  type="button"
+                  class="upcoming-day-add"
+                  tabIndex={-1}
+                  data-add-day={g.key}
+                  aria-label={m().upcoming.addOnDay(dayHeading(g))}
+                  title={m().common.add}
+                  innerHTML={plusSvg}
+                />
+              </Show>
               <Show when={weeks().get(g.key)}>
                 {(n) => (
                   <span class="upcoming-week-label">
@@ -1287,7 +1320,25 @@ export function Upcoming(props: {
                 a dragged row onto (`data-drop-day`); a day with rows has
                 them to drop onto. It says the day is empty ("Nothing
                 scheduled", Today's "Nothing due today"). Overdue is never empty. */}
-            <Show when={g.rows.length === 0 && g.urgency !== "overdue"}>
+            <Show
+              keyed
+              when={props.draft?.()?.day === g.key ? props.draft!()!.key : null}
+            >
+              {(_key) => (
+                <AgendaDraftRow
+                  placeholder={m().workspace.newItemPlaceholder}
+                  onInput={(t) => props.onDraftInput?.(t)}
+                  onSettle={(t, how) => props.onDraftSettle?.(t, how)}
+                />
+              )}
+            </Show>
+            <Show
+              when={
+                g.rows.length === 0 &&
+                g.urgency !== "overdue" &&
+                props.draft?.()?.day !== g.key
+              }
+            >
               <div
                 class="upcoming-day-slot"
                 data-drop-day={g.key}
@@ -1304,6 +1355,66 @@ export function Upcoming(props: {
         )}
       </For>
       <div class="upcoming-spacer" style={{ height: `${spacers().bottom}px` }} />
+    </div>
+  );
+}
+
+/** The agenda's draft row: a plain text input laid out as a task row
+ *  (an empty box in the check lane, the title in the body), at the end
+ *  of its day. It takes the caret on mount and settles exactly once:
+ *  Enter, Escape or ↑ from the keyboard, or focus leaving it (which
+ *  includes the owner ending it from outside, a pane handoff, after
+ *  which the late blur is ignored). Keys stop here, so the agenda's
+ *  listbox and the global shortcuts never see them. */
+function AgendaDraftRow(props: {
+  placeholder: string;
+  onInput: (text: string) => void;
+  onSettle: (text: string, how: "enter" | "escape" | "blur") => void;
+}) {
+  let input!: HTMLInputElement;
+  let settled = false;
+  const settle = (how: "enter" | "escape" | "blur") => {
+    if (settled) return;
+    settled = true;
+    props.onSettle(input.value.trim(), how);
+  };
+  onMount(() => {
+    input.focus({ preventScroll: true });
+    input.closest(".upcoming-row")?.scrollIntoView({ block: "nearest" });
+  });
+  onCleanup(() => {
+    settled = true;
+  });
+  return (
+    <div class="upcoming-row upcoming-draft-row">
+      <span class="upcoming-row-check">
+        <input type="checkbox" class="task-check" disabled tabIndex={-1} aria-hidden="true" />
+      </span>
+      <span class="upcoming-row-time" />
+      <span class="upcoming-row-body">
+        <span class="upcoming-row-title">
+          <input
+            ref={input}
+            type="text"
+            class="upcoming-draft-input"
+            placeholder={props.placeholder}
+            aria-label={props.placeholder}
+            onInput={(e) => props.onInput(e.currentTarget.value)}
+            on:blur={() => settle("blur")}
+            on:keydown={(e) => {
+              e.stopPropagation();
+              if (e.isComposing) return;
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                settle("enter");
+              } else if (e.key === "Escape" || e.key === "ArrowUp") {
+                e.preventDefault();
+                settle("escape");
+              }
+            }}
+          />
+        </span>
+      </span>
     </div>
   );
 }

@@ -462,6 +462,8 @@ export type Messages = {
     emptyToday: string;
     /** Any other empty day on the agenda (unless "Hide empty days" is checked). */
     emptyDay: string;
+    /** Accessible name of a day header's "+": `day` is its heading. */
+    addOnDay: (day: string) => string;
     /** Week label at the end of the header of the day opening a week:
      *  `n` is its ISO week number. */
     week: (n: number) => string;
@@ -894,6 +896,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     upcoming: {
       emptyToday: "Nada para hoy",
       emptyDay: "Nada programado",
+      addOnDay: (day) => `Añadir elemento: ${day}`,
       week: (n) => `Semana ${n}`,
       hideEmptyDays: "Ocultar días vacíos",
       event: "Evento",
@@ -1297,6 +1300,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     upcoming: {
       emptyToday: "Nothing due today",
       emptyDay: "Nothing scheduled",
+      addOnDay: (day) => `Add item on ${day}`,
       week: (n) => `Week ${n}`,
       hideEmptyDays: "Hide empty days",
       event: "Event",

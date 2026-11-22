@@ -540,6 +540,66 @@ body {
   font-style: italic;
 }
 
+/* The agenda's draft row (a day's Add): a task row whose title is a
+   bare input, the box beside it empty and inert. */
+.upcoming-draft-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+.upcoming-draft-input::placeholder {
+  color: var(--text-faint);
+}
+.upcoming-draft-row .task-check {
+  pointer-events: none;
+}
+
+/* A day's Add (today on): a "+" right after the day's heading, shown
+   while the day is hovered (always on Today, and where nothing hovers).
+   It is pulled out of the header's height so a day with no "+"
+   (Overdue, a day gone by) heads the same. */
+.upcoming-day-add {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: 22px;
+  height: 22px;
+  margin: -4px 0 -4px -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+}
+.upcoming-day-add svg {
+  width: 12px;
+  height: 12px;
+}
+.upcoming-day:hover .upcoming-day-add,
+.upcoming-day[data-urgency="today"] .upcoming-day-add,
+.upcoming-day-add:focus-visible {
+  opacity: 1;
+}
+.upcoming-day-add:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+@media (hover: none) {
+  .upcoming-day-add {
+    opacity: 1;
+  }
+}
+
 /* A task closed today, at the end of Today: muted, so the eye stays on
    what is left. */
 .upcoming-row[data-placed="done"] .upcoming-row-text {

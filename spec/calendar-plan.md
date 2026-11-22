@@ -439,6 +439,21 @@ for the month grid). `groupByDeadline` becomes
   a new event: no list, `when` prefilled to today and the Event box under
   it ticked. Unticking the box makes it a task with that date, still
   shown here and not in Inbox (`inbox-plan.md` "Membership").
+  **A day's Add** (web, built 2026-11-22): each day from Today on has a
+  "+" right after its heading, shown while the day is hovered (always
+  on Today); N adds on the topmost selected row's day, else today. Both
+  open a draft row at the end of that day (in place of an empty day's
+  "Nothing scheduled") and clear the selection. Its item is a task, not
+  an event: no list (Home's Inbox), `when` that day, all-day. With the
+  side pane showing, the pane mirrors the draft as a capture, as the
+  list view's draft mirror does: the row is the title, the pane holds
+  the other fields, and a pointerdown in the pane hands over (a named
+  draft becomes its item and the pane follows it; an unnamed one leaves
+  the pane as the capture). Enter commits and opens a fresh draft on
+  the same day, an empty Enter ends; Escape, ↑ and blur commit and end.
+  A day with no section (empty days hidden) gets the pane's capture
+  alone. Overdue and past days take no Add. The toolbar's Add is
+  unchanged (an event on today, in the pane).
 - **Completed today** (web, built 2026-11-18, `groupByDay` in
   `dayGroups.ts`): a closed (done or cancelled) task, timed or not and
   with a `when` or only a deadline, that was closed today is placed on

@@ -660,6 +660,9 @@ export function Workspace(props: {
   // the spot and the pane follows it, an unnamed one leaves the pane as
   // an ordinary capture at the slot.
   const [draftText, setDraftText] = createSignal("");
+  // The agenda draft row's text, trimmed, for a handoff that ends the row
+  // from outside it (the list draft's row reads its own on collapse).
+  const captureDraftText = () => draftText().trim();
   let captureHandle: CaptureHandle | null = null;
   let draftHandoff = false;
 
@@ -680,6 +683,7 @@ export function Workspace(props: {
         // capture with it (dropped, not committed: the target is cleared
         // before the surface settles, so nothing is created).
         setDraft(null);
+        setAgendaDraft(null);
         setExpandedKey(null);
         if (untrack(newItemTarget)?.draft) setNewItemTarget(null);
         // Moving on abandons an unresolved item link.
@@ -1145,6 +1149,115 @@ export function Workspace(props: {
     event: true,
   });
 
+  // A day's Add on the agenda (its header's "+", or N): a draft row at
+  // the end of that day, the agenda's take on the list view's draft. Its
+  // item is a task with no list, all-day on the day: like the toolbar's
+  // Add it lands in Home's Inbox, where a dated item shows on the agenda
+  // only. With the side pane showing, the pane mirrors it as a capture
+  // (the draft mirror, by `draftText`): the row is the title editor,
+  // the pane holds the rest, and pointing into the pane hands the draft
+  // over (`onPanePointerDown`). Starting one clears the selection, so
+  // the row that was selected no longer is and the pane is the draft's.
+  // `key` remounts the row for each draft (Enter chains a fresh one).
+  const [agendaDraft, setAgendaDraft] = createSignal<{
+    day: string;
+    key: string;
+  } | null>(null);
+  const agendaCaptureTarget = (day: string): NewItemTarget & { docId: string } => ({
+    listId: "inbox",
+    docId: docs.homeDocId,
+    state: "backlog",
+    when: day,
+  });
+  const addOnDay = (day: string) => {
+    if (agendaDraft() !== null) return;
+    // A day the agenda has no section for (empty days hidden) has no
+    // row to draft in: the pane's capture alone, on that day.
+    if (!upcomingGroups().some((g) => g.key === day)) {
+      setNewItemTarget(agendaCaptureTarget(day));
+      return;
+    }
+    selection.clear();
+    setOpenItemId(null);
+    setAgendaDraft({ day, key: crypto.randomUUID() });
+    setDraftText("");
+    if (sidePanelShown()) {
+      setNewItemTarget({ ...agendaCaptureTarget(day), draft: "row" });
+    } else {
+      setNewItemTarget(null);
+    }
+  };
+  // The agenda draft row settled. `how`: Enter commits and opens a fresh
+  // draft on the same day (an empty Enter ends it); Escape and ↑ commit
+  // and end; a blur (focus left for somewhere else) commits and ends,
+  // leaving the selection to the click that is landing. Mirrors
+  // `settleDraft`, handoff included.
+  const settleAgendaDraft = (
+    text: string,
+    how: "enter" | "escape" | "blur",
+  ) => {
+    const d = agendaDraft();
+    if (!d) return;
+    const nw = newItemTarget();
+    const mirrored = nw?.draft !== undefined;
+    setAgendaDraft(null);
+    const createPlain = (t: string): string =>
+      home.withActionBatch(() => {
+        const id = home.addItemAt("inbox", t, 0);
+        home.setItemWhen(id, d.day);
+        return id;
+      });
+    if (draftHandoff && nw?.draft === "row") {
+      // Pointed into the pane: as `settleDraft`'s handoff.
+      if (text) {
+        let id = captureHandle?.promote(text) ?? null;
+        if (id === null) {
+          id = createPlain(text);
+          setNewItemTarget(null);
+        }
+        const newId = id;
+        setTimeout(() => {
+          if (docs.getItem(newId)) selection.selectOnly(newId);
+        }, 0);
+      } else {
+        setNewItemTarget({ ...nw, draft: "pane" });
+      }
+      return;
+    }
+    if (!text) {
+      if (mirrored) setNewItemTarget(null);
+      if (how !== "blur") upcomingHandle?.focus();
+      return;
+    }
+    const newId =
+      (mirrored ? captureHandle?.commit(text) : null) ?? createPlain(text);
+    if (mirrored) setNewItemTarget(null);
+    if (how === "enter") {
+      addOnDay(d.day);
+      return;
+    }
+    // Once the agenda's rows (and so the selection's order) have it.
+    setTimeout(() => {
+      if (!docs.getItem(newId)) return;
+      selection.selectOnly(newId);
+      if (how !== "blur") upcomingHandle?.focus();
+    }, 0);
+  };
+  // N on the agenda: the day of the topmost selected row (its first day
+  // from today on, so an overdue or past row adds on today), else today.
+  const agendaAddDay = (): string => {
+    const today = todayStamp(nowMs());
+    const top = actionSelection()?.getSelectionTop() ?? null;
+    if (top === null) return today;
+    const id = String(top);
+    const g = upcomingGroups().find(
+      (g) =>
+        (g.urgency === "today" || g.urgency === "future") &&
+        g.rows.some((r) => r.item.id === id),
+    );
+    return g?.key ?? today;
+  };
+
   // Start a draft row: pseudo-item at `at`, or (the shortcut path) just
   // below the topmost selected item, or at the top if nothing is
   // selected. Expanding it via the controlled `expandedKey` flips the row
@@ -1219,6 +1332,15 @@ export function Workspace(props: {
   // the capture, by the time the click lands. Capture phase, so a control
   // in the pane that swallows the event still gets this first.
   const onPanePointerDown = () => {
+    if (agendaDraft() !== null && newItemTarget()?.draft === "row") {
+      draftHandoff = true;
+      try {
+        settleAgendaDraft(captureDraftText(), "blur");
+      } finally {
+        draftHandoff = false;
+      }
+      return;
+    }
     const d = draft();
     if (!d || newItemTarget()?.draft !== "row") return;
     if (expandedKey() !== d.item.id) return;
@@ -2314,10 +2436,16 @@ export function Workspace(props: {
   // inline draft below the topmost selection. In a board it opens the
   // new-item dialog (boards capture via the dialog, not an inline draft),
   // placing the new card just below the selected card in its column — or
-  // at the top of the default column when nothing is selected.
+  // at the top of the default column when nothing is selected. On the
+  // agenda it opens a day's Add (`agendaAddDay`).
   const onNewKey = (e: KeyboardEvent) => {
     if (e.key !== "n" && e.key !== "N") return;
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    if (view().kind === "upcoming") {
+      e.preventDefault();
+      addOnDay(agendaAddDay());
+      return;
+    }
     if (view().kind !== "list" && view().kind !== "focus") return;
 
     // Focus is never a board, so boardId is null there and we fall through
@@ -4036,6 +4164,10 @@ export function Workspace(props: {
             copyBlock={copyRows}
             onReveal={revealItemIn}
             onMoveToList={openMovePalette}
+            onAddOnDay={addOnDay}
+            draft={agendaDraft}
+            onDraftInput={setDraftText}
+            onDraftSettle={settleAgendaDraft}
           />
         </Show>
       </main>
