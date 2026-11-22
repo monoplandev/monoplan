@@ -844,11 +844,6 @@ body {
   font-size: 13px;
 }
 
-.header-toggle-button[aria-pressed="true"] {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
 .icon-button:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text);

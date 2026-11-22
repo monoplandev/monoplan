@@ -59,7 +59,7 @@ import {
   isClosedTask,
   type DayGroup,
 } from "./dayGroups.ts";
-import { loadAgendaAllDays, saveAgendaAllDays } from "./agendaAllDays.ts";
+import { loadHideEmptyDays, saveHideEmptyDays } from "./agendaHideEmptyDays.ts";
 import { addDaysToStamp, nowMs, todayStamp } from "./format.tsx";
 import { applySuggestionChange } from "./whenSuggest.ts";
 import { restoreCapturedPositions } from "./linger.ts";
@@ -802,9 +802,9 @@ export function Workspace(props: {
   const doneLingers = (it: ItemView, now: number): boolean =>
     Math.abs(now - it.lifecycleAt) < DONE_LINGER_MS;
   const [doneMoveTick, setDoneMoveTick] = createSignal(0);
-  // "All days" (the header toggle, a device preference, on by default):
-  // every day gets a section, not just the days something is on.
-  const [agendaAllDays, setAgendaAllDays] = createSignal(loadAgendaAllDays());
+  // Every day gets a section unless "Hide empty days" (the agenda's
+  // filter menu, a device preference, off by default) is checked.
+  const [hideEmptyDays, setHideEmptyDays] = createSignal(loadHideEmptyDays());
   const upcomingGroups = createMemo((): DayGroup[] => {
     const today = todayStamp(nowMs());
     doneMoveTick();
@@ -822,9 +822,9 @@ export function Workspace(props: {
       addDaysToStamp(today, -AGENDA_PAST_DAYS),
       (it) => doneLingers(it, now),
     );
-    return agendaAllDays()
-      ? fillEmptyDays(groups, today, labels, locale())
-      : groups;
+    return hideEmptyDays()
+      ? groups
+      : fillEmptyDays(groups, today, labels, locale());
   });
   // One timeout for the next lingering row to move; re-armed as rows
   // close. Only while the agenda is the view.
@@ -3754,30 +3754,28 @@ export function Workspace(props: {
               >
                 {m().deadline.today}
               </button>
-              <button
-                type="button"
-                class="icon-button header-text-button header-toggle-button"
-                tabIndex={-1}
-                aria-pressed={agendaAllDays()}
-                title={m().upcoming.allDaysHint}
-                onClick={() => {
-                  const on = !agendaAllDays();
-                  setAgendaAllDays(on);
-                  saveAgendaAllDays(on);
-                }}
-              >
-                {m().upcoming.allDays}
-              </button>
             </Show>
             {/* The calendar merges every doc; the Done view's filter menu
                 narrows it by workspace, with the same reading: none
                 checked is every workspace. Behind it is the synced
                 hidden set on the Home doc (`spec/sharing-plan.md`), so
                 the checked workspaces are the ones not hidden, once any
-                is hidden. Only offered once there is more than one doc. */}
-            <Show when={view().kind === "upcoming" && docs.docs().length > 1}>
+                is hidden. The workspace rows only show once there is
+                more than one doc; "Hide empty days" leads the menu
+                either way (a view option: not counted, not cleared). */}
+            <Show when={view().kind === "upcoming"}>
               <DoneFilterMenu
-                workspaces={docs.docs().map((d) => ({
+                options={[
+                  {
+                    label: m().upcoming.hideEmptyDays,
+                    checked: hideEmptyDays(),
+                    onChange: (hide) => {
+                      setHideEmptyDays(hide);
+                      saveHideEmptyDays(hide);
+                    },
+                  },
+                ]}
+                workspaces={docs.docs().length < 2 ? [] : docs.docs().map((d) => ({
                   docId: d.docId,
                   label: docLabel(d.docId),
                   shared: !d.home,

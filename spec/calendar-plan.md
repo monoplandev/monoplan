@@ -413,12 +413,15 @@ for the month grid). `groupByDeadline` becomes
   "Reschedule" under "Deferred" below. A row closed today does not pick
   up, and is left where it is when carried in a selection. Escape
   cancels. Not built: touch, ⌘↑ / ⌘↓ nudging by a day, the month grid.
-- **All days** (web, 2026-11-22): a header toggle, a device preference
-  on by default, gives every day a section from the first past day with
-  something on it to the later of the last placed day and two weeks ahead
-  (`fillEmptyDays`), not only the days something is on. An empty day is
-  its heading over a blank row-height slot (`data-drop-day`), the day's
-  drop target once reschedule lands; Today's says "Nothing due today".
+- **Empty days** (web, 2026-11-22): by default every day has a section,
+  from the first past day with something on it to the later of the last
+  placed day and two weeks ahead (`fillEmptyDays`). "Hide empty days" in
+  the view's filter menu (a device preference, unchecked by default, not
+  counted as a filter and not cleared by Clear) shows only the days
+  something is on. An empty day is its heading over a blank row-height
+  slot (`data-drop-day`) saying "Nothing scheduled" (Today's "Nothing
+  due today"). The filter menu is always on this view now; its
+  workspace rows only with more than one doc.
 - **Week breaks** (web, 2026-11-22): the day that opens a week (the
   locale's first day from `Intl.Locale` week info, else Monday; with
   days missing, the first day group of a new week) has "Week N" at the

@@ -4,7 +4,8 @@
 // and its semantics live in `doneFilter.ts`; this is the surface.
 //
 // The calendar uses the same menu with the workspace facet alone (no
-// `lists`): its checkboxes then sit in the menu itself, not a submenu.
+// `lists`): its checkboxes then sit in the menu itself, not a submenu,
+// under its "Hide empty days" option (`options`).
 //
 // The Lists submenu leads with a text box that narrows the rows. Archived
 // lists are left out until the box has a query (or they are checked), and
@@ -30,6 +31,10 @@ import { createPopoverTooltipGuard } from "./popoverTooltip.ts";
 import { matchesName } from "./search.ts";
 
 export function DoneFilterMenu(props: {
+  /** Plain checkbox options leading the menu, outside the facets: not
+   *  in the trigger's count and left alone by Clear (the calendar's
+   *  "Hide empty days"). */
+  options?: { label: string; checked: boolean; onChange: (checked: boolean) => void }[];
   /** Every open doc, Home first, with its shown name. `shared` is any
    *  non-Home doc, marked with the people glyph as in the nav and the
    *  move palette. The Workspaces submenu is only offered when there is
@@ -104,6 +109,22 @@ export function DoneFilterMenu(props: {
       </Tooltip>
       <DropdownMenu.Portal>
         <DropdownMenu.Content {...guard.content} class="dropdown-menu-content">
+          <For each={props.options ?? []}>
+            {(o) => (
+              <DropdownMenu.CheckboxItem
+                class="dropdown-menu-item done-filter-item"
+                closeOnSelect={false}
+                checked={o.checked}
+                onChange={(checked: boolean) => o.onChange(checked)}
+              >
+                <CheckBox />
+                <span class="done-filter-item-name">{o.label}</span>
+              </DropdownMenu.CheckboxItem>
+            )}
+          </For>
+          <Show when={(props.options?.length ?? 0) > 0 && props.workspaces.length > 0}>
+            <DropdownMenu.Separator class="dropdown-menu-separator" />
+          </Show>
           <Show when={props.lists === undefined}>{workspaceRows()}</Show>
           <Show when={props.lists !== undefined && props.workspaces.length > 1}>
             <DropdownMenu.Sub gutter={4}>

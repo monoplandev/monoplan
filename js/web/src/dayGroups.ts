@@ -416,13 +416,14 @@ const coversToday = (
   return span.start <= today && today <= span.end;
 };
 
-/** How far ahead of today the agenda's "all days" mode reaches when
+/** How far ahead of today the agenda reaches with empty days shown when
  *  nothing is placed later: two weeks, so the days ahead read as a
  *  calendar even when they are empty. */
 export const AGENDA_ALL_DAYS_AHEAD = 13;
 
 /** The agenda with every day in it, not just the days something is on
- *  (the web Upcoming view's "All days" toggle, a device preference): an
+ *  (the web Upcoming view's default; "Hide empty days" in its filter
+ *  menu, a device preference, turns it off): an
  *  empty group for each missing day from the first past group (if any)
  *  through to the later of the last placed day and `today + ahead`.
  *  Overdue keeps its place between the days gone by and Today. Labels

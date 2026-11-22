@@ -454,15 +454,13 @@ export type Messages = {
   upcoming: {
     /** Upcoming view's Today group when nothing is due today. */
     emptyToday: string;
-    /** Any other empty day on the agenda (the "All days" toggle). */
+    /** Any other empty day on the agenda (unless "Hide empty days" is checked). */
     emptyDay: string;
     /** Week label at the end of the header of the day opening a week:
      *  `n` is its ISO week number. */
     week: (n: number) => string;
-    /** Header toggle: show every day, empty ones too. */
-    allDays: string;
-    /** Tooltip of the "All days" toggle. */
-    allDaysHint: string;
+    /** Filter-menu option: leave out the days nothing is on. */
+    hideEmptyDays: string;
     /** Heading over the calendar's per-doc show / hide toggles. */
     /** What an Open event's status reads: the one label its four open
      *  states share in the status controls (`statusLabel`). */
@@ -888,8 +886,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       emptyToday: "Nada para hoy",
       emptyDay: "Nada programado",
       week: (n) => `Semana ${n}`,
-      allDays: "Todos los días",
-      allDaysHint: "Mostrar también los días vacíos",
+      hideEmptyDays: "Ocultar días vacíos",
       event: "Evento",
       fixedEvent: "Evento",
       eventHint: "Ocurre en esta fecha: pasa sin más, en lugar de quedar atrasado",
@@ -1289,8 +1286,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       emptyToday: "Nothing due today",
       emptyDay: "Nothing scheduled",
       week: (n) => `Week ${n}`,
-      allDays: "All days",
-      allDaysHint: "Show empty days too",
+      hideEmptyDays: "Hide empty days",
       event: "Event",
       fixedEvent: "Event",
       eventHint: "Happens on this date: it goes by instead of going overdue",
