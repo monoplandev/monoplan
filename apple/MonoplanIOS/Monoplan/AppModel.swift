@@ -50,6 +50,10 @@ final class AppModel: ObservableObject {
     /// in date order, the days gone by ahead of the `today` group.
     @Published private(set) var agenda: [AgendaGroup] = []
     @Published private(set) var agendaError: String?
+    /// The Calendar row's count (`Engine.calendarCount`): Open items
+    /// owed or on today, as the web's Upcoming badge. Read with the
+    /// agenda.
+    @Published private(set) var calendarCount = 0
     /// The Starred lens (`Engine.starred`): Home's curated order with
     /// its cross-workspace entries resolved.
     @Published private(set) var starred: [StarredItem] = []
@@ -1146,9 +1150,15 @@ final class AppModel: ObservableObject {
     func refreshAgenda() {
         let days = Self.agendaDays
         let past = Self.agendaPastDays
-        read({ (groups: try $0.agenda(days: days, pastDays: past), json: try $0.agendaJson(days: days)) }) { [weak self] read, error in
+        read({
+            (
+                groups: try $0.agenda(days: days, pastDays: past), json: try $0.agendaJson(days: days),
+                count: Int(try $0.calendarCount())
+            )
+        }) { [weak self] read, error in
             if let read {
                 self?.agenda = read.groups
+                self?.calendarCount = read.count
                 Self.leaveWidgetSnapshot(read.json)
             }
             self?.agendaError = error

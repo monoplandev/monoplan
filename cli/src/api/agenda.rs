@@ -120,6 +120,26 @@ pub fn set_calendar_doc_hidden(cx: &Ctx, doc_id: &str, hidden: bool) -> anyhow::
     Ok(())
 }
 
+/// The Calendar nav entry's count over every workspace minus those
+/// hidden from the calendar: Open items owed or on today
+/// (`rules::attention_count`, the web's `attentionBadge`). `today` is
+/// the clock's local date when `None`.
+pub fn attention_count(cx: &Ctx, today: Option<&str>) -> anyhow::Result<u32> {
+    let today = match today {
+        Some(t) => t.to_string(),
+        None => Local::now().date_naive().format("%Y-%m-%d").to_string(),
+    };
+    let hidden = cx.home_doc()?.get_settings().calendar_hidden_docs;
+    let mut count = 0;
+    for (c, d) in cx.workspaces {
+        if hidden.iter().any(|h| *h == c.doc_id.0.to_string()) {
+            continue;
+        }
+        count += rules::attention_count(&d.all_items(), &today);
+    }
+    Ok(count)
+}
+
 /// An agenda as placed, before it is shaped into rows: what the
 /// terminal prints from.
 pub struct Placed {

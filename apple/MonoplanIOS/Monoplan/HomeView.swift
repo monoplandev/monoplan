@@ -281,7 +281,9 @@ struct HomeView: View {
                             .counted(model.starred.count)
                     }
                     NavigationLink(value: HomePage.agenda) {
+                        // What is owed or on today, as the web's Upcoming.
                         Label { Text("Calendar") } icon: { CatalogIcon(name: "Calendar") }
+                            .counted(model.calendarCount)
                     }
                     // Only while something is assigned to this
                     // account, as the Bin shows only while it holds

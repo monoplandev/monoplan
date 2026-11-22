@@ -358,6 +358,10 @@ final class MainWindowModel: ObservableObject {
     /// The Bin's rows, every workspace's, newest binned first. Always
     /// read: the sidebar shows the Bin only while it has any.
     @Published private(set) var binned: [BinEntry] = []
+    /// The Calendar row's count: Open items owed or on today, over the
+    /// workspaces the Calendar shows (`Engine.calendarCount`, the web's
+    /// Upcoming badge). Always read.
+    @Published private(set) var calendarCount = 0
     /// The selected row's item, if one is: its panel is open.
     @Published private(set) var selected: ItemSelection?
     /// The panel's item page. On a new selection the old page stays
@@ -670,6 +674,7 @@ final class MainWindowModel: ObservableObject {
         agenda = []
         done = []
         binned = []
+        calendarCount = 0
     }
 
     private func clear() {
@@ -695,6 +700,7 @@ final class MainWindowModel: ObservableObject {
         var calendarHidden: [String] = []
         var done: [DoneRow] = []
         var binned: [BinEntry] = []
+        var calendarCount = 0
         /// The selection the read was made for, and its item.
         var selected: ItemSelection?
         var detail: ItemInfo?
@@ -736,6 +742,7 @@ final class MainWindowModel: ObservableObject {
             snapshot.accountId = try engine.account()?.accountId
             snapshot.starred = try engine.starred()
             snapshot.binned = try engine.binned()
+            snapshot.calendarCount = Int(try engine.calendarCount())
             snapshot.assigned = try engine.assigned().map { entry in
                 let section = sections.first { $0.id == entry.docId }
                 return AssignedRow(
@@ -807,6 +814,7 @@ final class MainWindowModel: ObservableObject {
                 self.calendarHidden = snapshot.calendarHidden
                 self.done = snapshot.done
                 self.binned = snapshot.binned
+                self.calendarCount = snapshot.calendarCount
                 // An item selected since the read went out keeps the
                 // old page until its own read lands.
                 if let picked = snapshot.selected, picked == self.selected {
@@ -1835,14 +1843,19 @@ struct MainWindowView: View {
         }
         return List {
             Section {
-                // Starred and the Inbox are counted whatever the
-                // preference says, as on iOS.
+                // Starred, the Calendar and the Inbox are counted
+                // whatever the preference says, as on iOS.
                 row(.lens(.starred), HStack {
                     Label { Text("Starred") } icon: { StarOutline() }
                     Spacer()
                     count(model.starred.count)
                 })
-                row(.lens(.agenda), Label { Text("Calendar") } icon: { NavIcon(image: NavArt.calendar) })
+                // What is owed or on today, as the web's Upcoming.
+                row(.lens(.agenda), HStack {
+                    Label { Text("Calendar") } icon: { NavIcon(image: NavArt.calendar) }
+                    Spacer()
+                    count(model.calendarCount)
+                })
                 // Only while something is assigned to this account
                 // (or while it is the lens shown, so ticking the last
                 // row does not pull it away), as the web's nav; counted.

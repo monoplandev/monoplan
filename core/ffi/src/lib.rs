@@ -1263,6 +1263,16 @@ impl Engine {
         })?)
     }
 
+    /// The Calendar nav entry's count: Open items owed or on today
+    /// (an overdue deadline, a task `when` that is over, a deadline
+    /// today, a `when` on today) over the workspaces `agenda` covers.
+    /// The web's Upcoming badge, by the same rule.
+    pub fn calendar_count(&self) -> Result<u32, EngineError> {
+        Ok(self
+            .client
+            .call_blocking(None, |cx| api::agenda::attention_count(cx, None))?)
+    }
+
     /// The workspaces left out of `agenda`: Home's synced
     /// `calendar_hidden_docs` (the Calendar's workspace filter).
     pub fn calendar_hidden_docs(&self) -> Result<Vec<String>, EngineError> {

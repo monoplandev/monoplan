@@ -338,6 +338,35 @@ fn when_end_day(when: &str, duration: Option<u32>) -> String {
         .unwrap_or_else(|| day.to_string())
 }
 
+/// The Calendar nav entry's count: what is owed or on today. Open
+/// items with an overdue deadline, a task `when` that is over, a
+/// deadline today, or a `when` on today (a span covering it included),
+/// each counted once. An event's past `when` has gone by and counts
+/// for nothing; days ahead are the view's business. Mirrors
+/// `attentionBadge` in the web's `dayGroups.ts`.
+pub fn attention_count(items: &[ItemView], today: &str) -> u32 {
+    let mut count = 0;
+    for item in items {
+        if !item.is_open() {
+            continue;
+        }
+        let deadline = item.deadline.as_deref();
+        let span = item
+            .when
+            .as_deref()
+            .map(|w| (&w[..w.len().min(10)], when_end_day(w, item.duration)));
+        let slipped =
+            !item.is_event() && span.as_ref().is_some_and(|(_, end)| end.as_str() < today);
+        let on_today = span
+            .as_ref()
+            .is_some_and(|(start, end)| *start <= today && today <= end.as_str());
+        if deadline.is_some_and(|d| d <= today) || slipped || on_today {
+            count += 1;
+        }
+    }
+    count
+}
+
 /// `agenda`, and with `--all` one agenda over every workspace the
 /// install has open (`api::agenda::place`). Rows of the merged one
 /// carry their workspace.
@@ -435,6 +464,33 @@ mod tests {
 
     const TODAY: &str = "2026-09-09";
     const HORIZON: &str = "2026-09-23";
+
+    #[test]
+    fn attention_counts_what_is_owed_or_on_today_once() {
+        let mut gone_event = item("gone-event", Some("2026-09-01"), None, 1);
+        gone_event.event = true;
+        let mut done = item("done", Some(TODAY), None, 2);
+        done.state = WorkflowState::Done;
+        let mut binned = item("binned", None, Some(TODAY), 3);
+        binned.binned_at = Some(1);
+        let mut span = item("span", Some("2026-09-08"), None, 4);
+        span.duration = Some(3 * 1440);
+        let items = [
+            item("overdue", None, Some("2026-09-01"), 5),
+            item("slipped", Some("2026-09-02"), None, 6),
+            item("due-today", None, Some(TODAY), 7),
+            item("on-today", Some("2026-09-09T10:00"), None, 8),
+            // Both dates count: one item, one count.
+            item("both", Some(TODAY), Some(TODAY), 9),
+            span,
+            item("ahead", Some("2026-09-12"), Some("2026-09-13"), 10),
+            item("undated", None, None, 11),
+            gone_event,
+            done,
+            binned,
+        ];
+        assert_eq!(attention_count(&items, TODAY), 6);
+    }
 
     #[test]
     fn merged_sources_share_one_order_and_carry_their_tag() {

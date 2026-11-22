@@ -395,7 +395,10 @@ for the month grid). `groupByDeadline` becomes
   warning, otherwise the ordinary faint count); hidden at zero and not gated
   by the list-counts preference. Future days and done rows do not count, and neither
   does an event's past `when`: it has gone by (`attentionBadge` in
-  `dayGroups.ts`).
+  `dayGroups.ts`). The Mac sidebar's and iOS Home's Calendar row carry
+  the same count, plain, no tone (built 2026-11-23: `commands::agenda::
+  attention_count`, `api::agenda::attention_count`, `Engine.calendar_count`,
+  over the workspaces the Calendar shows).
 - Not a `Dnd` listbox (day sections, rows of two heights), but a
   listbox in the list view's sense (web, built 2026-10-14): it runs the
   Workspace's `DndSelection` over every day's rows concatenated and answers
