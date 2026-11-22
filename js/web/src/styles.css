@@ -453,7 +453,9 @@ body {
   border-radius: 6px;
 }
 
-.upcoming-row[data-dragging] {
+/* Scoped to the agenda: the overlay's clones carry the attribute too,
+   and sit outside it, so they stay at full strength. */
+.upcoming .upcoming-row[data-dragging] {
   opacity: 0.4;
 }
 
