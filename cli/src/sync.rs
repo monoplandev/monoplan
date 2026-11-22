@@ -196,7 +196,7 @@ impl Engine {
         match engine.try_connect_and_pull().await {
             Ok(()) => Ok(engine),
             Err(e) => {
-                eprintln!("offline — sync deferred ({e})");
+                crate::note!("offline — sync deferred ({e})");
                 engine.ws = None;
                 Ok(engine)
             }

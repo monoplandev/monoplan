@@ -278,13 +278,13 @@ fn trim_log(path: &Path, cap: u64, keep: u64) {
 /// Installs no signal handlers; the headless `run` does that itself.
 pub async fn serve(started: Started, shutdown: oneshot::Receiver<()>) -> anyhow::Result<()> {
     if started.engine.is_local_only() {
-        eprintln!("monoplan daemon: listening; local-only workspace, no server");
+        crate::note!("monoplan daemon: listening; local-only workspace, no server");
     } else {
-        eprintln!("monoplan daemon: listening, connecting to server…");
+        crate::note!("monoplan daemon: listening, connecting to server…");
     }
     let (serving, _client) = Serving::new(started);
     let result = serving.run(shutdown).await;
-    eprintln!("monoplan daemon: stopped");
+    crate::note!("monoplan daemon: stopped");
     Ok(result?)
 }
 
@@ -1002,7 +1002,7 @@ impl Host {
 
                 _ = persist.tick() => {
                     if !self.lock_path.exists() {
-                        eprintln!("monoplan daemon: profile directory is gone, exiting");
+                        crate::note!("monoplan daemon: profile directory is gone, exiting");
                         return Ok(());
                     }
                     self.on_persist_tick().await?;
@@ -1355,7 +1355,7 @@ impl Host {
                 self.engine.handle_connected();
                 self.offline_reason = None;
                 self.status.send_modify(|s| s.connects += 1);
-                eprintln!("monoplan daemon: connected");
+                crate::note!("monoplan daemon: connected");
                 self.pump().await;
                 // Whatever the account joined or created while this
                 // device was away (or never heard a nudge for).
@@ -1642,7 +1642,7 @@ impl Host {
 
     fn drop_socket(&mut self, reason: &str) {
         if self.ws.take().is_some() {
-            eprintln!("monoplan daemon: offline ({reason})");
+            crate::note!("monoplan daemon: offline ({reason})");
         }
         self.resolve_pending_syncs(false);
         self.connected_at = None;

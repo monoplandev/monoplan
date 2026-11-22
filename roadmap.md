@@ -124,3 +124,7 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - mini cal collapse to single date
 - mini cal scrolls up / down easily
 - mini cal grays out prior dates
+- full page item view with hideable sidebar for metadata
+- themes
+- sunrise / sunset times
+- fun app icons for ios?

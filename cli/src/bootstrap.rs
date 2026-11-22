@@ -58,7 +58,7 @@ pub async fn open_or_init_at(dir: PathBuf) -> anyhow::Result<Profile> {
     }
     init_local(&profile)?;
     drop(claim);
-    eprintln!(
+    crate::note!(
         "created a local workspace in {}; `monoplan auth signup` syncs it across devices",
         profile.dir.display()
     );
@@ -74,7 +74,7 @@ async fn discard_if_orphaned(profile: &Profile) -> anyhow::Result<()> {
     let claim = crate::client::claim(&profile.dir).await?;
     if profile.orphaned() {
         profile.purge()?;
-        eprintln!(
+        crate::note!(
             "discarded the workspace in {}: its keys are not in this device's keychain",
             profile.dir.display()
         );

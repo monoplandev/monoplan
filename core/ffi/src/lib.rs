@@ -624,7 +624,7 @@ impl Engine {
                         Ok(()) => tracing::info!("engine loop stopped"),
                         Err(e) => {
                             tracing::error!("engine loop failed: {e:#}");
-                            eprintln!("monoplan engine: {e:#}");
+                            monoplan_cli::note!("monoplan engine: {e:#}");
                         }
                     }
                 });
