@@ -39,6 +39,9 @@ private extension NSToolbarItem.Identifier {
     /// Before search while Done is shown: its filter's popover
     /// (`DoneFilter.swift`).
     static let doneFilter = NSToolbarItem.Identifier("MonoplanDoneFilter")
+    /// Before "Today" on the Calendar: a menu of its display options,
+    /// "Hide Empty Days" (`agendaHideEmptyDaysKey`).
+    static let agendaFilter = NSToolbarItem.Identifier("MonoplanAgendaFilter")
     /// The Calendar's "Today": scrolls back to Today's header.
     static let today = NSToolbarItem.Identifier("MonoplanToday")
     /// At the far end of the list's section, after new, while there
@@ -87,7 +90,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         let own: [NSToolbarItem.Identifier]
         switch lens {
         case .done: own = [.doneFilter, .space]
-        case .agenda: own = [.today, .space]
+        case .agenda: own = [.agendaFilter, .space, .today, .space]
         default: own = []
         }
         return [.sidebarSeparator, .title, .flexibleSpace] + own + [.newItem] + (signedIn ? [] : [.space, .signIn])
@@ -234,6 +237,20 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             toolbarItem.toolTip = label
             return
         }
+        if toolbarItem.itemIdentifier == .agendaFilter {
+            // Filled while a filter is in effect, as Done's.
+            let hide = UserDefaults.standard.bool(forKey: agendaHideEmptyDaysKey)
+            let count = hide ? 1 : 0
+            let label = count > 0 ? String(localized: "Filter (\(count) active)") : String(localized: "Filter")
+            toolbarItem.image = NSImage(
+                systemSymbolName: hide
+                    ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease",
+                accessibilityDescription: label)
+            toolbarItem.label = label
+            toolbarItem.toolTip = label
+            (toolbarItem as? NSMenuToolbarItem)?.menu.items.first?.state = hide ? .on : .off
+            return
+        }
         let item = barItem
         switch toolbarItem.itemIdentifier {
         case .itemStatus:
@@ -302,7 +319,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        Self.fixedItems + [.doneFilter, .today, .panelSeparator, .signIn, .search, .newList, .itemStatus, .itemStar, .itemMore]
+        Self.fixedItems + [.doneFilter, .agendaFilter, .today, .panelSeparator, .signIn, .search, .newList, .itemStatus, .itemStar, .itemMore]
     }
 
     func toolbar(
@@ -314,6 +331,19 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         }
         if identifier == .panelSeparator {
             return NSTrackingSeparatorToolbarItem(identifier: identifier, splitView: splitView, dividerIndex: 1)
+        }
+        if identifier == .agendaFilter {
+            let item = NSMenuToolbarItem(itemIdentifier: identifier)
+            item.showsIndicator = false
+            let menu = NSMenu()
+            let hide = NSMenuItem(
+                title: String(localized: "Hide Empty Days"), action: #selector(toggleHideEmptyDays(_:)),
+                keyEquivalent: "")
+            hide.target = self
+            menu.addItem(hide)
+            item.menu = menu
+            update(item)
+            return item
         }
         if identifier == .itemMore {
             let item = NSMenuToolbarItem(itemIdentifier: identifier)
@@ -408,6 +438,14 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         }
         update(item)
         return item
+    }
+
+    /// The Calendar filter's "Hide Empty Days": flips the device
+    /// preference. The Calendar reads it through `@AppStorage`.
+    @objc private func toggleHideEmptyDays(_ sender: Any?) {
+        let defaults = UserDefaults.standard
+        defaults.set(!defaults.bool(forKey: agendaHideEmptyDaysKey), forKey: agendaHideEmptyDaysKey)
+        for item in toolbar.items where item.itemIdentifier == .agendaFilter { update(item) }
     }
 
     @objc private func jumpToToday(_ sender: Any?) {

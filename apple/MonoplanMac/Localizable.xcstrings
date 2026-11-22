@@ -789,6 +789,16 @@
         }
       }
     },
+    "Hide Empty Days" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ocultar días vacíos"
+          }
+        }
+      }
+    },
     "deleting the account" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1743,6 +1753,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nada destacado"
+          }
+        }
+      }
+    },
+    "Nothing scheduled" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nada programado"
           }
         }
       }

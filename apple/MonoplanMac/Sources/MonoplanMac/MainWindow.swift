@@ -193,7 +193,9 @@ struct NavSection: Identifiable {
 }
 
 /// The views over every workspace, on top of the sidebar.
-enum Lens: Hashable {
+/// Raw values are what `SurfaceStore` keeps; renaming a case drops a
+/// saved page back to the Inbox, nothing worse.
+enum Lens: String, Hashable {
     case starred, agenda, assigned, done, bin
 }
 
@@ -203,6 +205,29 @@ struct Surface: Equatable {
     /// The workspace's doc id; nil is Home.
     var workspace: String?
     var list: String
+}
+
+/// The last page shown, kept across launches so the window opens back
+/// on it. Device-local, like the sidebar's folds. A workspace or list
+/// that has gone by the next launch falls back as any selection does
+/// (`MainWindowModel.reload`: Home, the Inbox).
+enum SurfaceStore {
+    private static let key = "MonoplanLastSurface"
+
+    static func load(from defaults: UserDefaults = .standard) -> Surface? {
+        guard let stored = defaults.dictionary(forKey: key), let list = stored["list"] as? String else {
+            return nil
+        }
+        let lens = (stored["lens"] as? String).flatMap(Lens.init(rawValue:))
+        return Surface(lens: lens, workspace: stored["workspace"] as? String, list: list)
+    }
+
+    static func save(_ surface: Surface, to defaults: UserDefaults = .standard) {
+        var stored: [String: String] = ["list": surface.list]
+        stored["lens"] = surface.lens?.rawValue
+        stored["workspace"] = surface.workspace
+        defaults.set(stored, forKey: key)
+    }
 }
 
 /// A Done row: the item, tagged with the workspace it was read from.
@@ -445,7 +470,21 @@ final class MainWindowModel: ObservableObject {
         self.engine = engine
         state = engine.state
         collapsed = Set(UserDefaults.standard.stringArray(forKey: Self.collapsedKey) ?? [])
+        // Back on the page shown last time (`SurfaceStore`).
+        if let last = SurfaceStore.load() {
+            lens = last.lens
+            workspace = last.workspace
+            list = last.list
+            shown = last
+            restoring = true
+        }
     }
+
+    /// The page was restored from the last launch and its first read
+    /// has not landed: a lens with nothing in it then, which the
+    /// sidebar does not offer (the Bin, Assigned), gives way to the
+    /// list under it.
+    private var restoring = false
 
     /// The selected list's name, for the items' heading.
     var listTitle: String {
@@ -755,6 +794,7 @@ final class MainWindowModel: ObservableObject {
                 self.workspace = snapshot.workspace
                 self.list = snapshot.list
                 self.shown = Surface(lens: snapshot.lens, workspace: snapshot.workspace, list: snapshot.list)
+                SurfaceStore.save(self.shown)
                 self.items = snapshot.items
                 self.starred = snapshot.starred
                 self.assigned = snapshot.assigned
@@ -785,7 +825,13 @@ final class MainWindowModel: ObservableObject {
                 self.error = nil
                 // The Bin emptied while shown: its sidebar row goes, so
                 // the list under it comes back.
+                let wasRestoring = self.restoring
+                self.restoring = false
                 if snapshot.lens == .bin, snapshot.binned.isEmpty, self.lens == .bin {
+                    self.select(workspace: snapshot.workspace, list: snapshot.list)
+                    return
+                }
+                if wasRestoring, snapshot.lens == .assigned, snapshot.assigned.isEmpty, self.lens == .assigned {
                     self.select(workspace: snapshot.workspace, list: snapshot.list)
                     return
                 }
@@ -1645,6 +1691,13 @@ let listCountsKey = "listCounts"
 /// iOS.
 let inboxNewestFirstKey = "inboxNewestFirst"
 
+/// `UserDefaults` key of the Calendar's "Hide Empty Days" (the toolbar's
+/// filter button on the Calendar): set, only Today and the days
+/// something is on have a header; absent, every day from Today on does
+/// (`AgendaTable.filled`). Display only, the web's
+/// `monoplan.agenda.hideEmptyDays`.
+let agendaHideEmptyDaysKey = "agendaHideEmptyDays"
+
 struct MainWindowView: View {
     @ObservedObject var model: MainWindowModel
     /// The device's list-counts preference (Settings), off by default:
@@ -1654,6 +1707,8 @@ struct MainWindowView: View {
     /// The device's Inbox order (`inboxNewestFirstKey`): reverses an
     /// Inbox's rows on screen, never the doc.
     @AppStorage(inboxNewestFirstKey) private var inboxNewestFirst = false
+    /// The device's Calendar preference (`agendaHideEmptyDaysKey`).
+    @AppStorage(agendaHideEmptyDaysKey) private var agendaHideEmptyDays = false
     /// The workspace whose Sharing sheet is up.
     @State private var sharing: SharingTarget?
     /// The workspace row under the pointer: its "…" and chevron show.
@@ -2075,7 +2130,9 @@ struct MainWindowView: View {
     /// gone by that have rows (the events that happened on them; a
     /// task done today is at the end of Today, muted, and one done
     /// earlier is not here), then Overdue while something is,
-    /// then Today, always there, then each non-empty day. It opens on
+    /// then Today, always there, then every day ahead, empty
+    /// ones too, for two weeks and on to the last day with rows
+    /// (only the days with rows under "Hide Empty Days"). It opens on
     /// Today's header (Overdue's, when it is there), the past above
     /// it, and the toolbar's "Today" comes back
     /// there: an AppKit table (`AgendaTable.swift`), which can be put
@@ -2090,6 +2147,7 @@ struct MainWindowView: View {
             groups: model.agenda,
             selected: model.selected?.id,
             todayJumps: model.todayJumps,
+            fillEmptyDays: !agendaHideEmptyDays,
             heading: Self.heading(for:),
             rowHeight: { agendaRowDetailed($0) ? 42 : 24 },
             row: { row in AnyView(agendaRow(row)) },

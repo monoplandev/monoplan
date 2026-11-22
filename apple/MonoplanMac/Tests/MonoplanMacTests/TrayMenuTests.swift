@@ -150,3 +150,51 @@ final class TrayMenuTests: XCTestCase {
             "Offline · last synced 3m ago · connect failed")
     }
 }
+
+final class AgendaFillTests: XCTestCase {
+    private func entry(_ id: String) -> AgendaEntry {
+        AgendaEntry(
+            id: id, text: id, listId: "inbox", listName: nil, listIcon: nil, state: .backlog, event: false,
+            when: nil, duration: nil, deadline: nil, place: nil, assignee: nil, placedBy: .deadline,
+            tone: .neutral, docId: nil, docName: nil)
+    }
+
+    func testFillsTwoWeeksFromTodayKeepingPastNonEmpty() {
+        let groups = [
+            AgendaGroup(day: "2026-11-20", today: false, rows: [entry("a")]),
+            AgendaGroup(day: "2026-11-23", today: true, rows: []),
+            AgendaGroup(day: "2026-11-25", today: false, rows: [entry("b")]),
+        ]
+        let out = AgendaTable.filled(groups)
+        XCTAssertEqual(out.first?.day, "2026-11-20")
+        XCTAssertEqual(out.dropFirst().map(\.day).first, "2026-11-23")
+        XCTAssertEqual(out.count, 1 + 14)
+        XCTAssertEqual(out.last?.day, "2026-12-06")
+        XCTAssertEqual(out.first { $0.day == "2026-11-25" }?.rows.count, 1)
+        XCTAssertEqual(out.filter(\.today).count, 1)
+    }
+
+    func testReachesTheLastDayWithRows() {
+        let groups = [
+            AgendaGroup(day: "2026-11-23", today: true, rows: []),
+            AgendaGroup(day: "2027-01-02", today: false, rows: [entry("c")]),
+        ]
+        let out = AgendaTable.filled(groups)
+        XCTAssertEqual(out.last?.day, "2027-01-02")
+        XCTAssertEqual(out.count, 41)
+    }
+}
+
+final class SurfaceStoreTests: XCTestCase {
+    func testRoundTrips() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "SurfaceStoreTests"))
+        defer { defaults.removePersistentDomain(forName: "SurfaceStoreTests") }
+        XCTAssertNil(SurfaceStore.load(from: defaults))
+        let list = Surface(lens: nil, workspace: "doc1", list: "abc")
+        SurfaceStore.save(list, to: defaults)
+        XCTAssertEqual(SurfaceStore.load(from: defaults), list)
+        let lens = Surface(lens: .agenda, workspace: nil, list: "inbox")
+        SurfaceStore.save(lens, to: defaults)
+        XCTAssertEqual(SurfaceStore.load(from: defaults), lens)
+    }
+}

@@ -12,6 +12,14 @@
 // there it is what the table opens on and what "Today" comes back to,
 // so what is owed is never left above the top of the pane.
 //
+// Every day from Today on has a header, empty or not, for two weeks
+// ahead and through to the last day something is on: the days ahead
+// read as a calendar, as the web's Upcoming does by default
+// (`fillEmptyDays` in `js/web/src/dayGroups.ts`). Days gone by show
+// only when something is on them. "Hide Empty Days" under the
+// toolbar's filter button (`agendaHideEmptyDaysKey`, a device
+// preference) leaves out every empty day but Today.
+//
 // The rows are the window's SwiftUI rows, hosted in the cells and
 // rewritten in place; a day's header is a group row. No drag, no
 // multiple selection: a click selects an item, which opens its panel,
@@ -33,6 +41,9 @@ struct AgendaTable: NSViewRepresentable {
     /// The model's count of "Today" presses: a new value scrolls back
     /// to Today, or to Overdue above it when something is.
     let todayJumps: Int
+    /// Every day from Today on gets a header (`filled`); false is only
+    /// Today and the days something is on.
+    let fillEmptyDays: Bool
     let heading: (AgendaGroup) -> String
     /// A row's content height; the table adds 4 pt above and below,
     /// as a SwiftUI list does.
@@ -133,8 +144,8 @@ struct AgendaTable: NSViewRepresentable {
         case header(day: String, title: String, today: Bool)
         /// `divided`: a line under it, as between two rows of a day.
         case item(AgendaEntry, day: String, height: CGFloat, divided: Bool)
-        /// Today's line when nothing is on it.
-        case nothing(day: String)
+        /// A day's line when nothing is on it.
+        case nothing(day: String, today: Bool)
 
         /// The row's identity, and the shape the table laid out: two
         /// lines with the same key have the same kind and place.
@@ -142,15 +153,17 @@ struct AgendaTable: NSViewRepresentable {
             switch self {
             case .header(let day, _, _): return "h/\(day)"
             case .item(let row, let day, _, _): return "i/\(day)/\(row.docId ?? "")/\(row.id)"
-            case .nothing(let day): return "n/\(day)"
+            case .nothing(let day, _): return "n/\(day)"
             }
         }
 
         var height: CGFloat {
             switch self {
-            case .header: return 28
+            // Tight above the label, its old gap kept below it to the
+            // line: a day reads close under the one before.
+            case .header: return 22
             case .item(_, _, let height, _): return height + 8
-            case .nothing: return 32
+            case .nothing: return 24
             }
         }
 
@@ -158,6 +171,55 @@ struct AgendaTable: NSViewRepresentable {
             if case .item(let row, _, _, _) = self { return row }
             return nil
         }
+    }
+
+    /// How many days past Today are shown when nothing is on them, if
+    /// nothing is placed later: two weeks of days in all, the web's
+    /// `AGENDA_ALL_DAYS_AHEAD`.
+    static let daysAhead = 13
+
+    /// The groups with every day from Today on: an empty group for
+    /// each day missing from Today through the later of the last day
+    /// with rows and `daysAhead` past Today. Days gone by are kept only
+    /// when they have rows, as before. Without a Today group (no read
+    /// yet) the groups are the non-empty ones as they are.
+    static func filled(_ groups: [AgendaGroup], ahead: Int = daysAhead) -> [AgendaGroup] {
+        var out: [AgendaGroup] = []
+        var byDay: [String: AgendaGroup] = [:]
+        var today: String?
+        for group in groups {
+            if group.today { today = group.day }
+            if let today, group.day >= today {
+                byDay[group.day] = byDay[group.day] ?? group
+            } else if group.today || !group.rows.isEmpty {
+                out.append(group)
+            }
+        }
+        guard let today else { return out }
+        var last = addDays(today, ahead)
+        if let latest = byDay.filter({ !$0.value.rows.isEmpty }).keys.max(), latest > last {
+            last = latest
+        }
+        var day = today
+        while day <= last {
+            out.append(byDay[day] ?? AgendaGroup(day: day, today: day == today, rows: []))
+            day = addDays(day, 1)
+        }
+        return out
+    }
+
+    /// `stamp` (`YYYY-MM-DD`) moved by `days`, on the Gregorian
+    /// calendar in UTC, so no clock change skips or repeats a day.
+    static func addDays(_ stamp: String, _ days: Int) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let parts = stamp.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3,
+              let date = calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2])),
+              let moved = calendar.date(byAdding: .day, value: days, to: date)
+        else { return stamp }
+        let c = calendar.dateComponents([.year, .month, .day], from: moved)
+        return String(format: "%04d-%02d-%02d", c.year!, c.month!, c.day!)
     }
 
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
@@ -187,8 +249,9 @@ struct AgendaTable: NSViewRepresentable {
 
         // MARK: Rows
 
-        /// Today always, the other days when they have rows, and
-        /// Overdue above Today when Today's group has overdue rows.
+        /// Today always, the days ahead always when `fillEmptyDays`
+        /// (`filled`), any other day when it has rows, and Overdue
+        /// above Today when Today's group has overdue rows.
         private func build() -> [Line] {
             var lines: [Line] = []
             var days: Set<String> = []
@@ -199,7 +262,10 @@ struct AgendaTable: NSViewRepresentable {
                         divided: index < rows.count - 1))
                 }
             }
-            for group in parent.groups where group.today || !group.rows.isEmpty {
+            let groups = parent.fillEmptyDays
+                ? AgendaTable.filled(parent.groups)
+                : parent.groups.filter { $0.today || !$0.rows.isEmpty }
+            for group in groups {
                 guard days.insert(group.day).inserted else { continue }
                 var rows = group.rows
                 if group.today {
@@ -213,7 +279,7 @@ struct AgendaTable: NSViewRepresentable {
                 }
                 lines.append(.header(day: group.day, title: parent.heading(group), today: group.today))
                 if rows.isEmpty {
-                    lines.append(.nothing(day: group.day))
+                    lines.append(.nothing(day: group.day, today: group.today))
                 }
                 items(rows, day: group.day)
             }
@@ -297,9 +363,9 @@ struct AgendaTable: NSViewRepresentable {
                 (cell as? HeaderCell)?.label.stringValue = title
             case .item(let row, _, _, let divided):
                 (cell as? HostCell)?.show(parent.row(row), divided: divided && !selected)
-            case .nothing:
+            case .nothing(_, let today):
                 (cell as? HostCell)?.show(
-                    AnyView(Text("Nothing today").foregroundStyle(.secondary)
+                    AnyView((today ? Text("Nothing today") : Text("Nothing scheduled")).italic().foregroundStyle(.tertiary)
                         .frame(maxWidth: .infinity, alignment: .leading)),
                     divided: false)
             }
@@ -439,7 +505,8 @@ struct AgendaTable: NSViewRepresentable {
     /// `textField`: the table restyles that one itself, and not for
     /// every header at once (new ones came in small, and a selection
     /// made the ones on screen larger). The font (the body's size and
-    /// weight) and the colour are set here, once.
+    /// weight) and the colour are set here, once. A line runs under it,
+    /// the rows' divider (`PaneColor.rowDivider`), across the cell.
     private final class HeaderCell: NSTableCellView {
         static let identifier = NSUserInterfaceItemIdentifier("AgendaHeader")
 
@@ -453,15 +520,31 @@ struct AgendaTable: NSViewRepresentable {
             label.lineBreakMode = .byTruncatingTail
             label.translatesAutoresizingMaskIntoConstraints = false
             addSubview(label)
+            let divider = Divider()
+            divider.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(divider)
             NSLayoutConstraint.activate([
                 label.leadingAnchor.constraint(equalTo: leadingAnchor),
                 label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-                label.centerYAnchor.constraint(equalTo: centerYAnchor),
+                label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
+                divider.leadingAnchor.constraint(equalTo: leadingAnchor),
+                divider.trailingAnchor.constraint(equalTo: trailingAnchor),
+                divider.bottomAnchor.constraint(equalTo: bottomAnchor),
+                divider.heightAnchor.constraint(equalToConstant: 1),
             ])
         }
 
         @available(*, unavailable)
         required init?(coder: NSCoder) { fatalError("not built from a nib") }
+
+        /// The line, drawn rather than a layer's colour so it follows
+        /// the appearance (light, dark) on its own.
+        private final class Divider: NSView {
+            override func draw(_ dirtyRect: NSRect) {
+                PaneColor.rowDivider.setFill()
+                bounds.fill(using: .sourceOver)
+            }
+        }
     }
 
     /// A row that draws its own selection in the inset style's rounded
