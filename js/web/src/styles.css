@@ -478,12 +478,6 @@ body {
   outline: none;
 }
 
-/* The calendar's agenda view (blank for now). */
-.calendar-agenda {
-  flex: 1;
-  min-height: 0;
-}
-
 /* The windowing in `Upcoming.tsx` adds this margin to a day's measured
    height. */
 .upcoming-day {
@@ -895,6 +889,49 @@ body {
    the talking. The time lane is already muted on every row. */
 .upcoming-day[data-urgency="past"] .upcoming-row-text {
   color: var(--text-muted);
+}
+
+/* The agenda column view (`Upcoming.tsx`, `layout="columns"`): the same
+   day sections side by side, each a fixed-width column that scrolls
+   down its own rows under a pinned header, the pane scrolling sideways.
+   The width and gap come from `agendaColumns.ts`, which places the
+   columns by them: the gap is a margin, not a flex gap, so the spacers
+   either side stand for whole columns. */
+.upcoming[data-layout="columns"] {
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-padding-inline: 12px;
+}
+
+.upcoming[data-layout="columns"] .upcoming-day {
+  flex: none;
+  box-sizing: border-box;
+  width: var(--agenda-col-w);
+  margin: 0 var(--agenda-col-gap) 0 0;
+  overflow-y: auto;
+  /* Room for the pinned header when a row is scrolled into view. */
+  scroll-padding-top: 36px;
+}
+
+/* Opaque, so the rows pass under it. */
+.upcoming[data-layout="columns"] .upcoming-day-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+}
+
+/* A column is too narrow for the list's fixed time lane: the time
+   takes the room it needs at the row's right edge, and none when the
+   row has no time. */
+.upcoming[data-layout="columns"] .upcoming-row-time {
+  width: auto;
+}
+
+.upcoming[data-layout="columns"] .upcoming-row-time[data-empty] {
+  display: none;
 }
 
 .nav-group {

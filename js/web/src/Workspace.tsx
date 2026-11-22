@@ -60,6 +60,7 @@ import {
   type DayGroup,
 } from "./dayGroups.ts";
 import { loadHideEmptyDays, saveHideEmptyDays } from "./agendaHideEmptyDays.ts";
+import { loadAgendaMode, saveAgendaMode, type AgendaMode } from "./agendaMode.ts";
 import { addDaysToStamp, nowMs, todayStamp } from "./format.tsx";
 import { applySuggestionChange } from "./whenSuggest.ts";
 import { restoreCapturedPositions } from "./linger.ts";
@@ -851,9 +852,10 @@ export function Workspace(props: {
   // Every day gets a section unless "Hide empty days" (the agenda's
   // filter menu, a device preference, off by default) is checked.
   const [hideEmptyDays, setHideEmptyDays] = createSignal(loadHideEmptyDays());
-  // Which calendar view the header's switch shows: the day-grouped list
-  // (`Upcoming`) or the agenda (blank for now).
-  const [calendarMode, setCalendarMode] = createSignal<"list" | "agenda">("list");
+  // Which agenda view the header's switch shows: the agenda list (days
+  // down the page) or the agenda columns (a column per day), both
+  // `Upcoming`. A device preference (`agendaMode.ts`).
+  const [agendaMode, setAgendaMode] = createSignal<AgendaMode>(loadAgendaMode());
   // A day the sidebar's mini calendar jumped to, so the agenda's empty
   // days reach it (`fillEmptyDays`); dropped when the agenda is left.
   const [agendaReach, setAgendaReach] = createSignal<string | null>(null);
@@ -3676,8 +3678,12 @@ export function Workspace(props: {
               <SegmentedControl
                 class="theme-segmented"
                 aria-label={m().nav.upcoming}
-                value={calendarMode()}
-                onChange={(value) => setCalendarMode(value === "agenda" ? "agenda" : "list")}
+                value={agendaMode()}
+                onChange={(value) => {
+                  const mode: AgendaMode = value === "columns" ? "columns" : "list";
+                  setAgendaMode(mode);
+                  saveAgendaMode(mode);
+                }}
               >
                 <SegmentedControl.Indicator class="theme-segment-indicator" />
                 <SegmentedControl.Item value="list" class="theme-segment">
@@ -3686,10 +3692,10 @@ export function Workspace(props: {
                     <SegmentedControl.ItemLabel>{m().upcoming.modeList}</SegmentedControl.ItemLabel>
                   </SegmentedControl.ItemControl>
                 </SegmentedControl.Item>
-                <SegmentedControl.Item value="agenda" class="theme-segment">
+                <SegmentedControl.Item value="columns" class="theme-segment">
                   <SegmentedControl.ItemInput />
                   <SegmentedControl.ItemControl class="theme-segment-control">
-                    <SegmentedControl.ItemLabel>{m().upcoming.modeAgenda}</SegmentedControl.ItemLabel>
+                    <SegmentedControl.ItemLabel>{m().upcoming.modeColumns}</SegmentedControl.ItemLabel>
                   </SegmentedControl.ItemControl>
                 </SegmentedControl.Item>
               </SegmentedControl>
@@ -3982,7 +3988,7 @@ export function Workspace(props: {
             </Show>
             {/* The calendar's "Today": back to where the view opens
                 (Overdue's header, else Today's), as the Mac toolbar's. */}
-            <Show when={view().kind === "upcoming" && calendarMode() === "list"}>
+            <Show when={view().kind === "upcoming"}>
               <button
                 type="button"
                 class="icon-button header-text-button"
@@ -4222,11 +4228,12 @@ export function Workspace(props: {
         </Show>
           }
         >
-          <Show
-            when={calendarMode() === "list"}
-            fallback={<div class="calendar-agenda" />}
-          >
+          {/* Keyed on the mode: the agenda list and the agenda columns
+              are one component, remounted on a switch. */}
+          <Show keyed when={agendaMode()}>
+          {(mode) => (
           <Upcoming
+            layout={mode}
             app={routed}
             groups={upcomingGroups()}
             selection={selection}
@@ -4238,7 +4245,7 @@ export function Workspace(props: {
             openOnTap={openOnTap}
             ref={(h) => {
               upcomingHandle = h;
-              // The agenda unmounts the list: drop its handle with it.
+              // A mode switch remounts the view: drop its handle with it.
               onCleanup(() => {
                 if (upcomingHandle === h) upcomingHandle = null;
               });
@@ -4252,6 +4259,7 @@ export function Workspace(props: {
             onDraftInput={setDraftText}
             onDraftSettle={settleAgendaDraft}
           />
+          )}
           </Show>
         </Show>
       </main>

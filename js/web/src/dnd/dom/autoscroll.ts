@@ -1,6 +1,8 @@
 /**
  * Autoscroll controller: scrolls the list container when drag cursor
- * approaches the top or bottom edge.
+ * approaches the top or bottom edge. With `axis` "x" it is the left and
+ * right edges and the container scrolls sideways ("up" is left, "down"
+ * right).
  */
 export class DndAutoscroll {
   private direction: "up" | "down" | null = null;
@@ -15,6 +17,7 @@ export class DndAutoscroll {
     public confine: boolean,
     maxSpeed = 12,
     accelerationMs = 500,
+    private axis: "x" | "y" = "y",
   ) {
     this.maxSpeed = maxSpeed;
     this.accelerationMs = accelerationMs;
@@ -26,7 +29,13 @@ export class DndAutoscroll {
    * @param clientY - Mouse Y in viewport coords
    */
   update(clientX: number, clientY: number): void {
-    const rect = this.container.getBoundingClientRect();
+    const box = this.container.getBoundingClientRect();
+    // On the x axis the same checks run with the two axes swapped.
+    const x = this.axis === "x";
+    const rect = x
+      ? { left: box.top, right: box.bottom, top: box.left, bottom: box.right }
+      : box;
+    if (x) [clientX, clientY] = [clientY, clientX];
 
     // Check x-bounds — stop if cursor leaves horizontal bounds
     if (clientX < rect.left || clientX > rect.right) {
@@ -88,7 +97,8 @@ export class DndAutoscroll {
     const speed = this.maxSpeed * (0.2 + 0.8 * t);
     const delta = this.direction === "up" ? -speed : speed;
 
-    this.container.scrollTop += delta;
+    if (this.axis === "x") this.container.scrollLeft += delta;
+    else this.container.scrollTop += delta;
     this.raf = requestAnimationFrame(this.tick);
   };
 }

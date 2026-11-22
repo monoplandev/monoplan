@@ -59,6 +59,15 @@
 // docs can still be loading when the view mounts); from then on a change
 // keeps what is at the top of the pane where it is, so rows arriving in
 // a past day do not move the page.
+//
+// Columns (`layout="columns"`, the agenda column view): the same day
+// sections side by side, one fixed-width column a day, the pane
+// scrolling sideways and each column down its own rows under a pinned
+// header. Rows, selection, keys, the draft row and the drag are the
+// list's. Only the windowing differs: a column's place is its index
+// times the pitch (`agendaColumns.ts`), so there is nothing to measure
+// and drawing a column never moves another. It opens with Overdue's
+// column (else Today's) at the left edge, the past a scroll left away.
 
 import {
   batch,
@@ -87,6 +96,12 @@ import {
   type DayGroup,
   type DayRow,
 } from "./dayGroups.ts";
+import {
+  AGENDA_COL_GAP,
+  AGENDA_COL_PITCH,
+  AGENDA_COL_WIDTH,
+  columnWindow,
+} from "./agendaColumns.ts";
 import { DndAutoscroll } from "./dnd/dom/autoscroll.ts";
 import { DndDragOverlay } from "./dnd/dom/drag-overlay.ts";
 import {
@@ -191,10 +206,14 @@ export function Upcoming(props: {
   /** The draft row settled, with its trimmed text: Enter, Escape (or ↑
    *  out of it), or focus leaving it. Called once per draft. */
   onDraftSettle?: (text: string, how: "enter" | "escape" | "blur") => void;
+  /** Days down the page (the default) or a column a day. Read once: the
+   *  Workspace remounts the view when the mode changes. */
+  layout?: "list" | "columns";
 }) {
   const { m, locale } = useAppI18n();
 
   let hostEl!: HTMLDivElement;
+  const cols = props.layout === "columns";
 
   // The selection lives in one day (`selDay`): its order is that day's
   // rows, so a shift or ⌘ range never crosses into another day, and the
@@ -230,8 +249,9 @@ export function Upcoming(props: {
     () => new Map(flat().map((r) => [r.item.id, r.group])),
   );
   // The selected ids as of the last consistent selection, what `settle`
-  // carries over when the rows change under it.
-  let selectedIds: string[] = [];
+  // carries over when the rows change under it. Seeded from what is
+  // selected on mount, so a switch between list and columns keeps it.
+  let selectedIds: string[] = props.selection.getSelectedKeys().map(String);
   // The day a drop landed on, preferred by the next `settle`.
   let landingDay: string | null = null;
   // Put the selection on `ids` in one day: `prefer` when it holds any
@@ -404,8 +424,15 @@ export function Upcoming(props: {
     runs().flatMap((r) => props.groups.slice(r.start, r.end + 1)),
   );
   const spacers = createMemo(() => {
-    const at = offsets(props.groups);
     const rs = runs();
+    if (cols) {
+      const n = props.groups.length;
+      return {
+        top: rs[0]!.start * AGENDA_COL_PITCH,
+        bottom: Math.max(0, n - 1 - rs[rs.length - 1]!.end) * AGENDA_COL_PITCH,
+      };
+    }
+    const at = offsets(props.groups);
     return {
       top: at[rs[0]!.start]!,
       bottom: at[at.length - 1]! - at[rs[rs.length - 1]!.end + 1]!,
@@ -483,8 +510,21 @@ export function Upcoming(props: {
     restore(h);
     return true;
   };
+  // Columns: the days from a pane's width before the pane to one after.
+  // No hold: the spacers are exact, so the drawn columns stay put.
+  const setColumnWindow = (next: Span) => {
+    const cur = win();
+    if (cur.start === next.start && cur.end === next.end) return;
+    setWin(next);
+  };
+  const columnWindowAt = (left: number): Span =>
+    columnWindow(left, hostEl.clientWidth, props.groups.length);
   const updateWindow = () => {
     if (!hostEl?.isConnected || flying) return;
+    if (cols) {
+      setColumnWindow(columnWindowAt(hostEl.scrollLeft));
+      return;
+    }
     for (let pass = 0; pass < 4; pass++) {
       measureDrawn();
       if (!setWindow(windowFor(hostEl.scrollTop))) return;
@@ -520,6 +560,16 @@ export function Upcoming(props: {
   };
 
   const putAnchorAtTop = () => {
+    if (cols) {
+      // The anchor's column at the left edge (the browser clamps when
+      // the days from there on are narrower than the pane).
+      const left = anchorIndex() * AGENDA_COL_PITCH;
+      setColumnWindow(columnWindowAt(left));
+      hostEl.scrollLeft = left;
+      updateWindow();
+      put = hostEl.scrollLeft;
+      return;
+    }
     ensureDrawn(anchorIndex());
     const el = anchorEl();
     // Not past the end: a page shorter than the pane from Today on
@@ -618,6 +668,17 @@ export function Upcoming(props: {
   };
   const scrollToGroup = (i: number, find: () => Element | null) => {
     release();
+    if (cols) {
+      // The column's place is known, and the window follows the scroll
+      // as it goes. Smooth over a few panes; a far day is a jump.
+      const left = i * AGENDA_COL_PITCH;
+      const near = Math.abs(left - hostEl.scrollLeft) <= 3 * hostEl.clientWidth;
+      hostEl.scrollTo({
+        left,
+        behavior: near && !reducedMotion?.matches ? "smooth" : "instant",
+      });
+      return;
+    }
     const { start, end } = span();
     if (i < start || i > end) {
       fakeNear(i);
@@ -689,7 +750,8 @@ export function Upcoming(props: {
       armLanding();
       return;
     }
-    if (anchoring && Math.abs(hostEl.scrollTop - put) > 1) release();
+    const at = cols ? hostEl.scrollLeft : hostEl.scrollTop;
+    if (anchoring && Math.abs(at - put) > 1) release();
     scheduleWindow();
   };
   onMount(() => {
@@ -707,13 +769,35 @@ export function Upcoming(props: {
   // so the DOM read here is still the old one.
   createComputed(() => {
     void props.groups;
-    held = anchoring || flying || !hostEl?.isConnected ? null : topRow();
+    held = cols || anchoring || flying || !hostEl?.isConnected ? null : topRow();
   });
+  // Columns: the day keys as last drawn, to find where the column at the
+  // pane's left edge went when the days change.
+  let colKeys: string[] = [];
   // The window moves in a microtask: a signal written inside an effect
   // waits for the effect to end before the DOM has it, and the window
   // reads the DOM straight after its writes.
   createEffect(() => {
     void props.groups;
+    if (cols) {
+      const keys = props.groups.map((g) => g.key);
+      const was = colKeys;
+      colKeys = keys;
+      queueMicrotask(() => {
+        if (!hostEl?.isConnected) return;
+        if (anchoring) return putAnchorAtTop();
+        // A day added or dropped before the pane shifts every column
+        // after it by a pitch: scroll by as much.
+        const iOld = Math.floor(hostEl.scrollLeft / AGENDA_COL_PITCH);
+        const key = was[iOld];
+        const iNew = key === undefined ? -1 : keys.indexOf(key);
+        if (iNew >= 0 && iNew !== iOld) {
+          hostEl.scrollLeft += (iNew - iOld) * AGENDA_COL_PITCH;
+        }
+        updateWindow();
+      });
+      return;
+    }
     if (anchoring) {
       queueMicrotask(() => {
         if (anchoring) putAnchorAtTop();
@@ -744,12 +828,22 @@ export function Upcoming(props: {
       i = props.groups.findIndex((g) => g.rows.some((r) => r.item.id === id));
     }
     if (i < 0) return;
-    ensureDrawn(i);
+    if (cols) {
+      const { start, end } = span();
+      if (i < start || i > end) {
+        setColumnWindow({
+          start: Math.max(0, i - 1),
+          end: Math.min(props.groups.length - 1, i + 1),
+        });
+      }
+    } else ensureDrawn(i);
     const key = `[data-key="${CSS.escape(id)}"]`;
     const el =
       (day && hostEl.querySelector(`${key}[data-day="${CSS.escape(day)}"]`)) ||
       hostEl.querySelector(key);
-    el?.scrollIntoView({ block: "nearest" });
+    // Columns: down the row's column and sideways to it.
+    el?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (cols) updateWindow();
   };
 
   props.ref?.({
@@ -937,7 +1031,7 @@ export function Upcoming(props: {
       0,
       4,
     );
-    autoscroll = new DndAutoscroll(hostEl, 48, false);
+    autoscroll = new DndAutoscroll(hostEl, 48, false, undefined, undefined, cols ? "x" : "y");
     document.addEventListener("keydown", onDragKeyDown, true);
   };
   const onDocMouseMove = (e: MouseEvent) => {
@@ -1145,6 +1239,15 @@ export function Upcoming(props: {
     <div
       ref={hostEl}
       class="upcoming"
+      data-layout={cols ? "columns" : undefined}
+      style={
+        cols
+          ? {
+              "--agenda-col-w": `${AGENDA_COL_WIDTH}px`,
+              "--agenda-col-gap": `${AGENDA_COL_GAP}px`,
+            }
+          : undefined
+      }
       role="listbox"
       aria-multiselectable="true"
       tabIndex={-1}
@@ -1160,7 +1263,10 @@ export function Upcoming(props: {
       onTouchMove={release}
       onPointerDown={release}
     >
-      <div class="upcoming-spacer" style={{ height: `${spacers().top}px` }} />
+      <div
+        class="upcoming-spacer"
+        style={cols ? { width: `${spacers().top}px` } : { height: `${spacers().top}px` }}
+      />
       <For each={shown()}>
         {(g) => (
           <section
@@ -1268,7 +1374,10 @@ export function Upcoming(props: {
                         />
                       </Show>
                     </span>
-                    <span class="upcoming-row-time">
+                    <span
+                      class="upcoming-row-time"
+                      data-empty={timeLabel(r) === "" ? "" : undefined}
+                    >
                       <Show when={r.placedBy === "deadline"}>
                         <span
                           class="upcoming-row-due-icon"
@@ -1448,7 +1557,12 @@ export function Upcoming(props: {
           </section>
         )}
       </For>
-      <div class="upcoming-spacer" style={{ height: `${spacers().bottom}px` }} />
+      <div
+        class="upcoming-spacer"
+        style={
+          cols ? { width: `${spacers().bottom}px` } : { height: `${spacers().bottom}px` }
+        }
+      />
     </div>
   );
 }
@@ -1484,7 +1598,7 @@ function AgendaDraftRow(props: {
       <span class="upcoming-row-check">
         <input type="checkbox" class="task-check" disabled tabIndex={-1} aria-hidden="true" />
       </span>
-      <span class="upcoming-row-time" />
+      <span class="upcoming-row-time" data-empty="" />
       <span class="upcoming-row-body">
         <span class="upcoming-row-title">
           <input
