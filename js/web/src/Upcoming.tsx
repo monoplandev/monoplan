@@ -74,6 +74,7 @@ import {
 import { ContextMenu } from "@kobalte/core/context-menu";
 import { Avatar } from "./Avatar.tsx";
 import { ItemContextMenu, type RevealTarget } from "./ItemContextMenu.tsx";
+import { pressCheck } from "./Row.tsx";
 import {
   agendaItems,
   dropOnDay,
@@ -1166,6 +1167,7 @@ export function Upcoming(props: {
                           checked={isClosed(r.item)}
                           data-cancelled={isCancelled(r.item) ? "" : undefined}
                           aria-label={m().workspace.markDone}
+                          onPointerDown={(e) => pressCheck(e.currentTarget)}
                           onChange={(e) =>
                             props.app.setDone(r.item.id, e.currentTarget.checked)
                           }

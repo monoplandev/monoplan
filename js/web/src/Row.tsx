@@ -61,7 +61,7 @@ function lifecycleTimestamp(it: ItemView): number | undefined {
 
 /** Swell the checkbox while the pointer holds it down; it settles back
  *  on release, wherever the pointer goes up (`input.task-check[data-pressed]`). */
-function pressCheck(el: HTMLElement): void {
+export function pressCheck(el: HTMLElement): void {
   el.dataset.pressed = "";
   const release = (): void => {
     delete el.dataset.pressed;
