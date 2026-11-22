@@ -204,14 +204,22 @@ export function Upcoming(props: {
   const firstDayOf = createMemo(
     () => new Map(flat().map((r) => [r.item.id, r.group])),
   );
-  const litDay = (id: string): string | undefined =>
-    pickedDay().get(id) ?? firstDayOf().get(id);
+  // A picked day that no longer holds the item (an undo / redo or a
+  // remote edit moved its date) falls back to the first copy.
+  const litDay = (id: string): string | undefined => {
+    const picked = pickedDay().get(id);
+    if (picked !== undefined && onPage().has(`${id}\n${picked}`)) return picked;
+    return firstDayOf().get(id);
+  };
   // Every row on the page in display order, an item's several rows
   // included: what plain ↑ / ↓ step through.
   const pageRows = createMemo(() =>
     props.groups.flatMap((g) =>
       g.rows.map((r) => ({ id: r.item.id, day: g.key })),
     ),
+  );
+  const onPage = createMemo(
+    () => new Set(pageRows().map((r) => `${r.id}\n${r.day}`)),
   );
   // A picked row only lives while its item stays selected; other paths
   // fall back to the first copy.

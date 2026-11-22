@@ -2567,10 +2567,14 @@ export function Workspace(props: {
       return;
     }
     // Same deferral as `revealItem`: past the store-driven re-render so
-    // the dnd's source has the rows when the scroll lands.
+    // the dnd's source has the rows when the scroll lands. The agenda
+    // scrolls through its own handle (its day windowing draws the day a
+    // date move landed on if it is not drawn).
+    const agenda = view().kind === "upcoming";
     setTimeout(() => {
       selection.setSelectedKeys(inView);
-      dndHandle?.scrollToKey(inView[0]);
+      if (agenda) upcomingHandle?.scrollToKey(inView[0]);
+      else dndHandle?.scrollToKey(inView[0]);
     }, 0);
   };
   onCleanup(docs.onUndoRedo(revealUndoOutcome));
