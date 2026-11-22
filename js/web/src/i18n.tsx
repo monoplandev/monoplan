@@ -454,6 +454,8 @@ export type Messages = {
   upcoming: {
     /** Upcoming view's Today group when nothing is due today. */
     emptyToday: string;
+    /** Any other empty day on the agenda (the "All days" toggle). */
+    emptyDay: string;
     /** Header toggle: show every day, empty ones too. */
     allDays: string;
     /** Tooltip of the "All days" toggle. */
@@ -881,6 +883,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     upcoming: {
       emptyToday: "Nada para hoy",
+      emptyDay: "Nada programado",
       allDays: "Todos los días",
       allDaysHint: "Mostrar también los días vacíos",
       event: "Evento",
@@ -1280,6 +1283,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     upcoming: {
       emptyToday: "Nothing due today",
+      emptyDay: "Nothing scheduled",
       allDays: "All days",
       allDaysHint: "Show empty days too",
       event: "Event",

@@ -488,6 +488,7 @@ body {
 .upcoming-empty-day {
   padding: 0 8px;
   color: var(--text-faint);
+  font-style: italic;
 }
 
 /* A task closed today, at the end of Today: muted, so the eye stays on

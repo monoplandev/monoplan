@@ -1067,17 +1067,19 @@ export function Upcoming(props: {
             </For>
             {/* An empty day keeps a blank row-height slot, room to drop
                 a dragged row onto (`data-drop-day`); a day with rows has
-                them to drop onto. Today with nothing
-                on it says so here. Overdue is never empty. */}
+                them to drop onto. It says the day is empty ("Nothing
+                scheduled", Today's "Nothing due today"). Overdue is never empty. */}
             <Show when={g.rows.length === 0 && g.urgency !== "overdue"}>
               <div
                 class="upcoming-day-slot"
                 data-drop-day={g.key}
                 aria-hidden="true"
               >
-                <Show when={g.urgency === "today"}>
-                  <span class="upcoming-empty-day">{m().upcoming.emptyToday}</span>
-                </Show>
+                <span class="upcoming-empty-day">
+                  {g.urgency === "today"
+                    ? m().upcoming.emptyToday
+                    : m().upcoming.emptyDay}
+                </span>
               </div>
             </Show>
           </section>
