@@ -461,11 +461,10 @@ body {
 
 /* The week number at the end of the header of the day opening a week.
    Right edge lined up with the rows' time lane, which ends short of the
-   row's edge by the "…" button (20px), the gap before it (4px) and the
-   row's padding (6px): 30px, less the header's own 4px. */
+   row's edge by the row's padding (6px), less the header's own 4px. */
 .upcoming-week-label {
   margin-left: auto;
-  margin-right: 26px;
+  margin-right: 2px;
   color: var(--text-faint);
 }
 
@@ -526,8 +525,7 @@ body {
   cursor: default;
 }
 
-/* No hover ground, as on list rows: hovering only reveals the "…" menu
-   button (`.row-menu` below); the selection fill is the only tint. */
+/* No hover ground, as on list rows: the selection fill is the only tint. */
 
 /* Selection chrome follows the list view's two tokens (see the listbox
    rules below): live while the keyboard is on the agenda, a quiet neutral
@@ -1484,56 +1482,6 @@ input.task-check:hover {
   gap: 4px;
 }
 
-/* Row menu: the trailing "…" (Row.tsx) that opens the row's context menu
-   on a left click. Invisible at rest and revealed by hovering the row, or
-   while the menu it opened is up (so the trigger doesn't vanish under its
-   own menu). Its width is reserved either way, so the badges don't shift
-   on hover. A 20px hit box pulled in by a negative vertical margin so it
-   takes only the 16px content line — the virtualizer fixes the row height
-   (Workspace.tsx rowHeight) and a taller child would overflow it. Gone on
-   coarse pointers: there is no hover to reveal it, and touch already has
-   long-press on the row and the dialog's own menu. */
-.row-menu {
-  flex: none;
-  width: 20px;
-  height: 20px;
-  margin: -2px 0;
-  color: var(--text-faint);
-  /* No fade: it appears and goes on the hover edge instantly. */
-  opacity: 0;
-}
-
-.row-menu svg {
-  width: 12px;
-  height: 12px;
-}
-
-/* Agenda rows take the same button past the time lane (whose `order: 1`
-   puts it at the right edge), centred on the 24px first-line band. */
-.upcoming-row .row-menu {
-  order: 2;
-  margin: 2px 0;
-}
-
-:is(.row, .upcoming-row):hover .row-menu,
-:is(.row, .upcoming-row)[data-menu-open] .row-menu {
-  opacity: 1;
-}
-
-/* While the menu is up the button keeps its hover fill, so it reads as
-   the thing the menu belongs to (the same pressed look `.icon-button
-   [data-expanded]` gives a dropdown trigger). */
-:is(.row, .upcoming-row)[data-menu-open] .row-menu {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-@media (pointer: coarse) {
-  .row-menu {
-    display: none;
-  }
-}
-
 .row-text {
   min-width: 0;
   white-space: nowrap;
@@ -1716,18 +1664,6 @@ input.task-check:hover {
 .row-new-text {
   flex: 1;
   color: var(--text-empty);
-}
-
-/* Stand-in for the row menu on rows that have none (the trailer, drafts,
-   rows mid-edit): same width and coarse-pointer rule as `.row-menu` via
-   the shared class, but never revealed on hover. */
-.row-menu-spacer {
-  pointer-events: none;
-}
-
-:is(.row, .upcoming-row):hover .row-menu-spacer,
-:is(.row, .upcoming-row)[data-menu-open] .row-menu-spacer {
-  opacity: 0;
 }
 
 .empty {

@@ -71,7 +71,6 @@ import {
 import { ContextMenu } from "@kobalte/core/context-menu";
 import { Avatar } from "./Avatar.tsx";
 import { ItemContextMenu } from "./ItemContextMenu.tsx";
-import { RowMenuButton } from "./Row.tsx";
 import {
   agendaItems,
   dropOnDay,
@@ -860,9 +859,6 @@ export function Upcoming(props: {
                       selectedSet().has(r.item.id) &&
                       litDay(r.item.id) === g.key,
                   );
-                  // Keeps the "…" button showing while its menu is up
-                  // (`.upcoming-row[data-menu-open]`), as list rows do.
-                  const [menuOpen, setMenuOpen] = createSignal(false);
                   // Starred (pinned to Focus): a star follows the title.
                   const starred = createMemo(() =>
                     props.app.isFocused(r.item.id),
@@ -881,14 +877,12 @@ export function Upcoming(props: {
                     onReveal={props.onReveal}
                     onMoveToList={props.onMoveToList}
                     listLabel={props.listLabel}
-                    onMenuOpenChange={setMenuOpen}
                   >
                   <ContextMenu.Trigger
                     class="upcoming-row"
                     role="option"
                     data-key={r.item.id}
                     data-day={g.key}
-                    data-menu-open={menuOpen() ? "" : undefined}
                     aria-selected={selected() ? "true" : "false"}
                     data-tone={r.tone}
                     data-placed={r.placedBy}
@@ -1073,9 +1067,6 @@ export function Upcoming(props: {
                         )}
                       </Show>
                     </span>
-                    {/* Row menu, past the time lane at the right edge
-                        (CSS `order`), as on list rows. */}
-                    <RowMenuButton />
                   </ContextMenu.Trigger>
                   </ItemContextMenu>
                   );
