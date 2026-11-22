@@ -1,20 +1,23 @@
 // The item page's subtasks (spec/subtasks.md): text nodes with done /
 // not done, owned by the item. The Mac panel's field
 // (`MonoplanMac/SubtasksField.swift`) for touch: a column of rows, each
-// a checkbox and a one-line text field edited in place, over a trailing
-// "Add subtask" field that keeps the keyboard after Return so a list
-// can be typed straight down.
+// a checkbox and a text field edited in place, over a trailing "Add
+// subtask" field that keeps the keyboard after Return so a list can be
+// typed straight down. A field wraps, so a long subtask takes as many
+// lines as it needs, with the checkbox and the grip on its first line;
+// the text itself stays one line (Return commits, a pasted newline
+// becomes a space).
 //
 // Return commits and moves down. A row emptied and then left is
 // removed: the software keyboard does not report a Backspace in an
 // empty field, so there is no "Backspace again" to wait for (a hardware
 // keyboard's does remove it there and then, and its Up / Down walk the
-// rows, Option+Up / Option+Down reorder).
+// rows, a wrapped row's lines first, Option+Up / Option+Down reorder).
 //
 // The grip at a row's end reorders, always shown as there is no
 // pointer to hover: the row follows the finger, the rows it passes step
-// aside, and the release is one move. Plain offsets over rows of one
-// height.
+// aside, and the release is one move. Plain offsets over rows measured
+// as they lay out.
 
 import MonoplanCore
 import SwiftUI
@@ -55,13 +58,18 @@ struct ItemSubtasksField: View {
         let order: [String]
     }
 
-    /// A full-height touch target, growing with the text (Dynamic Type).
+    /// One line's row: a full-height touch target, growing with the
+    /// text (Dynamic Type). A wrapped row is taller.
     @ScaledMetric(relativeTo: .body) private var rowHeight: CGFloat = 44
 
     @FocusState private var focus: Focus?
     @State private var drag: Drag?
     @State private var pending: Pending?
     @State private var addDraft = ""
+    @State private var addSelection: TextSelection?
+    @State private var addFieldHeight: CGFloat = 0
+    /// Each row's laid-out height, by subtask id.
+    @State private var heights: [String: CGFloat] = [:]
 
     private var shown: [Subtask] {
         guard let pending, pending.base == subtasks.map(\.id) else { return subtasks }
@@ -74,7 +82,7 @@ struct ItemSubtasksField: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, sub in
                 SubtaskRow(
-                    sub: sub, focus: $focus, locked: locked, height: rowHeight,
+                    sub: sub, focus: $focus, locked: locked, height: rowHeight, linePad: linePad,
                     dragged: drag?.id == sub.id,
                     commit: { setText(sub.id, $0) },
                     toggle: { setDone(sub.id, $0) },
@@ -93,11 +101,12 @@ struct ItemSubtasksField: View {
                     gripMoved: { delta in
                         if drag?.id != sub.id { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
                         let from = drag?.id == sub.id ? drag?.from ?? index : index
-                        let target = Self.dragTarget(from: from, delta: delta, rowHeight: rowHeight, count: rows.count)
+                        let target = Self.dragTarget(from: from, delta: delta, heights: rowHeights(rows))
                         drag = Drag(id: sub.id, from: from, to: target.to, dy: target.dy)
                     },
                     gripReleased: { drop(rows) }
                 )
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heights[sub.id] = $0 }
                 .offset(y: shift(of: sub.id, at: index))
                 .zIndex(drag?.id == sub.id ? 1 : 0)
                 // The rows stepping aside ease; the dragged one tracks
@@ -114,27 +123,54 @@ struct ItemSubtasksField: View {
     }
 
     private func addRow(_ rows: [Subtask]) -> some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             Image(systemName: "plus")
                 .foregroundStyle(.tertiary)
-                .frame(width: 24)
-            TextField("Add subtask", text: $addDraft)
+                .frame(width: 24, height: rowHeight)
+            TextField("Add subtask", text: $addDraft, selection: $addSelection, axis: .vertical)
                 .focused($focus, equals: .add)
                 .submitLabel(.next)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { addFieldHeight = $0 }
+                .padding(.vertical, linePad)
                 // Return adds and keeps the keyboard for the next one;
                 // on an empty field it puts the keyboard away.
-                .onSubmit {
-                    guard commitAdd() else { return }
-                    focus = .add
+                .onSubmit(submitAdd)
+                .onKeyPress(.return) {
+                    submitAdd()
+                    return .handled
                 }
-                .onKeyPress(keys: [.delete, .upArrow], phases: .down) { _ in
-                    guard addDraft.isEmpty, let last = rows.last else { return .ignored }
+                .onChange(of: addDraft) { old, new in
+                    if let text = subtaskOneLineEdit(old: old, new: new, submit: submitAdd) { addDraft = text }
+                }
+                .onKeyPress(keys: [.delete, .upArrow], phases: .down) { press in
+                    guard let last = rows.last else { return .ignored }
+                    let leave =
+                        press.key == .delete
+                        ? addDraft.isEmpty
+                        : !press.modifiers.contains(.option)
+                            && subtaskCaretAtEdge(
+                                up: true, text: addDraft, selection: addSelection,
+                                wrapped: addFieldHeight > lineHeight * 1.5)
+                    guard leave else { return .ignored }
                     focus = .row(last.id)
                     return .handled
                 }
                 .onChange(of: focus) { if focus != .add { commitAdd() } }
         }
-        .frame(height: rowHeight)
+        .frame(minHeight: rowHeight)
+    }
+
+    /// The body text's line, and the padding that centres one line in a
+    /// row.
+    private var lineHeight: CGFloat { UIFont.preferredFont(forTextStyle: .body).lineHeight }
+    private var linePad: CGFloat { max(0, (rowHeight - lineHeight) / 2) }
+
+    private func submitAdd() {
+        guard commitAdd() else {
+            focus = nil
+            return
+        }
+        focus = .add
     }
 
     @discardableResult
@@ -176,27 +212,63 @@ struct ItemSubtasksField: View {
         }
     }
 
+    private func rowHeights(_ rows: [Subtask]) -> [CGFloat] {
+        rows.map { heights[$0.id] ?? rowHeight }
+    }
+
     /// How far the row at `index` is drawn from its slot: the dragged
-    /// one by the finger, those between its slot and its target one row
-    /// towards the slot it left.
+    /// one by the finger, those between its slot and its target by the
+    /// dragged row's height towards the slot it left.
     private func shift(of id: String, at index: Int) -> CGFloat {
         guard let drag else { return 0 }
         if drag.id == id { return drag.dy }
-        if index > drag.from, index <= drag.to { return -rowHeight }
-        if index < drag.from, index >= drag.to { return rowHeight }
+        let h = heights[drag.id] ?? rowHeight
+        if index > drag.from, index <= drag.to { return -h }
+        if index < drag.from, index >= drag.to { return h }
         return 0
     }
 
-    /// Where a grip drag stands: the row that started at `from` of
-    /// `count` rows, each `rowHeight` tall, with the finger `delta`
-    /// points from where it went down. `dy` is the row's offset, held
-    /// inside the list; `to` the index it would land at, changing as it
-    /// crosses half a row. The web's `dragTarget`.
-    static func dragTarget(from: Int, delta: CGFloat, rowHeight: CGFloat, count: Int) -> (dy: CGFloat, to: Int) {
-        guard rowHeight > 0, count > 0 else { return (0, from) }
-        let dy = min(max(delta, -CGFloat(from) * rowHeight), CGFloat(count - 1 - from) * rowHeight)
-        return (dy, from + Int((dy / rowHeight).rounded()))
+    /// Where a grip drag stands: the row that started at `from`, of rows
+    /// `heights` tall, with the finger `delta` points from where it went
+    /// down. `dy` is the row's offset, held inside the list; `to` the
+    /// index it would land at, changing as it crosses half of the next
+    /// row over. The web's `dragTarget`.
+    static func dragTarget(from: Int, delta: CGFloat, heights: [CGFloat]) -> (dy: CGFloat, to: Int) {
+        let count = heights.count
+        guard count > 0, heights.indices.contains(from), heights.allSatisfy({ $0 > 0 }) else { return (0, from) }
+        func sum(_ a: Int, _ b: Int) -> CGFloat { a < b ? heights[a..<b].reduce(0, +) : 0 }
+        let dy = min(max(delta, -sum(0, from)), sum(from + 1, count))
+        var to = from
+        if dy > 0 {
+            while to + 1 < count, dy >= sum(from + 1, to + 1) + heights[to + 1] / 2 { to += 1 }
+        } else {
+            while to > 0, -dy >= sum(to, from) + heights[to - 1] / 2 { to -= 1 }
+        }
+        return (dy, to)
     }
+}
+
+/// A field's text after an edit, when it must change: a subtask is one
+/// line. A newline typed on its own is a Return (`submit`, and the text
+/// as it was); any other (a paste) becomes a space. Nil leaves it.
+private func subtaskOneLineEdit(old: String, new: String, submit: () -> Void) -> String? {
+    guard new.contains(where: \.isNewline) else { return nil }
+    if new.filter({ !$0.isNewline }) == old, new.count == old.count + 1 {
+        submit()
+        return old
+    }
+    return String(new.map { $0.isNewline ? " " : $0 })
+}
+
+/// Whether a hardware keyboard's Up / Down should leave a field for the
+/// row beside it: a field of one visual line always does, a wrapped one
+/// only from the very start (Up) or end (Down) of its text, so the
+/// arrows walk its lines first. The web's `atEdge`.
+private func subtaskCaretAtEdge(up: Bool, text: String, selection: TextSelection?, wrapped: Bool) -> Bool {
+    guard wrapped else { return true }
+    guard let selection else { return true }
+    guard case .selection(let range) = selection.indices, range.isEmpty else { return false }
+    return up ? range.lowerBound == text.startIndex : range.upperBound == text.endIndex
 }
 
 /// One subtask: its checkbox, its text edited in place, and the grip
@@ -205,7 +277,9 @@ private struct SubtaskRow: View {
     let sub: Subtask
     var focus: FocusState<ItemSubtasksField.Focus?>.Binding
     let locked: Bool
+    /// One line's height, and the padding that centres a line in it.
     let height: CGFloat
+    let linePad: CGFloat
     /// This row is the one being dragged.
     let dragged: Bool
     let commit: (String) -> Void
@@ -222,10 +296,12 @@ private struct SubtaskRow: View {
     let gripMoved: (CGFloat) -> Void
     let gripReleased: () -> Void
     @State private var draft: String
+    @State private var selection: TextSelection?
+    @State private var fieldHeight: CGFloat = 0
 
     init(
         sub: Subtask, focus: FocusState<ItemSubtasksField.Focus?>.Binding, locked: Bool, height: CGFloat,
-        dragged: Bool,
+        linePad: CGFloat, dragged: Bool,
         commit: @escaping (String) -> Void, toggle: @escaping (Bool) -> Void,
         step: @escaping (Int) -> Void, shift: @escaping (Int) -> Void,
         removeRow: @escaping () -> Void, removeAndStepUp: @escaping () -> Void,
@@ -235,6 +311,7 @@ private struct SubtaskRow: View {
         self.focus = focus
         self.locked = locked
         self.height = height
+        self.linePad = linePad
         self.dragged = dragged
         self.commit = commit
         self.toggle = toggle
@@ -251,14 +328,17 @@ private struct SubtaskRow: View {
     private var ink: HierarchicalShapeStyle { sub.done && !focused ? .secondary : .primary }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        // Top: the checkbox and the grip are one line tall, on a wrapped
+        // row's first line.
+        HStack(alignment: .top, spacing: 12) {
             if locked {
                 ItemCheckbox(state: sub.done ? .done : .backlog)
-                    .frame(width: 24)
+                    .frame(width: 24, height: height)
                 Text(sub.text)
-                    .lineLimit(1)
                     .foregroundStyle(ink)
                     .strikethrough(sub.done)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, linePad)
             } else {
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -270,29 +350,46 @@ private struct SubtaskRow: View {
                         .padding(-10)
                 }
                 .buttonStyle(.plain)
-                .frame(width: 24)
+                .frame(width: 24, height: height)
                 .accessibilityLabel(sub.done ? String(localized: "Mark not done") : String(localized: "Mark done"))
                 field
                 grip
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: height)
+        .frame(maxWidth: .infinity, minHeight: height, alignment: .leading)
         // Lifted off the page while it is dragged.
         .opacity(dragged ? 0.7 : 1)
     }
 
     private var field: some View {
-        TextField("Subtask", text: $draft)
+        TextField("Subtask", text: $draft, selection: $selection, axis: .vertical)
             .foregroundStyle(ink)
             .strikethrough(sub.done && !focused)
             .focused(focus, equals: .row(sub.id))
             .submitLabel(.next)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fieldHeight = $0 }
+            .padding(.vertical, linePad)
             // The focus leaving is the commit.
             .onSubmit { step(1) }
+            .onKeyPress(.return) {
+                step(1)
+                return .handled
+            }
+            .onChange(of: draft) { old, new in
+                if let text = subtaskOneLineEdit(old: old, new: new, submit: { step(1) }) { draft = text }
+            }
             .onKeyPress(keys: [.upArrow, .downArrow]) { press in
                 let delta = press.key == .upArrow ? -1 : 1
-                if press.modifiers.contains(.option) { shift(delta) } else { step(delta) }
+                if press.modifiers.contains(.option) {
+                    shift(delta)
+                } else if subtaskCaretAtEdge(
+                    up: delta < 0, text: draft, selection: selection,
+                    wrapped: fieldHeight > (height - 2 * linePad) * 1.5)
+                {
+                    step(delta)
+                } else {
+                    return .ignored
+                }
                 return .handled
             }
             // A hardware keyboard's Backspace, on a fresh press only: a

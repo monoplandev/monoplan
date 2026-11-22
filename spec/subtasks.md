@@ -63,14 +63,21 @@ Open: whether a subtask records a done timestamp (leaning no; not stored).
   emptied row on a fresh press only: AppKit selects a field's text as
   it takes the focus, so a held key would otherwise run up the list. A
   binned item's subtasks are shown, not edited. No count on the Mac's
-  rows yet.
+  rows yet. Long text wraps (2026-11-23), as on the web: vertical-axis
+  fields, the checkbox and grip on the first line, the grip drag over
+  each row's measured height. Return (any modifier) commits; a pasted
+  newline becomes a space. Up / Down walk a wrapped row's lines, read
+  off the window's field editor, before leaving from its start / end.
 - **iOS (2026-11-19).** `ItemSubtasksField.swift` on the item page
   between the place and the notes, edited in place (no editor takes the
   sheet): the Mac's field for touch, rows a full 44 pt, the grip always
   shown. A row emptied and then left (Return, or the focus going) is
   removed: the software keyboard reports no Backspace in an empty
   field. A hardware keyboard gets the Mac's keys. The page now puts the
-  keyboard away on a scroll. No count on iOS rows yet.
+  keyboard away on a scroll. No count on iOS rows yet. Long text wraps
+  (2026-11-23), the Mac's way; a software keyboard's Return arrives as
+  a newline in the field and is taken as the commit, and a hardware
+  keyboard's Up / Down read the caret from the field's `TextSelection`.
 
 Not built: "untick all" for a re-used checklist, subtask
 text in search, a count on the calendar's rows or any Mac or iOS row, CLI.
