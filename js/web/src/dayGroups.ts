@@ -117,11 +117,12 @@ export const isSlippedTask = (it: ItemView, today: string): boolean =>
   whenSpan(it.when, it.duration).end < today;
 
 /** Where a row sits among its day's rows (`spec/calendar-plan.md`
- *  "Within a day"): all-day events lead (0), they are the day's
- *  backdrop; then what has a clock time, tasks and events alike (1);
- *  then what is for the day at no particular time, an untimed task or a
- *  deadline's row (2). Mirrors `day_band` in the CLI's `agenda.rs`. */
+ *  "Within a day"): all-day events and deadline rows lead (0), they are
+ *  the day's backdrop; then what has a clock time, tasks and events
+ *  alike (1); then untimed tasks, for the day at no particular time (2).
+ *  Mirrors `day_band` in the CLI's `agenda.rs`. */
 export const dayBand = (row: DayRow): 0 | 1 | 2 => {
+  if (row.placedBy === "deadline") return 0;
   if (row.placedBy !== "when") return 2;
   if ((row.item.when?.length ?? 0) > 10) return 1;
   return isEvent(row.item) ? 0 : 2;
@@ -141,8 +142,8 @@ export const isClosedTask = (it: ItemView): boolean =>
  *  present after it, empty if nothing is due, so the surface
  *  anchors on the current day.
  *
- *  Within a day, rows order in three bands (`dayBand`): all-day events,
- *  timed rows by the clock, then untimed tasks and deadline rows. Inside
+ *  Within a day, rows order in three bands (`dayBand`): all-day events
+ *  and deadline rows, timed rows by the clock, then untimed tasks. Inside
  *  a band, the raw string of the placing field, then `createdAt`.
  *  Overdue has no bands.
  *

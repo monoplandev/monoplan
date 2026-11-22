@@ -115,8 +115,8 @@ pub struct AgendaDay {
 ///   neutral.
 /// - Within a day: overdue rows (oldest first, by the date that made
 ///   them overdue), then the day's own rows in three bands
-///   ([`day_band`]): all-day events, timed rows by the clock, then
-///   untimed tasks and deadline rows. Inside a band, the raw string of
+///   ([`day_band`]): all-day events and deadline rows, timed rows by
+///   the clock, then untimed tasks. Inside a band, the raw string of
 ///   the placing field, then `created_at`.
 /// - A done task (anything done but an event with a `when`) leaves its
 ///   dates. Done today, that is with a `lifecycle_at` at or after
@@ -328,12 +328,13 @@ pub fn build_agenda_from(
 }
 
 /// Where a row sits among its day's own rows (`spec/calendar-plan.md`
-/// "Within a day"): all-day events lead (0), they are the day's
-/// backdrop; then what has a clock time, tasks and events alike (1);
-/// then what is for the day at no particular time, an untimed task or
-/// a deadline's row (2). Mirrors `dayBand` in the web's `dayGroups.ts`.
+/// "Within a day"): all-day events and deadline rows lead (0), they
+/// are the day's backdrop; then what has a clock time, tasks and events
+/// alike (1); then untimed tasks, for the day at no particular time (2).
+/// Mirrors `dayBand` in the web's `dayGroups.ts`.
 fn day_band(item: &ItemView, placed_by: PlacedBy) -> u8 {
     match (placed_by, item.when.as_deref()) {
+        (PlacedBy::Deadline, _) => 0,
         (PlacedBy::When, Some(w)) if w.len() > 10 => 1,
         (PlacedBy::When, _) if item.is_event() => 0,
         _ => 2,
@@ -595,7 +596,7 @@ mod tests {
     }
 
     #[test]
-    fn within_day_all_day_events_then_timed_then_untimed() {
+    fn within_day_all_day_events_and_deadlines_then_timed_then_untimed() {
         let mut birthday = item("birthday", Some("2026-09-12"), None, 8);
         birthday.event = true;
         let mut gig09 = item("gig09", Some("2026-09-12T09:00"), None, 7);
@@ -609,11 +610,10 @@ mod tests {
             gig09,
         ];
         let days = build_agenda(&items, TODAY, HORIZON);
-        // Inside the last band: raw string (one day here), then
-        // `created_at`.
+        // Inside a band: raw string (one day here), then `created_at`.
         assert_eq!(
             ids(&days[1]),
-            vec!["birthday", "gig09", "t14", "task-early", "due", "task-late"]
+            vec!["due", "birthday", "gig09", "t14", "task-early", "task-late"]
         );
     }
 

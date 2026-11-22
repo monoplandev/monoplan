@@ -360,16 +360,19 @@ for the month grid). `groupByDeadline` becomes
   or today-warning (deadline day = today); a `when`'s row is overdue (a
   task's `when` over) or today-warning (it carries a deadline that is
   today); otherwise neutral.
-- **Within a day**, three bands (changed 2026-11-17; `day_band` in
+- **Within a day**, three bands (changed 2026-11-17, deadline rows
+  moved to the first band 2026-11-22; `day_band` in
   `cli/src/commands/agenda.rs`, `dayBand` in `dayGroups.ts`):
-  1. **All-day events**: a row placed by a 10-character `when` on an
-     item with the event flag. A birthday or a conference is the day's
+  1. **All-day events and deadlines**: a row placed by a 10-character
+     `when` on an item with the event flag, and every row placed by a
+     deadline. A birthday, a conference or a due date is the day's
      backdrop, so it leads, as on every calendar.
   2. **Timed rows**: placed by a 16-character `when`, tasks and events
      alike, in clock order. The day's fixed points.
   3. **Untimed tasks**: a row placed by a 10-character `when` on a
-     task, and every row placed by a deadline. For the day at no
-     particular time, so they come after what has one.
+     task. For the day at no particular time, so they come after what
+     has one. The one band a user will order by hand
+     (`spec/day-order-plan.md`, not built).
 
   Inside a band, the raw string of the field that placed the row, then
   `created_at`. A timed span's later days stay in the timed band and

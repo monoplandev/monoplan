@@ -101,7 +101,7 @@ describe("groupByDay", () => {
     ]);
   });
 
-  test("within a day: all-day events, then timed, then untimed tasks and deadlines", () => {
+  test("within a day: all-day events and deadlines, then timed, then untimed tasks", () => {
     const groups = groupByDay(
       [
         item("task-a", { when: "2026-09-12" }),
@@ -115,13 +115,13 @@ describe("groupByDay", () => {
       LABELS,
       "en",
     );
-    // Inside the last band: raw string (all the same day), then createdAt.
+    // Inside a band: raw string (all the same day), then createdAt.
     expect(ids(groups[1]!)).toEqual([
+      "due",
       "birthday",
       "gig09",
       "t14",
       "task-a",
-      "due",
       "task-b",
     ]);
   });
@@ -178,11 +178,11 @@ describe("groupByDay", () => {
         ["past-due-today", "past-due-later", "span-over", "past-when", "past-timed"],
       ],
       // A deadline still to come keeps its own row on its day.
-      [TODAY, ["running", "past-due-today"]],
+      [TODAY, ["past-due-today", "running"]],
       ["2026-09-10", ["running"]],
       ["2026-09-20", ["past-due-later"]],
     ]);
-    expect(groups[1]!.rows[1]).toMatchObject({ placedBy: "deadline", tone: "warning" });
+    expect(groups[1]!.rows[0]).toMatchObject({ placedBy: "deadline", tone: "warning" });
     for (const row of groups[0]!.rows) {
       expect(row).toMatchObject({ placedBy: "when", tone: "overdue" });
       expect(row.span).toBeUndefined();
@@ -435,13 +435,13 @@ describe("groupByDay: multi-day spans", () => {
       ["overdue", ["owed"]],
       [TODAY, []],
       ["2026-09-10", ["owed"]],
-      ["2026-09-11", ["owed", "dl-first"]],
+      ["2026-09-11", ["dl-first", "owed"]],
       ["2026-09-12", ["owed", "dl-first"]],
       ["2026-09-13", ["dl-first"]],
       ["2026-09-14", ["dl-first"]],
     ]);
-    expect(groups[3]!.rows[1]).toMatchObject({ placedBy: "deadline" });
-    expect(groups[3]!.rows[1]!.span).toBeUndefined();
+    expect(groups[3]!.rows[0]).toMatchObject({ placedBy: "deadline" });
+    expect(groups[3]!.rows[0]!.span).toBeUndefined();
   });
 
   test("a deadline on a day the when covers rides on that row", () => {
