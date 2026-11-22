@@ -8,13 +8,13 @@
 // day header is the date, and the task surface shows the rest. The
 // checkbox leads each row, then a fixed-width lane carries the start time
 // ("All day" on an event with no time, nothing on a task with none,
-// "Due" on a deadline, or the planned date on a task that
+// "Deadline" on a deadline, or the planned date on a task that
 // slipped into Overdue, which has no day header to say it); the place is
 // a muted line under the title.
 // A deadline is a special kind of date here: its own row on the day it
-// is owed, a timer glyph and "Due" in the time lane, beside whatever row
+// is owed, a timer glyph and "Deadline" in the time lane, beside whatever row
 // the item's `when` gives it on another day. Where both fall on one day
-// the `when` row stands for both and carries the "Due" mark after its
+// the `when` row stands for both and carries the "Deadline" mark after its
 // title.
 // An event ticks off in place and stays on its `when` day once done or
 // cancelled, so the day still records what happened and what was called
@@ -987,7 +987,7 @@ export function Upcoming(props: {
   // Start time only: the agenda is a glance at the day, the end sits on
   // the task surface. An all-day event says so in the lane; a task with
   // no time says nothing (it is for the day, not something that fills
-  // it), and a row here on its deadline says "Due". A multi-day span
+  // it), and a row here on its deadline says "Deadline". A multi-day span
   // reads by what the day holds of it: every day of an all-day span is
   // "All day"; a timed one shows its start clock on the first day, "All
   // day" on the days it runs clean through, and its end clock on the last

@@ -856,7 +856,7 @@ body {
   white-space: nowrap;
 }
 
-/* A deadline on the calendar: the timer glyph ahead of "Due", in the
+/* A deadline on the calendar: the timer glyph ahead of "Deadline", in the
    time lane of the deadline's own row and after the title of a row
    whose date is the same day. */
 .upcoming-row-due {
@@ -877,15 +877,10 @@ body {
   height: 12px;
 }
 
-/* Urgency colours the deadline, not the row: red once it is behind,
-   the due-today tone on its day. */
+/* Urgency colours the deadline, not the row: red once it is behind.
+   On its day it stays muted, as a deadline ahead does. */
 .upcoming-row[data-placed="deadline"][data-tone="overdue"] .upcoming-row-time {
   color: var(--overdue-text);
-}
-
-.upcoming-row[data-placed="deadline"][data-tone="warning"] .upcoming-row-time,
-.upcoming-row[data-tone="warning"] .upcoming-row-due {
-  color: var(--due-today-text);
 }
 
 /* A day gone by is the record of what happened: its rows are muted,

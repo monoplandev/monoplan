@@ -2323,7 +2323,7 @@ struct MainWindowView: View {
                 if let day = Self.overdueDay(row) {
                     Text(verbatim: day).foregroundStyle(.secondary).monospacedDigit().fixedSize()
                 }
-            case .warning: Text("Due").foregroundStyle(.orange).fixedSize()
+            case .warning: Text("Deadline").foregroundStyle(.secondary).fixedSize()
             case .neutral: EmptyView()
             }
             if TodayMenu.isTimed(row), let when = row.when {
@@ -2333,9 +2333,9 @@ struct MainWindowView: View {
                     .fixedSize()
             } else if row.placedBy == .deadline {
                 // A deadline's own row. One still ahead says so here;
-                // today's and a late one are toned above.
-                if row.tone == .neutral, let deadline = row.deadline {
-                    Text("Due \(ItemPanel.dayText(deadline))").foregroundStyle(.secondary).fixedSize()
+                // today's and a late one are handled above.
+                if row.tone == .neutral {
+                    Text("Deadline").foregroundStyle(.secondary).fixedSize()
                 }
             } else if row.event, row.when != nil {
                 // An event with a day and no clock time.

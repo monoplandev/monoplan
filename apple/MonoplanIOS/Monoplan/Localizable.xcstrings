@@ -971,6 +971,17 @@
         }
       }
     },
+    "Deadline" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plazo"
+          }
+        }
+      }
+    },
     "Debug" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1167,17 +1178,6 @@
         }
       }
     },
-    "due %@" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "vence %@"
-          }
-        }
-      }
-    },
     "Due %@" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1185,17 +1185,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vence el %@"
-          }
-        }
-      }
-    },
-    "Due today" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Vence hoy"
           }
         }
       }

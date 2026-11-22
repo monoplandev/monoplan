@@ -191,13 +191,13 @@ struct AgendaRowView: View {
     private var note: (text: String, color: Color)? {
         switch row.tone {
         case .overdue: return (String(localized: "Overdue"), .red)
-        case .warning: return (String(localized: "Due today"), .orange)
+        case .warning: return (String(localized: "Deadline"), .secondary)
         case .neutral: break
         }
         // A deadline's own row says what it is; the length belongs to
         // the `when`'s row.
         if row.placedBy == .deadline {
-            return row.deadline.map { (String(localized: "due \($0)"), .secondary) }
+            return (String(localized: "Deadline"), .secondary)
         }
         if let minutes = row.duration, minutes > 0 {
             return (Self.span(Int(minutes)), .secondary)
