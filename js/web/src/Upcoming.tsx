@@ -46,7 +46,10 @@
 // above the pane to one below are drawn, spacers stand in for the rest
 // (each day's last measured height, or an estimate from its rows), and
 // the window follows the scroll. A jump to a day that is not drawn (a
-// row off in the past, back to Today) draws it first.
+// row off in the past, back to Today) draws it first. Today and the mini
+// calendar scroll there with the browser's smooth scroll, over days all
+// drawn beforehand, and the window holds still until it lands; a far day
+// is drawn next to the pane, the days between left out until then.
 //
 // The days gone by (a year of them, `AGENDA_PAST_DAYS`: events that
 // happened, items settled on the day they were planned for) sit above,
@@ -59,6 +62,7 @@
 // a past day do not move the page.
 
 import {
+  batch,
   createComputed,
   createEffect,
   createMemo,
@@ -265,11 +269,14 @@ export function Upcoming(props: {
     for (const g of groups) out.push(out[out.length - 1]! + heightOf(g));
     return out;
   };
-  // A day's height is its box plus the margin after it.
+  // A day's height is its box plus the margin after it. Fractional,
+  // not `offsetHeight`: the header's hairline is half a pixel, and a
+  // rounded height per day adds up to a page that moves as days swap
+  // in and out of the spacers.
   const measureDrawn = () => {
     for (const el of hostEl.querySelectorAll<HTMLElement>("[data-group]")) {
       const gap = parseFloat(getComputedStyle(el).marginBottom) || 0;
-      measured.set(el.dataset.group!, el.offsetHeight + gap);
+      measured.set(el.dataset.group!, el.getBoundingClientRect().height + gap);
     }
   };
   const anchorIndex = (): number => {
@@ -278,21 +285,42 @@ export function Upcoming(props: {
     );
     return i < 0 ? 0 : i;
   };
-  const [win, setWin] = createSignal({ start: anchorIndex(), end: anchorIndex() });
+  type Span = { start: number; end: number };
+  const [win, setWin] = createSignal<Span>({ start: anchorIndex(), end: anchorIndex() });
+  // A second run of days drawn straight after (or before) the window with
+  // no spacer between: the far end of a smooth scroll, drawn next to the
+  // pane so the scroll is a short one (see `scrollToGroup`). Null except
+  // in flight.
+  const [far, setFar] = createSignal<Span | null>(null);
   // Clamped against the groups as they are now: a change can shorten them.
-  const span = createMemo(() => {
+  const clamp = (s: Span): Span => {
     const n = props.groups.length;
-    const start = Math.min(win().start, Math.max(0, n - 1));
-    const end = Math.min(Math.max(win().end, start), n - 1);
+    const start = Math.min(s.start, Math.max(0, n - 1));
+    const end = Math.min(Math.max(s.end, start), n - 1);
     return { start, end };
+  };
+  const span = createMemo(() => clamp(win()));
+  // The drawn runs in page order. Runs that touch or overlap (a change
+  // to the groups mid-flight) are drawn as one, so no day is drawn twice.
+  const runs = createMemo((): Span[] => {
+    const s = span();
+    const f = far();
+    if (!f) return [s];
+    const c = clamp(f);
+    if (c.start > s.end + 1) return [s, c];
+    if (c.end < s.start - 1) return [c, s];
+    return [{ start: Math.min(s.start, c.start), end: Math.max(s.end, c.end) }];
   });
   const shown = createMemo(() =>
-    props.groups.slice(span().start, span().end + 1),
+    runs().flatMap((r) => props.groups.slice(r.start, r.end + 1)),
   );
   const spacers = createMemo(() => {
     const at = offsets(props.groups);
-    const { start, end } = span();
-    return { top: at[start]!, bottom: at[at.length - 1]! - at[end + 1]! };
+    const rs = runs();
+    return {
+      top: at[rs[0]!.start]!,
+      bottom: at[at.length - 1]! - at[rs[rs.length - 1]!.end + 1]!,
+    };
   });
 
   // Opening on Overdue / Today, and holding the page still under a
@@ -307,17 +335,22 @@ export function Upcoming(props: {
   // read before a change reaches the DOM and put back after it.
   type Held = { selector: string; offset: number } | null;
   let held: Held = null;
+  // Probed a little way down as well: the pane's top can sit in the
+  // margin between two days, which belongs to neither.
   const topRow = (): Held => {
     const box = hostEl.getBoundingClientRect();
-    const at = document.elementFromPoint(box.left + 24, box.top + 2);
-    if (!at || !hostEl.contains(at)) return null;
-    const row = at.closest<HTMLElement>("[data-key]");
-    const day = at.closest<HTMLElement>("[data-group]");
-    if (!day || !hostEl.contains(day)) return null;
-    const selector = row
-      ? `[data-key="${CSS.escape(row.dataset.key!)}"][data-day="${CSS.escape(row.dataset.day!)}"]`
-      : `[data-group="${CSS.escape(day.dataset.group!)}"]`;
-    return { selector, offset: offsetOf(row ?? day) };
+    for (const dy of [2, 12, 24]) {
+      const at = document.elementFromPoint(box.left + 24, box.top + dy);
+      if (!at || !hostEl.contains(at)) continue;
+      const row = at.closest<HTMLElement>("[data-key]");
+      const day = at.closest<HTMLElement>("[data-group]");
+      if (!day || !hostEl.contains(day)) continue;
+      const selector = row
+        ? `[data-key="${CSS.escape(row.dataset.key!)}"][data-day="${CSS.escape(row.dataset.day!)}"]`
+        : `[data-group="${CSS.escape(day.dataset.group!)}"]`;
+      return { selector, offset: offsetOf(row ?? day) };
+    }
+    return null;
   };
   const restore = (h: Held) => {
     const el = h && hostEl.querySelector(h.selector);
@@ -340,17 +373,29 @@ export function Upcoming(props: {
     while (end < n - 1 && at[end + 1]! < hi) end++;
     return { start, end };
   };
-  // Draw `next`, keeping what is at the top of the pane where it is.
-  const setWindow = (next: { start: number; end: number }) => {
+  // Draw `next` (and `nextFar`), keeping what is at the top of the pane
+  // where it is.
+  const setWindow = (next: Span, nextFar: Span | null = null) => {
     const cur = span();
-    if (cur.start === next.start && cur.end === next.end) return false;
+    const f = far();
+    if (
+      cur.start === next.start &&
+      cur.end === next.end &&
+      f?.start === nextFar?.start &&
+      f?.end === nextFar?.end
+    ) {
+      return false;
+    }
     const h = topRow();
-    setWin(next);
+    batch(() => {
+      setWin(next);
+      setFar(nextFar);
+    });
     restore(h);
     return true;
   };
   const updateWindow = () => {
-    if (!hostEl?.isConnected) return;
+    if (!hostEl?.isConnected || flying) return;
     for (let pass = 0; pass < 4; pass++) {
       measureDrawn();
       if (!setWindow(windowFor(hostEl.scrollTop))) return;
@@ -373,7 +418,10 @@ export function Upcoming(props: {
   // Draw day `i` at the top of the pane, then fill in around it: for a
   // jump to a day that is not drawn (a far row, back to Today).
   const jumpToDay = (i: number) => {
-    setWin({ start: i, end: i });
+    batch(() => {
+      setWin({ start: i, end: i });
+      setFar(null);
+    });
     hostEl.scrollTop = spacers().top;
     updateWindow();
   };
@@ -394,27 +442,127 @@ export function Upcoming(props: {
     put = hostEl.scrollTop;
   };
   // A press is the user's scroll: it does not re-arm the opening hold.
-  // Smooth when the target is drawn; from further off it is a jump.
+  //
+  // The scroll is the browser's smooth one, which heads for a fixed
+  // scrollTop and is cancelled by any write to it. So everything it will
+  // pass is drawn and measured before it starts, and the window holds
+  // still until it lands (`flying`): no days drawn or dropped, no hold
+  // putting the top row back. A change to the rows mid-flight re-aims it
+  // instead.
+  //
+  // A target that is not drawn is faked near: its days are drawn as a
+  // second run (`far`) straight after the days in the pane (before them,
+  // when it is above), the days between left out, so the scroll is about
+  // a pane over real rows. On landing the true layout goes back in under
+  // the hold: the skipped days come back off screen (above the pane after
+  // a scroll down, below it after one up), and only the scrollbar moves.
+  let flying = false;
+  let flightTarget: (() => Element | null) | null = null;
+  let landTimer = 0;
+  // Back to one run: the one under the top of the pane, which is the far
+  // one after a whole flight, and either if the user took over mid-way.
+  const land = () => {
+    flying = false;
+    flightTarget = null;
+    clearTimeout(landTimer);
+    if (far() && hostEl?.isConnected) {
+      const rs = runs();
+      const box = hostEl.getBoundingClientRect();
+      const at = document.elementFromPoint(box.left + 24, box.top + 12);
+      const key = at?.closest<HTMLElement>("[data-group]")?.dataset.group;
+      const k = props.groups.findIndex((g) => g.key === key);
+      const keep = rs.find((r) => k >= r.start && k <= r.end) ?? rs[rs.length - 1]!;
+      setWindow(keep, null);
+    }
+    updateWindow();
+  };
+  // `scrollend` is the signal where there is one; a quiet spell is the
+  // fallback, and covers a scroll that had nowhere to go.
+  const armLanding = () => {
+    clearTimeout(landTimer);
+    landTimer = window.setTimeout(land, 150);
+  };
+  onCleanup(() => clearTimeout(landTimer));
+  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+  // Where the flight is headed, as the browser will clamp it.
+  let aimTop = 0;
+  const aim = (el: Element) => {
+    const max = hostEl.scrollHeight - hostEl.clientHeight;
+    aimTop = Math.max(0, Math.min(max, hostEl.scrollTop + offsetOf(el)));
+    hostEl.scrollTo({
+      top: aimTop,
+      behavior: reducedMotion?.matches ? "instant" : "smooth",
+    });
+  };
+  // Draw day `i` as the far run beside the days in the pane: from `i`
+  // on for two panes when it is below, from `i` to the pane's first day
+  // (at most a pane of it) when it is above. The window is cut to the
+  // pane on that side, so the run starts where the pane ends. A pass
+  // again once the run is drawn and measured.
+  const fakeNear = (i: number) => {
+    const n = props.groups.length;
+    const pane = hostEl.clientHeight;
+    // One run still (a press lands any flight first), so scrollTop is
+    // true page position. The days in the pane: `vs` .. `ve`.
+    measureDrawn();
+    let at = offsets(props.groups);
+    const top = hostEl.scrollTop;
+    let vs = 0;
+    while (vs < n - 1 && at[vs + 1]! <= top) vs++;
+    let ve = vs;
+    while (ve < n - 1 && at[ve + 1]! < top + pane) ve++;
+    const cur = span();
+    for (let pass = 0; pass < 2; pass++) {
+      if (pass > 0) {
+        measureDrawn();
+        at = offsets(props.groups);
+      }
+      let fe = i;
+      if (i > ve) {
+        while (fe < n - 1 && at[fe + 1]! < at[i]! + 2 * pane) fe++;
+        setWindow({ start: cur.start, end: ve }, { start: i, end: fe });
+      } else {
+        while (fe < vs - 1 && at[fe + 1]! < at[i]! + pane) fe++;
+        setWindow({ start: vs, end: cur.end }, { start: i, end: fe });
+      }
+    }
+  };
   const scrollToGroup = (i: number, find: () => Element | null) => {
     release();
-    ensureDrawn(i);
+    const { start, end } = span();
+    if (i < start || i > end) {
+      fakeNear(i);
+      const el = find();
+      if (!el) return;
+      measureDrawn();
+      flying = true;
+      flightTarget = find;
+      armLanding();
+      aim(el);
+      return;
+    }
     let el = find();
     if (!el) return;
-    // Draw the days around where it lands now, so none is drawn above
-    // the top row mid-scroll (which moves the page and stops the scroll).
+    // Draw every day from here to a pane either side of where it lands.
+    // Days drawn for the first time measure differently from their
+    // estimate, which moves the landing, so a pass or two.
+    for (let pass = 0; pass < 4; pass++) {
+      measureDrawn();
+      const there = windowFor(hostEl.scrollTop + offsetOf(el));
+      const cur = span();
+      const next = {
+        start: Math.min(cur.start, there.start),
+        end: Math.max(cur.end, there.end),
+      };
+      if (!setWindow(next)) break;
+      el = find();
+      if (!el) return;
+    }
     measureDrawn();
-    const there = windowFor(hostEl.scrollTop + offsetOf(el));
-    const cur = span();
-    setWindow({
-      start: Math.min(cur.start, there.start),
-      end: Math.max(cur.end, there.end),
-    });
-    el = find();
-    if (!el) return;
-    hostEl.scrollTo({
-      top: hostEl.scrollTop + offsetOf(el),
-      behavior: "smooth",
-    });
+    flying = true;
+    flightTarget = find;
+    armLanding();
+    aim(el);
   };
   const scrollToToday = () => scrollToGroup(anchorIndex(), anchorEl);
   // Day keys are `YYYY-MM-DD`, so they order as strings; Overdue's key
@@ -441,18 +589,36 @@ export function Upcoming(props: {
   // Where the opening scroll left the pane: a scroll to anywhere else
   // is the user's (the scrollbar, Page Down), and ends it.
   let put = 0;
+  // Also the end of a flight: a wheel, touch or click during one is
+  // the user taking over.
   const release = () => {
     anchoring = false;
+    if (flying) land();
   };
   const onScroll = () => {
+    if (flying) {
+      armLanding();
+      return;
+    }
     if (anchoring && Math.abs(hostEl.scrollTop - put) > 1) release();
     scheduleWindow();
   };
+  onMount(() => {
+    // Only at the destination: the instant scrollTop write that put the
+    // far run in (the hold) has its own `scrollend`, which arrives after
+    // the flight has set off. A flight stopped short lands on the quiet
+    // spell instead.
+    const onEnd = () => {
+      if (flying && Math.abs(hostEl.scrollTop - aimTop) < 2) land();
+    };
+    hostEl.addEventListener("scrollend", onEnd);
+    onCleanup(() => hostEl.removeEventListener("scrollend", onEnd));
+  });
   // A computed runs ahead of the render effects that patch the rows in,
   // so the DOM read here is still the old one.
   createComputed(() => {
     void props.groups;
-    held = anchoring || !hostEl?.isConnected ? null : topRow();
+    held = anchoring || flying || !hostEl?.isConnected ? null : topRow();
   });
   // The window moves in a microtask: a signal written inside an effect
   // waits for the effect to end before the DOM has it, and the window
@@ -462,6 +628,16 @@ export function Upcoming(props: {
     if (anchoring) {
       queueMicrotask(() => {
         if (anchoring) putAnchorAtTop();
+      });
+      return;
+    }
+    if (flying) {
+      // A far run is indexed into the old groups: give it up.
+      queueMicrotask(() => {
+        if (!flying) return;
+        if (far()) return land();
+        const el = flightTarget?.();
+        if (el) aim(el);
       });
       return;
     }

@@ -479,7 +479,7 @@ body {
 }
 
 /* The windowing in `Upcoming.tsx` adds this margin to a day's measured
-   `offsetHeight`. */
+   height. */
 .upcoming-day {
   margin-bottom: 0.5em;
 }
