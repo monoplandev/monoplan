@@ -14,7 +14,8 @@
 // radius 8, icon column centred 27.25, title at 42, 28 pt rows).
 //
 // Its selection is its own: the list shown, when it is one of these.
-// The `List`'s selection has no row for it then, and shows none.
+// The `List` has no selection either: its rows draw their own grey
+// selection to match these (`MainWindowView.sidebar`).
 
 import AppKit
 import MonoplanCore

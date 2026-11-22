@@ -1674,6 +1674,10 @@ struct MainWindowView: View {
         }
     }
 
+    /// A nav row's content is 20 pt in a 28 pt row: its selection
+    /// reaches this far above and below it.
+    private static let navRowPad: CGFloat = (SidebarLists.rowHeight - 20) / 2
+
     /// The web nav's shape: the lenses over every workspace on top
     /// (Starred, Calendar, Done), then one group per open workspace, stacked, Home
     /// ("Personal") first: a heading that folds the group, then its
@@ -1681,24 +1685,42 @@ struct MainWindowView: View {
     /// one in another group moves both at once.
     private var sidebar: some View {
         let current = model.lens.map(NavTarget.lens) ?? .list(workspace: model.workspace, list: model.list)
-        // Every row's label is regular, selected or not. A sidebar
-        // `List` whose selection is set on its first render draws that
-        // row bold and keeps it bold after the selection moves on
-        // (macOS 26, probed 2026-11-15); the explicit weight on each
-        // row (`navRow`) overrides it.
+        // The rows draw their own selection, as the lists' block
+        // (`SidebarLists`) does: the web nav's grey, focused or not, the
+        // label unchanged on it. The `List` has no selection of its own,
+        // so it draws no accent highlight, and none of the bold a
+        // sidebar `List` gives the row selected on its first render
+        // (macOS 26, probed 2026-11-15).
         func row<V: View>(_ target: NavTarget, _ content: V) -> some View {
-            content.navRow().tag(target)
-        }
-        return List(selection: Binding<NavTarget?>(
-            get: { current },
-            set: {
-                switch $0 {
-                case .lens(let lens): model.select(lens: lens)
-                case .list(let workspace, let list): model.select(workspace: workspace, list: list)
-                case nil: break
+            let selected = target == current
+            return content.navRow()
+                // Template glyphs in their label colour, not the accent.
+                .listItemTint(Color(nsColor: .labelColor))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                // Out to the selection's bounds: the row's height, and
+                // `bleed` past the cell each side, as the lists' rows.
+                .padding(.vertical, Self.navRowPad)
+                .padding(.horizontal, SidebarLists.bleed)
+                .background {
+                    if selected {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color(nsColor: PaneColor.rowSelectedInactive))
+                    }
                 }
+                .contentShape(Rectangle())
+                .onTapGesture { select(target) }
+                .padding(.vertical, -Self.navRowPad)
+                .padding(.horizontal, -SidebarLists.bleed)
+                .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+                .accessibilityAction { select(target) }
+        }
+        func select(_ target: NavTarget) {
+            switch target {
+            case .lens(let lens): model.select(lens: lens)
+            case .list(let workspace, let list): model.select(workspace: workspace, list: list)
             }
-        )) {
+        }
+        return List {
             Section {
                 // Starred and the Inbox are counted whatever the
                 // preference says, as on iOS.
