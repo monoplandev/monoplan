@@ -39,8 +39,14 @@
 // host group headers. So it runs the Workspace's `DndSelection` over the
 // rows of every day concatenated, and answers the same keys through the
 // shared `applySelectionKeyAction`, which makes ↑ / ↓ cross day boundaries
-// for free. Nothing is virtualised. Drag-to-reschedule is deferred
-// (`spec/calendar-plan.md`).
+// for free. Rows drag between days to reschedule (see "Drag to
+// reschedule" below).
+//
+// Windowed by day, not by row: the day sections from a pane's height
+// above the pane to one below are drawn, spacers stand in for the rest
+// (each day's last measured height, or an estimate from its rows), and
+// the window follows the scroll. A jump to a day that is not drawn (a
+// row off in the past, back to Today) draws it first.
 //
 // The days gone by (a year of them, `AGENDA_PAST_DAYS`: events that
 // happened, items settled on the day they were planned for) sit above,
@@ -68,10 +74,14 @@ import { ItemContextMenu } from "./ItemContextMenu.tsx";
 import { RowMenuButton } from "./Row.tsx";
 import {
   agendaItems,
+  dropOnDay,
   isDueRow,
+  OVERDUE_KEY,
   type DayGroup,
   type DayRow,
 } from "./dayGroups.ts";
+import { DndAutoscroll } from "./dnd/dom/autoscroll.ts";
+import { DndDragOverlay } from "./dnd/dom/drag-overlay.ts";
 import {
   applySelectionKeyAction,
   mapDndKeyEvent,
@@ -213,6 +223,58 @@ export function Upcoming(props: {
     setPickedDay(next);
   });
 
+  // Day windowing: only the day sections near the pane are in the DOM,
+  // from one pane's height above it to one below, with a spacer each
+  // side standing in for the rest. A day's height is what it measured
+  // when it was last drawn, else an estimate from its rows; drawing a
+  // day changes the estimate to the truth, and the hold below keeps
+  // what is at the top of the pane where it is when that moves things.
+  const measured = new Map<string, number>();
+  const DAY_HEADER_EST = 28;
+  const ROW_EST = 40;
+  const SLOT_EST = 32;
+  const DAY_GAP_EST = 7;
+  const heightOf = (g: DayGroup): number =>
+    measured.get(g.key) ??
+    DAY_HEADER_EST +
+      DAY_GAP_EST +
+      (g.rows.length === 0 ? SLOT_EST : g.rows.length * ROW_EST);
+  // `out[i]` is where day `i` starts; `out[n]` is the whole height.
+  const offsets = (groups: readonly DayGroup[]): number[] => {
+    const out = [0];
+    for (const g of groups) out.push(out[out.length - 1]! + heightOf(g));
+    return out;
+  };
+  // A day's height is its box plus the margin after it.
+  const measureDrawn = () => {
+    for (const el of hostEl.querySelectorAll<HTMLElement>("[data-group]")) {
+      const gap = parseFloat(getComputedStyle(el).marginBottom) || 0;
+      measured.set(el.dataset.group!, el.offsetHeight + gap);
+    }
+  };
+  const anchorIndex = (): number => {
+    const i = props.groups.findIndex(
+      (g) => g.urgency === "overdue" || g.urgency === "today",
+    );
+    return i < 0 ? 0 : i;
+  };
+  const [win, setWin] = createSignal({ start: anchorIndex(), end: anchorIndex() });
+  // Clamped against the groups as they are now: a change can shorten them.
+  const span = createMemo(() => {
+    const n = props.groups.length;
+    const start = Math.min(win().start, Math.max(0, n - 1));
+    const end = Math.min(Math.max(win().end, start), n - 1);
+    return { start, end };
+  });
+  const shown = createMemo(() =>
+    props.groups.slice(span().start, span().end + 1),
+  );
+  const spacers = createMemo(() => {
+    const at = offsets(props.groups);
+    const { start, end } = span();
+    return { top: at[start]!, bottom: at[at.length - 1]! - at[end + 1]! };
+  });
+
   // Opening on Overdue / Today, and holding the page still under a
   // change (see the header comment).
   let anchoring = true;
@@ -221,17 +283,113 @@ export function Upcoming(props: {
   // Overdue comes first in the DOM when it is there.
   const anchorEl = () =>
     hostEl.querySelector('[data-urgency="overdue"], [data-urgency="today"]');
+  // The row (or day header) at the top of the pane and where it sits,
+  // read before a change reaches the DOM and put back after it.
+  type Held = { selector: string; offset: number } | null;
+  let held: Held = null;
+  const topRow = (): Held => {
+    const box = hostEl.getBoundingClientRect();
+    const at = document.elementFromPoint(box.left + 24, box.top + 2);
+    if (!at || !hostEl.contains(at)) return null;
+    const row = at.closest<HTMLElement>("[data-key]");
+    const day = at.closest<HTMLElement>("[data-group]");
+    if (!day || !hostEl.contains(day)) return null;
+    const selector = row
+      ? `[data-key="${CSS.escape(row.dataset.key!)}"][data-day="${CSS.escape(row.dataset.day!)}"]`
+      : `[data-group="${CSS.escape(day.dataset.group!)}"]`;
+    return { selector, offset: offsetOf(row ?? day) };
+  };
+  const restore = (h: Held) => {
+    const el = h && hostEl.querySelector(h.selector);
+    if (!el) return;
+    const moved = offsetOf(el) - h!.offset;
+    if (Math.abs(moved) >= 1) hostEl.scrollTop += moved;
+  };
+  // Re-pick the drawn days from where the pane is now. Settles in a
+  // pass or two: drawing a day can move the pane, which re-picks.
+  // The days to draw with the pane's top at `top` (content px).
+  const windowFor = (top: number): { start: number; end: number } => {
+    const at = offsets(props.groups);
+    const n = props.groups.length;
+    const pane = hostEl.clientHeight;
+    const lo = top - pane;
+    const hi = top + 2 * pane;
+    let start = 0;
+    while (start < n - 1 && at[start + 1]! <= lo) start++;
+    let end = start;
+    while (end < n - 1 && at[end + 1]! < hi) end++;
+    return { start, end };
+  };
+  // Draw `next`, keeping what is at the top of the pane where it is.
+  const setWindow = (next: { start: number; end: number }) => {
+    const cur = span();
+    if (cur.start === next.start && cur.end === next.end) return false;
+    const h = topRow();
+    setWin(next);
+    restore(h);
+    return true;
+  };
+  const updateWindow = () => {
+    if (!hostEl?.isConnected) return;
+    for (let pass = 0; pass < 4; pass++) {
+      measureDrawn();
+      if (!setWindow(windowFor(hostEl.scrollTop))) return;
+    }
+  };
+  let frame = 0;
+  const scheduleWindow = () => {
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      updateWindow();
+    });
+  };
+  onCleanup(() => cancelAnimationFrame(frame));
+  onMount(() => {
+    const ro = new ResizeObserver(scheduleWindow);
+    ro.observe(hostEl);
+    onCleanup(() => ro.disconnect());
+  });
+  // Draw day `i` at the top of the pane, then fill in around it: for a
+  // jump to a day that is not drawn (a far row, back to Today).
+  const jumpToDay = (i: number) => {
+    setWin({ start: i, end: i });
+    hostEl.scrollTop = spacers().top;
+    updateWindow();
+  };
+  const ensureDrawn = (i: number) => {
+    const { start, end } = span();
+    if (i < start || i > end) jumpToDay(i);
+  };
+
   const putAnchorAtTop = () => {
+    ensureDrawn(anchorIndex());
     const el = anchorEl();
     // Not past the end: a page shorter than the pane from Today on
     // rests on its last row (the browser clamps).
     if (el) hostEl.scrollTop += offsetOf(el);
+    updateWindow();
+    const again = anchorEl();
+    if (again) hostEl.scrollTop += offsetOf(again);
     put = hostEl.scrollTop;
   };
   // A press is the user's scroll: it does not re-arm the opening hold.
+  // Smooth when Today is drawn; from further off it is a jump.
   const scrollToToday = () => {
     release();
-    const el = anchorEl();
+    ensureDrawn(anchorIndex());
+    let el = anchorEl();
+    if (!el) return;
+    // Draw the days around where it lands now, so none is drawn above
+    // the top row mid-scroll (which moves the page and stops the scroll).
+    measureDrawn();
+    const there = windowFor(hostEl.scrollTop + offsetOf(el));
+    const cur = span();
+    setWindow({
+      start: Math.min(cur.start, there.start),
+      end: Math.max(cur.end, there.end),
+    });
+    el = anchorEl();
     if (!el) return;
     hostEl.scrollTo({
       top: hostEl.scrollTop + offsetOf(el),
@@ -246,21 +404,7 @@ export function Upcoming(props: {
   };
   const onScroll = () => {
     if (anchoring && Math.abs(hostEl.scrollTop - put) > 1) release();
-  };
-  // The row (or day header) at the top of the pane and where it sits,
-  // read before a change reaches the DOM and put back after it.
-  let held: { selector: string; offset: number } | null = null;
-  const topRow = (): typeof held => {
-    const box = hostEl.getBoundingClientRect();
-    const at = document.elementFromPoint(box.left + 24, box.top + 2);
-    if (!at || !hostEl.contains(at)) return null;
-    const row = at.closest<HTMLElement>("[data-key]");
-    const day = at.closest<HTMLElement>("[data-group]");
-    if (!day || !hostEl.contains(day)) return null;
-    const selector = row
-      ? `[data-key="${CSS.escape(row.dataset.key!)}"][data-day="${CSS.escape(row.dataset.day!)}"]`
-      : `[data-group="${CSS.escape(day.dataset.group!)}"]`;
-    return { selector, offset: offsetOf(row ?? day) };
+    scheduleWindow();
   };
   // A computed runs ahead of the render effects that patch the rows in,
   // so the DOM read here is still the old one.
@@ -268,24 +412,33 @@ export function Upcoming(props: {
     void props.groups;
     held = anchoring || !hostEl?.isConnected ? null : topRow();
   });
+  // The window moves in a microtask: a signal written inside an effect
+  // waits for the effect to end before the DOM has it, and the window
+  // reads the DOM straight after its writes.
   createEffect(() => {
     void props.groups;
     if (anchoring) {
-      putAnchorAtTop();
+      queueMicrotask(() => {
+        if (anchoring) putAnchorAtTop();
+      });
       return;
     }
-    const el = held && hostEl.querySelector(held.selector);
-    if (!el) return;
-    const moved = offsetOf(el) - held!.offset;
-    if (Math.abs(moved) >= 1) hostEl.scrollTop += moved;
+    restore(held);
+    queueMicrotask(updateWindow);
   });
 
   // The copy that draws the selection (`litDay`), else the first row
-  // carrying the id in DOM order.
+  // carrying the id in DOM order; its day is drawn first if it is not.
   const scrollToKey = (id: string) => {
     release();
-    const key = `[data-key="${CSS.escape(id)}"]`;
     const day = litDay(id);
+    let i = day === undefined ? -1 : props.groups.findIndex((g) => g.key === day);
+    if (i < 0) {
+      i = props.groups.findIndex((g) => g.rows.some((r) => r.item.id === id));
+    }
+    if (i < 0) return;
+    ensureDrawn(i);
+    const key = `[data-key="${CSS.escape(id)}"]`;
     const el =
       (day && hostEl.querySelector(`${key}[data-day="${CSS.escape(day)}"]`)) ||
       hostEl.querySelector(key);
@@ -388,7 +541,150 @@ export function Upcoming(props: {
   };
   const rowIdFromEvent = (e: MouseEvent): string | null =>
     rowFromEvent(e)?.dataset.key ?? null;
+  // Drag to reschedule (`spec/calendar-plan.md` "Reschedule"): a mouse
+  // press on a row that moves past a few px picks up the selection (the
+  // row is selected first if it is not), the list view's overlay stack
+  // follows the pointer, and the day section under it is the target
+  // (any day, past ones included; not Overdue). The drop writes
+  // `dropOnDay` for each item as one undo step. A row closed today (at
+  // the end of Today by when it was closed) does not pick up, and in a
+  // selection it stays put. Escape cancels. Mouse only.
+  const DRAG_START_PX = 4;
+  const overlay = new DndDragOverlay(3);
+  let autoscroll: DndAutoscroll | null = null;
+  let press: { x: number; y: number; id: string; day: string; el: HTMLElement } | null =
+    null;
+  let dragIds: string[] | null = null;
+  let lastPointer = { x: 0, y: 0 };
+  let suppressClick = false;
+  const [dropDay, setDropDay] = createSignal<string | null>(null);
+  const [dragging, setDragging] = createSignal<ReadonlySet<string>>(new Set());
+
+  const dayUnder = (x: number, y: number): string | null => {
+    const at = document.elementFromPoint(x, y);
+    if (!at || !hostEl.contains(at)) return null;
+    const key = at.closest<HTMLElement>("[data-group]")?.dataset.group;
+    return key && key !== OVERDUE_KEY ? key : null;
+  };
+  const onRowMouseDown = (e: MouseEvent) => {
+    if (e.button !== 0 || e.shiftKey || (isMac ? e.metaKey : e.ctrlKey)) return;
+    if (props.openOnTap?.()) return;
+    const t = e.target as HTMLElement | null;
+    if (t?.closest("input, button, a")) return;
+    const row = rowFromEvent(e);
+    if (!row || row.dataset.placed === "done") return;
+    press = {
+      x: e.clientX,
+      y: e.clientY,
+      id: row.dataset.key!,
+      day: row.dataset.day!,
+      el: row,
+    };
+    document.addEventListener("mousemove", onDocMouseMove);
+    document.addEventListener("mouseup", onDocMouseUp);
+  };
+  const startDrag = () => {
+    const p = press!;
+    if (!props.selection.getSelectedKeySet().has(p.id)) {
+      props.selection.selectOnly(p.id);
+      setPickedDay(new Map([[p.id, p.day]]));
+    }
+    const ids = props.selection.getSelectedKeys().map(String);
+    dragIds = ids;
+    setDragging(new Set(ids));
+    release();
+    window.getSelection()?.removeAllRanges();
+    // The grabbed row leads the stack, then the other selected rows that
+    // are drawn, each once.
+    const els: HTMLElement[] = [p.el];
+    for (const id of ids) {
+      if (id === p.id) continue;
+      const el = hostEl.querySelector<HTMLElement>(
+        `[data-key="${CSS.escape(id)}"]`,
+      );
+      if (el) els.push(el);
+    }
+    overlay.start(
+      els,
+      ids.length,
+      p.x,
+      p.y,
+      p.el.offsetHeight,
+      p.el.offsetWidth,
+      p.el,
+      0,
+      4,
+    );
+    autoscroll = new DndAutoscroll(hostEl, 48, false);
+    document.addEventListener("keydown", onDragKeyDown, true);
+  };
+  const onDocMouseMove = (e: MouseEvent) => {
+    if (!press) return;
+    if (!dragIds) {
+      if (Math.hypot(e.clientX - press.x, e.clientY - press.y) < DRAG_START_PX) {
+        return;
+      }
+      startDrag();
+    }
+    e.preventDefault();
+    lastPointer = { x: e.clientX, y: e.clientY };
+    overlay.updatePosition(e.clientX, e.clientY);
+    autoscroll?.update(e.clientX, e.clientY);
+    setDropDay(dayUnder(e.clientX, e.clientY));
+  };
+  const endDrag = (commit: boolean) => {
+    document.removeEventListener("mousemove", onDocMouseMove);
+    document.removeEventListener("mouseup", onDocMouseUp);
+    document.removeEventListener("keydown", onDragKeyDown, true);
+    const ids = dragIds;
+    const day = dropDay();
+    press = null;
+    dragIds = null;
+    overlay.stop();
+    autoscroll?.stop();
+    autoscroll = null;
+    setDropDay(null);
+    setDragging(new Set<string>());
+    if (!ids) return;
+    // The click that follows the mouseup is the drag's, not a select.
+    suppressClick = true;
+    setTimeout(() => (suppressClick = false), 0);
+    if (!commit || day === null) return;
+    const writes = ids.flatMap((id) => {
+      const it = flat().find((r) => r.item.id === id)?.item;
+      const w = it ? dropOnDay(it, day) : null;
+      return w ? [{ id, ...w }] : [];
+    });
+    if (writes.length === 0) return;
+    props.app.withActionBatch(() => {
+      for (const w of writes) {
+        if (w.field === "when") props.app.setItemWhen(w.id, w.value);
+        else props.app.setItemDeadline(w.id, w.value);
+      }
+    });
+    // The moved items light on the day they landed on.
+    setPickedDay(new Map(ids.map((id) => [id, day])));
+  };
+  const onDocMouseUp = () => endDrag(true);
+  const onDragKeyDown = (e: KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    endDrag(false);
+  };
+  // Autoscroll moves the days under a still pointer.
+  const onDragScroll = () => {
+    if (dragIds) setDropDay(dayUnder(lastPointer.x, lastPointer.y));
+  };
+  onCleanup(() => {
+    if (press || dragIds) endDrag(false);
+  });
+
   const onClick = (e: MouseEvent) => {
+    if (suppressClick) {
+      suppressClick = false;
+      return;
+    }
     const t = e.target as HTMLElement | null;
     if (t?.closest("input")) return;
     const row = rowFromEvent(e);
@@ -518,12 +814,17 @@ export function Upcoming(props: {
       onKeyDown={onKeyDown}
       onClick={onClick}
       onDblClick={onDblClick}
-      onScroll={onScroll}
+      onScroll={() => {
+        onScroll();
+        onDragScroll();
+      }}
+      onMouseDown={onRowMouseDown}
       onWheel={release}
       onTouchMove={release}
       onPointerDown={release}
     >
-      <For each={props.groups}>
+      <div class="upcoming-spacer" style={{ height: `${spacers().top}px` }} />
+      <For each={shown()}>
         {(g) => (
           <section
             class="upcoming-day"
@@ -531,6 +832,7 @@ export function Upcoming(props: {
             aria-label={dayHeading(g)}
             data-urgency={g.urgency}
             data-group={g.key}
+            data-drop-target={dropDay() === g.key ? "" : undefined}
           >
             <header class="upcoming-day-header">
               <h2 class="upcoming-day-label">{dayHeading(g)}</h2>
@@ -574,6 +876,7 @@ export function Upcoming(props: {
                     aria-selected={selected() ? "true" : "false"}
                     data-tone={r.tone}
                     data-placed={r.placedBy}
+                    data-dragging={dragging().has(r.item.id) ? "" : undefined}
                     // `data-done`, not `data-closed`: the menu trigger
                     // sets its own `data-closed` while the menu is shut.
                     data-done={isClosed(r.item) ? "" : undefined}
@@ -762,9 +1065,9 @@ export function Upcoming(props: {
                   );
                 }}
             </For>
-            {/* An empty day keeps a blank row-height slot: room to drop
-                onto it once drag-to-reschedule lands (`data-drop-day`);
-                a day with rows has them to drop onto. Today with nothing
+            {/* An empty day keeps a blank row-height slot, room to drop
+                a dragged row onto (`data-drop-day`); a day with rows has
+                them to drop onto. Today with nothing
                 on it says so here. Overdue is never empty. */}
             <Show when={g.rows.length === 0 && g.urgency !== "overdue"}>
               <div
@@ -780,6 +1083,7 @@ export function Upcoming(props: {
           </section>
         )}
       </For>
+      <div class="upcoming-spacer" style={{ height: `${spacers().bottom}px` }} />
     </div>
   );
 }

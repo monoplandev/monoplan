@@ -5,7 +5,7 @@ Decided 2026-09-09, trimmed the same day.** Adds
 a second date to items, `when`, alongside the existing `deadline`, and grows
 the Upcoming view into a day-granular agenda over both dates. The first cut
 is the basics only: the field, the agenda, and a When control with an
-optional time. No month grid, no drag-to-reschedule, no recurrence rules, no
+optional time. No month grid, no recurrence rules, no
 time zones, no export, each with its extension point reserved so it lands
 later without a migration.
 
@@ -24,7 +24,7 @@ lands; this file is the design record.
 | Recurrence? | **Not in the first cut.** No `repeat` field, no hint of one in the doc. Repeat-on-done (clone with the date advanced when ticked Done) is the likely first form; RRULE-style schedules are a calendar app's job. |
 | Does the clock ever write? | **Never.** A past `when` stays where it was set, on its day in the past. Nothing promotes an item to Live, adds it to Focus, or moves it because a day arrived: every device would race to do it. |
 | What does a past `when` mean? | **On an event, it went by; on a task, it is overdue** (decided 2026-11-13, narrowing 2026-09-30, which let every past `when` go by). `when` is fixed and does not roll over: it is never rewritten and never reinterpreted as "today". An event's `when` from a previous day is in the past, and the agenda, which renders no past days, does not select it. An Open task's is still to do: it was planned and not done, so it sits in Overdue until it is ticked, re-planned or cleared. The 2026-09-30 rule predates the `events` list (2026-10-02): once things that merely happen had a home of their own, a dated item outside it is work, and work that silently left the agenda when its day passed was lost. |
-| Calendar surface | **One lens: Upcoming becomes the agenda** (day sections, both dates). Day granularity only: no hour grid, no overlap. Items carry an optional `duration` (added 2026-09-16, see "Field: `duration`"), which the agenda reads for multi-day all-day spans and the end-time display but never lays out on an hour axis. A month grid and drag-to-reschedule are deferred; the agenda's shape does not change when they land. |
+| Calendar surface | **One lens: Upcoming becomes the agenda** (day sections, both dates). Day granularity only: no hour grid, no overlap. Items carry an optional `duration` (added 2026-09-16, see "Field: `duration`"), which the agenda reads for multi-day all-day spans and the end-time display but never lays out on an hour axis. A month grid is deferred; drag-to-reschedule on the agenda was built 2026-11-22 ("Agenda"). |
 | Time input | **Typed time picker** (`TimePicker.tsx`): a text input with a suggestion list, 12 or 24-hour cycle from the existing time-format preference. Empty means all-day. See "Task surface and rows". |
 | Export / CalDAV | **Deferred.** Mapping is recorded below. A subscribable feed needs a server that can read items, which the E2EE server cannot; a non-E2EE CalDAV carve-out is a separate conversation. |
 | Schema | **Additive within v4.** No break, no import step. |
@@ -396,15 +396,35 @@ for the month grid). `groupByDeadline` becomes
   by the list-counts preference. Future days and done rows do not count, and neither
   does an event's past `when`: it has gone by (`attentionBadge` in
   `dayGroups.ts`).
-- Not a `Dnd` listbox (day sections, rows of two heights, nothing
-  virtualised: the agenda is bounded to overdue plus today onward), but a
+- Not a `Dnd` listbox (day sections, rows of two heights), but a
   listbox in the list view's sense (web, built 2026-10-14): it runs the
   Workspace's `DndSelection` over every day's rows concatenated and answers
   the same keys through the shared `applySelectionKeyAction`, so ↑ / ↓ and
   shift-ranges cross day boundaries. Click selects and the side pane
   follows; Enter / double-click opens; `x`, `f`, `m`, ⌫, ⌘C, ⌘D act on the
-  selection as on a list. ⌘↑ / ⌘↓ (reorder) does nothing here.
-  Drag-to-reschedule is deferred (see below).
+  selection as on a list. ⌘↑ / ⌘↓ (reorder) and ⌘A (select all: the
+  agenda reaches a year back) do nothing here.
+- **Drag to reschedule** (web, built 2026-11-22, mouse only): a press on
+  a row that moves a few px picks up the selection (the row selected
+  first if it is not) under the list view's overlay stack; the day
+  section under the pointer is the target, tinted, and the edges
+  autoscroll. The drop writes `dropOnDay` (`dayGroups.ts`) for each
+  carried item in one action batch, so one undo step; the rules are
+  "Reschedule" under "Deferred" below. A row closed today does not pick
+  up, and is left where it is when carried in a selection. Escape
+  cancels. Not built: touch, ⌘↑ / ⌘↓ nudging by a day, the month grid.
+- **All days** (web, 2026-11-22): a header toggle, a device preference
+  on by default, gives every day a section from the first past day with
+  something on it to the later of the last placed day and two weeks ahead
+  (`fillEmptyDays`), not only the days something is on. An empty day is
+  its heading over a blank row-height slot (`data-drop-day`), the day's
+  drop target once reschedule lands; Today's says "Nothing due today".
+- **Windowed by day** (web, 2026-11-22): only the day sections from one
+  pane's height above the pane to one below are in the DOM; spacers stand
+  in for the rest at each day's last measured height, else an estimate
+  from its rows. The window follows the scroll, keeping the top row where
+  it is as estimates turn into measurements; a jump to an undrawn day (a
+  far row, back to Today) draws it first.
 - **Capture** (web): the Add button on this view opens the task dialog on
   a new event: no list, `when` prefilled to today and the Event box under
   it ticked. Unticking the box makes it a task with that date, still
@@ -667,12 +687,18 @@ here.
   on them; overdue deadlines stay in Overdue), click or Enter on a day opens the agenda
   anchored on it. Needs the agenda to accept an anchor day. Nothing in the
   data model changes for it.
-- **Reschedule.** Drag a row between agenda day sections or grid cells. A
+- **Reschedule** (agenda drag built 2026-11-22, see "Agenda"; the grid
+  is not). Drag a row between agenda day sections or grid cells. A
   row placed by `when` moves its `when` with the time part kept; a row placed
   by `deadline` only moves its deadline; a row with both moves `when`, the
   deadline being a commitment that moves only through the explicit control.
-  The agenda already carries a selection; what is missing is a pointer
-  drag that hit-tests day section rects, or ⌘↑ / ⌘↓ nudging the day by one.
+  Decided 2026-11-22: a multi-day span moves its start to the drop day
+  (whichever day of the span was grabbed), keeping its `duration`; rows
+  drag out of Overdue; any day takes a drop, past days included (not
+  Overdue, which is not a day); a multi-selection lands every item on the
+  drop day (not shifted by a common offset). The drop target is the whole
+  day section, an empty day's blank slot included.
+  Still to do: ⌘↑ / ⌘↓ nudging the day by one, and touch.
 - **Export**, per the mapping above.
 - **CalDAV carve-out.** Separate conversation.
 - **Week view, hour grid.** Not planned. (A `duration` register landed

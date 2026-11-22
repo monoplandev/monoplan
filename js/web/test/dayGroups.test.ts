@@ -10,6 +10,7 @@ import { describe, expect, test } from "bun:test";
 import {
   agendaItems,
   attentionBadge,
+  dropOnDay,
   fillEmptyDays,
   groupByDay,
   isDueRow,
@@ -681,5 +682,35 @@ describe("fillEmptyDays", () => {
     expect(filled[0]!.key).toBe(TODAY);
     expect(filled[filled.length - 1]!.key).toBe("2026-10-01");
     expect(filled.length).toBe(23);
+  });
+});
+
+describe("dropOnDay", () => {
+  test("moves the when, keeping the clock time", () => {
+    expect(dropOnDay(item("a", { when: "2026-09-10T14:30" }), "2026-09-12")).toEqual({
+      field: "when",
+      value: "2026-09-12T14:30",
+    });
+    expect(dropOnDay(item("b", { when: "2026-09-10" }), "2026-09-01")).toEqual({
+      field: "when",
+      value: "2026-09-01",
+    });
+  });
+
+  test("an item with both dates moves its when; deadline-only moves the deadline", () => {
+    const both = item("c", { when: "2026-09-10", deadline: "2026-09-15" });
+    expect(dropOnDay(both, "2026-09-11")).toEqual({ field: "when", value: "2026-09-11" });
+    const due = item("d", { deadline: "2026-09-15" });
+    expect(dropOnDay(due, "2026-09-11")).toEqual({ field: "deadline", value: "2026-09-11" });
+  });
+
+  test("a span moves its start; same day, closed tasks and undated items are no-ops", () => {
+    const span = item("e", { when: "2026-09-08" }, { duration: 3 * 1440 });
+    expect(dropOnDay(span, "2026-09-20")).toEqual({ field: "when", value: "2026-09-20" });
+    expect(dropOnDay(item("f", { when: "2026-09-10T09:00" }), "2026-09-10")).toBeNull();
+    expect(
+      dropOnDay(item("g", { when: "2026-09-10" }, { state: "done" }), "2026-09-11"),
+    ).toBeNull();
+    expect(dropOnDay(item("h", {}), "2026-09-11")).toBeNull();
   });
 });

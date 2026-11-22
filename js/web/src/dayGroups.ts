@@ -464,3 +464,27 @@ export function fillEmptyDays(
   }
   return out;
 }
+
+/** What dropping `item` on the agenda day `day` writes
+ *  (`spec/calendar-plan.md` "Reschedule"): an item with a `when` moves
+ *  its `when` there, the clock time kept, and a multi-day span moves its
+ *  start (the `duration` is untouched, so the span keeps its length),
+ *  whichever of its rows was grabbed; an item with only a deadline moves
+ *  the deadline. Null when nothing would change, or for an item the
+ *  drop does not move: a closed task (it sits on the day it was closed)
+ *  or one with no date. */
+export function dropOnDay(
+  item: ItemView,
+  day: string,
+): { field: "when" | "deadline"; value: string } | null {
+  if (isBinned(item) || isClosedTask(item)) return null;
+  if (item.when) {
+    if (whenDay(item.when) === day) return null;
+    return { field: "when", value: day + item.when.slice(10) };
+  }
+  if (item.deadline) {
+    if (item.deadline === day) return null;
+    return { field: "deadline", value: day };
+  }
+  return null;
+}

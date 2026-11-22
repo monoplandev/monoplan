@@ -440,12 +440,25 @@ body {
   outline: none;
 }
 
+/* The windowing in `Upcoming.tsx` adds this margin to a day's measured
+   `offsetHeight`. */
 .upcoming-day {
   margin-bottom: 0.5em;
 }
 
-.upcoming-day:last-child {
-  margin-bottom: 0;
+/* Drag to reschedule: the day under the pointer, and the rows being
+   carried (their overlay copies follow the pointer). */
+.upcoming-day[data-drop-target] {
+  background: var(--bg-hover);
+  border-radius: 6px;
+}
+
+.upcoming-row[data-dragging] {
+  opacity: 0.4;
+}
+
+.upcoming-spacer {
+  flex: none;
 }
 
 /* The hairline sits under the day heading, not under the day's rows. */
@@ -453,7 +466,7 @@ body {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding: 10px 4px 8px;
+  padding: 4px;
   border-bottom: 0.5px solid var(--row-divider);
 }
 
