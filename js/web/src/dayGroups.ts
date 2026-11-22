@@ -424,12 +424,14 @@ export const AGENDA_ALL_DAYS_AHEAD = 13;
 /** The agenda with every day in it, not just the days something is on
  *  (the web Upcoming view's default; "Hide empty days" in its filter
  *  menu, a device preference, turns it off): an
- *  empty group for each missing day from the first past group (if any)
- *  through to the later of the last placed day and `today + ahead`.
- *  Overdue keeps its place between the days gone by and Today. `reach`
- *  (a day the sidebar's mini calendar jumped to) widens the range to
- *  take it in, so the jump lands on that day's own section. Labels
- *  follow `groupByDay`'s rules. */
+ *  empty group for each missing day from today through to the later of
+ *  the last placed day and `today + ahead`. Days gone by are never
+ *  filled: a past day shows only when something is on it. Overdue keeps
+ *  its place between the days gone by and Today. `reach` (a day the
+ *  sidebar's mini calendar jumped to) widens the range ahead to take it
+ *  in, so the jump lands on that day's own section; a jump to an empty
+ *  past day lands on the next section after it. Labels follow
+ *  `groupByDay`'s rules. */
 export function fillEmptyDays(
   groups: readonly DayGroup[],
   today: string,
@@ -439,21 +441,20 @@ export function fillEmptyDays(
   reach: string | null = null,
 ): DayGroup[] {
   const byDay = new Map<string, DayGroup>();
-  let first = today;
   let last = addDaysToStamp(today, ahead);
-  if (reach !== null) {
-    if (reach < first) first = reach;
-    if (reach > last) last = reach;
-  }
+  if (reach !== null && reach > last) last = reach;
+  const out: DayGroup[] = [];
   for (const g of groups) {
     if (g.key === OVERDUE_KEY) continue;
+    if (g.key < today) {
+      if (g.rows.length > 0) out.push(g);
+      continue;
+    }
     byDay.set(g.key, g);
-    if (g.key < first) first = g.key;
     if (g.key > last) last = g.key;
   }
   const overdue = groups.find((g) => g.key === OVERDUE_KEY);
-  const out: DayGroup[] = [];
-  for (let day = first; day <= last; day = addDaysToStamp(day, 1)) {
+  for (let day = today; day <= last; day = addDaysToStamp(day, 1)) {
     if (day === today && overdue) out.push(overdue);
     const have = byDay.get(day);
     if (have) {

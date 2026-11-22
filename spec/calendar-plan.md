@@ -413,9 +413,10 @@ for the month grid). `groupByDeadline` becomes
   "Reschedule" under "Deferred" below. A row closed today does not pick
   up, and is left where it is when carried in a selection. Escape
   cancels. Not built: touch, ⌘↑ / ⌘↓ nudging by a day, the month grid.
-- **Empty days** (web, 2026-11-22): by default every day has a section,
-  from the first past day with something on it to the later of the last
-  placed day and two weeks ahead (`fillEmptyDays`). "Hide empty days" in
+- **Empty days** (web, 2026-11-22): by default every day from today on
+  has a section, to the later of the last placed day and two weeks ahead
+  (`fillEmptyDays`); a past day never shows empty, only when something
+  is on it. "Hide empty days" in
   the view's filter menu (a device preference, unchecked by default, not
   counted as a filter and not cleared by Clear) shows only the days
   something is on. An empty day is its heading over a blank row-height
@@ -479,9 +480,10 @@ for the month grid). `groupByDeadline` becomes
   the top of the sidebar, above the nav list, for orientation. It is the date pickers' corvu
   grid (`MonthGrid.tsx`) with nothing selected and today marked. A
   click on a day opens the agenda with that day's header at the top of
-  the pane. With empty days shown, the agenda's range widens to take in
-  the picked day until the agenda is left. With them hidden, the jump
-  lands on the next day that has rows. "Show mini calendar" in the
+  the pane. With empty days shown, the agenda's range widens ahead to
+  take in a future picked day until the agenda is left. With them
+  hidden, or for an empty past day, the jump lands on the next day that
+  has a section. "Show mini calendar" in the
   sidebar's blank-space context menu (beside "Show list counts") shows
   and hides it, a device preference (shown by default). The URL
   does not change: the `upcoming_<day>` anchor (§URLs) stays unbuilt.

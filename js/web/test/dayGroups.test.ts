@@ -646,7 +646,7 @@ describe("groupByDay with a floor (the days gone by)", () => {
 });
 
 describe("fillEmptyDays", () => {
-  test("every day from the first past day to two weeks ahead, Overdue before Today", () => {
+  test("every day from today to two weeks ahead, past days only when non-empty, Overdue before Today", () => {
     const groups = groupByDay(
       [
         item("past", { when: "2026-09-06" }, { event: true }),
@@ -660,27 +660,20 @@ describe("fillEmptyDays", () => {
     );
     const filled = fillEmptyDays(groups, TODAY, LABELS, "en");
     const keys = filled.map((g) => g.key);
-    expect(keys.slice(0, 5)).toEqual([
-      "2026-09-06",
-      "2026-09-07",
-      "2026-09-08",
-      "overdue",
-      TODAY,
-    ]);
+    expect(keys.slice(0, 3)).toEqual(["2026-09-06", "overdue", TODAY]);
     expect(keys[keys.length - 1]).toBe("2026-09-22");
-    expect(filled.length).toBe(3 + 1 + 14);
+    expect(filled.length).toBe(1 + 1 + 14);
     expect(filled.find((g) => g.key === "2026-09-11")!.rows.length).toBe(1);
-    expect(filled.find((g) => g.key === "2026-09-07")!.urgency).toBe("past");
+    expect(filled.find((g) => g.key === "2026-09-07")).toBeUndefined();
     expect(filled.find((g) => g.key === "2026-09-10")!.label).toBe("Tomorrow");
   });
 
-  test("a reach day widens the range either way", () => {
+  test("a reach day widens the range ahead, never into empty past days", () => {
     const ahead = fillEmptyDays([], TODAY, LABELS, "en", undefined, "2026-10-31");
     expect(ahead[0]!.key).toBe(TODAY);
     expect(ahead[ahead.length - 1]!.key).toBe("2026-10-31");
     const back = fillEmptyDays([], TODAY, LABELS, "en", undefined, "2026-09-01");
-    expect(back[0]!.key).toBe("2026-09-01");
-    expect(back[0]!.urgency).toBe("past");
+    expect(back[0]!.key).toBe(TODAY);
     expect(back[back.length - 1]!.key).toBe("2026-09-22");
   });
 
