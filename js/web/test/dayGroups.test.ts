@@ -13,6 +13,9 @@ import {
   dropOnDay,
   fillEmptyDays,
   groupByDay,
+  isoWeekNumber,
+  weekStarts,
+  weekStartOf,
   isDueRow,
   whenSpan,
 } from "../src/dayGroups.ts";
@@ -712,5 +715,44 @@ describe("dropOnDay", () => {
       dropOnDay(item("g", { when: "2026-09-10" }, { state: "done" }), "2026-09-11"),
     ).toBeNull();
     expect(dropOnDay(item("h", {}), "2026-09-11")).toBeNull();
+  });
+});
+
+describe("weeks", () => {
+  test("ISO week numbers, across year ends", () => {
+    expect(isoWeekNumber("2026-11-22")).toBe(47);
+    expect(isoWeekNumber("2026-11-23")).toBe(48);
+    expect(isoWeekNumber("2026-01-01")).toBe(1);
+    expect(isoWeekNumber("2027-01-01")).toBe(53);
+    expect(isoWeekNumber("2024-12-30")).toBe(1);
+  });
+
+  test("week start for Monday and Sunday weeks", () => {
+    expect(weekStartOf("2026-11-22", 1)).toBe("2026-11-16");
+    expect(weekStartOf("2026-11-23", 1)).toBe("2026-11-23");
+    expect(weekStartOf("2026-11-22", 7)).toBe("2026-11-22");
+    expect(weekStartOf("2026-11-28", 7)).toBe("2026-11-22");
+  });
+
+  test("marks the first day group of each week, Overdue skipped, gaps allowed", () => {
+    const g = (key: string) => ({ key, label: key, urgency: "future" as const, rows: [] });
+    const groups = [
+      g("2026-11-20"),
+      { ...g("overdue"), urgency: "overdue" as const },
+      g("2026-11-22"),
+      g("2026-11-25"),
+      g("2026-12-01"),
+    ];
+    expect([...weekStarts(groups, 1)]).toEqual([
+      ["2026-11-20", 47],
+      ["2026-11-25", 48],
+      ["2026-12-01", 49],
+    ]);
+    // Sunday weeks: the 22nd opens the week numbered by Monday the 23rd.
+    expect([...weekStarts(groups, 7)]).toEqual([
+      ["2026-11-20", 47],
+      ["2026-11-22", 48],
+      ["2026-12-01", 49],
+    ]);
   });
 });

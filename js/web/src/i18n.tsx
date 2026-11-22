@@ -456,6 +456,9 @@ export type Messages = {
     emptyToday: string;
     /** Any other empty day on the agenda (the "All days" toggle). */
     emptyDay: string;
+    /** Week label at the end of the header of the day opening a week:
+     *  `n` is its ISO week number. */
+    week: (n: number) => string;
     /** Header toggle: show every day, empty ones too. */
     allDays: string;
     /** Tooltip of the "All days" toggle. */
@@ -884,6 +887,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     upcoming: {
       emptyToday: "Nada para hoy",
       emptyDay: "Nada programado",
+      week: (n) => `Semana ${n}`,
       allDays: "Todos los días",
       allDaysHint: "Mostrar también los días vacíos",
       event: "Evento",
@@ -1284,6 +1288,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     upcoming: {
       emptyToday: "Nothing due today",
       emptyDay: "Nothing scheduled",
+      week: (n) => `Week ${n}`,
       allDays: "All days",
       allDaysHint: "Show empty days too",
       event: "Event",

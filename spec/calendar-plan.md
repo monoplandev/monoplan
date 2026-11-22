@@ -419,6 +419,12 @@ for the month grid). `groupByDeadline` becomes
   (`fillEmptyDays`), not only the days something is on. An empty day is
   its heading over a blank row-height slot (`data-drop-day`), the day's
   drop target once reschedule lands; Today's says "Nothing due today".
+- **Week breaks** (web, 2026-11-22): the day that opens a week (the
+  locale's first day from `Intl.Locale` week info, else Monday; with
+  days missing, the first day group of a new week) has more room above
+  it and "Week N" at the end of its header, N the ISO week of the
+  Monday inside that week (`weekStarts`). Weekends are not marked: the
+  heading's weekday already says so.
 - **Windowed by day** (web, 2026-11-22): only the day sections from one
   pane's height above the pane to one below are in the DOM; spacers stand
   in for the rest at each day's last measured height, else an estimate

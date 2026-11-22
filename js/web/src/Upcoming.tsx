@@ -75,8 +75,10 @@ import { RowMenuButton } from "./Row.tsx";
 import {
   agendaItems,
   dropOnDay,
+  firstDayOfWeek,
   isDueRow,
   OVERDUE_KEY,
+  weekStarts,
   type DayGroup,
   type DayRow,
 } from "./dayGroups.ts";
@@ -223,6 +225,14 @@ export function Upcoming(props: {
     setPickedDay(next);
   });
 
+  // Week breaks: the day that opens a week (by the locale's first day)
+  // gets more room above it and "Week 48" at the end of its header.
+  // Over every group, not just the drawn ones, so a break does not move
+  // as the window does.
+  const weeks = createMemo(() =>
+    weekStarts(props.groups, firstDayOfWeek(locale())),
+  );
+
   // Day windowing: only the day sections near the pane are in the DOM,
   // from one pane's height above it to one below, with a spacer each
   // side standing in for the rest. A day's height is what it measured
@@ -234,9 +244,11 @@ export function Upcoming(props: {
   const ROW_EST = 40;
   const SLOT_EST = 32;
   const DAY_GAP_EST = 7;
+  const WEEK_GAP_EST = 16;
   const heightOf = (g: DayGroup): number =>
     measured.get(g.key) ??
-    DAY_HEADER_EST +
+    (weeks().has(g.key) ? WEEK_GAP_EST : 0) +
+      DAY_HEADER_EST +
       DAY_GAP_EST +
       (g.rows.length === 0 ? SLOT_EST : g.rows.length * ROW_EST);
   // `out[i]` is where day `i` starts; `out[n]` is the whole height.
@@ -832,10 +844,20 @@ export function Upcoming(props: {
             aria-label={dayHeading(g)}
             data-urgency={g.urgency}
             data-group={g.key}
+            data-week-start={
+              weeks().has(g.key) && g !== props.groups[0] ? "" : undefined
+            }
             data-drop-target={dropDay() === g.key ? "" : undefined}
           >
             <header class="upcoming-day-header">
               <h2 class="upcoming-day-label">{dayHeading(g)}</h2>
+              <Show when={weeks().get(g.key)}>
+                {(n) => (
+                  <span class="upcoming-week-label">
+                    {m().upcoming.week(n())}
+                  </span>
+                )}
+              </Show>
             </header>
             <For each={g.rows}>
                 {(r) => {

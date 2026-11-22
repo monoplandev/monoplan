@@ -488,3 +488,67 @@ export function dropOnDay(
   }
   return null;
 }
+
+/** The locale's first day of the week, 1 (Monday) to 7 (Sunday), from
+ *  `Intl.Locale` week info where the engine has it (`getWeekInfo()`,
+ *  or the older `weekInfo` getter); Monday otherwise. */
+export function firstDayOfWeek(locale: string): number {
+  try {
+    const loc = new Intl.Locale(locale) as Intl.Locale & {
+      getWeekInfo?: () => { firstDay: number };
+      weekInfo?: { firstDay: number };
+    };
+    const day = loc.getWeekInfo?.().firstDay ?? loc.weekInfo?.firstDay;
+    return day && day >= 1 && day <= 7 ? day : 1;
+  } catch {
+    return 1;
+  }
+}
+
+/** 1 (Monday) to 7 (Sunday) for a `YYYY-MM-DD` stamp. */
+const isoWeekday = (stamp: string): number => {
+  const [y, m, d] = stamp.split("-").map(Number);
+  const wd = new Date(Date.UTC(y!, m! - 1, d!)).getUTCDay();
+  return wd === 0 ? 7 : wd;
+};
+
+/** ISO 8601 week number of a `YYYY-MM-DD` stamp: the week (Monday to
+ *  Sunday) holding that year's first Thursday is week 1. */
+export function isoWeekNumber(stamp: string): number {
+  const [y, m, d] = stamp.split("-").map(Number);
+  const date = new Date(Date.UTC(y!, m! - 1, d!));
+  // The Thursday of this ISO week decides its year.
+  date.setUTCDate(date.getUTCDate() + 4 - isoWeekday(stamp));
+  const yearStart = Date.UTC(date.getUTCFullYear(), 0, 1);
+  return Math.ceil(((date.getTime() - yearStart) / 86_400_000 + 1) / 7);
+}
+
+/** The first day (`YYYY-MM-DD`) of the week holding `stamp`, weeks
+ *  starting on `firstDay` (1 Monday … 7 Sunday). */
+export function weekStartOf(stamp: string, firstDay: number): string {
+  return addDaysToStamp(stamp, -((isoWeekday(stamp) - firstDay + 7) % 7));
+}
+
+/** Which agenda days open a week, with the number to label it: a day
+ *  whose week differs from the day group before it (Overdue skipped),
+ *  the first day group included. Works with or without empty days
+ *  filled in: a week's first day need not be on the agenda. The number
+ *  is the ISO week of the Monday inside the week, so a week starting on
+ *  a Sunday or a Saturday takes the number of the days that follow. */
+export function weekStarts(
+  groups: readonly DayGroup[],
+  firstDay: number,
+): Map<string, number> {
+  const out = new Map<string, number>();
+  let prev: string | null = null;
+  for (const g of groups) {
+    if (g.key === OVERDUE_KEY) continue;
+    const start = weekStartOf(g.key, firstDay);
+    if (start !== prev) {
+      const monday = addDaysToStamp(start, (8 - firstDay) % 7);
+      out.set(g.key, isoWeekNumber(monday));
+      prev = start;
+    }
+  }
+  return out;
+}
