@@ -26,3 +26,21 @@ export function columnWindow(
   const end = Math.min(last, Math.max(start, Math.floor((left + 2 * pane) / pitch)));
   return { start, end };
 }
+
+/** ← / → in the columns: the row to select in the nearest day that has
+ *  rows, `dir` from day `from`, at row `row` or that day's last when it
+ *  is shorter. `counts` is each day's row count, in page order. Days
+ *  with no rows are passed over; null when there is none that way (no
+ *  wrap). `from` may be off either end, to enter from outside. */
+export function neighbourDayRow(
+  counts: readonly number[],
+  from: number,
+  row: number,
+  dir: -1 | 1,
+): { day: number; row: number } | null {
+  for (let i = from + dir; i >= 0 && i < counts.length; i += dir) {
+    const n = counts[i]!;
+    if (n > 0) return { day: i, row: Math.max(0, Math.min(row, n - 1)) };
+  }
+  return null;
+}

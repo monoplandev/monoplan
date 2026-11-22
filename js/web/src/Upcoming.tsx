@@ -68,6 +68,9 @@
 // times the pitch (`agendaColumns.ts`), so there is nothing to measure
 // and drawing a column never moves another. It opens with Overdue's
 // column (else Today's) at the left edge, the past a scroll left away.
+// ← / → move the selection to the day beside it, and a vertical wheel
+// over a day's header scrolls the days sideways (a mouse wheel anywhere
+// else in a column scrolls its rows).
 
 import {
   batch,
@@ -101,6 +104,7 @@ import {
   AGENDA_COL_PITCH,
   AGENDA_COL_WIDTH,
   columnWindow,
+  neighbourDayRow,
 } from "./agendaColumns.ts";
 import { DndAutoscroll } from "./dnd/dom/autoscroll.ts";
 import { DndDragOverlay } from "./dnd/dom/drag-overlay.ts";
@@ -122,6 +126,7 @@ import {
   whenTime,
 } from "./format.tsx";
 import { useAppI18n } from "./i18n.tsx";
+import { isOverlayOpen } from "./overlay.ts";
 import fileSvg from "./icons/file.svg?raw";
 import mapPinSvg from "./icons/map-pin.svg?raw";
 import plusSvg from "./icons/plus.svg?raw";
@@ -881,7 +886,49 @@ export function Upcoming(props: {
   // with nothing selected does nothing: the agenda reaches a year back,
   // so "all of it" is never what is meant. Swallowed either way so the
   // browser does not select the page's text.
+  //
+  // Columns: plain ← / → move the selection to the nearest day that way
+  // with rows, at the same row index (that day's last row when it is
+  // shorter), as the board's lanes do. No wrap. With nothing selected →
+  // enters at Overdue / Today's first row and ← at the day before it.
+  const stepDay = (dir: -1 | 1) => {
+    const groups = props.groups;
+    const sel = props.selection.hasSelection();
+    const at = sel ? groups.findIndex((g) => g.key === selDay()) : -1;
+    const top = sel ? props.selection.getSelectionTop() : null;
+    const row =
+      at < 0 || top === null
+        ? 0
+        : Math.max(0, groups[at]!.rows.findIndex((r) => r.item.id === String(top)));
+    // From outside, the scan starts on the anchor day (→) or before it.
+    const from = at >= 0 ? at : dir === 1 ? anchorIndex() - 1 : anchorIndex();
+    const next = neighbourDayRow(
+      groups.map((g) => g.rows.length),
+      from,
+      row,
+      dir,
+    );
+    if (!next) return;
+    const g = groups[next.day]!;
+    const id = g.rows[next.row]!.item.id;
+    release();
+    useDay(g.key);
+    props.selection.selectOnly(id);
+    scrollToKey(id);
+  };
   const onKeyDown = (e: KeyboardEvent) => {
+    if (
+      cols &&
+      (e.key === "ArrowLeft" || e.key === "ArrowRight") &&
+      !(e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) &&
+      // A row's context menu portals out, but Solid routes its keydown
+      // back through here, and ← / → there belong to its submenus.
+      !isOverlayOpen()
+    ) {
+      e.preventDefault();
+      stepDay(e.key === "ArrowRight" ? 1 : -1);
+      return;
+    }
     const action = mapDndKeyEvent(e);
     if (action.type === "ignore" || action.type === "move-selection") return;
     e.preventDefault();
@@ -934,6 +981,28 @@ export function Upcoming(props: {
     });
     if (target !== null) scrollToKey(String(target));
   };
+
+  // Columns: a vertical wheel over a day's header scrolls the days
+  // sideways, since a mouse wheel in a column only scrolls its rows. A
+  // sideways gesture (a trackpad, shift + wheel) is the browser's own,
+  // and ctrl + wheel is its zoom.
+  const onHeaderWheel = (e: WheelEvent) => {
+    if (e.ctrlKey || e.shiftKey) return;
+    if (e.deltaY === 0 || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+    const t = e.target as Element | null;
+    if (!t?.closest(".upcoming-day-header")) return;
+    e.preventDefault();
+    // Lines (Firefox's mouse wheel) and pages, in px.
+    const unit =
+      e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? hostEl.clientWidth : 1;
+    hostEl.scrollLeft += e.deltaY * unit;
+  };
+  onMount(() => {
+    if (!cols) return;
+    // Not passive: it stops the column scrolling its rows.
+    hostEl.addEventListener("wheel", onHeaderWheel, { passive: false });
+    onCleanup(() => hostEl.removeEventListener("wheel", onHeaderWheel));
+  });
 
   // Mouse mirrors the listbox: click selects, shift extends, ⌘/Ctrl
   // toggles, a click on no row clears (the list's `clearOnBlankClick`).

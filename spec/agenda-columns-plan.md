@@ -1,7 +1,8 @@
 # Agenda columns: plan
 
-Decided 2026-11-23. Web only, no core change. Phase 1 built the same day;
-phases 2 and 3 are not built.
+Decided 2026-11-23. Web only, no core change. All three phases built the
+same day. The built behaviour is in `calendar-plan.md` "Agenda"
+(**Columns**); this file keeps the decisions and the phase record.
 
 The calendar (`#upcoming`) has two agenda views, picked by the segmented
 control that stands in for the view's title:
@@ -58,20 +59,28 @@ agenda columns.
 
 Not checked in a browser at the time of writing.
 
-## Phase 2: what columns add (not built)
+## Phase 2: what columns add (built 2026-11-23)
 
-- ← / → move the selection to the neighbouring day at the nearest row
-  index. Until then ↑ / ↓ walk the rows in page order, so ↓ at the foot of a
-  column lands on the top of the next day.
+- Plain ← / → move the selection to the nearest day that way with rows, at
+  the same row index (that day's last row when it is shorter); empty days
+  are passed over, no wrap, as the board's lanes. With nothing selected →
+  enters at Overdue / Today and ← at the day before it. The pick is
+  `neighbourDayRow` in `agendaColumns.ts`, with its `bun test`. ↑ / ↓ still
+  walk the rows in page order, so ↓ at the foot of a column lands on the
+  top of the next day.
 - A vertical wheel over a column header scrolls the days sideways (a mouse
-  wheel otherwise only scrolls within a column).
+  wheel otherwise only scrolls within a column). A trackpad's vertical
+  swipe over a header does the same.
+- The shortcuts dialog's "Switch lane" row reads "Switch lane / day".
 
-## Phase 3: tidy up (not built)
+Not checked in a browser at the time of writing.
 
-- `bun test` for the ← / → neighbour pick.
-- Delete the orphaned prototype `js/web/src/AgendaColumns.tsx` (cards, not
-  imported anywhere).
-- Fold the "As built" notes into `calendar-plan.md`'s Agenda section.
+## Phase 3: tidy up (done 2026-11-23)
+
+- `bun test` for the ← / → neighbour pick (written with phase 2).
+- The orphaned prototype `js/web/src/AgendaColumns.tsx` (cards, never
+  imported) is deleted; it had no CSS of its own.
+- The as-built notes are folded into `calendar-plan.md`'s Agenda section.
 
 ## Open
 

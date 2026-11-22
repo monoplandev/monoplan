@@ -499,6 +499,36 @@ for the month grid). `groupByDeadline` becomes
   sidebar's blank-space context menu (beside "Show list counts") shows
   and hides it, a device preference (shown by default). The URL
   does not change: the `upcoming_<day>` anchor (§URLs) stays unbuilt.
+- **Columns** (web, built 2026-11-23; decisions in
+  `agenda-columns-plan.md`): the segmented control that stands in for the
+  view's title picks "List" (the days down the page, everything above) or
+  "Columns", the same day sections side by side, one fixed-width column a
+  day (300px, 12px gap), the pane scrolling sideways and each column down
+  its own rows under a pinned header. It is a layout of the same
+  component (`Upcoming.tsx`, `layout="columns"`), not a second view: the
+  rows, Overdue (its own column, left of Today), spans, "Hide empty
+  days", selection, keys, the "+" and draft row, the context menu and
+  drag to reschedule (the autoscroll sideways) are the list's. What
+  differs:
+  - Windowing is index arithmetic over the fixed pitch (`columnWindow` in
+    `agendaColumns.ts`), from a pane's width before the pane to one
+    after, with nothing measured. It opens with Overdue's column (else
+    Today's) at the left edge; a day added or dropped before the pane
+    scrolls by whole pitches. Today and the mini calendar scroll smoothly
+    within three pane-widths and jump beyond.
+  - Plain ← / → move the selection to the nearest day that way with
+    rows, at the same row index (that day's last row when it is shorter;
+    `neighbourDayRow`): empty days passed over, no wrap, as the board's
+    lanes. With nothing selected → enters at Overdue / Today and ← at the
+    day before it. ↑ / ↓ still walk the page's rows, so ↓ at the foot of
+    a column lands on the top of the next day.
+  - A vertical wheel over a day's header scrolls the days sideways (a
+    mouse wheel elsewhere in a column scrolls its rows).
+  - The time lane takes its natural width at the row's right edge, and
+    none on a row with no time.
+  The mode is a device preference (`agendaMode.ts`, list by default);
+  `#upcoming` opens whichever was last used. Still not a week view or an
+  hour grid: no bars across columns, no week snapping.
 
 ## Task surface and rows
 
