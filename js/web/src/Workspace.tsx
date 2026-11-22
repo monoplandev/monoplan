@@ -851,6 +851,9 @@ export function Workspace(props: {
   // Every day gets a section unless "Hide empty days" (the agenda's
   // filter menu, a device preference, off by default) is checked.
   const [hideEmptyDays, setHideEmptyDays] = createSignal(loadHideEmptyDays());
+  // Which calendar view the header's switch shows: the day-grouped list
+  // (`Upcoming`) or the agenda (blank for now).
+  const [calendarMode, setCalendarMode] = createSignal<"list" | "agenda">("list");
   // A day the sidebar's mini calendar jumped to, so the agenda's empty
   // days reach it (`fillEmptyDays`); dropped when the agenda is left.
   const [agendaReach, setAgendaReach] = createSignal<string | null>(null);
@@ -3665,9 +3668,33 @@ export function Workspace(props: {
             {/* Reserved views (Focus, Home/Inbox, Done, Bin) can't store a
                 custom icon, so mirror their fixed navbar glyph here as a
                 static, non-interactive counterpart to the list icon. */}
-            <Show when={viewIcon(view())} keyed>
+            <Show when={view().kind !== "upcoming" && viewIcon(view())} keyed>
               {(svg) => <span class="list-icon-static" innerHTML={svg} />}
             </Show>
+            {/* The calendar's title is its view switch. */}
+            <Show when={view().kind === "upcoming"}>
+              <SegmentedControl
+                class="theme-segmented"
+                aria-label={m().nav.upcoming}
+                value={calendarMode()}
+                onChange={(value) => setCalendarMode(value === "agenda" ? "agenda" : "list")}
+              >
+                <SegmentedControl.Indicator class="theme-segment-indicator" />
+                <SegmentedControl.Item value="list" class="theme-segment">
+                  <SegmentedControl.ItemInput />
+                  <SegmentedControl.ItemControl class="theme-segment-control">
+                    <SegmentedControl.ItemLabel>{m().upcoming.modeList}</SegmentedControl.ItemLabel>
+                  </SegmentedControl.ItemControl>
+                </SegmentedControl.Item>
+                <SegmentedControl.Item value="agenda" class="theme-segment">
+                  <SegmentedControl.ItemInput />
+                  <SegmentedControl.ItemControl class="theme-segment-control">
+                    <SegmentedControl.ItemLabel>{m().upcoming.modeAgenda}</SegmentedControl.ItemLabel>
+                  </SegmentedControl.ItemControl>
+                </SegmentedControl.Item>
+              </SegmentedControl>
+            </Show>
+            <Show when={view().kind !== "upcoming"}>
             <h1>
             {/* A list (Inbox included) lives in one workspace; prefix its
                 name with the workspace's so the title reads
@@ -3700,6 +3727,7 @@ export function Workspace(props: {
               )}
             </Show>
           </h1>
+            </Show>
             {/* Item count beside a list, Starred or Done title, hidden at
                 zero so an empty view reads clean. */}
             <Show when={headerCount() > 0}>
@@ -3954,7 +3982,7 @@ export function Workspace(props: {
             </Show>
             {/* The calendar's "Today": back to where the view opens
                 (Overdue's header, else Today's), as the Mac toolbar's. */}
-            <Show when={view().kind === "upcoming"}>
+            <Show when={view().kind === "upcoming" && calendarMode() === "list"}>
               <button
                 type="button"
                 class="icon-button header-text-button"
@@ -4194,6 +4222,10 @@ export function Workspace(props: {
         </Show>
           }
         >
+          <Show
+            when={calendarMode() === "list"}
+            fallback={<div class="calendar-agenda" />}
+          >
           <Upcoming
             app={routed}
             groups={upcomingGroups()}
@@ -4204,7 +4236,13 @@ export function Workspace(props: {
             assigneeOf={assigneeOf}
             onOpen={(id) => setOpenItemId(id)}
             openOnTap={openOnTap}
-            ref={(h) => (upcomingHandle = h)}
+            ref={(h) => {
+              upcomingHandle = h;
+              // The agenda unmounts the list: drop its handle with it.
+              onCleanup(() => {
+                if (upcomingHandle === h) upcomingHandle = null;
+              });
+            }}
             duplicateBlock={duplicateBlock}
             copyBlock={copyRows}
             onReveal={revealItemIn}
@@ -4214,6 +4252,7 @@ export function Workspace(props: {
             onDraftInput={setDraftText}
             onDraftSettle={settleAgendaDraft}
           />
+          </Show>
         </Show>
       </main>
       </div>

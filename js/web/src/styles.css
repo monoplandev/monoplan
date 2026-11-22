@@ -478,6 +478,12 @@ body {
   outline: none;
 }
 
+/* The calendar's agenda view (blank for now). */
+.calendar-agenda {
+  flex: 1;
+  min-height: 0;
+}
+
 /* The windowing in `Upcoming.tsx` adds this margin to a day's measured
    height. */
 .upcoming-day {

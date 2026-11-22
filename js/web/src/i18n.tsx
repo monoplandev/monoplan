@@ -487,6 +487,10 @@ export type Messages = {
     week: (n: number) => string;
     /** Filter-menu option: leave out the days nothing is on. */
     hideEmptyDays: string;
+    /** Calendar header switch: the day-grouped list. */
+    modeList: string;
+    /** Calendar header switch: the agenda view. */
+    modeAgenda: string;
     /** Heading over the calendar's per-doc show / hide toggles. */
     /** What an Open event's status reads: the one label its four open
      *  states share in the status controls (`statusLabel`). */
@@ -920,6 +924,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       addOnDay: (day) => `Añadir elemento: ${day}`,
       week: (n) => `Semana ${n}`,
       hideEmptyDays: "Ocultar días vacíos",
+      modeList: "Lista",
+      modeAgenda: "Agenda",
       event: "Evento",
       fixedEvent: "Evento",
       eventHint: "Ocurre en esta fecha: pasa sin más, en lugar de quedar atrasado",
@@ -1326,6 +1332,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       addOnDay: (day) => `Add item on ${day}`,
       week: (n) => `Week ${n}`,
       hideEmptyDays: "Hide empty days",
+      modeList: "List",
+      modeAgenda: "Agenda",
       event: "Event",
       fixedEvent: "Event",
       eventHint: "Happens on this date: it goes by instead of going overdue",
