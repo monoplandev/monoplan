@@ -228,26 +228,21 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             return
         }
         if toolbarItem.itemIdentifier == .doneFilter {
-            // Filled while any check is in effect; the hint says how many.
+            // The count beside the glyph while any check is in effect, as
+            // the web's trigger; the hint says it too.
             let count = model.doneFilter.count
             let label = count > 0 ? String(localized: "Filter (\(count) active)") : String(localized: "Filter")
-            toolbarItem.image = NSImage(
-                systemSymbolName: count > 0
-                    ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease",
-                accessibilityDescription: label)
+            toolbarItem.image = FilterArt.image(count: count, label: label)
             toolbarItem.label = label
             toolbarItem.toolTip = label
             return
         }
         if toolbarItem.itemIdentifier == .agendaFilter {
-            // Filled while a workspace is left out, as Done's. "Hide
-            // Empty Days" is a view option, not counted (the web's).
+            // The count of checked workspaces beside the glyph, as Done's.
+            // "Hide Empty Days" is a view option, not counted (the web's).
             let count = model.calendarCheckedDocs.count
             let label = count > 0 ? String(localized: "Filter (\(count) active)") : String(localized: "Filter")
-            toolbarItem.image = NSImage(
-                systemSymbolName: count > 0
-                    ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease",
-                accessibilityDescription: label)
+            toolbarItem.image = FilterArt.image(count: count, label: label)
             toolbarItem.label = label
             toolbarItem.toolTip = label
             return
@@ -962,5 +957,39 @@ final class ToolbarTitleView: NSView {
     override func mouseDown(with event: NSEvent) {
         guard renamable else { return super.mouseDown(with: event) }
         onClick()
+    }
+}
+
+/// A filter button's image: the funnel glyph, and while checks are in
+/// effect their count beside it, the web's trigger
+/// (`.done-filter-trigger-count`). One template image, so the toolbar
+/// tints it and gives the item its own glass as for any other glyph.
+enum FilterArt {
+    private static let symbol = "line.3.horizontal.decrease"
+
+    static func image(count: Int, label: String) -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        guard let glyph = NSImage(systemSymbolName: symbol, accessibilityDescription: label)?
+            .withSymbolConfiguration(config)
+        else { return nil }
+        guard count > 0 else { return glyph }
+        let text = NSAttributedString(string: "\(count)", attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium),
+            .foregroundColor: NSColor.black,
+        ])
+        let gap: CGFloat = 4
+        let textSize = text.size()
+        let height = max(glyph.size.height, ceil(textSize.height))
+        let size = NSSize(width: ceil(glyph.size.width + gap + textSize.width), height: height)
+        let image = NSImage(size: size, flipped: false) { _ in
+            glyph.draw(in: NSRect(
+                x: 0, y: (height - glyph.size.height) / 2,
+                width: glyph.size.width, height: glyph.size.height))
+            text.draw(at: NSPoint(x: glyph.size.width + gap, y: (height - textSize.height) / 2))
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = label
+        return image
     }
 }
