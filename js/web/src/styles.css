@@ -1146,8 +1146,12 @@ body {
   color: inherit;
 }
 
+/* Item drag over a nav target (a list, Starred, Bin). The outline is
+   inset so the nav's scroll container doesn't clip it. */
 .nav-item[data-drop-active] {
   background: var(--dnd-select-bg);
+  outline: 1.5px solid var(--link);
+  outline-offset: -1.5px;
 }
 
 .nav-item-label {
