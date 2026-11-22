@@ -42,10 +42,27 @@ function writeLanguage(language: AppLanguage) {
   } catch {}
 }
 
-const localeByLanguage: Record<AppLanguage, string> = {
+const fallbackLocale: Record<AppLanguage, string> = {
   es: "es-ES",
   en: "en-US",
 };
+
+// The app's language with the browser's region: the first of the
+// browser's preferred locales in that language ("en-AU" for English on
+// an Australian machine), so dates, times and the first day of the week
+// follow where the user is. Falls back to a fixed region when the
+// browser lists none in that language.
+function localeFor(language: AppLanguage): string {
+  try {
+    const preferred = navigator.languages?.length ? navigator.languages : [navigator.language];
+    for (const tag of preferred) {
+      if (!tag) continue;
+      const loc = new Intl.Locale(tag);
+      if (loc.language === language && loc.region) return `${language}-${loc.region}`;
+    }
+  } catch {}
+  return fallbackLocale[language];
+}
 
 export type Messages = {
   common: {
@@ -1462,7 +1479,7 @@ const AppI18nContext = createContext<AppI18nContextValue>();
 
 export function AppI18nProvider(props: { children: JSX.Element }) {
   const [language, setLanguageSignal] = createSignal<AppLanguage>(readLanguage());
-  const localeCode = createMemo(() => localeByLanguage[language()]);
+  const localeCode = createMemo(() => localeFor(language()));
   const messages = createMemo(() => messagesByLanguage[language()]);
 
   const setLanguage = (language: AppLanguage) => {

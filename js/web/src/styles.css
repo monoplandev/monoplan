@@ -5312,6 +5312,7 @@ input.task-check:hover {
   display: flex;
   align-items: center;
   gap: 4px;
+  font-variant-numeric: tabular-nums;
   min-width: 0;
   text-align: end;
 }

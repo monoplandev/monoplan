@@ -525,8 +525,10 @@ export function formatDoneStamp(ts: number, now: number, locale: string): string
 
 // Task-dialog stamp, for the activity rows: every stamp carries its time
 // of day. Today → "Today 2:05 PM"; yesterday → "Yesterday 8:06 PM";
-// otherwise the date in year.month.day digits plus time, "2026.11.09
-// 8:19 AM", so the rows compare at a glance one under the other.
+// otherwise the locale's day and abbreviated month plus time, "9 Nov
+// 8:19 AM" ("Nov 9" in en-US), the year only when it is not this one.
+// The rows are end-aligned in tabular figures, so they still compare at
+// a glance one under the other.
 export function formatDialogStamp(ts: number, now: number, locale: string): string {
   const tsDate = new Date(ts);
   const nowDate = new Date(now);
@@ -535,8 +537,11 @@ export function formatDialogStamp(ts: number, now: number, locale: string): stri
   const m = locale.startsWith("es") ? relativeEs : relativeEn;
   if (days === 0) return m.todayAt(time);
   if (days === 1) return m.yesterdayAt(time);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const date = `${tsDate.getFullYear()}.${pad(tsDate.getMonth() + 1)}.${pad(tsDate.getDate())}`;
+  const date = new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    ...(tsDate.getFullYear() === nowDate.getFullYear() ? {} : { year: "numeric" }),
+  }).format(tsDate);
   return `${date} ${time}`;
 }
 

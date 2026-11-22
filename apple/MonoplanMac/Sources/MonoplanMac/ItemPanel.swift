@@ -361,6 +361,7 @@ struct ItemPanel: View {
         activityRow(label) {
             Text(verbatim: value)
                 .multilineTextAlignment(.trailing)
+                .monospacedDigit()
                 .textSelection(.enabled)
         }
     }
@@ -451,16 +452,20 @@ struct ItemPanel: View {
     }
 
     /// An instant for the activity log: "Today 2:05 PM" today, otherwise
-    /// "2026.11.09 2:05 PM", the date in year.month.day digits so the
-    /// rows compare at a glance one under the other.
+    /// the locale's day and abbreviated month, "9 Nov 2:05 PM", the year
+    /// only when it is not this one. The rows show it in monospaced
+    /// digits, end-aligned, so they compare at a glance one under the
+    /// other.
     static func stamp(_ millis: Int64, now: Date = Date(), calendar: Calendar = .current) -> String {
         let date = Date(timeIntervalSince1970: Double(millis) / 1000)
         let time = date.formatted(date: .omitted, time: .shortened)
         if calendar.isDate(date, inSameDayAs: now) {
             return String(localized: "Today \(time)")
         }
-        let day = calendar.dateComponents([.year, .month, .day], from: date)
-        return String(format: "%04d.%02d.%02d", day.year ?? 0, day.month ?? 0, day.day ?? 0) + " " + time
+        let day = calendar.isDate(date, equalTo: now, toGranularity: .year)
+            ? date.formatted(.dateTime.day().month(.abbreviated))
+            : date.formatted(.dateTime.day().month(.abbreviated).year())
+        return day + " " + time
     }
 
     /// "1d 3h": two units at most, the larger first, the smaller only
