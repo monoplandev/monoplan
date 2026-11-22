@@ -48,6 +48,8 @@ export function MiniCalendar(props: {
         // list by a row as months page by.
         fixedWeeks
         shortMonth
+        navRight
+        todayButton
         onPick={(d) => {
           if (d) props.onPickDay(localDateStamp(d));
         }}

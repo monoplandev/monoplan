@@ -270,8 +270,13 @@ body {
   max-width: 224px;
   margin: 0 auto;
 }
+.mini-calendar .calendar-label {
+  margin: 8px 0;
+  font-weight: 500;
+}
 .mini-calendar .calendar-headcell {
   height: 22px;
+  font-weight: 400;
   padding: 0;
 }
 .mini-calendar .calendar-cell {
@@ -4291,6 +4296,46 @@ input.task-check:hover {
   border: none;
   border-radius: 6px;
   cursor: pointer;
+}
+
+.calendar-header[data-nav-right] .calendar-label {
+  padding-left: 4px;
+}
+
+.calendar-label-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.calendar-today {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.calendar-today:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.calendar-nav-group {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.calendar-header[data-nav-right] .calendar-nav {
+  width: 22px;
+  height: 22px;
 }
 
 .calendar-nav:hover {
