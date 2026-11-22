@@ -4,7 +4,11 @@ import plusSvg from "./icons/plus.svg?raw";
 import starFilledSvg from "./icons/star-filled.svg?raw";
 import usersSvg from "./icons/users.svg?raw";
 import { DndSelection } from "./dnd/solid";
-import { ItemContextMenu, canPinToFocusIn } from "./ItemContextMenu.tsx";
+import {
+  ItemContextMenu,
+  canPinToFocusIn,
+  type RevealTarget,
+} from "./ItemContextMenu.tsx";
 import { DeadlineBadge } from "./DeadlineBadge.tsx";
 import { subtaskCount } from "./SubtasksField.tsx";
 import { Avatar } from "./Avatar.tsx";
@@ -117,7 +121,7 @@ export function Row(props: {
   /** Jump to the item's other appearance and select it there: from the
    *  Focus lens to its home list, or from a list / board to the Focus
    *  lens. Only offered for items that appear in both (`spec/focus.md`). */
-  onReveal?: (id: string, where: "list" | "focus") => void;
+  onReveal?: (id: string, where: RevealTarget) => void;
   /** Open the workspace's move palette on the target set (the selection
    *  when this row is part of it, else this row alone) — the menu twin of
    *  the `m` shortcut. */

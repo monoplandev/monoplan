@@ -558,6 +558,8 @@ export type Messages = {
     showInList: (list: string) => string;
     /** Context-menu jump from a list / board to the item in the Focus lens. */
     showInFocus: string;
+    /** Context-menu jump that opens a dated item over the calendar. */
+    openInCalendar: string;
   };
   settings: {
     general: string;
@@ -965,6 +967,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       badge: "Destacado",
       showInList: (list: string) => `Ver en ${list}`,
       showInFocus: "Ver en Destacados",
+      openInCalendar: "Abrir en el calendario",
     },
     settings: {
       general: "General",
@@ -1370,6 +1373,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       badge: "Starred",
       showInList: (list: string) => `Show in ${list}`,
       showInFocus: "Show in Starred",
+      openInCalendar: "Open in calendar",
     },
     settings: {
       general: "General",

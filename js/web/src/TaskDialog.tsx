@@ -81,6 +81,7 @@ import {
   type Place,
   type WorkflowState,
 } from "./sync/store.ts";
+import type { RevealTarget } from "./ItemContextMenu.tsx";
 
 /** Known places handed to the place field when its popover opens: enough
  *  for prefix narrowing to always have something to show, few enough to
@@ -250,7 +251,10 @@ export function TaskDialog(props: {
   /** Jump to the view that shows this item (the Workspace reveal path:
    *  switch view, select + scroll the row). The dialog closes so the
    *  revealed row isn't hidden behind the modal. */
-  onReveal?: (id: string, where: "list" | "focus") => void;
+  onReveal?: (id: string, where: RevealTarget) => void;
+  /** Whether the workspace behind the surface is the calendar, which
+   *  hides the menu's "Open in calendar". */
+  inCalendar?: () => boolean;
 }) {
   const { m, locale } = useAppI18n();
   const canCopyLink = useCanCopyLink();
@@ -1491,6 +1495,25 @@ export function TaskDialog(props: {
                           listOptions().find((o) => o.id === it().listId)?.name ??
                             it().listId,
                         )}
+                      </DropdownMenu.Item>
+                    </Show>
+                    {/* The calendar jump, as on the row menu: an
+                        unbinned item with a date or a deadline, from
+                        anywhere but the calendar. The item stays open,
+                        now over the calendar. */}
+                    <Show
+                      when={
+                        props.onReveal &&
+                        !props.inCalendar?.() &&
+                        !isBinned(it()) &&
+                        (!!it().when || !!it().deadline)
+                      }
+                    >
+                      <DropdownMenu.Item
+                        class="dropdown-menu-item"
+                        onSelect={() => props.onReveal?.(it().id, "calendar")}
+                      >
+                        {m().focus.openInCalendar}
                       </DropdownMenu.Item>
                     </Show>
                     {/* The deadline's one way in from this surface: a

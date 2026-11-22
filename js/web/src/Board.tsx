@@ -42,6 +42,7 @@ import {
   type ItemView,
   type WorkflowState,
 } from "./sync/store.ts";
+import type { RevealTarget } from "./ItemContextMenu.tsx";
 
 /** Fixed lane keys — the workflow state names plus `done`; used as DOM
  *  `data-drop-column-id` attributes and as the keys of the per-lane
@@ -85,7 +86,7 @@ export function Board(props: {
   onOpen: (id: string) => void;
   /** Row context-menu jump to the item's other appearance (the Focus
    *  lens). Forwarded to each card. */
-  onReveal?: (id: string, where: "list" | "focus") => void;
+  onReveal?: (id: string, where: RevealTarget) => void;
   /** Resolves an item's assignee for its card's avatar (see `Row`). */
   assigneeOf?: (item: ItemView) => { accountId: string; email: string | null } | null;
   /** Row context-menu move-to-list (opens the workspace's move palette).
@@ -710,7 +711,7 @@ function BoardColumn(props: {
   /** Open the new-item dialog targeting this lane. */
   onAddItem: () => void;
   onOpen: (id: string) => void;
-  onReveal?: (id: string, where: "list" | "focus") => void;
+  onReveal?: (id: string, where: RevealTarget) => void;
   /** Resolves an item's assignee for its card's avatar (see `Row`). */
   assigneeOf?: (item: ItemView) => { accountId: string; email: string | null } | null;
   onMoveToList?: (ids: readonly string[]) => void;

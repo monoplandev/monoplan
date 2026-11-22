@@ -45,6 +45,10 @@ export const canPinToFocusIn = (
   isOpen(it) &&
   !isDraftId(it.id);
 
+/** Where a row's context menu (or the item page) can jump the item to:
+ *  its home list, the Starred lens, or the calendar. */
+export type RevealTarget = "list" | "focus" | "calendar";
+
 export function ItemContextMenu(props: {
   item: () => ItemView;
   /** The item's doc, or the cross-doc layer's routed actions in a view
@@ -58,8 +62,10 @@ export function ItemContextMenu(props: {
   onOpen?: (id: string) => void;
   /** Jump to the item's other appearance and select it there: from the
    *  Focus lens to its home list, or from a list / board to the Focus
-   *  lens. Only offered for items that appear in both (`spec/focus.md`). */
-  onReveal?: (id: string, where: "list" | "focus") => void;
+   *  lens. Only offered for items that appear in both (`spec/focus.md`).
+   *  "calendar" opens a dated item over the calendar, as its
+   *  `#upcoming_<id>` link does (`spec/urls.md`). */
+  onReveal?: (id: string, where: RevealTarget) => void;
   /** Open the workspace's move palette on the target set, the menu twin
    *  of the `m` shortcut. */
   onMoveToList?: (ids: readonly string[]) => void;
@@ -91,6 +97,14 @@ export function ItemContextMenu(props: {
     ((props.viewKind === "upcoming" || props.viewKind === "assigned") &&
       !isDraftId(props.item().id) &&
       !isInboxDated(props.item()));
+
+  // "Open in calendar" for an unbinned item with a date or a deadline,
+  // from anywhere but the calendar itself.
+  const canOpenInCalendar = (): boolean =>
+    props.viewKind !== "upcoming" &&
+    !isDraftId(props.item().id) &&
+    !isBinned(props.item()) &&
+    (!!props.item().when || !!props.item().deadline);
 
   // If the right-clicked row is already in the multi-select, act on the
   // whole selection; otherwise act on this row alone. The onOpenChange
@@ -355,6 +369,14 @@ export function ItemContextMenu(props: {
               onSelect={() => props.onReveal?.(props.item().id, "focus")}
             >
               <span>{m().focus.showInFocus}</span>
+            </ContextMenu.Item>
+          </Show>
+          <Show when={props.onReveal && canOpenInCalendar()}>
+            <ContextMenu.Item
+              class="context-menu-item"
+              onSelect={() => props.onReveal?.(props.item().id, "calendar")}
+            >
+              <span>{m().focus.openInCalendar}</span>
             </ContextMenu.Item>
           </Show>
           <Show when={canRemoveDeadline()}>

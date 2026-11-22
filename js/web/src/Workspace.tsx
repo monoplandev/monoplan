@@ -90,6 +90,7 @@ import {
   registerFocusHome,
 } from "./overlay.ts";
 import type { ViewKey } from "./prefs.ts";
+import type { RevealTarget } from "./ItemContextMenu.tsx";
 import { Row, DRAFT_ID_PREFIX } from "./Row.tsx";
 import { planReorderMoves } from "./reorder.ts";
 import { SelectionPanel, type SelectionAction } from "./SelectionPanel.tsx";
@@ -2783,7 +2784,13 @@ export function Workspace(props: {
   // list (falling back to the inbox if the id has gone stale); "focus" is
   // only offered for items that already carry a Focus ref, so the lens is
   // guaranteed to render it.
-  const revealItemIn = (id: string, where: "list" | "focus"): void => {
+  const revealItemIn = (id: string, where: RevealTarget): void => {
+    // The calendar opens the item over it, as `#upcoming_<id>` does: a
+    // past item has no agenda row to land a selection on.
+    if (where === "calendar") {
+      openItemFromUrl(id, "upcoming");
+      return;
+    }
     if (where === "focus") {
       revealItem(id, { kind: "focus" });
       return;
@@ -3510,6 +3517,7 @@ export function Workspace(props: {
         assignmentOf={assignmentOf}
         itemId={shownItemId}
         setItemId={setOpenItemId}
+        inCalendar={() => view().kind === "upcoming"}
         newItem={newItemTarget}
         setNewItem={(v) =>
           // A re-target stays in the capture's doc unless the picker

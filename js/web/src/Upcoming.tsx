@@ -74,7 +74,7 @@ import {
 } from "solid-js";
 import { ContextMenu } from "@kobalte/core/context-menu";
 import { Avatar } from "./Avatar.tsx";
-import { ItemContextMenu } from "./ItemContextMenu.tsx";
+import { ItemContextMenu, type RevealTarget } from "./ItemContextMenu.tsx";
 import {
   agendaItems,
   dropOnDay,
@@ -176,7 +176,7 @@ export function Upcoming(props: {
   /** Context menu wiring, as the list rows take it (`ItemContextMenu`). */
   duplicateBlock: (sourceIds: readonly string[]) => void;
   copyBlock: (sourceIds: readonly string[]) => void;
-  onReveal?: (id: string, where: "list" | "focus") => void;
+  onReveal?: (id: string, where: RevealTarget) => void;
   onMoveToList?: (ids: readonly string[]) => void;
   /** A day's Add (its header's "+", `data-add-day`):
    *  capture a new item on day `YYYY-MM-DD`. Today and later only. */
