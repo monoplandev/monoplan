@@ -1475,6 +1475,16 @@ export function NavMenu(props: {
             </DropdownMenu.Item>
             <DropdownMenu.Item
               class="dropdown-menu-item"
+              as="a"
+              href="https://monoplan.app/privacy/"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {m().nav.privacy}
+              <span innerHTML={externalLinkSvg} />
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              class="dropdown-menu-item"
               onSelect={() => props.onOpenShortcuts()}
             >
               <span>{m().shortcuts.title}</span>

@@ -2,7 +2,8 @@
 // General (the device's list-counts preference, as the web's Settings
 // has it), the account (who is signed in and where, sign in / sign out,
 // delete account), sync
-// (the status line and when it last synced), and the last error when
+// (the status line and when it last synced), About (links to the
+// website and the privacy policy), and the last error when
 // there is one. Everything diagnostic sits a level down in Debug
 // (`DebugView.swift`), pushed from the last row. Sign-in is the Mac
 // sheet's form without account creation or recovery.
@@ -24,6 +25,10 @@ struct SettingsView: View {
             }
             accountSection
             syncSection
+            Section("About") {
+                Link("Website", destination: URL(string: "https://monoplan.app/")!)
+                Link("Privacy Policy", destination: URL(string: "https://monoplan.app/privacy/")!)
+            }
             if let session = model.session, !session.localOnly {
                 Section {
                     Button("Delete Account…", role: .destructive) { showDeleteAccount = true }

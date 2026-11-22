@@ -18,6 +18,9 @@ enum MainMenu {
         let app = NSMenu()
         app.addItem(withTitle: String(localized: "About Monoplan"),
                     action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        let privacyItem = app.addItem(withTitle: String(localized: "Privacy Policy"),
+                                      action: #selector(Links.openPrivacyPolicy(_:)), keyEquivalent: "")
+        privacyItem.target = Links.shared
         app.addItem(.separator())
         // ⇧⌘N, Finder's new-folder chord.
         let newWorkspaceItem = app.addItem(withTitle: String(localized: "New Workspace…"), action: newWorkspace, keyEquivalent: "n")
@@ -82,5 +85,15 @@ enum MainMenu {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.submenu = menu
         return item
+    }
+}
+
+/// Targets for menu items that open a page in the browser. A singleton
+/// because `NSMenuItem.target` is weak.
+final class Links: NSObject {
+    static let shared = Links()
+
+    @objc func openPrivacyPolicy(_ sender: Any?) {
+        NSWorkspace.shared.open(URL(string: "https://monoplan.app/privacy/")!)
     }
 }

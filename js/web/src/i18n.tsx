@@ -190,6 +190,7 @@ export type Messages = {
     redo: string;
     settings: string;
     website: string;
+    privacy: string;
     logOut: string;
     /** Sign-out confirmation (title + body); mirrors the macOS app's alert. */
     logOutTitle: string;
@@ -743,6 +744,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       redo: "Rehacer",
       settings: "Ajustes",
       website: "Sitio web de Monoplan",
+      privacy: "Política de privacidad",
       logOut: "Cerrar sesión",
       logOutTitle: "¿Cerrar sesión en Monoplan?",
       logOutConfirm:
@@ -1147,6 +1149,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       redo: "Redo",
       settings: "Settings",
       website: "Monoplan website",
+      privacy: "Privacy policy",
       logOut: "Log out",
       logOutTitle: "Sign out of Monoplan?",
       logOutConfirm:

@@ -1942,6 +1942,16 @@
         }
       }
     },
+    "Privacy Policy" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Política de privacidad"
+          }
+        }
+      }
+    },
     "Profile" : {
       "extractionState" : "stale",
       "localizations" : {
