@@ -62,9 +62,10 @@ struct SidebarLists: NSViewRepresentable {
         list.delegate = context.coordinator
         list.selectionInset = 0
         list.selectionRadius = 8
-        // The web nav's `--bg-active`, focused or not (`.nav-item[data-active]`).
-        list.selectionColor = PaneColor.rowSelectedInactive
-        list.dormantSelectionColor = PaneColor.rowSelectedInactive
+        // The SwiftUI rows' selection (`PaneColor.navSelected`), focused
+        // or not, as the web nav's.
+        list.selectionColor = PaneColor.navSelected
+        list.dormantSelectionColor = PaneColor.navSelected
         list.placeholderColor = PaneColor.dropSlot
         list.dragBackgroundColor = PaneColor.sidebar
         return list

@@ -821,6 +821,16 @@
         }
       }
     },
+    "Due" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vence"
+          }
+        }
+      }
+    },
     "Due %@" : {
       "localizations" : {
         "es" : {
@@ -838,16 +848,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "vence hoy"
-          }
-        }
-      }
-    },
-    "Due today" : {
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Vence hoy"
           }
         }
       }

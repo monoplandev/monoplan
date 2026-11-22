@@ -85,6 +85,16 @@ enum PaneColor {
             : NSColor(white: 0, alpha: 0.5)
     }
 
+    /// The selected nav row's ground on the sidebar's glass: the label
+    /// colour, translucent, so it darkens (light) or lightens (dark)
+    /// whatever the glass shows rather than sitting on it as a flat
+    /// grey. Black at 9% in light, white at 12% in dark.
+    static let navSelected = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(white: 1, alpha: 0.12)
+            : NSColor(white: 0, alpha: 0.09)
+    }
+
     /// A sidebar row's count, active and not.
     static let navCount = NSColor.secondaryLabelColor
     static let navCountInactive = NSColor.tertiaryLabelColor

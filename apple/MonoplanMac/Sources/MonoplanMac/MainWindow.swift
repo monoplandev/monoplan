@@ -1711,7 +1711,7 @@ struct MainWindowView: View {
                 .background {
                     if selected {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color(nsColor: PaneColor.rowSelectedInactive))
+                            .fill(Color(nsColor: PaneColor.navSelected))
                     }
                 }
                 .contentShape(Rectangle())
@@ -2214,7 +2214,7 @@ struct MainWindowView: View {
                 if let day = Self.overdueDay(row) {
                     Text(verbatim: day).foregroundStyle(.secondary).monospacedDigit().fixedSize()
                 }
-            case .warning: Text("Due today").font(.footnote).foregroundStyle(.orange).fixedSize()
+            case .warning: Text("Due").foregroundStyle(.orange).fixedSize()
             case .neutral: EmptyView()
             }
             if TodayMenu.isTimed(row), let when = row.when {
