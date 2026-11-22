@@ -59,6 +59,19 @@ function lifecycleTimestamp(it: ItemView): number | undefined {
   return it.binnedAt ?? (isClosed(it) ? it.lifecycleAt : undefined);
 }
 
+/** Swell the checkbox while the pointer holds it down; it settles back
+ *  on release, wherever the pointer goes up (`input.task-check[data-pressed]`). */
+function pressCheck(el: HTMLElement): void {
+  el.dataset.pressed = "";
+  const release = (): void => {
+    delete el.dataset.pressed;
+    window.removeEventListener("pointerup", release);
+    window.removeEventListener("pointercancel", release);
+  };
+  window.addEventListener("pointerup", release);
+  window.addEventListener("pointercancel", release);
+}
+
 export function Row(props: {
   item: () => ItemView;
   expanded: () => boolean;
@@ -368,6 +381,7 @@ export function Row(props: {
             tabIndex={-1}
             checked={isClosed(props.item())}
             data-cancelled={isCancelled(props.item()) ? "" : undefined}
+            onPointerDown={(e) => pressCheck(e.currentTarget)}
             onMouseDown={(e) => {
               // Clicking still focuses the checkbox despite tabIndex=-1, and
               // the lingering focus makes a later Space press re-toggle it.

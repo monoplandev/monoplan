@@ -1460,6 +1460,29 @@ body {
 
 input.task-check {
   cursor: pointer;
+  /* Release: settle back with a touch of overshoot. */
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Held down (Row's `pressCheck`): a pixel or two bigger. A data
+   attribute, not :active, because the row cancels mousedown's default
+   to keep focus off the box, which leaves :active unset in some engines. */
+input.task-check[data-pressed] {
+  transform: scale(1.15);
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    transform 0.08s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  input.task-check,
+  input.task-check[data-pressed] {
+    transform: none;
+  }
 }
 
 input.task-check:hover {

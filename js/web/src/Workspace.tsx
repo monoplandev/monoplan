@@ -155,7 +155,7 @@ import {
 // done, so the user sees the strike-through before the row drops out.
 // The state change is instant — this is purely a render-time tail
 // derived from doneAt, not a separate "pending" set.
-const DONE_LINGER_MS = 3_000;
+const DONE_LINGER_MS = 2_000;
 
 /** Fixed list-row height for the virtualizer. Must agree with the
  *  `.row` padding in styles.css: 8px + 1.3em line + 8px. */
