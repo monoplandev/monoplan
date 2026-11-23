@@ -131,3 +131,4 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - ios drag and drop rounded corners?
 - custom ios lists w hints + sliding + faster drag
 - tui
+- side by side days agenda view
