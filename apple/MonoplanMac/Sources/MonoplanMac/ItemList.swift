@@ -1,4 +1,4 @@
-// A list's rows and Starred's, on `DndListView` (`apple/MonoplanDnd`,
+// A list's rows, Starred's and Done's, on `DndListView` (`apple/MonoplanDnd`,
 // the web's list component on AppKit): several rows selected at once,
 // dragged to reorder, moved with ⌘↑ / ⌘↓ (spec/mac-dnd-plan.md). The
 // other lenses are still SwiftUI lists, and the Calendar a table.
@@ -33,6 +33,8 @@ struct ItemListRow: Equatable {
     var note: String?
     /// Drawn in the secondary colour (a Done row in Starred).
     var muted = false
+    /// Small print before the text (when a Done row entered Done).
+    var stamp: String?
 }
 
 /// What the row for a new item tells its owner. The item panel shows
@@ -82,7 +84,7 @@ struct ItemList: NSViewRepresentable {
     /// The item whose panel is open, if one is.
     let selected: String?
     /// Whether rows can be dragged to another place in the list and
-    /// ⌘-moved (not in an Inbox).
+    /// ⌘-moved (not in an Inbox or Done).
     let reorder: Bool
     /// The selection came down to one row (its panel opens), or to
     /// none or several (it shuts).
@@ -367,6 +369,7 @@ private final class ItemRowContent: NSView {
     private let check = RowCheck()
     private let title = NSTextField(labelWithString: "")
     private let note = NSTextField(labelWithString: "")
+    private let stamp = NSTextField(labelWithString: "")
     private let star = NSImageView(image: StarArt.row)
     private var selected = false
 
@@ -382,7 +385,9 @@ private final class ItemRowContent: NSView {
         note.textColor = .tertiaryLabelColor
         note.lineBreakMode = .byTruncatingTail
         note.alignment = .right
-        for view in [check, title, note, star] { addSubview(view) }
+        stamp.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        stamp.textColor = .secondaryLabelColor
+        for view in [check, stamp, title, note, star] { addSubview(view) }
     }
 
     @available(*, unavailable)
@@ -395,6 +400,8 @@ private final class ItemRowContent: NSView {
         title.textColor = row.muted ? .secondaryLabelColor : PaneColor.rowText
         note.stringValue = row.note ?? ""
         note.isHidden = (row.note ?? "").isEmpty
+        stamp.stringValue = row.stamp ?? ""
+        stamp.isHidden = (row.stamp ?? "").isEmpty
         star.isHidden = !row.starred
         if selected != self.selected {
             self.selected = selected
@@ -413,14 +420,21 @@ private final class ItemRowContent: NSView {
             star.frame = NSRect(x: right - 13, y: mid - 6.5, width: 13, height: 13)
             right = star.frame.minX - 8
         }
-        let left = Self.edge + 15 + 8
+        var left = Self.edge + 15 + 8
+        // The cell's size, not the intrinsic one: that leaves out
+        // the cell's 2 pt of padding either side, and a frame that
+        // narrow truncates every label. A frame overhangs its edge
+        // by the padding so the glyphs still meet it.
+        let pad: CGFloat = 2
+        if !stamp.isHidden {
+            // As wide as it reads: the text follows at the same gap.
+            let width = ceil(stamp.cell?.cellSize.width ?? stamp.intrinsicContentSize.width)
+            let height = ceil(stamp.intrinsicContentSize.height)
+            stamp.frame = NSRect(x: left - pad, y: mid - height / 2, width: width, height: height)
+            left = stamp.frame.maxX - pad + 8
+        }
         if !note.isHidden {
             // The text keeps at least half the row.
-            // The cell's size, not the intrinsic one: that leaves out
-            // the cell's 2 pt of padding either side, and a frame that
-            // narrow truncates every label. The frame overhangs `right`
-            // by the padding so the glyphs still end on it.
-            let pad: CGFloat = 2
             let wanted = ceil(note.cell?.cellSize.width ?? note.intrinsicContentSize.width)
             let width = min(wanted, max(0, (right - left) / 2))
             let height = ceil(note.intrinsicContentSize.height)

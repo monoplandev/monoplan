@@ -86,10 +86,15 @@ on top, for a drop on the list shown), as a reorder does, so they do
 not snap back for the frames the write is out. The selection clears
 unless the drop was on the list shown, and the panel shuts with it. An
 Inbox's rows now drag (`reorder` off, `drag` on): they have nowhere to
-go in the Inbox and snap back unless a sidebar row takes them. Not
-built: drags from the other lenses (Calendar, Assigned, Done, Bin: not
-on `DndListView`), unfolding a folded workspace or scrolling the
-sidebar under a drag.
+go in the Inbox and snap back unless a sidebar row takes them. Done's
+rows drag the same way since 2026-11-23 (the lens moved onto
+`ItemList`, `reorder` off, several rows selectable): onto a list or an
+Inbox they move and stay Done, and stay in the lens unless its filter
+leaves the new list out; onto the Bin they are binned; onto Starred
+nothing happens (the core stars Open items only), as on the web. Not
+built: drags from the other lenses (Calendar, Assigned, Bin: not on
+`DndListView`), unfolding a folded workspace or scrolling the sidebar
+under a drag.
 
 **New-item row (2026-11-20):** a list ends in a row to type the next
 item into, the web's trailing capture slot (`ItemAddRow` in the list's

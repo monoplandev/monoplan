@@ -1196,7 +1196,7 @@ final class MainWindowModel: ObservableObject {
     /// (`SidebarDrop.swift`).
     let drops = SidebarDrops()
 
-    /// Rows dragged from the list or Starred, in the order shown, let
+    /// Rows dragged from the list, Starred or Done, in the order shown, let
     /// go on a sidebar row (spec/mac-dnd-plan.md phase 3; the web's
     /// `onDndDragEnd`). One typed call each, so one Undo step:
     ///
@@ -1220,6 +1220,7 @@ final class MainWindowModel: ObservableObject {
             // Gone from the rows at once, not after the reread.
             items.removeAll { ids.contains($0.id) }
             starred.removeAll { ids.contains($0.id) }
+            done.removeAll { ids.contains($0.item.id) }
             bin(refs)
             return false
         case .starred:
@@ -1243,7 +1244,8 @@ final class MainWindowModel: ObservableObject {
                     }
                 } else {
                     if let selected, ids.contains(selected.id) { clearItem() }
-                    // Starred's rows stay: they are starred wherever they live.
+                    // Starred's and Done's rows stay: they are starred,
+                    // or Done, wherever they live.
                     if shown.lens == nil { items.removeAll { ids.contains($0.id) } }
                 }
                 write { try $0.moveItemsAcross(items: refs, to: workspace, list: list, index: 0) }
@@ -2256,7 +2258,7 @@ struct MainWindowView: View {
             }
     }
 
-    /// Rows dragged out of a list or Starred onto the sidebar: the row
+    /// Rows dragged out of a list, Starred or Done onto the sidebar: the row
     /// under the drag is lit, and takes them when they are let go.
     private var sidebarDrop: ItemListDrop {
         ItemListDrop(
@@ -2532,42 +2534,35 @@ struct MainWindowView: View {
     /// (`DoneFilter.swift`) admits, newest first. The
     /// tick puts a row back. As the web's Done rows: the tick, when it
     /// entered Done, the text, and the list it is on at the far edge.
+    /// On `ItemList`, so rows drag onto the sidebar as a list's do: a
+    /// list or an Inbox moves them there, still Done.
     private var done: some View {
-        List(selection: selection { id in model.done.first { $0.item.id == id }?.workspace }) {
-            ForEach(model.done) { row in
-                HStack(alignment: .center, spacing: 8) {
-                    ItemCheckButton(state: row.item.state) {
-                        model.setDone(workspace: row.workspace, id: row.item.id, done: $0)
-                    }
-                    // As wide as it reads, so the text follows it at
-                    // the same gap on every row.
-                    Text(verbatim: Self.stamp(row.item.lifecycleAt))
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                        .fixedSize()
-                    Text(verbatim: row.item.text)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(verbatim: model.doneListName(row))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-                .itemRow()
-                .itemMenu(model, workspace: row.workspace, id: row.item.id)
-                .tag(row.item.id)
-            }
-            if model.done.isEmpty {
-                if model.doneFilter.isEmpty {
-                    Text("Nothing here").foregroundStyle(.secondary)
-                } else {
-                    Text("No finished items match the filter.").foregroundStyle(.secondary)
+        ItemList(
+            surface: model.shown,
+            rows: model.done.map {
+                ItemListRow(
+                    id: $0.item.id, workspace: $0.workspace, text: $0.item.text, state: $0.item.state,
+                    note: model.doneListName($0), muted: true,
+                    stamp: Self.stamp($0.item.lifecycleAt))
+            },
+            selected: model.selected?.id,
+            // Newest first, never by hand: its rows only drag out, to
+            // the sidebar.
+            reorder: false,
+            select: { model.selectItem(workspace: $0?.workspace, id: $0?.id) },
+            selectedCount: { [surface = model.shown] in model.rowsSelected($0, on: surface) },
+            toggle: { row, done in model.setDone(workspace: row.workspace, id: row.id, done: done) },
+            move: { _, _ in },
+            menu: itemListMenu,
+            drop: sidebarDrop)
+            .ignoresSafeArea()
+            .overlay(alignment: .topLeading) {
+                if model.done.isEmpty {
+                    emptyNote(
+                        model.doneFilter.isEmpty
+                            ? Text("Nothing here") : Text("No finished items match the filter."))
                 }
             }
-        }
-        .listStyle(.inset)
-        .scrollContentBackground(.hidden)
     }
 
     /// Empty, asked first: the sidebar row's menu and the Bin's bar.
