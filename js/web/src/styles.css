@@ -5159,8 +5159,8 @@ input.task-check:hover {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  flex: 0 0 320px;
-  width: 320px;
+  flex: 0 0 280px;
+  width: 280px;
   border-radius: 10px;
   background: var(--bg-board-col);
   /* Matches .board's padding so ensure-lane-visible scrolls (Board.tsx)
@@ -5437,6 +5437,7 @@ input.task-check:hover {
    (with one line, the content stays at the top). */
 .row.row-card {
   height: calc(100% - 6px);
+  font-size: 13px;
   border: 1px solid var(--border-row);
   border-radius: 8px;
   flex-wrap: wrap;
