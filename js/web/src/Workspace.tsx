@@ -2527,8 +2527,8 @@ export function Workspace(props: {
   };
   onGlobalKey(onNewKey);
 
-  // [ / ]: cycle through the nav views in top-to-bottom order — Focus, Home,
-  // Done, Bin, then the user lists (Bin only earns a slot while it holds
+  // [ / ]: cycle through the nav views in top-to-bottom order — Upcoming,
+  // Assigned, Focus, Done, Bin, then each doc's lists (Bin only earns a slot while it holds
   // items, matching its nav visibility). Wraps at both ends. From a view that
   // isn't in the sequence (e.g. an emptied Bin), ] enters at the top and
   // [ at the bottom, so the bracket pair always re-enters the set.
@@ -2538,9 +2538,9 @@ export function Workspace(props: {
     // Sidebar order: the fixed views (Bin only while it has a row), then
     // each doc's section (Home first): its Inbox, then its user lists.
     const seq: ViewKey[] = [
-      { kind: "focus" },
       { kind: "upcoming" },
       ...(assignedShown() ? [{ kind: "assigned" } as ViewKey] : []),
+      { kind: "focus" },
       { kind: "done" },
       ...(docs.binCount() > 0 ? [{ kind: "bin" } as ViewKey] : []),
       ...docs.docs().flatMap((d): ViewKey[] => [
@@ -2561,8 +2561,8 @@ export function Workspace(props: {
   };
   onGlobalKey(onBracketNavigate);
 
-  // 1–4: jump straight to the fixed nav views in sidebar order (Focus /
-  // Upcoming / Done / Inbox). Bin has no digit. Mapping and modifier guard
+  // 1–4: jump straight to the fixed nav views in sidebar order (Upcoming /
+  // Focus / Done / Inbox). Bin has no digit. Mapping and modifier guard
   // live in digitNavTarget (pure, unit-tested); onGlobalKey supplies the
   // overlay / editable-surface guards.
   const onDigitNavigate = (e: KeyboardEvent) => {

@@ -243,9 +243,10 @@ event — so the web store must re-derive `focus_view` on **item events too**
 ## Client (web) contract
 
 - Focus is a static nav entry alongside Done and Bin (not a `ListMeta` row), with
-  a fixed icon and a count badge = number of visible refs. Placed at the very top
-  of the nav — above Inbox/Home and the user-created lists — as the first "what am
-  I working on now" entry. The count renders plainly, like every other list count
+  a fixed icon and a count badge = number of visible refs. Placed in the nav's
+  top group, above Inbox/Home and the user-created lists, under the Calendar and
+  Assigned and above Done (moved from the very top 2026-11-23; the same order on
+  iOS and macOS). The count renders plainly, like every other list count
   (no special colour treatment).
 - The Focus view is a flat ordered list of `focus_view()`; drag-to-reorder reuses
   the existing DnD infrastructure. Per-row actions: set lifecycle, mark Done, and

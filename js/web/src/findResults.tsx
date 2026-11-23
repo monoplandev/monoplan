@@ -66,12 +66,12 @@ export function createFindState(docs: DocsLayer, assignedShown: () => boolean) {
   // Inbox heading the lists group (it's the reserved primary list, filed
   // with the user's lists in the nav).
   const builtinViews = (): ViewResult[] => [
-    { kind: "view", id: "focus", title: m().nav.focus },
     { kind: "view", id: "upcoming", title: m().nav.upcoming },
     // Assigned follows the sidebar too: only while something is assigned.
     ...(assignedShown()
       ? [{ kind: "view", id: "assigned", title: m().nav.assigned } as ViewResult]
       : []),
+    { kind: "view", id: "focus", title: m().nav.focus },
     { kind: "view", id: "done", title: m().nav.done },
     ...(docs.binCount() > 0
       ? [{ kind: "view", id: "bin", title: m().nav.bin } as ViewResult]

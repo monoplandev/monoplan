@@ -275,11 +275,6 @@ struct HomeView: View {
         NavigationStack(path: $path) {
             List {
                 Section {
-                    NavigationLink(value: HomePage.starred) {
-                        // How many are starred; nothing is drawn for none.
-                        Label { Text("Starred") } icon: { StarIcon() }
-                            .counted(model.starred.count)
-                    }
                     NavigationLink(value: HomePage.agenda) {
                         // What is owed or on today, as the web's Upcoming.
                         Label { Text("Calendar") } icon: { CatalogIcon(name: "Calendar") }
@@ -293,6 +288,11 @@ struct HomeView: View {
                             Label("Assigned", systemImage: "person")
                                 .counted(model.assigned.count)
                         }
+                    }
+                    NavigationLink(value: HomePage.starred) {
+                        // How many are starred; nothing is drawn for none.
+                        Label { Text("Starred") } icon: { StarIcon() }
+                            .counted(model.starred.count)
                     }
                     NavigationLink(value: HomePage.map) {
                         Label("Map", systemImage: "map")

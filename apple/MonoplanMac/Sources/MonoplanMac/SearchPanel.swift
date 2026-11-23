@@ -65,12 +65,12 @@ final class SearchModel: ObservableObject {
     /// The Bin only while it has something, as in the sidebar.
     private func builtIns(_ query: String) -> [SearchRow] {
         var pages: [(String, SearchRow)] = [
-            (String(localized: "Starred"), .lens(.starred)),
             (String(localized: "Calendar"), .lens(.agenda)),
+            (String(localized: "Starred"), .lens(.starred)),
             (String(localized: "Done"), .lens(.done)),
         ]
         // Assigned only while something is, as in the sidebar.
-        if !window.assigned.isEmpty { pages.insert((String(localized: "Assigned"), .lens(.assigned)), at: 2) }
+        if !window.assigned.isEmpty { pages.insert((String(localized: "Assigned"), .lens(.assigned)), at: 1) }
         if !window.binned.isEmpty { pages.append((String(localized: "Bin"), .lens(.bin))) }
         pages.append((String(localized: "Inbox"), .inbox))
         return pages.filter { matchesName(name: $0.0, query: query) }.map(\.1)

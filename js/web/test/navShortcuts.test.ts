@@ -22,9 +22,9 @@ const key = (
 });
 
 describe("digitNavTarget", () => {
-  test("1–4 map to Focus / Upcoming / Done / Inbox in sidebar order", () => {
-    expect(digitNavTarget(key("1"))).toEqual({ kind: "focus" });
-    expect(digitNavTarget(key("2"))).toEqual({ kind: "upcoming" });
+  test("1–4 map to Upcoming / Focus / Done / Inbox in sidebar order", () => {
+    expect(digitNavTarget(key("1"))).toEqual({ kind: "upcoming" });
+    expect(digitNavTarget(key("2"))).toEqual({ kind: "focus" });
     expect(digitNavTarget(key("3"))).toEqual({ kind: "done" });
     expect(digitNavTarget(key("4"))).toEqual({ kind: "list", id: "inbox" });
   });

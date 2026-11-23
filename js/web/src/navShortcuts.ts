@@ -1,5 +1,5 @@
-// Digit shortcuts for the fixed nav views, in sidebar order: 1 Focus,
-// 2 Upcoming, 3 Done, 4 Inbox. Pure decision logic, extracted from
+// Digit shortcuts for the fixed nav views, in sidebar order: 1 Upcoming,
+// 2 Focus, 3 Done, 4 Inbox. Pure decision logic, extracted from
 // Workspace so it can be unit-tested without a DOM. Bin deliberately has
 // no digit: its row only exists while it holds items, and it's a
 // destination you reach via Backspace on an item, not a place to jump to.
@@ -14,9 +14,9 @@ export function digitNavTarget(
   if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return null;
   switch (e.key) {
     case "1":
-      return { kind: "focus" };
-    case "2":
       return { kind: "upcoming" };
+    case "2":
+      return { kind: "focus" };
     case "3":
       return { kind: "done" };
     case "4":

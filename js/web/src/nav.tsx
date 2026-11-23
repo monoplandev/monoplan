@@ -367,24 +367,6 @@ export function Nav(props: {
       {props.header}
       <div class="nav-scroll" tabIndex={-1} ref={navScrollEl}>
       <div class="nav-group">
-        {/* Focus: a reserved lens (spec/focus.md), not a `ListMeta` row, so
-            it's a static entry with a fixed icon — like Done / Bin. Sits at
-            the very top: it's the "what am I working on now" answer the
-            user reaches for first. */}
-        <button
-          type="button"
-          class="nav-item"
-          data-active={props.view.kind === "focus" ? "" : undefined}
-          data-drop-focus=""
-          tabIndex={-1}
-          onClick={() => props.setView({ kind: "focus" })}
-        >
-          <span class="nav-item-icon" innerHTML={starSvg} />
-          {m().nav.focus}
-          <Show when={props.focusCount > 0}>
-            <span class="nav-item-count">{props.focusCount}</span>
-          </Show>
-        </button>
         {/* Upcoming: the deadline lens (proto calendar) — a cross-cutting
             view like Done / Bin, so a static entry with a fixed icon. */}
         <button
@@ -417,6 +399,23 @@ export function Nav(props: {
             </Show>
           </button>
         </Show>
+        {/* Focus: a reserved lens (spec/focus.md), not a `ListMeta` row, so
+            it's a static entry with a fixed icon — like Done / Bin. Sits
+            under the Calendar and Assigned. */}
+        <button
+          type="button"
+          class="nav-item"
+          data-active={props.view.kind === "focus" ? "" : undefined}
+          data-drop-focus=""
+          tabIndex={-1}
+          onClick={() => props.setView({ kind: "focus" })}
+        >
+          <span class="nav-item-icon" innerHTML={starSvg} />
+          {m().nav.focus}
+          <Show when={props.focusCount > 0}>
+            <span class="nav-item-count">{props.focusCount}</span>
+          </Show>
+        </button>
         <button
           type="button"
           class="nav-item"

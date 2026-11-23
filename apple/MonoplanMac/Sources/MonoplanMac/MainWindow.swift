@@ -2,7 +2,7 @@
 // (spec/swift-bindings-plan.md "The macOS window"), replacing the
 // webview. Deliberately a debug screen for now: a sidebar laid out as
 // the web nav is (the lenses
-// Starred, Calendar and Done on top, then one group per open workspace,
+// Calendar, Starred and Done on top, then one group per open workspace,
 // Personal first, each a heading row over its Inbox and lists: the row
 // folds the group, and each has a "…" menu: Export and Import JSON
 // (`WorkspaceJSON.swift`), and on a shared workspace Share…
@@ -1965,13 +1965,6 @@ struct MainWindowView: View {
         }
         return List {
             Section {
-                // Starred, the Calendar and the Inbox are counted
-                // whatever the preference says, as on iOS.
-                row(.lens(.starred), HStack {
-                    Label { Text("Starred") } icon: { StarOutline() }
-                    Spacer()
-                    count(model.starred.count)
-                })
                 // What is owed or on today, as the web's Upcoming.
                 row(.lens(.agenda), HStack {
                     Label { Text("Calendar") } icon: { NavIcon(image: NavArt.calendar) }
@@ -1988,6 +1981,13 @@ struct MainWindowView: View {
                         count(model.assigned.count)
                     })
                 }
+                // Starred, the Calendar and the Inbox are counted
+                // whatever the preference says, as on iOS.
+                row(.lens(.starred), HStack {
+                    Label { Text("Starred") } icon: { StarOutline() }
+                    Spacer()
+                    count(model.starred.count)
+                })
                 row(.lens(.done), Label { Text("Done") } icon: { NavIcon(image: NavArt.done) })
                 // Only while something is binned, as the web's and iOS's
                 // nav; counted, as the web's.
