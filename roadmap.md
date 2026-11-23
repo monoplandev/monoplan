@@ -133,3 +133,7 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - tui
 - side by side days agenda view
 - floating kanban surface
+- gate large actions e.g. are you sure you want to delete 25+ items?
+- backlinks etc
+- ai suggested next action button?
+- jepsen for testing?
