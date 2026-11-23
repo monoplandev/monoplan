@@ -1917,7 +1917,7 @@ let inboxNewestFirstKey = "inboxNewestFirst"
 /// `UserDefaults` key of the Calendar's "Hide Empty Days" (the toolbar's
 /// filter button on the Calendar): set, only Today and the days
 /// something is on have a header; absent, every day from Today on does
-/// (`AgendaTable.filled`). Display only, the web's
+/// (`AgendaGroup.filled` in MonoplanCore). Display only, the web's
 /// `monoplan.agenda.hideEmptyDays`.
 let agendaHideEmptyDaysKey = "agendaHideEmptyDays"
 

@@ -155,7 +155,7 @@ final class AgendaFillTests: XCTestCase {
             AgendaGroup(day: "2026-11-23", today: true, rows: []),
             AgendaGroup(day: "2026-11-25", today: false, rows: [entry("b")]),
         ]
-        let out = AgendaTable.filled(groups)
+        let out = AgendaGroup.filled(groups)
         XCTAssertEqual(out.first?.day, "2026-11-20")
         XCTAssertEqual(out.dropFirst().map(\.day).first, "2026-11-23")
         XCTAssertEqual(out.count, 1 + 14)
@@ -169,7 +169,7 @@ final class AgendaFillTests: XCTestCase {
             AgendaGroup(day: "2026-11-23", today: true, rows: []),
             AgendaGroup(day: "2027-01-02", today: false, rows: [entry("c")]),
         ]
-        let out = AgendaTable.filled(groups)
+        let out = AgendaGroup.filled(groups)
         XCTAssertEqual(out.last?.day, "2027-01-02")
         XCTAssertEqual(out.count, 41)
     }

@@ -56,7 +56,7 @@ struct AgendaTable: NSViewRepresentable {
     /// The model's count of "Today" presses: a new value scrolls back
     /// to Today, or to Overdue above it when something is.
     let todayJumps: Int
-    /// Every day from Today on gets a header (`filled`); false is only
+    /// Every day from Today on gets a header (`AgendaGroup.filled`); false is only
     /// Today and the days something is on.
     let fillEmptyDays: Bool
     let heading: (AgendaGroup) -> String
@@ -210,55 +210,6 @@ struct AgendaTable: NSViewRepresentable {
         }
     }
 
-    /// How many days past Today are shown when nothing is on them, if
-    /// nothing is placed later: two weeks of days in all, the web's
-    /// `AGENDA_ALL_DAYS_AHEAD`.
-    static let daysAhead = 13
-
-    /// The groups with every day from Today on: an empty group for
-    /// each day missing from Today through the later of the last day
-    /// with rows and `daysAhead` past Today. Days gone by are kept only
-    /// when they have rows, as before. Without a Today group (no read
-    /// yet) the groups are the non-empty ones as they are.
-    static func filled(_ groups: [AgendaGroup], ahead: Int = daysAhead) -> [AgendaGroup] {
-        var out: [AgendaGroup] = []
-        var byDay: [String: AgendaGroup] = [:]
-        var today: String?
-        for group in groups {
-            if group.today { today = group.day }
-            if let today, group.day >= today {
-                byDay[group.day] = byDay[group.day] ?? group
-            } else if group.today || !group.rows.isEmpty {
-                out.append(group)
-            }
-        }
-        guard let today else { return out }
-        var last = addDays(today, ahead)
-        if let latest = byDay.filter({ !$0.value.rows.isEmpty }).keys.max(), latest > last {
-            last = latest
-        }
-        var day = today
-        while day <= last {
-            out.append(byDay[day] ?? AgendaGroup(day: day, today: day == today, rows: []))
-            day = addDays(day, 1)
-        }
-        return out
-    }
-
-    /// `stamp` (`YYYY-MM-DD`) moved by `days`, on the Gregorian
-    /// calendar in UTC, so no clock change skips or repeats a day.
-    static func addDays(_ stamp: String, _ days: Int) -> String {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        let parts = stamp.split(separator: "-").compactMap { Int($0) }
-        guard parts.count == 3,
-              let date = calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2])),
-              let moved = calendar.date(byAdding: .day, value: days, to: date)
-        else { return stamp }
-        let c = calendar.dateComponents([.year, .month, .day], from: moved)
-        return String(format: "%04d-%02d-%02d", c.year!, c.month!, c.day!)
-    }
-
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         var parent: AgendaTable
         let table = MenuTable()
@@ -287,7 +238,7 @@ struct AgendaTable: NSViewRepresentable {
         // MARK: Rows
 
         /// Today always, the days ahead always when `fillEmptyDays`
-        /// (`filled`), any other day when it has rows, and Overdue
+        /// (`AgendaGroup.filled`), any other day when it has rows, and Overdue
         /// above Today when Today's group has overdue rows.
         private func build() -> [Line] {
             var lines: [Line] = []
@@ -300,8 +251,8 @@ struct AgendaTable: NSViewRepresentable {
                 }
             }
             let groups = parent.fillEmptyDays
-                ? AgendaTable.filled(parent.groups)
-                : parent.groups.filter { $0.today || !$0.rows.isEmpty }
+                ? AgendaGroup.filled(parent.groups)
+                : AgendaGroup.nonEmpty(parent.groups)
             for group in groups {
                 guard days.insert(group.day).inserted else { continue }
                 var rows = group.rows

@@ -8,13 +8,18 @@
 //
 // The list is plain, as the Mac's Calendar is (`AgendaTable.swift`,
 // 2026-11-18): no card behind a day's rows. A day's header is a line of
-// secondary text at the body's size, its rows sit on the page's own
+// secondary text at the body's size over a hairline, its rows sit on the page's own
 // ground, and a hairline runs between two rows of a day.
 //
 // What is overdue (the rows the engine leads Today with, in the overdue
 // tone) has a section of its own right above Today, there only while
 // something is overdue (`spec/calendar-plan.md` "Overdue"). When it is
 // there it is what the page opens on and what "Today" comes back to.
+//
+// The days come in as the page shows them (`AgendaView.groups`): every
+// day from Today on, or only Today and the days something is on under
+// "Hide Empty Days". A day with nothing on it has a line saying so, as
+// on the Mac.
 //
 // The rows are the SwiftUI ones (`AgendaRowView`), hosted in the cells,
 // and so are the headers, which keeps the two on the same margin.
@@ -56,10 +61,10 @@ struct AgendaCollection: UIViewControllerRepresentable {
 
 final class AgendaCollectionController: UICollectionViewController {
     /// A cell: an agenda row, by its day and its key within the day,
-    /// or the line Today has when nothing is on it.
+    /// or the line a day has when nothing is on it.
     private enum Item: Hashable {
         case row(day: String, key: String)
-        case nothingToday
+        case nothing(day: String, today: Bool)
     }
 
     private typealias Snapshot = NSDiffableDataSourceSnapshot<String, Item>
@@ -139,13 +144,17 @@ final class AgendaCollectionController: UICollectionViewController {
         let cell = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [unowned self] cell, _, item in
             cell.backgroundConfiguration = .clear()
             guard let row = entries[item] else {
+                // The Mac's empty line: italic, in the tertiary colour.
+                let today = if case .nothing(_, true) = item { true } else { false }
                 cell.contentConfiguration = UIHostingConfiguration {
-                    Text("Nothing scheduled")
-                        .foregroundStyle(.secondary)
+                    (today ? Text("Nothing today") : Text("Nothing scheduled"))
+                        .italic()
+                        .foregroundStyle(.tertiary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .margins(.horizontal, Self.margin)
-                .minSize(height: 44)
+                .margins(.vertical, 4)
+                .minSize(height: 32)
                 return
             }
             let divided = divided.contains(item)
@@ -184,7 +193,8 @@ final class AgendaCollectionController: UICollectionViewController {
         }
     }
 
-    /// Show these days: Today always, the others when they have rows.
+    /// Show these days, each as it comes: the page has already left
+    /// out the ones it does not show.
     func show(_ groups: [AgendaGroup]) {
         guard groups != shown else { return }
         shown = groups
@@ -204,7 +214,7 @@ final class AgendaCollectionController: UICollectionViewController {
                 snapshot.appendItems([item], toSection: section)
             }
         }
-        for day in groups where day.today || !day.rows.isEmpty {
+        for day in groups {
             // A diffable snapshot traps on a repeated identifier.
             guard titles[day.day] == nil else { continue }
             var rows = day.rows
@@ -222,7 +232,7 @@ final class AgendaCollectionController: UICollectionViewController {
             titles[day.day] = AgendaView.title(for: day)
             snapshot.appendSections([day.day])
             if rows.isEmpty {
-                snapshot.appendItems([.nothingToday], toSection: day.day)
+                snapshot.appendItems([.nothing(day: day.day, today: day.today)], toSection: day.day)
             }
             append(rows, to: day.day)
         }
@@ -260,16 +270,21 @@ final class AgendaCollectionController: UICollectionViewController {
     private func setTitle(of header: UICollectionViewListCell, section: Int) {
         let title = dataSource.sectionIdentifier(for: section).flatMap { titles[$0] } ?? ""
         header.backgroundConfiguration = .clear()
-        // The Mac's header: the body's size, in the secondary colour.
+        // The Mac's header: the body's size, in the secondary colour,
+        // with a line under it, the rows' own hairline, 5 pt below the
+        // text.
         header.contentConfiguration = UIHostingConfiguration {
-            Text(verbatim: title)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityAddTraits(.isHeader)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(verbatim: title)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityAddTraits(.isHeader)
+                Divider()
+            }
         }
         .margins(.horizontal, Self.margin)
         .margins(.top, 16)
-        .margins(.bottom, 4)
+        .margins(.bottom, 0)
     }
 
     override func viewDidLayoutSubviews() {

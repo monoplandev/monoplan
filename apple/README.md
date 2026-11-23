@@ -142,8 +142,10 @@ first; each a heading that folds its group, the fold kept in
 their open count, the lists theirs when the
 General pane's "Show list counts in sidebar" is on (off by default),
 `Engine.lists` once per workspace), the Calendar (`Engine.agenda` over
-every workspace: the days gone by a year back, Today, then each
-non-empty day, rows with a tick; it opens on Today's header and the
+every workspace: the days gone by a year back, Today, then every day
+ahead, empty ones too, for two weeks and on to the last day with rows
+(only those with rows under the filter's "Hide Empty Days"), rows with
+a tick; it opens on Today's header and the
 toolbar's "Today" comes back to it, in an AppKit table,
 `AgendaTable.swift`, 2026-11-17, because a SwiftUI `List` cannot be
 opened part-way down reliably; a row drags onto another day to
@@ -500,8 +502,10 @@ engine's merged agenda (`Request.agenda(days: AppModel.agendaDays, all: true)`, 
 `agenda --all --json`, `spec/cli.md` §Items: every open workspace in
 one placement, the Home doc's hidden-from-calendar docs left out; the
 horizon is a century, so the whole future in one fetch, no paging), every
-group as a section: Today, then each non-empty
-day, with the row's time, its workspace under the text when it is not
+group as a section: Today, then every day ahead, empty ones too, for
+two weeks and on to the last day with rows (2026-11-23, as the Mac's;
+the toolbar's filter menu has "Hide Empty Days" for only the days with
+rows), with the row's time, its workspace under the text when it is not
 Personal's, and the duration or overdue / due-today tone; read-only
 markup, nothing tappable yet. The days gone by are sections above Today
 and the page opens on Today's header: the list is a UIKit collection

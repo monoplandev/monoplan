@@ -58,6 +58,12 @@ let listCountsKey = "listCounts"
 /// (spec/inbox-plan.md). Display only; the same key as the Mac's.
 let inboxNewestFirstKey = "inboxNewestFirst"
 
+/// `UserDefaults` key of the Calendar's "Hide Empty Days" (the Calendar
+/// page's filter menu): set, only Today and the days something is on
+/// have a header; absent, every day from Today on does
+/// (`AgendaGroup.filled`). Display only; the same key as the Mac's.
+let agendaHideEmptyDaysKey = "agendaHideEmptyDays"
+
 struct ListRef: Hashable {
     let docId: String
     let listId: String

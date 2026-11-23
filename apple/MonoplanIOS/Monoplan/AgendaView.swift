@@ -3,7 +3,11 @@
 // spec/cli.md, with a horizon far enough out to be the whole future,
 // `AppModel.agendaDays`) as sections: Overdue while something is
 // (overdue deadlines and tasks whose planned day has passed), Today,
-// then each non-empty day. A row opens the item's sheet
+// then every day ahead, empty ones too, for two weeks and on to the
+// last day with rows, as the Mac's Calendar has them
+// (`AgendaGroup.filled`). The filter menu's "Hide Empty Days"
+// (`agendaHideEmptyDaysKey`, a device preference) leaves out every
+// empty day but Today. A row opens the item's sheet
 // (`ItemView`) and its checkbox ticks it, as in the other lenses.
 //
 // The days gone by (`AppModel.agendaPastDays`: the events that
@@ -25,28 +29,74 @@ struct AgendaView: View {
     /// Counts the taps on "Today": each one scrolls the list back to
     /// Today's header, or Overdue's above it.
     @State private var todayJumps = 0
+    @AppStorage(agendaHideEmptyDaysKey) private var hideEmptyDays = false
+
+    /// The days shown: every day from Today on, or under "Hide Empty
+    /// Days" only Today and the days something is on.
+    private var groups: [AgendaGroup] {
+        hideEmptyDays ? AgendaGroup.nonEmpty(model.agenda) : AgendaGroup.filled(model.agenda)
+    }
+
+    /// Nothing to show: no rows anywhere, and either the empty days
+    /// are hidden or there is no Today yet (no read). With the empty
+    /// days shown the page is a calendar even with nothing on it.
+    private var isEmpty: Bool {
+        model.agenda.allSatisfy({ $0.rows.isEmpty })
+            && (hideEmptyDays || !model.agenda.contains(where: \.today))
+    }
 
     var body: some View {
         Group {
-            if model.agenda.allSatisfy({ $0.rows.isEmpty }) {
+            if isEmpty {
                 emptyState
             } else {
-                AgendaCollection(groups: model.agenda, model: model, todayJumps: todayJumps, openItem: openItem) {
+                AgendaCollection(groups: groups, model: model, todayJumps: todayJumps, openItem: openItem) {
                     model.refreshAgenda()
                 }
                 // Under the bars, as a list is: the collection view
                 // insets its own content for them.
                 .ignoresSafeArea()
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Today") { todayJumps += 1 }
-                    }
-                }
             }
         }
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if !isEmpty {
+                    Button("Today") { todayJumps += 1 }
+                }
+                // In either state, so the days hidden can always be
+                // brought back.
+                filterMenu
+            }
+        }
+        // Named for the back button's menu, not drawn: the page is
+        // plainly the calendar.
         .navigationTitle("Calendar")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(removing: .title)
         .refreshable { model.refreshAgenda() }
         .onAppear { model.refreshAgenda() }
+    }
+
+    /// The filter button: a menu with the one tick, open while it is
+    /// changed. The count of checks in effect rides beside the glyph,
+    /// as Done's trigger has it.
+    private var filterMenu: some View {
+        let count = hideEmptyDays ? 1 : 0
+        return Menu {
+            Toggle("Hide Empty Days", isOn: $hideEmptyDays)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "line.3.horizontal.decrease")
+                if count > 0 {
+                    Text(verbatim: "\(count)").monospacedDigit()
+                }
+            }
+            .fontWeight(count > 0 ? .semibold : .regular)
+            .foregroundStyle(count > 0 ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+        }
+        .menuActionDismissBehavior(.disabled)
+        .accessibilityLabel("Filter")
+        .accessibilityValue(count > 0 ? String(localized: "\(count) active") : "")
     }
 
     private var emptyState: some View {

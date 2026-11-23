@@ -1372,6 +1372,17 @@
         }
       }
     },
+    "Hide Empty Days" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ocultar días vacíos"
+          }
+        }
+      }
+    },
     "Home" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2144,6 +2155,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nada destacado"
+          }
+        }
+      }
+    },
+    "Nothing today" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nada para hoy"
           }
         }
       }

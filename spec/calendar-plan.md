@@ -439,7 +439,11 @@ for the month grid). `groupByDeadline` becomes
   something is on. An empty day is its heading over a blank row-height
   slot (`data-drop-day`) saying "Nothing scheduled" (Today's "Nothing
   due today"). The filter menu is always on this view now; its
-  workspace rows only with more than one doc.
+  workspace rows only with more than one doc. The Mac and iOS
+  Calendars do the same (`AgendaGroup.filled` in `MonoplanCore`, the
+  `agendaHideEmptyDays` device preference; iOS 2026-11-23, a filter
+  menu in the page's toolbar holding only that tick), the empty line
+  reading "Nothing scheduled" (Today's "Nothing today").
 - **Week breaks** (web, 2026-11-22): the day that opens a week (the
   locale's first day from `Intl.Locale` week info, else Monday; with
   days missing, the first day group of a new week) has "Week N" at the
