@@ -2828,6 +2828,17 @@
         }
       }
     },
+    "Show in List" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mostrar en la lista"
+          }
+        }
+      }
+    },
     "Show list counts in Home" : {
       "extractionState" : "stale",
       "localizations" : {

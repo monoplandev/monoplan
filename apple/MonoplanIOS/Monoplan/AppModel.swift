@@ -244,9 +244,11 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// The item a capture last created and the list it landed in, until
-    /// that list's page has shown it: Home goes to the list, and the
-    /// list scrolls to the item and takes this back (`showedCaptured`).
+    /// The item a capture last created and the list it landed in (or
+    /// the item an item page's "Show in List" asked for, `reveal`),
+    /// until that list's page has shown it: Home goes to the list, and
+    /// the list scrolls to the item and takes this back
+    /// (`showedCaptured`).
     @Published private(set) var captured: Captured?
 
     struct Captured: Equatable {
@@ -256,6 +258,11 @@ final class AppModel: ObservableObject {
 
     /// The list page has the captured item on screen.
     func showedCaptured() { captured = nil }
+
+    /// Go to `list` and scroll to the item there, as after a capture.
+    func reveal(_ itemId: String, in list: ListRef) {
+        captured = Captured(list: list, itemId: itemId)
+    }
 
     /// Capture: create an item at the top of `list` (an Inbox's at
     /// the end of its queue, whatever is asked) (`Engine.addItem`),

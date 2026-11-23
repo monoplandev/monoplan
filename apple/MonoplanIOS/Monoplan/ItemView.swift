@@ -385,11 +385,18 @@ struct ItemView: View {
     /// to the bin and the sheet closes on it, as it leaves the list
     /// underneath. A binned one (reached from search) can be restored,
     /// which keeps the sheet up on the item as it was, or deleted for
-    /// good after a confirmation.
+    /// good after a confirmation. "Show in List" closes the sheet on
+    /// the item's list page, scrolled to its row (`parentList`).
     /// `width` is set when it shares the glass with the star: the
     /// label is then that wide, all of it the tap target.
     private func moreMenu(_ item: ItemInfo, width: CGFloat? = nil) -> some View {
         Menu {
+            if let list = parentList(item) {
+                Button("Show in List", systemImage: "list.bullet") {
+                    model.reveal(ref.itemId, in: list)
+                    dismiss()
+                }
+            }
             if item.binnedAt == nil {
                 Button("Move to Bin", systemImage: "trash", role: .destructive) {
                     confirmingBin = true
@@ -412,6 +419,18 @@ struct ItemView: View {
                 Label("More", systemImage: "ellipsis")
             }
         }
+    }
+
+    /// The list page the item is a row of, for "Show in List": its own
+    /// list, or the Inbox when its list row is gone (the catch-all,
+    /// spec/inbox-plan.md). None for what no list page shows: a closed
+    /// or binned item, or a dated one with no list (the Calendar's).
+    private func parentList(_ item: ItemInfo) -> ListRef? {
+        guard item.binnedAt == nil, item.closedAt == nil else { return nil }
+        let lists = model.lists(inDoc: ref.docId)
+        guard let list = lists.first(where: { $0.listId == item.listId }) ?? lists.first else { return nil }
+        if list.listId == "inbox" && item.when != nil { return nil }
+        return list
     }
 
     /// List, planned date, deadline (only when set, as on the web) and
