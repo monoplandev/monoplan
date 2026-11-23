@@ -16,6 +16,12 @@ struct MonoplanApp: App {
     @StateObject private var model = AppModel()
     @Environment(\.scenePhase) private var scenePhase
 
+    init() {
+        // The notification centre's delegate, in place before launch
+        // ends: a tap on a reminder may be what started the app.
+        _ = ReminderScheduler.shared
+    }
+
     var body: some Scene {
         WindowGroup {
             HomeView()

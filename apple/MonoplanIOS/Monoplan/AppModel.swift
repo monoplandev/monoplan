@@ -145,6 +145,13 @@ final class AppModel: ObservableObject {
     @Published var deletingAccount = false
     @Published var deleteAccountError: String?
 
+    /// The item whose reminder was tapped, for the item sheet to open
+    /// (`opensItems()`), which then calls `showedReminder`. Held back
+    /// until the session has loaded: a tap can be what starts the app.
+    @Published private(set) var tappedReminder: ItemRef?
+    private var awaitedReminder: ItemRef?
+    private let reminders = ReminderScheduler.shared
+
     let location: ProfileLocation
     private let engineController: EngineController
 
@@ -158,6 +165,7 @@ final class AppModel: ObservableObject {
         hasAccount = location.hasAccount
         engineController.onState = { [weak self] state in self?.stateChanged(state) }
         engineController.onChanged = { [weak self] in self?.docChanged() }
+        reminders.onOpen = { [weak self] ref in self?.openReminder(ref) }
         engineController.start()
     }
 
@@ -179,6 +187,7 @@ final class AppModel: ObservableObject {
             refreshStarred()
             refreshAssigned()
             refreshDone()
+            refreshReminders()
         case .connecting:
             session = nil
         }
@@ -211,6 +220,7 @@ final class AppModel: ObservableObject {
         refreshDone()
         refreshSearch()
         refreshBin()
+        refreshReminders()
     }
 
     /// Search for what the bar's field holds, on every keystroke: the
@@ -1118,6 +1128,24 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// `Engine.reminders`, handed to the scheduler: the notifications
+    /// pending on this iPhone follow every change to what is timed
+    /// (spec/reminders.md).
+    func refreshReminders() {
+        read({ try $0.reminders() }) { [weak self] rows, _ in
+            if let rows { self?.reminders.update(rows) }
+        }
+    }
+
+    /// A reminder setting changed (Settings).
+    func remindersSettingsChanged() { reminders.reschedule(settingsChanged: true) }
+
+    private func openReminder(_ ref: ItemRef) {
+        if session == nil { awaitedReminder = ref } else { tappedReminder = ref }
+    }
+
+    func showedReminder() { tappedReminder = nil }
+
     /// `Engine.starred`.
     func refreshStarred() {
         read({ try $0.starred() }) { [weak self] rows, error in
@@ -1202,6 +1230,10 @@ final class AppModel: ObservableObject {
         read({ Session(account: try $0.account(), docs: try $0.workspaces()) }) { [weak self] session, _ in
             guard let self, let session else { return }
             self.session = session
+            if let ref = awaitedReminder {
+                awaitedReminder = nil
+                tappedReminder = ref
+            }
             refreshLists()
             refreshRoles()
             if !binLoaded { refreshBin() }
@@ -1270,7 +1302,10 @@ final class AppModel: ObservableObject {
             busy = nil
             hasAccount = location.hasAccount
             if let error { lastError = error.localizedDescription }
-            if !hasAccount { Self.clearWidgetSnapshot() }
+            if !hasAccount {
+                Self.clearWidgetSnapshot()
+                reminders.clear()
+            }
         }
     }
 
@@ -1289,7 +1324,10 @@ final class AppModel: ObservableObject {
             busy = nil
             hasAccount = location.hasAccount
             deleteAccountError = error?.localizedDescription
-            if !hasAccount { Self.clearWidgetSnapshot() }
+            if !hasAccount {
+                Self.clearWidgetSnapshot()
+                reminders.clear()
+            }
             completion(error == nil)
         }
     }
@@ -1297,6 +1335,9 @@ final class AppModel: ObservableObject {
     /// Back in the foreground: the socket is dead after a suspension
     /// of any length. A local-only workspace has nothing to dial.
     func didBecomeActive() {
+        // Time has passed: reminders fired, and the furthest ones the
+        // pending set had no room for may now fit.
+        refreshReminders()
         guard let sync, !sync.localOnly else { return }
         reconnect()
     }

@@ -38,6 +38,7 @@ pub mod json;
 pub mod lists;
 pub mod moves;
 pub mod places;
+pub mod reminders;
 pub mod sharing;
 pub mod starred;
 

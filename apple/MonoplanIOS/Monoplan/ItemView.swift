@@ -113,6 +113,12 @@ private struct ItemSheet: ViewModifier {
                 }
                 .environmentObject(model)
             }
+            // A tapped reminder opens its item, over whatever is up.
+            .onChange(of: model.tappedReminder, initial: true) {
+                guard let ref = model.tappedReminder else { return }
+                open = .item(ref)
+                model.showedReminder()
+            }
     }
 }
 

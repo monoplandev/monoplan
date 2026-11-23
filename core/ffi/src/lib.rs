@@ -42,6 +42,7 @@ use monoplan_cli::api::{
     lists::{ListFilter, ListInfo},
     moves::ItemRef,
     places::{LocatedItem, PlaceSuggestion},
+    reminders::Reminder,
     sharing::{IssuedInvite, PendingInvite, WorkspaceMember},
     starred::StarredItem,
 };
@@ -1393,6 +1394,16 @@ impl Engine {
     /// (spec/sharing-plan.md "Assignment").
     pub fn assigned(&self) -> Result<Vec<AssignedEntry>, EngineError> {
         Ok(self.client.call_blocking(None, api::assigned::assigned)?)
+    }
+
+    /// What this device may remind about: every open workspace's Open
+    /// items with a timed `when` still ahead, soonest first, tasks and
+    /// events alike. When each fires is the device's setting
+    /// (spec/reminders.md).
+    pub fn reminders(&self) -> Result<Vec<Reminder>, EngineError> {
+        Ok(self
+            .client
+            .call_blocking(None, |cx| api::reminders::reminders(cx, None))?)
     }
 
     /// Done across every workspace that `filter` admits (an empty

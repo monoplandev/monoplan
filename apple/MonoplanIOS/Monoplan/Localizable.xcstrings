@@ -162,6 +162,16 @@
         }
       }
     },
+    "10 minutes before" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "10 minutos antes"
+          }
+        }
+      }
+    },
     "A former member" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -378,6 +388,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Al menos %lld caracteres. Recibirás un código de recuperación de 12 palabras. Es la única forma de volver a entrar si olvidas tu contraseña: Monoplan no puede restablecerla por ti."
+          }
+        }
+      }
+    },
+    "At the time" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A la hora"
           }
         }
       }
@@ -1330,6 +1350,17 @@
         }
       }
     },
+    "Events" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eventos"
+          }
+        }
+      }
+    },
     "Expires %@" : {
       "localizations" : {
         "es" : {
@@ -1347,6 +1378,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Filtrar"
+          }
+        }
+      }
+    },
+    "For items with a time, on this iPhone only." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Para los elementos con hora, solo en este iPhone."
           }
         }
       }
@@ -1401,6 +1442,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "He anotado estas 12 palabras"
+          }
+        }
+      }
+    },
+    "In %lld minutes" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En %lld minutos"
           }
         }
       }
@@ -2169,6 +2221,26 @@
         }
       }
     },
+    "Notifications are turned off for Monoplan, so no reminders are shown." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Las notificaciones de Monoplan están desactivadas, así que no se muestra ningún recordatorio."
+          }
+        }
+      }
+    },
+    "Off" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desactivado"
+          }
+        }
+      }
+    },
     "Offline · last synced %@ ago" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2453,6 +2525,16 @@
         }
       }
     },
+    "Reminders" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recordatorios"
+          }
+        }
+      }
+    },
     "Remove" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2603,6 +2685,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Revocar"
+          }
+        }
+      }
+    },
+    "Scheduled tasks" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tareas programadas"
           }
         }
       }
@@ -3295,6 +3388,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Reintentar"
+          }
+        }
+      }
+    },
+    "Turn On Notifications…" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activar notificaciones…"
           }
         }
       }

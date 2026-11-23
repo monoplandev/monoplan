@@ -1,6 +1,7 @@
 // The Settings page, pushed from Home's gear: what a person acts on.
 // General (the device's list-counts preference, as the web's Settings
-// has it), the account (who is signed in and where, sign in / sign out,
+// has it), reminders (this iPhone's two settings, spec/reminders.md),
+// the account (who is signed in and where, sign in / sign out,
 // delete account), sync
 // (the status line and when it last synced), About (links to the
 // website and the privacy policy), and the last error when
@@ -9,7 +10,9 @@
 // sheet's form without account creation or recovery.
 
 import MonoplanCore
+import MonoplanMacKit
 import SwiftUI
+import UserNotifications
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
@@ -17,12 +20,20 @@ struct SettingsView: View {
     @State private var confirmSignOut = false
     @State private var showDeleteAccount = false
     @AppStorage(listCountsKey) private var showListCounts = false
+    @AppStorage(ReminderSettings.eventKey) private var eventReminder = ReminderSettings.defaultEvent
+    @AppStorage(ReminderSettings.taskKey) private var taskReminder = ReminderSettings.defaultTask
+    /// Notifications are turned off for the app in the system's
+    /// Settings: no reminder can be delivered whatever is picked here.
+    @State private var notificationsDenied = false
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         List {
             Section("General") {
                 Toggle("Show list counts in Home", isOn: $showListCounts)
             }
+            remindersSection
             accountSection
             syncSection
             Section("About") {
@@ -48,6 +59,16 @@ struct SettingsView: View {
             #endif
         }
         .navigationTitle("Settings")
+        .onChange(of: eventReminder) { model.remindersSettingsChanged() }
+        .onChange(of: taskReminder) { model.remindersSettingsChanged() }
+        // Read again on the way back from the system's Settings.
+        .onChange(of: scenePhase, initial: true) {
+            guard scenePhase == .active else { return }
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                let denied = settings.authorizationStatus == .denied
+                DispatchQueue.main.async { notificationsDenied = denied }
+            }
+        }
         .sheet(isPresented: $showSignIn) {
             SignInView()
                 .environmentObject(model)
@@ -56,6 +77,35 @@ struct SettingsView: View {
             if let session = model.session {
                 DeleteAccountView(email: session.email)
                     .environmentObject(model)
+            }
+        }
+    }
+
+    /// A notification for an item with a time, by kind. A setting of
+    /// this iPhone alone: each device has its own.
+    private var remindersSection: some View {
+        Section {
+            Picker("Events", selection: $eventReminder) {
+                Text("10 minutes before").tag(EventReminder.tenMinutes)
+                Text("Off").tag(EventReminder.off)
+            }
+            Picker("Scheduled tasks", selection: $taskReminder) {
+                Text("At the time").tag(TaskReminder.atTime)
+                Text("10 minutes before").tag(TaskReminder.tenMinutes)
+                Text("Off").tag(TaskReminder.off)
+            }
+            if notificationsDenied {
+                Button("Turn On Notifications…") {
+                    if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
+                }
+            }
+        } header: {
+            Text("Reminders")
+        } footer: {
+            if notificationsDenied {
+                Text("Notifications are turned off for Monoplan, so no reminders are shown.")
+            } else {
+                Text("For items with a time, on this iPhone only.")
             }
         }
     }
