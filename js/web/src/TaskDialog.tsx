@@ -30,7 +30,7 @@ import { DeadlineField } from "./DeadlineField.tsx";
 import { PlaceField } from "./PlaceField.tsx";
 import type { PlaceSuggestion } from "./placeSuggest.ts";
 import { WhenField } from "./WhenField.tsx";
-import { rezonedWhen, storedWhen } from "./zones.ts";
+import { fixedWhen, localWhen, zoneWall } from "./zones.ts";
 import { ListPicker, type ListOption } from "./ListPicker.tsx";
 import { AssigneeField, type Assignment } from "./AssigneeField.tsx";
 import { SubtasksField } from "./SubtasksField.tsx";
@@ -329,8 +329,8 @@ export function TaskDialog(props: {
   // creation. Declared ahead of the list options, which name "no list"
   // by whether there is a date.
   const [newWhen, setNewWhen] = createSignal<string | null>(null);
-  // The zone that buffer is fixed to; `newWhen` is wall time on this
-  // device either way, as an item's `when` is.
+  // The zone that buffer is fixed to. With one, `newWhen` is the time on
+  // that zone's clock, as the fields show it.
   const [newZone, setNewZone] = createSignal<string | null>(null);
   const listOptions = createMemo<ListOption[]>(() => {
     // A shared workspace's lists carry its name, this doc's included;
@@ -934,7 +934,7 @@ export function TaskDialog(props: {
       const n = notes();
       if (n) props.app.setItemNotes(id, n);
       const w = newWhen();
-      if (w) props.app.setItemWhen(id, storedWhen(w, whenTime(w) ? newZone() : null));
+      if (w) props.app.setItemWhen(id, fixedWhen(w, newZone()));
       else if (suggested && !nw.done) props.app.setItemWhenSuggested(id, suggested.when);
       if (w && newEvent()) props.app.setItemEvent(id, true);
       const dur = newDuration();
@@ -1268,6 +1268,15 @@ export function TaskDialog(props: {
   const vPinned = () => (item() ? focused() : newFocus());
   const vWhen = () => (item() ? (item()?.when ?? null) : newWhen());
   const vZone = () => (item() ? (item()?.whenZone ?? null) : newZone());
+  // What the date and time fields show and edit: a time fixed to a zone
+  // reads on that zone's clock (`spec/calendar-plan.md` "Fixed
+  // instants"), where everything else in the app shows `vWhen`, the
+  // device's.
+  const fieldWhen = () => {
+    const it = item();
+    if (!it) return newWhen();
+    return it.when ? zoneWall(it.when, it.whenZone) : null;
+  };
   const vDuration = () =>
     item() ? (item()?.duration ?? null) : newDuration();
   // A capture has no deadline: it is set from an existing item's menu.
@@ -1352,7 +1361,8 @@ export function TaskDialog(props: {
   const onWhenChange = (value: string | null) => {
     const it = item();
     if (it) {
-      props.app.setItemWhen(it.id, value);
+      // The fields edit the zone's clock, so the write names the zone.
+      props.app.setItemWhen(it.id, value && fixedWhen(value, it.whenZone));
       return;
     }
     setNewWhen(value);
@@ -1366,7 +1376,9 @@ export function TaskDialog(props: {
       setNewDuration(DEFAULT_DURATION_MINUTES);
   };
   // Fix the time to a zone, or make it floating again (null). The
-  // buffer does to itself what the core does to an item.
+  // buffer does to itself what the core does to an item: fixing keeps
+  // the digits in the fields, unfixing keeps the moment, as the device
+  // reads it.
   const onZoneChange = (zone: string | null) => {
     const it = item();
     if (it) {
@@ -1375,7 +1387,7 @@ export function TaskDialog(props: {
     }
     const w = newWhen();
     if (!w || !whenTime(w)) return;
-    setNewWhen(rezonedWhen(w, newZone(), zone));
+    if (!zone) setNewWhen(localWhen(w, newZone()));
     setNewZone(zone);
   };
   // The date suggestion (`whenSuggest.ts`) as this surface holds it. A
@@ -1686,7 +1698,7 @@ export function TaskDialog(props: {
               when={!props.whenOpen() && suggestedWhen()}
               fallback={
                 <WhenField
-                  when={vWhen}
+                  when={fieldWhen}
                   duration={vDuration}
                   muted={muted}
                   onChange={onWhenChange}

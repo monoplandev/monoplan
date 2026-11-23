@@ -804,16 +804,22 @@ here.
     localised name and its offset on the item's day dim after it; typed
     words match the city, id, name or offset by word prefix, city
     matches first; the blank list is by city with the device's zone on
-    top. Picking calls `setItemWhenZone`, so the digits are kept and
-    the time fields above, which stay device-local, move; the closed
-    field therefore reads the city and the time there when it differs
-    ("Paris · 14:00", with the weekday on another day). The ✕, the
-    panel's Remove row and Enter on emptied text make it floating.
+    top. With a zone, the task surface's date and time fields show
+    and edit that zone's clock, not the device's (decided 2026-11-23;
+    the one place the app does): picking calls `setItemWhenZone`,
+    which keeps the digits, so nothing in the fields moves, and an
+    edit of them is written as `...[Zone]`. Everything else (rows,
+    agenda, reminders) stays device-local. The closed zone field
+    reads the zone's offset on the item's day and its city ("GMT+1
+    Paris"). The ✕, the
+    panel's Remove row and Enter on emptied text make it floating, at
+    the moment it had, so the fields then move to the device's clock.
     `Intl` supplies names and offsets only (labels); every conversion
-    is the core's, through wasm `whenInZone` / `whenLocalized`. A
-    capture buffers the zone beside its local `when` and writes both in
-    one `setItemWhen` in the stored form; duplicate and copy / paste
-    carry `whenZone` the same way. The store has `ItemView.whenZone`.
+    is the core's, through wasm `whenInZone` / `whenLocalized`
+    (`zoneWall` / `fixedWhen` / `localWhen` in `zones.ts`). A capture
+    buffers the zone beside its `when` on that zone's clock and writes
+    both in one `setItemWhen`; duplicate and copy / paste carry
+    `whenZone` beside the local `when` and write the stored form too. The store has `ItemView.whenZone`.
   - **Not built**: the zone on rows and in the agenda (a fixed item
     looks like any other outside the task surface); a picker and label
     on iOS and macOS; `Engine.set_when_zone` on the FFI. The web

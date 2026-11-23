@@ -171,13 +171,23 @@ export function storedWhen(when: string, zone: string | null | undefined): strin
   return wall ? `${wall}[${zone}]` : when;
 }
 
-/** A device-local timed `when` after its zone changes from `from` to
- *  `to` (null is floating), as the core's `set_item_when_zone` would
- *  leave it: fixing keeps the clock digits the value has in `from` and
- *  reads them in `to`; unfixing keeps what the device shows. For the
- *  capture buffer, which has no item to ask the core about. */
-export function rezonedWhen(when: string, from: string | null, to: string | null): string {
-  if (!to) return when;
-  const digits = from ? (wallInZone(when, from) ?? when) : when;
-  return whenLocalized(`${digits}[${to}]`);
+/** A fixed `when` as its own zone's clock reads it, which is what the
+ *  task surface's date and time fields show and edit. The device-local
+ *  value where there is no zone or it cannot be converted (the core
+ *  shows such a value as written, so that is the zone's clock too). */
+export function zoneWall(when: string, zone: string | null | undefined): string {
+  return (zone ? wallInZone(when, zone) : null) ?? when;
+}
+
+/** The register value for a time read on `zone`'s own clock: the
+ *  inverse of `zoneWall`, for writing an edit of those fields. Plain
+ *  (the core drops the zone for an all-day value, and keeps one it
+ *  cannot convert) when there is no zone to name. */
+export function fixedWhen(wall: string, zone: string | null | undefined): string {
+  return zone && wallInZone(wall, zone) !== null ? `${wall}[${zone}]` : wall;
+}
+
+/** The device-local time of a value read on `zone`'s clock. */
+export function localWhen(wall: string, zone: string | null | undefined): string {
+  return whenLocalized(fixedWhen(wall, zone));
 }

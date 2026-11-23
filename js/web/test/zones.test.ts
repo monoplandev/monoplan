@@ -12,11 +12,13 @@ import { MemReplicaStorage } from "../../core/test/mem-replica-storage.ts";
 import { clipFromHtml, renderClip, toClipItem } from "../src/itemClip.ts";
 import { createSyncedApp } from "../src/sync/store.ts";
 import {
-  rezonedWhen,
+  fixedWhen,
+  localWhen,
   storedWhen,
   wallInZone,
   zoneCity,
   zoneIds,
+  zoneWall,
   zoneOption,
   zoneOptions,
   zoneSuggestions,
@@ -142,14 +144,19 @@ describe("zone conversions", () => {
     expect(storedWhen("2026-07-13", "Asia/Tokyo")).toBe("2026-07-13");
   });
 
-  test("fixing keeps the digits, unfixing keeps what the device shows", () => {
-    // Floating → Tokyo: 14:00 becomes 14:00 in Tokyo.
-    const fixed = rezonedWhen(WHEN, null, "Asia/Tokyo");
-    expect(wallInZone(fixed, "Asia/Tokyo")).toBe(WHEN);
-    // Tokyo → Honolulu: still 14:00 on the clock there.
-    const moved = rezonedWhen(fixed, "Asia/Tokyo", "Pacific/Honolulu");
-    expect(wallInZone(moved, "Pacific/Honolulu")).toBe(WHEN);
-    expect(rezonedWhen(moved, "Pacific/Honolulu", null)).toBe(moved);
+  test("the fields' clock and the register round-trip", () => {
+    const local = "2026-07-13T14:00";
+    const wall = zoneWall(local, "Asia/Tokyo");
+    expect(wall).toBe(wallInZone(local, "Asia/Tokyo")!);
+    expect(fixedWhen(wall, "Asia/Tokyo")).toBe(`${wall}[Asia/Tokyo]`);
+    expect(localWhen(wall, "Asia/Tokyo")).toBe(local);
+    // No zone, a day, or a zone the tzdb lacks: plain values throughout.
+    expect(zoneWall(local, null)).toBe(local);
+    expect(fixedWhen(local, null)).toBe(local);
+    expect(localWhen(local, null)).toBe(local);
+    expect(fixedWhen("2026-07-13", "Asia/Tokyo")).toBe("2026-07-13");
+    expect(zoneWall(local, "Mars/Olympus_Mons")).toBe(local);
+    expect(fixedWhen(local, "Mars/Olympus_Mons")).toBe(local);
   });
 });
 
@@ -164,10 +171,16 @@ describe("store when zone", () => {
     const it = a.getItem(id)!;
     expect(it.whenZone).toBe("Asia/Tokyo");
     expect(wallInZone(it.when!, "Asia/Tokyo")).toBe(WHEN);
-    // The buffer's arithmetic is the core's.
-    expect(it.when).toBe(rezonedWhen(WHEN, null, "Asia/Tokyo"));
+    // The fields show the zone's clock: the digits did not move.
+    expect(zoneWall(it.when!, it.whenZone)).toBe(WHEN);
 
-    // A local-time write moves the instant and keeps the zone.
+    // An edit of those fields is written on the zone's clock.
+    a.setItemWhen(id, fixedWhen("2026-07-14T09:30", "Asia/Tokyo"));
+    expect(a.getItem(id)?.whenZone).toBe("Asia/Tokyo");
+    expect(zoneWall(a.getItem(id)!.when!, "Asia/Tokyo")).toBe("2026-07-14T09:30");
+
+    // A local-time write (a drag in the agenda) moves the instant and
+    // keeps the zone.
     a.setItemWhen(id, "2026-07-14T09:30");
     expect(a.getItem(id)?.whenZone).toBe("Asia/Tokyo");
     expect(a.getItem(id)?.when).toBe("2026-07-14T09:30");

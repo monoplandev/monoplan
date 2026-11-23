@@ -2,11 +2,10 @@
 // instants"): a row under the time row, there only while the `when` has
 // a time. Blank ("Time zone" as its dim placeholder) the time is
 // floating, wall time wherever the device is. Picking a zone fixes the
-// time to it: the clock digits now read in that zone, and the time
-// fields above go on showing the device's local time, so they move.
-// The field therefore says both halves: the zone's city, and the time
-// there whenever that differs from the local one ("Paris · 14:00", with
-// the weekday when it is another day there).
+// time to it: the digits in the date and time fields above stay as they
+// are and now read on that zone's clock, which is what those fields show
+// and edit from then on. The closed field reads the zone's offset on the
+// item's day and its city ("GMT+1 Paris").
 //
 // `TimePicker`'s manner throughout: a text input that opens a listbox of
 // zones on focus, narrowed by what is typed (`zones.ts` has the list and
@@ -27,12 +26,10 @@ import {
   untrack,
 } from "solid-js";
 import { Portal } from "solid-js/web";
-import { formatWhenTime, parseLocalDateParts, whenDay } from "./format.tsx";
+import { whenDay } from "./format.tsx";
 import globeSvg from "./icons/globe.svg?raw";
 import {
   deviceZone,
-  wallInZone,
-  zoneCity,
   zoneOption,
   zoneOptions,
   zoneSuggestions,
@@ -45,7 +42,8 @@ const MARGIN = 8;
 export function ZonePicker(props: {
   /** The zone the time is fixed to; null is floating. */
   value: () => string | null;
-  /** The timed `when` as the device shows it. */
+  /** The timed `when` on the zone's clock, as the fields above show it
+   *  (the device's when floating). */
   when: () => string;
   onChange: (zone: string | null) => void;
   locale: () => string;
@@ -80,29 +78,21 @@ export function ZonePicker(props: {
 
   const day = () => whenDay(props.when());
 
-  // The stored zone as the closed field reads: its city, and the time
-  // there when that is not the time shown above.
-  const stored = createMemo(() => {
+  // The stored zone as the closed field reads: its offset on the
+  // item's day, then its city ("GMT+1 Paris").
+  const storedOption = createMemo(() => {
     const zone = props.value();
-    if (!zone) return "";
-    const city = zoneCity(zone);
-    const there = wallInZone(props.when(), zone);
-    if (!there || there === props.when()) return city;
-    const time = formatWhenTime(there, props.locale());
-    if (whenDay(there) === day()) return `${city} · ${time}`;
-    const date = parseLocalDateParts(whenDay(there));
-    const weekday = date
-      ? new Intl.DateTimeFormat(props.locale(), { weekday: "short" }).format(date)
-      : "";
-    return `${city} · ${weekday} ${time}`.replace("  ", " ");
+    return zone ? zoneOption(zone, props.locale(), day()) : null;
   });
-  // Hover text: the id's full name and offset, which the field leaves out.
-  const title = createMemo(() => {
-    const zone = props.value();
-    if (!zone) return undefined;
-    const o = zoneOption(zone, props.locale(), day());
-    return [zone, o.name, o.offset].filter(Boolean).join(" · ");
-  });
+  const stored = () => {
+    const o = storedOption();
+    return o ? [o.offset, o.city].filter(Boolean).join(" ") : "";
+  };
+  // Hover text: the id and the zone's name, which the field leaves out.
+  const title = () => {
+    const o = storedOption();
+    return o ? [o.id, o.name].filter(Boolean).join(" · ") : undefined;
+  };
 
   const display = () => {
     const p = preview();

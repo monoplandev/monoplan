@@ -16,7 +16,8 @@
 // The date input has an inset ✕ while a `when` is set, which removes the
 // whole value, time included, as the popover's Remove does. The popover
 // carries no time picker of its own. Under the time row, while there is a
-// time, sits the zone it is fixed to (`ZonePicker`; blank is floating).
+// time, sits the zone it is fixed to (`ZonePicker`; blank is floating);
+// with one, every field here reads and writes that zone's clock.
 // Its open state is the caller's, so a
 // row context menu's "Set date…" can open the item straight onto it.
 //
@@ -71,6 +72,8 @@ import { WhenTimeRow } from "./WhenTimeRow.tsx";
 import { ZonePicker } from "./ZonePicker.tsx";
 
 export function WhenField(props: {
+  /** The planned date as the fields show it: on the zone's clock when
+   *  it is fixed to one, the device's otherwise. */
   when: () => string | null;
   /** Stored duration in minutes, or null. */
   duration: () => number | null;
