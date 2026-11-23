@@ -15,7 +15,9 @@
 // is just the date input, and there is no day for a time to belong to.
 // The date input has an inset ✕ while a `when` is set, which removes the
 // whole value, time included, as the popover's Remove does. The popover
-// carries no time picker of its own. Its open state is the caller's, so a
+// carries no time picker of its own. Under the time row, while there is a
+// time, sits the zone it is fixed to (`ZonePicker`; blank is floating).
+// Its open state is the caller's, so a
 // row context menu's "Set date…" can open the item straight onto it.
 //
 // Once a date is set, an end-date input sits after the date input, over
@@ -66,6 +68,7 @@ import arrowRightSvg from "./icons/arrow-right.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
 import { useAppI18n } from "./i18n.tsx";
 import { WhenTimeRow } from "./WhenTimeRow.tsx";
+import { ZonePicker } from "./ZonePicker.tsx";
 
 export function WhenField(props: {
   when: () => string | null;
@@ -73,6 +76,9 @@ export function WhenField(props: {
   duration: () => number | null;
   muted: () => boolean;
   onChange: (value: string | null) => void;
+  /** The IANA zone a timed `when` is fixed to, or null (floating). */
+  zone: () => string | null;
+  onZoneChange: (zone: string | null) => void;
   onDurationChange: (minutes: number | null) => void;
   /** The item is an event (`spec/events-plan.md`): it happens on this
    *  date rather than being done by it. */
@@ -432,6 +438,17 @@ export function WhenField(props: {
           duration={props.duration}
           onDurationChange={props.onDurationChange}
         />
+        {/* The zone a time is fixed to; an all-day date has none. */}
+        <Show when={time()}>
+          <ZonePicker
+            value={props.zone}
+            when={() => props.when() ?? ""}
+            onChange={props.onZoneChange}
+            locale={locale}
+            label={() => m().when.zone}
+            removeLabel={() => m().when.clearZone}
+          />
+        </Show>
         {/* What the date means: something to do (overdue once it has
             passed) or something that happens (it goes by). */}
         <Switch

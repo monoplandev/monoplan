@@ -757,8 +757,9 @@ here.
   `when` advanced and the done item kept, so creation-to-done stats stay
   honest. No RRULE. This form covers tasks only: an event
   (`events-plan.md`) is never ticked, so recurring events are unsolved.
-- **Fixed instants.** Built 2026-11-23 in core, wasm events and the CLI;
-  no client has a zone picker yet. Decisions: a zone is attached only
+- **Fixed instants.** Built 2026-11-23 in core, wasm, the CLI and the
+  web task surface (zone picker below; not browser-checked); iOS and
+  macOS have no picker yet. Decisions: a zone is attached only
   when the user picks one (everything else stays floating, nothing
   migrates), and a fixed item shows in the device's local time, on the
   local day it falls on.
@@ -795,9 +796,30 @@ here.
   - **Unknown zones**: a write naming a zone the device's tzdata lacks
     is refused. One that arrives by sync or import is kept: its wall
     time shows as written, with its id, and a local edit keeps the id.
-  - **Not built**: a zone picker and label on web, iOS and macOS (the
-    platform supplies the localised zone names); `Engine.set_when_zone`
-    on the FFI; a wasm `setItemWhenZone`. Not checked on a device: that
+  - **Web picker** (`ZonePicker.tsx`, `zones.ts`): a row under the
+    time row of the task surface, shown only while the `when` has a
+    time. Blank ("Time zone") is floating. It is `TimePicker`'s typed
+    combobox over the browser's zone list (`Intl.supportedValuesOf`,
+    plus UTC): each row is the city read out of the id, with the zone's
+    localised name and its offset on the item's day dim after it; typed
+    words match the city, id, name or offset by word prefix, city
+    matches first; the blank list is by city with the device's zone on
+    top. Picking calls `setItemWhenZone`, so the digits are kept and
+    the time fields above, which stay device-local, move; the closed
+    field therefore reads the city and the time there when it differs
+    ("Paris · 14:00", with the weekday on another day). The ✕, the
+    panel's Remove row and Enter on emptied text make it floating.
+    `Intl` supplies names and offsets only (labels); every conversion
+    is the core's, through wasm `whenInZone` / `whenLocalized`. A
+    capture buffers the zone beside its local `when` and writes both in
+    one `setItemWhen` in the stored form; duplicate and copy / paste
+    carry `whenZone` the same way. The store has `ItemView.whenZone`.
+  - **Not built**: the zone on rows and in the agenda (a fixed item
+    looks like any other outside the task surface); a picker and label
+    on iOS and macOS; `Engine.set_when_zone` on the FFI. The web
+    picker's "is this the stored zone" highlight compares ids as
+    strings, so an alias the browser lists under another name is not
+    marked. Not checked on a device: that
     `jiff` finds the system zone and tzdata inside the iOS sandbox (it
     falls back to UTC if not). Views re-read the device zone on every
     projection, but nothing re-projects when the zone changes under a

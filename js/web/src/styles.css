@@ -5115,6 +5115,19 @@ input.task-check:hover {
   font-variant-numeric: tabular-nums;
 }
 
+/* The zone picker's panel: the same column, at least as wide as its
+   field (set inline) and wide enough for a city with its zone's name. */
+.list-picker.time-picker.zone-picker {
+  width: max-content;
+  max-width: min(26em, calc(100vw - 16px));
+}
+
+/* The zone field under the time row: a full row of the dates band. */
+.zone-picker-field {
+  display: flex;
+  min-width: 0;
+}
+
 /* Remove row pinned under the list while a time is set: ruled off like
    the calendar picker's footer, and outside the scroller, so it holds its
    place when the panel is squeezed and the list gives up the height. */

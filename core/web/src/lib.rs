@@ -66,6 +66,27 @@ fn suggestions_to_json(rows: &[monoplan_core::PlaceSuggestion]) -> String {
     serde_json::to_string(rows).unwrap_or_else(|_| "[]".to_string())
 }
 
+/// The wall time (`YYYY-MM-DDTHH:MM`) in `zone` at the instant the
+/// device-local timed `when` names; `undefined` when the value is not
+/// timed or the tzdb does not know the zone. What a zone label shows
+/// beside a fixed item, and with `[zone]` appended the stored form
+/// `setItemWhen` takes.
+#[wasm_bindgen(js_name = whenInZone)]
+pub fn when_in_zone(when: &str, zone: &str) -> Option<String> {
+    // `YYYY-MM-DDTHH:MM`; a bare date would parse as its midnight.
+    if when.len() != 16 {
+        return None;
+    }
+    monoplan_core::zone::wall_in_zone(when, zone)
+}
+
+/// A stored `when` as this device shows it: a `...[Zone]` value as
+/// device-local wall time, anything else unchanged.
+#[wasm_bindgen(js_name = whenLocalized)]
+pub fn when_localized(stored: &str) -> String {
+    monoplan_core::zone::localize(stored)
+}
+
 /// The account's known places (`spec/place-plan.md` "Reuse"): every
 /// open doc's `placeUsesJson()` merged, deduped and ranked newest use
 /// first, as a JSON array of `{place, count, lastUsed}`. `query`
@@ -359,6 +380,17 @@ impl Doc {
     pub fn set_item_when(&self, item_id: &str, when: Option<String>) -> Result<(), JsError> {
         self.inner
             .set_item_when(item_id, when.as_deref())
+            .map_err(js_err)
+    }
+
+    /// Fix an item's timed `when` to an IANA zone (`Some`: the stored
+    /// clock digits stay and now read in that zone) or make it floating
+    /// again (`None`: at the time this device shows). Rejects without a
+    /// timed `when`, or on a zone the bundled tzdb does not know.
+    #[wasm_bindgen(js_name = setItemWhenZone)]
+    pub fn set_item_when_zone(&self, item_id: &str, zone: Option<String>) -> Result<(), JsError> {
+        self.inner
+            .set_item_when_zone(item_id, zone.as_deref())
             .map_err(js_err)
     }
 
@@ -2048,6 +2080,17 @@ impl Replica {
     pub fn set_item_when(&self, item_id: &str, when: Option<String>) -> Result<(), JsError> {
         self.doc()
             .set_item_when(item_id, when.as_deref())
+            .map_err(js_err)
+    }
+
+    /// Fix an item's timed `when` to an IANA zone (`Some`: the stored
+    /// clock digits stay and now read in that zone) or make it floating
+    /// again (`None`: at the time this device shows). Rejects without a
+    /// timed `when`, or on a zone the bundled tzdb does not know.
+    #[wasm_bindgen(js_name = setItemWhenZone)]
+    pub fn set_item_when_zone(&self, item_id: &str, zone: Option<String>) -> Result<(), JsError> {
+        self.doc()
+            .set_item_when_zone(item_id, zone.as_deref())
             .map_err(js_err)
     }
 

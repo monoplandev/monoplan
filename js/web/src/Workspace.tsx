@@ -63,6 +63,7 @@ import { loadHideEmptyDays, saveHideEmptyDays } from "./agendaHideEmptyDays.ts";
 import { loadAgendaMode, saveAgendaMode, type AgendaMode } from "./agendaMode.ts";
 
 import { addDaysToStamp, nowMs, todayStamp } from "./format.tsx";
+import { storedWhen } from "./zones.ts";
 import { applySuggestionChange } from "./whenSuggest.ts";
 import { restoreCapturedPositions } from "./linger.ts";
 import { createPopoverTooltipGuard } from "./popoverTooltip.ts";
@@ -2120,6 +2121,7 @@ export function Workspace(props: {
       notes?: string;
       deadline?: string;
       when?: string;
+      whenZone?: string;
       event?: boolean;
       duration?: number;
       place?: Place;
@@ -2134,7 +2136,8 @@ export function Workspace(props: {
     }
     if (src.notes) target.setItemNotes(id, src.notes);
     if (src.deadline) target.setItemDeadline(id, src.deadline);
-    if (src.when) target.setItemWhen(id, src.when);
+    // A fixed time goes over with its zone, as the register holds it.
+    if (src.when) target.setItemWhen(id, storedWhen(src.when, src.whenZone));
     if (src.when && src.event) target.setItemEvent(id, true);
     if (src.when && src.duration) target.setItemDuration(id, src.duration);
     if (src.place) target.setItemPlace(id, src.place);
@@ -2159,6 +2162,7 @@ export function Workspace(props: {
         notes: string;
         deadline: string | undefined;
         when: string | undefined;
+        whenZone: string | undefined;
         event: boolean | undefined;
         duration: number | undefined;
         place: Place | undefined;
@@ -2180,6 +2184,7 @@ export function Workspace(props: {
           notes: it.notes,
           deadline: it.deadline,
           when: it.when,
+          whenZone: it.whenZone,
           event: it.event,
           duration: it.duration,
           place: it.place,
@@ -2240,6 +2245,7 @@ export function Workspace(props: {
       notes: string;
       deadline: string | undefined;
       when: string | undefined;
+      whenZone: string | undefined;
       event: boolean | undefined;
       duration: number | undefined;
       place: Place | undefined;
@@ -2255,6 +2261,7 @@ export function Workspace(props: {
         notes: it.notes,
         deadline: it.deadline,
         when: it.when,
+        whenZone: it.whenZone,
         event: it.event,
         duration: it.duration,
         place: it.place,

@@ -41,6 +41,9 @@ export interface ClipItem {
   notes?: string;
   deadline?: string;
   when?: string;
+  /** The IANA zone a timed `when` is fixed to; `when` is the copying
+   *  device's wall time either way. */
+  whenZone?: string;
   /** The event flag (`spec/events-plan.md`); only carried with a `when`. */
   event?: boolean;
   duration?: number;
@@ -73,6 +76,7 @@ export const toClipItem = (it: ItemView): ClipItem => {
   if (it.notes) out.notes = it.notes;
   if (it.deadline) out.deadline = it.deadline;
   if (it.when) out.when = it.when;
+  if (it.when && it.whenZone) out.whenZone = it.whenZone;
   if (it.when && it.event) out.event = true;
   if (it.when && it.duration) out.duration = it.duration;
   if (it.place) out.place = { ...it.place };
@@ -211,6 +215,7 @@ const parseClip = (raw: string): ClipItem[] | null => {
     if (typeof e.deadline === "string" && e.deadline)
       item.deadline = e.deadline;
     if (typeof e.when === "string" && e.when) item.when = e.when;
+    if (item.when && typeof e.whenZone === "string" && e.whenZone) item.whenZone = e.whenZone;
     if (item.when && e.event === true) item.event = true;
     if (
       item.when &&

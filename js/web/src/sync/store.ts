@@ -134,6 +134,10 @@ export interface ItemView {
    *  `YYYY-MM-DDTHH:MM` (timed), floating (`spec/calendar-plan.md`).
    *  Same never-`new Date()` rule as `deadline`. Absent means unset. */
   when?: string;
+  /** The IANA zone a timed `when` is fixed to ("Fixed instants" in
+   *  `spec/calendar-plan.md`). `when` stays wall time on this device
+   *  either way; absent means floating. */
+  whenZone?: string;
   /** A date read out of the title as it was typed, waiting for a yes or
    *  no (`spec/calendar-plan.md`, "Typed date phrases"): `when`-shaped.
    *  Shown only in the task surface, while `when` is unset and the
@@ -358,6 +362,7 @@ export interface DocItemActions {
   moveSubtask(id: string, subtaskId: string, index: number): void;
   removeSubtask(id: string, subtaskId: string): void;
   setItemWhen(id: string, when: string | null): void;
+  setItemWhenZone(id: string, zone: string | null): void;
   setItemWhenSuggested(id: string, when: string | null): void;
   acceptItemWhenSuggestion(id: string): void;
   setItemEvent(id: string, event: boolean): void;
@@ -503,9 +508,16 @@ export interface DocApp extends DocItemActions {
    *  (`null`). Writing the assignee it already has is a no-op. */
   setItemAssignee(id: string, assignee: string | null): void;
   /** Set (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`) or clear (`null`) an
-   *  item's planned date. Floating; malformed values are rejected by the
-   *  core. */
+   *  item's planned date: wall time on this device, re-expressed in the
+   *  item's zone when it is fixed to one. A timed value may carry a
+   *  `[Zone]` suffix, which sets that time in that zone. Malformed
+   *  values are rejected by the core. */
   setItemWhen(id: string, when: string | null): void;
+  /** Fix an item's timed `when` to an IANA zone (the stored clock
+   *  digits stay and now read in that zone) or make it floating again
+   *  (`null`: at the time this device shows). No-op without a timed
+   *  `when`, or when the item already has that zone. */
+  setItemWhenZone(id: string, zone: string | null): void;
   /** Write (`when`-shaped) or clear (`null`) an item's pending date
    *  suggestion. Clearing is the user's "no". */
   setItemWhenSuggested(id: string, when: string | null): void;
@@ -940,6 +952,7 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
           lifecycleAt: Number(ev.lifecycleAt ?? ev.createdAt ?? 0),
           deadline: ev.deadline ?? undefined,
           when: ev.when ?? undefined,
+          whenZone: ev.whenZone ?? undefined,
           whenSuggested: ev.whenSuggested ?? undefined,
           event: ev.event === true ? true : undefined,
           duration: ev.duration != null ? Number(ev.duration) : undefined,
@@ -1087,6 +1100,7 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
         // it brings the item back at `openIndex`.
         const was = isListed(prev);
         setState("itemsById", ev.id, "when", ev.when ?? undefined);
+        setState("itemsById", ev.id, "whenZone", ev.whenZone ?? undefined);
         const now = isListed(prev);
         if (was && !now) {
           removeOpen(prev.listId, ev.id);
@@ -1619,6 +1633,16 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
     },
     setItemWhen(id, when) {
       mutate(() => replica.setItemWhen(id, when ?? undefined));
+    },
+    setItemWhenZone(id, zone) {
+      // The core refuses a zone on a value with no time and makes no
+      // commit for the zone it already has; skip both. Inside a batch
+      // the store may not have caught up, so the caller vouches there.
+      if (actionBatchDepth === 0) {
+        const it = state.itemsById[id];
+        if (!it?.when || it.when.length <= 10 || (it.whenZone ?? null) === zone) return;
+      }
+      mutate(() => replica.setItemWhenZone(id, zone ?? undefined));
     },
     setItemWhenSuggested(id, when) {
       // A write that changes nothing makes no commit; skipped here so it

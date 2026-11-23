@@ -30,6 +30,7 @@ import { DeadlineField } from "./DeadlineField.tsx";
 import { PlaceField } from "./PlaceField.tsx";
 import type { PlaceSuggestion } from "./placeSuggest.ts";
 import { WhenField } from "./WhenField.tsx";
+import { rezonedWhen, storedWhen } from "./zones.ts";
 import { ListPicker, type ListOption } from "./ListPicker.tsx";
 import { AssigneeField, type Assignment } from "./AssigneeField.tsx";
 import { SubtasksField } from "./SubtasksField.tsx";
@@ -107,6 +108,9 @@ export type NewItemTarget = {
   /** Planned date the capture opens with (the calendar's Add prefills
    *  today). */
   when?: string;
+  /** The zone that `when` is fixed to (a capture re-targeted to another
+   *  workspace keeps it). */
+  zone?: string;
   /** Open with the Event box ticked (the calendar's Add): the capture
    *  becomes an event (`spec/events-plan.md`) while it keeps a date. */
   event?: boolean;
@@ -325,6 +329,9 @@ export function TaskDialog(props: {
   // creation. Declared ahead of the list options, which name "no list"
   // by whether there is a date.
   const [newWhen, setNewWhen] = createSignal<string | null>(null);
+  // The zone that buffer is fixed to; `newWhen` is wall time on this
+  // device either way, as an item's `when` is.
+  const [newZone, setNewZone] = createSignal<string | null>(null);
   const listOptions = createMemo<ListOption[]>(() => {
     // A shared workspace's lists carry its name, this doc's included;
     // Personal's go unsaid.
@@ -401,6 +408,7 @@ export function TaskDialog(props: {
       done: nw.done,
       draft: nw.draft,
       when: newWhen() ?? undefined,
+      zone: newZone() ?? undefined,
       event: newEvent() || undefined,
       focus: newFocus() || undefined,
     });
@@ -826,6 +834,7 @@ export function TaskDialog(props: {
     markAsked(t);
     setNotes(n);
     setNewWhen(id ? null : (nw?.when ?? null));
+    setNewZone(id ? null : (nw?.zone ?? null));
     setNewEvent(id ? false : (nw?.event ?? false));
     setNewDuration(null);
     setNewPlace(null);
@@ -925,7 +934,7 @@ export function TaskDialog(props: {
       const n = notes();
       if (n) props.app.setItemNotes(id, n);
       const w = newWhen();
-      if (w) props.app.setItemWhen(id, w);
+      if (w) props.app.setItemWhen(id, storedWhen(w, whenTime(w) ? newZone() : null));
       else if (suggested && !nw.done) props.app.setItemWhenSuggested(id, suggested.when);
       if (w && newEvent()) props.app.setItemEvent(id, true);
       const dur = newDuration();
@@ -963,6 +972,7 @@ export function TaskDialog(props: {
       syncedText = text().trim();
       subscribeNotes(id, notes());
         setNewWhen(null);
+      setNewZone(null);
       setNewEvent(false);
       setNewDuration(null);
       setNewPlace(null);
@@ -1257,6 +1267,7 @@ export function TaskDialog(props: {
   };
   const vPinned = () => (item() ? focused() : newFocus());
   const vWhen = () => (item() ? (item()?.when ?? null) : newWhen());
+  const vZone = () => (item() ? (item()?.whenZone ?? null) : newZone());
   const vDuration = () =>
     item() ? (item()?.duration ?? null) : newDuration();
   // A capture has no deadline: it is set from an existing item's menu.
@@ -1349,9 +1360,23 @@ export function TaskDialog(props: {
     // event; a timed date on a buffer with no length takes the default
     // hour, so the end field shows before the item exists.
     if (!value) setNewEvent(false);
+    if (!value || !whenTime(value)) setNewZone(null);
     if (!value) setNewDuration(null);
     else if (whenTime(value) && newDuration() == null)
       setNewDuration(DEFAULT_DURATION_MINUTES);
+  };
+  // Fix the time to a zone, or make it floating again (null). The
+  // buffer does to itself what the core does to an item.
+  const onZoneChange = (zone: string | null) => {
+    const it = item();
+    if (it) {
+      props.app.setItemWhenZone(it.id, zone);
+      return;
+    }
+    const w = newWhen();
+    if (!w || !whenTime(w)) return;
+    setNewWhen(rezonedWhen(w, newZone(), zone));
+    setNewZone(zone);
   };
   // The date suggestion (`whenSuggest.ts`) as this surface holds it. A
   // phrase in the title as it reads right now that has not been asked
@@ -1665,6 +1690,8 @@ export function TaskDialog(props: {
                   duration={vDuration}
                   muted={muted}
                   onChange={onWhenChange}
+                  zone={vZone}
+                  onZoneChange={onZoneChange}
                   onDurationChange={onDurationChange}
                   event={vEvent}
                   onEventChange={onEventChange}

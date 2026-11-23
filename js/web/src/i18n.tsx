@@ -442,6 +442,12 @@ export type Messages = {
     /** ✕ beside the time field and the Remove row in its panel: blanks
      *  the time (back to all-day). */
     clearTime: string;
+    /** Accessible name + placeholder of the time-zone field under the
+     *  time row; blank, the time is floating. */
+    zone: string;
+    /** ✕ beside the zone field and the Remove row in its panel: the
+     *  time is floating again. */
+    clearZone: string;
     /** Accessible name + placeholder of the end-time field after the
      *  start time; typing an end stores a duration. */
     end: string;
@@ -902,6 +908,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       suggestionNo: "Descartar la sugerencia",
       time: "Hora",
       clearTime: "Quitar hora",
+      zone: "Zona horaria",
+      clearZone: "Quitar zona horaria",
       end: "Fin",
       endDate: "Fecha de fin",
     },
@@ -1310,6 +1318,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       suggestionNo: "Dismiss suggestion",
       time: "Time",
       clearTime: "Remove time",
+      zone: "Time zone",
+      clearZone: "Remove time zone",
       end: "End",
       endDate: "End date",
     },
