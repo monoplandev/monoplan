@@ -13,6 +13,10 @@
 // 2026-11-22: cell x 16–204 of a 220 pt sidebar, selection 10–210,
 // radius 8, icon column centred 27.25, title at 42, 28 pt rows).
 //
+// Items dragged from the list on screen drop onto these rows too: the
+// block is one `SidebarDropZone` (`SidebarDrop.swift`), lighting the
+// row under the drag.
+//
 // Its selection is its own: the list shown, when it is one of these.
 // The `List` has no selection either: its rows draw their own grey
 // selection to match these (`MainWindowView.sidebar`).
@@ -31,6 +35,8 @@ struct SidebarLists: NSViewRepresentable {
     /// system's selection does.
     static let bleed: CGFloat = 6
 
+    /// The workspace these are the lists of; nil is Home.
+    let workspace: String?
     /// The workspace's active lists, in its order (`NavSection.userLists`).
     let lists: [ListInfo]
     /// The list shown, if it is one of these.
@@ -45,6 +51,8 @@ struct SidebarLists: NSViewRepresentable {
     let move: ([String], String?) -> Void
     /// Delete, from the row's right-click menu (it confirms first).
     let delete: (ListInfo) -> Void
+    /// The window's drop zones: each row here takes dropped items.
+    let drops: SidebarDrops
 
     /// The block's height for `count` lists.
     static func height(_ count: Int) -> CGFloat { CGFloat(count) * rowHeight }
@@ -68,6 +76,8 @@ struct SidebarLists: NSViewRepresentable {
         list.dormantSelectionColor = PaneColor.navSelected
         list.placeholderColor = PaneColor.dropSlot
         list.dragBackgroundColor = PaneColor.sidebar
+        context.coordinator.attach(list)
+        drops.add(context.coordinator)
         return list
     }
 
@@ -75,14 +85,55 @@ struct SidebarLists: NSViewRepresentable {
         context.coordinator.apply(self, to: list)
     }
 
-    final class Coordinator: NSObject, DndListDataSource, DndListDelegate {
+    final class Coordinator: NSObject, DndListDataSource, DndListDelegate, SidebarDropZone {
         var parent: SidebarLists
         private var rows: [String: ListInfo] = [:]
         /// Inside `apply`: the list's own notices are not the user's.
         private var applying = false
+        private weak var list: DndListView?
+        /// On the row items would drop on, under the rows (which are
+        /// clear), as the drop slot's shade is.
+        private let highlight = SidebarDropHighlight()
+        /// The list `highlight` is on.
+        private var lit: String?
 
         init(_ parent: SidebarLists) {
             self.parent = parent
+        }
+
+        func attach(_ list: DndListView) {
+            self.list = list
+            highlight.isHidden = true
+            list.addSubview(highlight, positioned: .below, relativeTo: list.scrollView)
+        }
+
+        // MARK: SidebarDropZone
+
+        func dropTarget(at point: NSPoint, in window: NSWindow) -> SidebarDropTarget? {
+            guard let list, SidebarDrops.shows(list.bounds, of: list, at: point, in: window),
+                  let key = list.key(at: list.convert(point, from: nil))
+            else { return nil }
+            return .list(workspace: parent.workspace, list: key)
+        }
+
+        func showDrop(_ target: SidebarDropTarget?) {
+            if case .list(_, let id)? = target { lit = id } else { lit = nil }
+            placeHighlight()
+        }
+
+        /// The rows do not scroll and are all one height: a row's frame
+        /// is its place in the order.
+        private func placeHighlight() {
+            guard let list, let lit, let index = list.order.firstIndex(of: lit) else {
+                highlight.lit = false
+                highlight.isHidden = true
+                return
+            }
+            highlight.frame = NSRect(
+                x: 0, y: CGFloat(index) * SidebarLists.rowHeight,
+                width: list.bounds.width, height: SidebarLists.rowHeight)
+            highlight.isHidden = false
+            highlight.lit = true
         }
 
         func apply(_ next: SidebarLists, to list: DndListView) {
@@ -93,6 +144,8 @@ struct SidebarLists: NSViewRepresentable {
             list.setOrder(next.lists.map(\.id))
             list.reloadRows()
             sync(list)
+            // The lists changed under a drag.
+            if lit != nil { placeHighlight() }
         }
 
         /// The list's selection to the model's: the list shown, or none.

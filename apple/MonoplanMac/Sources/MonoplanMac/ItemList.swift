@@ -55,6 +55,25 @@ struct ItemListCapture {
     let settled: Int
 }
 
+/// A drag of the list's rows over what lies outside it: the sidebar's
+/// rows take them (`SidebarDrops`). Points are the window's.
+struct ItemListDrop {
+    enum Outcome {
+        /// Nothing there takes rows: the list goes on to its own drop.
+        case ignored
+        /// Taken. The rows stay selected if they are still to be seen
+        /// where they were dropped (the list shown).
+        case taken(keepsSelection: Bool)
+    }
+
+    /// The drag is at this point.
+    let moved: (NSPoint, NSWindow?) -> Void
+    /// The rows, in the list's order, were let go at this point.
+    let dropped: ([ItemListRow], NSPoint, NSWindow?) -> Outcome
+    /// The drag is over, however it ended.
+    let ended: () -> Void
+}
+
 struct ItemList: NSViewRepresentable {
     /// What is shown: a change of it is another list, not an edit of
     /// this one, so its rows do not slide and it starts at the top.
@@ -62,7 +81,8 @@ struct ItemList: NSViewRepresentable {
     let rows: [ItemListRow]
     /// The item whose panel is open, if one is.
     let selected: String?
-    /// Whether rows can be dragged and ⌘-moved (not in an Inbox).
+    /// Whether rows can be dragged to another place in the list and
+    /// ⌘-moved (not in an Inbox).
     let reorder: Bool
     /// The selection came down to one row (its panel opens), or to
     /// none or several (it shuts).
@@ -81,6 +101,9 @@ struct ItemList: NSViewRepresentable {
     /// surface's own: text still in the row when another list is shown
     /// goes to the list it was typed under.
     var capture: ItemListCapture?
+    /// Where rows dragged out of the list can go; nil is nowhere, and
+    /// then a list that does not reorder does not drag either.
+    var drop: ItemListDrop?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -159,7 +182,9 @@ struct ItemList: NSViewRepresentable {
             parent = next
             rows = Dictionary(next.rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             list.model.config.reorder = next.reorder
-            list.model.config.drag = next.reorder
+            // An Inbox's rows have nowhere to go in it, and still drag
+            // out to the sidebar.
+            list.model.config.drag = next.reorder || next.drop != nil
 
             surface = next.surface
             list.setOrder(next.rows.map(\.id), animated: !moved)
@@ -221,6 +246,33 @@ struct ItemList: NSViewRepresentable {
 
         func dndList(_ list: DndListView, didMove keys: [String], before: String?) {
             parent.move(keys, before)
+        }
+
+        func dndList(_ list: DndListView, dragDidMoveTo windowPoint: NSPoint, keys: [String]) {
+            parent.drop?.moved(windowPoint, list.window)
+        }
+
+        func dndList(_ list: DndListView, dragWillEndAt windowPoint: NSPoint, keys: [String]) -> Bool {
+            guard let drop = parent.drop else { return false }
+            // In the order shown, whatever order they were picked in.
+            let dragged = Set(keys)
+            let rows = parent.rows.filter { dragged.contains($0.id) }
+            switch drop.dropped(rows, windowPoint, list.window) {
+            case .ignored:
+                return false
+            case .taken(let keepsSelection):
+                // Rows that went elsewhere, or were starred or binned,
+                // are done with, as on the web.
+                if !keepsSelection {
+                    list.model.selection.clear()
+                    list.render()
+                }
+                return true
+            }
+        }
+
+        func dndListDragDidEnd(_ list: DndListView) {
+            parent.drop?.ended()
         }
 
         /// ↓ on the last row (or in an empty list) goes on to the row

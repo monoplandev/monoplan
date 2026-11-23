@@ -1200,6 +1200,24 @@ impl Engine {
         })?)
     }
 
+    /// `move_items` for rows of any workspace (a drop from Starred, or
+    /// onto another workspace's list): `items`, in the order given,
+    /// land from the 0-based `index` of `list` in the workspace `to`
+    /// names (nil is Home). Rows of other workspaces cross over with
+    /// their ids and stars. One undo step. Whether the audience changes
+    /// is the caller's to ask first.
+    pub fn move_items_across(
+        &self,
+        items: Vec<ItemRef>,
+        to: Option<String>,
+        list: String,
+        index: u32,
+    ) -> Result<(), EngineError> {
+        Ok(self.client.call_blocking(None, move |cx| {
+            api::moves::move_items_across(cx, &items, to.as_deref(), &list, index as usize)
+        })?)
+    }
+
     /// Reorder Starred: `ids` become one block directly above
     /// `before`, a starred id. Hidden entries keep their place.
     pub fn reorder_starred(

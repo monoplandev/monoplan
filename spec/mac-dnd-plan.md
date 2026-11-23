@@ -10,9 +10,10 @@ Status: phase 1 built 2026-11-15. Phase 2 attempted 2026-11-15 and
 **abandoned**: the Swift code was reverted, the window is back on
 SwiftUI lists. What was learnt is in "Phase 2 attempt" below; a v2
 spec for the macOS side is to be written before another attempt.
-Phase 3's list reorder built 2026-11-22 (below); its item drops and
-phase 4 not built. The AppKit mapping below is the original plan,
-not a design proven in the app.
+Phase 3's list reorder built 2026-11-22 and its item drops, with
+phase 4's drop across workspaces, 2026-11-23 (both below), not yet run
+in the app. The AppKit mapping below is the original plan, not a
+design proven in the app.
 
 **v2 baseline (spike, 2026-11-20):** `apple/MonoplanDnd/`, a port of
 the web component itself rather than a mapping onto `NSTableView`:
@@ -30,9 +31,8 @@ its own rows first, so the list never shows the old order while the
 write is out), right-click on several rows to bin them in one step
 (`set_binned_many`). One row selected opens its panel; none or several
 shut it. An Inbox neither drags nor reorders. Rows are AppKit with the
-checkbox and star hosted from SwiftUI. Not built: item drops on the
-sidebar (phase 3, the list's delegate already reports the drag for it), across
-workspaces (4); the other lenses are still SwiftUI lists.
+checkbox and star hosted from SwiftUI. The other lenses are still
+SwiftUI lists.
 
 **Sidebar list reorder (2026-11-22):** the half of phase 3 that moves
 lists. Each workspace's active lists are one `DndListView` block
@@ -49,10 +49,47 @@ in the web nav's grey (`--bg-active`, `PaneColor.rowSelectedInactive`)
 whether or not it has the keyboard, text unchanged on it (2026-11-22;
 first built in the system's accent blue). The block does not scroll (`DndListView.scrolls`
 off): the wheel goes to the sidebar. Inbox, the lenses and the
-workspace headings stay SwiftUI rows. Not built: item drops onto
-sidebar rows (the other half of phase 3), dragging a list into another
-workspace, autoscroll of the sidebar during a drag, arrows across the
-block's edges into the SwiftUI rows.
+workspace headings stay SwiftUI rows. Not built: dragging a list into
+another workspace, autoscroll of the sidebar during a drag, arrows
+across the block's edges into the SwiftUI rows.
+
+**Item drops on the sidebar (2026-11-23):** the other half of phase 3,
+and phase 4 with it. Rows dragged out of a list, an Inbox or Starred
+and let go on a sidebar row, as the web's `onDndDragEnd`:
+
+- *A list or an Inbox*, of any workspace: the rows become its first
+  items in the order shown (an Inbox queues them at its end), binned
+  ones restored, Done ones still Done. Rows of another workspace cross
+  over with their ids and stars; when that changes who sees them
+  (either end has other members) `MoveConfirm` asks first, with the
+  web's wording for several items. One call, `move_items_across`, so
+  one undo step whatever mix of workspaces the rows came from (Starred
+  mixes them).
+- *Starred*: `star_items`; the rows keep their lists.
+- *The Bin* (a row only while something is binned, as on the web):
+  `set_binned_many`.
+
+The drag is `DndListView`'s own, so nothing of AppKit's finds the row
+under it. Each row that takes a drop is a `SidebarDropZone` in the
+window's `SidebarDrops` (`SidebarDrop.swift`), asked with the pointer
+through the list's `dragDidMoveTo` / `dragWillEndAt`: a SwiftUI row
+(Starred, Bin, an Inbox) has a `SidebarDropMarker` view behind its
+label, and a workspace's lists block is one zone that answers by row.
+The row under the drag is lit as the web's `data-drop-active`: the
+list's selection ground under a 1.5 pt outline in the accent colour.
+A row scrolled out of the sidebar or in a folded workspace takes
+nothing; over anything else the drag is the list's own (a reorder, or
+a snap back).
+
+The model drops the rows from the list on screen at once (or puts them
+on top, for a drop on the list shown), as a reorder does, so they do
+not snap back for the frames the write is out. The selection clears
+unless the drop was on the list shown, and the panel shuts with it. An
+Inbox's rows now drag (`reorder` off, `drag` on): they have nowhere to
+go in the Inbox and snap back unless a sidebar row takes them. Not
+built: drags from the other lenses (Calendar, Assigned, Done, Bin: not
+on `DndListView`), unfolding a folded workspace or scrolling the
+sidebar under a drag.
 
 **New-item row (2026-11-20):** a list ends in a row to type the next
 item into, the web's trailing capture slot (`ItemAddRow` in the list's
@@ -179,6 +216,7 @@ reordering (memory: put cross-doc rules in Rust above `Doc`).
 | `reorder_starred(ids, before)` | `reorder_starred` | Starred reorder over Home's full entry list, `before` a starred id or nil (end). |
 | `move_lists(workspace, ids, before)` | `move_lists` | Sidebar list reorder over active lists; `before` nil appends. Reserved lists refused by the core. |
 | `set_binned_many(items, binned)` | `set_binned_many` | Bin / restore `ItemRef`s from any workspace; ones already in the wanted state skipped. |
+| `move_items_across(items, to, list, index)` | `move_items_across` | `move_items` for `ItemRef`s of any workspace (2026-11-23): rows of `to` move as `move_items` moves them, the rest cross over (`move_items_across_docs` per source doc: ids kept, Focus retargeted) and sit directly under them, as the web's `relocateTo`. The audience confirm is the client's. |
 | `star_items(items)` | `star_items` | Star `ItemRef`s from any workspace on top of Starred in the given order; already starred or not Open skipped (`addToFocusMany`). |
 
 `ItemRef { workspace: Option<String>, id }` is the cross-workspace row
@@ -194,7 +232,7 @@ rows are a filtered view of the order (Starred's hidden entries). A
 row after it. The existing single-row `reorder_item` / `move_item` /
 `move_starred` stay for the panel and menus.
 
-Cross-workspace relocation (`move_items_across_docs`) is phase 4.
+Cross-workspace relocation was phase 4: `move_items_across`, above.
 
 ## Phases
 
@@ -220,12 +258,14 @@ Cross-workspace relocation (`move_items_across_docs`) is phase 4.
    `.above` via `move_lists`. Selection clears unless dropped on the
    shown list. Done when: every web sidebar drop works from a list and
    from Starred, refusals (another workspace's list until phase 4) show
-   no highlight.
+   no highlight. Built without the outline view: list reorder
+   2026-11-22, item drops 2026-11-23 (above).
 4. **Across workspaces** — `move_items` accepts `ItemRef`s from other
    workspaces via `move_items_across_docs` (ids kept, Focus retargeted,
    one entry in `History` spanning both docs) behind a confirm sheet
    when the audience changes. Done when: a drop onto another
-   workspace's list moves, undoes as one step, and asks first.
+   workspace's list moves, undoes as one step, and asks first. Built
+   2026-11-23 as its own call, `move_items_across`.
 
 ## Phase 2 attempt (2026-11-15, abandoned)
 

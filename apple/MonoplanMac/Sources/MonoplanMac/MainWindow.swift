@@ -1192,6 +1192,80 @@ final class MainWindowModel: ObservableObject {
         return rest
     }
 
+    /// The sidebar rows that take items dragged from the list
+    /// (`SidebarDrop.swift`).
+    let drops = SidebarDrops()
+
+    /// Rows dragged from the list or Starred, in the order shown, let
+    /// go on a sidebar row (spec/mac-dnd-plan.md phase 3; the web's
+    /// `onDndDragEnd`). One typed call each, so one Undo step:
+    ///
+    /// - A list or an Inbox: they become its first items
+    ///   (`Engine.moveItemsAcross`; an Inbox queues them at its end),
+    ///   binned ones restored and Done ones still Done. Rows of another
+    ///   workspace cross over, asked about first when that changes who
+    ///   sees them.
+    /// - Starred: each Open one not yet starred goes on top
+    ///   (`Engine.starItems`); they stay in their lists.
+    /// - The Bin: `Engine.setBinnedMany`.
+    ///
+    /// True when the rows are still where they were dragged from (the
+    /// drop was on the list shown), and so stay selected.
+    func drop(_ rows: [ItemListRow], on target: SidebarDropTarget, window: NSWindow?) -> Bool {
+        let refs = rows.map { ItemRef(workspace: $0.workspace, id: $0.id) }
+        guard !refs.isEmpty else { return false }
+        let ids = Set(rows.map(\.id))
+        switch target {
+        case .bin:
+            // Gone from the rows at once, not after the reread.
+            items.removeAll { ids.contains($0.id) }
+            starred.removeAll { ids.contains($0.id) }
+            bin(refs)
+            return false
+        case .starred:
+            write { try $0.starItems(items: refs) }
+            return false
+        case .list(let workspace, let list):
+            let here = shown.lens == nil && shown.workspace == workspace && shown.list == list
+            let to = section(workspace)
+            // Rows of another workspace: the move changes who sees them
+            // when either end has other members.
+            let crossing = rows.filter { section($0.workspace)?.id != to?.id }
+            let exposes = !crossing.isEmpty && hasOtherMembers(workspace)
+            let leaving = crossing.filter { hasOtherMembers(section($0.workspace)?.id) }
+            let move = { [weak self] in
+                guard let self else { return }
+                if here {
+                    // On top, in the order they had; an Inbox keeps its own.
+                    if list != Self.inbox {
+                        let first = items.first { !ids.contains($0.id) }?.id
+                        items = Self.moved(items, ids: Array(ids), before: first, id: \.id)
+                    }
+                } else {
+                    if let selected, ids.contains(selected.id) { clearItem() }
+                    // Starred's rows stay: they are starred wherever they live.
+                    if shown.lens == nil { items.removeAll { ids.contains($0.id) } }
+                }
+                write { try $0.moveItemsAcross(items: refs, to: workspace, list: list, index: 0) }
+            }
+            if exposes || !leaving.isEmpty {
+                var sources: [String] = []
+                for row in leaving {
+                    let name = workspaceLabel(row.workspace)
+                    if !sources.contains(name) { sources.append(name) }
+                }
+                MoveConfirm.across(
+                    to: workspaceLabel(workspace),
+                    exposes: exposes ? .some(workspace.flatMap { memberCounts[$0] }) : nil,
+                    removesFrom: sources.isEmpty ? nil : ListFormatter.localizedString(byJoining: sources),
+                    count: crossing.count, on: window, then: move)
+            } else {
+                move()
+            }
+            return here
+        }
+    }
+
     /// Take an item out of the Bin, back to its list and state.
     func restore(workspace: String?, id: String) {
         write { try $0.setBinned(workspace: workspace, id: id, binned: false) }
@@ -1827,6 +1901,13 @@ struct MainWindowView: View {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(Color(nsColor: PaneColor.navSelected))
                     }
+                    // Items dragged from the list drop on Starred, the
+                    // Bin and an Inbox (`SidebarDrop.swift`).
+                    if let drop = dropTarget(target) {
+                        SidebarDropMarker(drops: model.drops, target: drop)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { select(target) }
@@ -1834,6 +1915,14 @@ struct MainWindowView: View {
                 .padding(.horizontal, -SidebarLists.bleed)
                 .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
                 .accessibilityAction { select(target) }
+        }
+        func dropTarget(_ target: NavTarget) -> SidebarDropTarget? {
+            switch target {
+            case .lens(.starred): return .starred
+            case .lens(.bin): return .bin
+            case .lens: return nil
+            case .list(let workspace, let list): return .list(workspace: workspace, list: list)
+            }
         }
         func select(_ target: NavTarget) {
             switch target {
@@ -1894,13 +1983,15 @@ struct MainWindowView: View {
                         let lists = section.userLists
                         if !lists.isEmpty {
                             SidebarLists(
+                                workspace: section.target,
                                 lists: lists,
                                 selected: model.lens == nil && model.workspace == section.target ? model.list : nil,
                                 counts: showListCounts,
                                 active: windowActive,
                                 select: { model.select(workspace: section.target, list: $0) },
                                 move: { model.reorderLists(workspace: section.target, ids: $0, before: $1) },
-                                delete: { confirmDelete(section, $0) })
+                                delete: { confirmDelete(section, $0) },
+                                drops: model.drops)
                             .frame(height: SidebarLists.height(lists.count))
                             .padding(.horizontal, -SidebarLists.bleed)
                             .listRowInsets(EdgeInsets())
@@ -2154,7 +2245,8 @@ struct MainWindowView: View {
                     },
                     ended: { model.rowEnded(cancelled: $0, click: $1) },
                     settled: model.captureSettled)
-                : nil)
+                : nil,
+            drop: sidebarDrop)
             // Under the toolbar, as a list is: the scroll view insets
             // its own content for it.
             .ignoresSafeArea()
@@ -2162,6 +2254,18 @@ struct MainWindowView: View {
                 // The row for a new item is the empty list's first row.
                 if model.items.isEmpty, !adds { emptyNote(Text("Nothing here")) }
             }
+    }
+
+    /// Rows dragged out of a list or Starred onto the sidebar: the row
+    /// under the drag is lit, and takes them when they are let go.
+    private var sidebarDrop: ItemListDrop {
+        ItemListDrop(
+            moved: { model.drops.hover(at: $0, in: $1) },
+            dropped: { rows, point, window in
+                guard let target = model.drops.target(at: point, in: window) else { return .ignored }
+                return .taken(keepsSelection: model.drop(rows, on: target, window: window))
+            },
+            ended: { model.drops.clear() })
     }
 
     /// What an empty list says, where its first row would be.
@@ -2382,7 +2486,8 @@ struct MainWindowView: View {
             selectedCount: { [surface = model.shown] in model.rowsSelected($0, on: surface) },
             toggle: { row, done in model.setDone(workspace: row.workspace, id: row.id, done: done) },
             move: { ids, before in model.reorderStarred(ids: ids, before: before) },
-            menu: itemListMenu)
+            menu: itemListMenu,
+            drop: sidebarDrop)
             .ignoresSafeArea()
             .overlay(alignment: .topLeading) {
                 if model.starred.isEmpty { emptyNote(Text("Nothing starred")) }
@@ -2678,18 +2783,26 @@ enum MoveConfirm {
     /// `exposes` is set when the target has other members: how many
     /// members in all, nil inside when the count is not known.
     /// `removesFrom` names a source that has other members.
+    /// `count` is how many items cross (several: a drop on the sidebar).
     static func across(
-        to target: String, exposes: Int??, removesFrom source: String?, on window: NSWindow?,
+        to target: String, exposes: Int??, removesFrom source: String?, count: Int = 1, on window: NSWindow?,
         then confirmed: @escaping () -> Void
     ) {
         var lines: [String] = []
-        if let exposes {
+        if let exposes, count > 1 {
+            lines.append(
+                exposes.map { String(localized: "These \(count) items will be visible to all \($0) members of \(target).") }
+                    ?? String(localized: "These \(count) items will be visible to everyone in \(target)."))
+        } else if let exposes {
             lines.append(
                 exposes.map { String(localized: "This item will be visible to all \($0) members of \(target).") }
                     ?? String(localized: "This item will be visible to everyone in \(target)."))
         }
         if let source {
-            lines.append(String(localized: "It will be removed from \(source) for everyone there."))
+            lines.append(
+                count > 1
+                    ? String(localized: "They will be removed from \(source) for everyone there.")
+                    : String(localized: "It will be removed from \(source) for everyone there."))
         }
         let alert = NSAlert()
         alert.messageText = String(localized: "Move to \(target)?")

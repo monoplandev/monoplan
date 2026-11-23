@@ -128,3 +128,4 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - themes
 - sunrise / sunset times
 - fun app icons for ios?
+- ios drag and drop rounded corners?

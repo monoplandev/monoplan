@@ -148,23 +148,85 @@ pub fn reorder_items(cx: &Ctx, ids: &[String], before: Option<&str>) -> anyhow::
 /// sort as the queue does (arrival time, then creation), which is not
 /// necessarily the order given.
 pub fn move_items(cx: &Ctx, ids: &[String], list: &str, index: usize) -> anyhow::Result<()> {
+    land(cx.doc, ids, list, index)
+}
+
+/// `move_items` over the doc the rows are in.
+fn land(doc: &Doc, ids: &[String], list: &str, index: usize) -> anyhow::Result<()> {
     let mut at = index;
     for id in ids {
-        let Some(item) = cx.doc.get_item(id) else {
+        let Some(item) = doc.get_item(id) else {
             continue;
         };
         if item.is_binned() {
-            cx.doc.set_item_binned(id, false)?;
+            doc.set_item_binned(id, false)?;
         }
         // Inbox is a queue: a row already in it has no slot to move to
         // (and every row moved in lands at the end, whatever `index`).
         if list == LIST_INBOX && item.list_id == LIST_INBOX {
             continue;
         }
-        cx.doc.move_item(id, list, at)?;
+        doc.move_item(id, list, at)?;
         at += 1;
     }
     Ok(())
+}
+
+/// `move_items` for rows of any workspace: a drop from a view that
+/// mixes them (Starred), or onto another workspace's list in the
+/// sidebar. `items`, in the order given, land from the 0-based `index`
+/// of `list` in the workspace `to` names (`None`: Home). Rows of that
+/// workspace move as `move_items` moves them; the rest cross over as
+/// `move_item_across` does (id and star kept, binned rows restored,
+/// closed ones still closed) and sit directly under them, as the web's
+/// `relocateTo` leaves a mixed block. One call, so one undo step over
+/// every doc involved. Rows their workspace no longer has are skipped.
+///
+/// Asking whether the audience changes is the client's, before it
+/// calls.
+pub fn move_items_across(
+    cx: &Ctx,
+    items: &[ItemRef],
+    to: Option<&str>,
+    list: &str,
+    index: usize,
+) -> anyhow::Result<()> {
+    let (dst, dst_id) = resolve(cx, to)?;
+    let mut own: Vec<String> = Vec::new();
+    // Each source doc's rows, docs in the order their first row came.
+    let mut arriving: Vec<(Option<DocId>, &Doc, Vec<&str>)> = Vec::new();
+    for r in items {
+        let (src, src_id) = resolve(cx, r.workspace.as_deref())?;
+        if src_id == dst_id {
+            own.push(r.id.clone());
+        } else if src.get_item(&r.id).is_some() {
+            match arriving.iter_mut().find(|(id, _, _)| *id == src_id) {
+                Some((_, _, ids)) => ids.push(&r.id),
+                None => arriving.push((src_id, src, vec![&r.id])),
+            }
+        }
+    }
+    // A foreign ref names the doc; Home's own are bare.
+    let target = dst_id
+        .filter(|id| Some(*id) != cx.home)
+        .map(|id| id.0.to_string());
+    let mut at = index;
+    for (_, src, ids) in &arriving {
+        monoplan_core::move_items_across_docs(
+            src,
+            dst,
+            ids,
+            list,
+            at,
+            Some(monoplan_core::FocusRetarget {
+                home: home_doc(cx)?,
+                target_doc_id: target.as_deref(),
+            }),
+        )?;
+        at += ids.len();
+    }
+    // Last, so they end above the arrivals.
+    land(dst, &own, list, index)
 }
 
 /// Reorder Starred: `ids` become one block directly above `before`, a
@@ -814,6 +876,90 @@ mod tests {
         };
         move_item_across(&cx, &stay, Some("Work"), LIST_INBOX).unwrap();
         assert_eq!(open_texts(&work, LIST_INBOX), s(&["w1"]));
+    }
+
+    #[test]
+    fn rows_of_several_workspaces_land_on_one_list_in_one_step() {
+        let home = Doc::new().unwrap();
+        let work = Doc::new().unwrap();
+        let home_id = DocId(uuid::Uuid::from_bytes([1; 16]));
+        let work_id = DocId(uuid::Uuid::from_bytes([2; 16]));
+        let h_ids = add(&home, LIST_INBOX, &["h1", "h2", "h3"]);
+        let list = work.add_list("Plans").unwrap();
+        let w_ids = add(&work, &list, &["w1", "w2", "w3"]);
+        let workspaces = [
+            (
+                Candidate {
+                    doc_id: home_id,
+                    name: None,
+                },
+                &home,
+            ),
+            (
+                Candidate {
+                    doc_id: work_id,
+                    name: Some("Work".into()),
+                },
+                &work,
+            ),
+        ];
+        let docs = [&home, &work];
+        let lens = Lens::home(&home);
+        let cx = Ctx {
+            doc: &home,
+            open_docs: &docs,
+            lens: &lens,
+            workspaces: &workspaces,
+            home: Some(home_id),
+        };
+        let tagged = [(home_id, &home), (work_id, &work)];
+        let mut h = History::default();
+        lens.star(&home, &h_ids[2], 0).unwrap();
+        home.set_item_binned(&h_ids[0], true).unwrap();
+
+        // A mixed block, as Starred would give it: Home's rows by
+        // nothing or by doc id, Work's by name.
+        let given = [
+            ItemRef {
+                workspace: None,
+                id: h_ids[2].clone(),
+            },
+            ItemRef {
+                workspace: Some("Work".into()),
+                id: w_ids[2].clone(),
+            },
+            ItemRef {
+                workspace: Some(home_id.0.to_string()),
+                id: h_ids[0].clone(),
+            },
+            ItemRef {
+                workspace: None,
+                id: "gone".into(),
+            },
+        ];
+        let before = h.before(&tagged);
+        move_items_across(&cx, &given, Some("Work"), &list, 0).unwrap();
+        h.record(before, &tagged);
+        // The list's own row on top, then the arrivals in the order
+        // given, the binned one restored.
+        assert_eq!(open_texts(&work, &list), s(&["w3", "h3", "h1", "w1", "w2"]));
+        assert_eq!(open_texts(&home, LIST_INBOX), s(&["h2"]));
+        assert!(home.get_item(&h_ids[0]).is_none());
+        assert_eq!(home.focus_entries()[0].doc_id, Some(work_id.0.to_string()));
+
+        assert!(h.undo(&tagged).unwrap());
+        assert_eq!(open_texts(&work, &list), s(&["w1", "w2", "w3"]));
+        assert_eq!(open_texts(&home, LIST_INBOX), s(&["h2", "h3"]));
+        assert!(home.get_item(&h_ids[0]).unwrap().is_binned());
+        assert_eq!(home.focus_entries()[0].doc_id, None);
+
+        // With every row already the target's, it is `move_items`.
+        let own = [ItemRef {
+            workspace: Some("Work".into()),
+            id: w_ids[1].clone(),
+        }];
+        move_items_across(&cx, &own, Some("Work"), &list, 0).unwrap();
+        assert_eq!(open_texts(&work, &list), s(&["w2", "w1", "w3"]));
     }
 
     #[test]

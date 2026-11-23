@@ -3098,6 +3098,36 @@
           }
         }
       }
+    },
+    "These %lld items will be visible to all %lld members of %@." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estos %lld elementos serán visibles para los %lld miembros de %@."
+          }
+        }
+      }
+    },
+    "These %lld items will be visible to everyone in %@." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estos %lld elementos serán visibles para todas las personas de %@."
+          }
+        }
+      }
+    },
+    "They will be removed from %@ for everyone there." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se quitarán de %@ para todas las personas de ese espacio."
+          }
+        }
+      }
     }
   },
   "version" : "1.1"

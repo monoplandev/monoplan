@@ -107,7 +107,10 @@ The drag rules are the web's, unchanged:
 - `viewport.topInset`: the list scrolls under a toolbar, as the app's
   panes do. The rest position is `scrollTop = -topInset`; reveal,
   autoscroll's top zone and the fill-height floor allow for it.
-- `drag = false` turns dragging off altogether (the Inbox).
+- `drag = false` turns dragging off altogether. The Mac app's Inbox is
+  `reorder = false` with `drag` on: its rows go nowhere in it, and drag
+  out to the sidebar's rows (`SidebarDrop.swift`, through the
+  delegate's `dragDidMoveTo` / `dragWillEndAt`).
 - The trailer's presses are its view's own (the listbox does not take
   them, as it does a row's). One the view does not handle climbs the
   responder chain to the listbox and is a blank click, which is the
